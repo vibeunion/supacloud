@@ -32,9 +32,8 @@ import { StorageService } from "../services/storage.service";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
 import {
-    buildImagorRequest,
     imagorOutputContentType,
-    runImagor,
+    runImagorWithRequest,
 } from "../services/imagor.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
@@ -2067,8 +2066,7 @@ async function proxyToImagor(
         // POST the raw image body to imagor (no URL fetch needed).
         const imageBody = await downloadRes.arrayBuffer();
         const imagorQuery = query as Record<string, unknown>;
-        const imagorRequest = buildImagorRequest(imagorQuery, operation);
-        const res = await runImagor(imagorQuery, {
+        const { request: imagorRequest, response: res } = await runImagorWithRequest(imagorQuery, {
             bytes: imageBody,
             contentType: sourceContentType,
         }, operation);

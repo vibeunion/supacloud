@@ -21,10 +21,10 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
-    buildImagorRequest,
     checkImagorHealth,
     imagorOutputContentType,
     runImagor,
+    runImagorWithRequest,
 } from "../services/imagor.service";
 
 const ErrorResponse = t.Object({ message: t.String() });
@@ -459,8 +459,10 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if ('error' in resolved) return resolved.error;
 
         try {
-            const imagorRequest = buildImagorRequest(query as Record<string, unknown>);
-            const res = await runImagor(query as Record<string, unknown>, resolved.source);
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+                query as Record<string, unknown>,
+                resolved.source,
+            );
             if (!res.ok) {
                 await res.body?.cancel();
                 logger.error("Imagor image transform failed:", { status: res.status });
@@ -487,7 +489,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if ('error' in resolved) return resolved.error;
         try {
             const transformQuery = { ...query, width: query.width || 300, height: query.height || 300, smartcrop: true };
-            const res = await runImagor(
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(
                 transformQuery,
                 resolved.source,
                 "smartcrop",
@@ -495,7 +497,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
-                buildImagorRequest(transformQuery, "smartcrop"),
+                imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
@@ -518,11 +520,11 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 opacity: query.opacity || 0.3,
                 quality: query.quality || 85,
             };
-            const res = await runImagor(transformQuery, resolved.source, "watermark");
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(transformQuery, resolved.source, "watermark");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
-                buildImagorRequest(transformQuery, "watermark"),
+                imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
@@ -543,11 +545,11 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 sigma: query.sigma || 10,
                 quality: query.quality || 60,
             };
-            const res = await runImagor(transformQuery, resolved.source, "blur");
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(transformQuery, resolved.source, "blur");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
-                buildImagorRequest(transformQuery, "blur"),
+                imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
@@ -582,11 +584,11 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 width: query.width || 150,
                 quality: query.quality || 70,
             };
-            const res = await runImagor(transformQuery, resolved.source, "thumbnail");
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(transformQuery, resolved.source, "thumbnail");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
-                buildImagorRequest(transformQuery, "thumbnail"),
+                imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
