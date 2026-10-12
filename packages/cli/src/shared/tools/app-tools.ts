@@ -1167,6 +1167,7 @@ function releasePhaseFailure(
         ...(phaseResult === undefined ? {} : { phase_result: phaseResult }),
     };
     if (phaseResult?.activation_id !== undefined) payload.activation_id = phaseResult.activation_id;
+    if (typeof phaseResult?.deployment_id === "string") payload.deployment_id = phaseResult.deployment_id;
     if (phaseResult?.expected_activation_id !== undefined) {
         payload.expected_activation_id = phaseResult.expected_activation_id;
     }
@@ -1306,6 +1307,7 @@ async function runAppRelease(
         application_id: id,
         environment_id: environmentId,
         release_id: releaseId,
+        ...(typeof deployReceipt.deployment_id === "string" ? { deployment_id: deployReceipt.deployment_id } : {}),
         ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         manifest_path: manifestPath,
         build: buildReceipt ? completed.build : { skipped: true, manifest_path: manifestPath },
@@ -1322,6 +1324,7 @@ async function runAppRelease(
             `Release: ${releaseId}`,
             `Configuration: ${configurationId}`,
             `Activation: ${result.activation_id ?? "not performed"}`,
+            ...(result.deployment_id === undefined ? [] : [`Deployment: ${result.deployment_id}`]),
             `Build: ${request.skip_build ? "skipped" : "completed"}`,
         ].join("\n"));
 }
