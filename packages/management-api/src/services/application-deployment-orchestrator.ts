@@ -211,8 +211,8 @@ export class ApplicationDeploymentOrchestrator {
       status: state.status,
       phase,
       project_ref: projectRef,
-      application_id: typeof requestRecord?.application_id === "string" ? requestRecord.application_id : "",
-      environment_id: typeof requestRecord?.environment_id === "string" ? requestRecord.environment_id : "",
+      application_id: typeof requestRecord?.["application_id"] === "string" ? requestRecord["application_id"] : "",
+      environment_id: typeof requestRecord?.["environment_id"] === "string" ? requestRecord["environment_id"] : "",
       receipt: state.receipt,
       failure_code: state.failureCode,
     };
