@@ -33,7 +33,7 @@ import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
 import { registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
-import { releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess } from "./shared/tools/release-control-response";
+import { runProjectDeployment } from "./shared/tools/project-deployment";
 import type { ToolSchema } from "./shared/schema";
 import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -439,95 +439,6 @@ function authorizedToolMap(
 // Keep stdout reserved for the final ToolResult, including one parseable JSON document.
 function writeDevProgress(result: { content: Array<{ type: string; text: string }> }): void {
     for (const item of result.content) process.stderr.write(`${item.text}\n`);
-}
-
-function projectDeploymentIdentity(args: Record<string, unknown>) {
-    return {
-        project_ref: String(args.ref ?? ""),
-        application_id: String(args.id ?? ""),
-        environment_id: String(args.environment_id ?? ""),
-        deployment_id: String(args.mutation_id ?? ""),
-        release_id: String(args.release_id ?? ""),
-    };
-}
-
-async function runProjectDeployment(
-    http: HttpTransport,
-    args: Record<string, unknown>,
-): Promise<import("./shared/tool-server").ToolResult> {
-    const ref = String(args.ref ?? "").trim();
-    const applicationId = String(args.id ?? "").trim();
-    const environmentId = String(args.environment_id ?? "").trim();
-    const deploymentId = String(args.mutation_id ?? "").trim();
-    const releaseId = String(args.release_id ?? "").trim();
-    if (!ref || !applicationId || !environmentId || !deploymentId || !releaseId) {
-        return releaseControlFailure("applications.project_deploy", "INVALID_RESPONSE", null);
-    }
-    const body = {
-        deployment_id: deploymentId,
-        application_id: applicationId,
-        release_id: releaseId,
-        ...(args.configuration_id === undefined ? {} : { configuration_id: args.configuration_id }),
-        ...(args.configuration_write === undefined ? {} : { configuration_write: args.configuration_write }),
-        ...(args.web === undefined ? {} : { web: args.web }),
-    };
-    const identity = projectDeploymentIdentity(args);
-    const endpoint = `/v1/projects/${encodeURIComponent(ref)}/environments/${encodeURIComponent(environmentId)}/deployments`;
-    const result = await http.post(endpoint, body, {
-        timeoutMs: 120_000, maxJsonBytes: 131_072, responseTimeoutMs: 30_000,
-    });
-    if (result.ok && result.status === 200) {
-        const responseRecord = result.data && typeof result.data === "object" && !Array.isArray(result.data)
-            ? result.data as Record<string, unknown> : null;
-        if (responseRecord?.ok !== true) {
-            return releaseControlFailure("applications.project_deploy", "INVALID_RESPONSE", result.status, identity);
-        }
-        return releaseControlSuccess("applications.project_deploy", {
-            ...responseRecord,
-            project_ref: ref,
-            application_id: applicationId,
-            environment_id: environmentId,
-            deployment_id: deploymentId,
-            mutation_id: deploymentId,
-            release_id: releaseId,
-        });
-    }
-    if (!result.ok && (result.transportError || result.responseReadError || result.status >= 500 || result.status === 408)) {
-        const statusResponse = await http.get(
-            `${endpoint}/${encodeURIComponent(deploymentId)}`,
-            { maxJsonBytes: 131_072, responseTimeoutMs: 30_000 },
-        );
-        if (statusResponse.ok && statusResponse.status === 200
-            && statusResponse.data && typeof statusResponse.data === "object"
-            && !Array.isArray(statusResponse.data)
-            && (statusResponse.data as Record<string, unknown>).status === "succeeded") {
-            const reconciled = await http.post(
-                `${endpoint}/${encodeURIComponent(deploymentId)}/reconcile`,
-                {},
-                { timeoutMs: 30_000, maxJsonBytes: 131_072, responseTimeoutMs: 30_000 },
-            );
-            if (reconciled.ok && reconciled.status === 200) {
-                const reconciledRecord = reconciled.data && typeof reconciled.data === "object"
-                    && !Array.isArray(reconciled.data)
-                    ? reconciled.data as Record<string, unknown> : null;
-                const receipt = reconciledRecord?.receipt && typeof reconciledRecord.receipt === "object"
-                    && !Array.isArray(reconciledRecord.receipt)
-                    ? reconciledRecord.receipt as Record<string, unknown> : null;
-                if (!receipt) {
-                    return releaseControlFailure(
-                        "applications.project_deploy", "OUTCOME_UNKNOWN", reconciled.status, identity,
-                    );
-                }
-                return releaseControlSuccess("applications.project_deploy", {
-                    ...receipt,
-                    ...identity,
-                    mutation_id: deploymentId,
-                    replayed: true,
-                });
-            }
-        }
-    }
-    return releaseControlMutationFailure("applications.project_deploy", result, identity);
 }
 
 function createCliTools(context: ResolvedContext, confirmProduction?: string): ToolMap {

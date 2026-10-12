@@ -91,6 +91,79 @@ async function runCli(
 }
 
 describe("one-command deploy", () => {
+    test("uses the repository application declaration and selected environment without an application profile", async () => {
+        const directory = await workspace();
+        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
+            application: { id: "orders", environmentId: "production" },
+        }));
+        const calls: Array<Record<string, unknown>> = [];
+        let callback: ToolInvocation | undefined;
+        registerDeployTools({
+            tool(_name, _description, _schema, handler) { callback = handler; },
+        }, {} as HttpTransport, {
+            cwd: directory, projectRef: "test-ref", environment: "test",
+            applicationRelease: async args => {
+                calls.push(args);
+                return { content: [{ type: "text", text: "{}" }] };
+            },
+        });
+        await callback?.({ json: true });
+        expect(calls).toEqual([{
+            action: "release", ref: "test-ref", id: "orders", environment_id: "test",
+            root: directory, format: "json", json: true,
+        }]);
+    });
+
+    for (const source of ["manifest", "mixed-targets", "compiler", "migrations", "functions"]) {
+        test(`does not silently publish Web when ${source} declares a backend`, async () => {
+            const directory = await workspace();
+            const config: Record<string, unknown> = { frontend: { id: "web", outputDirectory: "dist" } };
+            if (source === "manifest") {
+                await mkdir(join(directory, "supacloud", "example"), { recursive: true });
+                await writeFile(join(directory, "supacloud", "example", "deploy-manifest.json"), "{}");
+            } else if (source === "mixed-targets") {
+                config.defaultTarget = "web";
+                config.targets = {
+                    web: { type: "frontend", root: ".", id: "web" },
+                    api: { type: "edge_function", root: "api" },
+                };
+            } else if (source === "compiler") {
+                await writeFile(join(directory, "supacloud.config.ts"), "export default {};");
+            } else {
+                await mkdir(join(directory, "supabase", source), { recursive: true });
+            }
+            await writeFile(join(directory, "supacloud.json"), JSON.stringify(config));
+            let requests = 0;
+            const server = Bun.serve({ port: 0, fetch() { requests++; return Response.json({}); } });
+            servers.push(server);
+            let callback: ToolInvocation | undefined;
+            registerDeployTools({
+                tool(_name, _description, _schema, handler) { callback = handler; },
+            }, new HttpTransport({ baseUrl: server.url.origin, token: "fixture" }), {
+                cwd: directory, projectRef: "test-ref",
+            });
+            await expect(callback!({ skip_build: true })).rejects.toThrow("PROJECT_DEPLOYMENT_UNSUPPORTED");
+            expect(requests).toBe(0);
+        });
+    }
+
+    test("an application profile cannot silently discard declared Edge Function targets", async () => {
+        const directory = await workspace();
+        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
+            targets: { api: { type: "edge_function", root: "." } },
+        }));
+        let calls = 0;
+        let callback: ToolInvocation | undefined;
+        registerDeployTools({
+            tool(_name, _description, _schema, handler) { callback = handler; },
+        }, {} as HttpTransport, {
+            cwd: directory, projectRef: "test-ref", application: { id: "orders", environmentId: "test" },
+            applicationRelease: async () => { calls++; return { content: [] }; },
+        });
+        await expect(callback!({})).rejects.toThrow("PROJECT_DEPLOYMENT_UNSUPPORTED");
+        expect(calls).toBe(0);
+    });
+
     test("uses the application profile for deploy without requiring frontend configuration", async () => {
         const directory = await workspace();
         const calls: Array<Record<string, unknown>> = [];
@@ -658,7 +731,7 @@ describe("one-command deploy", () => {
         servers.push(server);
 
         const response = await runCli(join(directory, "apps", "web"), `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--dry_run", "--json",
+            "deploy", "--target", "web", "--skip_build", "--dry_run", "--json",
         ]);
 
         expect(response.exitCode).toBe(0);

@@ -51,7 +51,7 @@ const plan: ApplicationDeployPlan = {
   execution_performed: false,
 };
 
-function fixture(options: { migrationFails?: boolean } = {}) {
+function fixture(options: { migrationFails?: boolean; currentActivation?: boolean } = {}) {
   const calls: string[] = [];
   const phases: string[] = [];
   const lease: MutationLeaseInput = {
@@ -122,7 +122,14 @@ function fixture(options: { migrationFails?: boolean } = {}) {
       bun_version: "1.3.0",
       targets: [{ name: "api", kind: "http" as const, hosts: ["orders.example.test"], environment_names: [] }],
     }) },
-    deployPlans: { read: async () => structuredClone(plan) },
+    deployPlans: { read: async () => ({
+      ...structuredClone(plan),
+      ...(options.currentActivation ? {
+        current: { activation_id: activationId, release_id: "9".repeat(64), configuration_id: configurationId },
+        expected_activation_id: activationId,
+        changes: { ...plan.changes, configuration: false },
+      } : {}),
+    }) },
     migrations: {
       readExecutionPlan: async () => ({
         schema: "supacloud.application-migration-execution-plan.v1" as const,
@@ -286,3 +293,43 @@ test("reuses the platform configuration head when the request omits configuratio
   expect(result.configuration_id).toBe(configurationId);
   expect(result.execution_performed).toBe(true);
 });
+
+test("a changed candidate gets a new activation ID while retaining the observed CAS", async () => {
+  const value = fixture({ currentActivation: true });
+  const result = await value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+  });
+  expect(result.activation_id).not.toBe(activationId);
+  expect(result.expected_activation_id).toBe(activationId);
+});
+
+test("status verifies the persisted receipt and never repeats deployment effects", async () => {
+  const value = fixture();
+  await value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+  });
+  const count = value.calls.length;
+  expect(await value.orchestrator.status("demo", mutationId)).toMatchObject({
+    status: "succeeded", phase: "verifying", project_ref: "demo", application_id: "reviews",
+    environment_id: "test", receipt: { replayed: true, execution_performed: false },
+  });
+  expect(value.calls.slice(count)).toEqual(["read"]);
+});
+
+for (const [name, corrupt] of [
+  ["wrong response status", (state: ProjectMutationState) => { state.responseStatus = 503; }],
+  ["wrong stored project", (state: ProjectMutationState) => { state.projectRef = "other"; }],
+  ["wrong checkpoint", (state: ProjectMutationState) => { state.checkpoint.schema = "other"; }],
+  ["missing binding", (state: ProjectMutationState) => { state.checkpoint.request = {}; }],
+  ["wrong candidate receipt", (state: ProjectMutationState) => { state.receipt!.release_id = "0".repeat(64); }],
+  ["nonterminal phase", (state: ProjectMutationState) => { state.checkpoint.phase = "migrating"; }],
+] as const) {
+  test(`status refuses ${name}`, async () => {
+    const value = fixture();
+    await value.orchestrator.execute({
+      projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+    });
+    corrupt(value.state());
+    await expect(value.orchestrator.status("demo", mutationId)).rejects.toMatchObject({ statusCode: 503 });
+  });
+}

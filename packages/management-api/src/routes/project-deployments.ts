@@ -30,6 +30,12 @@ const requestBody = t.Object({
 
 function publicStatus(state: ApplicationDeploymentStatus | null) {
   if (state === null) return null;
+  const receipt = state.status === "succeeded" ? parseApplicationDeployResult(state.receipt) : null;
+  if (receipt && (receipt.project_ref !== state.project_ref || receipt.application_id !== state.application_id
+    || receipt.environment_id !== state.environment_id || receipt.mutation_id !== state.mutation_id
+    || state.phase !== "verifying")) {
+    throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503);
+  }
   return {
     schema: "supacloud.project-deployment-status.v1",
     deployment_id: state.mutation_id,
@@ -39,17 +45,35 @@ function publicStatus(state: ApplicationDeploymentStatus | null) {
     project_ref: state.project_ref,
     application_id: state.application_id,
     environment_id: state.environment_id,
-    ...(state.receipt === null ? {} : { receipt: state.receipt }),
-    ...(state.failure_code === null ? {} : { failure_code: state.failure_code }),
+    ...(receipt === null ? {} : { receipt }),
+    ...(state.failure_code === null ? {} : {
+      failure_code: /^[A-Z][A-Z0-9_]{0,63}$/.test(state.failure_code)
+        ? state.failure_code : "PROJECT_DEPLOYMENT_UNAVAILABLE",
+    }),
   };
 }
 
 export function createProjectDeploymentRoutes(
   orchestrator: Pick<ApplicationDeploymentOrchestrator, "execute" | "status">,
+  auth: {
+    authorize?: typeof requireProjectOrAdminAuth;
+    principal?: typeof getVerifiedRequestPrincipal;
+  } = {},
 ) {
+  const authorize = auth.authorize ?? requireProjectOrAdminAuth;
+  const principalFor = auth.principal ?? getVerifiedRequestPrincipal;
   return new Elysia({ prefix: "/v1/projects/:ref/environments/:environmentId/deployments", name: "project-deployments" })
-    .beforeHandle(async ({ params, request }) => {
-      const denied = await requireProjectOrAdminAuth(request, params.ref);
+    .error(({ error }) => {
+      if (error instanceof Error && "code" in error && (error.code === "validation" || error.code === "parse")) {
+        return status(400, { ok: false, code: "PROJECT_DEPLOYMENT_REQUEST_INVALID", error: "Invalid deployment request" });
+      }
+      return status(503, {
+        ok: false, code: "PROJECT_DEPLOYMENT_UNAVAILABLE", error: "Project deployment state is unavailable",
+      });
+    })
+    .beforeHandle(async ({ params, request, set }) => {
+      set.headers["Cache-Control"] = "no-store";
+      const denied = await authorize(request, params.ref);
       if (denied) return status(denied.status, denied.body);
     })
     .post("", {
@@ -57,7 +81,7 @@ export function createProjectDeploymentRoutes(
       body: requestBody,
       detail: { tags: ["deployments"], summary: "Deploy the project backend and Web as one durable mutation" },
     }, async ({ params, body, request }) => {
-      const principal = await getVerifiedRequestPrincipal(request);
+      const principal = await principalFor(request);
       if (!principal) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
       const requestValue = {
         mutation_id: body.deployment_id,
@@ -81,9 +105,14 @@ export function createProjectDeploymentRoutes(
           request: requestValue,
           principal,
         });
-        return { ok: true, ...parseApplicationDeployResult(receipt) };
+        return { ok: true, ...parseApplicationDeployResult(receipt, {
+          project_ref: params.ref, application_id: body.application_id,
+          environment_id: params.environmentId, request: requestValue,
+        }) };
       } catch (error) {
-        const code = error instanceof Error ? error.message : "PROJECT_DEPLOYMENT_OUTCOME_UNKNOWN";
+        const code = error instanceof ApplicationDeploymentOrchestrationError
+          && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)
+          ? error.code : "PROJECT_DEPLOYMENT_OUTCOME_UNKNOWN";
         const statusCode = error instanceof ApplicationDeploymentOrchestrationError
           ? error.statusCode : 503;
         return status(statusCode, {
@@ -103,7 +132,8 @@ export function createProjectDeploymentRoutes(
     }, async ({ params }) => {
       const state = await orchestrator.status(params.ref, params.deploymentId);
       if (state === null) return status(404, { code: "PROJECT_DEPLOYMENT_NOT_FOUND", error: "Deployment not found" });
-      if (state.environment_id !== params.environmentId) {
+      if (state.environment_id !== params.environmentId || state.project_ref !== params.ref
+        || state.mutation_id !== params.deploymentId) {
         return status(404, { code: "PROJECT_DEPLOYMENT_NOT_FOUND", error: "Deployment not found" });
       }
       return publicStatus(state);
@@ -114,7 +144,8 @@ export function createProjectDeploymentRoutes(
       detail: { tags: ["deployments"], summary: "Re-read a project deployment after an unknown response" },
     }, async ({ params }) => {
       const state = await orchestrator.status(params.ref, params.deploymentId);
-      if (state === null || state.environment_id !== params.environmentId) {
+      if (state === null || state.environment_id !== params.environmentId
+        || state.project_ref !== params.ref || state.mutation_id !== params.deploymentId) {
         return status(404, { code: "PROJECT_DEPLOYMENT_NOT_FOUND", error: "Deployment not found" });
       }
       if (state.status !== "succeeded") {
