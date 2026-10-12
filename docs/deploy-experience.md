@@ -41,13 +41,22 @@ supacloud --env test deploy
 supacloud --env production deploy --confirm-production production-ref
 ```
 
-The selected `.env.supacloud.<name>` supplies
-`SUPACLOUD_APPLICATION_ID`, `SUPACLOUD_APPLICATION_ENVIRONMENT_ID` (or
-`SUPACLOUD_ENV`), and either `SUPACLOUD_APPLICATION_CONFIGURATION_PATH` or
-`SUPACLOUD_APPLICATION_CONFIGURATION_ID`. `deploy` uses the same project
-deployment resource as the Management API, so the CLI does not ask the user to
-choose Web versus application deployment. Test and production use the same
-command shape. The explicit advanced form remains available:
+Declare the Application once in `supacloud.json`:
+
+```json
+{
+  "application": { "id": "orders" }
+}
+```
+
+The selected `.env.supacloud.<name>` supplies the project credentials and
+`SUPACLOUD_ENV`; the selected environment overrides the optional repository
+`application.environmentId`. An explicit `SUPACLOUD_APPLICATION_ID` profile
+continues to select its own `SUPACLOUD_APPLICATION_ENVIRONMENT_ID` (or
+`SUPACLOUD_ENV`). Configuration is resolved from the platform unless a
+configuration path or immutable revision is explicitly declared. `deploy`
+uses the project deployment resource for this Application path. Test and
+production use the same command shape. The explicit advanced form remains available:
 
 ```bash
 supacloud --env test app release \
@@ -63,13 +72,42 @@ already reviewed configuration and manifest. `--format json` returns one receipt
 containing every completed phase, the release/configuration identities and the
 activation result.
 
-The workflow stops on the first failed or uncertain phase. A lost deployment
-response is queried and reconciled with the same deployment ID before the CLI
-reports an unknown result. The composed CLI workflow is not a cross-request
+The workflow stops on the first failed or uncertain phase. A lost or malformed
+deployment response triggers a bounded GET for the same deployment ID. Only a
+verified terminal receipt matching the project, environment, application,
+candidate, configuration, backend and requested Web release confirms success.
+The CLI never rewrites a foreign receipt's identity or sends a second deployment
+POST. A nonterminal or unavailable status remains unknown and retains the
+deployment ID. This is receipt confirmation, not resumption after a server crash.
+The composed CLI workflow is not a cross-request
 transaction; SupaCloud remains responsible for immutable storage, backup policy,
 migration orchestration, readiness, smoke evidence, CAS authority, durable
 mutation receipts and verified rollback/downgrade policy. The application layer
 does not implement backup, restore, activation or downgrade orchestration.
+
+## Current Project Boundary
+
+The project endpoint currently orchestrates an Application delivery artifact
+(HTTP/Worker runtime and its archived migrations) plus an optional Web release.
+It does **not** yet accept FA's standalone migration packages, multi-Function
+inventory, schedule convergence or business release manifest. Adding this
+endpoint alone does not satisfy the FA one-command acceptance criteria.
+
+Normal `deploy` rejects detected unsupported project release manifests and
+backend declarations before any remote request instead of silently publishing
+only Web. Detection covers `deploy-manifest.json`, one-level
+`supacloud/*/deploy-manifest.json`, declared Edge Function targets, a compiler
+configuration without an Application binding, and conventional Supabase backend
+directories. This is a fail-closed guard, not a complete discovery engine for
+arbitrary repository layouts. An explicit `--target` remains a component command,
+not proof of a complete project release.
+
+The missing platform implementation must consume the complete candidate, compare
+it with verified target inventory, and select Web-only versus backend-plus-Web
+internally. Customer scope creation/rebinding, Git diff classification and
+manual inventory comparison are not an acceptable replacement. Destructive
+migrations require an explicit reviewed decision; routine release planning does
+not. See `fa-deployment-capability-boundary.md` for ownership and acceptance.
 
 ## Frontend Archive Cutover
 
@@ -167,6 +205,24 @@ Scenario: Preserve an uncertain write
   When deploy returns
   Then mutation ID and original CAS remain in the failure receipt
   And the CLI never submits another activation
+
+Scenario: The repository selects the Application path
+  Given an application ID in supacloud.json and a selected test profile
+  When deploy is requested without an application ID environment variable
+  Then the CLI submits the Application candidate for the test environment
+  And the platform resolves the current configuration and backend plan
+
+Scenario: Never claim a partial release is a project release
+  Given a Web target and detected backend declarations not supported by the orchestrator
+  When default deploy is requested
+  Then it reports PROJECT_DEPLOYMENT_UNSUPPORTED before remote requests
+  And it does not suggest manually authoring a scope as the normal workflow
+
+Scenario: A successful response must be bound
+  Given HTTP 200 with ok true but a foreign or incomplete receipt
+  When deploy receives the response
+  Then it queries the same deployment ID without another POST
+  And only a matching verified terminal receipt can confirm success
 
 Scenario: Old archive input is rejected
   Given a ZIP archive or v1 frontend release metadata

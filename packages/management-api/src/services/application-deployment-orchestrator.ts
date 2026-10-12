@@ -1,5 +1,6 @@
 import {
-  ApplicationDeployRequestSchema, parseApplicationDeployResult, parseApplicationDeployPlan,
+  ApplicationConfigurationIdSchema, ApplicationDeployRequestSchema, ApplicationIdSchema, ApplicationReleaseIdSchema,
+  parseApplicationDeployResult, parseApplicationDeployPlan,
   parseApplicationReleaseRecord, type ApplicationBackendReceipt, type ApplicationDeployRequest,
   type ApplicationDeployResult,
 } from "@supacloud/delivery";
@@ -161,11 +162,13 @@ function receiptFromState(
     });
   }
   try {
-    const result = parseApplicationDeployResult(state.receipt);
-    if (result.project_ref !== input.projectRef || result.application_id !== input.applicationId
-      || result.environment_id !== input.environmentId || result.mutation_id !== input.request.mutation_id) {
+    if (state.projectRef !== input.projectRef || state.mutationId !== input.request.mutation_id) {
       throw new Error();
     }
+    const result = parseApplicationDeployResult(state.receipt, {
+      project_ref: input.projectRef, application_id: input.applicationId,
+      environment_id: input.environmentId, request: input.request,
+    });
     return {
       ...result,
       replayed,
@@ -198,22 +201,55 @@ export class ApplicationDeploymentOrchestrator {
   async status(projectRef: string, mutationId: string): Promise<ApplicationDeploymentStatus | null> {
     const state = await this.mutations.read(projectRef, mutationId);
     if (!state || state.operation !== OPERATION) return null;
-    const request = state.checkpoint["request"];
-    const requestRecord = request && typeof request === "object" && !Array.isArray(request)
-      ? request as Record<string, unknown> : null;
+    const checkpointRequest = state.checkpoint["request"];
+    const requestRecord = checkpointRequest && typeof checkpointRequest === "object" && !Array.isArray(checkpointRequest)
+      ? checkpointRequest as Record<string, unknown> : null;
+    if (state.projectRef !== projectRef || state.mutationId !== mutationId
+      || state.checkpoint["schema"] !== CHECKPOINT_SCHEMA || state.checkpoint["mutation_id"] !== mutationId
+      || !requestRecord || requestRecord["project_ref"] !== projectRef || requestRecord["mutation_id"] !== mutationId
+      || !Value.Check(ApplicationIdSchema, requestRecord["application_id"])
+      || !Value.Check(ApplicationIdSchema, requestRecord["environment_id"])
+      || !Value.Check(ApplicationConfigurationIdSchema, requestRecord["configuration_id"])
+      || !Value.Check(ApplicationReleaseIdSchema, requestRecord["release_id"])
+      || !Value.Check(ApplicationReleaseIdSchema, requestRecord["plan_sha256"])) {
+      throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_CHECKPOINT_INVALID", 503);
+    }
+    const request = {
+      mutation_id: mutationId,
+      release_id: requestRecord["release_id"],
+      configuration_id: requestRecord["configuration_id"],
+      expected_plan_sha256: requestRecord["plan_sha256"],
+      ...(requestRecord["approved_migration_digest"] === null ? {} : {
+        approved_migration_digest: requestRecord["approved_migration_digest"],
+      }),
+      ...(requestRecord["web"] === null ? {} : { web: requestRecord["web"] }),
+    };
+    if (!Value.Check(ApplicationDeployRequestSchema, request)) {
+      throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_CHECKPOINT_INVALID", 503);
+    }
     const phaseValue = state.checkpoint["phase"];
     const phase = phaseValue === "prepared" || phaseValue === "migrating"
       || phaseValue === "activating" || phaseValue === "binding-web" || phaseValue === "verifying"
       ? phaseValue : "queued";
+    let receipt: ApplicationDeployResult | null = null;
+    if (state.status === "succeeded") {
+      if (!success(state) || phase !== "verifying") {
+        throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503);
+      }
+      receipt = receiptFromState(state, {
+        projectRef, applicationId: requestRecord["application_id"],
+        environmentId: requestRecord["environment_id"], request, principal: state.principal,
+      });
+    }
     return {
       mutation_id: state.mutationId,
       operation: OPERATION,
       status: state.status,
       phase,
       project_ref: projectRef,
-      application_id: typeof requestRecord?.["application_id"] === "string" ? requestRecord["application_id"] : "",
-      environment_id: typeof requestRecord?.["environment_id"] === "string" ? requestRecord["environment_id"] : "",
-      receipt: state.receipt,
+      application_id: requestRecord["application_id"],
+      environment_id: requestRecord["environment_id"],
+      receipt,
       failure_code: state.failureCode,
     };
   }
@@ -266,6 +302,11 @@ export class ApplicationDeploymentOrchestrator {
     } catch (error) {
       throw mapError(error, { project_ref: input.projectRef, release_id: request.release_id, configuration_id: configurationId });
     }
+    if (plan.project_ref !== input.projectRef || plan.application_id !== input.applicationId
+      || plan.environment_id !== input.environmentId || plan.candidate.release_id !== request.release_id
+      || plan.candidate.configuration_id !== configurationId) {
+      throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_IDENTITY_INVALID", 409);
+    }
     const planSha256 = stableSha256(plan);
     const binding = requestBinding(input, configurationId, planSha256);
     if (request.expected_plan_sha256 !== undefined && request.expected_plan_sha256 !== planSha256) {
@@ -295,7 +336,8 @@ export class ApplicationDeploymentOrchestrator {
       request: binding,
       plan,
       backup_id: backupId(input, request.mutation_id, planSha256),
-      activation_id: plan.current?.activation_id ?? crypto.randomUUID(),
+      activation_id: plan.action === "no-op" && plan.current
+        ? plan.current.activation_id : crypto.randomUUID(),
     };
     let effectsStarted = false;
     let completed = false;
@@ -413,7 +455,11 @@ export class ApplicationDeploymentOrchestrator {
         backend_receipt: checkpoint.backend_receipt,
         ...(checkpoint.web === undefined ? {} : { web: checkpoint.web }),
       };
-      await this.mutations.success(lease, result as unknown as Record<string, unknown>);
+      const verified = parseApplicationDeployResult(result, {
+        project_ref: input.projectRef, application_id: input.applicationId,
+        environment_id: input.environmentId, request,
+      });
+      await this.mutations.success(lease, verified);
       completed = true;
       const stored = await this.mutations.read(input.projectRef, request.mutation_id);
       if (!stored) throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503, binding);
@@ -434,6 +480,10 @@ export class ApplicationDeploymentOrchestrator {
     const after = migration?.after ?? await this.dependencies.migrations.inspect(
       input.projectRef, input.applicationId, input.request.release_id,
     );
+    if (after.project_ref !== input.projectRef || after.application_id !== input.applicationId
+      || after.release_id !== input.request.release_id || !after.ledger_compatible || !after.project_migrations_applied) {
+      throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503);
+    }
     const postgrest = this.dependencies.postgrestStatus
       ? await this.dependencies.postgrestStatus(input.projectRef)
       : { actual: "running", health: "healthy" };
