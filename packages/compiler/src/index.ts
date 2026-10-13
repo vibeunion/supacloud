@@ -165,6 +165,7 @@ export type {
   CommandExecutionCapabilities,
   CommandNode,
   CompileOptions,
+  DatabaseGovernanceOptions,
   CompileResult,
   CompileStats,
   ControllerNode,

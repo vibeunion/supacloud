@@ -14,12 +14,25 @@ const temporary = await mkdtemp(join(tmpdir(), 'delivery-package-consumer-'));
 const consumer = join(temporary, 'consumer');
 try {
   const delivery = JSON.parse(await readFile(join(repo, 'packages/delivery/package.json'), 'utf8'));
+  const db = JSON.parse(await readFile(join(repo, 'packages/db/package.json'), 'utf8'));
+  const contracts = JSON.parse(await readFile(join(repo, 'packages/contracts/package.json'), 'utf8'));
   const compiler = JSON.parse(await readFile(join(repo, 'packages/compiler/package.json'), 'utf8'));
-  const prepared = prepareCommandPackage(compiler, new Map([['@supacloud/delivery', delivery]]));
-  assert.deepEqual(prepared.required, [`@supacloud/delivery@${delivery.version}`]);
+  const siblings = new Map([
+    ['@supacloud/delivery', delivery],
+    ['@supacloud/db', db],
+    ['@supacloud/contracts', contracts],
+  ]);
+  const prepared = prepareCommandPackage(compiler, siblings);
+  assert.deepEqual(prepared.required, [
+    `@supacloud/db@${db.version}`,
+    `@supacloud/delivery@${delivery.version}`,
+  ]);
   assert.equal(prepared.package.dependencies['@supacloud/delivery'], delivery.version);
+  assert.equal(prepared.package.dependencies['@supacloud/db'], db.version);
   const tarballs = [];
   for (const [name, manifest, directories] of [
+    ['contracts', prepareCommandPackage(contracts, siblings).package, ['dist']],
+    ['db', prepareCommandPackage(db, siblings).package, ['dist']],
     ['delivery', delivery, ['src', 'dist']],
     ['compiler', prepared.package, ['dist']],
   ]) {
