@@ -18,7 +18,7 @@ function fixture(t) {
   };
   return { root, put };
 }
-const versions = { node: 'v24.test', bun: '1.4.2', platform: 'linux', arch: 'x64' };
+const versions = { node: 'v24.test', bun: '1.4.3', platform: 'linux', arch: 'x64' };
 
 test('sync checks and plans are read-only; apply is idempotent and scoped', (t) => {
   const {root, put} = fixture(t); put('out/a.json', 'old'); put('user.ts', 'user');
@@ -100,7 +100,7 @@ test('cache fingerprint invalidates ignored files, locks, toolchain and environm
   put('packages/contracts/bun.lock','new lock');assert.notEqual(original,fingerprint());
   put('packages/contracts/bun.lock','lock');assert.notEqual(original,fingerprint({NODE_ENV:'test'}));
   assert.notEqual(original,fingerprint({}, {...versions,arch:'arm64'}));
-  assert.notEqual(original,fingerprint({}, {...versions,bun:'1.4.3'}));
+  assert.notEqual(original,fingerprint({}, {...versions,bun:'next'}));
   const secret=fingerprint({NODE_OPTIONS:'fixture-secret-value'});assert.match(secret,/^[a-f0-9]{64}$/);assert.ok(!secret.includes('fixture-secret-value'));
   put('packages/contracts/dist/out','generated');assert.equal(original,fingerprint());
 });

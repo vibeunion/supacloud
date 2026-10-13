@@ -32,7 +32,7 @@ jobs:
           node-version: '24.x'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.2'
+          bun-version: '1.4.3'
       - name: Install pinned repository tooling
         run: bun install --ignore-scripts --frozen-lockfile
       - name: Install local delivery dependencies

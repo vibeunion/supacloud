@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.3"
       - name: Reconcile local dependency snapshots with the pinned Bun
         run: |
           bun --revision
@@ -74,7 +74,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.3"
       - name: Build local adapter dependencies
         run: bun run scripts/build-command-dependencies.ts elysia
       - name: Install the pinned adapter graph

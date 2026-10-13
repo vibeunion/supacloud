@@ -82,7 +82,7 @@ function transaction(sql: Pick<SQL, "unsafe">): WorkerTransaction {
 }
 
 function deploymentFixture(replaceRoute = false) {
-  const runtime = { ...input(), bunVersion: "1.4.2" };
+  const runtime = { ...input(), bunVersion: "1.4.3" };
   const hosts = { api: ["reports.example.test"] };
   let active: ApplicationActiveRecord | null = replaceRoute ? {
     schema: "supacloud.application-active.v1", runtime: {
@@ -393,7 +393,7 @@ describe("worker execution groups", () => {
     const drained: string[] = [];
     f.dependencies.active!.readForApplication = async () => null;
     f.dependencies.configurations = { resolve: async () => ({
-      bunVersion: "1.4.2", environment: { api: {}, jobs: {} }, hosts: { api: ["reports.example.test"] },
+      bunVersion: "1.4.3", environment: { api: {}, jobs: {} }, hosts: { api: ["reports.example.test"] },
     }) };
     f.dependencies.retirementVerifier = async () => {};
     f.dependencies.verifyWorkerAllocationRetirement = async ({ groups }) => {

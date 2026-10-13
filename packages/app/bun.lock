@@ -12,7 +12,7 @@
       },
       "devDependencies": {
         "@angular/compiler": "22.2.2",
-        "@types/bun": "^1.4.2",
+        "@types/bun": "^1.4.3",
         "@types/node": "^26.6.5",
         "typescript": "^7.0.2",
       },
@@ -23,9 +23,9 @@
 
     "@angular/core": ["@angular/core@22.2.2", "https://registry.npmmirror.com/@angular/core/-/core-22.2.2.tgz", { "dependencies": { "tslib": "^2.3.0" }, "peerDependencies": { "@angular/compiler": "22.2.2", "rxjs": "^6.5.3 || ^7.4.0", "zone.js": "~0.15.0 || ~0.16.0" }, "optionalPeers": ["@angular/compiler", "zone.js"] }, "sha512-mFiSoAs7Gp/7VlbdSxDyV2I/FEyYeNZRaHH7QrMWSB9t+k7wm37uCaYOt9fy6fgXU/UbCgBESp09fV9bUTQcmA=="],
 
-    "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.2", "typescript": "7.0.2" } }],
+    "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.3", "typescript": "7.0.2" } }],
 
-    "@types/bun": ["@types/bun@1.4.2", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.2.tgz", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
+    "@types/bun": ["@types/bun@1.4.3", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.3.tgz", { "dependencies": { "bun-types": "1.4.3" } }, "sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw=="],
 
     "@types/node": ["@types/node@26.6.5", "https://registry.npmmirror.com/@types/node/-/node-26.6.5.tgz", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
 
@@ -69,7 +69,7 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "https://registry.npmmirror.com/@typescript/typescript-win32-x64/-/typescript-win32-x64-7.0.2.tgz", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
-    "bun-types": ["bun-types@1.4.2", "https://registry.npmmirror.com/bun-types/-/bun-types-1.4.2.tgz", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
+    "bun-types": ["bun-types@1.4.3", "https://registry.npmmirror.com/bun-types/-/bun-types-1.4.3.tgz", { "dependencies": { "@types/node": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
 
     "rxjs": ["rxjs@7.8.2", "https://registry.npmmirror.com/rxjs/-/rxjs-7.8.2.tgz", { "dependencies": { "tslib": "^2.1.0" } }, "sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA=="],
 

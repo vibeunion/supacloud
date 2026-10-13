@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.3"
       - name: Transport, authorization boundaries and SDK recovery
         run: bun test packages/management-api/tests/unit/task-output.test.ts packages/supacloud-js/src/task-events.test.ts
       - name: Install existing Management API dependencies

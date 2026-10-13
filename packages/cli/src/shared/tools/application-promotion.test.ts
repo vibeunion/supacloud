@@ -38,7 +38,7 @@ function plan(): ApplicationPromotionPlan {
       configuration: {
         schema: "supacloud.application-configuration.v1", project_ref: "production", application_id: "reviews",
         environment_id: "production", configuration_id: configurationId, created_at: "2026-10-10T00:00:00.000Z",
-        bun_version: "1.4.2", targets: [{ name: "api", kind: "http", hosts: ["example.com"], environment_names: ["DATABASE_URL"] }],
+        bun_version: "1.4.3", targets: [{ name: "api", kind: "http", hosts: ["example.com"], environment_names: ["DATABASE_URL"] }],
       },
     },
     migrations: {

@@ -15,7 +15,7 @@ import { removeManagedSystemdUnit } from "../packages/management-api/src/service
 assert.equal(process.platform, "linux");
 assert.equal(process.getuid?.(), 0);
 assert.equal(process.env["SUPACLOUD_LINUX_ACCEPTANCE"], "1");
-assert.equal(Bun.version, "1.4.2");
+assert.equal(Bun.version, "1.4.3");
 assert.equal(config.caddyTlsIssuer, "internal");
 const build = JSON.parse(await readFile(join(import.meta.dir, "acceptance-build.json"), "utf8"));
 assert.equal(build.schema, "supacloud.linux-delivery-build.v1");
