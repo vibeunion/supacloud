@@ -10,9 +10,12 @@ import {
   ApplicationDeployRequestSchema,
 } from "@supacloud/delivery";
 import { sql } from "../db";
-import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
+import {
+  getVerifiedRequestPrincipal, requireProjectOrAdminAuth, requireProjectOrAdminAuthWithTrustedPrincipal,
+} from "../middleware/auth";
 import { ApplicationReleaseError, ApplicationReleaseStorage } from "../services/application-release-storage";
 import { ApplicationReleaseTransfers, ApplicationReleaseTransferError } from "../services/application-release-transfer";
+import { resolveTrustedPrincipal } from "../services/bff-proof.service";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import { uploadApplicationRelease } from "../services/application-release-upload";
 import { ApplicationActiveStorage } from "../services/application-active-storage";
@@ -29,6 +32,7 @@ import { applicationRuntimePlan } from "../services/application-runtime";
 import { buildApplicationPreviewReceipt, publicApplicationPreviewReceipt } from "../services/application-preview-contract";
 import { ApplicationPreviewService, APPLICATION_PREVIEW_MIN_TTL_SECONDS, APPLICATION_PREVIEW_MAX_TTL_SECONDS } from "../services/application-preview.service";
 import { ApplicationDeployPlans, ApplicationDeployPlanError } from "../services/application-deploy-plan";
+import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
 import { ApplicationRollbackError, ApplicationRollbackSnapshots } from "../services/application-rollback";
 import { ApplicationActivationHistoryReader, ApplicationHistoryError } from "../services/application-history";
 import {
@@ -106,13 +110,21 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const exists = dependencies.projectExists ?? projectExists;
   const transfers = dependencies.transfers ?? new ApplicationReleaseTransfers(storage);
   const promotions = dependencies.promotions ?? createDefaultApplicationPromotions();
-  const sourceAccess = async (request: Request, ref: string, id: string, releaseId: string) => {
+  const sourceAccess = async (
+    request: Request, targetRef: string, ref: string, id: string, releaseId: string,
+  ) => {
     const url = new URL(request.url);
     url.pathname = `/v1/projects/${ref}/applications/${id}/releases/${releaseId}`;
     url.search = "";
     // 重新构造源 GET 请求，使项目 scope 和委托读取权限均基于源路径。
     const sourceRequest = new Request(url, { method: "GET", headers: request.headers });
-    const denied = await authorize(sourceRequest, ref);
+    const denied = hasSupaOAuthDelegationHeaders(request)
+      ? await requireProjectOrAdminAuthWithTrustedPrincipal(
+        sourceRequest,
+        ref,
+        await resolveTrustedPrincipal(request, targetRef),
+      )
+      : await authorize(sourceRequest, ref);
     if (denied) throw new ApplicationReleaseTransferError("APPLICATION_RELEASE_TRANSFER_SOURCE_DENIED", denied.status);
     if (!await exists(ref)) throw new ApplicationReleaseTransferError("APPLICATION_RELEASE_TRANSFER_SOURCE_NOT_FOUND", 404);
   };
@@ -215,7 +227,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         configuration_id: t.Optional(ApplicationConfigurationIdSchema),
       }, { additionalProperties: false }),
       beforeHandle: async ({ params: values, query, request }) => {
-        await sourceAccess(request, query.source_ref, values.id, query.source_release_id);
+        await sourceAccess(request, values.ref, query.source_ref, values.id, query.source_release_id);
         const url = new URL(request.url);
         url.pathname = `/v1/projects/${query.source_ref}/applications/${values.id}/environments/${query.source_environment_id}/runtime`;
         url.search = "";
@@ -257,7 +269,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       }
       const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
-      await sourceAccess(request, body.source_ref, values.id, body.source_release_id);
+      await sourceAccess(request, values.ref, body.source_ref, values.id, body.source_release_id);
       const sourceUrl = new URL(request.url);
       sourceUrl.pathname = `/v1/projects/${body.source_ref}/applications/${values.id}/environments/${body.source_environment_id}/runtime`;
       sourceUrl.search = "";
@@ -298,7 +310,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       return promotionReconciler.reconcile(
         { ...scope(values), mutationId: values.mutationId, principal: actor },
         async input => {
-          await sourceAccess(request, input.sourceProjectRef, input.applicationId, input.sourceReleaseId);
+          await sourceAccess(request, values.ref, input.sourceProjectRef, input.applicationId, input.sourceReleaseId);
           const sourceUrl = new URL(request.url);
           sourceUrl.pathname = `/v1/projects/${input.sourceProjectRef}/applications/${input.applicationId}/environments/${input.sourceEnvironmentId}/runtime`;
           sourceUrl.search = "";
@@ -561,7 +573,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         source_release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
       }, { additionalProperties: false }),
       beforeHandle: ({ params: values, query, request }) =>
-        sourceAccess(request, query.source_ref, values.id, query.source_release_id),
+        sourceAccess(request, values.ref, query.source_ref, values.id, query.source_release_id),
       detail: { tags: ["applications"], summary: "Compare a verified source artifact with target inventory without copying or activating" },
     }, ({ params: values, query }) =>
       transfers.readPlan({
@@ -577,7 +589,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         expected_manifest_sha256: t.String({ pattern: "^[a-f0-9]{64}$" }),
       }, { additionalProperties: false }),
       beforeHandle: ({ params: values, body, request }) =>
-        sourceAccess(request, body.source_ref, values.id, body.source_release_id),
+        sourceAccess(request, values.ref, body.source_ref, values.id, body.source_release_id),
       detail: { tags: ["applications"], summary: "Materialize a verified artifact in the target project without build, configuration copying or activation" },
     }, ({ params: values, body }) =>
       transfers.transfer({
