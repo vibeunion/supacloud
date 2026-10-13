@@ -177,6 +177,9 @@ function optionsKeyOf(options: CompileOptions): string {
     openApi: options.openApi,
     generatePermissions: options.generatePermissions,
     typeSafety: options.typeSafety,
+    databaseGovernance: options.databaseGovernance && {
+      ...options.databaseGovernance, databaseUrl: undefined,
+    },
     effect: options.effect,
     treeShakeUnusedProviders: options.treeShakeUnusedProviders,
     graphql: options.graphql,

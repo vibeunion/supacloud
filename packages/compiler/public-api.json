@@ -166,7 +166,7 @@
     {
       "name": "CompileOptions",
       "kind": "type",
-      "signature": "export interface CompileOptions {\n    graphql?: GraphqlOptions;\n    requireRouteContracts?: boolean;\n    rootDir: string;\n    include?: string[];\n    outDir: string;\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    writeOnError?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    cache?: DependencyGraphCache;\n    changedPaths?: string[];\n    typeSafety?: TypeSafetyOptions;\n    effect?: EffectCompilerOptions;\n}"
+      "signature": "export interface CompileOptions {\n    databaseGovernance?: DatabaseGovernanceOptions;\n    graphql?: GraphqlOptions;\n    requireRouteContracts?: boolean;\n    rootDir: string;\n    include?: string[];\n    outDir: string;\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    writeOnError?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    cache?: DependencyGraphCache;\n    changedPaths?: string[];\n    typeSafety?: TypeSafetyOptions;\n    effect?: EffectCompilerOptions;\n}"
     },
     {
       "name": "compileOptionsFromConfig",
@@ -272,6 +272,11 @@
       "name": "DatabaseContractsOptions",
       "kind": "type",
       "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes: string;\n    drizzleSchema: string;\n    role: string;\n    graphql: GraphqlOptions;\n    migrations: readonly string[];\n}"
+    },
+    {
+      "name": "DatabaseGovernanceOptions",
+      "kind": "type",
+      "signature": "export interface DatabaseGovernanceOptions {\n    mode: \"off\" | \"enforce\";\n    projectRoot?: string;\n    moduleFile?: string;\n    databaseUrl?: string;\n    databaseUrlEnv?: string;\n    schemas?: string[];\n}"
     },
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
@@ -1026,7 +1031,7 @@
     {
       "name": "resolveSupacloudConfig",
       "kind": "value",
-      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
+      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    databaseGovernance?: NonNullable<CompileOptions[\"databaseGovernance\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
     },
     {
       "name": "RouteNode",
@@ -1121,7 +1126,7 @@
     {
       "name": "SupaCloudConfig",
       "kind": "type",
-      "signature": "export interface SupaCloudConfig {\n    delivery?: DeliveryOptions;\n    graphql?: GraphqlOptions | false;\n    root?: string;\n    outDir?: string;\n    include?: string[];\n    strict?: boolean;\n    requireRouteContracts?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    commandCapabilities?: CommandExecutionCapabilities;\n    treeShakeUnusedProviders?: boolean;\n}"
+      "signature": "export interface SupaCloudConfig {\n    delivery?: DeliveryOptions;\n    graphql?: GraphqlOptions | false;\n    root?: string;\n    outDir?: string;\n    include?: string[];\n    strict?: boolean;\n    requireRouteContracts?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    databaseGovernance?: NonNullable<CompileOptions[\"databaseGovernance\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    commandCapabilities?: CommandExecutionCapabilities;\n    treeShakeUnusedProviders?: boolean;\n}"
     },
     {
       "name": "SupaCloudMigration",

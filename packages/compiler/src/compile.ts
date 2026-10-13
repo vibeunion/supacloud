@@ -9,6 +9,7 @@ import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
 import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
 import { validateEffectPolicies } from "./effect-governance";
+import { checkDatabaseGovernance } from "./database-governance";
 
 function withDefaultGovernance(options: CompileOptions): CompileOptions {
   return options.commandCapabilities === undefined
@@ -41,6 +42,9 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...validateClientSchemaBoundaries(graph, options),
     ...validateEffectPolicies(graph, options.effect),
   ];
+  const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
+  diagnostics.push(...databaseDiagnostics);
+  if (databaseDiagnostics.length) return { diagnostics, graph, written: [] };
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, written: [] };
   }
@@ -114,6 +118,11 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     ...validateClientSchemaBoundaries(graph, options),
     ...validateEffectPolicies(graph, options.effect),
   ];
+  const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
+  diagnostics.push(...databaseDiagnostics);
+  if (databaseDiagnostics.length) {
+    return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };
+  }
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI must be migrated to constructor injection."] };
   }

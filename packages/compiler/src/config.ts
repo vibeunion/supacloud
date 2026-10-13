@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertGraphqlOptions } from "./graphql-options";
+import { assertDatabaseGovernance } from "./database-governance";
 import { parseDeliveryOptions, type DeliveryOptions } from "./delivery-schema";
 import type {
   CommandExecutionCapabilities,
@@ -27,6 +28,7 @@ export interface SupaCloudConfig {
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
   typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
+  databaseGovernance?: NonNullable<CompileOptions["databaseGovernance"]>;
   allowRouteCommandBindings?: boolean;
   disallowControllerDirectDb?: boolean;
   detectOrphanModules?: boolean;
@@ -44,6 +46,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   moduleBoundaryPreset: ModuleBoundaryPresetName;
   effect: NonNullable<CompileOptions["effect"]>;
 } = {
+  databaseGovernance: { mode: "off" },
   graphql: false,
   root: "src",
   outDir: "generated",
@@ -75,6 +78,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
 };
 
 export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudConfig {
+  if (config.databaseGovernance !== undefined) assertDatabaseGovernance(config.databaseGovernance);
   if (config.delivery !== undefined) parseDeliveryOptions(config.delivery);
   if (config.graphql !== undefined && config.graphql !== false) assertGraphqlOptions(config.graphql);
   validateGovernanceConfig(config);
@@ -205,6 +209,7 @@ export function resolveSupacloudConfig(
   commandCapabilities?: CommandExecutionCapabilities;
   moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
   typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
+  databaseGovernance?: NonNullable<CompileOptions["databaseGovernance"]>;
   allowRouteCommandBindings?: boolean;
   disallowControllerDirectDb?: boolean;
   detectOrphanModules?: boolean;
@@ -227,6 +232,12 @@ export function resolveSupacloudConfig(
     commandCapabilities: resolved.commandCapabilities ?? DEFAULT_SUPACLOUD_CONFIG.commandCapabilities,
     ...(resolved.moduleBoundaries ? { moduleBoundaries: resolved.moduleBoundaries } : {}),
     ...(resolved.typeSafety ? { typeSafety: resolved.typeSafety } : {}),
+    ...(resolved.databaseGovernance === undefined ? {} : {
+      databaseGovernance: {
+        ...resolved.databaseGovernance,
+        projectRoot: resolve(cwd, resolved.databaseGovernance.projectRoot ?? "."),
+      },
+    }),
     ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),
     ...(resolved.disallowControllerDirectDb === undefined ? {} : { disallowControllerDirectDb: resolved.disallowControllerDirectDb }),
     ...(resolved.detectOrphanModules === undefined ? {} : { detectOrphanModules: resolved.detectOrphanModules }),
