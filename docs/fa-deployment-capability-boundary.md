@@ -1,10 +1,37 @@
 # FA Deployment Capability Boundary
 
-This document is a proposed product boundary for deploying Failure Analysis
-(FA) through SupaCloud. The project-scoped deployment contract described here
-is not implemented by the current CLI or Management API. It is intentionally
-separate from the FA business workflow. A successful deployment is not
-business acceptance.
+This document defines the product boundary for deploying Failure Analysis
+(FA) through SupaCloud. Application deployment is implemented for executable
+HTTP and Worker targets, but does not yet cover the complete FA Function and
+schedule inventory. It is intentionally separate from the FA business
+workflow. A successful deployment is not business acceptance.
+
+## Current Implementation And Ownership
+
+The following describes source capabilities, not a claim that a published
+version or either FA environment has been upgraded.
+
+| Concern | Current platform implementation | FA responsibility / remaining gap |
+| --- | --- | --- |
+| SQL RPC installation | `ApplicationMigrations` executes declared SQL through `applyRecordedMigration` | FA declares RPC bodies, RLS, grants and domain invariants in forward migrations |
+| Migration ledger | Existing project migration ledger, checksums, conflict checks and read-back | No second FA ledger; legacy baseline adoption still requires verified inventory |
+| Backup and migration execution | Platform lock, verified logical backup, ordered pending SQL and checksum read-back | Operator-provisioning SQL is separate; destructive SQL needs exact-plan approval |
+| Deployment audit | Project mutations and platform audit record delivery operations | FA business audit and command receipts remain transactionally bound to domain writes |
+| Backend deployment receipt | Orchestrator binds migration evidence to the candidate release and requires a PostgREST status probe | Health is not proof of RPC authorization or business correctness |
+| Functions | Immutable staged versions and CAS-protected project Function release exist | Application delivery still lacks standalone Function targets; CLI rejects declared Edge Function targets |
+| Schedules | Project schedule CRUD with revision checks exists | No desired-state convergence from an immutable application release |
+| Web | Application orchestrator can bind a staged Web release by CAS | This does not make Function, schedule, SQL and Web changes one atomic transaction |
+
+Platform ownership does not mean generating FA business rules automatically.
+RPC SQL executes in the tenant database managed by SupaCloud; its definitions
+stay in FA source. Deployment audit cannot replace case/report/approval audit.
+Reusing the platform ledger must preserve historical checksums, not rewrite
+applied migrations or infer a baseline from missing records.
+
+The Function/schedule gaps below remain release blockers. This document and
+the backend evidence checks do not implement those targets or retire the
+legacy FA deployment scripts. Do not remove the legacy manifest or claim
+test/production migration until a complete replacement has runtime evidence.
 
 ## Proposed Decision
 
@@ -16,8 +43,8 @@ supacloud --env production deploy --confirm-production <project-ref>
 ```
 
 These are future examples, not currently supported FA deployment commands.
-Until the project deployment contract lands, use the existing target-level
-deploy flow documented in `docs/cli-guide.md`.
+For supported HTTP/Worker applications the deployment resource exists; the
+complete FA flow still needs the Function/schedule integration described above.
 
 The command must submit one project deployment request and observe one
 deployment receipt. The customer must not create a scope file, calculate a
@@ -27,7 +54,10 @@ bind Web manually, or reconcile an unknown mutation by choosing a new ID.
 The platform owns the deployment state machine. FA owns its source manifest,
 business contracts, and product acceptance.
 
-## Target Capability Matrix
+## Full FA Target Capability Matrix
+
+The status in this matrix describes the complete FA path, not the absence of
+the individual platform primitives listed above.
 
 | Capability | Target state | Owner | Customer-visible contract |
 | --- | --- | --- | --- |
@@ -72,17 +102,20 @@ must use the single SupaCloud project deployment receipt contract.
 
 ## Proposed Project Deployment Contract
 
-A future platform implementation should expose one project-scoped deployment
-resource:
+The application deployment resource exists at the following paths; the
+complete FA inventory is not yet supported through it:
 
 ```text
 POST /v1/projects/:projectRef/environments/:environmentId/deployments
 GET  /v1/projects/:projectRef/environments/:environmentId/deployments/:deploymentId
 POST /v1/projects/:projectRef/environments/:environmentId/deployments/:deploymentId/reconcile
-POST /v1/projects/:projectRef/environments/:environmentId/rollback
 ```
 
-The request contains an immutable source revision and artifact manifest. The
+The project-level rollback route remains a proposed part of the full FA
+contract, rather than a route implemented by `project-deployments.ts`.
+
+For the full FA contract, the request should contain an immutable source
+revision and artifact manifest. The
 platform derives the effective migration, Function, schedule, secret and Web
 changes from that manifest. The public response contains:
 
