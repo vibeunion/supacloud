@@ -276,7 +276,7 @@
     {
       "name": "DatabaseGovernanceOptions",
       "kind": "type",
-      "signature": "export interface DatabaseGovernanceOptions {\n    mode: \"off\" | \"enforce\";\n    projectRoot?: string;\n    moduleFile?: string;\n    databaseUrl?: string;\n    databaseUrlEnv?: string;\n    schemas?: string[];\n}"
+      "signature": "export interface DatabaseGovernanceOptions {\n    mode: \"off\" | \"check\" | \"enforce\";\n    projectRoot?: string;\n    moduleFile?: string;\n    databaseUrl?: string;\n    databaseUrlEnv?: string;\n    schemas?: string[];\n}"
     },
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",

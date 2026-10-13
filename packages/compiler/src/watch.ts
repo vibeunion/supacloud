@@ -30,7 +30,7 @@ export function watchProject(options: WatchOptions): WatchHandle {
   let watcher: ReturnType<typeof watch> | undefined;
   let schemaWatcher: ReturnType<typeof watch> | undefined;
   let databaseWatcher: ReturnType<typeof watch> | undefined;
-  const databaseRoot = options.databaseGovernance?.mode === "enforce"
+  const databaseRoot = options.databaseGovernance && options.databaseGovernance.mode !== "off"
     ? resolve(rootDir, options.databaseGovernance.projectRoot ?? ".") : undefined;
   const schemaPath = options.graphql ? resolve(rootDir, options.graphql.schema) : undefined;
   const incremental = createIncrementalCompiler();

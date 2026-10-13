@@ -72,6 +72,10 @@ The default command template includes database tooling. HTTP/Edge templates do n
 install Drizzle or require `db:generate`. For the command template, `db:generate`
 is an explicit first-use setup step after installation; commit `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
+New command projects also set compiler `databaseGovernance.mode` to `check`, so
+direct compile and dev/watch cannot bypass the offline source-contract gate.
+SQL lint and live Catalog reconciliation still require real module declarations
+and explicit `enforce` configuration with a selected read-only local/test database.
 `supacloud app check`, `doctor` and `build` also invoke the project's installed database
 checker when `database.sources.json` is present. See
 [Database Source Contracts](./database-source-contracts.md) for existing-project

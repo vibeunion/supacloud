@@ -92,6 +92,18 @@ test("framework starters include default query contracts and an offline client t
     expect(files["tests/graphql.test.ts"]).toContain("ReviewListQuery");
 });
 
+test("only the database starter opts into the offline compiler governance gate", () => {
+    expect(appStarterFiles("governed")["supacloud.config.ts"])
+        .toContain('databaseGovernance: { mode: "check" }');
+    for (const template of ["minimal", "http", "edge"] as const) {
+        const files = appTemplateFiles("plain", template, {
+            "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",
+        });
+        expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
+        expect(files["database.sources.json"]).toBeUndefined();
+    }
+});
+
 test("starter routes use explicit status response maps", () => {
     const files = appStarterFiles("example");
     const source = files["src/review/review.ts"];

@@ -6,7 +6,7 @@ import type { DatabaseGovernanceOptions, Diagnostic } from "./types";
 export function assertDatabaseGovernance(value: unknown): asserts value is DatabaseGovernanceOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid databaseGovernance configuration.");
   const entry = value as Record<string, unknown>;
-  if ((entry["mode"] !== "off" && entry["mode"] !== "enforce")
+  if ((entry["mode"] !== "off" && entry["mode"] !== "check" && entry["mode"] !== "enforce")
     || Object.keys(entry).some(key => !["mode", "projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv", "schemas"].includes(key))
     || ["projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv"].some(key =>
       entry[key] !== undefined && (typeof entry[key] !== "string" || !entry[key].trim()))

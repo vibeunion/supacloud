@@ -67,6 +67,8 @@ export async function enforceDatabaseGovernance(
     diagnostics.push(governanceDiagnostic("Database source contract check failed without findings."));
   }
   if (diagnostics.length > 0) return { diagnostics };
+  // Offline checks never import executable modules or access the database.
+  if (options.mode === "check") return { diagnostics };
 
   const modules = await loadModules(projectRoot, options.moduleFile ?? "db/modules.ts");
   if (!modules.length || new Set(modules.map(module => module.name)).size !== modules.length

@@ -64,12 +64,52 @@ async function fixture(): Promise<{ root: string; options: CompileOptions }> {
 
 test("configuration defaults off, resolves project root and rejects malformed modes", () => {
   expect(defineSupacloudConfig().databaseGovernance?.mode).toBe("off");
+  expect(compileOptionsFromConfig({ databaseGovernance: { mode: "check" } }, "/project"))
+    .toMatchObject({ databaseGovernance: { mode: "check", projectRoot: "/project" } });
   expect(compileOptionsFromConfig({ root: "src", databaseGovernance: { mode: "enforce" } }, "/project"))
     .toMatchObject({ rootDir: "/project/src", databaseGovernance: { projectRoot: "/project" } });
   for (const value of [false, null, {}, { mode: "warn" }, { mode: "enforce", schemas: [] },
     { mode: "enforce", databaseUrlEnv: "bad-name" }, { mode: "enforce", optional: true }]) {
     expect(() => Reflect.apply(defineSupacloudConfig, undefined, [{ databaseGovernance: value }])).toThrow();
   }
+});
+
+test("offline checks never import modules or use database credentials and still reject missing adoption", async () => {
+  const { root, options } = await fixture();
+  await writeFile(join(root, "db/modules.mjs"), "throw new Error('must not be imported');");
+  const offline = {
+    ...options.databaseGovernance!, mode: "check" as const,
+    databaseUrl: "not-a-database-url",
+  };
+  expect(await checkDatabaseGovernance(root, offline)).toEqual([]);
+  await rm(join(root, "db/modules.mjs"));
+  expect(await checkDatabaseGovernance(root, offline)).toEqual([]);
+  await rm(join(root, "database.sources.json"));
+  expect(await checkDatabaseGovernance(root, offline)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ code: "database-source-contract", severity: "error" })]),
+  );
+  expect(await checkDatabaseGovernance(root, { mode: "off" })).toEqual([]);
+});
+
+test("offline compile and incremental checks fail closed on stale contracts without repairing artifacts", async () => {
+  const { root, options } = await fixture();
+  const offline: CompileOptions = {
+    ...options, databaseGovernance: { mode: "check", projectRoot: root },
+  };
+  const compiler = createIncrementalCompiler();
+  expect((await compiler.compile(offline)).diagnostics.filter(item => item.severity === "error")).toEqual([]);
+  expect((await compiler.compile(offline, [])).stats.cacheHit).toBe(true);
+  const before = await readFile(join(options.outDir, "app.manifest.json"), "utf8");
+  await writeFile(join(root, "db/schema.ts"), "export const changed = true;");
+  const failed = await compiler.compile({ ...offline, writeOnError: true }, []);
+  expect(failed.written).toEqual([]);
+  expect(failed.stats.cacheHit).toBe(false);
+  expect(failed.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: "database-source-contract", severity: "error" }),
+  ]));
+  expect((await checkProject(offline)).upToDate).toBe(false);
+  expect(await readFile(join(options.outDir, "app.manifest.json"), "utf8")).toBe(before);
+  expect((await databaseSources(root, "check")).ok).toBe(false);
 });
 
 test("off does not require database adoption; enforce blocks without source contracts even with writeOnError", async () => {
@@ -211,11 +251,12 @@ test("CLI loads the same mode and returns failure without generating artifacts",
     diagnostics: expect.arrayContaining([expect.objectContaining({ code: "database-source-contract" })]) });
 });
 
-test("watch checks SQL changes outside the compiler source root", async () => {
+test.each(["check", "enforce"] as const)("watch in %s mode checks SQL changes outside the compiler source root", async (mode) => {
   const { root, options } = await fixture();
   const events: string[] = [];
   handle = watchProject({
     ...options, rootDir: join(root, "src"), debounceMs: 10,
+    databaseGovernance: { ...options.databaseGovernance!, mode },
     onEvent: event => events.push(`${event.type}:${event.initial}`),
   });
   expect((await handle.ready).type).toBe("compiled");

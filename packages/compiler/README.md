@@ -2,7 +2,16 @@
 
 ## Enforced Database Governance
 
-Database governance is opt-in. Set the following in `supacloud.config.ts`:
+Existing compiler callers retain `off`. Newly generated `command` starters set
+`databaseGovernance: { mode: "check" }`: compile/check/dev run the existing
+`@supacloud/db` source-boundary and contract-freshness gate offline, including
+incremental cache hits. Missing adoption files or stale contracts block generation
+even with `writeOnError`; checks never generate contracts. This mode does not
+import database modules, lint their SQL or connect to a database.
+The minimal/http/edge starters remain database-free.
+
+For SQL lint and live Catalog reconciliation, declare the real database modules
+and explicitly set the following in `supacloud.config.ts`:
 
 ```ts
 export default {
