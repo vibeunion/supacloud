@@ -658,7 +658,7 @@ function configurationView() {
   return {
     schema: "supacloud.application-configuration.v1", project_ref: "project", application_id: "reviews",
     environment_id: "test", configuration_id: "01234567-89ab-4def-8123-456789abcdef",
-    created_at: "2026-09-26T00:00:00.000Z", bun_version: "1.4.2",
+    created_at: "2026-09-26T00:00:00.000Z", bun_version: "1.4.3",
     targets: [{ name: "api", kind: "http", hosts: ["reviews.example.test"], environment_names: ["APP_SETTING"] }],
   };
 }
@@ -688,7 +688,7 @@ test("configuration writes send the bounded file and retain revision identity on
     const configuration = configurationView();
     const input = {
       configuration_id: configuration.configuration_id, expected_configuration_id: null,
-      configuration: { bun_version: "1.4.2", targets: [
+      configuration: { bun_version: "1.4.3", targets: [
         { name: "api", kind: "http", hosts: ["reviews.example.test"], environment: { APP_SETTING: "private-fixture" } },
       ] },
     };

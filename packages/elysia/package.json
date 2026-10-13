@@ -70,7 +70,7 @@
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/commands": "file:../commands",
     "@supacloud/db": "file:../db",
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "elysia": "2.0.0-beta.21",
     "typescript": "^7.0.2"
   }

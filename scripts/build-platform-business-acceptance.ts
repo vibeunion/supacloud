@@ -9,7 +9,7 @@ import { buildDeliveryProject, compileProject, compileOptionsFromConfig, loadSup
 import { readDeliveryExecutableArchive } from "../packages/delivery/src";
 
 // Build the shipped business starter; the detached output contains no credentials.
-assert.equal(Bun.version, "1.4.2");
+assert.equal(Bun.version, "1.4.3");
 const repo = resolve(import.meta.dir, "..");
 const output = await mkdtemp(join(tmpdir(), "supacloud-platform-business-"));
 const project = join(output, "project");

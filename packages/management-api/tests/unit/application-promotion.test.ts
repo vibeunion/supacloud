@@ -34,7 +34,7 @@ function active(projectRef: string): ApplicationActiveRecord {
     schema: "supacloud.application-active.v1", configurationDigest: "c".repeat(64), configurationId,
     hosts: { api: ["reviews.example.com"] },
     runtime: { release: release(projectRef), environmentId: projectRef, activationId: activation,
-      ports: { api: 31000 }, bunVersion: "1.4.2" },
+      ports: { api: 31000 }, bunVersion: "1.4.3" },
   };
 }
 function evidence(projectRef: string): DeploymentEvidence {
@@ -93,7 +93,7 @@ function fixture(
   let configuration: ApplicationConfigurationView | null = {
     schema: "supacloud.application-configuration.v1", project_ref: "production", application_id: "reviews",
     environment_id: "production", configuration_id: configurationId, created_at: "2026-10-10T00:00:00.000Z",
-    bun_version: "1.4.2", targets: [{ name: "api", kind: "http", hosts: ["reviews.example.com"], environment_names: ["DATABASE_URL"] }],
+    bun_version: "1.4.3", targets: [{ name: "api", kind: "http", hosts: ["reviews.example.com"], environment_names: ["DATABASE_URL"] }],
   };
   const sourceEvidence = evidence("staging");
   const targetEvidence = evidence("production");

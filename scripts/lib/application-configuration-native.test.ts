@@ -25,7 +25,7 @@ const scope = (environmentId: string) => ({ projectRef: "demo", applicationId: "
 function write(expected: string | null = null) {
   return {
     configuration_id: randomUUID(), expected_configuration_id: expected,
-    configuration: { bun_version: "1.4.2", targets: [
+    configuration: { bun_version: "1.4.3", targets: [
       { name: "api", kind: "http", hosts: ["reviews.example.test"], environment: { APP_SETTING: "private-config-fixture" } },
       { name: "jobs", kind: "worker", hosts: [], environment: {} },
     ] },

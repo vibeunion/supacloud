@@ -1,7 +1,7 @@
 {
   "name": "@supacloud/management-api",
   "license": "Apache-2.0",
-  "version": "0.116.1",
+  "version": "0.117.0",
   "description": "SupaCloud Multi-tenant Management API",
   "type": "module",
   "scripts": {
@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.117.3",
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "@types/yauzl": "3.4.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

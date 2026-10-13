@@ -4,7 +4,7 @@ import { parseApplicationConfigurationWrite } from "./application-configuration"
 function input() {
   return {
     configuration_id: "01234567-89ab-4def-8123-456789abcdef", expected_configuration_id: null,
-    configuration: { bun_version: "1.4.2", targets: [
+    configuration: { bun_version: "1.4.3", targets: [
       { name: "api", kind: "http", hosts: ["reviews.example.test"], environment: { APP_SETTING: "value" } },
       { name: "jobs", kind: "worker", hosts: [], environment: {} },
     ] },

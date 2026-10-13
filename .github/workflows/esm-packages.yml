@@ -72,7 +72,7 @@ jobs:
           node-version: '24.x'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.2'
+          bun-version: '1.4.3'
       - name: Build candidate packages in dependency order
         run: |
           for package in contracts db delivery app query supacloud-js compiler; do
@@ -121,7 +121,7 @@ jobs:
           node-version: '24.x'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.2'
+          bun-version: '1.4.3'
       - name: Download candidate build outputs
         uses: actions/download-artifact@v6
         with:

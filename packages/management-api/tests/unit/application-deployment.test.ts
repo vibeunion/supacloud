@@ -119,7 +119,7 @@ test("configured activation resolves an explicit scope-bound revision before mut
       expect(id).toBe(configurationId);
       expect(release).toEqual(f.input.runtime.release);
       expect(f.states.size).toBe(0);
-      return { bunVersion: "1.4.2", environment: savedEnvironment, hosts: { api: ["configured.example.test"] } };
+      return { bunVersion: "1.4.3", environment: savedEnvironment, hosts: { api: ["configured.example.test"] } };
     } },
     allocations: { allocate: async input => {
       expect(input.configurationId).toBe(configurationId);
@@ -152,7 +152,7 @@ test("configured deployment cannot allocate a forged release or activate a forei
   const service = new ApplicationDeploymentService({
     ...f.dependencies,
     configurations: { resolve: async () => ({
-      bunVersion: "1.4.2", environment: { api: {}, jobs: {} }, hosts: { api: ["reviews.example.test"] },
+      bunVersion: "1.4.3", environment: { api: {}, jobs: {} }, hosts: { api: ["reviews.example.test"] },
     }) },
     allocations: { allocate: async input => {
       allocations++;
@@ -241,7 +241,7 @@ test("HTTP activation with a lost journal receipt reconciles after service recon
   const dependencies: ApplicationDeploymentDependencies = {
     ...f.dependencies,
     configurations: { resolve: async () => ({
-      bunVersion: "1.4.2",
+      bunVersion: "1.4.3",
       environment: structuredClone(f.input.environment),
       hosts: Object.fromEntries(Object.entries(f.input.hosts).map(([key, hosts]) => [key, [...hosts]])),
     }) },

@@ -101,7 +101,7 @@ async function fixture(upgrade = true) {
           : Object.fromEntries(Object.entries(source.environment).map(([name, values]) => [name, { ...values }])),
         hosts: state.badHosts ? { api: ["other.example.test"] }
           : Object.fromEntries(Object.entries(source.hosts!).map(([name, hosts]) => [name, [...hosts]])),
-        bunVersion: state.badBun ? "1.0.0" : "1.4.2",
+        bunVersion: state.badBun ? "1.0.0" : "1.4.3",
       };
     } },
     verifyRoute: async record => {

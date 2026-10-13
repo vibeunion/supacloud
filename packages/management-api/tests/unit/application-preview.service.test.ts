@@ -43,7 +43,7 @@ function activation(): Pick<ApplicationPreviewServiceDependencies, "configuratio
   const configuration = (scope: { projectRef: string; applicationId: string; environmentId: string }, id: string) => ({
     schema: "supacloud.application-configuration.v1" as const, configuration_id: id,
     project_ref: scope.projectRef, application_id: scope.applicationId, environment_id: scope.environmentId,
-    created_at: "2026-10-10T00:00:00.000Z", bun_version: "1.4.2", targets: [],
+    created_at: "2026-10-10T00:00:00.000Z", bun_version: "1.4.3", targets: [],
   });
   return {
     configurations: {
@@ -968,7 +968,7 @@ async function deactivationFixture() {
   const dependencies: ApplicationDeploymentDependencies = {
     active, mutations: journal, verifyCompatibility: async () => {},
     withProjectLifecycle: async (_ref, operation) => { calls.push("lock"); return operation(); },
-    configurations: { resolve: async () => ({ bunVersion: "1.4.2", hosts, environment: { api: {}, jobs: {} } }) },
+    configurations: { resolve: async () => ({ bunVersion: "1.4.3", hosts, environment: { api: {}, jobs: {} } }) },
     allocations: {
       allocate: async () => { throw new Error("must not allocate"); },
       read: async () => structuredClone(allocation),

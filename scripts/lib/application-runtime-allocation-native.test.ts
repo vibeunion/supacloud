@@ -226,7 +226,7 @@ test.skipIf(!postgresBin)("configured control-plane deployment and explicit roll
   const scope = { projectRef: "demo", applicationId: "reviews", environmentId: "configured" };
   const initial = {
     configuration_id: input.configurationId, expected_configuration_id: null,
-    configuration: { bun_version: "1.4.2", targets: [
+    configuration: { bun_version: "1.4.3", targets: [
       { name: "api", kind: "http", hosts: ["configured.example.test"], environment: { APP_SETTING: "first-fixture" } },
       { name: "jobs", kind: "worker", hosts: [], environment: {} },
     ] },
