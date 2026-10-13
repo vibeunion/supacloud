@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.117.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.116.1...management-api-v0.117.0) (2026-10-13)
+
+
+### Features
+
+* **storage:** support raw image byte transforms ([#1884](https://github.com/vibeunion/supacloud/issues/1884)) ([fc3fc20](https://github.com/vibeunion/supacloud/commit/fc3fc20429c7887e16cc4ef49d7357bab57d4a67))
+
+
+### Bug Fixes
+
+* **management-api:** reuse delegated principal for promotion source checks ([#1879](https://github.com/vibeunion/supacloud/issues/1879)) ([f9ecba5](https://github.com/vibeunion/supacloud/commit/f9ecba5d348f4e7ff35ec2b0a189b540c58be249))
+
 ## [0.116.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.116.0...management-api-v0.116.1) (2026-10-13)
 
 
