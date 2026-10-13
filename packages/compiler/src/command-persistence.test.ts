@@ -27,7 +27,7 @@ test("persistent command profile accepts database and external adapters with tru
   for (const boundary of ["database", "external"] as const) {
     const capabilities: CommandExecutionCapabilities = {
       requirePersistentAdapters: true, permission: true,
-      rpc: { update: { boundary, audit: true, idempotency: true, transaction: boundary === "database" } },
+      rpc: { update: { boundary, audit: true, idempotency: true, reconcile: boundary === "external", transaction: boundary === "database" } },
     };
     expect(validateGraph(graph(boundary === "database" ? "required" : "none"), { commandCapabilities: capabilities })
       .filter((item) => item.code.startsWith("command-"))).toEqual([]);
@@ -52,7 +52,7 @@ export class UnsafeModule {}
 
 test("external effects cannot acquire transaction guarantees from metadata", () => {
   const diagnostics = validateGraph(graph(), { commandCapabilities: {
-    rpc: { update: { boundary: "external", audit: true, idempotency: true, transaction: false } },
+    rpc: { update: { boundary: "external", audit: true, idempotency: true, reconcile: true, transaction: false } },
   } });
   expect(diagnostics.some((item) => item.code === "command-external-transaction"
     && item.errorCode === "SC4021" && item.severity === "error")).toBe(true);
@@ -102,7 +102,7 @@ export class WebhookModule {}
       rootDir: root, outDir: join(root, "generated"), requireRouteContracts: true,
       commandCapabilities: {
         requirePersistentAdapters: true, permission: true,
-        rpc: { webhookUpdate: { boundary: "database" as const, audit: true, transaction: true, idempotency: true } },
+        rpc: { webhookUpdate: { boundary: "database" as const, audit: true, transaction: true, idempotency: true, reconcile: false } },
       },
     };
     const compiled = await compileProject(options);
@@ -114,7 +114,7 @@ export class WebhookModule {}
     const failed = await compileProject({
       ...options, commandCapabilities: {
         ...options.commandCapabilities,
-        rpc: { webhookUpdate: { boundary: "external", audit: true, transaction: false, idempotency: true } },
+        rpc: { webhookUpdate: { boundary: "external", audit: true, transaction: false, idempotency: true, reconcile: false } },
       },
     });
     expect(failed.written).toEqual([]);

@@ -156,7 +156,7 @@
     {
       "name": "CommandExecutionCapabilities",
       "kind": "type",
-      "signature": "export interface CommandExecutionCapabilities {\n    requirePersistentAdapters?: boolean;\n    rpc?: Record<string, {\n        audit?: boolean;\n        idempotency?: boolean;\n        transaction?: boolean;\n        boundary?: \"database\" | \"external\";\n    }>;\n    permission?: boolean;\n    audit?: boolean;\n    idempotency?: boolean;\n    transaction?: boolean | \"rpc-only\";\n}"
+      "signature": "export interface CommandExecutionCapabilities {\n    requirePersistentAdapters?: boolean;\n    rpc?: Record<string, {\n        audit?: boolean;\n        idempotency?: boolean;\n        reconcile?: boolean;\n        transaction?: boolean;\n        boundary?: \"database\" | \"external\";\n    }>;\n    permission?: boolean;\n    audit?: boolean;\n    idempotency?: boolean;\n    transaction?: boolean | \"rpc-only\";\n}"
     },
     {
       "name": "CommandNode",
@@ -201,7 +201,7 @@
     {
       "name": "ContextPack",
       "kind": "type",
-      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"drizzle-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
     },
     {
       "name": "ContractManifest",
@@ -281,7 +281,7 @@
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
       "kind": "value",
-      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\" | \"effect\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    effect: NonNullable<CompileOptions[\"effect\"]>;\n};"
+      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"openApi\" | \"effect\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    effect: NonNullable<CompileOptions[\"effect\"]>;\n};"
     },
     {
       "name": "defineSupacloudConfig",
@@ -1031,7 +1031,7 @@
     {
       "name": "resolveSupacloudConfig",
       "kind": "value",
-      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    databaseGovernance?: NonNullable<CompileOptions[\"databaseGovernance\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
+      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    databaseGovernance?: NonNullable<CompileOptions[\"databaseGovernance\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb: boolean;\n    detectOrphanModules: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
     },
     {
       "name": "RouteNode",
@@ -1171,7 +1171,7 @@
     {
       "name": "TypeSafetyOptions",
       "kind": "type",
-      "signature": "export interface TypeSafetyOptions {\n    noAnyInGenerated?: boolean;\n    scanProductionSource?: boolean;\n    exclude?: string[];\n}"
+      "signature": "export interface TypeSafetyOptions {\n    noAnyInGenerated?: boolean;\n    scanProductionSource?: boolean;\n    exclude?: string[];\n    allowAlternativeLibraries?: string[];\n}"
     },
     {
       "name": "TypeSafetyScanOptions",
@@ -1192,6 +1192,11 @@
       "name": "validateGraph",
       "kind": "value",
       "signature": "export declare function validateGraph(graph: ApplicationGraph, options?: boolean | ValidateOptions): Diagnostic[];"
+    },
+    {
+      "name": "validateJobPolicies",
+      "kind": "value",
+      "signature": "export declare function validateJobPolicies(graph: ApplicationGraph): Diagnostic[];"
     },
     {
       "name": "ValidateOptions",

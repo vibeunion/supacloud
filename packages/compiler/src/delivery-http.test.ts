@@ -43,7 +43,7 @@ async function fixture() {
     project,
     options: {
       rootDir: join(project, "src"), outDir: join(project, "generated"),
-      strict: false, generateClient: false, generatePermissions: false,
+      strict: false, generateClient: false, generatePermissions: false, requireRouteContracts: false,
     },
     settings: { version: 1, build: { httpApplications: [{ target: "api", source: "host.ts" }] } },
   };

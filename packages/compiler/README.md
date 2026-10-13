@@ -2,16 +2,18 @@
 
 ## Enforced Database Governance
 
-Existing compiler callers retain `off`. Newly generated `command` starters set
-`databaseGovernance: { mode: "check" }`: compile/check/dev run the existing
-`@supacloud/db` source-boundary and contract-freshness gate offline, including
-incremental cache hits. Missing adoption files or stale contracts block generation
-even with `writeOnError`; checks never generate contracts. This mode does not
-import database modules, lint their SQL or connect to a database.
+Existing compiler callers retain `off` as a compatibility migration exception.
+Newly generated `command` starters set
+`databaseGovernance: { mode: "enforce", moduleFile: "db/modules.ts" }`:
+compile/check/build run the existing `@supacloud/db` source-boundary and
+contract-freshness gate, SQL lint and live Catalog reconciliation, including
+incremental cache hits. Missing adoption files, stale contracts, SQL findings or
+Catalog drift block generation even with `writeOnError`; checks never generate
+contracts or migrations.
 The minimal/http/edge starters remain database-free.
 
-For SQL lint and live Catalog reconciliation, declare the real database modules
-and explicitly set the following in `supacloud.config.ts`:
+For an existing database project, adopt the governed path by declaring the real
+database modules and explicitly setting the following in `supacloud.config.ts`:
 
 ```ts
 export default {
@@ -26,10 +28,12 @@ export default {
 ```
 
 `projectRoot` is relative to the configuration directory (or `rootDir` when
-calling `compileProject` / `checkProject` directly). The default mode is `off`.
-Use a read-only PostgreSQL credential in the named environment variable, targeting
-an explicitly selected local or test database. The compiler does not load `.env`
-files for this worker, generate migrations, repair contracts, or apply SQL.
+calling `compileProject` / `checkProject` directly). Use a read-only PostgreSQL
+credential in the named environment variable, targeting an explicitly selected
+local or test database. The compiler does not load `.env` files for this worker,
+generate migrations, repair contracts, or apply SQL. Setting `mode: "off"` is
+reserved for an explicit migration exception and should not be used in a new
+database starter.
 
 In `enforce` mode, compile/check/dev must pass the existing
 `@supacloud/db` source-boundary and contract-freshness check, SQL lint and live

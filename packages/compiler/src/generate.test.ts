@@ -844,6 +844,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
 
     const out = join(standaloneDir, "gen");
     const res = await compileProject({ rootDir: standaloneDir, outDir: out, generateClient: true,
+      requireRouteContracts: false,
       commandCapabilities: { requirePersistentAdapters: false, permission: true, audit: true, idempotency: true, transaction: true } });
     expect(res.diagnostics).toEqual([]);
     const rootMod = res.graph.modules.find((m) => m.name === "root");

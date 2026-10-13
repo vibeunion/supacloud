@@ -22,7 +22,7 @@ export class HeaderController {
 @Module({ name: "headers", controllers: [HeaderController] })
 export class HeaderModule {}
 ` });
-    const result = await compileProject({ rootDir: root, outDir: join(root, "generated") });
+    const result = await compileProject({ rootDir: root, outDir: join(root, "generated"), requireRouteContracts: false });
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(result.graph.modules[0]?.controllers[0]?.routes[0]?.handlerParams).toMatchObject([
       { kind: "headers", bindingName: "Idempotency-Key" }, { kind: "headers" },

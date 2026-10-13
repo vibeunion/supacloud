@@ -70,6 +70,8 @@ function render(state: State): number {
     default: return 1;
   }
 }`,
+  SC6012: `import { createClient } from "@apollo/client";
+export { createClient };`,
   SC3001: `@Get("/:id") findById() {}
 @Get("/health") health() {}`,
   SC3002: `const routes = [{ path: "/old", redirectTo: "/missing" }];`,
@@ -170,6 +172,15 @@ class Issue {}`,
 class Issue {}`,
   SC4026: `defineSupacloudConfig({ commandCapabilities: { transaction: false } });
 @Command({ name: "billing.issue", permission: "billing.issue", transaction: "required" })
+class Issue {}`,
+  SC4027: `@Job({ name: "billing.rebuild", maxAttempts: 3, idempotency: "none" })
+class RebuildJob {}`,
+  SC4028: `defineSupacloudConfig({
+  commandCapabilities: {
+    rpc: { billing: { boundary: "external", audit: true, idempotency: true, reconcile: false } },
+  },
+});
+@Command({ name: "billing.issue", permission: "billing.issue", rpc: "billing", transaction: "none" })
 class Issue {}`,
   SC3021: `@Post("/items")
 create(@Body() input: unknown) {}`,
@@ -392,6 +403,7 @@ function fix(entry: DiagnosticEntry): string {
   if (entry.code === "SC2012") return "Use typed constructor parameters and compiler-generated scope factories instead of runtime inject() or injection contexts.";
   if (entry.code === "SC6007") return "Keep raw SQL results unknown and validate them with an explicit result decoder.";
   if (entry.code === "SC6008") return "Use parameterized SQL templates for values; raw SQL must be a static literal.";
+  if (entry.code === "SC6012") return "Use the governed Supabase client/PostgREST transport, RxJS for the existing reactive boundary, and Workflow/Command for durable execution. If an alternative is required, list its package explicitly in `typeSafety.allowAlternativeLibraries` and cover the boundary with focused governance tests.";
   if (entry.code.startsWith("SC81")) return "Correct the `@InfraResource` declaration or the module/command/job resource use. Declare each logical resource once, reference only declared resources, and keep operations within `read | write | publish | consume`.";
   if (entry.registry === "type-safety") return `Replace the unsafe type escape reported by \`${names}\` with an explicit type, \`unknown\` plus narrowing, or a constrained generic.`;
   if (entry.code.startsWith("SC1")) return `Inspect the module graph and change the dependency or scope declaration that triggered \`${names}\`. Keep dependencies one-way and make the smallest shared contract explicit.`;

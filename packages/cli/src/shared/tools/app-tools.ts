@@ -465,6 +465,13 @@ interface ProjectContextPack {
     diagnostics: Diagnostic[];
     allowedDependencies: { dependencies: string[]; devDependencies: string[] };
     commands: Record<string, string>;
+    defaults: {
+        readTransport: "postgrest-supabase-js";
+        writeTransport: "command-rpc";
+        writeRetry: "disabled";
+        externalOutcome: "receipt-reconcile";
+        databaseSource: "drizzle-append-only";
+    };
 }
 
 /** Declared package dependencies, so an agent can tell allowed imports from new packages. */
@@ -531,6 +538,13 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             fix: "supacloud app fix --fix <fix.json>",
             graph: "supacloud app graph --format json",
             explain: "supacloud app explain --target <name>",
+        },
+        defaults: {
+            readTransport: "postgrest-supabase-js",
+            writeTransport: "command-rpc",
+            writeRetry: "disabled",
+            externalOutcome: "receipt-reconcile",
+            databaseSource: "drizzle-append-only",
         },
     };
     if (args.format === "json") return textResult(JSON.stringify(project, null, 2));
