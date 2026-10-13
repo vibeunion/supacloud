@@ -110,6 +110,19 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const exists = dependencies.projectExists ?? projectExists;
   const transfers = dependencies.transfers ?? new ApplicationReleaseTransfers(storage);
   const promotions = dependencies.promotions ?? createDefaultApplicationPromotions();
+  // Delegated (SupaOAuth BFF) proofs are bound to the original method/path/body, so a
+  // rewritten source path cannot replay them. Resolve the trusted principal once against
+  // the original target request, then reuse it for every source-path capability check.
+  const authorizeSource = async (
+    sourceRequest: Request, targetRequest: Request, targetRef: string, ref: string,
+  ): Promise<{ status: number; body: { error: string } } | undefined> => {
+    if (hasSupaOAuthDelegationHeaders(targetRequest)) {
+      return requireProjectOrAdminAuthWithTrustedPrincipal(
+        sourceRequest, ref, await resolveTrustedPrincipal(targetRequest, targetRef),
+      );
+    }
+    return authorize(sourceRequest, ref);
+  };
   const sourceAccess = async (
     request: Request, targetRef: string, ref: string, id: string, releaseId: string,
   ) => {
@@ -118,13 +131,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     url.search = "";
     // 重新构造源 GET 请求，使项目 scope 和委托读取权限均基于源路径。
     const sourceRequest = new Request(url, { method: "GET", headers: request.headers });
-    const denied = hasSupaOAuthDelegationHeaders(request)
-      ? await requireProjectOrAdminAuthWithTrustedPrincipal(
-        sourceRequest,
-        ref,
-        await resolveTrustedPrincipal(request, targetRef),
-      )
-      : await authorize(sourceRequest, ref);
+    const denied = await authorizeSource(sourceRequest, request, targetRef, ref);
     if (denied) throw new ApplicationReleaseTransferError("APPLICATION_RELEASE_TRANSFER_SOURCE_DENIED", denied.status);
     if (!await exists(ref)) throw new ApplicationReleaseTransferError("APPLICATION_RELEASE_TRANSFER_SOURCE_NOT_FOUND", 404);
   };
@@ -231,7 +238,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         const url = new URL(request.url);
         url.pathname = `/v1/projects/${query.source_ref}/applications/${values.id}/environments/${query.source_environment_id}/runtime`;
         url.search = "";
-        const denied = await authorize(new Request(url, { method: "GET", headers: request.headers }), query.source_ref);
+        const denied = await authorizeSource(
+          new Request(url, { method: "GET", headers: request.headers }), request, values.ref, query.source_ref,
+        );
         if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
       },
       detail: { tags: ["applications"], summary: "Plan an immutable environment promotion without executing changes" },
@@ -273,7 +282,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       const sourceUrl = new URL(request.url);
       sourceUrl.pathname = `/v1/projects/${body.source_ref}/applications/${values.id}/environments/${body.source_environment_id}/runtime`;
       sourceUrl.search = "";
-      const denied = await authorize(new Request(sourceUrl, { method: "GET", headers: request.headers }), body.source_ref);
+      const denied = await authorizeSource(
+        new Request(sourceUrl, { method: "GET", headers: request.headers }), request, values.ref, body.source_ref,
+      );
       if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
       return promotionExecutor.execute({
         projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
@@ -314,7 +325,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
           const sourceUrl = new URL(request.url);
           sourceUrl.pathname = `/v1/projects/${input.sourceProjectRef}/applications/${input.applicationId}/environments/${input.sourceEnvironmentId}/runtime`;
           sourceUrl.search = "";
-          const denied = await authorize(new Request(sourceUrl, { method: "GET", headers: request.headers }), input.sourceProjectRef);
+          const denied = await authorizeSource(
+            new Request(sourceUrl, { method: "GET", headers: request.headers }), request, values.ref, input.sourceProjectRef,
+          );
           if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
         },
       );
