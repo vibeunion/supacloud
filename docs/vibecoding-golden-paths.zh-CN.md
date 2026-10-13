@@ -11,6 +11,9 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 
 > Angular 参考的是工程体验，不是技术实现；目标是让 Vibecoding 变成一条有约束、可诊断、可交付的开发流水线。
 
+默认策略见[《Vibecoding 默认策略》](vibecoding-default-policy.zh-CN.md)：没有特殊需求时，
+生成器和 AI 使用经过验证的最佳路径；替代方案必须显式选择并承担额外治理责任。
+
 ## 快速开始
 
 ```bash
