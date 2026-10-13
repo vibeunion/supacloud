@@ -14,6 +14,7 @@ import {
   type StudioSessionService,
 } from "../services/studio-session.service";
 import type { CollaboratorCapability } from "../services/project-collaborator.service";
+import type { TrustedPrincipal } from "../services/bff-proof.service";
 import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
 import { isAppError } from "../utils/errors";
 import { resolveTaskOutputInvoker } from "../utils/task-output";
@@ -424,12 +425,15 @@ async function enforceDelegatedCapability(
   request: Request,
   ref: string,
   capability: CollaboratorCapability,
+  principal?: TrustedPrincipal,
 ): Promise<void> {
-  const { resolveTrustedPrincipal } = await import("../services/bff-proof.service");
-  const principal = await resolveTrustedPrincipal(request, ref);
-  if (capability === "audit.write" && ["user", "system"].includes(principal.type)) return;
+  const resolvedPrincipal = principal ?? await (async () => {
+    const { resolveTrustedPrincipal } = await import("../services/bff-proof.service");
+    return resolveTrustedPrincipal(request, ref);
+  })();
+  if (capability === "audit.write" && ["user", "system"].includes(resolvedPrincipal.type)) return;
   const { requireCapability } = await import("../services/project-collaborator.service");
-  await requireCapability(ref, principal, capability);
+  await requireCapability(ref, resolvedPrincipal, capability);
 }
 
 export async function requireProjectOrAdminAuth(request: Request, ref: string): Promise<{ status: number; body: { error: string } } | undefined> {
@@ -440,4 +444,27 @@ export async function requireProjectOrAdminAuth(request: Request, ref: string): 
   if (auth.role === "master" || auth.role === "admin") return undefined;
   if (auth.role === "project" && auth.ref === ref) return undefined;
   return { status: 403, body: { error: "Project service role or admin privileges required" } };
+}
+
+/**
+ * Authorize a rewritten project path with a principal that was already
+ * verified on the original request. This is for internal fan-out only: the
+ * caller must preserve the original request's authentication boundary.
+ */
+export async function requireProjectOrAdminAuthWithTrustedPrincipal(
+  request: Request,
+  ref: string,
+  principal: TrustedPrincipal,
+): Promise<{ status: number; body: { error: string } } | undefined> {
+  const capability = delegatedProjectCapability(request, ref);
+  if (!capability) {
+    return { status: 403, body: { error: "Delegated access is unavailable for this project route" } };
+  }
+  try {
+    await enforceDelegatedCapability(request, ref, capability, principal);
+    return undefined;
+  } catch (error: unknown) {
+    if (!isAppError(error)) throw error;
+    return { status: error.statusCode, body: { error: error.message } };
+  }
 }
