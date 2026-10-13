@@ -8,7 +8,7 @@ const removedDeployFlags = ["target", "id", "build_command", "output_dir", "plan
 export function assertCurrentDeploymentInput(tool: string, input: unknown): void {
     if (!input || typeof input !== "object" || Array.isArray(input)) return;
     const args = input as Record<string, unknown>;
-    if (tool === "frontend" && typeof args.action === "string" && removedFrontendActions.has(args.action)) {
+    if (tool === "frontend" && typeof args["action"] === "string" && removedFrontendActions.has(args["action"])) {
         throw new Error(DEPLOYMENT_UPGRADE);
     }
     if (tool === "deploy" && removedDeployFlags.some(flag => Object.hasOwn(args, flag))) {
