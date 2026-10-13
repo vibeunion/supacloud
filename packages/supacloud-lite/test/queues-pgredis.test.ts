@@ -198,12 +198,13 @@ describe('Edge Function pgredis compatibility', () => {
   })
 
   test('supports TTL cleanup and atomic getset/getdel', async () => {
+    const ttlMs = 60_000
     const backend = await createLiteBackend({
       ...backendConfig,
       functions: {
         ttl: async () => {
           const cache = pgredis()
-          await cache.set('expires', { version: 1 }, 40)
+          await cache.set('expires', { version: 1 }, ttlMs)
           return Response.json({ cached: await cache.get('expires'), ttlMs: await cache.ttl('expires') })
         },
         expired: async () => Response.json({ cached: await pgredis().get('expires') }),
@@ -224,8 +225,14 @@ describe('Edge Function pgredis compatibility', () => {
       const initial = await invoke(backend, 'ttl') as { cached: unknown; ttlMs: number }
       expect(initial.cached).toEqual({ version: 1 })
       expect(initial.ttlMs).toBeGreaterThan(0)
-      expect(initial.ttlMs).toBeLessThanOrEqual(40)
-      await Bun.sleep(60)
+      expect(initial.ttlMs).toBeLessThanOrEqual(ttlMs)
+      // Exercise expiry without depending on CI scheduling or sleeping for the TTL.
+      const expired = await backend.db.query<{ key: string }>(
+        `update public.supacloud_pgredis_kv
+         set expires_at = clock_timestamp() - interval '1 second'
+         where key = 'expires' and expires_at is not null returning key`
+      )
+      expect(expired.rows).toEqual([{ key: 'expires' }])
       expect(await invoke(backend, 'expired')).toEqual({ cached: null })
       const remaining = await backend.db.query<{ count: number }>(
         `select count(*)::int as count from public.supacloud_pgredis_kv where key = 'expires'`
