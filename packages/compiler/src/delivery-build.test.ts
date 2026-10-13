@@ -248,3 +248,26 @@ test("CLI exposes structured builds and rejects write-like preview flags", async
     }
   } finally { await rm(project, {recursive: true, force: true}); }
 }, 60_000);
+
+test("rejects function targets until function rendering is implemented", async () => {
+  const project = await mkdtemp(join(tmpdir(), "delivery-function-"));
+  try {
+    await writeFixtureProject(project, {
+      ...GOOD_PROJECT_FILES,
+      "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
+    });
+    const result = await buildDeliveryProject({
+      rootDir: project, outDir: join(project, "generated"), strict: false,
+      generateClient: false, generatePermissions: false,
+    }, {
+      version: 1,
+      targets: [{
+        name: "intake-hooks", kind: "function",
+        function: { slug: "fa-intake-hooks", entrypoint: "src/runtime.ts", verifyJwt: false },
+      }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.manifest).toBeNull();
+    expect(result.diagnostics.map((item) => item.code)).toContain("delivery-function-build-unsupported");
+  } finally { await rm(project, { recursive: true, force: true }); }
+}, 120_000);
