@@ -81,3 +81,32 @@ test("planning preserves existing generated content and propagates compiler fail
   expect(rejected.plan).toBeNull();
   expect(rejected.written).toEqual([]);
 }, 30_000);
+
+test("planning forwards command capabilities instead of fabricating unavailable RPC adapters", async () => {
+  const project = await mkdtemp(join(tmpdir(), "supacloud-delivery-caps-"));
+  try {
+    await writeFixtureProject(project, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/accept-case.command.ts": GOOD_PROJECT_FILES["src/features/case/accept-case.command.ts"]
+        .replace("  name: \"case.accept\",", "  name: \"case.accept\",\n  rpc: \"fa_accept_case\","),
+    });
+    const options = {
+      rootDir: project, outDir: join(project, "generated"), strict: false,
+      generateClient: false, generatePermissions: false,
+    };
+    const without = await planDeliveryProject(options);
+    expect(without.ok).toBe(false);
+    expect(without.diagnostics.map((item) => item.code)).toContain("command-rpc-unavailable");
+    const withCapabilities = await planDeliveryProject({
+      ...options,
+      commandCapabilities: {
+        requirePersistentAdapters: true, permission: true, audit: true, idempotency: true, transaction: true,
+        rpc: { fa_accept_case: { audit: true, idempotency: true, transaction: true, boundary: "database" } },
+      },
+    });
+    expect(withCapabilities.diagnostics.map((item) => item.code)).not.toContain("command-rpc-unavailable");
+    expect(withCapabilities.ok).toBe(true);
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+}, 30_000);

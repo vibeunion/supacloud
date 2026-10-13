@@ -60,7 +60,7 @@ export async function buildDeliveryProject(
     phase = "compiler-checks";
     const sources = await sourceInventory(sourceRoot, generatedRoot);
     const checked = await checkProject(options);
-    const planned = createDeliveryPlan({ ...checked.graph, diagnostics: checked.diagnostics }, settings);
+    const planned = createDeliveryPlan({ ...checked.graph, diagnostics: checked.diagnostics }, settings, options);
     if (!planned.ok) return failed(planned.diagnostics);
     if (options.graphql && checked.mismatches.some((mismatch) => mismatch.startsWith("graphql"))) {
       throw new Error("Refresh GraphQL artifacts with compile before building independent targets.");
