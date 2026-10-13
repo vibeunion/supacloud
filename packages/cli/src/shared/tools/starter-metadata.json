@@ -21,7 +21,7 @@
       "version": "0.8.1"
     },
     "db": {
-      "version": "0.16.1",
+      "version": "0.16.2",
       "peerDependencies": {
         "drizzle-orm": "1.0.0-rc.5-169397b"
       },

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/vibeunion/supacloud/compare/db-v0.16.1...db-v0.16.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **db:** detect catalog contract drift and function overloads ([#1867](https://github.com/vibeunion/supacloud/issues/1867)) ([b44bfee](https://github.com/vibeunion/supacloud/commit/b44bfee59579a949c86ffaf2920adbd564f87401))
+
 ## [0.16.1](https://github.com/vibeunion/supacloud/compare/db-v0.16.0...db-v0.16.1) (2026-10-11)
 
 

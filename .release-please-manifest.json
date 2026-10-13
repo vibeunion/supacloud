@@ -1,12 +1,12 @@
 {
-  "packages/management-api": "0.115.0",
+  "packages/management-api": "0.116.0",
   "packages/web-console": "0.52.1",
   "packages/edge-runtime": "0.32.0",
   "packages/pgredis-runtime": "0.12.1",
   "packages/query": "0.2.1",
   "packages/supacloud-js": "0.41.2",
-  "packages/cli": "0.93.0",
-  "packages/admin": "0.27.1",
+  "packages/cli": "0.94.0",
+  "packages/admin": "0.28.0",
   "packages/supacloud": "0.16.6",
   "packages/function-adapter": "0.5.1",
   "packages/supacloud-lite": "0.26.0",
@@ -17,6 +17,6 @@
   "packages/delivery": "0.16.0",
   "packages/compiler": "0.44.1",
   "packages/elysia": "0.29.2",
-  "packages/db": "0.16.1",
+  "packages/db": "0.16.2",
   "packages/testing": "0.6.1"
 }
