@@ -438,6 +438,8 @@ export interface ApplicationGraph {
 }
 
 export interface CompileOptions {
+  /** Optional fail-closed database source and Catalog governance. */
+  databaseGovernance?: DatabaseGovernanceOptions;
   /** Opt-in, offline GraphQL query contracts backed by a role-scoped schema snapshot. */
   graphql?: GraphqlOptions;
   /** Require schemas for bound route inputs and responses. Does not prove runtime validation. */
@@ -576,6 +578,21 @@ export interface TypeSafetyOptions {
   scanProductionSource?: boolean;
   /** Additional relative glob patterns excluded from the production-source scan. */
   exclude?: string[];
+}
+
+export interface DatabaseGovernanceOptions {
+  /** Off by default; enforce blocks compilation on any database governance finding. */
+  mode: "off" | "enforce";
+  /** Relative to the configuration directory, or rootDir for programmatic callers. */
+  projectRoot?: string;
+  /** Project-relative module file exporting defineDatabaseModule(...) results. */
+  moduleFile?: string;
+  /** Explicit URL for programmatic callers; configuration files should use databaseUrlEnv. */
+  databaseUrl?: string;
+  /** Environment variable containing a read-only PostgreSQL connection URL. */
+  databaseUrlEnv?: string;
+  /** Schemas included in the live Catalog query. */
+  schemas?: string[];
 }
 
 export interface ModuleBoundaryRule {

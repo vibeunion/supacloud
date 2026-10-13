@@ -75,13 +75,14 @@ jobs:
           bun-version: '1.4.2'
       - name: Build candidate packages in dependency order
         run: |
-          for package in contracts delivery app query supacloud-js compiler; do
+          for package in contracts db delivery app query supacloud-js compiler; do
             (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
           done
       - name: Archive candidate build outputs
         run: |
           tar -czf "$RUNNER_TEMP/esm-candidate-build.tar.gz" \
             packages/contracts/dist \
+            packages/db/dist \
             packages/delivery/dist \
             packages/app/dist \
             packages/query/dist \

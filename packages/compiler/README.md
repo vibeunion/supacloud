@@ -1,5 +1,51 @@
 # @supacloud/compiler
 
+## Enforced Database Governance
+
+Database governance is opt-in. Set the following in `supacloud.config.ts`:
+
+```ts
+export default {
+  databaseGovernance: {
+    mode: "enforce",
+    projectRoot: ".",
+    moduleFile: "db/modules.ts",
+    databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
+    schemas: ["public"],
+  },
+};
+```
+
+`projectRoot` is relative to the configuration directory (or `rootDir` when
+calling `compileProject` / `checkProject` directly). The default mode is `off`.
+Use a read-only PostgreSQL credential in the named environment variable, targeting
+an explicitly selected local or test database. The compiler does not load `.env`
+files for this worker, generate migrations, repair contracts, or apply SQL.
+
+In `enforce` mode, compile/check/dev must pass the existing
+`@supacloud/db` source-boundary and contract-freshness check, SQL lint and live
+Catalog reconciliation for nonempty declared database modules. The module file
+must export `default` or `modules` containing `defineDatabaseModule` results.
+Its SQL and declared test paths must resolve within `projectRoot`.
+All lint/reconciliation findings, including warnings, block generation regardless
+of `strict` or `writeOnError`. Existing generated artifacts are retained.
+
+Each check runs in a fresh Bun process with a 30-second deadline, including
+incremental cache hits. Bun must be installed on PATH when the compiler runs on
+Node. Module imports are trusted executable project configuration, not sandboxed
+inputs. Module/SQL edits are reread; changing the compiler configuration requires
+restarting dev. Watch observes SQL/JSON/JS/TS inputs under the governance root,
+excluding generated output, dependencies and standard artifact directories.
+Remote database changes alone do not trigger watch; the next compile checks them.
+
+This gate enforces the adopted database-source contract and declared object
+checks, not complete database coverage, ORM usage, runtime authorization, or SQL
+test behavior. Passing it is not deployment acceptance. Keep one existing
+append-only migration ledger, maintain Drizzle structure and SQL sources
+separately, and explicitly generate/review RPC contracts before compiling.
+See `docs/database-governance.md` and `docs/database-source-contracts.md` for
+the database checks and their limitations.
+
 Generated HTTP clients export `ApiClientError` with `code`, `method`, route
 `path`, `status` and a bounded `requestId`. Undeclared HTTP errors no longer
 embed raw response bodies in their message; explicit inspection remains

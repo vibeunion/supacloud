@@ -29,6 +29,9 @@ export function watchProject(options: WatchOptions): WatchHandle {
   const pendingPaths = new Set<string>();
   let watcher: ReturnType<typeof watch> | undefined;
   let schemaWatcher: ReturnType<typeof watch> | undefined;
+  let databaseWatcher: ReturnType<typeof watch> | undefined;
+  const databaseRoot = options.databaseGovernance?.mode === "enforce"
+    ? resolve(rootDir, options.databaseGovernance.projectRoot ?? ".") : undefined;
   const schemaPath = options.graphql ? resolve(rootDir, options.graphql.schema) : undefined;
   const incremental = createIncrementalCompiler();
   let initialEvent: WatchEvent | undefined;
@@ -52,6 +55,7 @@ export function watchProject(options: WatchOptions): WatchHandle {
     if (timer) clearTimeout(timer);
     watcher?.close();
     schemaWatcher?.close();
+    databaseWatcher?.close();
   };
 
   const compile = (initial: boolean, changedPaths: string[] = []): Promise<void> => {
@@ -118,6 +122,16 @@ export function watchProject(options: WatchOptions): WatchHandle {
     }, debounceMs);
   };
 
+  const isDatabaseInput = (path: string): boolean => {
+    if (!databaseRoot) return false;
+    const local = relative(databaseRoot, path);
+    const output = relative(outDir, path);
+    return local !== ".." && !local.startsWith(`..${sep}`)
+      && output !== "" && (output === ".." || output.startsWith(`..${sep}`))
+      && !local.split(sep).some(part => ["node_modules", ".git", ".wt", ".worktrees", "dist", "output"].includes(part))
+      && /\.(?:sql|json|[cm]?[jt]s)$/.test(path);
+  };
+
   const startup = compile(true)
     .then(() => {
       if (closed) {
@@ -131,10 +145,17 @@ export function watchProject(options: WatchOptions): WatchHandle {
         if (!relativePath.startsWith("..") && relativePath !== "") return;
         if (/\.(tsx?|mts|cts)$/.test(changedPath)
           || isCompilerConfigurationPath(rootDir, changedPath)
+          || isDatabaseInput(changedPath)
           || (options.graphql && (/\.(graphql|gql)$/.test(changedPath) || changedPath === schemaPath))) {
           schedule(relative(rootDir, changedPath));
         }
       });
+      if (databaseRoot && databaseRoot !== rootDir) {
+        databaseWatcher = watch(databaseRoot, { recursive: true }, (_eventType, filename) => {
+          const path = filename ? resolve(databaseRoot, filename.toString()) : undefined;
+          if (!path || isDatabaseInput(path)) schedule(path);
+        });
+      }
       if (schemaPath && relative(rootDir, schemaPath).startsWith(`..${sep}`)) {
         let directory = dirname(schemaPath);
         while (!existsSync(directory) && dirname(directory) !== directory) directory = dirname(directory);

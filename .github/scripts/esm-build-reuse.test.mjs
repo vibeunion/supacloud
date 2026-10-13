@@ -10,7 +10,7 @@ const build = workflow.split('\n  esm-build:\n')[1]?.split('\n  esm-consumers:\n
 const consumers = workflow.split('\n  esm-consumers:\n')[1];
 assert.ok(build);
 assert.ok(consumers);
-const candidates = ['contracts', 'delivery', 'app', 'query', 'supacloud-js', 'compiler'];
+const candidates = ['contracts', 'db', 'delivery', 'app', 'query', 'supacloud-js', 'compiler'];
 const archive = build.match(/tar -czf "\$RUNNER_TEMP\/esm-candidate-build.tar.gz" \\\n((?: {12}packages\/[^\n]+\n)+)/);
 assert.ok(archive, 'Candidate archive must have an explicit path allowlist');
 const paths = archive[1].trim().split('\n').map(line => line.trim().replace(/ \\$/, ''));
@@ -19,7 +19,7 @@ test('all runtime consumers use one upstream build without rebuilding candidates
   assert.equal(workflow.match(/- '.github\/scripts\/esm-build-reuse.test.mjs'/g)?.length, 2);
   assert.match(workflow, /node --test .github\/scripts\/esm-build-reuse.test.mjs/);
   assert.match(build, /needs: esm-policy/);
-  assert.match(build, /for package in contracts delivery app query supacloud-js compiler/);
+  assert.match(build, /for package in contracts db delivery app query supacloud-js compiler/);
   assert.match(build, /bun install --frozen-lockfile && bun run build/);
   assert.doesNotMatch(build, /matrix:|continue-on-error/);
   assert.match(consumers, /needs: \[esm-policy, esm-build\]/);
