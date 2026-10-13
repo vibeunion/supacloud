@@ -73,6 +73,40 @@ describe("delivery input and output boundaries", () => {
   });
 });
 
+describe("function target declarations", () => {
+  const fn = {
+    version: 1,
+    targets: [{
+      name: "intake-hooks", kind: "function",
+      function: { slug: "fa-intake-hooks", entrypoint: "functions/intake/index.ts", verifyJwt: false },
+    }],
+  } satisfies DeliveryOptions;
+
+  test("plans a function target without owning app modules", () => {
+    const plan = successful(createDeliveryPlan(graph(http("orders")), fn));
+    const target = requireValue(plan.targets.find((item) => item.name === "intake-hooks"));
+    expect(target.kind).toBe("function");
+    expect(target.modules).toEqual([]);
+    expect(target.routes).toEqual([]);
+    expect(target.jobs).toEqual([]);
+    expect(target.function).toEqual({ slug: "fa-intake-hooks", entrypoint: "functions/intake/index.ts", verifyJwt: false });
+    expect(requireValue(plan.targets.find((item) => item.name === "api")).routes).toHaveLength(1);
+  });
+
+  test("requires an entrypoint descriptor and forbids app modules", () => {
+    expect(() => parseDeliveryOptions({ version: 1, targets: [{ name: "fn", kind: "function" }] }))
+      .toThrow("Invalid delivery configuration");
+    expect(() => parseDeliveryOptions({ version: 1, targets: [{
+      name: "fn", kind: "function", modules: ["orders"],
+      function: { slug: "fh", entrypoint: "f.ts", verifyJwt: false },
+    }] })).toThrow("Invalid delivery configuration");
+    expect(() => parseDeliveryOptions({ version: 1, targets: [{
+      name: "orders", kind: "api", modules: ["orders"],
+      function: { slug: "fh", entrypoint: "f.ts", verifyJwt: false },
+    }] })).toThrow("Invalid delivery configuration");
+  });
+});
+
 describe("deterministic workload placement", () => {
   test("compute limits are preserved in the delivery plan and change its digest", () => {
     const options: DeliveryOptions = { version: 1, runtime, targets: [{

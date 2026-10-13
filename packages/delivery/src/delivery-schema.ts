@@ -5,12 +5,18 @@ import { WorkerExecutionSchema, WorkerExecutionGroupSchema, ComputeResourcesSche
 const objectOptions = { additionalProperties: false } as const;
 const reference = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z][A-Za-z0-9_.:/-]*$" });
 const references = Type.Array(reference, { uniqueItems: true });
-const kind = Type.Union([Type.Literal("api"), Type.Literal("jobs"), Type.Literal("webhook")]);
+const kind = Type.Union([Type.Literal("api"), Type.Literal("jobs"), Type.Literal("webhook"), Type.Literal("function")]);
 const isolation = Type.Union([Type.Literal("shared"), Type.Literal("process")]);
 export const DeliveryFilePathSchema = Type.String({
   maxLength: 512,
   pattern: "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$",
 });
+/** Declarative Edge Function target. Rendering/activation is implemented by later delivery phases. */
+const functionTarget = Type.Object({
+  slug: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
+  entrypoint: DeliveryFilePathSchema,
+  verifyJwt: Type.Boolean(),
+}, objectOptions);
 
 export const DeliveryOptionsSchema = Type.Object({
   version: Type.Literal(1),
@@ -18,10 +24,11 @@ export const DeliveryOptionsSchema = Type.Object({
   targets: Type.Optional(Type.Array(Type.Object({
     name: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
     kind,
-    modules: Type.Array(reference, { minItems: 1, uniqueItems: true }),
+    modules: Type.Optional(Type.Array(reference, { minItems: 1, uniqueItems: true })),
     isolation: Type.Optional(isolation),
     capabilities: Type.Optional(references),
     compute: Type.Optional(ComputeResourcesSchema),
+    function: Type.Optional(functionTarget),
   }, objectOptions))),
   // These are declarations, never evidence that a remote host enforces isolation.
   runtime: Type.Optional(Type.Object({
@@ -101,6 +108,7 @@ export const DeliveryTargetSchema = Type.Object({
   routes: Type.Array(routeSchema),
   jobs: Type.Array(jobSchema),
   externalTokens: Type.Array(Type.String()),
+  function: Type.Optional(functionTarget),
   requirements: Type.Object({
     processIsolation: Type.Boolean(),
     durableQueue: Type.Boolean(),
@@ -153,6 +161,13 @@ export function parseDeliveryOptions(value: unknown): DeliveryOptions {
   if (!Value.Check(DeliveryOptionsSchema, value)) throw new DeliveryConfigurationError();
   if (value.targets?.some(target => target.compute && target.isolation === "shared")) {
     throw new DeliveryConfigurationError();
+  }
+  for (const target of value.targets ?? []) {
+    // Function targets declare an entrypoint instead of app modules; other kinds require modules.
+    const invalidShape = target.kind === "function"
+      ? target.function === undefined || target.modules !== undefined || target.compute !== undefined
+      : target.modules === undefined || target.function !== undefined;
+    if (invalidShape) throw new DeliveryConfigurationError();
   }
   const migrations = value.build?.migrations ?? [];
   try { validateWorkerExecution(value.execution?.groups ?? []); }
