@@ -6,12 +6,15 @@ import * as ts from "@typescript/typescript6";
 import { initializeAppProject, appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
 import { databaseSources } from "./source-contracts";
+import { lintModule } from "./lint";
+import type { DatabaseModule } from "./module";
+import { pathToFileURL } from "node:url";
 
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-test("database starter ships a working offline default without connecting or rewriting migration history", async () => {
+test("database starter ships a source contract and live module ownership without rewriting migration history", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -23,6 +26,7 @@ test("database starter ships a working offline default without connecting or rew
   expect((await databaseSources(root)).ok).toBe(true);
   expect(await readFile(join(root, "migrations/001-review.sql"), "utf8")).toBe(migration);
   expect(await readFile(join(root, "db/contracts/rpc-types.ts"), "utf8")).not.toContain("any");
+  expect(await readFile(join(root, "db/modules.ts"), "utf8")).toContain('name: "starter"');
 });
 test("default checks run before regeneration and Drizzle candidate paths never replace the deployment ledger", () => {
   const files = appStarterFiles("example");
@@ -41,6 +45,22 @@ test("default checks run before regeneration and Drizzle candidate paths never r
     expect(plain["database.sources.json"]).toBeUndefined();
   }
 });
+test("generated database module loads real Drizzle names and its SQL passes governance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "db-starter-module-"));
+  roots.push(root);
+  await initializeAppProject({ root, name: "example", template: "command" });
+  await symlink(resolve(import.meta.dir, "../../compiler/node_modules"), join(root, "node_modules"), "dir");
+  const loaded = await import(pathToFileURL(join(root, "db/modules.ts")).href) as { default: DatabaseModule };
+  expect(loaded.default.tables).toEqual([
+    "public.starter_application", "public.starter_reviews", "public.starter_members",
+    "public.starter_attachments", "public.starter_attachment_results",
+  ]);
+  expect(loaded.default.policies).toHaveLength(17);
+  expect(await lintModule(loaded.default, path => readFile(join(root, path), "utf8"))).toEqual([]);
+  for (const policy of loaded.default.policies) {
+    expect(await readFile(join(root, policy.source), "utf8")).toContain(`CREATE POLICY ${policy.name} ON ${policy.table}`);
+  }
+});
 test("generated Drizzle declarations and configuration typecheck; inferred row types reject invalid states", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-types-"));
   roots.push(root);
@@ -56,6 +76,7 @@ const insert: NewReview = row;`;
       path, join(root, "drizzle.config.ts"), join(root, "drizzle.pull.config.ts"),
     ], {
       strict: true, noEmit: true, skipLibCheck: true, types: ["bun"],
+      typeRoots: [join(root, "node_modules/@types")],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
     }));
   };

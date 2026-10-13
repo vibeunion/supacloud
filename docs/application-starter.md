@@ -51,11 +51,12 @@ does not bypass overwrite protection.
 The explicit `--template command` reference contains:
 
 - Drizzle table declarations and inferred row types, separate migration/introspection
-  candidate outputs, and an offline database-source contract gate in default check/build;
+  candidate outputs, a database-source contract gate and live Catalog reconciliation
+  in default check/build;
 - three separated framework packages, TypeScript configuration and strict compiler capabilities;
 - a typed review feature with a state specification, route schemas and static AOP;
-- Database First GraphQL query contracts as the recommended read path, a synthetic offline schema fixture, generated typed
-  client and a deterministic client test (see [GraphQL Query Contracts](./graphql-query-contracts.md));
+- PostgREST / `@supabase/supabase-js` as the default read path; GraphQL query
+  contracts remain an explicit opt-in (see [GraphQL Query Contracts](./graphql-query-contracts.md));
 - a loopback-only memory demo and regression tests for permissions, idempotency,
   transaction rollback, state/version conflicts and absent runtime adapters;
 - semantic watch/recompile/restart, with the last good artifacts preserved on errors;
@@ -72,22 +73,26 @@ The default command template includes database tooling. HTTP/Edge templates do n
 install Drizzle or require `db:generate`. For the command template, `db:generate`
 is an explicit first-use setup step after installation; commit `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
-New command projects also set compiler `databaseGovernance.mode` to `check`, so
-direct compile and dev/watch cannot bypass the offline source-contract gate.
-SQL lint and live Catalog reconciliation still require real module declarations
-and explicit `enforce` configuration with a selected read-only local/test database.
+New command projects generate `db/modules.ts` and set compiler
+`databaseGovernance.mode` to `enforce`, so compile/check/build perform SQL lint and
+live Catalog reconciliation against an explicitly selected `DATABASE_URL`.
+The normal `dev` profile is an explicit fast exception and uses only the offline
+source-contract check; `dev:integration` requires the CLI's explicit loopback
+database URL and restores live reconciliation. Neither path silently falls back
+from enforce to check.
 `supacloud app check`, `doctor` and `build` also invoke the project's installed database
 checker when `database.sources.json` is present. See
 [Database Source Contracts](./database-source-contracts.md) for existing-project
 assessment, source boundaries, precision and migration adoption.
 
-Database First is the only GraphQL server-schema model. The fixture is not an
-application-owned server SDL: change Drizzle/SQL declarations, migrate, then
-replace it with an intended-role database export before integration. Do not
-hand-edit exported schemas or add GraphQL resolver classes. After database/grant
-changes and before promotion, use `graphql-schema --check` against the selected
-database, then refresh intentionally and run generated-artifact, type and RLS
-checks. Offline compilation does not attest database provenance or freshness.
+Database First is the only GraphQL server-schema model when GraphQL is explicitly
+selected. The command starter does not generate a GraphQL schema or query. Change
+Drizzle/SQL declarations, migrate, then export an intended-role database snapshot
+before adding a Query Contract. Do not hand-edit exported schemas or add GraphQL
+resolver classes. After database/grant changes and before promotion, use
+`graphql-schema --check` against the selected database, then refresh intentionally
+and run generated-artifact, type and RLS checks. Offline compilation does not
+attest database provenance or freshness.
 
 ## Local Development Entry
 

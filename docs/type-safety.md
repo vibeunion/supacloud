@@ -33,6 +33,10 @@ not a proof that all possible `any` flows or excluded files are safe.
 - `SC6011` requires explicit coverage of every finite literal-union switch member.
   A `default` branch does not replace missing cases. Open string/number domains
   are not finite-union exhaustiveness checks.
+- `SC6012` rejects alternative GraphQL clients, reactive libraries and durable
+  engines in production source unless the package is explicitly listed in
+  `typeSafety.allowAlternativeLibraries`. This keeps PostgREST, RxJS and
+  Workflow/Command as the deterministic defaults.
 - `noCheck` cannot disable the mandatory TypeScript gate.
 
 Application properties and function signatures are inspected under the selected
