@@ -297,8 +297,6 @@ EXAMPLES
   ${preferredCommand} deploy
   ${preferredCommand} --env test deploy
   ${preferredCommand} --env production deploy --confirm-production <project-ref>
-  ${preferredCommand} deploy --target web
-  ${preferredCommand} deploy --target api
   ${preferredCommand} dev sync --env test --target functions --function api
   ${preferredCommand} dev status --env test
   ${preferredCommand} dev watch --env test --target project
@@ -670,7 +668,6 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 isError: true,
                 content: [{ type: "text" as const, text: "Application release support is unavailable in this CLI context" }],
             }),
-        edgeFunctionDeploy: advancedTools.edge_functions?.callback,
     })));
     assign(captureTools((server) => registerGatewayTools(server, http, {
         projectRef: context.projectRef || undefined,

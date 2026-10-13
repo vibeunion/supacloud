@@ -29,6 +29,15 @@ Use `supacloud` as the project-level control surface and keep durable changes re
 
 ## Workflow
 
+For normal application deployment, run `supacloud --env <name> deploy`.
+Use the current application delivery configuration and a bound application ID.
+Do not assemble a client-side sequence of scope generation, backup, migration
+apply, PostgREST refresh, Function deployment and Web activation.
+The server owns that sequence. Old `deploy --target` and `frontend` publishing
+actions are removed: upgrade CLI and server together, migrate the configuration,
+and retry the unified command. Do not substitute a legacy endpoint when it fails.
+The inspection and database-maintenance workflow below is not a deployment checklist.
+
 1. Classify the request using [references/command-map.md](references/command-map.md).
 2. For database work, load [references/database-workflow.md](references/database-workflow.md) and choose either new-change or historical-drift reconciliation.
 3. For AI-assisted database changes, first request bounded context:

@@ -1,1065 +1,338 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBuildEnvironment, createFrontendArchive, registerDeployTools } from "./deploy-tools";
+import { registerFrontendTools } from "./frontend-tools";
+import { registerDeveloperExperienceTools } from "./developer-experience-tools";
+import { requireProjectDeploymentProtocol } from "./project-deployment";
+import type { ToolInvocation, ToolResult } from "../tool-server";
 import type { ToolSchema } from "../schema";
-import type { ToolInvocation } from "../tool-server";
 import { HttpTransport } from "../transports/http";
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../../index.ts", import.meta.url));
 const temporaryDirectories: string[] = [];
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+const protocol = {
+    protocol: "supacloud.project-deployment.v1", project_ref: "test-ref", environment_id: "test",
+};
 
 afterEach(async () => {
     for (const server of servers.splice(0)) server.stop(true);
-    await Promise.all(temporaryDirectories.splice(0).map((directory) => (
-        rm(directory, { recursive: true, force: true })
-    )));
+    await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
-function release(projectRef: string, deploymentId: string, releaseId: string) {
-    return {
-        schema: "supacloud.frontend-release.v2",
-        project_ref: projectRef,
-        deployment_id: deploymentId,
-        release_id: releaseId,
-        sha256: releaseId,
-        tree_sha256: "dc8451fa5e9f82057e51c9cbf6848589753ece913961c1d8c57d5945c1376d47",
-        size_bytes: 128,
-        file_count: 2,
-        created_at: "2026-09-02T08:00:00.000Z",
-        kind: "prebuilt_static",
-        archive_format: "tar.zst",
-    };
-}
-
-function deployment(id = "web") {
-    return {
-        id,
-        name: id,
-        framework: "static",
-        build_command: "",
-        output_dir: "dist",
-        deployment_url: "https://web.example.com",
-    };
-}
-
-async function workspace(): Promise<string> {
+async function workspace(config: object = { application: { id: "orders", environmentId: "test" } }) {
     const directory = await mkdtemp(join(tmpdir(), "supacloud-deploy-test-"));
     temporaryDirectories.push(directory);
     await mkdir(join(directory, "dist", "assets"), { recursive: true });
     await writeFile(join(directory, "dist", "index.html"), "<h1>hello</h1>\n");
     await writeFile(join(directory, "dist", "assets", "app.js"), "console.log('hello');\n");
+    await writeFile(join(directory, "supacloud.json"), JSON.stringify(config));
     return directory;
 }
 
-async function runCli(
-    directory: string,
-    apiUrl: string,
-    args: string[],
-    options: { injectContext?: boolean; env?: Record<string, string> } = {},
-) {
-    const environment: Record<string, string | undefined> = { ...process.env };
-    if (options.injectContext === false) {
-        for (const key of ["SUPACLOUD_API_URL", "SUPACLOUD_API_TOKEN", "SUPACLOUD_PROJECT_REF", "SUPACLOUD_ENV"]) {
-            delete environment[key];
-        }
-    } else {
-        Object.assign(environment, {
-            SUPACLOUD_API_URL: apiUrl,
-            SUPACLOUD_API_TOKEN: "test-token",
-            SUPACLOUD_PROJECT_REF: "abc123",
-            SUPACLOUD_ENV: "test",
-        });
-    }
-    Object.assign(environment, options.env);
+function server(handler?: (request: Request) => Response | Promise<Response>) {
+    const requests: string[] = [];
+    const instance = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        fetch(request) {
+            const path = new URL(request.url).pathname;
+            requests.push(`${request.method} ${path}`);
+            return handler?.(request) ?? Response.json(protocol);
+        },
+    });
+    servers.push(instance);
+    return { requests, url: instance.url.origin, http: new HttpTransport({ baseUrl: instance.url.origin, token: "fixture" }) };
+}
+
+function deploy(http: HttpTransport, directory: string, options: {
+    application?: { id: string; environmentId: string; configurationPath?: string; configurationId?: string };
+    release?: (args: Record<string, unknown>) => Promise<ToolResult>;
+} = {}) {
+    let callback: ToolInvocation | undefined;
+    let schema: ToolSchema | undefined;
+    const calls: Record<string, unknown>[] = [];
+    registerDeployTools({
+        tool(_name, _description, shape, handler) { callback = handler; schema = shape; },
+    }, http, {
+        cwd: directory, projectRef: "test-ref", environment: "test",
+        application: options.application,
+        applicationRelease: async args => {
+            calls.push(args);
+            return options.release?.(args) ?? { content: [{ type: "text", text: '{"ok":true}' }] };
+        },
+    });
+    return { run: (input: unknown = {}) => callback!(input), calls, schema };
+}
+
+async function runCli(directory: string, apiUrl: string, args: readonly string[], env: Record<string, string> = {}) {
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => (
+        !name.startsWith("SUPACLOUD_") && !name.startsWith("SUPABASE_")
+        && !name.startsWith("MANAGEMENT_API_")
+    )));
     const child = Bun.spawn([process.execPath, CLI_ENTRYPOINT, ...args], {
         cwd: directory,
-        env: environment,
-        stdout: "pipe",
-        stderr: "pipe",
+        env: {
+            ...environment, SUPACLOUD_API_URL: apiUrl, SUPACLOUD_API_TOKEN: "fixture",
+            SUPACLOUD_PROJECT_REF: "test-ref", SUPACLOUD_ENV: "test", ...env,
+        },
+        stdout: "pipe", stderr: "pipe",
     });
     const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
     ]);
     return { exitCode, stdout, stderr };
 }
 
-describe("one-command deploy", () => {
-    test("uses the repository application declaration and selected environment without an application profile", async () => {
-        const directory = await workspace();
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            application: { id: "orders", environmentId: "production" },
-        }));
-        const calls: Array<Record<string, unknown>> = [];
-        let callback: ToolInvocation | undefined;
-        registerDeployTools({
-            tool(_name, _description, _schema, handler) { callback = handler; },
-        }, {} as HttpTransport, {
-            cwd: directory, projectRef: "test-ref", environment: "test",
-            applicationRelease: async args => {
-                calls.push(args);
-                return { content: [{ type: "text", text: "{}" }] };
-            },
-        });
-        await callback?.({ json: true });
-        expect(calls).toEqual([{
+describe("current deployment only", () => {
+    test("uses the repository application and selected environment, then delegates once", async () => {
+        const directory = await workspace({ application: { id: "orders", environmentId: "production" } });
+        const api = server();
+        const tool = deploy(api.http, directory);
+        await tool.run({ json: true });
+        expect(tool.calls).toEqual([{
             action: "release", ref: "test-ref", id: "orders", environment_id: "test",
             root: directory, format: "json", json: true,
         }]);
+        expect(api.requests).toEqual(["GET /v1/projects/test-ref/environments/test/deployments/protocol"]);
     });
 
-    for (const source of ["manifest", "mixed-targets", "compiler", "migrations", "functions"]) {
-        test(`does not silently publish Web when ${source} declares a backend`, async () => {
+    test("profile binding needs neither frontend configuration nor a local configuration revision", async () => {
+        const directory = await workspace({});
+        const api = server();
+        const tool = deploy(api.http, directory, { application: { id: "orders", environmentId: "test" } });
+        await tool.run();
+        expect(tool.calls).toHaveLength(1);
+        expect(tool.calls[0]).not.toHaveProperty("configuration_id");
+        expect(tool.calls[0]).not.toHaveProperty("web_release");
+    });
+
+    test("initialization prompts for current application delivery instead of standalone publishing", async () => {
+        const directory = await workspace();
+        await rm(join(directory, "supacloud.json"));
+        const tools = new Map<string, ToolInvocation>();
+        registerDeveloperExperienceTools({
+            tool(name, _description, _schema, handler) { tools.set(name, handler); },
+        });
+        const result = await tools.get("init")!({ root: directory, json: true });
+        expect(result.content[0]?.text).toContain("SUPACLOUD_APPLICATION_ID");
+        expect(await readFile(join(directory, ".env.supacloud.test.example"), "utf8"))
+            .toContain("SUPACLOUD_APPLICATION_ID=<application-id>");
+    });
+
+    test("environment inspection accepts repository application binding without client configuration revisions", async () => {
+        const directory = await workspace();
+        await writeFile(join(directory, ".env.supacloud.test"), [
+            "SUPACLOUD_ENV=test", "SUPACLOUD_API_URL=https://management.example.com",
+            "SUPACLOUD_API_TOKEN=private-profile-token", "SUPACLOUD_PROJECT_REF=test-ref",
+        ].join("\n"));
+        const tools = new Map<string, ToolInvocation>();
+        registerDeveloperExperienceTools({
+            tool(name, _description, _schema, handler) { tools.set(name, handler); },
+        });
+        const result = await tools.get("env")!({ action: "check", root: directory, json: true });
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+            environments: [{ deployReady: true, deployMissing: [] }],
+        });
+        expect(result.content[0]?.text).not.toContain("private-profile-token");
+    });
+
+    test.each(["target", "id", "build_command", "output_dir", "plan", "diff", "dry_run"])(
+        "rejects removed %s even when false, before HTTP or delegation", async flag => {
             const directory = await workspace();
-            const config: Record<string, unknown> = { frontend: { id: "web", outputDirectory: "dist" } };
-            if (source === "manifest") {
-                await mkdir(join(directory, "supacloud", "example"), { recursive: true });
-                await writeFile(join(directory, "supacloud", "example", "deploy-manifest.json"), "{}");
-            } else if (source === "mixed-targets") {
-                config.defaultTarget = "web";
-                config.targets = {
-                    web: { type: "frontend", root: ".", id: "web" },
-                    api: { type: "edge_function", root: "api" },
-                };
-            } else if (source === "compiler") {
-                await writeFile(join(directory, "supacloud.config.ts"), "export default {};");
-            } else {
-                await mkdir(join(directory, "supabase", source), { recursive: true });
-            }
-            await writeFile(join(directory, "supacloud.json"), JSON.stringify(config));
-            let requests = 0;
-            const server = Bun.serve({ port: 0, fetch() { requests++; return Response.json({}); } });
-            servers.push(server);
+            const api = server();
+            const tool = deploy(api.http, directory);
+            await expect(tool.run({ [flag]: false })).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
+            expect(tool.schema).not.toHaveProperty(flag);
+            expect(tool.calls).toEqual([]);
+            expect(api.requests).toEqual([]);
+        },
+    );
+
+    test.each([
+        {}, { frontend: { id: "web", outputDirectory: "dist" } },
+        { targets: { api: { type: "edge_function", root: "." } } },
+    ])("rejects standalone deployment configuration without guessing an application: %j", async config => {
+        const directory = await workspace(config);
+        const api = server();
+        const tool = deploy(api.http, directory);
+        await expect(tool.run({ skip_build: true })).rejects.toThrow("supacloud deploy");
+        expect(api.requests).toEqual([]);
+        expect(tool.calls).toEqual([]);
+    });
+
+    test("rejects a historical release manifest before any remote access", async () => {
+        const directory = await workspace();
+        await writeFile(join(directory, "deploy-manifest.json"), "{}");
+        const api = server();
+        await expect(deploy(api.http, directory).run()).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
+        expect(api.requests).toEqual([]);
+    });
+
+    test("does not silently discard standalone Function targets in an application", async () => {
+        const directory = await workspace({
+            application: { id: "orders" }, targets: { api: { type: "edge_function", root: "." } },
+        });
+        const api = server();
+        await expect(deploy(api.http, directory).run()).rejects.toThrow("PROJECT_DEPLOYMENT_UNSUPPORTED");
+        expect(api.requests).toEqual([]);
+    });
+
+    test("rejects conflicting configuration sources before remote access", async () => {
+        const directory = await workspace();
+        const api = server();
+        const tool = deploy(api.http, directory, {
+            application: { id: "orders", environmentId: "test", configurationId: "id", configurationPath: "path" },
+        });
+        await expect(tool.run()).rejects.toThrow("only one");
+        expect(api.requests).toEqual([]);
+    });
+
+    test.each([
+        { status: 404, data: {} }, { status: 200, data: { ...protocol, protocol: "old" } },
+        { status: 200, data: { ...protocol, environment_id: "production" } },
+        { status: 200, data: { ...protocol, project_ref: "other" } },
+    ])("fails closed on a missing, old or cross-environment protocol: %j", async scenario => {
+        const directory = await workspace({
+            application: { id: "orders" },
+            frontend: { buildCommand: "touch build-ran", outputDirectory: "dist" },
+        });
+        const api = server(() => Response.json(scenario.data, { status: scenario.status }));
+        const tool = deploy(api.http, directory);
+        await expect(tool.run()).rejects.toThrow("DEPLOYMENT_PROTOCOL_MISMATCH");
+        expect(api.requests).toHaveLength(1);
+        expect(tool.calls).toEqual([]);
+        await expect(readFile(join(directory, "build-ran"))).rejects.toThrow();
+    });
+
+    test.each([401, 403, 429, 503])("does not mislabel HTTP %s as a version mismatch or retry", async status => {
+        const api = server(() => Response.json({}, { status }));
+        await expect(requireProjectDeploymentProtocol(api.http, "test-ref", "test"))
+            .rejects.toThrow("DEPLOYMENT_PROTOCOL_UNAVAILABLE");
+        expect(api.requests).toHaveLength(1);
+    });
+
+    test("an unreadable protocol response stops before any write", async () => {
+        const api = server(() => Response.json(null));
+        await expect(requireProjectDeploymentProtocol(api.http, "test-ref", "test"))
+            .rejects.toThrow("DEPLOYMENT_PROTOCOL_UNAVAILABLE");
+        expect(api.requests).toHaveLength(1);
+    });
+
+    test.each(["deploy_git", "deploy_upload", "redeploy", "upload_release", "activate_release"])(
+        "removes frontend %s from metadata and rejects it before HTTP", async action => {
+            const api = server();
             let callback: ToolInvocation | undefined;
-            registerDeployTools({
-                tool(_name, _description, _schema, handler) { callback = handler; },
-            }, new HttpTransport({ baseUrl: server.url.origin, token: "fixture" }), {
-                cwd: directory, projectRef: "test-ref",
-            });
-            await expect(callback!({ skip_build: true })).rejects.toThrow("PROJECT_DEPLOYMENT_UNSUPPORTED");
-            expect(requests).toBe(0);
-        });
-    }
+            let shape: ToolSchema | undefined;
+            registerFrontendTools({
+                tool(_name, _description, schema, handler) { callback = handler; shape = schema; },
+            }, api.http);
+            expect(JSON.stringify(shape)).not.toContain(`"${action}"`);
+            await expect(callback!({ action })).rejects.toThrow("npm install -g @supacloud/cli@latest");
+            expect(api.requests).toEqual([]);
+        },
+    );
 
-    test("an application profile cannot silently discard declared Edge Function targets", async () => {
+    test.each([
+        { args: ["deploy", "--target=web"] }, { args: ["deploy", "--plan"] },
+        { args: ["frontend", "upload_release", "--archive_path", "does-not-exist"] },
+    ])("CLI gives upgrade guidance for removed invocation %j", async ({ args }) => {
         const directory = await workspace();
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            targets: { api: { type: "edge_function", root: "." } },
-        }));
-        let calls = 0;
-        let callback: ToolInvocation | undefined;
-        registerDeployTools({
-            tool(_name, _description, _schema, handler) { callback = handler; },
-        }, {} as HttpTransport, {
-            cwd: directory, projectRef: "test-ref", application: { id: "orders", environmentId: "test" },
-            applicationRelease: async () => { calls++; return { content: [] }; },
-        });
-        await expect(callback!({})).rejects.toThrow("PROJECT_DEPLOYMENT_UNSUPPORTED");
-        expect(calls).toBe(0);
+        const api = server();
+        const result = await runCli(directory, api.url, args);
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr).toContain("DEPLOYMENT_UPGRADE_REQUIRED");
+        expect(api.requests).toEqual([]);
     });
 
-    test("uses the application profile for deploy without requiring frontend configuration", async () => {
+    test("retains read-only and production confirmation protection before protocol reads", async () => {
         const directory = await workspace();
-        const calls: Array<Record<string, unknown>> = [];
-        let callback: ToolInvocation | undefined;
-        registerDeployTools({
-            tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
-                callback = handler;
-            },
-        }, {} as HttpTransport, {
-            cwd: directory,
-            projectRef: "test-ref",
-            application: {
-                id: "orders",
-                environmentId: "test",
-                configurationPath: "deploy/configuration.test.json",
-            },
-            applicationRelease: async args => {
-                calls.push(args);
-                return { content: [{ type: "text", text: JSON.stringify({ ok: true, operation: "applications.release" }) }] };
-            },
-        });
-
-        const result = await callback?.({ json: true });
-
-        expect(result).toMatchObject({ content: [{ type: "text" }] });
-        expect(calls).toEqual([{
-            action: "release",
-            ref: "test-ref",
-            id: "orders",
-            environment_id: "test",
-            root: directory,
-            configuration_path: "deploy/configuration.test.json",
-            format: "json",
-            json: true,
-        }]);
+        const api = server();
+        const environments: Record<string, string>[] = [
+            { SUPACLOUD_READ_ONLY: "true" }, { SUPACLOUD_ENV: "production" },
+        ];
+        for (const env of environments) {
+            const result = await runCli(directory, api.url, ["deploy"], env);
+            expect(result.exitCode).toBe(1);
+        }
+        expect(api.requests).toEqual([]);
     });
 
-    test("stages the configured Web release and binds its CAS identity to the application deploy", async () => {
-        const directory = await workspace();
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            frontend: { id: "web", outputDirectory: "dist" },
-        }));
-        const expectedArchive = await createFrontendArchive(join(directory, "dist"));
-        const expectedRelease = release("test-ref", "web", expectedArchive.sha256);
-        expectedRelease.tree_sha256 = expectedArchive.treeSha256;
-        expectedRelease.size_bytes = expectedArchive.archiveBytes;
-        expectedRelease.file_count = expectedArchive.fileCount;
-        await expectedArchive.cleanup();
-
-        const requests: string[] = [];
-        const deployRequests: Array<Record<string, unknown>> = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            async fetch(request) {
-                const url = new URL(request.url);
-                requests.push(`${request.method} ${url.pathname}`);
-                if (request.method === "GET" && url.pathname === "/v1/projects/test-ref/frontend/deployments") {
-                    return Response.json([deployment()]);
-                }
-                if (request.method === "POST"
-                    && url.pathname === "/v1/projects/test-ref/environments/test/deployments/web-release") {
-                    return Response.json({
-                        ok: true, project_ref: "test-ref", environment_id: "test",
-                        deployment_id: "web", release_id: expectedRelease.release_id, release: expectedRelease,
-                    }, { status: 201 });
-                }
-                if (request.method === "POST" && url.pathname.endsWith("/activate")) {
-                    throw new Error("Web activation must remain owned by the application deploy");
-                }
-                return new Response("not found", { status: 404 });
-            },
+    test("uploads one bound Web artifact without reading CAS or activating from the CLI", async () => {
+        const directory = await workspace({
+            application: { id: "orders" }, frontend: { id: "web", root: ".", outputDirectory: "dist" },
         });
-        servers.push(server);
-
-        let callback: ToolInvocation | undefined;
-        registerDeployTools({
-            tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
-                callback = handler;
-            },
-        }, new HttpTransport({ baseUrl: `http://127.0.0.1:${server.port}`, token: "test-token" }), {
-            cwd: directory,
-            projectRef: "test-ref",
-            application: {
-                id: "orders",
-                environmentId: "test",
-                configurationPath: "deploy/configuration.test.json",
-            },
-            applicationRelease: async args => {
-                deployRequests.push(args);
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({ ok: true, operation: "applications.release", web_release: args.web_release }),
-                    }],
-                };
-            },
+        const archive = await createFrontendArchive(join(directory, "dist"));
+        const release = {
+            schema: "supacloud.frontend-release.v2", project_ref: "test-ref", deployment_id: "web",
+            release_id: archive.sha256, sha256: archive.sha256, tree_sha256: archive.treeSha256,
+            size_bytes: archive.archiveBytes, file_count: archive.fileCount,
+            created_at: "2026-10-13T00:00:00.000Z", kind: "prebuilt_static", archive_format: "tar.zst",
+        };
+        await archive.cleanup();
+        const api = server(async request => {
+            const path = new URL(request.url).pathname;
+            if (path.endsWith("/protocol")) return Response.json(protocol);
+            if (request.method === "GET" && path.endsWith("/frontend/deployments")) {
+                return Response.json([{ id: "web", name: "web", framework: "static", output_dir: "dist" }]);
+            }
+            if (request.method === "POST" && path.endsWith("/deployments/web-release")) {
+                expect(new URL(request.url).searchParams.get("deployment_id")).toBe("web");
+                expect((await request.arrayBuffer()).byteLength).toBe(release.size_bytes);
+                return Response.json({
+                    ok: true, project_ref: "test-ref", environment_id: "test",
+                    deployment_id: "web", release_id: release.release_id, release,
+                }, { status: 201 });
+            }
+            return new Response("Unexpected legacy request", { status: 400 });
         });
-
-        const result = await callback?.({ json: true, skip_build: true });
-
-        expect(result).toMatchObject({ content: [{ type: "text" }] });
-        expect(deployRequests).toHaveLength(1);
-        expect(deployRequests[0]).toMatchObject({
-            action: "release",
-            ref: "test-ref",
-            id: "orders",
-            environment_id: "test",
-            web_release: {
-                deployment_id: "web",
-                release_id: expectedRelease.release_id,
-            },
-        });
-        expect(requests).toEqual([
+        const tool = deploy(api.http, directory);
+        await tool.run({ skip_build: true, json: true });
+        expect(tool.calls).toHaveLength(1);
+        expect(tool.calls[0]?.web_release).toEqual({ deployment_id: "web", release_id: release.release_id });
+        expect(api.requests).toEqual([
+            "GET /v1/projects/test-ref/environments/test/deployments/protocol",
             "GET /v1/projects/test-ref/frontend/deployments",
             "POST /v1/projects/test-ref/environments/test/deployments/web-release",
         ]);
     });
 
-    test("lets the platform resolve the application configuration when none is local", async () => {
-        const directory = await workspace();
-        const calls: Array<Record<string, unknown>> = [];
-        let callback: ToolInvocation | undefined;
-        registerDeployTools({
-            tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
-                callback = handler;
-            },
-        }, {} as HttpTransport, {
-            cwd: directory,
-            projectRef: "test-ref",
-            application: { id: "orders", environmentId: "test" },
-            applicationRelease: async args => {
-                calls.push(args);
-                return { content: [{ type: "text", text: JSON.stringify({ ok: true, operation: "applications.release" }) }] };
-            },
+    test("keeps sensitive build variables out and reports missing names without values", () => {
+        const build = createBuildEnvironment(["VITE_API_URL", "PUBLIC_MISSING"], {
+            VITE_API_URL: "https://test.example.com", SUPACLOUD_API_TOKEN: "private-token",
+            SUPABASE_SERVICE_ROLE_KEY: "private-key",
         });
-
-        const result = await callback?.({});
-        expect(result).toMatchObject({ content: [{ type: "text" }] });
-        expect(calls).toEqual([{
-            action: "release",
-            ref: "test-ref",
-            id: "orders",
-            environment_id: "test",
-            root: directory,
-        }]);
-    });
-
-    test.each(["plan", "diff"])("%s compares a built release without writes in read-only production", async (flag) => {
-        const directory = await workspace();
-        const archive = await createFrontendArchive(join(directory, "dist"));
-        const { sha256, treeSha256 } = archive;
-        await archive.cleanup();
-        const requests: string[] = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1", port: 0,
-            fetch(request) {
-                const path = new URL(request.url).pathname;
-                requests.push(`${request.method} ${path}`);
-                if (path.endsWith("/deployments")) return Response.json([deployment()]);
-                if (path.endsWith("/active-release")) return Response.json({
-                    project_ref: "abc123", deployment_id: "web",
-                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
-                });
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", `--${flag}`, "--skip_build", "--json",
-        ], { env: { SUPACLOUD_ENV: "production", SUPACLOUD_READ_ONLY: "true" } });
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            schema: "supacloud.frontend-deploy-plan.v1",
-            planned: true, published: false, unchanged: false, environment: "production",
-            comparison: "immutable_release", release_id: sha256, tree_sha256: treeSha256,
-            expected_active_release_id: "absent", expected_activation_id: "absent",
-            actions: ["upload_release", "activate_release"],
-        });
-        expect(requests).toEqual([
-            "GET /v1/projects/abc123/frontend/deployments",
-            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
-        ]);
-    });
-
-    test.each([true, false])("content-equivalent trees skip writes despite different archive identities (plan: %s)", async (plan) => {
-        const directory = await workspace();
-        const archive = await createFrontendArchive(join(directory, "dist"));
-        const treeSha256 = archive.treeSha256;
-        await archive.cleanup();
-        const activeId = "a".repeat(64);
-        const requests: string[] = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1", port: 0,
-            fetch(request) {
-                const path = new URL(request.url).pathname;
-                requests.push(`${request.method} ${path}`);
-                if (path.endsWith("/deployments")) return Response.json([deployment()]);
-                if (path.endsWith("/active-release")) return Response.json({
-                    project_ref: "abc123", deployment_id: "web",
-                    active_release_id: activeId, active_activation_id: "00000000-0000-4000-8000-000000000001",
-                    releases: [{ ...release("abc123", "web", activeId), tree_sha256: treeSha256 }], next_cursor: null,
-                });
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json", ...(plan ? ["--plan"] : []),
-        ]);
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            unchanged: true, tree_sha256: treeSha256,
-            ...(plan ? { actions: [], published: false } : { release_id: activeId }),
-        });
-        expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
-        expect(requests).toHaveLength(2);
-    });
-
-    test("plan runs a local build but conflicting dry_run stops before HTTP", async () => {
-        const directory = await workspace();
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            frontend: { id: "web", buildCommand: "bun -e \"require('fs').writeFileSync('built.txt','built')\"" },
-        }));
-        const requests: string[] = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1", port: 0,
-            fetch(request) {
-                const path = new URL(request.url).pathname;
-                requests.push(`${request.method} ${path}`);
-                if (path.endsWith("/deployments")) return Response.json([deployment()]);
-                return Response.json({
-                    project_ref: "abc123", deployment_id: "web",
-                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
-                });
-            },
-        });
-        servers.push(server);
-        const conflict = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--dry_run", "--plan", "--json"]);
-        expect(conflict.exitCode).toBe(1);
-        expect(requests).toEqual([]);
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--plan", "--json"]);
-        expect(response.exitCode).toBe(0);
-        expect(await readFile(join(directory, "built.txt"), "utf8")).toBe("built");
-        expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
-    });
-
-    test("keeps build logs on stderr and only the final JSON on stdout", async () => {
-        const directory = await workspace();
-        await Bun.write(join(directory, "build.ts"), [
-            'console.log("build output");',
-            'console.error("build warning");',
-            'await Bun.write("built.txt", "built");',
-        ].join("\n"));
-        await Bun.write(join(directory, "supacloud.json"), JSON.stringify({
-            frontend: { id: "web", buildCommand: "bun build.ts" },
-        }));
-        const server = Bun.serve({
-            hostname: "127.0.0.1", port: 0,
-            fetch(request) {
-                if (new URL(request.url).pathname.endsWith("/deployments")) return Response.json([deployment()]);
-                return Response.json({
-                    project_ref: "abc123", deployment_id: "web",
-                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
-                });
-            },
-        });
-        servers.push(server);
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--plan", "--json"]);
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({ planned: true, published: false });
-        expect(response.stderr).toContain("build output");
-        expect(response.stderr).toContain("build warning");
-        expect(await Bun.file(join(directory, "built.txt")).text()).toBe("built");
-    });
-
-    test.each(["deploy", "plan", "diff"])("rejects contradictory archive/tree identity before %s", async (mode) => {
-        const directory = await workspace();
-        const archive = await createFrontendArchive(join(directory, "dist"));
-        const releaseId = archive.sha256;
-        await archive.cleanup();
-        const requests: string[] = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1", port: 0,
-            fetch(request) {
-                const path = new URL(request.url).pathname;
-                requests.push(`${request.method} ${path}`);
-                if (path.endsWith("/deployments")) return Response.json([deployment()]);
-                return Response.json({
-                    project_ref: "abc123", deployment_id: "web",
-                    active_release_id: releaseId,
-                    active_activation_id: "00000000-0000-4000-8000-000000000001",
-                    releases: [{ ...release("abc123", "web", releaseId), tree_sha256: "0".repeat(64) }],
-                    next_cursor: null,
-                });
-            },
-        });
-        servers.push(server);
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json", ...(mode === "deploy" ? [] : [`--${mode}`]),
-        ]);
-        expect(response.exitCode).toBe(1);
-        expect(response.stderr).toContain("Active release tree does not match the local archive");
-        expect(requests).toEqual([
-            "GET /v1/projects/abc123/frontend/deployments",
-            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
-        ]);
-    });
-
-    test("unknown activation preserves its mutation identity without replay", async () => {
-        const directory = await workspace();
-        let writes = 0;
-        let releaseId = "";
-        let mutationId = "";
-        const server = Bun.serve({
-            hostname: "127.0.0.1", port: 0,
-            async fetch(request) {
-                const path = new URL(request.url).pathname;
-                if (request.method === "GET" && path.endsWith("/deployments")) return Response.json([deployment()]);
-                if (request.method === "GET" && path.endsWith("/active-release")) return Response.json({
-                    project_ref: "abc123", deployment_id: "web", active_release_id: null,
-                    active_activation_id: null, releases: [], next_cursor: null,
-                });
-                if (request.method === "POST" && path.endsWith("/releases")) {
-                    writes++;
-                    releaseId = createHash("sha256").update(new Uint8Array(await request.arrayBuffer())).digest("hex");
-                    return Response.json({ project_ref: "abc123", deployment_id: "web", release: release("abc123", "web", releaseId) }, { status: 201 });
-                }
-                if (request.method === "GET" && path.endsWith(`/releases/${releaseId}`)) {
-                    return Response.json({ project_ref: "abc123", deployment_id: "web", release: release("abc123", "web", releaseId) });
-                }
-                if (request.method === "POST" && path.endsWith("/activate")) {
-                    writes++;
-                    mutationId = (await request.json() as Record<string, string>).mutation_id!;
-                    return Response.json({ token: "must-not-escape" }, { status: 503 });
-                }
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--skip_build", "--json"]);
-        expect(response.exitCode).toBe(1);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            operation: "deploy", error: { code: "OUTCOME_UNKNOWN" },
-            mutation_id: mutationId, target_release_id: releaseId,
-            expected_active_release_id: "absent", expected_activation_id: "absent",
-        });
-        expect(writes).toBe(2);
-        expect(response.stdout + response.stderr).not.toContain("must-not-escape");
-    });
-
-    test("injects only declared build variables from the selected environment", () => {
-        const build = createBuildEnvironment(["VITE_API_URL", "PUBLIC_SITE_NAME"], {
-            VITE_API_URL: "https://test.example.com",
-            PUBLIC_SITE_NAME: "Test",
-            SUPACLOUD_API_TOKEN: "must-not-be-used",
-        });
-
-        expect(build.names).toEqual(["PUBLIC_SITE_NAME", "VITE_API_URL"]);
-        expect(build.missing).toEqual([]);
-        expect(build.env).toMatchObject({
-            VITE_API_URL: "https://test.example.com",
-            PUBLIC_SITE_NAME: "Test",
-        });
+        expect(build.env.VITE_API_URL).toBe("https://test.example.com");
         expect(build.env.SUPACLOUD_API_TOKEN).toBeUndefined();
+        expect(build.env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+        expect(build.missing).toEqual(["PUBLIC_MISSING"]);
     });
 
-    test("injects public build variables when the environment does not declare buildEnv", () => {
-        const build = createBuildEnvironment(undefined, {
-            VITE_API_URL: "https://test.example.com",
-            PUBLIC_SITE_NAME: "Test",
-            API_TOKEN: "must-not-be-used",
-            SUPACLOUD_API_TOKEN: "must-not-be-used",
+    test("rejects credential allowlists before HTTP", async () => {
+        const directory = await workspace({
+            application: { id: "orders" }, frontend: { buildEnv: ["SUPACLOUD_API_TOKEN"] },
         });
-
-        expect(build.names).toEqual(["PUBLIC_SITE_NAME", "VITE_API_URL"]);
-        expect(build.missing).toEqual([]);
-        expect(build.env).toMatchObject({
-            VITE_API_URL: "https://test.example.com",
-            PUBLIC_SITE_NAME: "Test",
-        });
-        expect(build.env.API_TOKEN).toBeUndefined();
-        expect(build.env.SUPACLOUD_API_TOKEN).toBeUndefined();
+        const api = server();
+        await expect(deploy(api.http, directory).run()).rejects.toThrow("sensitive variable");
+        expect(api.requests).toEqual([]);
     });
 
-    test("reports missing declared build variables without exposing values", () => {
-        const build = createBuildEnvironment(["VITE_API_URL"], {});
-
-        expect(build.names).toEqual(["VITE_API_URL"]);
-        expect(build.missing).toEqual(["VITE_API_URL"]);
-        expect(JSON.stringify(build)).not.toContain("must-not-be-used");
-    });
-
-    test("rejects sensitive build variable declarations before contacting the API", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "supacloud-sensitive-build-env-test-"));
-        temporaryDirectories.push(directory);
-        await mkdir(join(directory, "dist"), { recursive: true });
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            frontend: {
-                buildEnv: ["API_TOKEN"],
-            },
-        }));
-
-        const response = await runCli(directory, "https://management.example.com", ["deploy", "--dry_run"]);
-
-        expect(response.exitCode).toBe(1);
-        expect(response.stderr).toContain("cannot include sensitive variable 'API_TOKEN'");
-    });
-
-    test("loads repository-root context when invoked from a nested frontend workspace", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-env-test-"));
-        temporaryDirectories.push(directory);
-        const webRoot = join(directory, "apps", "web");
-        await mkdir(join(webRoot, "dist"), { recursive: true });
-        await writeFile(join(webRoot, "dist", "index.html"), "web\n");
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            targets: {
-                web: {
-                    type: "frontend",
-                    root: "apps/web",
-                    id: "web",
-                    outputDirectory: "dist",
-                },
-            },
-        }));
-
-        const requests: string[] = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            fetch(request) {
-                const url = new URL(request.url);
-                requests.push(`${request.method} ${url.pathname}`);
-                if (url.pathname === "/v1/projects/abc123/frontend/deployments") return Response.json([deployment()]);
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-        await writeFile(join(directory, ".env"), [
-            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
-            "SUPACLOUD_API_TOKEN=test-token",
-            "SUPACLOUD_PROJECT_REF=abc123",
-            "SUPACLOUD_ENV=test",
-            "",
-        ].join("\n"));
-
-        const response = await runCli(webRoot, "", ["deploy", "--skip_build", "--dry_run", "--json"], {
-            injectContext: false,
-        });
-
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            ok: true,
-            dry_run: true,
-            project_ref: "abc123",
-            deployment_id: "web",
-            output_directory: join(await realpath(directory), "apps", "web", "dist"),
-        });
-        expect(requests).toEqual(["GET /v1/projects/abc123/frontend/deployments"]);
-    });
-
-    test("uses a named environment file for the direct supacloud deploy command", async () => {
-        const directory = await workspace();
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            fetch(request) {
-                if (new URL(request.url).pathname === "/v1/projects/abc123/frontend/deployments") {
-                    return Response.json([deployment()]);
-                }
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-        await writeFile(join(directory, ".env.supacloud.test"), [
-            "SUPACLOUD_ENV=test",
-            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
-            "SUPACLOUD_API_TOKEN=test-token",
-            "SUPACLOUD_PROJECT_REF=abc123",
-            "",
-        ].join("\n"));
-
-        const response = await runCli(directory, "", [
-            "--env", "test", "deploy", "--skip_build", "--dry_run", "--json",
-        ], { injectContext: false });
-
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            ok: true,
-            dry_run: true,
-            project_ref: "abc123",
-            deployment_id: "web",
-        });
-        expect(response.stderr).not.toContain("Management API context");
-    });
-
-    test("selects a frontend target from a monorepo subdirectory and keeps output rooted there", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-test-"));
-        temporaryDirectories.push(directory);
-        await mkdir(join(directory, "apps", "web", "dist"), { recursive: true });
-        await mkdir(join(directory, "apps", "api", "dist"), { recursive: true });
-        await writeFile(join(directory, "package.json"), JSON.stringify({
-            private: true,
-            workspaces: ["apps/*"],
-        }));
-        await writeFile(join(directory, "bun.lock"), "lockfile\n");
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            defaultTarget: "web",
-            targets: {
-                web: {
-                    type: "frontend",
-                    root: "apps/web",
-                    id: "web",
-                    buildCommand: "bun run build:web",
-                    outputDirectory: "dist",
-                },
-                api: {
-                    type: "edge_function",
-                    root: "apps/api",
-                    slug: "api",
-                    bundleDirectory: "dist",
-                },
-            },
-        }));
-        await writeFile(join(directory, "apps", "web", "dist", "index.html"), "web\n");
-
-        const requests: string[] = [];
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            fetch(request) {
-                const url = new URL(request.url);
-                requests.push(`${request.method} ${url.pathname}`);
-                if (url.pathname === "/v1/projects/abc123/frontend/deployments") return Response.json([deployment()]);
-                if (url.pathname === "/v1/projects/abc123/frontend/deployments/web/releases") {
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        active_release_id: null,
-                        active_activation_id: null,
-                        releases: [],
-                        next_cursor: null,
-                    });
-                }
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-
-        const response = await runCli(join(directory, "apps", "web"), `http://127.0.0.1:${server.port}`, [
-            "deploy", "--target", "web", "--skip_build", "--dry_run", "--json",
-        ]);
-
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            ok: true,
-            dry_run: true,
-            deployment_id: "web",
-            output_directory: join(await realpath(directory), "apps", "web", "dist"),
-        });
-        expect(requests).toEqual(["GET /v1/projects/abc123/frontend/deployments"]);
-    });
-
-    test("requires an explicit target at the monorepo root", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-root-test-"));
-        temporaryDirectories.push(directory);
-        await mkdir(join(directory, "apps", "web"), { recursive: true });
-        await mkdir(join(directory, "apps", "api"), { recursive: true });
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            targets: {
-                web: { type: "frontend", root: "apps/web", id: "web" },
-                api: { type: "edge_function", root: "apps/api", slug: "api" },
-            },
-        }));
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            fetch: () => Response.json([]),
-        });
-        servers.push(server);
-
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--dry_run"]);
-
-        expect(response.exitCode).toBe(1);
-        expect(response.stderr).toContain("Multiple deploy targets found");
-    });
-
-    test("deploys an edge-function backend from its own monorepo workspace", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-api-test-"));
-        temporaryDirectories.push(directory);
-        const apiRoot = join(directory, "apps", "api");
-        await mkdir(join(apiRoot, "dist"), { recursive: true });
-        await writeFile(join(apiRoot, "dist", "index.ts"), "export default { fetch: () => new Response('ok') };\n");
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            targets: {
-                web: { type: "frontend", root: "apps/web", id: "web" },
-                api: {
-                    type: "edge_function",
-                    root: "apps/api",
-                    slug: "api",
-                    bundleDirectory: "dist",
-                    entrypoint: "index.ts",
-                },
-            },
-        }));
-        const previousActivationId = "a1111111-1111-4111-8111-111111111111";
-        const committedActivationId = "b2222222-2222-4222-8222-222222222222";
-        let requestBody: Record<string, unknown> | null = null;
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            async fetch(request) {
-                const url = new URL(request.url);
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/functions") {
-                    return Response.json([{
-                        slug: "api",
-                        version: 4,
-                        activation_id: previousActivationId,
-                        verify_jwt: true,
-                    }]);
-                }
-                if (request.method === "POST" && url.pathname === "/v1/projects/abc123/functions/api/bundle") {
-                    requestBody = await request.json() as Record<string, unknown>;
-                    return Response.json({
-                        success: true,
-                        project_ref: "abc123",
-                        slug: "api",
-                        previous_active_version: "4",
-                        expected_activation_id: previousActivationId,
-                        activation_id: committedActivationId,
-                        active_version: "5",
-                        version: "5",
-                        config: {
-                            version: "5",
-                            verify_jwt: true,
-                            activation_id: committedActivationId,
-                        },
-                    });
-                }
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-
-        const response = await runCli(apiRoot, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json",
-        ]);
-
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            ok: true,
-            type: "edge_function",
-            target: "api",
-            slug: "api",
-            active_version: "5",
-            activation_id: committedActivationId,
-        });
-        expect(requestBody).toMatchObject({
-            files: { "index.ts": "export default { fetch: () => new Response('ok') };\n" },
-            entrypoint: "index.ts",
-            expected_active_version: "4",
-            expected_activation_id: previousActivationId,
-        });
-    });
-
-    test("fails closed before backend deployment when the active function identity is invalid", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-api-identity-test-"));
-        temporaryDirectories.push(directory);
-        const apiRoot = join(directory, "apps", "api");
-        await mkdir(join(apiRoot, "dist"), { recursive: true });
-        await writeFile(join(apiRoot, "dist", "index.ts"), "export default { fetch: () => new Response('ok') };\n");
-        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
-            targets: {
-                api: {
-                    type: "edge_function",
-                    root: "apps/api",
-                    slug: "api",
-                    bundleDirectory: "dist",
-                },
-            },
-        }));
-        let writes = 0;
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            fetch(request) {
-                if (request.method !== "GET") writes++;
-                return Response.json({ unexpected: true });
-            },
-        });
-        servers.push(server);
-
-        const response = await runCli(apiRoot, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json",
-        ]);
-
-        expect(response.exitCode).toBe(1);
-        expect(response.stderr).toContain("Unable to read the current identity for Edge Function 'api'");
-        expect(writes).toBe(0);
-    });
-
-    test("creates deterministic archives with paths rooted at the output directory", async () => {
+    test("creates deterministic archives and rejects symlink contents", async () => {
         const directory = await workspace();
         const first = await createFrontendArchive(join(directory, "dist"));
         const second = await createFrontendArchive(join(directory, "dist"));
         try {
             expect(first.sha256).toBe(second.sha256);
-            const tar = await Bun.zstdDecompress(new Uint8Array(await readFile(first.archivePath)));
-            const archive = await new Bun.Archive(tar).files();
-            expect([...archive.keys()].sort()).toEqual(["assets/app.js", "index.html"]);
-            expect(await archive.get("index.html")!.text()).toBe("<h1>hello</h1>\n");
-            expect(first.archivePath.endsWith(".tar.zst")).toBe(true);
+            expect(first.treeSha256).toBe(second.treeSha256);
+            expect(first.fileCount).toBe(2);
+            expect(await readFile(first.archivePath)).toEqual(await readFile(second.archivePath));
         } finally {
-            await Promise.all([first.cleanup(), second.cleanup()]);
+            await first.cleanup();
+            await second.cleanup();
         }
-    });
-
-    test("builds the immutable release flow and prints the final URL", async () => {
-        const directory = await workspace();
-        const requests: string[] = [];
-        let releaseId = "";
-        let activationId = "";
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            async fetch(request) {
-                const url = new URL(request.url);
-                requests.push(`${request.method} ${url.pathname}${url.search}`);
-                const base = "/v1/projects/abc123/frontend/deployments/web/releases";
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments") {
-                    return Response.json([deployment()]);
-                }
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments/web/active-release") {
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        active_release_id: releaseId || null,
-                        active_activation_id: activationId || null,
-                        releases: releaseId ? [release("abc123", "web", releaseId)] : [],
-                        next_cursor: null,
-                    });
-                }
-                if (request.method === "POST" && url.pathname === base) {
-                    const bytes = new Uint8Array(await request.arrayBuffer());
-                    releaseId = createHash("sha256").update(bytes).digest("hex");
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        release: release("abc123", "web", releaseId),
-                    }, { status: 201 });
-                }
-                if (request.method === "GET" && url.pathname === `${base}/${releaseId}`) {
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        release: release("abc123", "web", releaseId),
-                    });
-                }
-                if (request.method === "POST" && url.pathname === `${base}/${releaseId}/activate`) {
-                    const body = await request.json() as Record<string, string>;
-                    activationId = body.mutation_id;
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        active_release_id: releaseId,
-                        activation_id: activationId,
-                        release: release("abc123", "web", releaseId),
-                        mutation: { mutation_id: activationId, status: "succeeded", replayed: false },
-                    });
-                }
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments/web") {
-                    return Response.json(deployment());
-                }
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json",
-        ]);
-
-        expect(response.exitCode).toBe(0);
-        expect(response.stderr).toBe("");
-        const result = JSON.parse(response.stdout);
-        expect(result).toMatchObject({
-            ok: true,
-            unchanged: false,
-            project_ref: "abc123",
-            deployment_id: "web",
-            release_id: releaseId,
-            activation_id: activationId,
-            url: "https://web.example.com",
-            file_count: 2,
-            previous_release_id: null,
-            previous_activation_id: null,
-        });
-        expect(requests).toEqual([
-            "GET /v1/projects/abc123/frontend/deployments",
-            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
-            "POST /v1/projects/abc123/frontend/deployments/web/releases",
-            `GET /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}`,
-            `POST /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}/activate`,
-            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
-            `GET /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}`,
-            "GET /v1/projects/abc123/frontend/deployments/web",
-        ]);
-
-        const concise = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build",
-        ]);
-
-        expect(concise.exitCode).toBe(0);
-        expect(concise.stderr).toBe("");
-        expect(concise.stdout).toContain("Already up to date.");
-        expect(concise.stdout).toContain("URL: https://web.example.com");
-        expect(concise.stdout).not.toMatch(/Duration:|inspect|package|upload|activate|done/);
-    });
-
-    test("skips upload and activation when the content-addressed release is already active", async () => {
-        const directory = await workspace();
-        let writes = 0;
-        let releaseId = "";
-        let activationId = "";
-        const server = Bun.serve({
-            hostname: "127.0.0.1",
-            port: 0,
-            async fetch(request) {
-                const url = new URL(request.url);
-                if (request.method !== "GET") writes++;
-                const base = "/v1/projects/abc123/frontend/deployments/web/releases";
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments") {
-                    return Response.json([deployment()]);
-                }
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments/web/active-release") {
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        active_release_id: releaseId || null,
-                        active_activation_id: activationId || null,
-                        releases: releaseId ? [release("abc123", "web", releaseId)] : [],
-                        next_cursor: null,
-                    });
-                }
-                if (request.method === "POST" && url.pathname === base) {
-                    const bytes = new Uint8Array(await request.arrayBuffer());
-                    releaseId = createHash("sha256").update(bytes).digest("hex");
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        release: release("abc123", "web", releaseId),
-                    }, { status: 201 });
-                }
-                if (request.method === "GET" && url.pathname === `${base}/${releaseId}`) {
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        release: release("abc123", "web", releaseId),
-                    });
-                }
-                if (request.method === "POST" && url.pathname === `${base}/${releaseId}/activate`) {
-                    const body = await request.json() as Record<string, string>;
-                    activationId = body.mutation_id;
-                    return Response.json({
-                        project_ref: "abc123",
-                        deployment_id: "web",
-                        active_release_id: releaseId,
-                        activation_id: activationId,
-                        release: release("abc123", "web", releaseId),
-                        mutation: { mutation_id: activationId, status: "succeeded", replayed: false },
-                    });
-                }
-                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments/web") {
-                    return Response.json(deployment());
-                }
-                return new Response("not found", { status: 404 });
-            },
-        });
-        servers.push(server);
-
-        const first = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json",
-        ]);
-        expect(first.exitCode).toBe(0);
-        expect(writes).toBe(2);
-
-        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
-            "deploy", "--skip_build", "--json",
-        ]);
-
-        expect(response.exitCode).toBe(0);
-        expect(JSON.parse(response.stdout)).toMatchObject({
-            ok: true,
-            unchanged: true,
-            release_id: releaseId,
-        });
-        expect(writes).toBe(2);
+        await symlink(join(directory, "supacloud.json"), join(directory, "dist", "secret"));
+        await expect(createFrontendArchive(join(directory, "dist"))).rejects.toThrow("symbolic links");
     });
 });

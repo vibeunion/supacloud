@@ -141,6 +141,14 @@ export function createProjectDeploymentRoutes(
       const denied = await authorize(request, params.ref);
       if (denied) return status(denied.status, denied.body);
     })
+    .get("/protocol", {
+      params: t.Object({ ref: projectRef, environmentId }),
+      detail: { tags: ["deployments"], summary: "Check the current project deployment protocol before uploading" },
+    }, ({ params }) => ({
+      protocol: "supacloud.project-deployment.v1",
+      project_ref: params.ref,
+      environment_id: params.environmentId,
+    }))
     .post("/web-release", {
       params: t.Object({ ref: projectRef, environmentId }),
       query: t.Object({ deployment_id: t.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }) }),

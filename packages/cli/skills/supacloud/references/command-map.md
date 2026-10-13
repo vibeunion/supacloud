@@ -6,6 +6,7 @@ Load this reference when selecting a command surface or when a user asks an AI t
 
 | Intent | Use | Guardrail |
 | --- | --- | --- |
+| Deploy the bound application | `supacloud --env <name> deploy` | Use current CLI/server and application delivery configuration; never fall back to standalone target or direct frontend activation commands |
 | Inspect current project binding | `supacloud status` | Read-only; run first |
 | Inspect selected project API/Auth/Studio origins | `supacloud project endpoints` | Uses the Management API's authoritative projection; do not reconstruct domains locally |
 | Enumerate projects or endpoint projections | `supacloud-admin project list` / `project list_endpoints` | Platform-wide read; never promote a project credential to Admin authority |
@@ -23,9 +24,6 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Inspect or back up a remote database | `supabase db_pull`, `migration_list`, `db_dump`, `gen_types` | Requires explicit PostgreSQL DSN; redact it |
 | Replay the release-canary fixture stage receipt | `release release_canary_fixture_stage_replay` | Dual-bind Management project context and that project's service-role application origin; accepts only the exact subject/request UUID pair and a strict idempotent receipt |
 | Disable a staged release-canary fixture | `release release_canary_fixture_disable_replay` | Uses the fixed disable RPC once, accepts idempotent false/true receipts, then queries the existing pending RPC with issuer/subject and requires authoritative JSON `false`; fixture binding comes from the strict disable receipt |
-| Rebind release scope manifest to upstream base commit | `release scope_rebind` | Local maintenance action; requires the exact `--environment_id`, updates only scopes bound to that environment, supports `--dry_run`/`--task`, and recalculates `scope_sha256` |
-| Inspect release scope manifest and git alignment | `release scope_inspect` | Local maintenance action; requires the exact `--environment_id`, rejects legacy or cross-environment scopes, returns canonical hash, and checks alignment with HEAD / origin/main |
-| Scaffold a new canonical release scope manifest | `release scope_create` | Local maintenance action; requires `--environment_id` and outputs a current-main-bound scope with sorted functions, migrations, and environment identity |
 | Preview/apply migrations remotely | `supabase push` | Always dry-run first; production needs explicit approval |
 | Mark proven-equivalent historical migrations as applied | `database baseline_migrations` | Dry-run, schema-equivalence proof, backup, explicit approval |
 | Inspect auth users or generate a controlled login link | `auth list_users`, `auth get_user`, `auth generate_link` | User reads are bounded; generation supports only `magiclink`, `recovery`, and `invite`, requires production confirmation, and returns only a validated action URL |
@@ -47,11 +45,11 @@ until a project-scoped context is resolved.
 - `auth`: provider/configuration plus bounded user lookup and production-confirmed `magiclink`, `recovery`, or `invite` generation. Search/email/redirect inputs and returned action URLs are bounded and validated before use.
 - `storage`: buckets and object-management workflows.
 - `edge_functions`: list, atomically read one active or deleted identity with `get_config`, read immutable source, deploy, activate, configure, and delete Edge Functions. For every mutation, pass the `activation_id` read from the same `list` or `get_config` snapshot as `--expected-activation-id`; use `legacy` only for a never-created or listed legacy Function, not for a deleted slug with a tombstone UUID. Deploy and activate actions also require the non-negative observed version as `--expected-active-version`; use `absent` for a never-created slug or a `get_config` tombstone. Version `0` is a legacy version token and cannot be used as a source or activation target.
-- `frontend`: list, build/deploy, domain, and deployment workflows.
+- `frontend`: hosting management, release inspection and operator rollback. Publishing uses `supacloud deploy`; `deploy_git`, `deploy_upload`, `redeploy`, `upload_release` and `activate_release` are removed.
 - `secrets`: project secret management; never print values after write.
 - `queue`, `task_events`, `diagnostics`: asynchronous workload operations and bounded diagnostics.
 - `gateway`: project route/config/rebuild operations.
-- `release`: local release scope maintenance (`scope_rebind`, `scope_inspect`, `scope_create`), verified backup/PostgREST lifecycle controls, plus production-confirmed, non-retried, strict release-canary fixture stage and disable replay actions. Scope maintenance is not a prerequisite for the normal `supacloud --env <name> deploy` flow.
+- `release`: explicit backup/PostgREST maintenance and release-canary replay diagnostics. Do not run these or generate release scopes as prerequisites for `supacloud --env <name> deploy`; the platform owns deployment orchestration.
 - `ai`: inspect or install this packaged Skill.
 
 ## Safe inspection pattern

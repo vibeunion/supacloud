@@ -13,7 +13,7 @@ are not supported.
 
 ## Project Setup and Environment Profiles
 
-For an existing frontend, the shortest path is:
+For an existing SupaCloud application with a frontend, the shortest path is:
 
 ```sh
 supacloud init
@@ -26,6 +26,11 @@ supacloud --env test deploy
 overwriting an existing project configuration. `env list` and `env check` are
 local-only, redact credentials, and provide stable JSON with `--json` for CI or
 AI tooling. The real `.env.supacloud.*` files are added to `.gitignore`.
+Fill in `SUPACLOUD_APPLICATION_ID` and the Management credentials in the
+selected profile, and configure the application's current delivery build.
+Standalone frontend deployment is no longer supported. Upgrade the CLI with
+`npm install -g @supacloud/cli@latest` and upgrade the SupaCloud server together.
+`deploy` checks the server protocol before building or uploading.
 
 ## Application Starter
 
@@ -356,6 +361,7 @@ target configuration:
 
 ```json
 {
+  "application": { "id": "orders", "environmentId": "test" },
   "targets": {
     "web": {
       "type": "frontend",
@@ -383,36 +389,24 @@ loopback development origins, with the default `:80` likewise omitted. Use
 
 ### Immutable frontend releases
 
-The `frontend` command keeps the existing deployment, Git, and tar.zst
-actions and also exposes the immutable prebuilt release workflow:
+The `frontend` command retains release inspection and explicit operator rollback.
+Publish through `supacloud deploy`, which delegates activation to the platform:
 
 ```bash
 supacloud frontend list_releases --ref abc123 --id web
 supacloud frontend get_active_release --ref abc123 --id web
 supacloud frontend get_release --ref abc123 --id web --release_id <sha256>
-supacloud frontend upload_release --ref abc123 --id web --archive_path ./dist.tar.zst
-supacloud frontend activate_release --ref abc123 --id web \
-  --release_id <sha256> \
-  --expected_active_release_id absent \
-  --expected_activation_id absent \
-  --mutation_id <retry-stable-uuid-v4>
 supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 supacloud frontend rollback --ref abc123 --id web
 ```
 
-`upload_release` hashes and streams an existing regular tar.zst file without
-buffering the full archive. The Management API binds the upload to that SHA-256,
-and the CLI reads the immutable release back before reporting success.
-`activate_release` uses both the observed active release and activation IDs as
-optimistic concurrency tokens, then verifies the authoritative active release.
-Use the values returned by `get_active_release`; `absent` is valid only when no
-release has been activated. Production uploads, activations and rollback require the
-normal exact `--confirm-production <ref>` value, and
-`SUPACLOUD_READ_ONLY=true` blocks all mutations.
+`deploy_git`, `deploy_upload`, `redeploy`, `upload_release` and `activate_release`
+have been removed from `frontend`. Old invocations fail with an upgrade message,
+without reading an archive or sending a request. Production rollback retains
+the exact `--confirm-production <ref>` gate; read-only mode blocks mutations.
 
-`get_active_release` automatically handles older servers returning HTTP 404
-with a one-record history page and exact active artifact readback. It never
-falls back for authentication, integrity or server failures.
+`get_active_release` requires the current server endpoint. An HTTP 404 returns
+an upgrade/deployment-existence hint and never falls back to historical inventory.
 `rollback` without `--release_id` asks SupaCloud for a journal-verified previous
 immutable release, reads the current CAS identity and generates the mutation ID
 itself. An explicit `--release_id` remains available for a deliberate rollback
@@ -635,26 +629,23 @@ reporting success. Management endpoint projection is checked before and after.
 
 ### Internal release scope controls
 
-Scope files and manual release-controller operations are internal compatibility
-surfaces. The project-scoped FA deployment command is a proposed future
-contract and is not implemented yet. For current deployments, use the
-target-level one-command flow documented in
+Do not generate, rebind or hash scope files as part of a deployment.
+Use an application binding and the unified flow documented in
 [`docs/cli-guide.md`](../../docs/cli-guide.md), for example:
 
 ```bash
 supacloud deploy
-supacloud deploy --target web
-supacloud deploy --target api
 ```
 
 FA deployment policy and the boundary between platform-owned operations and
 FA-owned business features are documented in
 [`docs/fa-deployment-capability-boundary.md`](../../docs/fa-deployment-capability-boundary.md).
 
-Scope creation, rebinding, inspection and hash calculation are intentionally
-undocumented here. They remain available only for internal compatibility,
-audit and historical receipt migration. The future project-scoped flow will
-not require a scope file once its implementation lands.
+`deploy --target`, `--id`, `--build_command`, `--output_dir`, `--plan`, `--diff`
+and `--dry_run` are removed. Put build settings in `supacloud.json`; use
+`app deploy-plan` for read-only review. Historical project-specific manifests
+and standalone Function targets must move to application delivery configuration.
+The CLI rejects them rather than falling back to a partial Web deployment.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or
