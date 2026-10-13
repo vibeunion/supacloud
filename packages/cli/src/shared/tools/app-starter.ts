@@ -72,7 +72,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 useUnknownInCatchVariables: true,
                 noEmit: true, types: ["bun"],
             },
-            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
+            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/modules.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
         }),
         "bunfig.toml": "env = false\n",
         ".gitignore": [
@@ -89,7 +89,7 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
-  databaseGovernance: { mode: "check" },
+  databaseGovernance: { mode: "check", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" },
   effect: {
     requireRouteEffects: true,
     requireErrorMappings: true,
@@ -103,7 +103,6 @@ export default defineSupacloudConfig({
   typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
   disallowControllerDirectDb: true,
   detectOrphanModules: true,
-  graphql: { schema: "graphql/schema.graphql" },
   commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
   delivery: {
     version: 1,
@@ -118,50 +117,6 @@ export default defineSupacloudConfig({
   },
 });
 `,
-        "graphql/schema.graphql": `# Offline query-contract example, not a deployed database schema.
-# SYNTHETIC TEST FIXTURE ONLY. Database First is the sole server-schema model.
-# Do not extend this fixture as a server schema; change database declarations and export.
-# Replace using a snapshot exported with the intended caller role before integration.
-type Query {
-  reviewCollection(first: Int): ReviewConnection!
-}
-type ReviewConnection {
-  edges: [ReviewEdge!]!
-}
-type ReviewEdge {
-  node: Review!
-}
-type Review {
-  id: ID!
-  state: String!
-  version: Int!
-}
-`,
-        "src/review/reviews.graphql": `query ReviewList($first: Int = 20) {
-  reviewCollection(first: $first) {
-    edges { node { id state version } }
-  }
-}
-`,
-        "tests/graphql.test.ts": `import { expect, test } from "bun:test";
-import { createGraphqlClient, type ReviewListQuery } from "../generated/graphql";
-
-test("generated query client preserves its read contract without a live database", async () => {
-  const data: ReviewListQuery = {
-    reviewCollection: { edges: [{ node: { id: "demo", state: "draft", version: 1 } }] },
-  };
-  const queries = createGraphqlClient({
-    url: "https://project.example.test",
-    getAccessToken: async () => "synthetic-user-token",
-    fetch: async (_url, request) => {
-      expect(new Headers(request?.headers).get("Authorization")).toBe("Bearer synthetic-user-token");
-      expect(JSON.parse(String(request?.body)).variables).toEqual({ first: 10 });
-      return Response.json({ data });
-    },
-  });
-  expect(await queries.ReviewList({ first: 10 })).toEqual(data);
-});
-`,
         "REACTIVE.md": STARTER_REACTIVE_GUIDE,
         "AGENTS.md": STARTER_REACTIVE_AGENTS + STARTER_DATABASE_GUIDE,
         "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
@@ -170,11 +125,30 @@ test("generated query client preserves its read contract without a live database
         "scripts/dev.ts": `import { watchProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
 
 if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
+const profile = process.env["SUPACLOUD_DEV_PROFILE"] === "integration" ? "integration" : "fast";
+if (profile === "integration") {
+  const databaseUrl = process.env["SUPACLOUD_DEV_DATABASE_URL"];
+  if (!databaseUrl) throw new Error("Integration requires an explicit loopback PostgreSQL database");
+  const url = new URL(databaseUrl);
+  if (!["postgres:", "postgresql:"].includes(url.protocol)
+    || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+    || url.pathname.length <= 1 || url.search || url.hash
+    || process.env["DATABASE_SOCKET_PATH"]
+    || (process.env["DATABASE_URL"] && process.env["DATABASE_URL"] !== databaseUrl)) {
+    throw new Error("Integration requires an explicit loopback PostgreSQL database without conflicting settings");
+  }
+  process.env["DATABASE_URL"] = databaseUrl;
+}
+const configured = compileOptionsFromConfig(await loadSupacloudConfig());
+const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;
+const options = configured.databaseGovernance
+  ? { ...configured, databaseGovernance: { ...configured.databaseGovernance, mode: governanceMode } }
+  : configured;
 let server: ReturnType<typeof Bun.spawn> | undefined;
 let restarts = Promise.resolve();
 let closing = false;
 const watcher = watchProject({
-  ...compileOptionsFromConfig(await loadSupacloudConfig()),
+  ...options,
   writeOnError: false,
   onEvent: (event) => {
     if (event.type === "compile-error") console.error(event.diagnostics);
@@ -524,7 +498,6 @@ test("the production composition root rejects missing governance adapters", () =
 \`\`\`sh
 bun install
 bun run db:generate
-bun run check
 bun run dev
 \`\`\`
 
@@ -560,55 +533,23 @@ origin. The authenticated transport rejects missing credentials and redirects
 and does not replay a write after 401. Its underlying fetch must also be
 single-attempt.
 
-Reuse the same session resolver for generated/graphql.ts when adopting queries.
 The local memory demo is not this authenticated production integration.
 Never use supacloud.commands or supacloud.workflows from a browser action:
 those RPCs require service-role credentials. Browser business commands use
 application endpoints, optionally composed through @supacloud/js/contracts.
 Management API tokens and service-role keys remain on trusted servers.
 
-## Typed Queries
+## Reads
 
-This starter uses Database First as its only GraphQL server-schema model.
-Drizzle and reviewed SQL define the database; pg_graphql reflects the migrated
-database under the caller's role. Do not add GraphQL resolver/decorator classes
-or independently authored server SDL. Business writes continue through Commands.
+Ordinary reads use PostgREST through the existing user-scoped
+@supabase/supabase-js client: client.from("starter_reviews").select("id,state,version").
+Use the caller's session, RLS and grants; never introduce a second session store.
+Business writes continue through the governed Command/RPC boundary.
 
-GraphQL is preconfigured as the recommended read path. Edit src/review/reviews.graphql;
-compile, check and dev validate it against graphql/schema.graphql and generate
-generated/graphql.ts. Import createGraphqlClient from that file and call
-queries.ReviewList({ first: 20 }). Its variables and selected results are typed.
-Pass a public project key and a getAccessToken callback that reads the current
-user session. Never pass a service-role key to browser code.
-
-The included schema is a synthetic offline test fixture, not a deployed database.
-Do not hand-edit graphql/schema.graphql to add application fields. Change database
-declarations, apply migrations and export the actual schema. Replace the fixture
-with a snapshot exported under the intended caller role before real integration:
-
-\`\`\`sh
-bun node_modules/@supacloud/compiler/dist/cli.js graphql-schema \\
-  --url https://your-project.example \\
-  --key-env SUPACLOUD_PUBLISHABLE_KEY --token-env APP_USER_ACCESS_TOKEN
-\`\`\`
-
-After migrations or grants change, and before promotion, run the same command
-with --check --json to detect drift without writing. If it fails, explicitly
-re-export, review the snapshot diff, compile and run application typechecks and
-role/RLS tests. Normal compile/check/dev remain offline; they cannot prove that
-a snapshot came from a database or is current. Keep the exported snapshot and
-generated types in version control.
-
-The flags name environment variables, not credential values. Export requires
-GraphQL and introspection already enabled on the selected development project.
-The compiler does not enable extensions or alter database permissions.
-Production introspection may remain disabled. Queries do not pass through
-application Command/AOP; RLS and grants remain mandatory. Business writes stay
-in Commands. Existing projects without GraphQL configuration remain unaffected.
-Enabled contracts always reject invalid queries, including with strict: false.
-To opt this starter out entirely, set graphql: false and remove its example
-query test and unused generated client; do not replace checked queries with
-untyped calls to bypass validation.
+GraphQL is not generated or enabled by this starter. For a specific Query Contract,
+explicitly configure graphql.schema with a role-scoped database export and add
+checked query documents. Drizzle and append-only migrations remain the database
+authority; the export is a protocol snapshot, not a second schema source.
 
 ## Environments
 
@@ -824,8 +765,8 @@ bunx supacloud-compiler fix ./fix.json --dry-run
 \`\`\`
 
 Context packs include directional dependencies, relevant aspect files, diagnostics
-and static execution plans. Ordinary context can include declared source expressions;
-inspect it before sharing. The optional --events example expects a trusted host
+and static execution plans, without provider values or source expressions.
+The optional --events example expects a trusted host
 to capture approved onExecution metadata in { "version": 1, "events": [...] }.
 It selects one opaque request ID, omits payloads and source expressions, and applies
 input/output size limits. It does not read arbitrary logs, prove deployment versions,

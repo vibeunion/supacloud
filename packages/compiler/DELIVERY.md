@@ -62,6 +62,26 @@ their kind. HTTP and Job ownership are independent, so one module can contribute
 HTTP to `api` and Jobs to `jobs`. Two HTTP targets cannot both own the same module.
 `api` and `jobs` are reserved for their matching workload kinds.
 
+`kind: "function"` declares an Edge Function target instead of an app-module
+target. It carries a `function` descriptor (`slug`, `entrypoint`, `verifyJwt`)
+and must not declare `modules`. Function targets own no HTTP routes or Jobs, so
+the plan surfaces them alongside the module-owned targets:
+
+```ts
+{
+  version: 1,
+  targets: [
+    { name: "intake-hooks", kind: "function",
+      function: { slug: "fa-intake-hooks", entrypoint: "functions/intake/index.ts", verifyJwt: false } },
+  ],
+}
+```
+
+This version only **plans** function targets. The local delivery build still
+rejects them with `delivery-function-build-unsupported`; rendering, upload and
+activation belong to a later delivery phase (see the project deployment
+Function/schedule work). Existing HTTP/Worker configuration is unaffected.
+
 No unused explicit target is accepted. Unknown modules, duplicate ownership,
 unresolved imports, cyclic dependencies, duplicate job names, and conflicting
 method/path patterns reject the plan. Parameter-name aliases such as `/:id` and

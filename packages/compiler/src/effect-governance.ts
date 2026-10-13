@@ -84,3 +84,21 @@ export function validateEffectPolicies(
   }
   return diagnostics;
 }
+
+/** A retrying job must replay the same request without duplicating a write. */
+export function validateJobPolicies(graph: ApplicationGraph): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const module of graph.modules) {
+    for (const job of module.jobs ?? []) {
+      if (job.maxAttempts !== undefined && job.maxAttempts > 1 && job.idempotency !== "required") {
+        diagnostics.push(diagnostic(
+          "job-retry-idempotency-required",
+          `Job ${job.name} (${job.className}) enables ${job.maxAttempts} attempts without an idempotency contract.`,
+          module.file,
+          "Use idempotency: \"required\" with a durable receipt, or set maxAttempts: 1.",
+        ));
+      }
+    }
+  }
+  return diagnostics;
+}

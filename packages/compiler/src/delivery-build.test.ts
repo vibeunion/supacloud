@@ -74,8 +74,9 @@ test("isolates route owners, includes assets, and invalidates only dependent tar
       ...GOOD_PROJECT_FILES,
       "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
       "src/features/health/health.module.ts": `import { Module, Controller, Get } from "../../runtime";
+        export const HealthStatus = {type: "string"} as const;
         @Controller("/health") export class HealthController {
-          @Get("/", { response: {type: "string"} }) status(): string { return "ok"; }
+          @Get("/", { response: HealthStatus }) status(): string { return "ok"; }
         }
         @Module({name: "health", controllers: [HealthController]}) export class HealthModule {}`,
       "src/template.txt": "first",
@@ -184,7 +185,7 @@ test("keeps shared-module routes private to their owner and preserves Job factor
       "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
       "src/features/audit/audit.module.ts": GOOD_PROJECT_FILES["src/features/audit/audit.module.ts"]
         .replace('import { Module }', 'import { Module, Controller, Get }')
-        .replace("@Module({", '@Controller("/audit") export class AuditController { @Get("/", {response: {type: "string"}}) status(): string {return "ok";} }\n@Module({controllers: [AuditController],'),
+        .replace("@Module({", 'export const AuditStatus = {type:"string"} as const;\n@Controller("/audit") export class AuditController { @Get("/", {response: AuditStatus}) status(): string {return "ok";} }\n@Module({controllers: [AuditController],'),
       "src/jobs.module.ts": `import { Job, Module } from "./runtime";
         import { AuditModule } from "./features/audit/audit.module";
         @Job({name: "case.rebuild"}) export class RebuildJob {run(input: string): string {return input;}}
@@ -247,3 +248,26 @@ test("CLI exposes structured builds and rejects write-like preview flags", async
     }
   } finally { await rm(project, {recursive: true, force: true}); }
 }, 60_000);
+
+test("rejects function targets until function rendering is implemented", async () => {
+  const project = await mkdtemp(join(tmpdir(), "delivery-function-"));
+  try {
+    await writeFixtureProject(project, {
+      ...GOOD_PROJECT_FILES,
+      "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
+    });
+    const result = await buildDeliveryProject({
+      rootDir: project, outDir: join(project, "generated"), strict: false,
+      generateClient: false, generatePermissions: false,
+    }, {
+      version: 1,
+      targets: [{
+        name: "intake-hooks", kind: "function",
+        function: { slug: "fa-intake-hooks", entrypoint: "src/runtime.ts", verifyJwt: false },
+      }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.manifest).toBeNull();
+    expect(result.diagnostics.map((item) => item.code)).toContain("delivery-function-build-unsupported");
+  } finally { await rm(project, { recursive: true, force: true }); }
+}, 120_000);

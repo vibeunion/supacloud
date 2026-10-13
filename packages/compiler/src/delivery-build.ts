@@ -62,6 +62,13 @@ export async function buildDeliveryProject(
     const checked = await checkProject(options);
     const planned = createDeliveryPlan({ ...checked.graph, diagnostics: checked.diagnostics }, settings, options);
     if (!planned.ok) return failed(planned.diagnostics);
+    if (planned.plan.targets.some((target) => target.kind === "function")) {
+      return failed([{
+        severity: "error", code: "delivery-function-build-unsupported",
+        message: "Function target rendering is not implemented yet; the delivery build only produces HTTP and Worker application objects.",
+        suggestion: "Declare HTTP/Worker application targets for now; Function and schedule delivery is tracked separately.",
+      }]);
+    }
     if (options.graphql && checked.mismatches.some((mismatch) => mismatch.startsWith("graphql"))) {
       throw new Error("Refresh GraphQL artifacts with compile before building independent targets.");
     }

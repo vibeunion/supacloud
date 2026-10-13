@@ -40,7 +40,7 @@ export interface SupaCloudConfig {
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
   "include" | "moduleBoundaryPreset" | "moduleBoundaries" | "typeSafety" | "delivery"
-  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules" | "openApi" | "effect"
+  | "allowRouteCommandBindings" | "openApi" | "effect"
 >> & {
   include: string[];
   moduleBoundaryPreset: ModuleBoundaryPresetName;
@@ -52,11 +52,13 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   outDir: "generated",
   include: ["**/*.module.ts", "**/*.ts"],
   strict: true,
-  requireRouteContracts: false,
+  requireRouteContracts: true,
   generateClient: true,
   generateOpenApi: true,
   generatePermissions: true,
   treeShakeUnusedProviders: true,
+  disallowControllerDirectDb: true,
+  detectOrphanModules: true,
   commandCapabilities: {
     requirePersistentAdapters: true,
     permission: true,
@@ -123,8 +125,8 @@ function validateGovernanceConfig(config: {
       if (!isRecord(adapters)) throw new Error("commandCapabilities.rpc must contain named adapters.");
       for (const [name, adapter] of Object.entries(adapters)) {
         if (!name.trim() || !isRecord(adapter) || Object.keys(adapter).some((key) =>
-          !["audit", "idempotency", "transaction", "boundary"].includes(key))) throw new Error("Invalid command adapter.");
-        for (const key of ["audit", "idempotency", "transaction"]) {
+          !["audit", "idempotency", "reconcile", "transaction", "boundary"].includes(key))) throw new Error("Invalid command adapter.");
+        for (const key of ["audit", "idempotency", "reconcile", "transaction"]) {
           if (adapter[key] !== undefined && typeof adapter[key] !== "boolean") throw new Error("Invalid command adapter capability.");
         }
         if (adapter["boundary"] !== undefined && adapter["boundary"] !== "database" && adapter["boundary"] !== "external") {
@@ -151,11 +153,12 @@ function validateGovernanceConfig(config: {
   if (config.typeSafety !== undefined) {
     const rules = config.typeSafety;
     if (!isRecord(rules)
-      || Object.keys(rules).some((key) => !["scanProductionSource", "noAnyInGenerated", "exclude"].includes(key))
+      || Object.keys(rules).some((key) => !["scanProductionSource", "noAnyInGenerated", "exclude", "allowAlternativeLibraries"].includes(key))
       || (rules["scanProductionSource"] !== undefined && typeof rules["scanProductionSource"] !== "boolean")
       || (rules["noAnyInGenerated"] !== undefined && typeof rules["noAnyInGenerated"] !== "boolean")
-      || (rules["exclude"] !== undefined && !isStrings(rules["exclude"]))) {
-      throw new Error("typeSafety accepts boolean scanProductionSource/noAnyInGenerated and a string array exclude.");
+      || (rules["exclude"] !== undefined && !isStrings(rules["exclude"]))
+      || (rules["allowAlternativeLibraries"] !== undefined && !isStrings(rules["allowAlternativeLibraries"]))) {
+      throw new Error("typeSafety accepts boolean scanProductionSource/noAnyInGenerated and string arrays exclude/allowAlternativeLibraries.");
     }
   }
   for (const key of ["allowRouteCommandBindings", "disallowControllerDirectDb", "detectOrphanModules"] as const) {
@@ -211,8 +214,8 @@ export function resolveSupacloudConfig(
   typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
   databaseGovernance?: NonNullable<CompileOptions["databaseGovernance"]>;
   allowRouteCommandBindings?: boolean;
-  disallowControllerDirectDb?: boolean;
-  detectOrphanModules?: boolean;
+  disallowControllerDirectDb: boolean;
+  detectOrphanModules: boolean;
   effect?: NonNullable<CompileOptions["effect"]>;
   treeShakeUnusedProviders: boolean;
   graphql?: GraphqlOptions;
@@ -239,8 +242,8 @@ export function resolveSupacloudConfig(
       },
     }),
     ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),
-    ...(resolved.disallowControllerDirectDb === undefined ? {} : { disallowControllerDirectDb: resolved.disallowControllerDirectDb }),
-    ...(resolved.detectOrphanModules === undefined ? {} : { detectOrphanModules: resolved.detectOrphanModules }),
+    disallowControllerDirectDb: resolved.disallowControllerDirectDb ?? DEFAULT_SUPACLOUD_CONFIG.disallowControllerDirectDb,
+    detectOrphanModules: resolved.detectOrphanModules ?? DEFAULT_SUPACLOUD_CONFIG.detectOrphanModules,
     effect: resolved.effect === undefined
       ? { ...DEFAULT_SUPACLOUD_CONFIG.effect }
       : { ...DEFAULT_SUPACLOUD_CONFIG.effect, ...resolved.effect },

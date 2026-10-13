@@ -578,6 +578,8 @@ export interface TypeSafetyOptions {
   scanProductionSource?: boolean;
   /** Additional relative glob patterns excluded from the production-source scan. */
   exclude?: string[];
+  /** Explicitly approved alternatives to the default client/stream libraries. */
+  allowAlternativeLibraries?: string[];
 }
 
 export interface DatabaseGovernanceOptions {
@@ -642,7 +644,13 @@ export interface CommandExecutionCapabilities {
   /** Require named persistent adapters and explicit audit/idempotency declarations. */
   requirePersistentAdapters?: boolean;
   /** Explicit named adapters; declarations must also be tested against the database. */
-  rpc?: Record<string, { audit?: boolean; idempotency?: boolean; transaction?: boolean; boundary?: "database" | "external" }>;
+  rpc?: Record<string, {
+    audit?: boolean;
+    idempotency?: boolean;
+    reconcile?: boolean;
+    transaction?: boolean;
+    boundary?: "database" | "external";
+  }>;
   /** Whether runtime permission checks are supported. */
   permission?: boolean;
   /** Whether runtime audit persistence is supported. */

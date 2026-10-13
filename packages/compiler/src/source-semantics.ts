@@ -5,7 +5,14 @@ export const SOURCE_SEMANTIC_DIAGNOSTIC_CODES = {
   "source-unsafe-any": { errorCode: "SC6009", docsUrl: "https://supacloud.dev/errors/SC6009" },
   "source-floating-promise": { errorCode: "SC6010", docsUrl: "https://supacloud.dev/errors/SC6010" },
   "source-non-exhaustive-switch": { errorCode: "SC6011", docsUrl: "https://supacloud.dev/errors/SC6011" },
+  "source-alternative-library": { errorCode: "SC6012", docsUrl: "https://supacloud.dev/errors/SC6012" },
 } as const;
+
+const DEFAULT_ALTERNATIVE_LIBRARIES = [
+  "@apollo/client", "@urql/core", "graphql-request", "kefir", "most",
+  "@pgflow", "pgflow", "pg_durable",
+  "react-relay", "redux-observable", "urql", "wonka", "xstream",
+] as const;
 
 /** Inspect values at use sites, including types resolved through imported declarations. */
 export function scanSourceSemantics(
@@ -13,6 +20,7 @@ export function scanSourceSemantics(
   checker: ts.TypeChecker,
   file: string,
   rootDir: string,
+  options: { allowAlternativeLibraries?: readonly string[] } = {},
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const report = (code: keyof typeof SOURCE_SEMANTIC_DIAGNOSTIC_CODES, node: ts.Node, message: string): void => {
@@ -21,6 +29,20 @@ export function scanSourceSemantics(
       line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
     });
   };
+  const allowedLibraries = new Set(options.allowAlternativeLibraries ?? []);
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const moduleName = statement.moduleSpecifier.text;
+    const alternative = DEFAULT_ALTERNATIVE_LIBRARIES.find((name) =>
+      moduleName === name || moduleName.startsWith(`${name}/`));
+    if (alternative && !allowedLibraries.has(alternative) && !allowedLibraries.has(moduleName)) {
+      report(
+        "source-alternative-library",
+        statement.moduleSpecifier,
+        `Production source imports alternative library "${moduleName}". Use the governed Supabase client/PostgREST transport and RxJS event composition by default, or allow this package explicitly in typeSafety.allowAlternativeLibraries for a documented boundary.`,
+      );
+    }
+  }
   const unsafe = (value: ts.Expression, target: ts.Type): void => {
     if (isUnknownBoundary(target, checker) || containsAny(target, checker, new Set<ts.Type>(), rootDir)) return;
     if (containsAny(checker.getTypeAtLocation(value), checker, new Set<ts.Type>(), rootDir)) {

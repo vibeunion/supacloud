@@ -64,7 +64,7 @@ export function createDeliveryPlan(
     if ((target.name === "api" && target.kind !== "api") || (target.name === "jobs" && target.kind !== "jobs")) {
       fail("delivery-reserved-target", `"${target.name}" is reserved for its matching workload kind.`, "Rename the target or use the matching kind.");
     }
-    for (const name of sorted(target.modules)) {
+    for (const name of sorted(target.modules ?? [])) {
       if (!modules.has(name)) {
         fail("delivery-unknown-module", `Target "${target.name}" refers to unknown module "${name}".`, "Select a module name from the compiler graph.");
         continue;
@@ -79,6 +79,17 @@ export function createDeliveryPlan(
   }
 
   const targets = new Map<string, DeliveryTarget>();
+  // Function targets carry an entrypoint instead of app modules and own no routes or jobs.
+  for (const declaration of declarations.values()) {
+    if (declaration.kind !== "function" || declaration.function === undefined) continue;
+    targets.set(declaration.name, {
+      name: declaration.name, kind: "function", isolation: "shared",
+      roots: [], modules: [], routes: [], jobs: [], externalTokens: [],
+      function: declaration.function,
+      requirements: { processIsolation: false, durableQueue: false, capabilities: sorted(declaration.capabilities ?? []) },
+      runtimeStatus: options.runtime === undefined ? "unchecked" : "declared-compatible",
+    });
+  }
   function getTarget(name: string, fallback: "api" | "jobs"): DeliveryTarget {
     const existing = targets.get(name);
     if (existing) return existing;

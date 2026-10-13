@@ -38,7 +38,7 @@ test("POST command protocol, RPC descriptor and honest contracts survive compila
   await fixture(source, async (rootDir) => {
     const result = await compileProject({ rootDir, outDir: join(rootDir, "generated"), strict: false,
       commandCapabilities: { audit: false, idempotency: false, transaction: "rpc-only",
-        rpc: { remove_item: { audit: true, transaction: true, idempotency: true } } } });
+        rpc: { remove_item: { audit: true, transaction: true, idempotency: true, reconcile: false } } } });
     expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     const generated = await Bun.file(join(rootDir, "generated/application.ts")).text();
     expect(generated).toContain('rpc: "remove_item"');

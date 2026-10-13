@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ApplicationGraph } from "./types";
-import { validateEffectPolicies } from "./effect-governance";
+import { validateEffectPolicies, validateJobPolicies } from "./effect-governance";
 import { analyzeProject } from "./analyze";
 import { compileOptionsFromConfig } from "./config";
 import { compileProject } from "./compile";
@@ -380,4 +380,22 @@ export class OrdersModule {}
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("rejects retrying jobs without an idempotency contract", () => {
+  const graph = graphWith(undefined);
+  graph.modules[0]!.jobs = [{
+    className: "RebuildJob",
+    name: "orders.rebuild",
+    serviceKey: "rebuildJob",
+    scope: "job",
+    maxAttempts: 2,
+    idempotency: "none",
+  }];
+  expect(validateJobPolicies(graph)).toContainEqual(expect.objectContaining({
+    code: "job-retry-idempotency-required",
+    errorCode: "SC4027",
+  }));
+  graph.modules[0]!.jobs[0]!.idempotency = "required";
+  expect(validateJobPolicies(graph)).toEqual([]);
 });

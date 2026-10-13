@@ -50,10 +50,10 @@ test("wildcard and named parameter OpenAPI collisions fail before emission", asy
       .replace('"/:caseId/accept"', '"/files/*"')
       .replace("  accept()", '  other(): Effect<{ ok: boolean }, never, never> { return {} as Effect<{ ok: boolean }, never, never>; }\n  @Post("/files/:wildcard", { response: AcceptResult, effect: { required: true, dependencies: [], errors: [], retry: "none" } })\n  accept()');
     await writeFixtureProject(root, { ...GOOD_PROJECT_FILES, "src/features/case/case.controller.ts": source });
-    const compiled = await compileProject({ rootDir: root, outDir: join(root, "generated"), generateOpenApi: true });
+    const compiled = await compileProject({ rootDir: root, outDir: join(root, "generated"), generateOpenApi: true, requireRouteContracts: false });
     expect(compiled.diagnostics.some(d => d.errorCode === "SC3007" && d.severity === "error"), JSON.stringify(compiled.diagnostics)).toBe(true);
     expect(await Bun.file(join(root, "generated/openapi.ts")).exists()).toBe(false);
-    const runtimeOnly = await compileProject({ rootDir: root, outDir: join(root, "generated"), generateOpenApi: false });
+    const runtimeOnly = await compileProject({ rootDir: root, outDir: join(root, "generated"), generateOpenApi: false, requireRouteContracts: false });
     expect(runtimeOnly.diagnostics.filter(d => d.severity === "error")).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
