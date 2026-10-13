@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import {
-  applicationReleaseId, type ApplicationDeployPlan, type ApplicationReleaseRecord,
+  applicationReleaseId, type ApplicationDeployPlan, type ApplicationDeployRequest, type ApplicationReleaseRecord,
 } from "@supacloud/delivery";
 import {
   ApplicationDeploymentOrchestrator,
@@ -143,6 +143,7 @@ function fixture(options: {
           schema: "supacloud.application-migration-execution-plan.v1" as const,
           project_ref: "demo", application_id: "reviews", release_id: releaseId,
           manifest_sha256: manifestSha256, ledger_digest: plan.migrations.ledger_digest,
+          plan_sha256: "7".repeat(64),
           migrations: [{
             version: "1", name: "create_reviews", raw_sha256: "e".repeat(64),
             destructive: [], unsupported: [], non_transactional: [],
@@ -233,6 +234,7 @@ function fixture(options: {
   return {
     calls,
     phases,
+    dependencies,
     state: () => state,
     orchestrator: new ApplicationDeploymentOrchestrator(dependencies),
     request: {
@@ -243,7 +245,7 @@ function fixture(options: {
         deployment_id: "web",
         release_id: webReleaseId,
       },
-    },
+    } as ApplicationDeployRequest,
   };
 }
 
@@ -305,6 +307,98 @@ test("marks an uncertain backend outcome and blocks a blind retry", async () => 
   expect(fixtureValue.calls.filter(call => call === "migration")).toHaveLength(1);
   expect(fixtureValue.calls).not.toContain("activation");
   expect(fixtureValue.calls).not.toContain("web-activation");
+});
+
+test.each([false, true])("missing health probe rejects before effects (code-only=%s)", async codeOnly => {
+  const value = fixture({ migrationAlreadyApplied: codeOnly });
+  delete value.dependencies.postgrestStatus;
+  let configurationWrites = 0;
+  value.dependencies.configurations.put = async () => {
+    configurationWrites++;
+    throw new Error("must not write");
+  };
+  await expect(value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request: value.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_POSTGREST_STATUS_UNAVAILABLE", statusCode: 503 });
+  expect(configurationWrites).toBe(0);
+  expect(value.calls).toEqual([]);
+});
+
+test.each(["project_ref", "application_id", "release_id", "manifest_sha256"] as const)(
+  "migration plan with mismatched %s cannot execute SQL or activate", async key => {
+    const value = fixture();
+    const read = value.dependencies.migrations.readExecutionPlan;
+    value.dependencies.migrations.readExecutionPlan = async input => ({
+      ...await read(input), [key]: key.endsWith("_id") || key.endsWith("sha256") ? "f".repeat(64) : "other",
+    });
+    await expect(value.orchestrator.execute({
+      projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+    })).rejects.toMatchObject({ code: "APPLICATION_MIGRATION_PLAN_CHANGED", statusCode: 409 });
+    expect(value.state().status).toBe("failed_terminal");
+    expect(value.calls).not.toContain("migration");
+    expect(value.calls).not.toContain("activation");
+    expect(value.calls).not.toContain("web-activation");
+    expect(value.calls).not.toContain("success");
+  },
+);
+
+test.each([false, true])("mismatched backend manifest blocks success (code-only=%s)", async codeOnly => {
+  const value = fixture({ migrationAlreadyApplied: codeOnly });
+  const inspect = value.dependencies.migrations.inspect;
+  const apply = value.dependencies.migrations.apply;
+  value.dependencies.migrations.inspect = async (...args) => ({
+    ...await inspect(...args), manifest_sha256: "f".repeat(64),
+  });
+  value.dependencies.migrations.apply = async input => {
+    const result = await apply(input);
+    return { ...result, after: { ...result.after, manifest_sha256: "f".repeat(64) } };
+  };
+  await expect(value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_DEPLOY_RECEIPT_INVALID", statusCode: 503 });
+  expect(value.state().status).toBe(codeOnly ? "failed_terminal" : "outcome_unknown");
+  expect(value.calls).not.toContain("activation");
+  expect(value.calls).not.toContain("web-activation");
+  expect(value.calls).not.toContain("success");
+});
+
+test.each([false, true])("unhealthy PostgREST blocks success (code-only=%s)", async codeOnly => {
+  const value = fixture({ migrationAlreadyApplied: codeOnly });
+  value.dependencies.postgrestStatus = async () => ({ actual: "running", health: "unhealthy" });
+  await expect(value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_POSTGREST_NOT_READY", statusCode: 503 });
+  expect(value.state().status).toBe(codeOnly ? "failed_terminal" : "outcome_unknown");
+  expect(value.calls).not.toContain("activation");
+  expect(value.calls).not.toContain("web-activation");
+  expect(value.calls).not.toContain("success");
+});
+
+test("a failing health probe cannot become a successful backend receipt", async () => {
+  const value = fixture();
+  value.dependencies.postgrestStatus = async () => { throw new Error("private provider error"); };
+  await expect(value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_DEPLOY_OUTCOME_UNKNOWN", statusCode: 503 });
+  expect(value.state().status).toBe("outcome_unknown");
+  expect(value.calls).not.toContain("activation");
+  expect(value.calls).not.toContain("web-activation");
+  expect(value.calls).not.toContain("success");
+});
+
+test("outstanding operator provisioning cannot pass the code-only receipt path", async () => {
+  const value = fixture({ migrationAlreadyApplied: true });
+  const inspect = value.dependencies.migrations.inspect;
+  value.dependencies.migrations.inspect = async (...args) => ({
+    ...await inspect(...args), operator_provisioning: "separate-verification-required",
+  });
+  await expect(value.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal, request: value.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_DEPLOY_RECEIPT_INVALID", statusCode: 503 });
+  expect(value.calls).not.toContain("activation");
+  expect(value.calls).not.toContain("web-activation");
+  expect(value.calls).not.toContain("success");
 });
 
 test("reuses the platform configuration head when the request omits configuration identity", async () => {
