@@ -149,6 +149,14 @@
     },
     {
       "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/compiler/src/database-governance-runtime.ts",
+      "specifier": null,
+      "fingerprint": "157543e2e2f928070ac3d45cc6cdbdc13ed54a580d73cd3b48c2e137b1c3945c",
+      "count": 1,
+      "reason": "Runtime-selected database module loader for opt-in database governance. The path is resolved and confined to the configured project root; static ownership is unverified."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
       "file": "packages/compiler/src/openapi-tools.ts",
       "specifier": null,
       "fingerprint": "1be187be3ad6c5658948b8dc223f5a5d0f45a1f310ef8bfcdd7c7c0d37b6b65b",
