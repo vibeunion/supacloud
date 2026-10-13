@@ -152,11 +152,11 @@ jobs:
           (cd packages/query && bun install --frozen-lockfile && bun run build)
           (cd packages/supacloud-js && bun install --frozen-lockfile && bun run build)
           (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
-          (cd packages/db && bun install --frozen-lockfile --ignore-scripts)
+          (cd packages/db && bun install --frozen-lockfile && bun run build)
           (cd packages/management-api && bun install --frozen-lockfile)
           (cd packages/worker && bun install --frozen-lockfile)
           (cd packages/supacloud-lite && bun install --frozen-lockfile)
-          (cd packages/compiler && bun run build)
+          (cd packages/compiler && bun install --frozen-lockfile --force && bun run build)
 
       - name: Run workspace architecture gates
         run: |

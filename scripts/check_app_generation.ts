@@ -36,7 +36,7 @@ try {
     await mkdir(environment["HOME"], { recursive: true });
     await mkdir(environment["BUN_TMPDIR"], { recursive: true });
     const overrides: Record<string, string> = {};
-    for (const name of ["contracts", "commands", "delivery", "compiler", "db", "app", "elysia", "cli"]) {
+    for (const name of ["contracts", "commands", "db", "delivery", "compiler", "app", "elysia", "cli"]) {
         const directory = join(repo, "packages", name);
         await run(starterInstallArgs("workspace"), directory);
         await run(["run", "build"], directory);
