@@ -75,6 +75,12 @@ After installing dependencies, run \`bun run db:generate\` once and commit db/co
 The default \`bun run check\` and build fail on stale database contracts before any
 compiler regeneration. After an intentional source change, run db:generate again,
 review the diff, then run check. Ordinary checks are offline.
+The compiler also runs this source-contract gate on compile/check/dev through
+databaseGovernance.mode = "check", including incremental cache hits. Missing
+adoption files or stale contracts fail closed; no contracts are silently regenerated.
+This is not SQL lint or live Catalog reconciliation. Before promotion, declare
+the real database modules, their SQL and tests, then explicitly use mode "enforce"
+with a separately selected read-only local/test database connection.
 
 - Maintain one schema-qualified function with explicit grants per db/functions/*.sql.
 - Preserve migrations/ and its existing executor/ledger. Add forward migrations only.

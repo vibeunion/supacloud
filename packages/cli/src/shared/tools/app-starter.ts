@@ -89,6 +89,7 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
+  databaseGovernance: { mode: "check" },
   effect: {
     requireRouteEffects: true,
     requireErrorMappings: true,

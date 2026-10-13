@@ -19,6 +19,11 @@ platform capabilities stay SupaCloud-native.
 > not a requirement to adopt its frontend framework. The goal is a constrained, diagnosable and
 > deliverable pipeline.
 
+See [Vibecoding Default Policy](vibecoding-default-policy.md) for the
+selection rule: when no special requirement exists, generators and AI use the
+validated best path; alternatives must be explicit and carry their own governance
+and verification obligations.
+
 ## Quick start
 
 ```bash

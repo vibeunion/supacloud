@@ -581,8 +581,8 @@ export interface TypeSafetyOptions {
 }
 
 export interface DatabaseGovernanceOptions {
-  /** Off by default; enforce blocks compilation on any database governance finding. */
-  mode: "off" | "enforce";
+  /** Off for existing callers; check validates sources offline, enforce also checks SQL and Catalog. */
+  mode: "off" | "check" | "enforce";
   /** Relative to the configuration directory, or rootDir for programmatic callers. */
   projectRoot?: string;
   /** Project-relative module file exporting defineDatabaseModule(...) results. */
