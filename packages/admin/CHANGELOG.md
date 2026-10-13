@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/admin-v0.27.1...admin-v0.28.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deploy:** require unified application deployment and reject legacy flows ([#1870](https://github.com/vibeunion/supacloud/issues/1870))
+
+### Features
+
+* **deploy:** require unified application deployment and reject legacy flows ([#1870](https://github.com/vibeunion/supacloud/issues/1870)) ([ac3562d](https://github.com/vibeunion/supacloud/commit/ac3562dc65d5bd8de63d779f062d2f11c901af69))
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/admin-v0.27.0...admin-v0.27.1) (2026-10-11)
 
 

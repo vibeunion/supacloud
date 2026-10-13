@@ -14,6 +14,17 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.94.0](https://github.com/vibeunion/supacloud/compare/cli-v0.93.0...cli-v0.94.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deploy:** require unified application deployment and reject legacy flows ([#1870](https://github.com/vibeunion/supacloud/issues/1870))
+
+### Features
+
+* **deploy:** require unified application deployment and reject legacy flows ([#1870](https://github.com/vibeunion/supacloud/issues/1870)) ([ac3562d](https://github.com/vibeunion/supacloud/commit/ac3562dc65d5bd8de63d779f062d2f11c901af69))
+
 ## [0.93.0](https://github.com/vibeunion/supacloud/compare/cli-v0.92.0...cli-v0.93.0) (2026-10-12)
 
 
