@@ -51,7 +51,7 @@ try {
   await mkdir(consumer);
   await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
   await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund',
-    '--package-lock=false', '--registry=https://registry.npmjs.org', ...tarballs, '@types/bun@1.4.2'],
+    '--package-lock=false', '--registry=https://registry.npmjs.org', ...tarballs, '@types/bun@1.4.3'],
   { cwd: consumer, timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
   const installed = JSON.parse(await readFile(join(consumer, 'package.json'), 'utf8'));
   assert.equal(installed.overrides, undefined);

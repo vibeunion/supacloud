@@ -26,7 +26,7 @@ function fixture(t) {
   };
   write('package.json', { private: true });
   write('packages/elysia/compatibility.json', {
-    bun: '1.4.2', packages: { elysia: version, effect: '4.0.2', typebox: '1.3.34', 'exact-mirror': '1.2.6' },
+    bun: '1.4.3', packages: { elysia: version, effect: '4.0.2', typebox: '1.3.34', 'exact-mirror': '1.2.6' },
   });
   for (const name of ['app', 'compiler']) {
     write(`packages/${name}/package.json`, { name: `@supacloud/${name}`, dependencies: { typebox: '1.3.34' } });

@@ -18,7 +18,7 @@ function fixture(t) {
   };
   return { root, put };
 }
-const versions = { node: 'v24.test', bun: '1.4.2', platform: 'linux', arch: 'x64' };
+const versions = { node: 'v24.test', bun: '1.4.3', platform: 'linux', arch: 'x64' };
 
 test('sync checks and plans are read-only; apply is idempotent and scoped', (t) => {
   const {root, put} = fixture(t); put('out/a.json', 'old'); put('user.ts', 'user');

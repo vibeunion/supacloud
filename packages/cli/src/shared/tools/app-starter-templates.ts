@@ -96,7 +96,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
-      engines: { bun: ">=1.4.2" },
+      engines: { bun: ">=1.4.3" },
       scripts: {
         compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
         "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
@@ -120,7 +120,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
-        "@types/bun": "^1.4.2",
+        "@types/bun": "^1.4.3",
         typescript: "^7.0.2",
       },
     }),

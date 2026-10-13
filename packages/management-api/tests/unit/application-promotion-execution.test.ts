@@ -38,7 +38,7 @@ const now = Date.parse("2026-10-11T04:00:00.000Z");
 const stamp = new Date(now).toISOString();
 
 function fixture(migrationSql?: string) {
-  const runtime = { ...runtimeInput(), bunVersion: "1.4.2" };
+  const runtime = { ...runtimeInput(), bunVersion: "1.4.3" };
   const migration = {
     version: "1", name: "promotion_fixture", sql: migrationSql ?? "",
     path: "migrations/project-migration/1_promotion_fixture.sql",
@@ -65,7 +65,7 @@ function fixture(migrationSql?: string) {
       configuration: {
         schema: "supacloud.application-configuration.v1", project_ref: "demo",
         application_id: "reviews", environment_id: "test", configuration_id: configurationId,
-        created_at: stamp, bun_version: "1.4.2",
+        created_at: stamp, bun_version: "1.4.3",
         targets: [
           { name: "api", kind: "http", hosts: ["reviews.example.test"], environment_names: ["APP_SETTING"] },
           { name: "jobs", kind: "worker", hosts: [], environment_names: [] },
@@ -865,7 +865,7 @@ test.each(["valid", "nonce", "digest", "unauthenticated", "provider-error", "con
     let runs = 0;
     const verifier = createApplicationSmokeVerifier({
       resolve: async () => ({
-        bunVersion: "1.4.2", environment: fault === "configuration" ? { api: {}, jobs: {} } : f.activationInput.environment,
+        bunVersion: "1.4.3", environment: fault === "configuration" ? { api: {}, jobs: {} } : f.activationInput.environment,
         hosts: f.activationInput.hosts,
       }),
     }, {

@@ -25,6 +25,6 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.3"
       - name: Verify package licenses, notices, docs and release assets
         run: bun test scripts/license.test.ts
