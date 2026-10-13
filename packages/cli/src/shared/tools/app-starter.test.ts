@@ -96,7 +96,8 @@ test("the database starter registers live Catalog governance while default check
     expect(appStarterFiles("governed")["supacloud.config.ts"])
         .toContain('databaseGovernance: { mode: "check", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" }');
     expect(appStarterFiles("governed")["db/modules.ts"]).toContain('name: "starter"');
-    expect(appStarterFiles("governed")["scripts/dev.ts"]).toContain('mode: profile === "integration" ? "enforce" : "check"');
+    expect(appStarterFiles("governed")["scripts/dev.ts"])
+        .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');
     for (const template of ["minimal", "http", "edge"] as const) {
         const files = appTemplateFiles("plain", template, {
             "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",

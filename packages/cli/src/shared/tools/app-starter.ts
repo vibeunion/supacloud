@@ -140,8 +140,9 @@ if (profile === "integration") {
   process.env["DATABASE_URL"] = databaseUrl;
 }
 const configured = compileOptionsFromConfig(await loadSupacloudConfig());
+const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;
 const options = configured.databaseGovernance
-  ? { ...configured, databaseGovernance: { ...configured.databaseGovernance, mode: profile === "integration" ? "enforce" : "check" } }
+  ? { ...configured, databaseGovernance: { ...configured.databaseGovernance, mode: governanceMode } }
   : configured;
 let server: ReturnType<typeof Bun.spawn> | undefined;
 let restarts = Promise.resolve();
