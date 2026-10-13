@@ -88,9 +88,11 @@ export class ReviewUploadsController {
 export const STARTER_UPLOAD_SCHEMA = `-- Apply explicitly with the migration owner.
 ALTER TABLE public.starter_members ADD COLUMN storage_subject uuid UNIQUE;
 GRANT SELECT (subject,enabled,can_approve,storage_subject) ON public.starter_members TO authenticated;
+DROP POLICY IF EXISTS starter_member_read ON public.starter_members;
 CREATE POLICY starter_member_read ON public.starter_members FOR SELECT TO authenticated
   USING (subject=COALESCE(NULLIF(auth.jwt()->>'external_sub',''),auth.jwt()->>'sub') AND storage_subject=auth.uid());
 GRANT SELECT ON public.starter_reviews TO authenticated;
+DROP POLICY IF EXISTS starter_review_read ON public.starter_reviews;
 CREATE POLICY starter_review_read ON public.starter_reviews FOR SELECT TO authenticated
   USING (owner_id=COALESCE(NULLIF(auth.jwt()->>'external_sub',''),auth.jwt()->>'sub') AND EXISTS (
     SELECT 1 FROM public.starter_members m WHERE m.subject=owner_id
@@ -98,11 +100,14 @@ CREATE POLICY starter_review_read ON public.starter_reviews FOR SELECT TO authen
   ));
 INSERT INTO storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
   VALUES ('review-attachments','review-attachments',false,1048576,ARRAY['text/plain']);
+DROP POLICY IF EXISTS starter_attachment_read ON storage.objects;
 CREATE POLICY starter_attachment_read ON storage.objects FOR SELECT TO authenticated
   USING (bucket_id='review-attachments');
+DROP POLICY IF EXISTS starter_attachment_insert ON storage.objects;
 CREATE POLICY starter_attachment_insert ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id='review-attachments');
 -- Restrictive fences also apply when the host already has permissive Storage policies.
+DROP POLICY IF EXISTS starter_attachment_owner_fence ON storage.objects;
 CREATE POLICY starter_attachment_owner_fence ON storage.objects AS RESTRICTIVE FOR ALL TO authenticated
   USING (bucket_id<>'review-attachments' OR (split_part(name,'/',1)=auth.uid()::text AND EXISTS (
     SELECT 1 FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id
@@ -115,8 +120,10 @@ CREATE POLICY starter_attachment_owner_fence ON storage.objects AS RESTRICTIVE F
       WHERE r.id=split_part(name,'/',2) AND r.state='draft' AND m.subject=COALESCE(NULLIF(auth.jwt()->>'external_sub',''),auth.jwt()->>'sub')
         AND m.storage_subject=auth.uid() AND m.enabled AND m.can_approve
     )));
+DROP POLICY IF EXISTS starter_attachment_update_fence ON storage.objects;
 CREATE POLICY starter_attachment_update_fence ON storage.objects AS RESTRICTIVE FOR UPDATE TO authenticated
   USING (bucket_id<>'review-attachments') WITH CHECK (bucket_id<>'review-attachments');
+DROP POLICY IF EXISTS starter_attachment_delete_fence ON storage.objects;
 CREATE POLICY starter_attachment_delete_fence ON storage.objects AS RESTRICTIVE FOR DELETE TO authenticated
   USING (bucket_id<>'review-attachments');
 `;

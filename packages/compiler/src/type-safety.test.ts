@@ -196,6 +196,35 @@ describe("compiler type-safety gates", () => {
       .toEqual([3]);
   });
 
+  test("alternative reactive, GraphQL and durable engines require an explicit allowance", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
+      "src/production.ts": [
+        'import { createClient } from "@apollo/client";',
+        'import { stream } from "xstream";',
+        'import { Flow } from "@pgflow/dsl";',
+        "export { createClient, stream, Flow };",
+      ].join("\n"),
+    });
+    expect(scanProductionSource({ rootDir, strict: true })
+      .filter(({ code }) => code === "source-alternative-library")
+      .map(({ line }) => line))
+      .toEqual([1, 2, 3]);
+    expect(scanProductionSource({
+      rootDir, strict: true,
+      allowAlternativeLibraries: ["@apollo/client", "xstream", "@pgflow"],
+    }).filter(({ code }) => code === "source-alternative-library")).toEqual([]);
+  });
+
+  test("the existing RxJS boundary remains an approved default", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
+      "src/production.ts": 'import { Observable } from "rxjs";\nexport { Observable };',
+    });
+    expect(scanProductionSource({ rootDir, strict: true })
+      .filter(({ code }) => code === "source-alternative-library")).toEqual([]);
+  });
+
   test.each([
     ["export const value: any = 1;", "source-any"],
     ["export const value: string = null;", "source-typescript"],
