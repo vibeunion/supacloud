@@ -4,7 +4,7 @@ import {
   DeliveryConfigurationError, parseDeliveryOptions, parseDeliveryPlanResult,
   type DeliveryDiagnostic, type DeliveryOptions, type DeliveryPlanResult, type DeliveryTarget,
 } from "./delivery-schema";
-import type { ApplicationGraph, CompileOptions, Diagnostic, ModuleNode } from "./types";
+import type { ApplicationGraph, CompileOptions, Diagnostic, ModuleNode, ValidateOptions } from "./types";
 import { joinRoutePaths } from "./util";
 import { validateGraph } from "./validate";
 
@@ -25,6 +25,7 @@ function diagnostic(error: Diagnostic): DeliveryDiagnostic {
 export function createDeliveryPlan(
   graph: ApplicationGraph,
   input?: unknown,
+  validation?: ValidateOptions,
 ): DeliveryPlanResult {
   let options: DeliveryOptions;
   try {
@@ -39,7 +40,12 @@ export function createDeliveryPlan(
 
   const diagnostics: DeliveryDiagnostic[] = [
     ...(graph.diagnostics ?? []).map(diagnostic),
-    ...validateGraph(graph, { strict: true }).map(diagnostic),
+    // Re-validate the trusted graph with the same governance context that produced it.
+    // Dropping `validation` here (e.g. commandCapabilities/moduleBoundaries) fabricates
+    // false positives such as `command-rpc-unavailable` for configured RPC adapters.
+    ...validateGraph(graph, validation === undefined
+      ? { strict: true }
+      : { ...validation, strict: true }).map(diagnostic),
   ];
   const fail = (code: string, message: string, suggestion: string): void => {
     diagnostics.push({ severity: "error", code, message, suggestion });
@@ -234,7 +240,7 @@ export async function planDeliveryProject(
     return createDeliveryPlan({ modules: [], externalTokens: [] }, delivery);
   }
   const checked = await checkProject(options);
-  return createDeliveryPlan({ ...checked.graph, diagnostics: checked.diagnostics }, delivery);
+  return createDeliveryPlan({ ...checked.graph, diagnostics: checked.diagnostics }, delivery, options);
 }
 
 export function formatDeliveryPlan(result: DeliveryPlanResult): string {
