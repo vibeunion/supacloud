@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.116.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.116.0...management-api-v0.116.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **management-api:** bind application receipts to verified backend state ([#1874](https://github.com/vibeunion/supacloud/issues/1874)) ([5b1420d](https://github.com/vibeunion/supacloud/commit/5b1420dede87c57a87d1c824764110d6b5e08b62))
+* **management-api:** preserve delegated auth for release transfers ([#1876](https://github.com/vibeunion/supacloud/issues/1876)) ([818985d](https://github.com/vibeunion/supacloud/commit/818985d10535ae8e16632ddbea36dfb568f7f0e2))
+
 ## [0.116.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.115.0...management-api-v0.116.0) (2026-10-13)
 
 
