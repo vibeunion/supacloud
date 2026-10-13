@@ -21,6 +21,7 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
+    buildImagorRequest,
     checkImagorHealth,
     imagorOutputContentType,
     runImagor,
@@ -172,6 +173,58 @@ async function resolveTransformSource(request: Request, ref: string, bucket: str
         if (error instanceof TransformSourceTooLargeError) return { error: status(413, { message: "Image source too large", code: "413" }) };
         if (error instanceof ProjectStorageError) return { error: status(error.statusCode, { message: error.message, code: error.code }) };
         return { error: status(400, { message: "Invalid source path", code: "400" }) };
+    }
+}
+
+async function transformRawImageBytes(
+    request: Request,
+    ref: string,
+    query: Record<string, unknown>,
+    set: { headers: Record<string, string> },
+) {
+    const authError = await requireProjectOrAdminAuth(request, ref);
+    if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+    const sourceContentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() || "";
+    if (!sourceContentType.startsWith("image/")) {
+        return status(415, { message: "Image content type is required", code: "415" });
+    }
+
+    const declaredLength = Number(request.headers.get("content-length") || "");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_TRANSFORM_SOURCE_BYTES) {
+        return status(413, { message: "Image source too large", code: "413" });
+    }
+
+    let bytes: ArrayBuffer;
+    try {
+        bytes = await request.arrayBuffer();
+    } catch {
+        return status(400, { message: "Invalid image request body", code: "400" });
+    }
+    if (bytes.byteLength === 0) {
+        return status(400, { message: "Image request body is empty", code: "400" });
+    }
+    if (bytes.byteLength > MAX_TRANSFORM_SOURCE_BYTES) {
+        return status(413, { message: "Image source too large", code: "413" });
+    }
+
+    try {
+        const imagorRequest = buildImagorRequest(query);
+        const { response: result } = await runImagorWithRequest(query, { bytes, contentType: sourceContentType });
+        if (!result.ok) {
+            await result.body?.cancel();
+            logger.error("Imagor raw image transform failed:", { status: result.status });
+            return status(502, { message: "Image transform failed", code: "502" });
+        }
+
+        set.headers["Content-Type"] =
+            imagorOutputContentType(result, imagorRequest, sourceContentType) || "image/webp";
+        set.headers["Cache-Control"] = "private, max-age=3600";
+        set.headers["X-Image-Engine"] = "imagor/libvips";
+        return new Response(result.body, { headers: set.headers as unknown as HeadersInit });
+    } catch {
+        logger.error("Imagor raw image transform proxy failed");
+        return status(502, { message: "Image processing service unavailable", code: "502" });
     }
 }
 
@@ -478,6 +531,17 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             logger.error('Imagor image transform proxy failed');
             return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
+    })
+
+    // POST /v1/storage/:ref/transform/bytes
+    // For business-owned S3/QNAP objects that are not registered in SupaCloud Storage.
+    .post('/:ref/transform/bytes', { detail: { tags: ["storage"], summary: "Transform an authenticated image byte stream" } }, async ({ params, query, request, set }) => {
+        return await transformRawImageBytes(
+            request,
+            params.ref,
+            query as Record<string, unknown>,
+            set as { headers: Record<string, string> },
+        );
     })
 
     // ── Enhanced imagor Features (beyond Supabase standard) ───────

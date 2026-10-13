@@ -620,6 +620,64 @@ describe("storage management routes", () => {
     }
   });
 
+  test("raw image transforms accept authenticated external-object bytes without a source URL", async () => {
+    const calls: Array<{ url: string; method?: string; contentType?: string }> = [];
+    const fetcher = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        contentType: (init?.headers as Record<string, string>)?.["Content-Type"],
+      });
+      return new Response("png", { headers: { "content-type": "image/png" } });
+    });
+
+    try {
+      const response = await request("/v1/storage/proj_1/transform/bytes?width=64&format=png", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer dev-master-token",
+          "Content-Type": "image/tiff",
+        },
+        body: new Uint8Array([1, 2, 3, 4]),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe("POST");
+      expect(calls[0]?.contentType).toBe("image/tiff");
+      expect(new URL(calls[0]?.url || "").searchParams.get("url")).toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
+  test("raw image transforms reject anonymous, non-image, and oversized requests", async () => {
+    const anonymous = await request("/v1/storage/proj_1/transform/bytes", {
+      method: "POST",
+      headers: { "Content-Type": "image/png" },
+      body: new Uint8Array([1]),
+    });
+    expect(anonymous.status).toBe(401);
+
+    const nonImage = await request("/v1/storage/proj_1/transform/bytes", {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-master-token", "Content-Type": "application/pdf" },
+      body: new Uint8Array([1]),
+    });
+    expect(nonImage.status).toBe(415);
+
+    const oversized = await request("/v1/storage/proj_1/transform/bytes", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "Content-Type": "image/png",
+        "Content-Length": String(64 * 1024 * 1024 + 1),
+      },
+      body: new Uint8Array([1]),
+    });
+    expect(oversized.status).toBe(413);
+  });
+
   test("image transforms report a missing source object as 404 and oversized sources as 413", async () => {
     const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
       id: "evidence",
