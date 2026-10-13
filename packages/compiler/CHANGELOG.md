@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.45.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.44.1...compiler-v0.45.0) (2026-10-13)
+
+
+### Features
+
+* **compiler:** enforce database governance mode ([#1869](https://github.com/vibeunion/supacloud/issues/1869)) ([e5fc691](https://github.com/vibeunion/supacloud/commit/e5fc69198e6220ddf5ccbc58e1f5b31804f05273))
+* **compiler:** make database source governance deterministic by default ([#1875](https://github.com/vibeunion/supacloud/issues/1875)) ([e340aed](https://github.com/vibeunion/supacloud/commit/e340aedca7c025462c23ad76a6ed0a553c061b5b))
+
 ## [0.44.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.44.0...compiler-v0.44.1) (2026-10-11)
 
 

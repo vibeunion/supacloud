@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.95.0](https://github.com/vibeunion/supacloud/compare/cli-v0.94.0...cli-v0.95.0) (2026-10-13)
+
+
+### Features
+
+* **compiler:** make database source governance deterministic by default ([#1875](https://github.com/vibeunion/supacloud/issues/1875)) ([e340aed](https://github.com/vibeunion/supacloud/commit/e340aedca7c025462c23ad76a6ed0a553c061b5b))
+
 ## [0.94.0](https://github.com/vibeunion/supacloud/compare/cli-v0.93.0...cli-v0.94.0) (2026-10-13)
 
 
