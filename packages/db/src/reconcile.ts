@@ -28,13 +28,18 @@ export function splitQualifiedName(name: string): [string, string] {
 }
 
 /**
- * Checks whether search_path is securely fixed:
- * Must be explicitly set (non-null), containing no empty elements or dynamic schemas like pg_temp.
+ * Checks explicit path configuration, not schema ACL safety.
+ * An empty path is allowed; mixed empty elements and dynamic schemas are rejected.
  */
 function isFixedSearchPath(searchPath: string | null): boolean {
   if (searchPath === null) return false;
+  if (searchPath.trim() === '' || searchPath.trim() === '""') return true;
   const parts = searchPath.split(',').map((part) => part.trim().replace(/^"|"$/g, ''));
-  return parts.every((part) => part !== '' && part.toLowerCase() !== 'pg_temp');
+  return parts.every((part) =>
+    part !== '' &&
+    part.toLowerCase() !== 'pg_temp' &&
+    part.toLowerCase() !== '$user',
+  );
 }
 
 export function reconcileModule(
@@ -54,7 +59,7 @@ export function reconcileModule(
   // missing-policy: Declared policy does not exist in catalog
   for (const policy of module.policies) {
     const [schema, table] = splitQualifiedName(policy.table);
-    const found = catalog.policies.some(
+    const found = catalog.policies.find(
       (cp) => cp.schema === schema && cp.table === table && cp.name === policy.name,
     );
     if (!found) {
@@ -64,6 +69,41 @@ export function reconcileModule(
         `${policy.table}.${policy.name}`,
         `声明的策略 ${policy.name} 在表 ${policy.table} 的 catalog 中不存在`,
       );
+    } else {
+      if (found.command !== policy.operation) {
+        push(
+          'error',
+          'policy-command-mismatch',
+          `${policy.table}.${policy.name}`,
+          `策略 ${policy.name} 声明为 ${policy.operation}，catalog 实际为 ${found.command}`,
+        );
+      }
+      if (!sameRoles(policy.roles, found.roles)) {
+        push(
+          'error',
+          'policy-roles-mismatch',
+          `${policy.table}.${policy.name}`,
+          `策略 ${policy.name} 声明角色与 catalog 不一致`,
+        );
+      }
+      if (policy.usingExpr !== undefined &&
+        policy.usingExpr !== (found.usingExpr ?? null)) {
+        push(
+          'error',
+          'policy-using-mismatch',
+          `${policy.table}.${policy.name}`,
+          `策略 ${policy.name} 的 USING 表达式与 catalog 不一致`,
+        );
+      }
+      if (policy.checkExpr !== undefined &&
+        policy.checkExpr !== (found.checkExpr ?? null)) {
+        push(
+          'error',
+          'policy-check-mismatch',
+          `${policy.table}.${policy.name}`,
+          `策略 ${policy.name} 的 WITH CHECK 表达式与 catalog 不一致`,
+        );
+      }
     }
   }
 
@@ -84,13 +124,29 @@ export function reconcileModule(
   // missing-function / security-mismatch / definer-without-search-path
   for (const fn of module.functions) {
     const [schema, name] = splitQualifiedName(fn.name);
-    const cf = catalog.functions.find((f) => f.schema === schema && f.name === name);
-    if (!cf) {
+    const candidates = catalog.functions.filter((f) => f.schema === schema && f.name === name);
+    if (candidates.length === 0) {
       push(
         'error',
         'missing-function',
         fn.name,
         `声明的函数 ${fn.name} 在 catalog 中不存在`,
+      );
+      continue;
+    }
+    const cf = fn.signature !== undefined
+      ? candidates.find((candidate) => functionSignature(candidate) === fn.signature)
+      : candidates.length === 1
+        ? candidates[0]
+        : undefined;
+    if (!cf) {
+      push(
+        'error',
+        fn.signature !== undefined ? 'missing-function' : 'ambiguous-function-overload',
+        fn.name,
+        fn.signature !== undefined
+          ? `声明的函数签名 ${fn.signature} 在 catalog 中不存在或缺少签名元数据`
+          : `函数 ${fn.name} 存在多个重载，声明必须包含完整 signature`,
       );
       continue;
     }
@@ -116,7 +172,7 @@ export function reconcileModule(
   // missing-trigger: Declared trigger does not exist in catalog (matched by schema.table + name)
   for (const trigger of module.triggers) {
     const [schema, table] = splitQualifiedName(trigger.table);
-    const found = catalog.triggers.some(
+    const found = catalog.triggers.find(
       (ct) => ct.schema === schema && ct.table === table && ct.name === trigger.name,
     );
     if (!found) {
@@ -125,6 +181,13 @@ export function reconcileModule(
         'missing-trigger',
         `${trigger.table}.${trigger.name}`,
         `声明的触发器 ${trigger.name} 在表 ${trigger.table} 的 catalog 中不存在`,
+      );
+    } else if (found.enabled !== (trigger.enabled ?? true)) {
+      push(
+        'error',
+        found.enabled ? 'trigger-enabled-mismatch' : 'disabled-trigger',
+        `${trigger.table}.${trigger.name}`,
+        `声明的触发器 ${trigger.name} 的启用状态与 catalog 不一致`,
       );
     }
   }
@@ -148,7 +211,14 @@ export function reconcileModule(
   for (const table of module.tables) {
     const [schema, name] = splitQualifiedName(table);
     const ct = catalog.tables.find((t) => t.schema === schema && t.name === name);
-    if (ct && !ct.rlsEnabled) {
+    if (!ct) {
+      push(
+        'error',
+        'missing-table',
+        table,
+        `声明的表 ${table} 在 catalog 中不存在`,
+      );
+    } else if (!ct.rlsEnabled) {
       push(
         'error',
         'rls-disabled',
@@ -196,4 +266,16 @@ export function reconcileModule(
     issues,
     ok: !issues.some((issue) => issue.severity === 'error'),
   };
+}
+
+function sameRoles(expected: string[], actual: string[]): boolean {
+  const normalize = (roles: string[]) => [...new Set(roles)].sort();
+  return JSON.stringify(normalize(expected)) === JSON.stringify(normalize(actual));
+}
+
+function functionSignature(
+  functionEntry: DatabaseCatalog['functions'][number],
+): string | undefined {
+  if (functionEntry.identityArguments === undefined) return undefined;
+  return `${functionEntry.schema}.${functionEntry.name}(${functionEntry.identityArguments})`;
 }
