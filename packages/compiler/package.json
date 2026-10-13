@@ -32,6 +32,7 @@
     "build": "bun run clean && bun run build:js && bun run build:types",
     "prepare:db": "bun install --cwd ../contracts --frozen-lockfile && bun run --cwd ../contracts build && bun install --cwd ../db --force --frozen-lockfile && bun run --cwd ../db build && bun install --force --frozen-lockfile",
     "prebuild": "bun run prepare:db",
+    "pretypecheck": "bun run prepare:db",
     "build:js": "bun build src/index.ts src/diagnostics.ts src/cli.ts src/delivery-bundle-worker.ts src/database-governance-worker.ts --outdir dist --target node --conditions=supacloud-source --external @typescript/typescript6 --external @supacloud/db --external @supacloud/db/source-contracts --external graphql --external '@graphql-codegen/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
