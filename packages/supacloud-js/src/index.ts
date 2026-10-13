@@ -35,6 +35,7 @@ export {
   type SupaCloudOAuthFetchOptions,
 } from "./auth-fetch.js";
 export * from "./workflows.js";
+export * from "./workflow-dispatcher.js";
 export { createSupaCloudWorkflowFetch, type SupaCloudWorkflowFetchOptions } from "./workflow-fetch.js";
 export { createSupaCloudCommandFetch, type SupaCloudCommandFetchOptions } from "./command-fetch.js";
 export { createSupaCloudArtifactFetch, type SupaCloudArtifactFetchOptions } from "./artifact-fetch.js";
