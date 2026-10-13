@@ -55,6 +55,7 @@ jobs:
       edge_runtime_released: ${{ steps.edge_recovery.outputs.tag != '' && 'true' || steps.release.outputs['packages/edge-runtime--release_created'] }}
       edge_runtime_tag_name: ${{ steps.edge_recovery.outputs.tag || steps.release.outputs['packages/edge-runtime--tag_name'] }}
       edge_runtime_source_commit: ${{ steps.edge_recovery.outputs.source_commit }}
+      edge_runtime_tag_commit: ${{ steps.edge_recovery.outputs.tag_commit }}
       pgredis_runtime_released: ${{ steps.release.outputs['packages/pgredis-runtime--release_created'] }}
       pgredis_runtime_tag_name: ${{ steps.release.outputs['packages/pgredis-runtime--tag_name'] }}
       supacloud_lite_released: ${{ steps.release.outputs['packages/supacloud-lite--release_created'] }}
@@ -348,10 +349,12 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
           RECOVERY_TAG: ${{ inputs.recover_edge_runtime_tag }}
+          RECOVERY_TAG_COMMIT: ${{ needs.release-please.outputs.edge_runtime_tag_commit }}
         run: |
           if [[ -n "$RECOVERY_TAG" ]]; then
             git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$RECOVERY_TAG_COMMIT"
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
             test "$(gh release view "$RELEASE_TAG" --json assets --jq '.assets | length')" = 0
             gh release upload "$RELEASE_TAG" packages/edge-runtime/dist/*
           else
