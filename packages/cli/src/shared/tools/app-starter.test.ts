@@ -224,6 +224,13 @@ test("attachment worker uses explicit queue ownership and a fatal delivery signa
     expect(worker).toContain("AND run_id=$3");
     expect(worker).toContain("failure: failure.promise");
     expect(worker).toContain("halted = true");
+    expect(worker).toContain("createSupaCloudWorkflowTransport");
+    expect(worker).toContain("acceptClaim: ownedClaim");
+    expect(worker).toContain("workflowTransport.ack(claim, output)");
+    expect(worker).toContain('workflowTransport.fail(claim, "Attachment verification failed")');
+    expect(worker).not.toContain("Parameters<typeof workflows.fail>");
+    expect(worker).not.toContain("workflows.retry(");
+    expect(worker).not.toContain("workflows.complete(");
     expect(host).toContain("failure: worker.failure");
     expect(host).toContain('required("REVIEW_QUEUE_OWNERSHIP")');
     for (const source of [worker, host]) {

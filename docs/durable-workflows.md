@@ -117,6 +117,58 @@ Use `retry` for a transient error, `fail` for a terminal error, `complete` for t
 
 `claim` can return `null`, `claimed`, `dead_lettered`, or `discarded`. A discarded result means the internal queue contained an invalid, orphaned, or no-longer-claimable message; it has already been archived and the worker can continue polling. A `40001` claim error indicates concurrent work on the same run; retry the claim because its queue lease was rolled back.
 
+For trusted process workers, `@supacloud/js` also exports
+`createSupaCloudWorkflowRegistry` and `createSupaCloudWorkflowDispatcher`.
+Register handlers by the exact `workflowName`, `workflowVersion`, and `stepKey`
+tuple, then call `dispatchOnce()` from the host's polling loop. The dispatcher
+only routes and settles one already-claimed step; it does not create another
+poller, retry loop, queue, or execution ledger. A handler returns an explicit
+`advance`, `complete`, `retry`, or `fail` result. Unknown workflow tuples and
+worker mismatches throw while leaving the claim unsettled for operator recovery.
+Handler exceptions also remain unsettled; the host must decide whether the
+process should stop or apply a reviewed recovery policy.
+
+Hosts that already execute compiled Jobs can instead use
+`createSupaCloudWorkflowTransport`. It adapts the same Workflow claim,
+completion, retry, and failure mutations to the host's claim/ack/fail contract.
+Pass an `acceptClaim` guard for application-specific queue ownership and
+database binding checks. Do not run this transport and the dispatcher against
+the same queue ownership; the compiled Job host remains the single executor.
+
+For a dedicated process that owns one worker identity, `dispatcher.run(signal)`
+provides the bounded polling loop. It sleeps only after an empty claim and stops
+on the supplied `AbortSignal`; it never retries a handler or reclaims a
+settlement. Handler results are validated before any settlement RPC is sent.
+This is the recommended host shape:
+
+```ts
+const dispatcher = createSupaCloudWorkflowDispatcher({
+  workflows: supacloud.workflows,
+  workerId: process.env.WORKER_ID!,
+  registry: createSupaCloudWorkflowRegistry([
+    {
+      workflowName: "invoice.issue",
+      workflowVersion: "1",
+      stepKey: "validate",
+      handler: {
+        decode(input) {
+          if (typeof input.invoiceId !== "string") throw new Error("invalid input");
+          return { invoiceId: input.invoiceId };
+        },
+        authorize(input) {
+          return input.invoiceId.length > 0;
+        },
+        execute(input) {
+          return { kind: "complete", runOutput: { invoiceId: input.invoiceId } };
+        },
+      },
+    },
+  ]),
+});
+
+await dispatcher.run(shutdownController.signal);
+```
+
 ## Application transition handoff
 
 Applications should append workflow intent to a private domain outbox in the
