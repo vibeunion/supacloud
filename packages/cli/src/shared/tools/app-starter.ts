@@ -89,7 +89,7 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
-  databaseGovernance: { mode: "enforce", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" },
+  databaseGovernance: { mode: "check", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" },
   effect: {
     requireRouteEffects: true,
     requireErrorMappings: true,

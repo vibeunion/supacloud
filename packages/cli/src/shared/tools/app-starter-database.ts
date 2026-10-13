@@ -151,14 +151,13 @@ After installing dependencies, run \`bun run db:generate\` once and commit db/co
 The default \`bun run check\` and build fail on stale database contracts before any
 compiler regeneration. After an intentional source change, run db:generate again,
 review the diff, then run check.
-The command starter defaults to databaseGovernance.mode = "enforce": compile/check/build
-perform SQL lint and live Catalog reconciliation using the explicitly supplied
-\`DATABASE_URL\`. Missing connections, stale source contracts and Catalog drift fail
-closed; no contracts or migrations are silently regenerated.
-The default \`bun run dev\` is the explicit fast exception and changes only the
-compiler check to offline mode; it never connects to an ambient database. Use
-\`bun run dev:integration\` with the CLI's explicit loopback database URL to run
-the live governance path locally.
+The command starter registers databaseGovernance.moduleFile = "db/modules.ts" and
+keeps the default \`databaseGovernance.mode = "check"\`: compile/check/build run
+the offline source-contract gate without a database. Use \`bun run dev:integration\`
+with the CLI's explicit loopback database URL, or set databaseGovernance.mode to
+"enforce" with an explicitly supplied \`DATABASE_URL\`, to run SQL lint and live
+Catalog reconciliation. Missing connections, stale source contracts and Catalog
+drift fail closed; no contracts or migrations are silently regenerated.
 
 - Maintain one schema-qualified function with explicit grants per db/functions/*.sql.
 - Preserve migrations/ and its existing executor/ledger. Add forward migrations only.
