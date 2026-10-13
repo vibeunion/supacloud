@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.45.0...compiler-v0.45.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **compiler:** forward validation context into delivery plan revalidation ([2fbec0f](https://github.com/vibeunion/supacloud/commit/2fbec0f903c0ea748a6d797df2416e53aae4ce9d))
+
 ## [0.45.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.44.1...compiler-v0.45.0) (2026-10-13)
 
 
