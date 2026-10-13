@@ -34,7 +34,6 @@ test('current generated starter runs through Lite bundling, routes, contracts an
     }
     const result = await compileProject({
       rootDir: join(project, 'src'), outDir: join(project, 'generated'),
-      graphql: { schema: join(project, 'graphql/schema.graphql') },
       commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true },
     })
     expect(result.diagnostics.filter((item) => item.severity === 'error')).toEqual([])

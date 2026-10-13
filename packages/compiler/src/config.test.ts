@@ -11,9 +11,12 @@ describe("SupaCloud default configuration", () => {
       root: "src",
       outDir: "generated",
       strict: true,
+      requireRouteContracts: true,
       generateClient: true,
       generatePermissions: true,
       treeShakeUnusedProviders: true,
+      disallowControllerDirectDb: true,
+      detectOrphanModules: true,
       moduleBoundaryPreset: "modular-monolith",
       graphql: false,
       effect: {
@@ -83,6 +86,7 @@ describe("SupaCloud default configuration", () => {
         scanProductionSource: true,
         noAnyInGenerated: true,
         exclude: ["legacy/**"],
+        allowAlternativeLibraries: ["graphql-request"],
       },
       allowRouteCommandBindings: false,
       disallowControllerDirectDb: true,
@@ -96,10 +100,18 @@ describe("SupaCloud default configuration", () => {
     expect(resolved.detectOrphanModules).toBe(true);
     expect(compileOptionsFromConfig({}, "/workspace")).not.toHaveProperty("moduleBoundaries");
     expect(compileOptionsFromConfig({}, "/workspace")).not.toHaveProperty("typeSafety");
+    expect(compileOptionsFromConfig({}, "/workspace")).toMatchObject({
+      requireRouteContracts: true,
+      disallowControllerDirectDb: true,
+      detectOrphanModules: true,
+    });
     expect(compileOptionsFromConfig({ moduleBoundaries: [] }, "/workspace").moduleBoundaries).toEqual([]);
     expect(compileOptionsFromConfig({
       disallowControllerDirectDb: false, detectOrphanModules: false,
-    }, "/workspace")).toMatchObject({ disallowControllerDirectDb: false, detectOrphanModules: false });
+      requireRouteContracts: false,
+    }, "/workspace")).toMatchObject({
+      requireRouteContracts: false, disallowControllerDirectDb: false, detectOrphanModules: false,
+    });
   });
 
   test("passes Effect governance through the standard configuration", () => {

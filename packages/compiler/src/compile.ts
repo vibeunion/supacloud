@@ -8,19 +8,23 @@ import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
 import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
-import { validateEffectPolicies } from "./effect-governance";
+import { validateEffectPolicies, validateJobPolicies } from "./effect-governance";
 import { checkDatabaseGovernance } from "./database-governance";
 
 function withDefaultGovernance(options: CompileOptions): CompileOptions {
-  return options.commandCapabilities === undefined
-    ? { ...options, commandCapabilities: {
+  return {
+    ...options,
+    requireRouteContracts: options.requireRouteContracts ?? true,
+    disallowControllerDirectDb: options.disallowControllerDirectDb ?? true,
+    detectOrphanModules: options.detectOrphanModules ?? true,
+    ...(options.commandCapabilities === undefined ? { commandCapabilities: {
       requirePersistentAdapters: true,
       permission: true,
       audit: true,
       idempotency: true,
       transaction: true,
-    } }
-    : options;
+    } } : {}),
+  };
 }
 
 async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlArtifacts> {
@@ -41,6 +45,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...validateGraph(graph, options),
     ...validateClientSchemaBoundaries(graph, options),
     ...validateEffectPolicies(graph, options.effect),
+    ...validateJobPolicies(graph),
   ];
   const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
   diagnostics.push(...databaseDiagnostics);
@@ -117,6 +122,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     ...validateGraph(graph, options),
     ...validateClientSchemaBoundaries(graph, options),
     ...validateEffectPolicies(graph, options.effect),
+    ...validateJobPolicies(graph),
   ];
   const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
   diagnostics.push(...databaseDiagnostics);
@@ -203,5 +209,8 @@ function resolveTypeSafety(options: CompileOptions): NonNullable<CompileOptions[
     noAnyInGenerated: true,
     scanProductionSource: true,
     ...(options.typeSafety?.exclude ? { exclude: options.typeSafety.exclude } : {}),
+    ...(options.typeSafety?.allowAlternativeLibraries
+      ? { allowAlternativeLibraries: options.typeSafety.allowAlternativeLibraries }
+      : {}),
   };
 }
