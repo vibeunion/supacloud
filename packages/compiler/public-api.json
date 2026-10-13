@@ -226,7 +226,7 @@
     {
       "name": "createDeliveryPlan",
       "kind": "value",
-      "signature": "export declare function createDeliveryPlan(graph: ApplicationGraph, input?: unknown): DeliveryPlanResult;"
+      "signature": "export declare function createDeliveryPlan(graph: ApplicationGraph, input?: unknown, validation?: ValidateOptions): DeliveryPlanResult;"
     },
     {
       "name": "createDependencyGraphCache",
