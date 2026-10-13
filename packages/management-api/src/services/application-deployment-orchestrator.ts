@@ -276,6 +276,9 @@ export class ApplicationDeploymentOrchestrator {
     if (!Value.Check(ApplicationDeployRequestSchema, request)) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_REQUEST_INVALID", 400);
     }
+    if (!this.dependencies.postgrestStatus) {
+      throw new ApplicationDeploymentOrchestrationError("APPLICATION_POSTGREST_STATUS_UNAVAILABLE", 503);
+    }
     const release = parseApplicationReleaseRecord(await this.dependencies.storage.readRelease(
       input.projectRef, input.applicationId, request.release_id,
     ));
@@ -397,12 +400,16 @@ export class ApplicationDeploymentOrchestrator {
         && plan.migrations.project_migrations_applied
         && plan.migrations.operator_provisioning === "not-declared";
       if (migrationAlreadyApplied) {
-        checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, null, false);
+        checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, null, false, release.manifest_sha256);
       } else {
         const executionPlan = await this.dependencies.migrations.readExecutionPlan({
           projectRef: input.projectRef, applicationId: input.applicationId, releaseId: request.release_id,
         });
-        if (executionPlan.ledger_digest !== plan.migrations.ledger_digest) {
+        if (executionPlan.project_ref !== input.projectRef
+          || executionPlan.application_id !== input.applicationId
+          || executionPlan.release_id !== request.release_id
+          || executionPlan.manifest_sha256 !== release.manifest_sha256
+          || executionPlan.ledger_digest !== plan.migrations.ledger_digest) {
           throw new ApplicationDeploymentOrchestrationError("APPLICATION_MIGRATION_PLAN_CHANGED", 409, binding);
         }
         if (!executionPlan.ledger_compatible) {
@@ -426,10 +433,10 @@ export class ApplicationDeploymentOrchestrator {
                 approvedMigrationDigest: request.approved_migration_digest,
               }),
             });
-            checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, migration, true);
+            checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, migration, true, release.manifest_sha256);
           });
         } else {
-          checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, null, false);
+          checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, null, false, release.manifest_sha256);
         }
       }
 
@@ -524,16 +531,20 @@ export class ApplicationDeploymentOrchestrator {
     checkpoint: DeployCheckpoint,
     migration: Awaited<ReturnType<ApplicationMigrations["apply"]>> | null,
     schemaReloaded: boolean,
+    manifestSha256: string,
   ): Promise<ApplicationBackendReceipt> {
+    if (!this.dependencies.postgrestStatus) {
+      throw new ApplicationDeploymentOrchestrationError("APPLICATION_POSTGREST_STATUS_UNAVAILABLE", 503);
+    }
     const afterPromise = migration?.after === undefined
       ? this.dependencies.migrations.inspect(input.projectRef, input.applicationId, input.request.release_id)
       : Promise.resolve(migration.after);
-    const postgrestPromise = this.dependencies.postgrestStatus
-      ? this.dependencies.postgrestStatus(input.projectRef)
-      : Promise.resolve({ actual: "running", health: "healthy" });
+    const postgrestPromise = this.dependencies.postgrestStatus(input.projectRef);
     const [after, postgrest] = await Promise.all([afterPromise, postgrestPromise]);
     if (after.project_ref !== input.projectRef || after.application_id !== input.applicationId
-      || after.release_id !== input.request.release_id || !after.ledger_compatible || !after.project_migrations_applied) {
+      || after.release_id !== input.request.release_id || after.manifest_sha256 !== manifestSha256
+      || !after.ledger_compatible || !after.project_migrations_applied
+      || after.operator_provisioning !== "not-declared") {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503);
     }
     if (postgrest.actual !== "running" || postgrest.health !== "healthy") {
