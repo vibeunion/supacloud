@@ -75,7 +75,7 @@ describe("immutable frontend release control", () => {
         });
     });
 
-    test("falls back to a single history record only for an unsupported active endpoint", async () => {
+    test("requires an upgrade without a history fallback for an unsupported active endpoint", async () => {
         const calls: string[] = [];
         const response = await readFrontendReleaseAuthority({
             get: async (path: string) => {
@@ -100,15 +100,10 @@ describe("immutable frontend release control", () => {
                 };
             },
         } as never, PROJECT_REF, DEPLOYMENT_ID);
-        expect(response.isError).not.toBe(true);
-        expect(calls).toHaveLength(3);
-        expect(calls[1]).toEndWith("?limit=1");
-        expect(calls[2]).toEndWith(`/${RELEASE_ID}`);
-        expect(parsed(response)).toMatchObject({
-            active_release_id: RELEASE_ID,
-            releases: [expect.objectContaining({ release_id: RELEASE_ID })],
-            next_cursor: null,
-        });
+        expect(response.isError).toBe(true);
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toEndWith("/active-release");
+        expect(parsed(response)).toMatchObject({ error: { code: "DEPLOYMENT_UPGRADE_REQUIRED" } });
     });
 
     test.each([401, 403, 500])("never downgrades a failed active snapshot HTTP %s", async (status) => {

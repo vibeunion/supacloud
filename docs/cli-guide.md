@@ -31,8 +31,8 @@ Project-scoped by default. Intended for project users and developers.
 
 ### First-run project setup
 
-For an existing Vue/Vite, Svelte or static frontend, initialize the deployment
-contract once:
+For an existing SupaCloud application with a Vue/Vite, Svelte or static frontend,
+initialize the project profiles once:
 
 ```bash
 supacloud init
@@ -46,6 +46,9 @@ supacloud --env test deploy
 and adds ignore rules for real profile files. It never overwrites an existing
 `supacloud.json`. The output directory is inferred from the detected framework
 (`dist` for Vite/Vue, `out` for Next.js and `build` for Svelte).
+Set `SUPACLOUD_APPLICATION_ID` in the selected profile to the application's ID,
+and configure its current SupaCloud delivery build. A standalone frontend profile
+without an application binding no longer enables deployment.
 
 Copy an example to a real profile and fill in credentials locally:
 
@@ -85,20 +88,16 @@ supacloud supabase db_diff --schema public --name add_accounts
 supacloud supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud frontend list --ref abc123
 supacloud frontend list_releases --ref abc123 --id web
-supacloud frontend upload_release --ref abc123 --id web --archive_path ./dist.tar.zst
 ```
 
 ### One-command deploy
 
-`supacloud deploy` is the normal developer path for a linked application. It
-supports a frontend and backend living in separate directories. Frontend targets
-use immutable static releases; `edge_function` targets use the existing verified
-Edge Function bundle protocol. The command runs the target build, publishes only
-that target, and reads the final identity back. Targets may declare a `buildEnv`
-allowlist in `supacloud.json`; selected environment profile values are injected
-only into the local build command. Missing declared variables fail before the
-build, while `--dry_run --json` reports variable names and missing names without
-printing values.
+`supacloud deploy` publishes a linked application through the unified project
+deployment endpoint. The CLI builds and uploads artifacts; SupaCloud plans the
+release, handles migrations, reads CAS, activates Web and verifies the result.
+The CLI first performs a bounded read-only protocol check. A missing, mismatched
+or cross-environment response stops the command before building or uploading.
+Upgrade the CLI and server together; there is no legacy deployment fallback.
 
 ### Application rollback
 
@@ -171,31 +170,18 @@ supacloud --env test dev migrate
 supacloud --env test dev migrate --apply
 ```
 
-Simple single-frontend projects usually need no file. Monorepos should add a
-repository-root `supacloud.json`:
+Bind the application in the selected profile or repository-root `supacloud.json`.
+For a frontend in a separate directory:
 
 ```json
 {
-  "defaultTarget": "web",
-  "targets": {
-    "web": {
-      "type": "frontend",
-      "root": "apps/web",
-      "id": "web",
-      "buildCommand": "bun run build",
-      "outputDirectory": "dist",
-      "buildEnv": ["VITE_API_URL", "VITE_SUPABASE_ANON_KEY"]
-    },
-    "api": {
-      "type": "edge_function",
-      "root": "apps/api",
-      "slug": "api",
-      "buildCommand": "bun run bundle",
-      "bundleDirectory": "dist",
-      "entrypoint": "index.ts",
-      "verifyJwt": true,
-      "minify": true
-    }
+  "application": { "id": "orders", "environmentId": "test" },
+  "frontend": {
+    "root": "apps/web",
+    "id": "web",
+    "buildCommand": "bun run build",
+    "outputDirectory": "dist",
+    "buildEnv": ["VITE_API_URL", "VITE_SUPABASE_ANON_KEY"]
   }
 }
 ```
@@ -206,41 +192,19 @@ private keys. Runtime secrets use the separate Secrets API and are never copied
 into a static frontend build.
 
 ```bash
-# From a target workspace, the target is selected automatically.
-cd apps/web
-supacloud deploy
-cd ../api
-supacloud deploy
-
-# From the repository root, select a target explicitly.
-supacloud deploy --target web
-supacloud deploy --target api
-
-# Inspect the resolved plan without building or writing remotely.
-supacloud deploy --target web --dry_run
-
-# Publish an output directory already built by CI.
-supacloud deploy --target web --skip_build --output_dir dist
+# Upgrade before migrating an old deployment script.
+npm install -g @supacloud/cli@latest
+supacloud --env test deploy
+# Existing Web output and an application manifest configured in the profile:
+supacloud --env test deploy --skip_build
 ```
 
-When multiple targets exist and the command runs at the repository root, it
-fails closed unless `defaultTarget` or `--target` is provided. Running inside a
-target directory selects the deepest matching `root`. Relative output and bundle
-directories are resolved against that target root, while lockfiles are detected
-from the target root up to the repository root.
-
-The legacy shape remains supported:
-
-```json
-{
-  "frontend": {
-    "id": "web",
-    "root": "apps/web",
-    "buildCommand": "bun run build",
-    "outputDirectory": "dist"
-  }
-}
-```
+`--target`, `--id`, `--build_command`, `--output_dir`, `--plan`, `--diff` and
+`--dry_run` were removed from `deploy`. Build settings belong in configuration.
+Use `app deploy-plan` for an explicit read-only review of an uploaded application
+release. Standalone `edge_function` target declarations must be migrated to the
+application delivery configuration; the CLI will not silently omit them.
+Historical `deploy-manifest.json` files must be migrated, not reused as scopes.
 
 Production profiles retain the standard explicit confirmation gate:
 
@@ -561,15 +525,14 @@ Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for ap
 - `diagnostics`
 - `gateway` (requires an admin-capable token)
 
-The `frontend` group supports both the existing deployment/Git/tar.zst
-actions and immutable prebuilt release control. Use `get_active_release` to read
+The `frontend` group supports hosting management, inspection and explicit
+operator rollback. Use `get_active_release` to read
 the verified current artifact and activation IDs without scanning historical
 archives. `list_releases` remains the paginated, full-integrity audit interface.
-Use `upload_release` to stream a local tar.zst archive bound
-to its SHA-256, and `activate_release` with the observed IDs plus a retry-stable
-UUIDv4 mutation ID. The CLI verifies upload and activation readback before
-reporting success. Production mutations require exact project confirmation;
-read-only mode blocks them before opening the archive or sending HTTP.
+Publishing commands `deploy_git`, `deploy_upload`, `redeploy`, `upload_release`
+and `activate_release` were removed. Use `supacloud deploy` instead.
+Production mutations require exact project confirmation; read-only mode blocks
+them before opening an archive or sending HTTP.
 
 ```bash
 supacloud frontend list_releases --ref abc123 --id web
@@ -577,31 +540,25 @@ supacloud frontend get_active_release --ref abc123 --id web
 supacloud frontend get_release --ref abc123 --id web --release_id <sha256>
 supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 supacloud frontend rollback --ref abc123 --id web
-supacloud frontend activate_release --ref abc123 --id web \
-  --release_id <sha256> \
-  --expected_active_release_id <current-sha256-or-absent> \
-  --expected_activation_id <current-uuid-v4-or-absent> \
-  --mutation_id <retry-stable-uuid-v4>
 ```
 
 The active snapshot is read-only and protected by the deployment lock. It
 verifies the active immutable archive/tree, returns zero or one release, and
-does not hash unrelated historical releases. All consumers, including `deploy`,
-`rollback` and activation readback, use this path; an older server returning HTTP
-404 automatically falls back to `limit=1` plus exact active artifact readback
-and receives the same zero-or-one contract. Authentication, malformed snapshots and server
-failures never trigger this fallback.
+does not hash unrelated historical releases. Inspection and operator rollback
+use this path. An HTTP 404 reports that the deployment or endpoint is missing;
+check the deployment and upgrade the server. There is no historical-inventory
+fallback for older servers.
 
-For immutable frontend deployments the platform already retains previous
-artifacts. `deploy --json` returns `previous_release_id` and
-`previous_activation_id` alongside the new CAS identity. For an operator rollback,
+For immutable frontend deployments the platform retains previous artifacts.
+`deploy --json` returns the bound application deployment receipt, not
+client-side CAS instructions. For an operator rollback,
 run `frontend rollback`; SupaCloud supplies the journal-verified previous
 release, while the CLI observes current CAS and creates the mutation UUID.
 An explicit `--release_id <previous-release-sha256>` remains available for a
 deliberate target. Concurrent writes fail without refreshing CAS or retrying.
 Release history is content-hash-sorted, so the client never guesses from its
-first record. Automated compensation tied to a release receipt must still
-use `activate_release` with that receipt's expected identity, never refresh it.
+first record. Automated deployment compensation belongs on the server, not in
+client scripts that refresh CAS and retry writes.
 No download, rebuild or reupload is needed. A null previous release indicates legacy/initial
 deployment, not a verified rollback backup. This does not replace database or
 Storage backups and never authorizes automatic database restore.

@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
+import { ApplicationIdSchema } from "@supacloud/delivery";
 import { resolveSupaCloudContext, type ContextCredentialScope, type ResolvedContext } from "../context";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -68,6 +70,7 @@ const TEST_PROFILE = [
     "SUPACLOUD_API_URL=https://management.test.example.com",
     "SUPACLOUD_API_TOKEN=<test-management-api-token>",
     "SUPACLOUD_PROJECT_REF=<test-project-ref>",
+    "SUPACLOUD_APPLICATION_ID=<application-id>",
     "",
 ].join("\n");
 
@@ -76,6 +79,7 @@ const PRODUCTION_PROFILE = [
     "SUPACLOUD_API_URL=https://management.example.com",
     "SUPACLOUD_API_TOKEN=<production-management-api-token>",
     "SUPACLOUD_PROJECT_REF=<production-project-ref>",
+    "SUPACLOUD_APPLICATION_ID=<application-id>",
     "",
 ].join("\n");
 
@@ -200,6 +204,7 @@ async function initializeProject(request: InitRequest, options: DeveloperExperie
         },
         next: [
             "cp .env.supacloud.test.example .env.supacloud.test",
+            "Set SUPACLOUD_APPLICATION_ID to the application's ID and configure its current SupaCloud delivery build.",
             "supacloud env check",
             "supacloud --env test deploy",
         ],
@@ -254,16 +259,16 @@ function statusMissing(context: ResolvedContext): string[] {
     return ["SUPACLOUD_API_URL", "SUPACLOUD_API_TOKEN", "SUPACLOUD_PROJECT_REF"];
 }
 
-function deployMissing(context: ResolvedContext): string[] {
+function deployMissing(context: ResolvedContext, application?: Record<string, unknown> | null): string[] {
     const missing = statusMissing(context);
     if (context.credentialScope !== "management") {
         return [...missing, "Management API context"];
     }
-    if (context.applicationId) {
-        if (!context.applicationEnvironmentId) missing.push("SUPACLOUD_APPLICATION_ENVIRONMENT_ID");
-        if (!context.applicationConfigurationPath && !context.applicationConfigurationId) {
-            missing.push("SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
-        }
+    if (!Value.Check(ApplicationIdSchema, context.applicationId || application?.id)) {
+        missing.push("valid SUPACLOUD_APPLICATION_ID or supacloud.json application.id");
+    }
+    if (!Value.Check(ApplicationIdSchema, context.applicationEnvironmentId || application?.environmentId)) {
+        missing.push("valid SUPACLOUD_APPLICATION_ENVIRONMENT_ID or SUPACLOUD_ENV");
     }
     return missing;
 }
@@ -274,7 +279,13 @@ async function inspectProfile(profile: EnvironmentProfile): Promise<EnvironmentR
             environmentName: profile.name,
         });
         const status = statusMissing(context);
-        const deploy = deployMissing(context);
+        const configText = await readFile(join(dirname(profile.path), "supacloud.json"), "utf8")
+            .catch((error: unknown) => {
+                if (error instanceof Error && "code" in error && error.code === "ENOENT") return "{}";
+                throw error;
+            });
+        const config = record(JSON.parse(configText));
+        const deploy = deployMissing(context, record(config?.application));
         return {
             name: profile.name,
             path: profile.path,

@@ -6,6 +6,7 @@ import {
     FRONTEND_ARCHIVE_CONTENT_TYPE, FRONTEND_ARCHIVE_FORMAT, FRONTEND_ARCHIVE_RELEASE_SCHEMA,
 } from "@supacloud/delivery/frontend-archive";
 import type { HttpResult } from "../transports/http";
+import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
 
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,20}$/u;
 const DEPLOYMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
@@ -65,7 +66,7 @@ interface FrontendReleaseInventory {
 }
 
 type ActiveReleaseSnapshot =
-    | { inventory: FrontendReleaseInventory; exactReadback: boolean }
+    | { inventory: FrontendReleaseInventory }
     | { failure: ToolResponse; status: number };
 
 interface LocalArchive {
@@ -582,10 +583,6 @@ async function activeReleaseReadback(
         || inventory.active_activation_id !== identity.mutationId) {
         return { release: null, status: 200 };
     }
-    if (snapshot.exactReadback) {
-        return { release: inventory.releases[0] ?? null, status: 200 };
-    }
-
     const releaseRead = await http.get(releasePath(
         identity.projectRef,
         identity.deploymentId,
@@ -617,41 +614,22 @@ async function readActiveFrontendRelease(
             || (inventory.releases[0] && inventory.releases[0].release_id !== inventory.active_release_id)) {
             return { failure: releaseReadFailure("frontend.get_active_release", response), status: response.status };
         }
-        return { inventory, exactReadback: false };
+        return { inventory };
     }
-    if (response.ok || response.status !== 404) {
-        return { failure: releaseReadFailure("frontend.get_active_release", response), status: response.status };
-    }
-
-    // 旧 Management API 没有 active-release 路由：限制历史页为 1 条，
-    // 再按权威 active_release_id 精确读回，避免把排序后的第一条误当成当前版本。
-    const historyResponse = await http.get(`${releaseEndpoint(projectRef, deploymentId)}?limit=1`, {
-        maxJsonBytes: RESPONSE_MAX_BYTES,
-    });
-    const history = historyResponse.ok && historyResponse.status === 200
-        ? releaseInventory(historyResponse.data, { projectRef, deploymentId }) : null;
-    if (!history || history.releases.length > 1) {
+    if (response.status === 404) {
         return {
-            failure: releaseReadFailure("frontend.get_active_release", historyResponse),
-            status: historyResponse.status,
+            failure: {
+                isError: true,
+                content: [{ type: "text", text: JSON.stringify({
+                    ok: false, operation: "frontend.get_active_release",
+                    error: { code: "DEPLOYMENT_UPGRADE_REQUIRED", http_status: 404,
+                        message: `${DEPLOYMENT_UPGRADE} Check that the deployment exists and upgrade the server if this endpoint is unavailable.` },
+                }) }],
+            },
+            status: response.status,
         };
     }
-    if (history.active_release_id === null) {
-        return { inventory: { ...history, releases: [], next_cursor: null }, exactReadback: false };
-    }
-    const exactResponse = await http.get(releasePath(projectRef, deploymentId, history.active_release_id), {
-        maxJsonBytes: RESPONSE_MAX_BYTES,
-    });
-    const release = exactResponse.ok && exactResponse.status === 200
-        ? releaseEnvelope(exactResponse.data, { projectRef, deploymentId, releaseId: history.active_release_id })
-        : null;
-    if (!release) {
-        return {
-            failure: releaseReadFailure("frontend.get_active_release", exactResponse),
-            status: exactResponse.status,
-        };
-    }
-    return { inventory: { ...history, releases: [release], next_cursor: null }, exactReadback: true };
+    return { failure: releaseReadFailure("frontend.get_active_release", response), status: response.status };
 }
 
 export async function getActiveFrontendRelease(
@@ -775,7 +753,6 @@ async function readPreviousFrontendRelease(
             active_release_id: activeReleaseId, active_activation_id: activeActivationId,
             releases: [], next_cursor: null,
         },
-        exactReadback: false,
         ...(previous ? { previousRelease: previous } : {}),
     };
 }

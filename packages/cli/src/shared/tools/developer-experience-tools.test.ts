@@ -27,7 +27,7 @@ async function workspace(): Promise<string> {
 }
 
 describe("developer experience tools", () => {
-    test("init creates deploy config, safe profile examples, and gitignore rules", async () => {
+    test("init creates Web build config and requires application binding in profile examples", async () => {
         const root = await workspace();
         await writeFile(join(root, "package.json"), JSON.stringify({
             scripts: { build: "vite build" },
@@ -45,6 +45,7 @@ describe("developer experience tools", () => {
         expect(await readFile(join(root, ".gitignore"), "utf8"))
             .toContain(".env.supacloud.*");
         expect(response.content[0].text).toContain("supacloud env check");
+        expect(response.content[0].text).toContain("SUPACLOUD_APPLICATION_ID");
     });
 
     test("init never overwrites existing deployment configuration", async () => {

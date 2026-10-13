@@ -323,12 +323,12 @@ describe("supacloud process contract", () => {
         expect(response.exitCode).toBe(0);
         expect(response.stderr).toContain("list_releases");
         expect(response.stderr).toContain("get_release");
-        expect(response.stderr).toContain("upload_release");
-        expect(response.stderr).toContain("activate_release");
-        expect(response.stderr).toContain("--archive_path");
-        expect(response.stderr).toContain("--expected_active_release_id");
-        expect(response.stderr).toContain("--expected_activation_id");
-        expect(response.stderr).toContain("--mutation_id");
+        expect(response.stderr).not.toContain("upload_release");
+        expect(response.stderr).not.toContain("activate_release");
+        expect(response.stderr).not.toContain("--archive_path");
+        expect(response.stderr).not.toContain("--expected_active_release_id");
+        expect(response.stderr).not.toContain("--expected_activation_id");
+        expect(response.stderr).not.toContain("--mutation_id");
     });
 
     test("runs migration lint locally without project credentials", async () => {
@@ -490,7 +490,7 @@ describe("supacloud process contract", () => {
         expect(requestedPaths).toEqual([]);
     });
 
-    test("blocks production frontend release upload before file or HTTP without exact confirmation", async () => {
+    test("rejects removed production frontend upload before file or HTTP access", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-frontend-"));
         temporaryDirectories.push(workspace);
         let requestCount = 0;
@@ -516,12 +516,12 @@ describe("supacloud process contract", () => {
         ], {}, workspace);
 
         expect(response.exitCode).toBe(1);
-        expect(response.stderr).toContain("--confirm-production prod-ref");
+        expect(response.stderr).toContain("DEPLOYMENT_UPGRADE_REQUIRED");
         expect(response.stdout + response.stderr).not.toContain("frontend-production-token");
         expect(requestCount).toBe(0);
     });
 
-    test("runs authoritative immutable frontend release list, upload, and activation flows", async () => {
+    test("retains frontend release inspection but rejects removed upload and activation commands", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-frontend-release-"));
         temporaryDirectories.push(workspace);
         const archivePath = join(workspace, "site.tar.zst");
@@ -618,33 +618,12 @@ describe("supacloud process contract", () => {
 
         expect(listed.exitCode).toBe(0);
         expect(JSON.parse(listed.stdout).releases).toHaveLength(1);
-        expect(uploaded.exitCode).toBe(0);
-        expect(JSON.parse(uploaded.stdout).release.release_id).toBe(releaseId);
-        expect(activated.exitCode).toBe(0);
-        expect(JSON.parse(activated.stdout)).toMatchObject({
-            active_release_id: releaseId,
-            activation_id: mutationId,
-        });
+        expect(uploaded.exitCode).toBe(1);
+        expect(uploaded.stderr).toContain("DEPLOYMENT_UPGRADE_REQUIRED");
+        expect(activated.exitCode).toBe(1);
+        expect(activated.stderr).toContain("DEPLOYMENT_UPGRADE_REQUIRED");
         expect(requested).toEqual([
             { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}?limit=50` },
-            {
-                method: "POST",
-                path: releaseBasePath(projectRef, deploymentId),
-                sha256: releaseId,
-            },
-            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}` },
-            {
-                method: "POST",
-                path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}/activate`,
-                body: {
-                    expected_active_release_id: "absent",
-                    expected_activation_id: "absent",
-                    mutation_id: mutationId,
-                },
-            },
-            { method: "GET", path: `/v1/projects/${projectRef}/frontend/deployments/${deploymentId}/active-release` },
-            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}?limit=1` },
-            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}` },
         ]);
         expect(listed.stdout + uploaded.stdout + activated.stdout).not.toContain("frontend-test-token");
     });

@@ -86,9 +86,21 @@ test("project endpoint submits one bound application request and returns a verif
 
 test("authorization rejection prevents all deployment and status calls", async () => {
   const f = fixture({ denied: true });
-  for (const request of [post(), new Request(`${base}/${deploymentId}`), post(`${base}/${deploymentId}/reconcile`, {})]) {
+  for (const request of [post(), new Request(`${base}/protocol`), new Request(`${base}/${deploymentId}`), post(`${base}/${deploymentId}/reconcile`, {})]) {
     expect((await f.app.handle(request)).status).toBe(403);
   }
+  expect(f.calls).toEqual([]);
+  expect(f.reads).toEqual([]);
+});
+
+test("protocol discovery is bound to the authorized project and environment without execution", async () => {
+  const f = fixture();
+  const response = await f.app.handle(new Request(`${base}/protocol`));
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    protocol: "supacloud.project-deployment.v1", project_ref: "demo", environment_id: "test",
+  });
   expect(f.calls).toEqual([]);
   expect(f.reads).toEqual([]);
 });

@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { parseToolArguments, type ToolArguments, type ToolSchema } from "./schema.js";
+import { assertCurrentDeploymentInput } from "./deployment-upgrade";
 
 export interface ToolTextContent {
     readonly type: "text";
@@ -37,6 +38,7 @@ export function registerTool<S extends ToolSchema, TResult extends ToolResult = 
     callback: ToolCallback<NoInfer<ToolArguments<S>>, TResult>,
 ): void {
     server.tool(name, description, schema, async (input) => {
+        assertCurrentDeploymentInput(name, input);
         const args = parseToolArguments(schema, input);
         const result = await callback(args);
         if (!Value.Check(resultSchema, result)) throw new Error(`Invalid result from tool '${name}'`);

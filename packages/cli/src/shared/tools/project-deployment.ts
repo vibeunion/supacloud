@@ -7,6 +7,28 @@ import type { ToolResult } from "../tool-server";
 import type { HttpTransport } from "../transports/http";
 import { releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess } from "./release-control-response";
 
+export async function requireProjectDeploymentProtocol(
+    http: Pick<HttpTransport, "get">,
+    projectRef: string,
+    environmentId: string,
+): Promise<void> {
+    const response = await http.get(
+        `/v1/projects/${encodeURIComponent(projectRef)}/environments/${encodeURIComponent(environmentId)}/deployments/protocol`,
+        { retry: false, totalTimeoutMs: 5_000, maxJsonBytes: 4_096 },
+    );
+    if (response.transportError || response.responseReadError || response.status >= 500
+        || response.status === 401 || response.status === 403 || response.status === 429) {
+        throw new Error(`DEPLOYMENT_PROTOCOL_UNAVAILABLE: Cannot verify the selected server (HTTP ${response.status}). Check connectivity, credentials and server health; no upload or deployment was attempted.`);
+    }
+    const data = response.data;
+    if (response.status !== 200 || !response.ok || !data || typeof data !== "object"
+        || !("protocol" in data) || data.protocol !== "supacloud.project-deployment.v1"
+        || !("project_ref" in data) || data.project_ref !== projectRef
+        || !("environment_id" in data) || data.environment_id !== environmentId) {
+        throw new Error("DEPLOYMENT_PROTOCOL_MISMATCH: Upgrade the SupaCloud server and CLI together (`npm install -g @supacloud/cli@latest`), then retry `supacloud deploy`. No upload or deployment was attempted; legacy endpoints will not be used.");
+    }
+}
+
 const operation = "applications.project_deploy";
 const scopeSchema = Type.Object({
     project_ref: Type.String({ pattern: "^[a-z0-9-]{1,20}$" }),

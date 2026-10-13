@@ -24,6 +24,7 @@ test("Admin preparation refreshes public runtime files after a clean file-depend
         await mkdir(admin, { recursive: true });
         for (const file of [
             "src/tool-runtime.ts", "src/shared/schema.ts", "src/shared/tool-server.ts",
+            "src/shared/deployment-upgrade.ts",
             "tsconfig.json", "tsconfig.tool-runtime.json",
         ]) {
             const destination = join(cli, file);

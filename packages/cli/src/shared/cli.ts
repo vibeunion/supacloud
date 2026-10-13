@@ -9,6 +9,7 @@ import {
 import type { ToolSchema } from "./schema";
 import type { ToolInvocation } from "./tool-server";
 import { outcomeUnknownGuidance } from "./outcome-guidance";
+import { assertCurrentDeploymentInput } from "./deployment-upgrade";
 
 interface CliRunOptions {
     commandName?: string;
@@ -183,6 +184,7 @@ export async function runCli(
     try {
         const parsedArgs = parseCliFlags(args, startIdx, tool.schema);
         if (startIdx === 2) parsedArgs.action = args[1];
+        assertCurrentDeploymentInput(args[0], parsedArgs);
         validateToolArguments(tool.schema, parsedArgs);
 
         const result = await tool.callback(parsedArgs);
