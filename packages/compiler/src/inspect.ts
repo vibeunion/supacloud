@@ -201,23 +201,27 @@ function sanitizeContextModule(module: ModuleNode): ModuleNode {
         functionalInjects: provider.functionalInjects.map((inject) => ({ ...inject, expression: "[omitted]" })),
       }),
     })),
-    aspects: module.aspects?.map(sanitizeAspect),
+    ...(module.aspects === undefined ? {} : { aspects: module.aspects.map(sanitizeAspect) }),
     controllers: module.controllers.map((controller) => ({
       ...controller,
-      functionalInjects: controller.functionalInjects?.map((inject) => ({ ...inject, expression: "[omitted]" })),
+      ...(controller.functionalInjects === undefined ? {} : {
+        functionalInjects: controller.functionalInjects.map((inject) => ({ ...inject, expression: "[omitted]" })),
+      }),
       routes: controller.routes.map((route) => ({
         ...route,
-        aspects: route.aspects?.map(sanitizeAspect),
+        ...(route.aspects === undefined ? {} : { aspects: route.aspects.map(sanitizeAspect) }),
       })),
     })),
     commands: module.commands.map((command) => ({
       ...command,
-      aspects: command.aspects?.map(sanitizeAspect),
+      ...(command.aspects === undefined ? {} : { aspects: command.aspects.map(sanitizeAspect) }),
     })),
-    jobs: module.jobs?.map((job) => ({
-      ...job,
-      aspects: job.aspects?.map(sanitizeAspect),
-    })),
+    ...(module.jobs === undefined ? {} : {
+      jobs: module.jobs.map((job) => ({
+        ...job,
+        ...(job.aspects === undefined ? {} : { aspects: job.aspects.map(sanitizeAspect) }),
+      })),
+    }),
   };
 }
 

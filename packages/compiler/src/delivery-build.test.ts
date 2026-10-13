@@ -74,8 +74,9 @@ test("isolates route owners, includes assets, and invalidates only dependent tar
       ...GOOD_PROJECT_FILES,
       "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
       "src/features/health/health.module.ts": `import { Module, Controller, Get } from "../../runtime";
+        export const HealthStatus = {type: "string"} as const;
         @Controller("/health") export class HealthController {
-          @Get("/", { response: {type: "string"} }) status(): string { return "ok"; }
+          @Get("/", { response: HealthStatus }) status(): string { return "ok"; }
         }
         @Module({name: "health", controllers: [HealthController]}) export class HealthModule {}`,
       "src/template.txt": "first",
@@ -184,7 +185,7 @@ test("keeps shared-module routes private to their owner and preserves Job factor
       "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
       "src/features/audit/audit.module.ts": GOOD_PROJECT_FILES["src/features/audit/audit.module.ts"]
         .replace('import { Module }', 'import { Module, Controller, Get }')
-        .replace("@Module({", '@Controller("/audit") export class AuditController { @Get("/", {response: {type: "string"}}) status(): string {return "ok";} }\n@Module({controllers: [AuditController],'),
+        .replace("@Module({", 'export const AuditStatus = {type:"string"} as const;\n@Controller("/audit") export class AuditController { @Get("/", {response: AuditStatus}) status(): string {return "ok";} }\n@Module({controllers: [AuditController],'),
       "src/jobs.module.ts": `import { Job, Module } from "./runtime";
         import { AuditModule } from "./features/audit/audit.module";
         @Job({name: "case.rebuild"}) export class RebuildJob {run(input: string): string {return input;}}

@@ -33,8 +33,9 @@ async function fixture() {
     "tsconfig.json": FIXTURE_TSCONFIG.replace('"strict": true', '"strict": true, "skipLibCheck": true, "types": ["bun"]'),
     "src/runtime.ts": RUNTIME_SOURCE.replaceAll("() => {}", "(..._args: unknown[]) => {}"),
     "src/health.ts": `import { Module, Controller, Get } from "./runtime";
+      export const HealthStatus = {type: "string"} as const;
       @Controller("/health") export class HealthController {
-        @Get("/", {response: {type: "string"}}) status(): string {return "ready";}
+        @Get("/", {response: HealthStatus}) status(): string {return "ready";}
       }
       @Module({name: "health", controllers: [HealthController]}) export class HealthModule {}`,
     "src/host.ts": hostSource,
@@ -78,8 +79,9 @@ test("detached execution feedback uses its verified build snapshot without curre
   try {
     await writeFixtureProject(project, {
       "src/health.ts": `import { Module, Controller, Get } from "./runtime";
+        export const HealthStatus = {type: "string"} as const;
         @Controller("/health") export class HealthController {
-          @Get("/", {response: {type: "string"}}) status(): string {throw new Error("private-business-value");}
+          @Get("/", {response: HealthStatus}) status(): string {throw new Error("private-business-value");}
         }
         @Module({name: "health", controllers: [HealthController]}) export class HealthModule {}`,
       "src/host.ts": `import { createApplication, type CompiledModule, type ExecutionEvent } from "@supacloud/elysia";

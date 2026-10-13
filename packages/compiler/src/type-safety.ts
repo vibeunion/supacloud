@@ -155,7 +155,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
     diagnostics.push(...scanSourceSemantics(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), rootDir,
-      { allowAlternativeLibraries: options.allowAlternativeLibraries },
+      options.allowAlternativeLibraries === undefined ? {} : { allowAlternativeLibraries: options.allowAlternativeLibraries },
     ));
     diagnostics.push(...scanDrizzleSql(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
