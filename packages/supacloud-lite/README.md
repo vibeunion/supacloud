@@ -159,6 +159,7 @@ supacloud-lite start
 supacloud-lite migrate
 supacloud-lite status
 supacloud-lite keys [--service-role]
+supacloud-lite auth create-user --email <email> --password-stdin [--email-confirm] [--json]
 supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
@@ -173,6 +174,21 @@ supacloud-lite version
 ```
 
 首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。
+
+#### 创建本地 Auth 账号
+
+先停止项目服务，再从受保护的文件或密码管理器管道提供密码：
+
+```sh
+supacloud-lite auth create-user --project-dir ./my-project \
+  --email operator@example.com --password-stdin --email-confirm --json < /secure/password.txt
+```
+
+不要将密码写进命令行参数或 shell 历史；文件应限制为当前用户可读，并按自己的凭据管理流程清理。命令只接受 stdin 的一行 UTF-8 密码（最多 4096 字节），移除末尾一个 LF/CRLF，保留空格。交互终端输入和 `--password` 参数会被拒绝。
+
+这是离线、本地账号创建操作，不连接远程 Auth API，不执行待应用的业务迁移、seed、函数或 webhook；请先用 `migrate` 初始化应用 schema。即使关闭公开注册，也可以由本机管理员创建账号。邮箱默认未确认；只有管理员已核实邮箱时才加 `--email-confirm`。未确认账号能否登录仍受项目的邮箱确认配置控制，命令不会发送确认邮件。
+
+命令遵守有效密码长度策略，拒绝重复邮箱（不覆盖密码）、`--memory`、禁用 Auth、外部身份模式及占用中的数据目录。输出仅含用户 ID、邮箱和确认状态，不含密码、项目密钥或登录 token。该账号使用普通 `authenticated` 角色；业务权限仍由应用自己的成员关系和 RLS 管理。
 
 `db diff` / `db pull` 只读检查现有数据库，不会初始化 live backend 或自动应用待执行迁移；已应用历史必须与本地迁移精确一致。生成的 DDL 先在不含 seed 的临时影子数据库中重放并核对受支持的 Catalog。检测到不能完整重建的 view/function/trigger/policy、权限、RLS 或非追加 enum 变更时拒绝生成，改用官方 Supabase pg-delta；这不是完整 PostgreSQL Catalog 覆盖。
 
@@ -599,6 +615,7 @@ supacloud-lite start
 supacloud-lite migrate
 supacloud-lite status
 supacloud-lite keys [--service-role]
+supacloud-lite auth create-user --email <email> --password-stdin [--email-confirm] [--json]
 supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
@@ -613,6 +630,21 @@ supacloud-lite version
 ```
 
 Run `supacloud-lite migrate` first when initializing a project or when the state directory is missing or empty. `db reset` only accepts initialized state with a valid `secrets.json` marker; it never creates or replaces project secrets for a reset.
+
+#### Create a Local Auth User
+
+Stop the project server first, then supply the password through a protected file or password-manager pipe:
+
+```sh
+supacloud-lite auth create-user --project-dir ./my-project \
+  --email operator@example.com --password-stdin --email-confirm --json < /secure/password.txt
+```
+
+Keep passwords out of command arguments and shell history. Restrict the file to its owner and remove it according to your credential-handling policy. The command accepts one UTF-8 password line on stdin (at most 4096 bytes), removes one trailing LF/CRLF, and preserves spaces. Interactive terminal input and `--password` arguments are rejected.
+
+This is an offline, local operation: it does not contact a remote Auth API or run pending application migrations, seed, functions, or webhooks. Initialize application schemas with `migrate` first. Local administrators can provision accounts even when public signup is disabled. Email is unconfirmed by default; use `--email-confirm` only after verifying the address. Login eligibility for unconfirmed accounts still follows the project's email-confirmation settings; this command does not send confirmation mail.
+
+The command enforces the effective password-length policy and rejects duplicate emails without changing passwords, `--memory`, disabled Auth, external identity, and occupied data directories. Output contains only the user ID, email, and confirmation status, never passwords, project keys, or session tokens. Accounts have the ordinary `authenticated` role; application membership and RLS still govern business permissions.
 
 Common flags:
 
