@@ -13,6 +13,10 @@ export const VIBECODING_TASKS = {
     request: "Extend an existing orders command and test denied, stale-version and duplicate requests without weakening governance.",
     allowed: ["src/features/orders/", "generated/"],
   },
+  "create-feature-slice": {
+    request: "Generate case-approval in an existing governed application with a preconfigured durable RPC, bind its verified database ports, and test the authenticated flow without weakening governance.",
+    allowed: ["src/features/case-approval/", "src/app.module.ts", "generated/"],
+  },
 } as const;
 
 interface Trial {

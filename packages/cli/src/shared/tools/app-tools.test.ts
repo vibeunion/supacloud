@@ -231,6 +231,9 @@ describe("app tools", () => {
         const commandSource = readFileSync(commandFile, "utf8");
         expect(commandSource).toContain("@Command({");
         expect(commandSource).toContain('name: "billing.issueInvoice"');
+        expect(commandSource).toContain('transaction: "required"');
+        expect(commandSource).toContain('audit: "billing.issueInvoice.completed"');
+        expect(commandSource).toContain('idempotency: "required"');
         expect(commandSource).toContain("Implement IssueInvoiceCommand.execute before exposing this command");
         expect(commandSource).toContain("export class IssueInvoiceCommand");
 

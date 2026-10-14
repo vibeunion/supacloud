@@ -38,6 +38,7 @@ import {
     ApplicationPromotionResultSchema, parsePreviewReceipt, parsePreviewList, parsePromotionStatus,
 } from "./application-workflow-schemas";
 import { resourceScaffold } from "./app-resource";
+import { featureScaffold } from "./app-feature";
 import { runLocalDevelopment } from "./app-local-dev";
 import { createVerificationPlan } from "./app-verification-plan";
 import { applyScaffoldWrites, planScaffoldWrites, scaffoldPath, ScaffoldError, type ScaffoldWrite } from "./app-scaffold-writes";
@@ -143,10 +144,12 @@ export interface AppToolArguments {
     ttl_seconds?: number;
     wait?: boolean;
     timeout_seconds?: number;
-    kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource";
+    kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource" | "feature";
     template?: "minimal" | "http" | "command" | "edge";
     name?: string;
     module?: string;
+    permission?: string;
+    rpc?: string;
     dir?: string;
     force?: boolean;
     dry_run?: boolean;
@@ -227,6 +230,13 @@ function requireIdentifier(value: string | undefined, flag: string): string {
     return trimmed;
 }
 
+function requireFeatureCapability(value: string | undefined, flag: string): string {
+    if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(value)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", `feature requires an explicit valid --${flag}; capabilities are not inferred`);
+    }
+    return value;
+}
+
 function moduleScaffold(name: string): string {
     return `import { Module } from "@supacloud/app";
 
@@ -246,6 +256,9 @@ function commandScaffold(moduleName: string, name: string): string {
 @Command({
     name: ${JSON.stringify(`${moduleName}.${camelName(name)}`)},
     permission: ${JSON.stringify(`${moduleName}.${camelName(name)}`)},
+    transaction: "required",
+    audit: ${JSON.stringify(`${moduleName}.${camelName(name)}.completed`)},
+    idempotency: "required",
 })
 export class ${pascalName(name)}Command {
     execute(): void {
@@ -305,8 +318,8 @@ export const ${prefix}Response = t.Object({});
 
 async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const kind = args.kind;
-    if (!kind || !["module", "command", "query", "controller", "job", "contract", "resource"].includes(kind)) {
-        throw new ScaffoldError("SCAFFOLD_KIND_INVALID", "app generate requires --kind (module|command|query|controller|job|contract|resource)");
+    if (!kind || !["module", "command", "query", "controller", "job", "contract", "resource", "feature"].includes(kind)) {
+        throw new ScaffoldError("SCAFFOLD_KIND_INVALID", "app generate requires --kind (module|command|query|controller|job|contract|resource|feature)");
     }
     for (const flag of ["dry_run", "force"] as const) {
         if (args[flag] !== undefined && typeof args[flag] !== "boolean") {
@@ -316,22 +329,31 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
     const dir = args.dir ?? "src/features";
     if (dir !== ".") scaffoldPath(root, dir);
-    if (args.register_in !== undefined && kind !== "resource" && kind !== "module") {
-        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--register-in is only supported for a new module or resource");
+    if (args.register_in !== undefined && kind !== "resource" && kind !== "module" && kind !== "feature") {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--register-in is only supported for a new module, resource or feature");
     }
-    if (kind === "resource" && (args.force || args.module !== undefined)) {
-        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "resource creates its own module; use --name and optionally --register-in, never --force or --module");
+    if ((kind === "resource" || kind === "feature") && (args.force || args.module !== undefined)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", `${kind} creates its own module; use --name and optionally --register-in, never --force or --module`);
     }
+    if (kind !== "feature" && (args.permission !== undefined || args.rpc !== undefined)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--permission and --rpc are only supported for feature generation");
+    }
+    const featureGovernance = kind === "feature" ? {
+        permission: requireFeatureCapability(args.permission, "permission"),
+        rpc: requireFeatureCapability(args.rpc, "rpc"),
+    } : undefined;
     const writes: ScaffoldWrite[] = [];
     let modulePath: string | undefined;
     let moduleSymbol: string | undefined;
     let contractName: string | undefined;
-    if (kind === "module" || kind === "resource") {
+    if (kind === "module" || kind === "resource" || kind === "feature") {
         const name = requireIdentifier(args.name, "name");
-        modulePath = join(dir, name, `${name}.module.ts`).replaceAll("\\", "/");
-        moduleSymbol = `${pascalName(name)}Module`;
+        modulePath = join(dir, name, kind === "feature" ? `${name}.feature.ts` : `${name}.module.ts`).replaceAll("\\", "/");
+        moduleSymbol = kind === "feature" ? `${pascalName(name)}Feature` : `${pascalName(name)}Module`;
         if (kind === "module") writes.push({ path: modulePath, content: moduleScaffold(name), overwrite: args.force === true });
-        else for (const [file, content] of Object.entries(resourceScaffold(name, pascalName(name)))) {
+        else for (const [file, content] of Object.entries(kind === "feature"
+            ? featureScaffold(name, pascalName(name), featureGovernance!)
+            : resourceScaffold(name, pascalName(name)))) {
             writes.push({ path: join(dir, name, file).replaceAll("\\", "/"), content });
         }
     } else {
@@ -385,6 +407,11 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
         "Service and controller are registered in the generated module. No root module is guessed.",
         "Use --register-in <module.ts> to add an explicit parent import. Implement the read port before exposing the resource.",
         "Run app compile, app check --format json and your tests. No writes, permissions or persistence are inferred.",
+    );
+    if (kind === "feature") lines.push(
+        `Approval feature scaffold ${args.dry_run ? "planned" : "created"}; no database, authorization or job adapter is fabricated.`,
+        "Bind the explicit RPC in compiler capabilities and runtime governance. Review the generated delivery checklist.",
+        "Generate the client through app compile; no handwritten transport or database schema is created.",
     );
     if (contractName) {
         const prefix = pascalName(contractName);
@@ -1672,15 +1699,17 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
                 "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
-            kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
+            kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
+            permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
+            rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
-            force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/controller never overwrite"),
+            force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/feature/controller never overwrite"),
             dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
             "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
-            register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource; uses the compiler AST editor"),
+            register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource/feature; uses the compiler AST editor"),
             "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
             root: optional(Type.String(), "[dev/plan/build/release/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
             include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
@@ -1711,14 +1740,16 @@ const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "
  */
 export function registerAppAliases(server: ToolServer): void {
     const schema = {
-        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
+        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
         name: optional(Type.String(), "[generate] Object name"),
         module: optional(Type.String(), "[generate] Target feature module"),
+        permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
+        rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
         dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
-        force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/controller never overwrite"),
+        force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/feature/controller never overwrite"),
         dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
         "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
-        register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource; uses the compiler AST editor"),
+        register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource/feature; uses the compiler AST editor"),
         "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
         root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
         include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
