@@ -80,3 +80,70 @@ test("runtime matchers must return literal true, not truthy strings or promises"
     expect(await client({ id: "request" })).toEqual({ status: "unknown" });
   }
 });
+
+test("server metadata overrides a legacy status-code denial classifier", async () => {
+  let writes = 0, reads = 0;
+  const client = createContractCommandClient({ input: decode, result: decode }, {
+    send: async () => { writes++; throw new Error("private transport details"); },
+    lookup: async input => { reads++; return input; },
+    matches: (input, result) => input.id === result.id,
+    failureMetadata: () => ({
+      retryability: "read-only", idempotency: "required", deadlineAt: null, outcome: "unknown",
+    }),
+    isDefinitiveFailure: () => true,
+  });
+  expect(await client({ id: "same-key" })).toMatchObject({ status: "confirmed", source: "lookup" });
+  expect([writes, reads]).toEqual([1, 1]);
+});
+
+test("invalid metadata or a broken classifier never makes an unknown write a denial", async () => {
+  for (const mode of ["invalid", "throws"] as const) {
+    const client = createContractCommandClient({ input: decode, result: decode }, {
+      send: async () => { throw Error("private"); },
+      lookup: async input => input,
+      matches: (input, result) => input.id === result.id,
+      failureMetadata: () => {
+        if (mode === "throws") throw Error("classifier");
+        return { outcome: "confirmed-failure" };
+      },
+      isDefinitiveFailure: () => true,
+    });
+    expect(await client({ id: "key" })).toMatchObject({ status: "confirmed", source: "lookup" });
+  }
+});
+
+test("one deadline bounds an uncooperative write and never starts a second write or expired lookup", async () => {
+  let writes = 0, reads = 0;
+  let signal: AbortSignal | undefined;
+  const client = createContractCommandClient({ input: decode, result: decode }, {
+    send: async (_input, requestSignal) => {
+      writes++; signal = requestSignal;
+      return new Promise<never>(() => {});
+    },
+    lookup: async input => { reads++; return input; },
+    matches: (input, result) => input.id === result.id,
+  }, { timeoutMs: 20 });
+  expect(await client({ id: "key" })).toEqual({ status: "unknown" });
+  expect(signal?.aborted).toBe(true);
+  expect([writes, reads]).toEqual([1, 0]);
+});
+
+test("lookup shares the original deadline and receives the same abort signal", async () => {
+  let writeSignal: AbortSignal | undefined, lookupSignal: AbortSignal | undefined;
+  const client = createContractCommandClient({ input: decode, result: decode }, {
+    send: async (_input, signal) => { writeSignal = signal; throw Error("lost response"); },
+    lookup: async (_input, signal) => { lookupSignal = signal; return new Promise<never>(() => {}); },
+    matches: () => true,
+  }, { timeoutMs: 20 });
+  expect(await client({ id: "key" })).toEqual({ status: "unknown" });
+  expect(writeSignal).toBe(lookupSignal);
+  expect(lookupSignal?.aborted).toBe(true);
+});
+
+test("rejects invalid command deadline configuration before dispatch", () => {
+  for (const timeoutMs of [0, -1, NaN, Infinity, 0.5, 2_147_483_648]) {
+    expect(() => createContractCommandClient({ input: decode, result: decode }, {
+      send: async value => value, matches: () => true,
+    }, { timeoutMs })).toThrow("Invalid command deadline");
+  }
+});

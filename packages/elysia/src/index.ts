@@ -8,7 +8,7 @@ import type {
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
-import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
+import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { compileHttpPolicies, type HttpPolicyRegistry } from "./http-policy";
 import { httpRequestId } from "./http-telemetry";
@@ -448,6 +448,7 @@ export interface ApplicationErrorOptions {
   status?: number;
   code?: string;
   details?: unknown;
+  metadata?: ErrorMetadata;
 }
 
 export interface PublicApplicationError extends Error {
@@ -455,6 +456,7 @@ export interface PublicApplicationError extends Error {
   readonly status: number;
   readonly code: string;
   readonly details?: unknown;
+  readonly metadata?: ErrorMetadata;
 }
 
 export class ApplicationError extends Error implements PublicApplicationError {
@@ -462,6 +464,7 @@ export class ApplicationError extends Error implements PublicApplicationError {
   readonly status: number;
   readonly code: string;
   readonly details?: unknown;
+  readonly metadata?: ErrorMetadata;
 
   constructor(message: string, options: ApplicationErrorOptions = {}) {
     super(message);
@@ -469,6 +472,7 @@ export class ApplicationError extends Error implements PublicApplicationError {
     this.status = options.status ?? 500;
     this.code = options.code ?? "INTERNAL_ERROR";
     this.details = options.details;
+    this.metadata = options.metadata;
   }
 }
 
@@ -1528,7 +1532,12 @@ export function defaultErrorResponse(
 ): Response {
   const protocolCode = commandErrorCode(error);
   if (protocolCode) {
-    return Response.json({ ok: false, code: protocolCode, message: protocolCode }, {
+    return Response.json({
+      ok: false,
+      code: protocolCode,
+      message: protocolCode,
+      metadata: commandFailureMetadata(protocolCode),
+    }, {
       status: commandErrorStatus(protocolCode),
     });
   }
@@ -1538,6 +1547,7 @@ export function defaultErrorResponse(
       code: error.code,
       message: error.message,
       ...(error.details === undefined ? {} : { details: error.details }),
+      ...(error.metadata === undefined ? {} : { metadata: error.metadata }),
     }, { status: error.status });
   }
   if (frameworkCode === "PARSE") {
