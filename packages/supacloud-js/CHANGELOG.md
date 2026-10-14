@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.41.2...supacloud-js-v0.42.0) (2026-10-14)
+
+
+### Features
+
+* **workflows:** add host-neutral workflow dispatcher ([#1889](https://github.com/vibeunion/supacloud/issues/1889)) ([9fd3184](https://github.com/vibeunion/supacloud/commit/9fd31849cd3dceacb9a4cbc8fa82866512a12ccb))
+
 ## [0.41.2](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.41.1...supacloud-js-v0.41.2) (2026-10-11)
 
 

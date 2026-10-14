@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.16.0...delivery-v0.17.0) (2026-10-14)
+
+
+### Features
+
+* **delivery:** declare Edge Function targets in the delivery plan ([#1893](https://github.com/vibeunion/supacloud/issues/1893)) ([1312281](https://github.com/vibeunion/supacloud/commit/131228138edd0d2a4484eea82a80257a88eaf795))
+
 ## [0.16.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.15.1...delivery-v0.16.0) (2026-10-12)
 
 

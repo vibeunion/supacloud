@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/db-v0.16.2...db-v0.17.0) (2026-10-14)
+
+
+### Features
+
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+
 ## [0.16.2](https://github.com/vibeunion/supacloud/compare/db-v0.16.1...db-v0.16.2) (2026-10-13)
 
 
