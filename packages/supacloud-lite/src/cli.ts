@@ -193,10 +193,18 @@ async function main(): Promise<void> {
   if (options.command === 'doctor') {
     const config = loadProjectConfig(paths.projectDir, process.env, options.runtimeMode)
     const replication = resolveNativeReplicationOptions(options, paths.databaseEngine)
-    const report = liteCapabilities(paths.databaseEngine, replication?.profile)
+    const report = liteCapabilities(paths.databaseEngine, replication?.profile, config.auth.enabled !== false)
     report.runtime_mode = config.lite.runtimeMode
     if (options.identityModule ?? config.lite.identityModule) {
-      report.identity = { mode: 'external', verification: 'unverified' }
+      report.identity = {
+        mode: 'external',
+        verification: 'unverified',
+        local_auth: {
+          status: 'disabled',
+          reason: 'EXTERNAL_IDENTITY_CONFIGURED',
+          verification: 'configuration-only',
+        },
+      }
     }
     if (paths.dataDir && existsSync(join(paths.dataDir, 'PG_VERSION'))) {
       const engine = paths.databaseEngine === 'native'
@@ -503,6 +511,7 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
       `${report.postgres_extensions.installed.length} installed)`,
   )
   output.push(`identity: ${report.identity.mode} (${report.identity.verification})`)
+  output.push(`local_auth: ${report.identity.local_auth.status} (${report.identity.local_auth.reason}, configuration-only)`)
   output.push(`migration_formats: ${report.migrations.formats.join(', ')}`)
   if (report.powersync_readiness) {
     output.push(`powersync_ready: ${report.powersync_readiness.ready}`)
