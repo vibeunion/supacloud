@@ -1,0 +1,85 @@
+import { strict as assert } from "node:assert";
+import { ApplicationError, type CommandGovernance } from "@supacloud/elysia";
+import { createApp } from "../src/application";
+import type { CaseApprovalReadPort, CaseApprovalWritePort } from "../src/features/case-approval/case-approval.model";
+
+assert.throws(() => createApp({
+    deps: {}, requestContext: () => ({}), commandGovernance: { authorize: () => {} },
+}), { code: "COMMAND_RPC_UNCONFIGURED" });
+
+// These explicit test doubles prove wiring and denial, not database durability.
+let authorized = false;
+let rpcCalls = 0;
+let writes = 0;
+const row = { id: "example", state: "approved", version: 2 };
+const governance: CommandGovernance = {
+    authorize: invocation => {
+        assert.equal(invocation.command.permission, "cases:approve");
+        if (!authorized) throw new ApplicationError("Denied", { status: 403, code: "FORBIDDEN" });
+    },
+    audit: { succeeded: () => {}, failed: () => {} },
+    idempotency: (_invocation, next) => next(),
+    transaction: (_invocation, next) => next(),
+    rpc: {
+        approveCase: {
+            capabilities: { boundary: "database", transaction: true, idempotency: true, audit: true },
+            execute: (_invocation, next) => { rpcCalls++; return next(); },
+        },
+    },
+};
+const reader: CaseApprovalReadPort = {
+    list: async input => { assert.deepEqual(input, { state: "approved" }); return [row]; },
+    detail: async id => { assert.equal(id, "example"); return row; },
+};
+const writer: CaseApprovalWritePort = {
+    approve: async input => {
+        writes++;
+        assert.deepEqual(input, { id: "example", expectedVersion: 1, reason: "reviewed" });
+        return row;
+    },
+};
+const approvalRequest = (expectedVersion = 1) => new Request("http://localhost/case-approval/example/approve", {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": "fixture-approval" },
+    body: JSON.stringify({ expectedVersion, reason: "reviewed" }),
+});
+
+const unbound = createApp({ deps: {}, requestContext: () => ({}), commandGovernance: governance });
+for (const path of ["/case-approval", "/case-approval/example"]) {
+    const response = await unbound.handle(new Request("http://localhost" + path));
+    assert.equal(response.status, 500);
+    assert.ok(!(await response.text()).includes("Bind CaseApprovalReader"));
+}
+authorized = true;
+const missingWriter = await unbound.handle(approvalRequest());
+assert.equal(missingWriter.status, 500);
+assert.ok(!(await missingWriter.text()).includes("Bind CaseApprovalWriter"));
+assert.equal(writes, 0);
+rpcCalls = 0;
+
+const app = createApp({
+    deps: { caseApprovalReader: reader, caseApprovalWriter: writer },
+    requestContext: () => ({}),
+    commandGovernance: governance,
+});
+const list = await app.handle(new Request("http://localhost/case-approval?state=approved"));
+assert.equal(list.status, 200);
+assert.deepEqual(await list.json(), [row]);
+const detail = await app.handle(new Request("http://localhost/case-approval/example"));
+assert.equal(detail.status, 200);
+assert.deepEqual(await detail.json(), row);
+authorized = false;
+const denied = await app.handle(approvalRequest());
+assert.equal(denied.status, 403);
+assert.equal(rpcCalls, 0);
+assert.equal(writes, 0);
+authorized = true;
+assert.equal((await app.handle(approvalRequest(0))).status, 422);
+assert.equal(rpcCalls, 0);
+assert.equal(writes, 0);
+const approved = await app.handle(approvalRequest());
+assert.equal(approved.status, 200);
+assert.deepEqual(await approved.json(), row);
+assert.equal(rpcCalls, 1);
+assert.equal(writes, 1);
+console.log("Packed feature: startup rejection, unbound ports, list/detail, authorization, validation and explicit test-double RPC wiring passed; persistence not exercised");

@@ -53,6 +53,40 @@ and a delivery checklist. `--permission` and `--rpc` are mandatory and are
 never inferred. The RPC must be registered in compiler capabilities and the
 runtime host.
 
+Register the capability in the existing `supacloud.config.ts`, preserving its
+other policies and any existing RPC entries:
+
+```ts
+commandCapabilities: {
+  requirePersistentAdapters: true,
+  permission: true,
+  transaction: true,
+  idempotency: true,
+  audit: true,
+  rpc: {
+    approveCase: {
+      boundary: "database",
+      transaction: true,
+      idempotency: true,
+      audit: true,
+    },
+  },
+},
+```
+
+This is a capability declaration, not an adapter implementation. Both compile and
+check reject an absent `approveCase` registration with `command-rpc-unavailable`
+and preserve existing generated artifacts. The runtime separately requires a
+matching `commandGovernance.rpc.approveCase` adapter and authorization function.
+Missing runtime registration prevents application startup with
+`COMMAND_RPC_UNCONFIGURED`.
+
+The HTTP starter's local memory demo cannot host this durable command without
+explicit integration. After registering the feature, its original demo test and
+`bun run dev` will fail until a suitable host is supplied; generation does not
+silently weaken governance. The generated feature's isolated service tests can
+run with `bun test src/features/case-approval/case-approval.feature.test.ts`.
+
 The Job intentionally throws until implemented. The state declaration is checked
 for compiler consistency; it does not lock or update database rows. The version
 field is an input contract, not an implemented optimistic lock. The generated tests
@@ -196,7 +230,20 @@ intentional artifact drift must fail JSON check without repair. Non-default outp
 is exercised, and a second packed edge starter is checked, built and inspected
 using its own generated composition root. No job is scheduled by this acceptance.
 
-`App Generation Acceptance` runs on pinned Bun 1.4.2 with contents-read-only
+After the original HTTP tests pass, the same consumer receives a generated
+`case-approval` feature. Acceptance checks mandatory flags, preview/apply equality,
+registration conflicts, compile/check refusal and preservation of all generated
+files before and after removing the named capability. It then verifies strict
+consumer types, the generated feature test and the built application's startup
+refusal when runtime registration is missing.
+
+The HTTP fixture uses explicit test doubles to verify list/detail delegation,
+denied authorization before RPC execution, invalid input before writes, successful
+RPC delegation and redacted errors from unbound ports. Its pass-through RPC is
+test-only: it proves no transaction, replay protection, audit persistence,
+tenant isolation or concurrency behavior.
+
+`App Generation Acceptance` runs on pinned Bun 1.4.3 with contents-read-only
 permissions. It also runs CLI typecheck, original generator regressions, filesystem
 safety and new composition tests. Dependency changes in commands/db/delivery also
 trigger it. Elysia policy runs even when another step fails (unless cancelled).

@@ -4,7 +4,7 @@
  * Application/resource generation is performed by the installed, packed CLI.
  */
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -82,6 +82,7 @@ try {
     const conflict = JSON.parse(await run(generation, project, false));
     assert.equal(conflict.ok, false);
     assert.equal(conflict.code, "SCAFFOLD_EXISTS");
+
     // Validate the actual CLI alias/flag parser, not only runAppTool's direct API.
     const alias = JSON.parse(await run([cli, "generate", "--kind", "module", "--name", "preview-only", "--dry-run", "--format", "json"]));
     assert.equal(alias.written, false);
@@ -190,6 +191,97 @@ console.log("Built consumer factory: original and generated routes served togeth
     assert.equal(JSON.parse(await run([cli, "app", "compile", "--out_dir", custom, "--format", "json"])).ok, true);
     const graph = JSON.parse(await run([cli, "app", "graph", "--out_dir", custom, "--format", "json"]));
     assert.ok(graph.modules.some((module: { name: string }) => module.name === "inventory"));
+
+    // Add the durable slice only after the original HTTP sandbox acceptance:
+    // an unbound RPC must never acquire an automatic in-memory fallback.
+    const featureGeneration = [
+        cli, "app", "generate", "--kind", "feature", "--name", "case-approval",
+        "--permission", "cases:approve", "--rpc", "approveCase",
+        "--register-in", "src/app.module.ts", "--format", "json",
+    ];
+    const featureParent = await readFile(join(project, "src/app.module.ts"), "utf8");
+    for (const flag of ["--permission", "--rpc"]) {
+        const missing = featureGeneration.filter((_value, index) => index !== featureGeneration.indexOf(flag)
+            && index !== featureGeneration.indexOf(flag) + 1);
+        const rejected = JSON.parse(await run(missing, project, false));
+        assert.equal(rejected.code, "SCAFFOLD_OPTION_INVALID");
+        assert.equal(await readFile(join(project, "src/app.module.ts"), "utf8"), featureParent);
+        await assert.rejects(readFile(join(project, "src/features/case-approval/case-approval.feature.ts")), { code: "ENOENT" });
+    }
+    const featurePreview = JSON.parse(await run([...featureGeneration, "--dry-run"]));
+    assert.equal(featurePreview.written, false);
+    assert.equal(featurePreview.changes.length, 7);
+    assert.equal(await readFile(join(project, "src/app.module.ts"), "utf8"), featureParent);
+    await assert.rejects(readFile(join(project, "src/features/case-approval/case-approval.feature.ts")), { code: "ENOENT" });
+    assert.equal(JSON.parse(await run(featureGeneration)).written, true);
+    for (const change of featurePreview.changes) {
+        assert.equal(await readFile(join(project, change.path), "utf8"), change.content);
+    }
+    const featureConflict = JSON.parse(await run(featureGeneration, project, false));
+    assert.equal(featureConflict.ok, false);
+    assert.equal(featureConflict.code, "SCAFFOLD_EXISTS");
+
+    const configPath = join(project, "supacloud.config.ts");
+    const originalConfig = await readFile(configPath, "utf8");
+    const preservedArtifacts = new Map<string, string>();
+    for (const file of await readdir(join(project, "generated"))) {
+        preservedArtifacts.set(file, await readFile(join(project, "generated", file), "utf8"));
+    }
+    async function assertMissingCapability(): Promise<void> {
+        for (const action of ["compile", "check"]) {
+            const blocked = JSON.parse(await run([cli, "app", action, "--format", "json"], project, false));
+            assert.equal(blocked.ok, false);
+            assert.deepEqual(blocked.written, []);
+            assert.ok(blocked.diagnostics.some((diagnostic: { code: string; severity: string }) =>
+                diagnostic.severity === "error" && diagnostic.code === "command-rpc-unavailable"));
+            for (const [file, content] of preservedArtifacts) {
+                assert.equal(await readFile(join(project, "generated", file), "utf8"), content);
+            }
+        }
+    }
+    await assertMissingCapability();
+    await writeFile(join(project, "generation.base.config.ts"), originalConfig);
+    const persistentConfig = `import base from "./generation.base.config";
+import { defineSupacloudConfig } from "@supacloud/compiler";
+
+export default defineSupacloudConfig({
+  ...base,
+  commandCapabilities: {
+    ...base.commandCapabilities,
+    requirePersistentAdapters: true,
+    rpc: { approveCase: { boundary: "database", transaction: true, idempotency: true, audit: true } },
+  },
+});
+`;
+    await writeFile(configPath, persistentConfig);
+    const featureCompile = JSON.parse(await run([cli, "app", "compile", "--format", "json"]));
+    assert.equal(featureCompile.ok, true);
+    assert.ok(featureCompile.written.length > 0);
+    const featureCheck = JSON.parse(await run([cli, "app", "check", "--format", "json"]));
+    assert.equal(featureCheck.ok, true);
+    assert.deepEqual(featureCheck.written, []);
+    assert.ok(featureCheck.modules.includes("case-approval"));
+    await run(["test", "src/features/case-approval/case-approval.feature.test.ts"]);
+    await copyFile(join(repo, "scripts/fixtures/generated-feature.fixture"), join(project, "scripts/verify-generated-feature.ts"));
+    await run(["run", "typecheck"]);
+    console.log(await run(["scripts/verify-generated-feature.ts"]));
+    await run(["run", "build"]);
+    await writeFile(join(project, "scripts/verify-built-feature.mjs"), `import { strict as assert } from "node:assert";
+import { createApp } from "../dist/application.js";
+
+assert.throws(() => createApp({
+    deps: {}, requestContext: () => ({}), commandGovernance: { authorize: () => {} },
+}), { code: "COMMAND_RPC_UNCONFIGURED" });
+console.log("Built feature: missing named runtime RPC prevents startup");
+`);
+    console.log(await run(["scripts/verify-built-feature.mjs"]));
+    for (const file of preservedArtifacts.keys()) {
+        preservedArtifacts.set(file, await readFile(join(project, "generated", file), "utf8"));
+    }
+    await writeFile(configPath, originalConfig);
+    await assertMissingCapability();
+    await writeFile(configPath, persistentConfig);
+
     // The other lightweight template shares the root-generation code. Exercise
     // its real graph too, without scheduling or claiming any background job.
     const edge = join(temporary, "edge-project");
@@ -210,7 +302,7 @@ console.log("Built consumer factory: original and generated routes served togeth
     const edgeInspection = await run(["run", "inspect"], edge);
     assert.ok(edgeInspection.includes('"application-root"'));
     assert.ok(edgeInspection.includes('"sync"'));
-    console.log("Packed HTTP/edge roots, async resource, built application and read-only inspection passed; no deployment or production persistence was exercised.");
+    console.log("Packed HTTP/edge roots, resource and feature generation, runtime denial and artifact preservation passed; no database, deployment or production persistence was exercised.");
 } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
