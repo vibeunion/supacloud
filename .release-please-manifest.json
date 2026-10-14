@@ -5,7 +5,7 @@
   "packages/pgredis-runtime": "0.12.1",
   "packages/query": "0.3.0",
   "packages/supacloud-js": "0.42.0",
-  "packages/cli": "0.96.1",
+  "packages/cli": "0.96.2",
   "packages/admin": "0.28.0",
   "packages/supacloud": "0.16.10",
   "packages/function-adapter": "0.5.1",
@@ -15,7 +15,7 @@
   "packages/app-svelte": "0.5.1",
   "packages/app": "0.27.0",
   "packages/delivery": "0.18.0",
-  "packages/compiler": "0.46.0",
+  "packages/compiler": "0.46.1",
   "packages/elysia": "0.30.0",
   "packages/db": "0.17.0",
   "packages/testing": "0.6.1"
