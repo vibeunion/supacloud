@@ -5,6 +5,7 @@
   "license": "Apache-2.0",
   "private": true,
   "scripts": {
+    "check:fa-stability": "bun --no-env-file scripts/check_fa_stability.ts",
     "check:esm": "node .github/scripts/esm-package-policy.mjs",
     "test:esm": "node --experimental-strip-types --test .github/scripts/esm-package-policy.test.mjs .github/scripts/esm-package-launcher.test.mjs .github/scripts/esm-package-cli-resolution.test.mjs .github/scripts/esm-package-sdk.test.mjs",
     "verify:commands": "bun run scripts/verify-command-migration.ts",

@@ -5,12 +5,21 @@ on:
     branches: ["main", "dev"]
     paths:
       - "packages/delivery/**"
+      - "packages/contracts/**"
+      - "packages/elysia/src/command-errors.ts"
+      - "packages/elysia/src/index.ts"
+      - "packages/elysia/src/persistent-command.ts"
       - "packages/management-api/**"
       - "packages/cli/**"
       - "packages/web-console/**"
       - "infrastructure/monitoring/**"
       - "infrastructure/restore-drill/**"
       - "scripts/ci-single-node-acceptance.ts"
+      - "scripts/check_fa_stability.ts"
+      - "scripts/check_fa_stability.test.ts"
+      - "docs/fa-contract-matrix.json"
+      - "docs/fa-stability-gates.md"
+      - "docs/examples/fa-delivery-tuple.fixture.json"
       - "scripts/test-project-restore-drill.ts"
       - ".github/workflows/single-node-platform.yml"
   push:
@@ -52,6 +61,7 @@ jobs:
       - name: Install focused package dependencies
         run: |
           bun install --frozen-lockfile --cwd packages/delivery
+          bun install --frozen-lockfile --cwd packages/contracts
           bun install --frozen-lockfile --cwd packages/management-api
           bun install --frozen-lockfile --cwd packages/cli
           bun install --frozen-lockfile --cwd packages/web-console
@@ -61,6 +71,14 @@ jobs:
         run: |
           bun run --cwd packages/cli prepare:db
           bun test packages/delivery/src/deployment-evidence.test.ts
+          bun test packages/delivery/src/delivery-tuple.test.ts packages/delivery/src/contract-matrix.test.ts packages/delivery/src/fa-stability.test.ts
+          bun test packages/contracts/src/app_error.test.ts packages/contracts/src/app_error_decoder.test.ts packages/contracts/src/contract_client.test.ts
+          bun test scripts/check_fa_stability.test.ts
+          bun run --cwd packages/contracts typecheck:test
+          bun --no-env-file scripts/check_fa_stability.ts \
+            --level daily \
+            --tuple docs/examples/fa-delivery-tuple.fixture.json \
+            --matrix docs/fa-contract-matrix.json
           bun test packages/management-api/tests/unit/application-runtime.routes.test.ts
           bun test packages/management-api/tests/unit/mcp-developer-surface.test.ts
           bun test packages/management-api/tests/unit/branches.routes.test.ts
@@ -76,6 +94,7 @@ jobs:
       - name: Typecheck changed platform packages
         run: |
           bun run --cwd packages/delivery typecheck
+          bun run --cwd packages/contracts typecheck
           bun run --cwd packages/management-api typecheck
           bun run --cwd packages/cli typecheck
           bun run --cwd packages/web-console check
