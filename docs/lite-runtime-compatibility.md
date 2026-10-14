@@ -71,6 +71,19 @@ All sections are optional. Do not enable GraphQL on an engine without
 Maintenance commands can still initialize the database and apply the extension
 migration before the application is started.
 
+`supacloud-lite doctor --json` reports `identity.local_auth` separately from
+the identity verifier. Its status is `enabled` for the default local Auth,
+`disabled` with reason `AUTH_DISABLED` for `[auth] enabled = false`, or
+`disabled` with reason `EXTERNAL_IDENTITY_CONFIGURED` when an identity module
+is selected (including `--identity-module`). External identity takes precedence:
+it disables local login regardless of the Auth toggle.
+
+This report is explicitly `configuration-only`. Doctor does not import the
+identity module, expose its path or secrets, probe a running HTTP listener, or
+prove that an application's proxy forwards `/auth/v1`. An enabled status is
+not a successful login check. Password login, session refresh and authenticated
+application access still need an end-to-end check with the intended client.
+
 For embedded callers, `startRuntimeServices: false` only disables background
 services; configured identity verification and required GraphQL checks still
 apply to `backend.fetch`. Database-only maintenance explicitly selects

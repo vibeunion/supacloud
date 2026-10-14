@@ -13,7 +13,15 @@ export type LiteCapabilityStatus = 'supported' | 'static' | 'disabled' | 'unsupp
 export interface LiteDoctorReport {
   graphql: GraphqlCapability
   runtime_mode: RuntimeMode
-  identity: { mode: 'local' | 'external'; verification: 'built-in' | 'unverified' }
+  identity: {
+    mode: 'local' | 'external'
+    verification: 'built-in' | 'unverified'
+    local_auth: {
+      status: 'enabled' | 'disabled'
+      reason: 'LOCAL_AUTH_ENABLED' | 'AUTH_DISABLED' | 'EXTERNAL_IDENTITY_CONFIGURED'
+      verification: 'configuration-only'
+    }
+  }
   migrations: { formats: string[]; content_check: 'supported'; target_bindings: 'supported' }
   project_release_manifests: 'unsupported'
   engine: 'pglite' | 'native'
@@ -82,6 +90,7 @@ export interface PowerSyncReadiness {
 export function liteCapabilities(
   engine: 'pglite' | 'native',
   replicationProfile?: 'powersync',
+  authEnabled = true,
 ): LiteDoctorReport {
   const extensionSource: ExtensionInventorySource = engine === 'native'
     ? 'native-postgresql'
@@ -89,7 +98,15 @@ export function liteCapabilities(
   const common = {
     graphql: { status: 'unverified', extension: 'pg_graphql', reason: 'DATABASE_NOT_INSPECTED' } satisfies GraphqlCapability,
     runtime_mode: 'development' as const,
-    identity: { mode: 'local' as const, verification: 'built-in' as const },
+    identity: {
+      mode: 'local' as const,
+      verification: 'built-in' as const,
+      local_auth: {
+        status: authEnabled ? 'enabled' as const : 'disabled' as const,
+        reason: authEnabled ? 'LOCAL_AUTH_ENABLED' as const : 'AUTH_DISABLED' as const,
+        verification: 'configuration-only' as const,
+      },
+    },
     migrations: { formats: ['flat-sql', 'timestamp-folder'], content_check: 'supported' as const, target_bindings: 'supported' as const },
     project_release_manifests: 'unsupported' as const,
     postgres_extensions: {
