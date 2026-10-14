@@ -10,7 +10,7 @@ import { ApplicationIdSchema, type ApplicationDeployRequest } from "@supacloud/d
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
-import { uploadProjectWebRelease } from "./frontend-release-control";
+import { publishFrontendRelease, uploadProjectWebRelease } from "./frontend-release-control";
 import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
 import { requireProjectDeploymentProtocol } from "./project-deployment";
 
@@ -28,6 +28,7 @@ interface DeployConfig {
     targets?: Record<string, DeployTargetConfig>;
     frontend?: {
         id?: string;
+        name?: string;
         root?: string;
         buildCommand?: string;
         outputDirectory?: string;
@@ -39,6 +40,7 @@ interface DeployTargetConfig {
     type: "frontend" | "edge_function";
     root?: string;
     id?: string;
+    name?: string;
     slug?: string;
     buildCommand?: string;
     outputDirectory?: string;
@@ -98,6 +100,7 @@ export const deployToolSchema = {
     ref: optional(Type.String(), "Project ref (defaults to the linked project)"),
     cwd: optional(Type.String(), "Project directory (default: current directory)"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
+    assets_only: optional(Type.Boolean(), "Publish only configured static assets; leave backend Functions, schedules and migrations unchanged"),
     json: optional(Type.Boolean(), "Print only the final JSON result"),
 };
 
@@ -200,6 +203,7 @@ function deployTargetConfig(candidate: unknown, name: string): DeployTargetConfi
         type: value.type,
         root: optionalText(value.root, `targets.${name}.root`),
         id: optionalText(value.id, `targets.${name}.id`),
+        name: optionalText(value.name, `targets.${name}.name`),
         slug: optionalText(value.slug, `targets.${name}.slug`),
         buildCommand: optionalText(value.buildCommand, `targets.${name}.buildCommand`),
         outputDirectory: optionalText(value.outputDirectory, `targets.${name}.outputDirectory`),
@@ -257,6 +261,7 @@ async function readDeployConfig(configRoot: string): Promise<DeployConfig> {
             : undefined,
         frontend: frontend ? {
             id: optionalText(frontend.id, "frontend.id"),
+            name: optionalText(frontend.name, "frontend.name"),
             root: optionalText(frontend.root, "frontend.root"),
             buildCommand: optionalText(frontend.buildCommand, "frontend.buildCommand"),
             outputDirectory: optionalText(frontend.outputDirectory, "frontend.outputDirectory"),
@@ -322,11 +327,20 @@ function selectDeployment(
     deployments: FrontendDeployment[],
     requestedId: string | undefined,
     projectName: string | null,
+    requestedName?: string,
 ): FrontendDeployment {
     if (requestedId) {
         const selected = deployments.find((deployment) => deployment.id === requestedId);
         if (!selected) throw new Error(`Frontend deployment '${requestedId}' was not found`);
+        if (requestedName && selected.name !== requestedName) {
+            throw new Error(`Frontend deployment '${requestedId}' does not match name '${requestedName}'`);
+        }
         return selected;
+    }
+    if (requestedName) {
+        const matches = deployments.filter(deployment => deployment.name === requestedName);
+        if (matches.length !== 1) throw new Error(`Expected exactly one frontend deployment named '${requestedName}'`);
+        return matches[0]!;
     }
     if (deployments.length === 1) return deployments[0];
     if (projectName) {
@@ -355,6 +369,7 @@ function selectFrontendTarget(configRoot: string, config: DeployConfig): Selecte
             type: "frontend" as const,
             root: config.frontend?.root,
             id: config.frontend?.id,
+            name: config.frontend?.name,
             buildCommand: config.frontend?.buildCommand,
             outputDirectory: config.frontend?.outputDirectory,
             buildEnv: config.frontend?.buildEnv,
@@ -539,6 +554,7 @@ function payload(response: ToolResponse): Record<string, unknown> {
 
 interface StagedApplicationWeb {
     request?: ApplicationDeployRequest["web_release"];
+    result?: ToolResponse;
 }
 
 async function stageApplicationWebRelease(
@@ -549,6 +565,7 @@ async function stageApplicationWebRelease(
     skipBuild: boolean,
     json: boolean,
     environmentVariables?: Readonly<Record<string, string>>,
+    assetsOnly = false,
 ): Promise<StagedApplicationWeb | null> {
     const target = selectFrontendTarget(configRoot, await readDeployConfig(configRoot));
     if (!target) return null;
@@ -560,7 +577,9 @@ async function stageApplicationWebRelease(
     const requestedId = target.config.id;
     const listResponse = await http.get(`/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments`);
     if (!listResponse.ok) throw new Error(`Failed to list frontend deployments (HTTP ${listResponse.status})`);
-    const selected = selectDeployment(deploymentList(listResponse.data), requestedId, await packageName(projectDirectory));
+    const selected = selectDeployment(
+        deploymentList(listResponse.data), requestedId, await packageName(projectDirectory), target.config.name,
+    );
     const configuredBuildCommand = String(target.config.buildCommand || selected.buildCommand || "").trim();
     const buildCommand = configuredBuildCommand || (skipBuild ? "" : await defaultBuildCommand(projectDirectory, configRoot));
     const configuredOutput = String(target.config.outputDirectory || "").trim();
@@ -577,6 +596,11 @@ async function stageApplicationWebRelease(
 
     const archive = await createFrontendArchive(outputDirectory);
     try {
+        if (assetsOnly) {
+            return { result: await publishFrontendRelease(
+                http, projectRef, selected.id, archive.archivePath, archive.treeSha256,
+            ) };
+        }
         const uploaded = payload(await uploadProjectWebRelease(
             http, projectRef, environmentId, selected.id, archive.archivePath,
         ));
@@ -616,7 +640,28 @@ export function registerDeployTools(
                 : config.application ? {
                     ...config.application, environmentId: options.environment || config.application.environmentId,
                 } : undefined;
-            if (await hasProjectReleaseManifest(configRoot)) {
+            const legacyManifest = await hasProjectReleaseManifest(configRoot);
+            const assetsOnly = args.assets_only === true
+                || (!application?.id && selectFrontendTarget(configRoot, config) !== null
+                    && !legacyManifest
+                    && !Object.values(config.targets ?? {}).some(target => target.type === "edge_function"));
+            if (assetsOnly) {
+                if (!selectFrontendTarget(configRoot, config)) {
+                    throw new Error("Static asset deployment requires a frontend configuration in supacloud.json");
+                }
+                const environmentId = options.environment?.trim() || application?.environmentId?.trim();
+                if (!environmentId || !Value.Check(ApplicationIdSchema, environmentId)) {
+                    throw new Error("Static asset deployment requires SUPACLOUD_ENV");
+                }
+                await requireProjectDeploymentProtocol(http, projectRef, environmentId);
+                const staged = await stageApplicationWebRelease(
+                    http, projectRef, environmentId, configRoot,
+                    args.skip_build === true, args.json === true, options.environmentVariables, true,
+                );
+                if (!staged?.result) throw new Error("Static asset deployment did not produce a receipt");
+                return staged.result;
+            }
+            if (legacyManifest) {
                 throw new Error(`${DEPLOYMENT_UPGRADE} Replace deploy-manifest.json with the current application delivery configuration; no remote mutation was performed.`);
             }
             if (application?.id) {

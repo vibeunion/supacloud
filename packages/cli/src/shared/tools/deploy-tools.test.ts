@@ -109,7 +109,7 @@ describe("current deployment only", () => {
         expect(tool.calls[0]).not.toHaveProperty("web_release");
     });
 
-    test("initialization prompts for current application delivery instead of standalone publishing", async () => {
+    test("initialization makes application binding optional for static assets", async () => {
         const directory = await workspace();
         await rm(join(directory, "supacloud.json"));
         const tools = new Map<string, ToolInvocation>();
@@ -119,11 +119,14 @@ describe("current deployment only", () => {
         const result = await tools.get("init")!({ root: directory, json: true });
         expect(result.content[0]?.text).toContain("SUPACLOUD_APPLICATION_ID");
         expect(await readFile(join(directory, ".env.supacloud.test.example"), "utf8"))
-            .toContain("SUPACLOUD_APPLICATION_ID=<application-id>");
+            .toContain("# Optional for executable application delivery: SUPACLOUD_APPLICATION_ID=<application-id>");
     });
 
-    test("environment inspection accepts repository application binding without client configuration revisions", async () => {
-        const directory = await workspace();
+    test.each([
+        { application: { id: "orders", environmentId: "test" } },
+        { frontend: { outputDirectory: "dist" } },
+    ])("environment inspection accepts application or standalone frontend configuration: %j", async config => {
+        const directory = await workspace(config);
         await writeFile(join(directory, ".env.supacloud.test"), [
             "SUPACLOUD_ENV=test", "SUPACLOUD_API_URL=https://management.example.com",
             "SUPACLOUD_API_TOKEN=private-profile-token", "SUPACLOUD_PROJECT_REF=test-ref",
@@ -152,7 +155,7 @@ describe("current deployment only", () => {
     );
 
     test.each([
-        {}, { frontend: { id: "web", outputDirectory: "dist" } },
+        {},
         { targets: { api: { type: "edge_function", root: "." } } },
     ])("rejects standalone deployment configuration without guessing an application: %j", async config => {
         const directory = await workspace(config);
@@ -297,6 +300,162 @@ describe("current deployment only", () => {
             "GET /v1/projects/test-ref/frontend/deployments",
             "POST /v1/projects/test-ref/environments/test/deployments/web-release",
         ]);
+    });
+
+    test.each(["static", "mixed", "initial", "conflict", "unknown", "unchanged", "tree-mismatch"] as const)(
+        "assets-only publication preserves backend boundaries: %s", async mode => {
+            const directory = await workspace({
+                ...(mode === "mixed" ? { application: { id: "orders" },
+                    targets: {
+                        api: { type: "edge_function", root: "." },
+                        web: { type: "frontend", root: ".", id: "web", outputDirectory: "dist" },
+                    },
+                } : { frontend: { id: "web", root: ".", outputDirectory: "dist" } }),
+            });
+            if (mode === "mixed") {
+                await mkdir(join(directory, "supacloud", "fa"), { recursive: true });
+                await writeFile(join(directory, "supacloud", "fa", "deploy-manifest.json"), '{"keep":true}');
+            }
+            const archive = await createFrontendArchive(join(directory, "dist"));
+            const release = {
+                schema: "supacloud.frontend-release.v2", project_ref: "test-ref", deployment_id: "web",
+                release_id: archive.sha256, sha256: archive.sha256, tree_sha256: archive.treeSha256,
+                size_bytes: archive.archiveBytes, file_count: archive.fileCount,
+                created_at: "2026-10-14T00:00:00.000Z", kind: "prebuilt_static", archive_format: "tar.zst",
+            };
+            await archive.cleanup();
+            const previous = { ...release, release_id: "a".repeat(64), sha256: "a".repeat(64),
+                tree_sha256: mode === "unchanged" ? release.tree_sha256 : "b".repeat(64) };
+            let active = previous;
+            const previousActivation = crypto.randomUUID();
+            let activationId: string = previousActivation;
+            let activations = 0;
+            const base = "/v1/projects/test-ref/frontend/deployments/web";
+            const api = server(async request => {
+                const path = new URL(request.url).pathname;
+                if (path.endsWith("/protocol")) return Response.json(protocol);
+                if (request.method === "GET" && path.endsWith("/frontend/deployments")) {
+                    return Response.json([{ id: "web", name: "web", framework: "static", output_dir: "dist" }]);
+                }
+                if (request.method === "GET" && path === `${base}/active-release`) {
+                    return Response.json({
+                        project_ref: "test-ref", deployment_id: "web",
+                        active_release_id: mode === "initial" && activations === 0 ? null : active.release_id,
+                        active_activation_id: mode === "initial" && activations === 0 ? null : activationId,
+                        releases: mode === "initial" && activations === 0 ? [] : [active], next_cursor: null,
+                    });
+                }
+                if (path === `${base}/releases` && request.method === "POST") {
+                    expect((await request.arrayBuffer()).byteLength).toBe(release.size_bytes);
+                    return Response.json({ project_ref: "test-ref", deployment_id: "web",
+                        release: mode === "tree-mismatch" ? { ...release, tree_sha256: "c".repeat(64) } : release,
+                    }, { status: 201 });
+                }
+                if (path === `${base}/releases/${release.release_id}` && request.method === "GET") {
+                    return Response.json({ project_ref: "test-ref", deployment_id: "web", release });
+                }
+                if (path === `${base}/releases/${release.release_id}/activate` && request.method === "POST") {
+                    activations++;
+                    const body = await request.json() as Record<string, unknown>;
+                    expect(body.expected_active_release_id).toBe(mode === "initial" ? "absent" : previous.release_id);
+                    expect(body.expected_activation_id).toBe(mode === "initial" ? "absent" : previousActivation);
+                    expect(typeof body.mutation_id).toBe("string");
+                    if (mode === "conflict") return Response.json({ code: "CONFLICT" }, { status: 409 });
+                    active = release;
+                    activationId = String(body.mutation_id);
+                    if (mode === "unknown") return Response.json({}, { status: 503 });
+                    return Response.json({
+                        project_ref: "test-ref", deployment_id: "web",
+                        active_release_id: release.release_id, activation_id: activationId, release,
+                        mutation: { mutation_id: activationId, status: "succeeded", replayed: false },
+                    });
+                }
+                return Response.json({ code: "UNEXPECTED_REQUEST" }, { status: 404 });
+            });
+            const tool = deploy(api.http, directory);
+            const result = await tool.run({ skip_build: true, ...(mode === "mixed" ? { assets_only: true } : {}) });
+            const receipt = JSON.parse(result.content[0]!.text);
+            expect(tool.calls).toEqual([]);
+            expect(activations).toBe(mode === "unchanged" || mode === "tree-mismatch" ? 0 : 1);
+            if (mode === "conflict" || mode === "unknown") {
+                expect(result.isError).toBe(true);
+                expect(receipt.mutation_id).toBeString();
+                expect(receipt.target_release_id).toBe(release.release_id);
+                expect(receipt.error.code).toBe(mode === "unknown" ? "OUTCOME_UNKNOWN" : "HTTP_ERROR");
+            } else if (mode === "tree-mismatch") {
+                expect(result.isError).toBe(true);
+            } else {
+                expect(result.isError).not.toBe(true);
+                expect(receipt.active_release_id).toBe(mode === "unchanged" ? previous.release_id : release.release_id);
+            }
+            if (mode === "mixed") {
+                expect(await readFile(join(directory, "supacloud", "fa", "deploy-manifest.json"), "utf8"))
+                    .toBe('{"keep":true}');
+            }
+            expect(api.requests.every(path => path.includes("/frontend/") || path.endsWith("/protocol")
+                || (mode === "unknown" && path.includes("/mutations/")))).toBe(true);
+        },
+    );
+
+    test("assets-only requires explicit frontend configuration before remote access", async () => {
+        const directory = await workspace();
+        const api = server();
+        await expect(deploy(api.http, directory).run({ assets_only: true })).rejects.toThrow("frontend configuration");
+        expect(api.requests).toEqual([]);
+    });
+
+    test.each(["exact", "missing", "duplicate"] as const)(
+        "assets-only selects an exact named site among multiple deployments: %s", async mode => {
+            const directory = await workspace({ frontend: { name: "fa-web", outputDirectory: "dist" } });
+            const selected: string[] = [];
+            const api = server(request => {
+                const path = new URL(request.url).pathname;
+                if (path.endsWith("/protocol")) return Response.json(protocol);
+                if (path.endsWith("/frontend/deployments")) return Response.json([
+                    { id: "fonts", name: "fa-font-assets", framework: "static" },
+                    ...(mode === "missing" ? [] : [{ id: "web", name: "fa-web", framework: "static" }]),
+                    ...(mode === "duplicate" ? [{ id: "other", name: "fa-web", framework: "static" }] : []),
+                ]);
+                if (path.endsWith("/active-release")) selected.push(path);
+                return Response.json({}, { status: 409 });
+            });
+            if (mode === "exact") {
+                expect((await deploy(api.http, directory).run({ skip_build: true })).isError).toBe(true);
+                expect(selected).toEqual(["/v1/projects/test-ref/frontend/deployments/web/active-release"]);
+            } else {
+                await expect(deploy(api.http, directory).run({ skip_build: true }))
+                    .rejects.toThrow("Expected exactly one");
+                expect(selected).toEqual([]);
+            }
+            expect(api.requests.every(value => value.startsWith("GET "))).toBe(true);
+        },
+    );
+
+    test("mixed frontend repositories require explicit assets-only selection", async () => {
+        const directory = await workspace({ frontend: { outputDirectory: "dist" } });
+        await writeFile(join(directory, "deploy-manifest.json"), "{}");
+        const api = server();
+        await expect(deploy(api.http, directory).run({ skip_build: true })).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
+        expect(api.requests).toEqual([]);
+    });
+
+    test("assets-only retains production, read-only and target guards", async () => {
+        const directory = await workspace({ frontend: { outputDirectory: "dist" } });
+        const api = server();
+        const guardEnvironments: Array<Record<string, string>> = [
+            { SUPACLOUD_READ_ONLY: "true" }, { SUPACLOUD_ENV: "production" },
+        ];
+        for (const env of guardEnvironments) {
+            const result = await runCli(directory, api.url, ["deploy", "--assets_only"], env);
+            expect(result.exitCode).toBe(1);
+            expect(result.stderr).toContain(env.SUPACLOUD_READ_ONLY ? "read-only" : "--confirm-production");
+        }
+        const foreign = await runCli(directory, api.url, [
+            "deploy", "--assets_only", "--ref", "foreign", "--confirm-production", "foreign",
+        ], { SUPACLOUD_ENV: "production" });
+        expect(foreign.exitCode).toBe(1);
+        expect(foreign.stderr).toContain("cannot target a different project");
+        expect(api.requests).toEqual([]);
     });
 
     test("keeps sensitive build variables out and reports missing names without values", () => {

@@ -26,11 +26,15 @@ supacloud --env test deploy
 overwriting an existing project configuration. `env list` and `env check` are
 local-only, redact credentials, and provide stable JSON with `--json` for CI or
 AI tooling. The real `.env.supacloud.*` files are added to `.gitignore`.
-Fill in `SUPACLOUD_APPLICATION_ID` and the Management credentials in the
-selected profile, and configure the application's current delivery build.
-Standalone frontend deployment is no longer supported. Upgrade the CLI with
+Fill in the Management credentials and project/environment in the selected profile.
+Static frontends need only `frontend` build configuration; no application binding
+or backend delivery build is required. Set `SUPACLOUD_APPLICATION_ID` only for
+executable application delivery. Upgrade the CLI with
 `npm install -g @supacloud/cli@latest` and upgrade the SupaCloud server together.
 `deploy` checks the server protocol before building or uploading.
+Use `frontend.name` to select exactly one named site in each environment when
+deployment IDs differ. A missing or ambiguous name fails before upload; it never
+falls back to another site.
 
 ## Application Starter
 
@@ -645,7 +649,12 @@ FA-owned business features are documented in
 and `--dry_run` are removed. Put build settings in `supacloud.json`; use
 `app deploy-plan` for read-only review. Historical project-specific manifests
 and standalone Function targets must move to application delivery configuration.
-The CLI rejects them rather than falling back to a partial Web deployment.
+The CLI rejects them rather than silently falling back to a partial Web deployment.
+For an intentional Web-only release in a mixed repository, use
+`supacloud --env test deploy --assets_only`. This preserves historical manifests,
+Functions, schedules and migrations without invoking application compilation.
+Static publication reuses immutable archives, pre-upload CAS, mutation receipts
+and exact post-activation readback. It never retries a conflicting activation.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or

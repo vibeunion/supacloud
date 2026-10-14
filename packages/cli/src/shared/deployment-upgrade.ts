@@ -1,4 +1,4 @@
-export const DEPLOYMENT_UPGRADE = "DEPLOYMENT_UPGRADE_REQUIRED: Legacy deployment is no longer supported. Upgrade with `npm install -g @supacloud/cli@latest`, bind application.id and application.environmentId in supacloud.json (or SUPACLOUD_APPLICATION_ID and SUPACLOUD_ENV), then run `supacloud deploy`. SupaCloud owns deployment planning and activation; do not retry with legacy commands.";
+export const DEPLOYMENT_UPGRADE = "DEPLOYMENT_UPGRADE_REQUIRED: Legacy deployment commands are no longer supported. Upgrade with `npm install -g @supacloud/cli@latest`, configure frontend in supacloud.json for static assets, or application.id and application.environmentId for executable application delivery, then run `supacloud deploy`. Use `supacloud deploy --assets_only` to publish only Web assets in a mixed repository. SupaCloud owns activation; do not retry with legacy commands.";
 
 const removedFrontendActions = new Set([
     "deploy_git", "deploy_upload", "redeploy", "upload_release", "activate_release",

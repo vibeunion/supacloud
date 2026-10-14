@@ -170,7 +170,8 @@ supacloud --env test dev migrate
 supacloud --env test dev migrate --apply
 ```
 
-Bind the application in the selected profile or repository-root `supacloud.json`.
+For executable application delivery, bind the application in the selected profile
+or repository-root `supacloud.json`. Static-only sites omit `application` entirely.
 For a frontend in a separate directory:
 
 ```json
@@ -197,6 +198,8 @@ npm install -g @supacloud/cli@latest
 supacloud --env test deploy
 # Existing Web output and an application manifest configured in the profile:
 supacloud --env test deploy --skip_build
+# Publish only static assets while preserving a mixed repository's backend:
+supacloud --env test deploy --assets_only
 ```
 
 `--target`, `--id`, `--build_command`, `--output_dir`, `--plan`, `--diff` and
@@ -204,7 +207,8 @@ supacloud --env test deploy --skip_build
 Use `app deploy-plan` for an explicit read-only review of an uploaded application
 release. Standalone `edge_function` target declarations must be migrated to the
 application delivery configuration; the CLI will not silently omit them.
-Historical `deploy-manifest.json` files must be migrated, not reused as scopes.
+Historical `deploy-manifest.json` files are not reused as deployment scopes.
+Explicit `--assets_only` leaves them and all Functions/schedules untouched.
 
 Production profiles retain the standard explicit confirmation gate:
 
@@ -550,8 +554,10 @@ check the deployment and upgrade the server. There is no historical-inventory
 fallback for older servers.
 
 For immutable frontend deployments the platform retains previous artifacts.
-`deploy --json` returns the bound application deployment receipt, not
-client-side CAS instructions. For an operator rollback,
+`deploy --json` returns the application receipt for executable application delivery,
+or the immutable frontend receipt for assets-only delivery. Assets-only publication
+keeps the pre-upload CAS and exposes its mutation ID even on an unknown outcome.
+For an operator rollback,
 run `frontend rollback`; SupaCloud supplies the journal-verified previous
 release, while the CLI observes current CAS and creates the mutation UUID.
 An explicit `--release_id <previous-release-sha256>` remains available for a

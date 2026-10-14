@@ -27,7 +27,7 @@ async function workspace(): Promise<string> {
 }
 
 describe("developer experience tools", () => {
-    test("init creates Web build config and requires application binding in profile examples", async () => {
+    test("init creates Web build config with optional application binding", async () => {
         const root = await workspace();
         await writeFile(join(root, "package.json"), JSON.stringify({
             scripts: { build: "vite build" },
