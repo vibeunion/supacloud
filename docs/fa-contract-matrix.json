@@ -1,0 +1,37 @@
+{
+  "schema": "supacloud.consumer-contract-matrix.v1",
+  "customer": "xigu-fa",
+  "baseline_tuple_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "candidate_tuple_sha256": "10f1bbd8ddc8f2be094159714f9d349baeadace2b1ca9622459b072df4d777ca",
+  "artifacts": {
+    "frontend": { "old": "1111111111111111111111111111111111111111111111111111111111111111", "new": "2222222222222222222222222222222222222222222222222222222222222222" },
+    "functions": { "old": "3333333333333333333333333333333333333333333333333333333333333333", "new": "4444444444444444444444444444444444444444444444444444444444444444" },
+    "database": { "old": "5555555555555555555555555555555555555555555555555555555555555555", "new": "6666666666666666666666666666666666666666666666666666666666666666" }
+  },
+  "cases": [
+    { "frontend": "old", "functions": "old", "database": "old", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "old", "functions": "old", "database": "new", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "old", "functions": "new", "database": "old", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "old", "functions": "new", "database": "new", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "new", "functions": "old", "database": "old", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "new", "functions": "old", "database": "new", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "new", "functions": "new", "database": "old", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] },
+    { "frontend": "new", "functions": "new", "database": "new", "scenarios": [
+      { "name": "missing-display-field", "expected": "compatible" }, { "name": "missing-authority-field", "expected": "blocked-safely" }, { "name": "added-field", "expected": "compatible" }, { "name": "legacy-envelope", "expected": "compatible" }, { "name": "lost-write-response", "expected": "compatible" }, { "name": "downgrade", "expected": "blocked-safely" }
+    ] }
+  ]
+}

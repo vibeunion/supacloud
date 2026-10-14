@@ -58,6 +58,25 @@ export type {
   DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus,
 } from "./deployment-evidence";
 export {
+  DELIVERY_TUPLE_SCHEMA, FaDeliveryTupleSchema, formatFaDeliveryTuple,
+  isFaDeliveryTupleActive, parseFaDeliveryTuple,
+} from "./delivery-tuple";
+export type { FaDeliveryTuple } from "./delivery-tuple";
+export {
+  CONTRACT_MATRIX_SCHEMA, ConsumerContractMatrixSchema,
+  parseConsumerContractMatrix, FA_CONTRACT_COMBINATIONS, FA_CONTRACT_SCENARIOS,
+} from "./contract-matrix";
+export type { ConsumerContractMatrix } from "./contract-matrix";
+export {
+  FA_BUSINESS_OPERATIONS, FA_REQUIRED_ACCEPTANCE, FaBusinessObservationSchema,
+  FaServiceObjectivesSchema, FaStabilityEvidenceSchema, checkFaStability,
+  faEvidenceDigest, faEvidenceProofs, faEvidenceTime, measureFaBusinessObservations,
+  parseFaStabilityEvidence,
+} from "./fa-stability";
+export type {
+  FaBusinessObservation, FaProof, FaServiceObjectives, FaStabilityEvidence,
+} from "./fa-stability";
+export {
   ApplicationPromotionPlanSchema, applicationPromotionPlanDigest,
   applicationPromotionAction, applicationPromotionSteps, parseApplicationPromotionPlan,
 } from "./application-promotion";

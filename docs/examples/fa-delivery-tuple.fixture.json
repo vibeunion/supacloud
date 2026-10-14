@@ -1,0 +1,18 @@
+{
+  "schema": "supacloud.fa-delivery-tuple.v1",
+  "customer": "xigu-fa",
+  "fa_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cli": { "version": "0.96.1" },
+  "platform_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "edge_runtime": {
+    "version": "0.16.5",
+    "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "compatibility_window": {
+    "contract_schema": "fa-command-contract.v3",
+    "starts_at": "2026-10-14T00:00:00.000Z",
+    "ends_at": "2026-11-14T00:00:00.000Z",
+    "old_client_supported": true,
+    "partial_deployment_supported": true
+  }
+}
