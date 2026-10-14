@@ -1,6 +1,7 @@
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { createClient, type Session } from '@supabase/supabase-js'
 import packageJson from '../package.json' with { type: 'json' }
 import { executeBufferedCommand } from './subprocess.js'
 
@@ -14,15 +15,19 @@ const fetchObjectFunctionDir = join(projectDir, 'supabase', 'functions', 'fetch-
 const v1 = '20260729000000'
 const v2 = '20260729000001'
 const commandTimeoutMs = 120_000
+const authPassword = 'standalone-smoke-password-2026'
+const authEmail = `standalone-${crypto.randomUUID()}@example.test`
 
-try {
+async function runUpgradeSmoke(): Promise<void> {
   await access(binary)
   await mkdir(migrationDir, { recursive: true })
   await mkdir(functionDir, { recursive: true })
   await mkdir(fetchObjectFunctionDir, { recursive: true })
   await writeFile(join(projectDir, 'supabase', 'config.toml'), `
 [auth]
-enabled = false
+enabled = true
+[auth.email]
+enable_confirmations = false
 
 [db.seed]
 enabled = true
@@ -89,7 +94,7 @@ export default {
   const anonKey = parseAnonKey(
     await runCommand('keys', [binary, 'keys', '--project-dir', projectDir], projectDir, isolatedEnvironment),
   )
-  await withServer({ phaseLabel: 'server v1', binary, projectDir, environment: isolatedEnvironment }, async (url) => {
+  const authProbe = await withServer({ phaseLabel: 'server v1', binary, projectDir, environment: isolatedEnvironment }, async (url) => {
     const health = await fetch(`${url}/health`)
     assert(health.status === 200, `health returned HTTP ${health.status}`)
     assert((await health.json() as { status?: string }).status === 'healthy', 'health payload was not healthy')
@@ -106,6 +111,7 @@ export default {
       fetchObjectBody.ok === true && fetchObjectBody.runtime === 'fetch-object',
       'fetch-object function response was unexpected',
     )
+    return await expectAuthLifecycle(url, anonKey)
   })
 
   const storageDir = join(projectDir, '.supacloud-lite', 'storage')
@@ -180,6 +186,7 @@ alter table public.upgrade_probe
     assert(response.status === 200, `restored v1 read returned HTTP ${response.status}`)
     const rows = await response.json() as Array<{ id: number; body: string }>
     assert(rows[0]?.body === 'preserved-v1', 'pre-upgrade snapshot did not preserve v1 data')
+    await expectAuthLogin(url, anonKey, 'restored v1', authProbe)
   })
 
   const statusV2 = await runCommand(
@@ -201,9 +208,40 @@ alter table public.upgrade_probe
     assert(rows.length === 1, `expected one preserved row, got ${rows.length}`)
     assert(rows[0]?.body === 'preserved-v1', 'v1 data was not preserved')
     assert(rows[0]?.upgraded === true, 'v2 field was not readable')
+    await expectAuthLogin(url, anonKey, 'v2', authProbe)
   })
 
   console.log('standalone-smoke-ok')
+}
+
+async function runAuthSmoke(): Promise<void> {
+  await access(binary)
+  await mkdir(join(projectDir, 'supabase'), { recursive: true })
+  await writeFile(join(projectDir, 'supabase', 'config.toml'), `
+[auth]
+enabled = true
+[auth.email]
+enable_confirmations = false
+`)
+  const environment = withoutRuntimePath(emptyPath)
+  const version = (await runCommand('version', [binary, 'version'], projectDir, environment)).trim()
+  assert(version === packageJson.version, `unexpected standalone version: ${version}`)
+  const anonKey = parseAnonKey(await runCommand('keys', [binary, 'keys'], projectDir, environment))
+  const options = { binary, projectDir, environment }
+  const probe = await withServer({ ...options, phaseLabel: 'auth first run' }, (url) =>
+    expectAuthLifecycle(url, anonKey),
+  )
+  await withServer({ ...options, phaseLabel: 'auth restarted' }, (url) =>
+    expectAuthLogin(url, anonKey, 'restarted', probe),
+  )
+  console.log('standalone-auth-smoke-ok')
+}
+
+try {
+  const args = process.argv.slice(2)
+  assert(args.length === 0 || (args.length === 1 && args[0] === '--auth-only'), 'usage: standalone-smoke.ts [--auth-only]')
+  if (args[0] === '--auth-only') await runAuthSmoke()
+  else await runUpgradeSmoke()
 } finally {
   await Promise.all([
     rm(projectDir, { recursive: true, force: true }),
@@ -213,6 +251,11 @@ alter table public.upgrade_probe
 
 function withoutRuntimePath(path: string): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...process.env, PATH: path }
+  for (const key of Object.keys(environment)) {
+    if (key.startsWith('SUPACLOUD_LITE_')) delete environment[key]
+  }
+  delete environment.PORT
+  delete environment.BUN_BE_BUN
   if (process.platform === 'win32') environment.Path = path
   return environment
 }
@@ -232,7 +275,7 @@ interface ServerOptions {
   stateDir?: string
 }
 
-async function withServer(options: ServerOptions, check: (url: string) => Promise<void>): Promise<void> {
+async function withServer<T>(options: ServerOptions, check: (url: string) => Promise<T>): Promise<T> {
   const port = await findEphemeralPort()
   const stateArgs = options.stateDir ? ['--state-dir', options.stateDir] : []
   console.log(`[standalone-smoke] ${options.phaseLabel}: start`)
@@ -250,8 +293,9 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
   try {
     await waitForHealth(url, processHandle)
     console.log(`[standalone-smoke] ${options.phaseLabel}: healthy`)
-    await check(url)
+    const result = await check(url)
     checkCompleted = true
+    return result
   } finally {
     console.log(`[standalone-smoke] ${options.phaseLabel}: stop`)
     processHandle.kill('SIGTERM')
@@ -317,6 +361,81 @@ async function runCommand(
   if (timedOut) throw new Error(`standalone command "${commandLabel}" timed out after ${commandTimeoutMs}ms\n${stdout}\n${stderr}`)
   if (exitCode !== 0) throw new Error(`standalone command "${commandLabel}" failed (${exitCode})\n${stdout}\n${stderr}`)
   return stdout
+}
+
+interface AuthProbe {
+  session: Session
+  revokedRefreshToken: string
+}
+
+async function expectAuthLifecycle(url: string, anonKey: string): Promise<AuthProbe> {
+  const client = supabaseClient(url, anonKey)
+  const signup = await client.auth.signUp({ email: authEmail, password: authPassword })
+  assert(!signup.error && signup.data.user && signup.data.session, 'standalone Auth signup failed')
+
+  const refreshed = await client.auth.refreshSession()
+  assert(
+    !refreshed.error && refreshed.data.session &&
+      refreshed.data.session.user.id === signup.data.user.id &&
+      refreshed.data.session.refresh_token !== signup.data.session.refresh_token,
+    'standalone Auth refresh did not rotate the refresh token',
+  )
+  const refreshToken = refreshed.data.session.refresh_token
+  const logout = await client.auth.signOut()
+  assert(!logout.error, 'standalone Auth logout failed')
+  const localSession = await client.auth.getSession()
+  assert(!localSession.error && localSession.data.session === null, 'standalone SDK retained the signed-out session')
+  const revoked = await client.auth.refreshSession({ refresh_token: refreshToken })
+  assert(
+    revoked.error?.status === 400 &&
+      revoked.error.code === 'refresh_token_not_found' &&
+      revoked.data.session === null,
+    'standalone Auth accepted a revoked refresh token',
+  )
+
+  const login = await client.auth.signInWithPassword({ email: authEmail, password: authPassword })
+  assert(!login.error && login.data.user?.id === signup.data.user.id && login.data.session, 'standalone Auth relogin failed')
+  return { session: login.data.session, revokedRefreshToken: refreshToken }
+}
+
+async function expectAuthLogin(url: string, anonKey: string, label: string, probe: AuthProbe): Promise<void> {
+  const client = supabaseClient(url, anonKey)
+  const restored = await client.auth.setSession(probe.session)
+  assert(!restored.error && restored.data.user?.id === probe.session.user.id, `${label} Auth session did not survive restart`)
+  const user = await client.auth.getUser()
+  assert(!user.error && user.data.user?.id === probe.session.user.id, `${label} Auth could not validate the restored session`)
+  const refreshed = await client.auth.refreshSession()
+  assert(
+    !refreshed.error && refreshed.data.session &&
+      refreshed.data.session.user.id === probe.session.user.id &&
+      refreshed.data.session.refresh_token !== probe.session.refresh_token,
+    `${label} Auth could not rotate the persisted refresh token`,
+  )
+  const revoked = await supabaseClient(url, anonKey).auth.refreshSession({ refresh_token: probe.revokedRefreshToken })
+  assert(
+    revoked.error?.status === 400 &&
+      revoked.error.code === 'refresh_token_not_found' &&
+      revoked.data.session === null,
+    `${label} Auth did not preserve logout revocation`,
+  )
+  const login = await client.auth.signInWithPassword({ email: authEmail, password: authPassword })
+  assert(
+    !login.error && login.data.session && login.data.user?.id === probe.session.user.id,
+    `${label} Auth login did not survive restart`,
+  )
+}
+
+function supabaseClient(url: string, anonKey: string) {
+  return createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: {
+      fetch: Object.assign(
+        (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+          fetch(input, { ...init, signal: AbortSignal.timeout(10_000) }),
+        { preconnect: fetch.preconnect },
+      ),
+    },
+  })
 }
 
 function assertMigrationStatus(output: string, present: string[], absent: string[], label: string): void {
