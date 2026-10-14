@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.2...edge-runtime-v0.32.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* **edge-runtime:** recover admission and retain project workers ([#1897](https://github.com/vibeunion/supacloud/issues/1897)) ([26e6faf](https://github.com/vibeunion/supacloud/commit/26e6faf545e2054b689e5b17e84f36f299aa453d))
+
 ## [0.32.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.1...edge-runtime-v0.32.2) (2026-10-14)
 
 
