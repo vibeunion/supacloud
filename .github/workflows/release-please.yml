@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      recover_query:
+        description: Retry only the Query adapter publication
+        required: false
+        default: false
+        type: boolean
       recover_management_tag:
         description: Build and attest an existing empty Management release from its exact tag
         required: false
@@ -98,7 +103,7 @@ jobs:
         run: node .github/scripts/recover-edge-runtime-release.mjs
 
       - uses: googleapis/release-please-action@v5
-        if: ${{ inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && inputs.recover_elysia != true }}
+        if: ${{ inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && inputs.recover_elysia != true && inputs.recover_query != true }}
         id: release-action
         continue-on-error: true
         with:
@@ -514,7 +519,7 @@ jobs:
     needs: release-please
     # A previous release can leave a Git tag behind after npm publication
     # fails. Allow an explicit recovery run without creating another release.
-    if: ${{ always() && inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main')) }}
+    if: ${{ always() && inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main') || (inputs.recover_query == true && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
@@ -560,7 +565,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish Query adapter to NPM
-        if: ${{ !cancelled() && (needs.release-please.outputs.query_released == 'true' || inputs.recover_npm == true) }}
+        if: ${{ !cancelled() && (needs.release-please.outputs.query_released == 'true' || inputs.recover_npm == true || (inputs.recover_query == true && github.ref == 'refs/heads/main')) }}
         working-directory: packages/query
         run: |
           bun install --frozen-lockfile
