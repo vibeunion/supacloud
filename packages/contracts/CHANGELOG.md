@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.8.1...contracts-v0.9.0) (2026-10-14)
+
+
+### Features
+
+* **stability:** add FA delivery and acceptance governance ([#1915](https://github.com/vibeunion/supacloud/issues/1915)) ([f70b607](https://github.com/vibeunion/supacloud/commit/f70b6079234d849d5059dd5a879d22b895022987))
+
 ## [0.8.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.8.0...contracts-v0.8.1) (2026-10-11)
 
 
