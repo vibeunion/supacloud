@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.26.0...supacloud-lite-v0.27.0) (2026-10-14)
+
+
+### Features
+
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.25.1...supacloud-lite-v0.26.0) (2026-10-12)
 
 

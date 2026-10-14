@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.45.1...compiler-v0.46.0) (2026-10-14)
+
+
+### Features
+
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+* **delivery:** declare Edge Function targets in the delivery plan ([#1893](https://github.com/vibeunion/supacloud/issues/1893)) ([1312281](https://github.com/vibeunion/supacloud/commit/131228138edd0d2a4484eea82a80257a88eaf795))
+
 ## [0.45.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.45.0...compiler-v0.45.1) (2026-10-13)
 
 

@@ -14,6 +14,24 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.96.0](https://github.com/vibeunion/supacloud/compare/cli-v0.95.1...cli-v0.96.0) (2026-10-14)
+
+
+### Features
+
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+* **workflows:** add host-neutral workflow dispatcher ([#1889](https://github.com/vibeunion/supacloud/issues/1889)) ([9fd3184](https://github.com/vibeunion/supacloud/commit/9fd31849cd3dceacb9a4cbc8fa82866512a12ccb))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1891](https://github.com/vibeunion/supacloud/issues/1891)) ([906993e](https://github.com/vibeunion/supacloud/commit/906993e0a52b00ab35a6ed843e98e3a960749487))
+
+
+### Miscellaneous Chores
+
+* release main ([#1887](https://github.com/vibeunion/supacloud/issues/1887)) ([52d64a9](https://github.com/vibeunion/supacloud/commit/52d64a95d4e02401436e9ab25cb03d1bb25e64d0))
+
 ## [0.95.1](https://github.com/vibeunion/supacloud/compare/cli-v0.95.0...cli-v0.95.1) (2026-10-13)
 
 
