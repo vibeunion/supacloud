@@ -33,6 +33,44 @@ choose or create their explicit composition module before using `--register-in`.
 accepted. Supplying both aliases of a flag is an error. `--dry-run` is supported
 for generation, not init, compilation or deployment; misuse is rejected.
 
+For an approval vertical-slice scaffold, use the feature generator with explicit
+capabilities. This is not a completed database-backed business application:
+
+```sh
+supacloud app generate --kind feature --name case-approval \
+  --permission cases:approve --rpc approveCase \
+  --register-in src/app.module.ts --dry-run --format json
+supacloud app generate --kind feature --name case-approval \
+  --permission cases:approve --rpc approveCase \
+  --register-in src/app.module.ts
+```
+
+The six-file feature plan creates one feature directory containing HTTP boundary
+schemas, request-scoped read/write ports, list/detail operations, an
+approval Command with permission/transaction/audit/idempotency/state metadata,
+an existing Workflow/Queue job boundary, HTTP routes, fail-closed unit tests
+and a delivery checklist. `--permission` and `--rpc` are mandatory and are
+never inferred. The RPC must be registered in compiler capabilities and the
+runtime host.
+
+The Job intentionally throws until implemented. The state declaration is checked
+for compiler consistency; it does not lock or update database rows. The version
+field is an input contract, not an implemented optimistic lock. The generated tests
+exercise port delegation and refusal only, not authenticated HTTP/database E2E.
+This template requires matching current framework/compiler/runtime packages
+(including the Effect route contract); CLI generation alone does not attest a
+published-package compatibility tuple.
+
+No migration, fake database, service-role fallback or second schema/client
+source is generated. Bind the ports to verified identity, tenant-scoped
+persistence and durable adapters, then use the existing client generator and
+`@supacloud/query` for browser transport and identity-scoped invalidation.
+
+New single-file `command` scaffolds also declare required transaction/idempotency
+and an audit event. This is the database-command default, not proof of installed
+adapters. External side effects need the explicit external-command recipe with
+reconciliation and `transaction: "none"`; generation never retries them.
+
 ## What a resource contains
 
 The default directory is `src/features`, overridden by a project-relative `--dir`.

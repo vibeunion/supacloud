@@ -23,6 +23,19 @@ test("a passing test does not hide unauthorized file changes", () => {
   expect(result.summary.unauthorizedTrials).toBe(1);
 });
 
+test("approval slice trials cannot hide changes to unrelated features", () => {
+  const feature = {
+    ...trial, task: "create-feature-slice",
+    changedFiles: ["src/features/case-approval/case-approval.feature.ts"],
+  };
+  expect(evaluateVibecodingRuns({ version: 1, trials: [feature] }).summary.successRate).toBe(1);
+  const result = evaluateVibecodingRuns({ version: 1, trials: [
+    { ...feature, changedFiles: ["src/features/billing/billing.ts"] },
+  ] });
+  expect(result.summary.successRate).toBe(0);
+  expect(result.summary.unauthorizedTrials).toBe(1);
+});
+
 test("invalid metrics, duplicate identities and unstructured payloads are rejected", () => {
   for (const input of [
     { version: 1, trials: [] },

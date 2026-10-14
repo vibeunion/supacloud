@@ -6,11 +6,15 @@ definitions are `VIBECODING_TASKS` in `scripts/vibecoding-eval.ts`:
 1. Create and register a catalog resource with allowed/denied read tests.
 2. Repair a response-contract mismatch without weakening checks.
 3. Extend a governed orders command with denial, version and duplicate tests.
+4. Generate and complete an approval feature slice with explicit permission,
+   durable RPC, database adapters and authenticated acceptance.
 
 Use separate disposable branches with the same starter, dependency versions,
 model settings and initial task context for comparisons. The command task uses
 the explicit command recipe or an existing governed application, not fabricated
 persistence in a minimal application.
+The feature-slice task must use the generated scaffold and a real database/host
+adapter; passing generation or compiler metadata alone is not business acceptance.
 
 Record one trial per agent run:
 
