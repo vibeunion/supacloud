@@ -71,7 +71,14 @@ supacloud generate --kind command  --module orders --name accept
 supacloud generate --kind query    --module orders --name list
 supacloud generate --kind job      --module orders --name sync-orders
 supacloud generate --kind contract --module orders --name accept
+supacloud generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase
 ```
+
+`feature` 生成器提供审批业务切片骨架：它同时生成 HTTP 契约、
+Query、受治理 Command、状态声明、异步任务边界、HTTP 路由、失败关闭测试和
+交付检查清单。权限名和持久化 RPC 必须显式提供，框架不会猜测业务授权。
+它不生成第二套数据库模型，也不伪造数据库、身份或生产回执。
+数据库版本校验、授权、事务和任务宿主仍须接入；生成测试不代表真实数据库或 E2E 验收。
 
 ## 编译器替开发者做更多判断
 
