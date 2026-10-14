@@ -245,6 +245,21 @@ memory or CPU isolation is required.
 
 ### Memory Pressure Recovery
 
+Foreground and background workers default to `smol` mode. Override each pool
+with `EDGE_FOREGROUND_WORKER_SMOL` or `EDGE_BACKGROUND_WORKER_SMOL`; the legacy
+`WORKER_SMOL` setting is the fallback for both. This is a memory/GC policy, not
+a hard heap limit or a guarantee of lower peak RSS for every workload.
+
+External-runtime upgrades size the default foreground pool by the lower of
+twice the CPU count, 20 workers, and `floor(memoryHighMb * 0.75 / 512)`, with a
+minimum of one. The 512 MiB estimate is a sizing heuristic, leaving 25% of the
+high limit for the parent process and background pool; it does not enforce
+per-worker memory limits. Explicit `SUPACLOUD_EDGE_WORKER_POOL_SIZE` or
+`WORKER_POOL_SIZE` settings still override this estimate. Later systemd
+drop-ins and environment-file overrides must be reconciled by the operator.
+Validate capacity using the actual function workload, including module
+preheating and long-running requests, before increasing worker counts.
+
 On cgroup v2 hosts, the runtime resolves its membership from `/proc/self/cgroup`
 and `/proc/self/mountinfo`. It samples `memory.current`, `memory.high`, and
 `memory.events` for that cgroup and its visible ancestors once per second.

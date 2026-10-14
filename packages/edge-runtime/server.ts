@@ -78,7 +78,7 @@ const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || 
 const BACKGROUND_PREHEAT_MODE = process.env.EDGE_BACKGROUND_PREHEAT_MODE || "one";
 const FOREGROUND_WORKER_SMOL = resolveBooleanEnv(
   process.env.EDGE_FOREGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL,
-  false,
+  true,
 );
 const BACKGROUND_WORKER_SMOL = resolveBooleanEnv(
   process.env.EDGE_BACKGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL,
