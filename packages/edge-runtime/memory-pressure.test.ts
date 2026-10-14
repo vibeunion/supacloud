@@ -125,6 +125,38 @@ describe("cgroup memory pressure recovery", () => {
     expect(events).toHaveLength(1);
   });
 
+  test("blocks admission near memory.high and resumes with hysteresis", async () => {
+    let sample = { ...pressure, currentBytes: pressure.highBytes * 0.86, highEvents: 10 };
+    const states: boolean[] = [];
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: () => {},
+      onAdmissionStateChange: ({ blocked }) => states.push(blocked),
+      onError: () => {},
+    });
+
+    await monitor.poll();
+    sample = { ...sample, highEvents: 11 };
+    await monitor.poll();
+    expect(states).toEqual([true]);
+
+    sample = { ...sample, currentBytes: pressure.highBytes * 0.8, highEvents: 12 };
+    await monitor.poll();
+    expect(states).toEqual([true]);
+
+    sample = { ...sample, highEvents: 12 };
+    await monitor.poll();
+    expect(states.at(-1)).toBe(false);
+
+    sample = { ...sample, currentBytes: pressure.highBytes * 0.86, highEvents: 13 };
+    await monitor.poll();
+    expect(states.at(-1)).toBe(true);
+
+    sample = { ...sample, currentBytes: pressure.highBytes * 0.74 };
+    await monitor.poll();
+    expect(states.at(-1)).toBe(false);
+  });
+
   test("stalled counters and cgroup changes do not accumulate near-limit pressure", async () => {
     let sample = { ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: 100 };
     const events: MemoryPressureSnapshot[] = [];

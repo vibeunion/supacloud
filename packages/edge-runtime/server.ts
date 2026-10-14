@@ -2052,6 +2052,17 @@ const memoryCgroups = await resolveMemoryCgroups();
 if (memoryCgroups.length > 0) {
   const monitor = createMemoryPressureMonitor({
     sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
+    onAdmissionStateChange: ({ blocked, snapshot }) => {
+      pool.setAdmissionBlocked(blocked);
+      backgroundPool.setAdmissionBlocked(blocked);
+      if (snapshot) {
+        console.warn("[EdgeRuntime] New requests temporarily blocked by cgroup memory pressure", {
+          blocked,
+          currentBytes: snapshot.currentBytes,
+          highBytes: snapshot.highBytes,
+        });
+      }
+    },
     onPressure: (snapshot) => {
       console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
         ...snapshot,
