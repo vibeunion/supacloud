@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.27.1...supacloud-lite-v0.28.0) (2026-10-14)
+
+
+### Features
+
+* **lite:** add offline auth user provisioning ([#1911](https://github.com/vibeunion/supacloud/issues/1911)) ([e9c8931](https://github.com/vibeunion/supacloud/commit/e9c89319cf39d9fe2d71ceac9ab76e6856bb5d84))
+
+
+### Bug Fixes
+
+* **lite:** normalize filesystem storage roots ([#1902](https://github.com/vibeunion/supacloud/issues/1902)) ([f1b5141](https://github.com/vibeunion/supacloud/commit/f1b5141c1e831e68aaf94b505909c9e4942a42df))
+* **lite:** report effective local auth configuration in doctor ([#1907](https://github.com/vibeunion/supacloud/issues/1907)) ([c167617](https://github.com/vibeunion/supacloud/commit/c1676176bdd5a2c057114474186570b7e6d5d0dd))
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.27.0...supacloud-lite-v0.27.1) (2026-10-14)
 
 
