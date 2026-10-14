@@ -140,4 +140,5 @@ test("the generated approval compiles only with the explicit persistent capabili
         types.exited, new Response(types.stdout).text(), new Response(types.stderr).text(),
     ]);
     expect({ code: typeCode, errors: typeCode ? typeOut + typeErr : "" }).toEqual({ code: 0, errors: "" });
-}, { timeout: 30_000 });
+// Two compiles, a generated bun test run and a tsc pass on a cold CI runner.
+}, { timeout: 120_000 });
