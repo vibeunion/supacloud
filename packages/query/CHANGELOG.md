@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/vibeunion/supacloud/compare/query-v0.2.1...query-v0.3.0) (2026-10-14)
+
+
+### Features
+
+* **query:** add contract-safe imperative reads ([#1905](https://github.com/vibeunion/supacloud/issues/1905)) ([de54ce3](https://github.com/vibeunion/supacloud/commit/de54ce3e419d28d5fdc4859ea4ab3ee9ae652f5f))
+
 ## [0.2.1](https://github.com/vibeunion/supacloud/compare/query-v0.2.0...query-v0.2.1) (2026-10-11)
 
 
