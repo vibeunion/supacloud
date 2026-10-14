@@ -10,11 +10,13 @@ export type MemoryPressureSnapshot = {
 
 export type MemoryPressureAdmissionState = {
   blocked: boolean;
+  recovering: boolean;
   snapshot: MemoryPressureSnapshot | null;
 };
 
 const ADMISSION_BLOCK_RATIO = 0.85;
 const ADMISSION_RESUME_RATIO = 0.75;
+const ADMISSION_STABLE_SAMPLES = 3;
 
 type ReadText = (path: string) => Promise<string>;
 const readTextFile: ReadText = (file) => readFile(file, "utf8");
@@ -104,6 +106,8 @@ export function createMemoryPressureMonitor(options: {
   let inFlight = false;
   let stopped = false;
   let admissionBlocked = false;
+  let admissionRecovering = false;
+  let stableSamples = 0;
   let pressureSamples = 0;
   let pressureCgroup: string | null = null;
   let previous: MemoryPressureSnapshot | null = null;
@@ -113,20 +117,45 @@ export function createMemoryPressureMonitor(options: {
     throttling: boolean,
   ) => {
     const previousBlocked = admissionBlocked;
+    const previousRecovering = admissionRecovering;
     if (snapshot) {
       const ratio = snapshot.currentBytes / Math.max(1, snapshot.highBytes);
-      if (!admissionBlocked && (ratio >= 1 || (ratio >= ADMISSION_BLOCK_RATIO && throttling))) {
+      const comparable = previous !== null
+        && previous.cgroup === snapshot.cgroup
+        && previous.highBytes === snapshot.highBytes;
+      const stable = previous !== null && comparable && !throttling
+        && snapshot.highEvents === previous.highEvents
+        && snapshot.currentBytes <= previous.currentBytes;
+      if (ratio >= 1 || (ratio >= ADMISSION_BLOCK_RATIO
+        && (throttling || (admissionRecovering && comparable && !stable)))) {
         admissionBlocked = true;
+        admissionRecovering = false;
+        stableSamples = 0;
       } else if (
-        admissionBlocked
+        (admissionBlocked || admissionRecovering)
         && (ratio <= ADMISSION_RESUME_RATIO
           || (ratio < ADMISSION_BLOCK_RATIO && !throttling))
       ) {
         admissionBlocked = false;
+        admissionRecovering = false;
+        stableSamples = 0;
+      } else if (admissionBlocked || admissionRecovering) {
+        // Idle caches can plateau below memory.high indefinitely. Probe with
+        // limited concurrency before reopening instead of latching a 503.
+        stableSamples = stable ? stableSamples + 1 : 0;
+        if (stableSamples >= ADMISSION_STABLE_SAMPLES) {
+          admissionRecovering = admissionBlocked;
+          admissionBlocked = false;
+          stableSamples = 0;
+        }
       }
+    } else {
+      stableSamples = 0;
     }
-    if (admissionBlocked !== previousBlocked) {
-      options.onAdmissionStateChange?.({ blocked: admissionBlocked, snapshot });
+    if (admissionBlocked !== previousBlocked || admissionRecovering !== previousRecovering) {
+      options.onAdmissionStateChange?.({
+        blocked: admissionBlocked, recovering: admissionRecovering, snapshot,
+      });
     }
   };
 
@@ -160,6 +189,7 @@ export function createMemoryPressureMonitor(options: {
         options.onPressure(snapshot);
       } catch (error: unknown) {
         previous = null;
+        stableSamples = 0;
         pressureSamples = 0;
         pressureCgroup = null;
         options.onError(error);

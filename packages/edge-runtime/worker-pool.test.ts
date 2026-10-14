@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
+import { resolveProjectWorkerCacheOptions, resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
+import { createMemoryPressureMonitor } from "./memory-pressure";
+import { benchmarkProjectWorkers } from "./worker-project-benchmark";
 import {
   EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
   type EdgeRuntimePreheatIdentity,
@@ -2708,6 +2710,245 @@ describe("WorkerPool project scheduling", () => {
   });
 });
 
+describe("WorkerPool parked project slots", () => {
+  function setup(overrides: Partial<ConstructorParameters<typeof WorkerPool>[0]> = {}) {
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2000, ...overrides });
+    pools.push(pool);
+    const projectRoot = join(import.meta.dir, "fixtures");
+    const dispatch = (projectRef: string, delay = 1) => pool.dispatch({
+      projectRef, projectRoot,
+      functionId: `${projectRef}_fn`,
+      functionPath: join(projectRoot, "project-affinity.ts"),
+      env: { PROJECT_OWNER: projectRef },
+      request: new Request(`http://edge.local/fn?delay=${delay}`),
+    });
+    return { pool, dispatch };
+  }
+
+  test("validates cache options and preserves explicit zero overrides", () => {
+    expect(resolveProjectWorkerCacheOptions({})).toEqual({
+      maxExtraProjectWorkers: undefined, parkedWorkerIdleMs: undefined,
+    });
+    expect(resolveProjectWorkerCacheOptions({
+      EDGE_MAX_EXTRA_PROJECT_WORKERS: "0", EDGE_PARKED_WORKER_IDLE_MS: "30000",
+    })).toEqual({ maxExtraProjectWorkers: 0, parkedWorkerIdleMs: 30000 });
+    for (const key of ["EDGE_MAX_EXTRA_PROJECT_WORKERS", "EDGE_PARKED_WORKER_IDLE_MS"]) {
+      for (const value of ["-1", "1.5", "NaN", "Infinity", "1e3", "9007199254740992"]) {
+        expect(() => resolveProjectWorkerCacheOptions({ [key]: value })).toThrow(key);
+      }
+    }
+  });
+
+  test("rotates three queued projects without starving the last project", async () => {
+    const { dispatch } = setup();
+    const order: string[] = [];
+    const first = dispatch("a", 50);
+    const queued = ["a", "a", "a", "b", "b", "b", "c"].map(project =>
+      dispatch(project).then(response => {
+        expect(response.status).toBe(200);
+        order.push(project);
+      }),
+    );
+    await first;
+    await Promise.all(queued);
+    expect(order.slice(0, 3)).toEqual(["b", "a", "c"]);
+  });
+
+  test.each([{ maxExtraProjectWorkers: 0 }, { parkedWorkerIdleMs: 0 }])(
+    "can disable retained workers with %j",
+    async options => {
+      const { pool, dispatch } = setup(options);
+      const first: unknown = await (await dispatch("a")).json();
+      await dispatch("b");
+      expect(await (await dispatch("a")).json()).not.toEqual(first);
+      expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+      expect(pool.snapshotMetrics("test").test_total_worker_replacements).toBe(2);
+    },
+  );
+
+  test.each([1, 2])("bounds cold starts with %i slots and two busy projects", async size => {
+    const result = await benchmarkProjectWorkers({ size, projects: 2, requests: 80 });
+    expect(result.successful).toBe(80);
+    expect(result.metrics.benchmark_total_worker_replacements).toBeLessThanOrEqual(1);
+    // Once one project's queue drains, its slot can help the other project's
+    // backlog, creating at most one more project-bound worker.
+    const maxColdStarts = size === 1 ? 2 : 3;
+    const misses = result.metrics.benchmark_total_module_cache_misses;
+    const hits = result.metrics.benchmark_total_module_cache_hits;
+    expect(misses).toBeLessThanOrEqual(maxColdStarts);
+    expect(hits).toBeGreaterThanOrEqual(80 - maxColdStarts);
+    expect(hits + misses).toBe(80);
+    expect(result.metrics.benchmark_total_worker_retirements).toBe(0);
+    expect(result.metrics.benchmark_queue_length).toBe(0);
+    console.log("project-affinity-benchmark", JSON.stringify(result));
+  });
+
+  test("borrows a drained project's slot for another project's backlog", async () => {
+    const { pool, dispatch } = setup({ size: 2 });
+    const projectRoot = join(import.meta.dir, "fixtures");
+    let releaseBody = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        releaseBody = () => controller.close();
+      },
+    });
+    const first = dispatch("a");
+    // Hold B's original slot before execution, independently of worker speed.
+    const held = pool.dispatch({
+      projectRef: "b", projectRoot, functionId: "b_fn",
+      functionPath: join(projectRoot, "project-affinity.ts"),
+      env: { PROJECT_OWNER: "b" },
+      request: new Request("http://edge.local/fn", { method: "POST", body }),
+    });
+    const queued = dispatch("b");
+    try {
+      expect((await first).status).toBe(200);
+      expect(await (await queued).json()).toMatchObject({ owner: "b" });
+      expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+      expect((await dispatch("b")).status).toBe(200);
+    } finally {
+      releaseBody();
+      await held;
+    }
+    const metrics = pool.snapshotMetrics("test");
+    expect(metrics.test_total_worker_replacements).toBe(1);
+    expect(metrics.test_total_module_cache_misses).toBe(3);
+    expect(metrics.test_total_module_cache_hits).toBe(1);
+    expect(metrics.test_total_worker_retirements).toBe(0);
+    expect(metrics.test_queue_length).toBe(0);
+  });
+
+  test("keeps parked workers out of the execution concurrency budget", async () => {
+    const { pool, dispatch } = setup();
+    const a = dispatch("a", 100);
+    const b = dispatch("b", 100);
+    const c = dispatch("c", 100);
+    expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+    expect(pool.snapshotMetrics("test").test_queue_length).toBe(2);
+    expect((await a).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+    expect((await b).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+    expect((await c).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(2);
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(3);
+  });
+
+  test("reuses project module state without exposing another project's env", async () => {
+    const { pool, dispatch } = setup();
+    const first: unknown = await (await dispatch("a")).json();
+    const other: unknown = await (await dispatch("b")).json();
+    const again: unknown = await (await dispatch("a")).json();
+    expect(first).toMatchObject({ owner: "a" });
+    expect(other).toMatchObject({ owner: "b" });
+    expect(again).toEqual(first);
+    expect(pool.snapshotMetrics("test").test_total_parked_worker_reuses).toBe(1);
+  });
+
+  test("evicts the least recently parked project at the resident worker limit", async () => {
+    const { pool, dispatch } = setup({ maxExtraProjectWorkers: 1 });
+    const first: unknown = await (await dispatch("a")).json();
+    await dispatch("b");
+    await dispatch("c");
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(2);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(1);
+    expect(pool.snapshotMetrics("test").test_total_project_worker_evictions).toBe(1);
+    const reloaded: unknown = await (await dispatch("a")).json();
+    expect(reloaded).toMatchObject({ owner: "a" });
+    expect(reloaded).not.toEqual(first);
+  });
+
+  test("retires expired parked workers without allocating replacements", async () => {
+    const { pool, dispatch } = setup({ parkedWorkerIdleMs: 30 });
+    await dispatch("a");
+    await dispatch("b");
+    await waitForMetric(pool, "parked_workers", 0);
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(1);
+    expect(pool.snapshotMetrics("test").test_total_project_worker_evictions).toBe(1);
+    expect(pool.snapshotMetrics("test").test_total_worker_replacements).toBe(1);
+  });
+
+  test("clears parked generations before versioned preheat", async () => {
+    const { pool, dispatch } = setup();
+    const first: unknown = await (await dispatch("a")).json();
+    await dispatch("b");
+    const projectRoot = join(import.meta.dir, "fixtures");
+    const preheat = await pool.preheatVersionedIdleWorkers({
+      projectRef: "b", projectRoot, functionId: "b_fn",
+      functionPath: join(projectRoot, "project-affinity.ts"),
+      env: { PROJECT_OWNER: "b" }, moduleVersion: "v2",
+    });
+    expect(preheat.rotation.attempted).toBe(2);
+    expect(preheat.rotation.immediateReplacements).toBe(1);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    expect(await (await dispatch("a")).json()).not.toEqual(first);
+  });
+
+  test("invalidates modules in parked workers", async () => {
+    const { pool, dispatch } = setup();
+    await dispatch("a");
+    await dispatch("b");
+    const result = await pool.invalidateModule("a_fn");
+    expect(result.attempted).toBe(2);
+    expect(result.invalidated).toBe(1);
+    const missesBefore = pool.snapshotMetrics("test").test_total_module_cache_misses;
+    expect(await (await dispatch("a")).json()).toMatchObject({ owner: "a" });
+    expect(pool.snapshotMetrics("test").test_total_module_cache_misses).toBe(missesBefore + 1);
+  });
+
+  test("wires monitor recovery to one request per pool and releases parked caches", async () => {
+    const { pool, dispatch } = setup({ size: 2 });
+    const active = [dispatch("a", 50), dispatch("b", 50)];
+    await Promise.all(active);
+    await dispatch("c");
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(1);
+    let sample = { cgroup: "/test", highBytes: 100, currentBytes: 95, highEvents: 1 };
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: () => {},
+      onAdmissionStateChange: ({ blocked, recovering }) => pool.setAdmissionBlocked(blocked, recovering),
+      onError: error => { throw error; },
+    });
+    await monitor.poll();
+    sample = { ...sample, highEvents: 2 };
+    await monitor.poll();
+    expect((await dispatch("a")).status).toBe(503);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    for (let i = 0; i < 3; i++) await monitor.poll();
+    const probe = dispatch("c", 50);
+    expect((await dispatch("c")).status).toBe(503);
+    expect((await probe).status).toBe(200);
+    expect((await dispatch("a")).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    for (let i = 0; i < 3; i++) await monitor.poll();
+    expect((await Promise.all([dispatch("c"), dispatch("b")])).map(r => r.status)).toEqual([200, 200]);
+    expect(pool.snapshotMetrics("test").test_admission_recovering).toBe(0);
+    monitor.stop();
+  });
+
+  test("does not allow preheat to bypass memory admission", async () => {
+    const { pool } = setup();
+    pool.setAdmissionBlocked(true);
+    const projectRoot = join(import.meta.dir, "fixtures");
+    const functionPath = join(projectRoot, "project-affinity.ts");
+    expect(await pool.preheat("a_fn", functionPath, projectRoot, {}, { projectRef: "a" })).toBe(false);
+    await expect(pool.preheatVersionedIdleWorkers({
+      projectRef: "a", projectRoot, functionPath, functionId: "a_fn", env: {}, moduleVersion: "v1",
+    })).rejects.toThrow("Runtime admission does not allow preheat");
+    expect(pool.generation).toBe(0);
+  });
+
+  test("retires both execution slots and parked workers on shutdown", async () => {
+    const { pool, dispatch } = setup();
+    await dispatch("a");
+    await dispatch("b");
+    await pool.shutdown();
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(0);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    expect((await dispatch("a")).status).toBe(503);
+  });
+});
+
 describe("WorkerPool Bun plugin project isolation", () => {
   test.each([
     ["global", "Bun.plugin"],
@@ -2781,7 +3022,8 @@ describe("WorkerPool Bun plugin project isolation", () => {
       expect(await (await dispatch("project-b", clearGlobalPath)).text()).toBe("cleared-global");
       expect(await (await dispatch("project-b", clearImportPath)).text()).toBe("cleared-import");
       expect(await (await dispatch("project-a", registerPath)).text()).toBe("project-a");
-      expect(pool.snapshotMetrics("plugin")["plugin_total_worker_replacements"]).toBe(2);
+      expect(pool.snapshotMetrics("plugin")["plugin_total_worker_replacements"]).toBe(1);
+      expect(pool.snapshotMetrics("plugin")["plugin_total_parked_worker_reuses"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -2875,6 +3117,7 @@ describe("WorkerPool Bun plugin project isolation", () => {
     const pool = new WorkerPool({
       size: 1,
       requestTimeout: 2_000,
+      maxExtraProjectWorkers: 0,
       maxWorkerReplacementsBeforeRecycle: 2,
       onWorkerRecycleRequired: (event) => recycleEvents.push(event),
     });
@@ -3506,9 +3749,9 @@ describe("WorkerPool module cache", () => {
       expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
 
       const result = await pool.invalidateProject("proj_env_a");
-      expect(result.attempted).toBe(0);
-      expect(result.succeeded).toBe(0);
-      expect(result.invalidated).toBe(0);
+      expect(result.attempted).toBe(1);
+      expect(result.succeeded).toBe(1);
+      expect(result.invalidated).toBe(1);
 
       expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
       expect(await Bun.file(counterBPath).text()).toBe("1");

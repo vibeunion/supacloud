@@ -5,6 +5,7 @@ import { Elysia } from "elysia";
 import {
   WorkerPool,
   resolveMaxHttpBodySizeBytes,
+  resolveProjectWorkerCacheOptions,
   resolveWorkerReplacementBudget,
   type WorkerPoolPreheatResult,
   type WorkerPoolVersionPreheatResult,
@@ -108,6 +109,7 @@ const WORKER_REPLACEMENT_BUDGET = resolveWorkerReplacementBudget(
 const WORKER_REPLACEMENT_BUDGET_OPTIONS = WORKER_REPLACEMENT_BUDGET === undefined
   ? {}
   : { maxWorkerReplacementsBeforeRecycle: WORKER_REPLACEMENT_BUDGET };
+const PROJECT_WORKER_CACHE_OPTIONS = resolveProjectWorkerCacheOptions(process.env);
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const RUNTIME_INSTANCE_ID = process.env.EDGE_RUNTIME_INSTANCE_ID?.trim() || crypto.randomUUID();
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -345,6 +347,7 @@ const pool = new WorkerPool({
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
+  ...PROJECT_WORKER_CACHE_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
@@ -353,6 +356,7 @@ const backgroundPool = new WorkerPool({
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
+  ...PROJECT_WORKER_CACHE_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
@@ -2052,12 +2056,13 @@ const memoryCgroups = await resolveMemoryCgroups();
 if (memoryCgroups.length > 0) {
   const monitor = createMemoryPressureMonitor({
     sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
-    onAdmissionStateChange: ({ blocked, snapshot }) => {
-      pool.setAdmissionBlocked(blocked);
-      backgroundPool.setAdmissionBlocked(blocked);
+    onAdmissionStateChange: ({ blocked, recovering, snapshot }) => {
+      pool.setAdmissionBlocked(blocked, recovering);
+      backgroundPool.setAdmissionBlocked(blocked, recovering);
       if (snapshot) {
-        console.warn("[EdgeRuntime] New requests temporarily blocked by cgroup memory pressure", {
+        console.warn("[EdgeRuntime] Memory admission state changed", {
           blocked,
+          recovering,
           currentBytes: snapshot.currentBytes,
           highBytes: snapshot.highBytes,
         });
