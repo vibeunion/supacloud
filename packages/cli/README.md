@@ -32,6 +32,9 @@ or backend delivery build is required. Set `SUPACLOUD_APPLICATION_ID` only for
 executable application delivery. Upgrade the CLI with
 `npm install -g @supacloud/cli@latest` and upgrade the SupaCloud server together.
 `deploy` checks the server protocol before building or uploading.
+Use `frontend.name` to select exactly one named site in each environment when
+deployment IDs differ. A missing or ambiguous name fails before upload; it never
+falls back to another site.
 
 ## Application Starter
 

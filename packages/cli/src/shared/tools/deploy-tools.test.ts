@@ -404,6 +404,33 @@ describe("current deployment only", () => {
         expect(api.requests).toEqual([]);
     });
 
+    test.each(["exact", "missing", "duplicate"] as const)(
+        "assets-only selects an exact named site among multiple deployments: %s", async mode => {
+            const directory = await workspace({ frontend: { name: "fa-web", outputDirectory: "dist" } });
+            const selected: string[] = [];
+            const api = server(request => {
+                const path = new URL(request.url).pathname;
+                if (path.endsWith("/protocol")) return Response.json(protocol);
+                if (path.endsWith("/frontend/deployments")) return Response.json([
+                    { id: "fonts", name: "fa-font-assets", framework: "static" },
+                    ...(mode === "missing" ? [] : [{ id: "web", name: "fa-web", framework: "static" }]),
+                    ...(mode === "duplicate" ? [{ id: "other", name: "fa-web", framework: "static" }] : []),
+                ]);
+                if (path.endsWith("/active-release")) selected.push(path);
+                return Response.json({}, { status: 409 });
+            });
+            if (mode === "exact") {
+                expect((await deploy(api.http, directory).run({ skip_build: true })).isError).toBe(true);
+                expect(selected).toEqual(["/v1/projects/test-ref/frontend/deployments/web/active-release"]);
+            } else {
+                await expect(deploy(api.http, directory).run({ skip_build: true }))
+                    .rejects.toThrow("Expected exactly one");
+                expect(selected).toEqual([]);
+            }
+            expect(api.requests.every(value => value.startsWith("GET "))).toBe(true);
+        },
+    );
+
     test("mixed frontend repositories require explicit assets-only selection", async () => {
         const directory = await workspace({ frontend: { outputDirectory: "dist" } });
         await writeFile(join(directory, "deploy-manifest.json"), "{}");

@@ -28,6 +28,7 @@ interface DeployConfig {
     targets?: Record<string, DeployTargetConfig>;
     frontend?: {
         id?: string;
+        name?: string;
         root?: string;
         buildCommand?: string;
         outputDirectory?: string;
@@ -39,6 +40,7 @@ interface DeployTargetConfig {
     type: "frontend" | "edge_function";
     root?: string;
     id?: string;
+    name?: string;
     slug?: string;
     buildCommand?: string;
     outputDirectory?: string;
@@ -201,6 +203,7 @@ function deployTargetConfig(candidate: unknown, name: string): DeployTargetConfi
         type: value.type,
         root: optionalText(value.root, `targets.${name}.root`),
         id: optionalText(value.id, `targets.${name}.id`),
+        name: optionalText(value.name, `targets.${name}.name`),
         slug: optionalText(value.slug, `targets.${name}.slug`),
         buildCommand: optionalText(value.buildCommand, `targets.${name}.buildCommand`),
         outputDirectory: optionalText(value.outputDirectory, `targets.${name}.outputDirectory`),
@@ -258,6 +261,7 @@ async function readDeployConfig(configRoot: string): Promise<DeployConfig> {
             : undefined,
         frontend: frontend ? {
             id: optionalText(frontend.id, "frontend.id"),
+            name: optionalText(frontend.name, "frontend.name"),
             root: optionalText(frontend.root, "frontend.root"),
             buildCommand: optionalText(frontend.buildCommand, "frontend.buildCommand"),
             outputDirectory: optionalText(frontend.outputDirectory, "frontend.outputDirectory"),
@@ -323,11 +327,20 @@ function selectDeployment(
     deployments: FrontendDeployment[],
     requestedId: string | undefined,
     projectName: string | null,
+    requestedName?: string,
 ): FrontendDeployment {
     if (requestedId) {
         const selected = deployments.find((deployment) => deployment.id === requestedId);
         if (!selected) throw new Error(`Frontend deployment '${requestedId}' was not found`);
+        if (requestedName && selected.name !== requestedName) {
+            throw new Error(`Frontend deployment '${requestedId}' does not match name '${requestedName}'`);
+        }
         return selected;
+    }
+    if (requestedName) {
+        const matches = deployments.filter(deployment => deployment.name === requestedName);
+        if (matches.length !== 1) throw new Error(`Expected exactly one frontend deployment named '${requestedName}'`);
+        return matches[0]!;
     }
     if (deployments.length === 1) return deployments[0];
     if (projectName) {
@@ -356,6 +369,7 @@ function selectFrontendTarget(configRoot: string, config: DeployConfig): Selecte
             type: "frontend" as const,
             root: config.frontend?.root,
             id: config.frontend?.id,
+            name: config.frontend?.name,
             buildCommand: config.frontend?.buildCommand,
             outputDirectory: config.frontend?.outputDirectory,
             buildEnv: config.frontend?.buildEnv,
@@ -563,7 +577,9 @@ async function stageApplicationWebRelease(
     const requestedId = target.config.id;
     const listResponse = await http.get(`/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments`);
     if (!listResponse.ok) throw new Error(`Failed to list frontend deployments (HTTP ${listResponse.status})`);
-    const selected = selectDeployment(deploymentList(listResponse.data), requestedId, await packageName(projectDirectory));
+    const selected = selectDeployment(
+        deploymentList(listResponse.data), requestedId, await packageName(projectDirectory), target.config.name,
+    );
     const configuredBuildCommand = String(target.config.buildCommand || selected.buildCommand || "").trim();
     const buildCommand = configuredBuildCommand || (skipBuild ? "" : await defaultBuildCommand(projectDirectory, configRoot));
     const configuredOutput = String(target.config.outputDirectory || "").trim();
