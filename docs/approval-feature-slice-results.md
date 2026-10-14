@@ -101,10 +101,31 @@ attestation. No improvement ratio or ecosystem ranking is established here.
 - Existing app-tool regression: 21 tests passed.
 - Recorded-agent evaluator: 4 tests passed, including cross-feature scope denial.
 - CLI typecheck and build passed.
-- A separate resource-generator regression attempt had one failure resolving
-  inferred types through the candidate dependency setup. This remains a release
-  acceptance gap; no all-generator or packed-consumer green claim is made.
+- An earlier resource-generator attempt failed type resolution. The follow-up
+  rerun passed all 13 tests, and packed-consumer acceptance passed with the local
+  candidate tarballs. This resolves that local acceptance gap, not npm publication.
 - No database, browser, deployment, npm publication or comparative trial was run.
+
+### Packed Consumer Follow-up
+
+`bun scripts/check_app_generation.ts` passed using the installed candidate CLI
+outside the workspace, frozen/offline consumer reinstall, and Bun 1.4.3:
+
+- Original HTTP/resource tests, consumer typecheck/build and edge checks passed.
+- Feature preview/apply, required flags and registration conflicts passed.
+- Missing named compiler capability rejected compile/check without modifying
+  existing generated artifacts, both before and after successful feature builds.
+- Generated feature tests, consumer typecheck/build, and runtime rejection of a
+  missing RPC adapter passed.
+- Explicit test doubles verified list/detail routes, authorization before RPC,
+  validation before writes, successful delegation and redacted unbound-port errors.
+- Feature-generator regression passed all 6 tests; `git diff --check` passed.
+
+The unmodified HTTP memory demo rejects a newly registered durable command because
+it lacks the named RPC adapter. Acceptance checks the original demo first, then
+the durable feature separately; it does not insert a production memory fallback.
+The fixture's pass-through adapter proves wiring only, not persistence, tenant
+authorization, idempotency, state transitions, audit or outbox behavior.
 
 ## Remaining Work
 
@@ -112,7 +133,7 @@ attestation. No improvement ratio or ecosystem ranking is established here.
    source-of-truth tables; keep authorization and state rules in that application.
 2. Connect the compiler-generated client and existing query adapter, then run
    authenticated negative, concurrency, crash and recovery acceptance.
-3. Verify a supported packed/published dependency tuple and test-environment
-   deployment/upgrade before publication or production claims.
+3. Verify the published dependency tuple and test-environment deployment/upgrade.
+   Local candidate-package acceptance is complete; publication is not verified.
 4. Implement the three comparison stacks against the same contract and record
    repeated trials. Only then evaluate the "large project becomes medium" claim.
