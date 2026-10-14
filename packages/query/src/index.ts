@@ -13,6 +13,8 @@ export type {
   MutateProcedureAdapter,
 } from "./adapter.js";
 export { invalidateByTags } from "./invalidation.js";
+export { fetchQueryResult } from "./fetch-result.js";
+export type { FetchQueryResultOptions } from "./fetch-result.js";
 export type {
   QueryKey,
   QueryOptionsResult,
