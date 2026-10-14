@@ -112,6 +112,15 @@ function cancelledResponse(): Response {
   });
 }
 
+function admissionBlockedResponse(): Response {
+  return new Response(JSON.stringify({
+    error: "Runtime is temporarily overloaded; please retry",
+  }), {
+    status: 503,
+    headers: { "Content-Type": "application/json", "Retry-After": "2" },
+  });
+}
+
 function invalidatedBeforeExecutionResponse(): Response {
   return new Response(JSON.stringify({
     error: "Runtime environment changed before execution",
@@ -325,6 +334,8 @@ export class WorkerPool {
   private workerRecycleRequired = false;
   private workerRecycleNotificationSent = false;
   private workerRecycleNotificationDeferred = false;
+  private admissionBlocked = false;
+  private totalAdmissionRejected = 0;
   private activeWorkers = new Set<Worker>();
   private retiredWorkers = new Map<Worker, RetiredWorker>();
   private workerMetadata = new Map<
@@ -395,6 +406,10 @@ export class WorkerPool {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (this.admissionBlocked) {
+      this.totalAdmissionRejected++;
+      return admissionBlockedResponse();
+    }
 
     assertCanonicalPositiveFunctionVersion(opts.functionVersion);
 
@@ -421,6 +436,11 @@ export class WorkerPool {
   private enqueue(opts: ScheduledDispatch): Promise<Response> {
     const enqueuedAt = performance.now();
     return new Promise<Response>((resolve, reject) => {
+      if (this.admissionBlocked) {
+        this.totalAdmissionRejected++;
+        resolve(admissionBlockedResponse());
+        return;
+      }
       if (this.queuedCount >= MAX_QUEUE_SIZE) {
         resolve(new Response(JSON.stringify({ error: "Too many concurrent requests, please retry" }), {
           status: 503,
@@ -1097,6 +1117,22 @@ export class WorkerPool {
     this.queuedCount = 0;
   }
 
+  setAdmissionBlocked(blocked: boolean): void {
+    if (this.admissionBlocked === blocked) return;
+    this.admissionBlocked = blocked;
+    if (!blocked) return;
+
+    for (const projectQueue of this.queuedDispatches.values()) {
+      for (const entry of projectQueue) {
+        this.totalAdmissionRejected++;
+        entry.resolve(admissionBlockedResponse());
+      }
+    }
+    this.queuedDispatches.clear();
+    this.queuedProjects = [];
+    this.queuedCount = 0;
+  }
+
   getMetrics(): string {
     const snapshot = this.snapshotMetrics();
     return Object.entries(snapshot)
@@ -1618,6 +1654,8 @@ export class WorkerPool {
       [`${prefix}_avg_env_load_ms`]: this.totalRequests > 0 ? Math.round(this.totalEnvLoadMs / this.totalRequests) : 0,
       [`${prefix}_avg_queue_wait_ms`]: this.totalRequests > 0 ? Math.round(this.totalQueueWaitMs / this.totalRequests) : 0,
       [`${prefix}_total_queued_requests`]: this.totalQueuedRequests,
+      [`${prefix}_admission_blocked`]: this.admissionBlocked ? 1 : 0,
+      [`${prefix}_total_admission_rejected`]: this.totalAdmissionRejected,
       [`${prefix}_avg_worker_exec_ms`]: this.totalRequests > 0 ? Math.round(this.totalWorkerExecMs / this.totalRequests) : 0,
     };
   }

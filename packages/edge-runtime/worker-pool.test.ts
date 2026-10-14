@@ -2578,6 +2578,50 @@ describe("WorkerPool metrics NaN fix", () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  test("memory admission blocks new and queued dispatches", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-admission-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          await Bun.sleep(100);
+          return new Response("ok", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+
+    const dispatch = () => pool.dispatch({
+      functionId: "test_admission",
+      projectRef: "test-project",
+      functionPath,
+      projectRoot,
+      env: {},
+      request: new Request("http://edge.local/functions/v1/test"),
+    });
+
+    try {
+      const active = dispatch();
+      await Bun.sleep(10);
+      const queued = dispatch();
+      pool.setAdmissionBlocked(true);
+
+      expect((await queued).status).toBe(503);
+      expect((await dispatch()).status).toBe(503);
+      expect((await active).status).toBe(200);
+      expect(pool.snapshotMetrics("admission")["admission_admission_blocked"]).toBe(1);
+      expect(pool.snapshotMetrics("admission")["admission_total_admission_rejected"]).toBe(2);
+
+      pool.setAdmissionBlocked(false);
+      expect((await dispatch()).status).toBe(200);
+    } finally {
+      await pool.drain();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("WorkerPool project scheduling", () => {

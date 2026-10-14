@@ -8,6 +8,14 @@ export type MemoryPressureSnapshot = {
   highEvents: number;
 };
 
+export type MemoryPressureAdmissionState = {
+  blocked: boolean;
+  snapshot: MemoryPressureSnapshot | null;
+};
+
+const ADMISSION_BLOCK_RATIO = 0.85;
+const ADMISSION_RESUME_RATIO = 0.75;
+
 type ReadText = (path: string) => Promise<string>;
 const readTextFile: ReadText = (file) => readFile(file, "utf8");
 
@@ -90,13 +98,38 @@ export async function readMemoryPressureSnapshot(
 export function createMemoryPressureMonitor(options: {
   sample: () => Promise<MemoryPressureSnapshot | null>;
   onPressure: (snapshot: MemoryPressureSnapshot) => void;
+  onAdmissionStateChange?: (state: MemoryPressureAdmissionState) => void;
   onError: (error: unknown) => void;
 }) {
   let inFlight = false;
   let stopped = false;
+  let admissionBlocked = false;
   let pressureSamples = 0;
   let pressureCgroup: string | null = null;
   let previous: MemoryPressureSnapshot | null = null;
+
+  const updateAdmissionState = (
+    snapshot: MemoryPressureSnapshot | null,
+    throttling: boolean,
+  ) => {
+    const previousBlocked = admissionBlocked;
+    if (snapshot) {
+      const ratio = snapshot.currentBytes / Math.max(1, snapshot.highBytes);
+      if (!admissionBlocked && (ratio >= 1 || (ratio >= ADMISSION_BLOCK_RATIO && throttling))) {
+        admissionBlocked = true;
+      } else if (
+        admissionBlocked
+        && (ratio <= ADMISSION_RESUME_RATIO
+          || (ratio < ADMISSION_BLOCK_RATIO && !throttling))
+      ) {
+        admissionBlocked = false;
+      }
+    }
+    if (admissionBlocked !== previousBlocked) {
+      options.onAdmissionStateChange?.({ blocked: admissionBlocked, snapshot });
+    }
+  };
+
   return {
     stop() { stopped = true; },
     async poll(): Promise<void> {
@@ -109,6 +142,7 @@ export function createMemoryPressureMonitor(options: {
           && previous?.cgroup === snapshot.cgroup
           && previous.highBytes === snapshot.highBytes
           && snapshot.highEvents > previous.highEvents;
+        updateAdmissionState(snapshot, newHighEvents);
         previous = snapshot;
         // Near-limit occupancy alone is not pressure (for example, idle module caches).
         // Recover below memory.high only while reclaim throttling is still increasing;
