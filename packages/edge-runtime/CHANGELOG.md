@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.0...edge-runtime-v0.32.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **edge-runtime:** apply memory admission backpressure ([#1894](https://github.com/vibeunion/supacloud/issues/1894)) ([5f0b310](https://github.com/vibeunion/supacloud/commit/5f0b3109ec00e6b207581cfda312466816214429))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.31.2...edge-runtime-v0.32.0) (2026-10-12)
 
 
