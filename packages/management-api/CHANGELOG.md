@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.117.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.117.0...management-api-v0.117.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound default worker memory ([#1896](https://github.com/vibeunion/supacloud/issues/1896)) ([8790b91](https://github.com/vibeunion/supacloud/commit/8790b9167543c36b6f39e9554f85f3bd01617c58))
+
 ## [0.117.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.116.1...management-api-v0.117.0) (2026-10-13)
 
 

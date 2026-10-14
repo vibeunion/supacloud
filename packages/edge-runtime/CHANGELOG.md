@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.1...edge-runtime-v0.32.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound default worker memory ([#1896](https://github.com/vibeunion/supacloud/issues/1896)) ([8790b91](https://github.com/vibeunion/supacloud/commit/8790b9167543c36b6f39e9554f85f3bd01617c58))
+
 ## [0.32.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.0...edge-runtime-v0.32.1) (2026-10-14)
 
 
