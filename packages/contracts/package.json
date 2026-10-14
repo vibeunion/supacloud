@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/contracts",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "SupaCloud command protocol with optional client and browser entrypoints",
   "type": "module",
   "main": "./dist/index.cjs",

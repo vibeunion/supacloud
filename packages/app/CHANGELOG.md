@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/app-v0.26.1...app-v0.27.0) (2026-10-14)
+
+
+### Features
+
+* **stability:** add FA delivery and acceptance governance ([#1915](https://github.com/vibeunion/supacloud/issues/1915)) ([f70b607](https://github.com/vibeunion/supacloud/commit/f70b6079234d849d5059dd5a879d22b895022987))
+
 ## [0.26.1](https://github.com/vibeunion/supacloud/compare/app-v0.26.0...app-v0.26.1) (2026-10-11)
 
 

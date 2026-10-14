@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.29.2...elysia-v0.30.0) (2026-10-14)
+
+
+### Features
+
+* **stability:** add FA delivery and acceptance governance ([#1915](https://github.com/vibeunion/supacloud/issues/1915)) ([f70b607](https://github.com/vibeunion/supacloud/commit/f70b6079234d849d5059dd5a879d22b895022987))
+
 ## [0.29.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.29.1...elysia-v0.29.2) (2026-10-11)
 
 
