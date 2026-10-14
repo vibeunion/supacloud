@@ -62,6 +62,15 @@ describe("Edge Runtime auth material invalidation", () => {
     expect(source).toContain("process.exit(exitCode)");
   });
 
+  test("keeps foreground workers memory-efficient by default", () => {
+    const foregroundConfig = source.slice(
+      source.indexOf("const FOREGROUND_WORKER_SMOL"),
+      source.indexOf("const BACKGROUND_WORKER_SMOL"),
+    );
+    expect(foregroundConfig).toContain("process.env.EDGE_FOREGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL");
+    expect(foregroundConfig).toContain("  true,");
+  });
+
   test("function invalidation evicts policy config and active dispatch identities include version", () => {
     const invalidationEndpoint = source.slice(
       source.indexOf('.post("/invalidate/:ref/:slug"'),

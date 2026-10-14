@@ -2153,28 +2153,73 @@ describe("upgrade edge-runtime capacity defaults", () => {
     }
   });
 
-  test("sizes systemd limits and worker capacity for a two-core node", () => {
+  test("sizes systemd limits and memory-bounded worker capacity for a two-core node", () => {
     const config = resolveEdgeRuntimeCapacityConfig({
       env: {},
       cpuCount: 2,
       totalMemoryMb: 2048,
     });
 
-    expect(config.workerPoolSize).toBe(4);
-    expect(config.backgroundWorkerPoolSize).toBe(2);
+    expect(config.workerPoolSize).toBe(1);
+    expect(config.backgroundWorkerPoolSize).toBe(1);
     expect(config.cpuQuotaPercent).toBe(120);
     expect(config.memoryMaxMb).toBe(1228);
     expect(config.memoryHighMb).toBe(982);
     expect(config.tasksMax).toBe(256);
   });
 
-  test("scales the default foreground pool with CPU while keeping an upper bound", () => {
+  test("scales the default foreground pool with CPU and memory ceilings", () => {
     expect(resolveEdgeRuntimeCapacityConfig({ env: {}, cpuCount: 8, totalMemoryMb: 16_384 }).workerPoolSize)
-      .toBe(16);
+      .toBe(11);
     expect(resolveEdgeRuntimeCapacityConfig({ env: {}, cpuCount: 32, totalMemoryMb: 65_536 }).workerPoolSize)
       .toBe(20);
     expect(resolveEdgeRuntimeCapacityConfig({ env: {}, cpuCount: 1, totalMemoryMb: 1_024 }).workerPoolSize)
-      .toBe(4);
+      .toBe(1);
+  });
+
+  test("uses the configured high limit rather than host RAM for default workers", () => {
+    const config = resolveEdgeRuntimeCapacityConfig({
+      env: {
+        SUPACLOUD_EDGE_MEMORY_HIGH_MB: "4096",
+        SUPACLOUD_EDGE_MEMORY_MAX_MB: "6144",
+      },
+      cpuCount: 8,
+      totalMemoryMb: 65_536,
+    });
+    expect(config.workerPoolSize).toBe(6);
+    expect(config.backgroundWorkerPoolSize).toBe(2);
+    expect(config.memoryHighMb).toBe(4096);
+  });
+
+  test("clamps high to max before deriving the foreground memory budget", () => {
+    const config = resolveEdgeRuntimeCapacityConfig({
+      env: {
+        SUPACLOUD_EDGE_MEMORY_HIGH_MB: "8192",
+        SUPACLOUD_EDGE_MEMORY_MAX_MB: "2048",
+      },
+      cpuCount: 8,
+      totalMemoryMb: 65_536,
+    });
+    expect(config.workerPoolSize).toBe(3);
+    expect(config.memoryHighMb).toBe(2048);
+  });
+
+  test("retains the CPU ceiling even with an ample memory budget", () => {
+    expect(resolveEdgeRuntimeCapacityConfig({
+      env: {},
+      cpuCount: 2,
+      totalMemoryMb: 65_536,
+    }).workerPoolSize).toBe(4);
+  });
+
+  test("preserves legacy explicit worker overrides on constrained hosts", () => {
+    const config = resolveEdgeRuntimeCapacityConfig({
+      env: { WORKER_POOL_SIZE: "8", BACKGROUND_WORKER_POOL_SIZE: "3" },
+      cpuCount: 2,
+      totalMemoryMb: 2048,
+    });
+    expect(config.workerPoolSize).toBe(8);
+    expect(config.backgroundWorkerPoolSize).toBe(3);
   });
 
   test("honors explicit upgrade environment overrides", () => {
