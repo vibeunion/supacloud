@@ -30,6 +30,10 @@
     "./native": {
       "types": "./dist/native.d.ts",
       "import": "./dist/native.js"
+    },
+    "./document-conversion": {
+      "types": "./dist/document-conversion.d.ts",
+      "import": "./dist/document-conversion.js"
     }
   },
   "files": [
@@ -48,6 +52,7 @@
     "performance:check": "bun scripts/performance.ts",
     "test:delivery": "bun test tests/delivery.test.ts",
     "test:runtime": "bun test tests/runtime.test.ts",
+    "test:document-conversion": "bun --no-env-file test tests/document-conversion.test.ts",
     "check:runtime": "tsc -p tsconfig.runtime.json",
     "build": "tsc -p tsconfig.json",
     "test": "bun test tests/worker.test.ts src/job-policy.test.ts src/job-policy-boundaries.test.ts"

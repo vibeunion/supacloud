@@ -5,6 +5,16 @@ and `@pgflow/dsl` 0.16.0 packages. Not yet a published or deployed platform
 service. This package does not reimplement polling, retry, concurrency, queue
 acknowledgement or DAG execution.
 
+## Optional Document Conversion
+
+The independent `@supacloud/worker/document-conversion` entry point provides a
+default-off, project-bound Gotenberg/LibreOffice adapter for DOCX/XLSX to PDF.
+It does not install an engine, start a worker or change existing exports.
+See [configuration and acceptance](../../docs/optional-document-conversion.md)
+and `examples/document-conversion-worker.ts` for the authorization/private
+artifact integration boundary. Run `bun run test:document-conversion` for
+focused local transport tests; real document layout acceptance is separate.
+
 ## Resource Delivery
 
 Use the optional `@supacloud/worker/delivery` entry point to bootstrap a queue
