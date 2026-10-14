@@ -226,7 +226,13 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     defaultFileSizeLimit: config.storageFileSizeLimit,
     log,
   })
-  if (config.buckets?.length) await storage.ensureBuckets(config.buckets)
+  if (config.buckets?.length) {
+    try {
+      await storage.ensureBuckets(config.buckets)
+    } catch (error) {
+      await failStartup(error)
+    }
+  }
   const auth = new AuthHandler(db, {
     jwtSecret,
     apiUrl,
