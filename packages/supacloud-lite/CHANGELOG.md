@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.27.0...supacloud-lite-v0.27.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **lite:** close backend after startup failure ([#1903](https://github.com/vibeunion/supacloud/issues/1903)) ([3de47be](https://github.com/vibeunion/supacloud/commit/3de47be7821072b88563d51ee388bf76062040f4))
+
 ## [0.27.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.26.0...supacloud-lite-v0.27.0) (2026-10-14)
 
 
