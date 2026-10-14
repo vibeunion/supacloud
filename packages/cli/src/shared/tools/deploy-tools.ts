@@ -10,7 +10,7 @@ import { ApplicationIdSchema, type ApplicationDeployRequest } from "@supacloud/d
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
-import { uploadProjectWebRelease } from "./frontend-release-control";
+import { publishFrontendRelease, uploadProjectWebRelease } from "./frontend-release-control";
 import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
 import { requireProjectDeploymentProtocol } from "./project-deployment";
 
@@ -98,6 +98,7 @@ export const deployToolSchema = {
     ref: optional(Type.String(), "Project ref (defaults to the linked project)"),
     cwd: optional(Type.String(), "Project directory (default: current directory)"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
+    assets_only: optional(Type.Boolean(), "Publish only configured static assets; leave backend Functions, schedules and migrations unchanged"),
     json: optional(Type.Boolean(), "Print only the final JSON result"),
 };
 
@@ -539,6 +540,7 @@ function payload(response: ToolResponse): Record<string, unknown> {
 
 interface StagedApplicationWeb {
     request?: ApplicationDeployRequest["web_release"];
+    result?: ToolResponse;
 }
 
 async function stageApplicationWebRelease(
@@ -549,6 +551,7 @@ async function stageApplicationWebRelease(
     skipBuild: boolean,
     json: boolean,
     environmentVariables?: Readonly<Record<string, string>>,
+    assetsOnly = false,
 ): Promise<StagedApplicationWeb | null> {
     const target = selectFrontendTarget(configRoot, await readDeployConfig(configRoot));
     if (!target) return null;
@@ -577,6 +580,11 @@ async function stageApplicationWebRelease(
 
     const archive = await createFrontendArchive(outputDirectory);
     try {
+        if (assetsOnly) {
+            return { result: await publishFrontendRelease(
+                http, projectRef, selected.id, archive.archivePath, archive.treeSha256,
+            ) };
+        }
         const uploaded = payload(await uploadProjectWebRelease(
             http, projectRef, environmentId, selected.id, archive.archivePath,
         ));
@@ -616,7 +624,28 @@ export function registerDeployTools(
                 : config.application ? {
                     ...config.application, environmentId: options.environment || config.application.environmentId,
                 } : undefined;
-            if (await hasProjectReleaseManifest(configRoot)) {
+            const legacyManifest = await hasProjectReleaseManifest(configRoot);
+            const assetsOnly = args.assets_only === true
+                || (!application?.id && selectFrontendTarget(configRoot, config) !== null
+                    && !legacyManifest
+                    && !Object.values(config.targets ?? {}).some(target => target.type === "edge_function"));
+            if (assetsOnly) {
+                if (!selectFrontendTarget(configRoot, config)) {
+                    throw new Error("Static asset deployment requires a frontend configuration in supacloud.json");
+                }
+                const environmentId = options.environment?.trim() || application?.environmentId?.trim();
+                if (!environmentId || !Value.Check(ApplicationIdSchema, environmentId)) {
+                    throw new Error("Static asset deployment requires SUPACLOUD_ENV");
+                }
+                await requireProjectDeploymentProtocol(http, projectRef, environmentId);
+                const staged = await stageApplicationWebRelease(
+                    http, projectRef, environmentId, configRoot,
+                    args.skip_build === true, args.json === true, options.environmentVariables, true,
+                );
+                if (!staged?.result) throw new Error("Static asset deployment did not produce a receipt");
+                return staged.result;
+            }
+            if (legacyManifest) {
                 throw new Error(`${DEPLOYMENT_UPGRADE} Replace deploy-manifest.json with the current application delivery configuration; no remote mutation was performed.`);
             }
             if (application?.id) {

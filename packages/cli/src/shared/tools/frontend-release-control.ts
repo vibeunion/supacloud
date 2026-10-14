@@ -649,6 +649,59 @@ export async function readFrontendReleaseAuthority(
     return getActiveFrontendRelease(http, projectRef, deploymentId);
 }
 
+export async function publishFrontendRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+    archivePath: string,
+    expectedTreeSha256: string,
+): Promise<ToolResponse> {
+    const authority = await readActiveFrontendRelease(http, projectRef, deploymentId);
+    if ("failure" in authority) return authority.failure;
+    const inventory = authority.inventory;
+    const current = inventory.releases[0];
+    if (current?.tree_sha256 === expectedTreeSha256) {
+        return toolResponse({
+            operation: "frontend.deploy", project_ref: projectRef, deployment_id: deploymentId,
+            active_release_id: inventory.active_release_id, activation_id: inventory.active_activation_id,
+            release: current, unchanged: true,
+        });
+    }
+    const uploaded = await uploadFrontendRelease(http, projectRef, deploymentId, archivePath);
+    if (uploaded.isError) return uploaded;
+    const value: unknown = JSON.parse(uploaded.content[0]!.text);
+    const envelope = value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown> : null;
+    const candidate = envelope?.release;
+    const release = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+        ? candidate as Record<string, unknown> : null;
+    if (!release || release.tree_sha256 !== expectedTreeSha256
+        || typeof release.release_id !== "string" || !RELEASE_ID_PATTERN.test(release.release_id)) {
+        return releaseFailure("frontend.deploy", "INVALID_RESPONSE", 200);
+    }
+    const mutationId = crypto.randomUUID();
+    const activated = await activateFrontendRelease(http, {
+        projectRef, deploymentId, releaseId: release.release_id, mutationId,
+        expectedActiveReleaseId: inventory.active_release_id ?? "absent",
+        expectedActivationId: inventory.active_activation_id ?? "absent",
+    });
+    const activatedPayload: Record<string, unknown> = JSON.parse(activated.content[0]!.text);
+    const active = activatedPayload.release;
+    const treeMismatch = !activated.isError && (!active || typeof active !== "object"
+        || !("tree_sha256" in active) || active.tree_sha256 !== expectedTreeSha256);
+    return {
+        ...toolResponse({
+            ...(treeMismatch ? { ok: false, error: { code: "OUTCOME_UNKNOWN", http_status: 200 } } : activatedPayload),
+            operation: "frontend.deploy",
+            mutation_id: mutationId,
+            target_release_id: release.release_id,
+            previous_release_id: inventory.active_release_id,
+            previous_activation_id: inventory.active_activation_id,
+        }),
+        ...(activated.isError || treeMismatch ? { isError: true } : {}),
+    };
+}
+
 export async function rollbackFrontendRelease(
     http: FrontendReleaseHttp,
     projectRef: string,

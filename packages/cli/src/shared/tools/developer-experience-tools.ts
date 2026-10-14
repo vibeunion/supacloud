@@ -70,7 +70,7 @@ const TEST_PROFILE = [
     "SUPACLOUD_API_URL=https://management.test.example.com",
     "SUPACLOUD_API_TOKEN=<test-management-api-token>",
     "SUPACLOUD_PROJECT_REF=<test-project-ref>",
-    "SUPACLOUD_APPLICATION_ID=<application-id>",
+    "# Optional for executable application delivery: SUPACLOUD_APPLICATION_ID=<application-id>",
     "",
 ].join("\n");
 
@@ -79,7 +79,7 @@ const PRODUCTION_PROFILE = [
     "SUPACLOUD_API_URL=https://management.example.com",
     "SUPACLOUD_API_TOKEN=<production-management-api-token>",
     "SUPACLOUD_PROJECT_REF=<production-project-ref>",
-    "SUPACLOUD_APPLICATION_ID=<application-id>",
+    "# Optional for executable application delivery: SUPACLOUD_APPLICATION_ID=<application-id>",
     "",
 ].join("\n");
 
@@ -204,7 +204,7 @@ async function initializeProject(request: InitRequest, options: DeveloperExperie
         },
         next: [
             "cp .env.supacloud.test.example .env.supacloud.test",
-            "Set SUPACLOUD_APPLICATION_ID to the application's ID and configure its current SupaCloud delivery build.",
+            "Configure frontend assets; set SUPACLOUD_APPLICATION_ID only for executable application delivery.",
             "supacloud env check",
             "supacloud --env test deploy",
         ],
@@ -259,12 +259,13 @@ function statusMissing(context: ResolvedContext): string[] {
     return ["SUPACLOUD_API_URL", "SUPACLOUD_API_TOKEN", "SUPACLOUD_PROJECT_REF"];
 }
 
-function deployMissing(context: ResolvedContext, application?: Record<string, unknown> | null): string[] {
+function deployMissing(context: ResolvedContext, application?: Record<string, unknown> | null, hasFrontend = false): string[] {
     const missing = statusMissing(context);
     if (context.credentialScope !== "management") {
         return [...missing, "Management API context"];
     }
-    if (!Value.Check(ApplicationIdSchema, context.applicationId || application?.id)) {
+    if (!(hasFrontend && !context.applicationId && !application)
+        && !Value.Check(ApplicationIdSchema, context.applicationId || application?.id)) {
         missing.push("valid SUPACLOUD_APPLICATION_ID or supacloud.json application.id");
     }
     if (!Value.Check(ApplicationIdSchema, context.applicationEnvironmentId || application?.environmentId)) {
@@ -285,7 +286,9 @@ async function inspectProfile(profile: EnvironmentProfile): Promise<EnvironmentR
                 throw error;
             });
         const config = record(JSON.parse(configText));
-        const deploy = deployMissing(context, record(config?.application));
+        const hasFrontend = record(config?.frontend) !== null
+            || Object.values(record(config?.targets) ?? {}).some(target => record(target)?.type === "frontend");
+        const deploy = deployMissing(context, record(config?.application), hasFrontend);
         return {
             name: profile.name,
             path: profile.path,
