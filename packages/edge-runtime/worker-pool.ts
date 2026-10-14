@@ -89,6 +89,8 @@ const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 
 const CONTROL_MESSAGE_TIMEOUT_MS = Number(process.env.EDGE_CONTROL_MESSAGE_TIMEOUT_MS) || 1_000;
 const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
 const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_EXTRA_PROJECT_WORKERS = 2;
+const DEFAULT_PARKED_WORKER_IDLE_MS = 30_000;
 // Bun/JSC retains fixed host memory after Worker exit, so bound churn before recycling the process.
 const DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE = 128;
 const MAX_WORKER_REPLACEMENTS_ENV = "EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE";
@@ -103,6 +105,25 @@ export function resolveWorkerReplacementBudget(rawBudget?: string): number | und
     throw new Error(`${MAX_WORKER_REPLACEMENTS_ENV} must be a safe integer`);
   }
   return parsedBudget;
+}
+
+export function resolveProjectWorkerCacheOptions(env: Record<string, string | undefined>): {
+  maxExtraProjectWorkers?: number;
+  parkedWorkerIdleMs?: number;
+} {
+  const parse = (key: string): number | undefined => {
+    const raw = env[key];
+    if (raw === undefined || raw === "") return undefined;
+    const value = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value)) {
+      throw new Error(`${key} must be a non-negative safe integer`);
+    }
+    return value;
+  };
+  return {
+    maxExtraProjectWorkers: parse("EDGE_MAX_EXTRA_PROJECT_WORKERS"),
+    parkedWorkerIdleMs: parse("EDGE_PARKED_WORKER_IDLE_MS"),
+  };
 }
 
 function cancelledResponse(): Response {
@@ -259,6 +280,8 @@ type WorkerPoolConfig = {
   onRetirementBudgetExceeded?: (exceeded: RetirementBudgetExceeded) => void;
   maxWorkerReplacementsBeforeRecycle?: number;
   onWorkerRecycleRequired?: (event: WorkerPoolRecycleRequired) => void;
+  maxExtraProjectWorkers?: number;
+  parkedWorkerIdleMs?: number;
 };
 
 type RetiredWorker = {
@@ -344,11 +367,18 @@ export class WorkerPool {
       generation: number;
       projectRef?: string;
       replacementTimer?: ReturnType<typeof setTimeout>;
+      parkedTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
     }
   >();
+  private parkedWorkers = new Set<Worker>();
+  private totalProjectAffinityHits = 0;
+  private totalParkedWorkerReuses = 0;
+  private totalProjectWorkerEvictions = 0;
+  private totalWorkerCreateMs = 0;
   private tainted = new Set<Worker>();
   private draining = false;
+  private admissionRecovering = false;
 
   private readonly retirementBudget: {
     maxRetiredWorkers: number;
@@ -357,6 +387,8 @@ export class WorkerPool {
   private readonly onRetirementBudgetExceeded: (exceeded: RetirementBudgetExceeded) => void;
   private readonly maxWorkerReplacementsBeforeRecycle: number;
   private readonly onWorkerRecycleRequired: (event: WorkerPoolRecycleRequired) => void;
+  private readonly maxWorkers: number;
+  private readonly parkedWorkerIdleMs: number;
 
   constructor(private config: WorkerPoolConfig) {
     this.retirementBudget = config.retirementBudget ?? {
@@ -370,6 +402,15 @@ export class WorkerPool {
     this.maxWorkerReplacementsBeforeRecycle = config.maxWorkerReplacementsBeforeRecycle
       ?? DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE;
     this.onWorkerRecycleRequired = config.onWorkerRecycleRequired ?? (() => process.exit(1));
+    this.maxWorkers = config.size + (config.maxExtraProjectWorkers
+      ?? DEFAULT_MAX_EXTRA_PROJECT_WORKERS);
+    this.parkedWorkerIdleMs = config.parkedWorkerIdleMs ?? DEFAULT_PARKED_WORKER_IDLE_MS;
+    if (!Number.isSafeInteger(this.maxWorkers) || this.maxWorkers < config.size) {
+      throw new TypeError("maxExtraProjectWorkers must be a non-negative safe integer");
+    }
+    if (!Number.isSafeInteger(this.parkedWorkerIdleMs) || this.parkedWorkerIdleMs < 0) {
+      throw new TypeError("parkedWorkerIdleMs must be a non-negative safe integer");
+    }
     for (let i: number = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
@@ -378,11 +419,13 @@ export class WorkerPool {
   }
 
   private createWorker(): Worker {
+    const start = performance.now();
     const workerEntry = resolveWorkerEntry();
     const options: WorkerOptions & { smol?: boolean } = {
       ...(this.config.smol ? { smol: true } : {}),
     };
     const w = new Worker(workerEntry, options);
+    this.totalWorkerCreateMs += performance.now() - start;
     this.workers.push(w);
     this.workerMetadata.set(w, { generation: this.workerGeneration });
     w.once("exit", () => this.onWorkerExit(w));
@@ -406,7 +449,7 @@ export class WorkerPool {
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (this.admissionBlocked) {
+    if (this.rejectAdmission()) {
       this.totalAdmissionRejected++;
       return admissionBlockedResponse();
     }
@@ -436,7 +479,7 @@ export class WorkerPool {
   private enqueue(opts: ScheduledDispatch): Promise<Response> {
     const enqueuedAt = performance.now();
     return new Promise<Response>((resolve, reject) => {
-      if (this.admissionBlocked) {
+      if (this.rejectAdmission()) {
         this.totalAdmissionRejected++;
         resolve(admissionBlockedResponse());
         return;
@@ -456,13 +499,18 @@ export class WorkerPool {
       } else {
         this.totalQueuedRequests++;
         this.enqueueQueued({ opts, enqueuedAt, resolve, reject });
-        this.replaceIdleWorkerForQueuedProject();
+        this.ensureWorkerForQueuedProject();
       }
     });
   }
 
   private projectKey(opts: DispatchOptions): string {
     return opts.projectRef;
+  }
+
+  private rejectAdmission(): boolean {
+    return this.admissionBlocked || (this.admissionRecovering
+      && (this.activeWorkers.size > this.idle.length || this.queuedCount > 0));
   }
 
   private workerProjectRef(worker: Worker): string | undefined {
@@ -486,18 +534,78 @@ export class WorkerPool {
 
   private takeIdleWorker(projectRef: string): Worker | undefined {
     const workerIndex = this.idle.findLastIndex((worker) => (
-      this.workerProjectRef(worker) === projectRef
+      this.workerProjectRef(worker) === projectRef && !this.tainted.has(worker)
     ));
     const fallbackIndex = workerIndex >= 0
       ? workerIndex
-      : this.idle.findLastIndex((worker) => this.workerAcceptsProject(worker, projectRef));
+      : this.idle.findLastIndex((worker) => (
+        this.workerAcceptsProject(worker, projectRef) && !this.tainted.has(worker)
+      ));
     if (fallbackIndex < 0) return undefined;
-    return this.idle.splice(fallbackIndex, 1)[0];
+    const worker = this.idle.splice(fallbackIndex, 1)[0];
+    if (workerIndex >= 0) this.totalProjectAffinityHits++;
+    return worker;
   }
 
-  private replaceIdleWorkerForQueuedProject(): void {
-    const mismatchedWorker = this.idle.at(-1);
-    if (mismatchedWorker) this.retireWorker(mismatchedWorker);
+  private ensureWorkerForQueuedProject(): void {
+    for (const worker of [...this.idle]) {
+      if (this.queuedCount === 0) return;
+      this.idle = this.idle.filter((candidate) => candidate !== worker);
+      this.schedule(worker);
+    }
+  }
+
+  // A parked worker retains its project, but owns no execution slot.
+  private parkWorker(worker: Worker): void {
+    this.activeWorkers.delete(worker);
+    this.idle = this.idle.filter(candidate => candidate !== worker);
+    this.parkedWorkers.add(worker);
+    const metadata = this.workerMetadata.get(worker);
+    if (!metadata) return;
+    if (metadata.parkedTimer) clearTimeout(metadata.parkedTimer);
+    if (this.parkedWorkerIdleMs <= 0 || this.admissionRecovering) {
+      this.evictParkedWorker(worker);
+      return;
+    }
+    metadata.parkedTimer = setTimeout(() => {
+      metadata.parkedTimer = undefined;
+      this.evictParkedWorker(worker);
+    }, this.parkedWorkerIdleMs);
+    metadata.parkedTimer.unref?.();
+  }
+
+  private unparkWorker(worker: Worker): void {
+    this.parkedWorkers.delete(worker);
+    const metadata = this.workerMetadata.get(worker);
+    if (!metadata?.parkedTimer) return;
+    clearTimeout(metadata.parkedTimer);
+    metadata.parkedTimer = undefined;
+  }
+
+  private evictParkedWorker(worker: Worker): void {
+    if (!this.parkedWorkers.has(worker)) return;
+    this.totalProjectWorkerEvictions++;
+    this.retireWorker(worker);
+  }
+
+  private switchProjectSlot(worker: Worker, projectRef: string): Worker {
+    const cached = [...this.parkedWorkers].find(
+      candidate => this.workerProjectRef(candidate) === projectRef
+        && this.workerMetadata.get(candidate)?.generation === this.workerGeneration
+        && !this.tainted.has(candidate),
+    );
+    if (cached) this.unparkWorker(cached);
+    this.parkWorker(worker);
+    while (this.parkedWorkers.size > this.maxWorkers - this.config.size) {
+      const oldest = this.parkedWorkers.values().next().value;
+      if (oldest) this.evictParkedWorker(oldest);
+    }
+    if (!cached) this.recordWorkerReplacement();
+    else this.totalParkedWorkerReuses++;
+    const replacement = cached ?? this.createWorker();
+    this.assignWorkerProject(replacement, projectRef);
+    this.activeWorkers.add(replacement);
+    return replacement;
   }
 
   private enqueueQueued(entry: QueuedDispatch): void {
@@ -544,9 +652,11 @@ export class WorkerPool {
     if (!entry) throw new Error(`Empty dispatch queue for project ${projectRef}`);
 
     this.queuedCount--;
+    this.queuedProjects = this.queuedProjects.filter((queuedProject) => queuedProject !== projectRef);
     if (projectQueue.length === 0) {
       this.queuedDispatches.delete(projectRef);
-      this.queuedProjects = this.queuedProjects.filter((queuedProject) => queuedProject !== projectRef);
+    } else {
+      this.queuedProjects.push(projectRef);
     }
     this.lastDispatchedProjectRef = projectRef;
     return entry;
@@ -976,19 +1086,37 @@ export class WorkerPool {
   }
 
   private schedule(worker: Worker) {
-    const assignedProjectRef = this.workerProjectRef(worker);
-    if (assignedProjectRef !== undefined && this.queuedProjects.some(
-      (projectRef) => projectRef !== assignedProjectRef,
-    )) {
+    if (this.tainted.has(worker)) {
       this.retireWorker(worker);
       return;
     }
+    if (this.draining || this.admissionBlocked) {
+      this.idle.push(worker);
+      return;
+    }
+    const assignedProjectRef = this.workerProjectRef(worker);
+    // Preserve warm slots when every queued project already has capacity.
+    // An unrepresented project gets the next completed slot, even under load.
+    const uncoveredProject = this.queuedProjects.find(projectRef => (
+      projectRef !== assignedProjectRef && ![...this.activeWorkers].some(
+        candidate => this.workerProjectRef(candidate) === projectRef && !this.tainted.has(candidate),
+      )
+    ));
+    const targetProject = uncoveredProject
+      ?? (assignedProjectRef && this.queuedDispatches.has(assignedProjectRef)
+        ? assignedProjectRef : this.queuedProjects[0]);
+    if (targetProject === undefined) {
+      this.idle.push(worker);
+      return;
+    }
+    if (!this.workerAcceptsProject(worker, targetProject)) {
+      worker = this.switchProjectSlot(worker, targetProject);
+    } else {
+      if (assignedProjectRef === targetProject) this.totalProjectAffinityHits++;
+      this.assignWorkerProject(worker, targetProject);
+    }
     const next = this.dequeueQueuedForWorker(worker);
     if (!next) {
-      if (this.queuedCount > 0) {
-        this.retireWorker(worker);
-        return;
-      }
       this.idle.push(worker);
       return;
     }
@@ -996,12 +1124,16 @@ export class WorkerPool {
   }
 
   private retireWorker(worker: Worker) {
-    if (!this.activeWorkers.delete(worker)) return;
+    const ownedSlot = this.activeWorkers.delete(worker);
+    const wasParked = this.parkedWorkers.delete(worker);
+    if (!ownedSlot && !wasParked) return;
     this.totalWorkerRetirements++;
     const metadata = this.workerMetadata.get(worker);
     if (metadata?.replacementTimer) clearTimeout(metadata.replacementTimer);
+    if (metadata?.parkedTimer) clearTimeout(metadata.parkedTimer);
     this.workerMetadata.delete(worker);
     this.tainted.delete(worker);
+    this.parkedWorkers.delete(worker);
     const idleIdx = this.idle.indexOf(worker);
     if (idleIdx !== -1) this.idle.splice(idleIdx, 1);
     this.trackRetiredWorker(worker);
@@ -1013,7 +1145,7 @@ export class WorkerPool {
     }
     worker.unref();
 
-    if (!this.draining) {
+    if (!this.draining && ownedSlot) {
       this.recordWorkerReplacement();
       const replacement = this.createWorker();
       this.activeWorkers.add(replacement);
@@ -1075,8 +1207,11 @@ export class WorkerPool {
   }
 
   private removeWorkerReferences(worker: Worker) {
+    const metadata = this.workerMetadata.get(worker);
+    if (metadata?.parkedTimer) clearTimeout(metadata.parkedTimer);
     this.workerMetadata.delete(worker);
     this.tainted.delete(worker);
+    this.parkedWorkers.delete(worker);
     const idleIndex = this.idle.indexOf(worker);
     if (idleIndex !== -1) this.idle.splice(idleIndex, 1);
     const workerIndex = this.workers.indexOf(worker);
@@ -1117,9 +1252,10 @@ export class WorkerPool {
     this.queuedCount = 0;
   }
 
-  setAdmissionBlocked(blocked: boolean): void {
-    if (this.admissionBlocked === blocked) return;
+  setAdmissionBlocked(blocked: boolean, recovering = false): void {
+    if (this.admissionBlocked === blocked && this.admissionRecovering === recovering) return;
     this.admissionBlocked = blocked;
+    this.admissionRecovering = recovering && !blocked;
     if (!blocked) return;
 
     for (const projectQueue of this.queuedDispatches.values()) {
@@ -1131,6 +1267,9 @@ export class WorkerPool {
     this.queuedDispatches.clear();
     this.queuedProjects = [];
     this.queuedCount = 0;
+    for (const worker of [...this.parkedWorkers]) {
+      this.evictParkedWorker(worker);
+    }
   }
 
   getMetrics(): string {
@@ -1193,7 +1332,7 @@ export class WorkerPool {
 
   private async invalidateWorkers(message: WorkerControlMessage): Promise<WorkerPoolControlResult> {
     this.totalInvalidations++;
-    const workers = [...this.activeWorkers];
+    const workers = [...this.activeWorkers, ...this.parkedWorkers];
     const results = await Promise.all(
       workers.map(async (worker) => ({
         worker,
@@ -1202,7 +1341,7 @@ export class WorkerPool {
     );
     for (const { worker, result } of results) {
       if (result.acked) continue;
-      if (this.idle.includes(worker)) {
+      if (this.idle.includes(worker) || this.parkedWorkers.has(worker)) {
         this.retireWorker(worker);
       } else {
         this.tainted.add(worker);
@@ -1224,7 +1363,7 @@ export class WorkerPool {
   }
 
   private invalidateProjectWorkers(projectRef: string): Promise<WorkerControlAck[]> {
-    const workers = [...this.activeWorkers].filter(
+    const workers = [...this.activeWorkers, ...this.parkedWorkers].filter(
       (worker) => this.workerProjectRef(worker) === projectRef,
     );
     for (const worker of workers) this.tainted.add(worker);
@@ -1233,7 +1372,7 @@ export class WorkerPool {
         type: "invalidate_project",
         projectRef,
       });
-      if (this.idle.includes(worker)) {
+      if (this.idle.includes(worker) || this.parkedWorkers.has(worker)) {
         this.retireWorker(worker);
       }
       return acknowledgement;
@@ -1267,7 +1406,7 @@ export class WorkerPool {
   }
 
   private rotateWorkerForGeneration(worker: Worker): GenerationRotationDisposition {
-    if (this.idle.includes(worker)) {
+    if (this.idle.includes(worker) || this.parkedWorkers.has(worker)) {
       this.retireWorker(worker);
       return "idle-retired";
     }
@@ -1279,7 +1418,8 @@ export class WorkerPool {
   private rotateGeneration(): WorkerPoolGenerationRotationResult {
     this.workerGeneration++;
     this.totalGenerationRotations++;
-    const workers = [...this.activeWorkers].filter(
+    const replacementsBefore = this.totalWorkerReplacements;
+    const workers = [...this.activeWorkers, ...this.parkedWorkers].filter(
       (worker) => (this.workerMetadata.get(worker)?.generation ?? -1) < this.workerGeneration,
     );
     const dispositions = workers.map((worker) => this.rotateWorkerForGeneration(worker));
@@ -1294,7 +1434,7 @@ export class WorkerPool {
       idleRetired,
       busyTainted,
       alreadyTainted,
-      immediateReplacements: idleRetired,
+      immediateReplacements: this.totalWorkerReplacements - replacementsBefore,
     };
   }
 
@@ -1413,6 +1553,9 @@ export class WorkerPool {
     env: Record<string, string>,
     options: PreheatOptions,
   ): Promise<boolean> {
+    if (this.draining || this.admissionBlocked || this.admissionRecovering) {
+      return Promise.resolve(false);
+    }
     const projectRef = options.projectRef;
     const worker = this.takeIdleWorker(projectRef);
     if (!worker) {
@@ -1510,7 +1653,12 @@ export class WorkerPool {
   }
 
   private enqueueBulkPreheat<T>(operation: () => Promise<T>): Promise<T> {
-    const deferredOperation = () => this.runWithDeferredRecycleNotification(operation);
+    const deferredOperation = () => {
+      if (this.draining || this.admissionBlocked || this.admissionRecovering) {
+        return Promise.reject<T>(new Error("Runtime admission does not allow preheat"));
+      }
+      return this.runWithDeferredRecycleNotification(operation);
+    };
     const queuedOperation = this.bulkPreheatTail
       ? this.bulkPreheatTail.then(deferredOperation)
       : deferredOperation();
@@ -1567,11 +1715,13 @@ export class WorkerPool {
   private takeIdleWorkersForProject(projectRef: string, maxWorkers?: number): Worker[] {
     const requested = this.requestedPreheatWorkers(maxWorkers);
     const matchingCount = this.idle.filter(
-      (worker) => this.workerAcceptsProject(worker, projectRef),
+      (worker) => this.workerAcceptsProject(worker, projectRef) && !this.tainted.has(worker),
     ).length;
     this.replaceMismatchedIdleWorkers(projectRef, requested - matchingCount);
 
-    const available = this.idle.filter((worker) => this.workerAcceptsProject(worker, projectRef));
+    const available = this.idle.filter(
+      (worker) => this.workerAcceptsProject(worker, projectRef) && !this.tainted.has(worker),
+    );
     const workers = available.slice(0, requested);
     const selected = new Set(workers);
     this.idle = this.idle.filter((worker) => !selected.has(worker));
@@ -1588,7 +1738,10 @@ export class WorkerPool {
     const mismatched = this.idle.filter(
       (worker) => !this.workerAcceptsProject(worker, projectRef),
     ).slice(0, replacementCount);
-    for (const worker of mismatched) this.retireWorker(worker);
+    for (const worker of mismatched) {
+      const replacement = this.switchProjectSlot(worker, projectRef);
+      this.idle.push(replacement);
+    }
   }
 
   private recordBulkPreheatResults(
@@ -1622,8 +1775,15 @@ export class WorkerPool {
 
   snapshotMetrics(prefix = "supacloud_edge"): Record<string, number> {
     return {
-      [`${prefix}_active_workers`]: this.config.size - this.idle.length,
+      [`${prefix}_active_workers`]: this.activeWorkers.size - this.idle.length,
       [`${prefix}_idle_workers`]: this.idle.length,
+      [`${prefix}_parked_workers`]: this.parkedWorkers.size,
+      [`${prefix}_total_workers`]: this.activeWorkers.size + this.parkedWorkers.size,
+      [`${prefix}_max_project_workers`]: this.maxWorkers,
+      [`${prefix}_total_project_affinity_hits`]: this.totalProjectAffinityHits,
+      [`${prefix}_total_parked_worker_reuses`]: this.totalParkedWorkerReuses,
+      [`${prefix}_total_project_worker_evictions`]: this.totalProjectWorkerEvictions,
+      [`${prefix}_total_worker_create_ms`]: this.totalWorkerCreateMs,
       [`${prefix}_worker_smol`]: this.config.smol ? 1 : 0,
       [`${prefix}_queue_length`]: this.queuedCount,
       [`${prefix}_total_requests`]: this.totalRequests,
@@ -1655,6 +1815,7 @@ export class WorkerPool {
       [`${prefix}_avg_queue_wait_ms`]: this.totalRequests > 0 ? Math.round(this.totalQueueWaitMs / this.totalRequests) : 0,
       [`${prefix}_total_queued_requests`]: this.totalQueuedRequests,
       [`${prefix}_admission_blocked`]: this.admissionBlocked ? 1 : 0,
+      [`${prefix}_admission_recovering`]: this.admissionRecovering ? 1 : 0,
       [`${prefix}_total_admission_rejected`]: this.totalAdmissionRejected,
       [`${prefix}_avg_worker_exec_ms`]: this.totalRequests > 0 ? Math.round(this.totalWorkerExecMs / this.totalRequests) : 0,
     };
@@ -1742,7 +1903,7 @@ export class WorkerPool {
     if (!drained) {
       console.error(`[Pool] Cooperative shutdown drain exceeded ${maxDrainMs}ms`);
     }
-    for (const worker of [...this.activeWorkers]) {
+    for (const worker of [...this.activeWorkers, ...this.parkedWorkers]) {
       this.retireWorker(worker);
     }
     await Bun.sleep(0);

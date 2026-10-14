@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "bench:projects": "bun worker-project-benchmark.ts",
     "dev": "bun run --watch server.ts",
     "start": "bun run server.ts",
     "build:amd64": "bun run scripts/build-compiled.ts --target bun-linux-x64 --outfile supacloud-edge-runtime-linux-amd64",
