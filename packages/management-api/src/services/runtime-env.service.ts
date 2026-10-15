@@ -10,8 +10,6 @@ import {
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import {
   resolveAlignedServiceRoleKey,
-  resolveProjectServiceRoleKey,
-  isStoredServiceRoleKeyAligned,
   resolveStoredServiceRoleKey,
 } from "../utils/service-role";
 import {
@@ -84,10 +82,9 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   );
 
   const storedServiceRoleKey = resolveStoredServiceRoleKey(project);
-  let serviceRoleKey = await resolveProjectServiceRoleKey(project);
-  if (serviceRoleKey === storedServiceRoleKey && !(await isStoredServiceRoleKeyAligned(project))) {
-    serviceRoleKey = await resolveAlignedServiceRoleKey(project);
-  }
+  // Runtime environments outlive request-scoped OIDC tokens. Only repair the
+  // durable credential here; never persist a newly minted short-lived token.
+  const serviceRoleKey = await resolveAlignedServiceRoleKey(project);
   if (!serviceRoleKey) {
     throw new Error(`Project ${projectRef} has no valid service-role key`);
   }
