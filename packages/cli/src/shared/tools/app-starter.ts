@@ -11,6 +11,7 @@ import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER }
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
+import { STARTER_REVIEW_QUERY } from "./app-starter-query";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
@@ -20,6 +21,7 @@ const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 export function appStarterFiles(name: string): Record<string, string> {
     return {
         ...starterDatabaseFiles(),
+        "src/review/list-reviews.ts": STARTER_REVIEW_QUERY,
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
             engines: { bun: ">=1.4.3" },
@@ -545,6 +547,18 @@ Ordinary reads use PostgREST through the existing user-scoped
 @supabase/supabase-js client: client.from("starter_reviews").select("id,state,version").
 Use the caller's session, RLS and grants; never introduce a second session store.
 Business writes continue through the governed Command/RPC boundary.
+
+Use listReviews from src/review/list-reviews.ts for the paginated review list.
+Type the existing client with ReviewReadDatabase (a read-only projection derived
+from db/schema.ts), then call listReviews(client, { page: 1, pageSize: 25, signal }).
+The helper returns data, total, page, pageSize and hasNextPage, orders by the unique
+id and preserves PostgREST errors. Pages are one-based and limited to 100 rows.
+Exact counts obey RLS but may be expensive on large tables; offset pages are not
+a cross-request snapshot when records change. No owner filter replaces RLS.
+Do not create a service-role client or a second auth session for this helper.
+Existing starters can add this file without a new migration only if their reviewed
+review-table grants and identity-mapping RLS from migration 003 are already applied.
+The projection is not a full database export and grants no write access.
 
 GraphQL is not generated or enabled by this starter. For a specific Query Contract,
 explicitly configure graphql.schema with a role-scoped database export and add
