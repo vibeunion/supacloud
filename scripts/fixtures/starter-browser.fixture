@@ -1,0 +1,145 @@
+import { readFile } from "node:fs/promises";
+import { generateKeyPair, SignJWT } from "jose";
+import { createClient } from "@supabase/supabase-js";
+import { compileProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+import { COMMAND_PERSISTENCE_SQL } from "@supacloud/db";
+import { startStarterLite } from "#starter-lite";
+
+// A source-only browser harness. No production credentials or remote database.
+const { databaseGovernance, ...options } = compileOptionsFromConfig(await loadSupacloudConfig());
+const compiled = await compileProject(options);
+if (compiled.diagnostics.some(item => item.severity === "error")) throw new Error("Starter compilation failed");
+const { createApp } = await import("../src/application");
+const { createReviewPostgresAdapters } = await import("../src/host/review-postgres");
+const { createReviewUploadAdapters } = await import("../src/host/review-uploads");
+const abort = new AbortController();
+let shutdown = () => { abort.abort(); };
+const stop = () => shutdown();
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
+const database = await startStarterLite(process.cwd(), abort.signal, process.env["SUPACLOUD_STARTER_POSTGRES_BIN"]);
+let server: ReturnType<typeof Bun.serve> | undefined;
+try {
+  await database.exec(COMMAND_PERSISTENCE_SQL);
+  for (const file of ["001-review.sql", "002-review-attachments.sql", "003-review-uploads.sql"]) {
+    await database.exec(await readFile(new URL("../migrations/" + file, import.meta.url), "utf8"));
+  }
+  const subjects = { owner: "11111111-1111-4111-8111-111111111111", other: "22222222-2222-4222-8222-222222222222" };
+  await database.exec(`
+    INSERT INTO public.starter_application(project_id,tenant_id) VALUES ('starter-test','starter-test');
+    INSERT INTO public.starter_members(subject,can_approve,storage_subject) VALUES
+      ('owner',true,'${subjects.owner}'),('other',true,'${subjects.other}');
+  `);
+  const query = (sql: string, params: readonly (string | number)[] = []) =>
+    database.transaction(tx => tx.query(sql, params));
+  const reviewId = crypto.randomUUID();
+  await query("INSERT INTO public.starter_reviews VALUES($1,'owner','draft',1)", [reviewId]);
+  const keys = await generateKeyPair("ES256"), issuer = "https://identity.example.test";
+  const token = (subject: string) => new SignJWT({ client_id: "starter-client", role: "authenticated" })
+    .setProtectedHeader({ alg: "ES256" }).setIssuer(issuer).setAudience("starter-test")
+    .setSubject(subject).setIssuedAt().setExpirationTime("1h").sign(keys.privateKey);
+  const tokens = { owner: await token("owner"), other: await token("other") };
+  const service = createClient(database.storage.url, database.storage.serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  const uploads = await createReviewUploadAdapters({ database, service, projectId: "starter-test", tenantId: "starter-test" });
+  const adapters = await createReviewPostgresAdapters({ database, uploads, tenantId: "starter-test",
+    identity: { issuer, audience: "starter-test", clientId: "starter-client", projectId: "starter-test",
+      jwksUrl: issuer + "/jwks", keyResolver: async () => keys.publicKey } });
+  database.configureIdentity({
+    context: adapters.requestContext,
+    async resolveLocalSubject(identity) {
+      return identity.subject === "owner" ? subjects.owner : identity.subject === "other" ? subjects.other : null;
+    },
+  });
+  const app = createApp(adapters);
+  const bundle = await Bun.build({ entrypoints: ["tests/starter-browser-client.ts"], target: "browser",
+    tsconfig: process.cwd() + "/tsconfig.json" });
+  if (!bundle.success) throw new Error("Browser fixture build failed: " + bundle.logs.join("\n"));
+  const javascript = await bundle.outputs[0]!.text();
+  let approvalRequests = 0, droppedResponses = 0;
+  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+    <title>Review acceptance fixture</title><body><main>
+    <h1>Review acceptance fixture</h1>
+    <label>Identity <select id="identity"><option>owner</option><option>other</option></select></label>
+    <button id="refresh">Refresh</button>
+    <label><input type="checkbox" id="lose">Lose approval response</label>
+    <label><input type="checkbox" id="fail-list">Fail list request</label>
+    <p>List: <output id="list-status"></output></p>
+    <ul id="rows"></ul>
+    <label>Attachment <input id="file" type="file" accept="text/plain"></label>
+    <button id="upload">Upload</button><button id="approve">Approve</button>
+    <button id="recover">Check receipt</button>
+    <button id="conflict">Advance database version</button>
+    <button id="denied">Probe foreign approval</button>
+    <p>Mutation: <output id="mutation-status"></output></p>
+    <p>Operation: <output id="operation"></output></p>
+    <button id="evidence">Read evidence</button><pre id="result"></pre>
+    </main><script type="module" src="/client.js"></script></body></html>`;
+  server = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    tls: { key: Bun.file("key.pem"), cert: Bun.file("cert.pem") },
+    async fetch(request) {
+      const url = new URL(request.url);
+      const origin = server!.url.origin;
+      if (url.origin !== origin || (request.headers.has("origin") && request.headers.get("origin") !== origin)
+        || request.headers.get("sec-fetch-site") === "cross-site") return new Response(null, { status: 403 });
+      const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
+      if (url.pathname.startsWith("/fixture/")) {
+        if (request.headers.get("x-starter-fixture") !== "browser") return reply({ error: "Forbidden" }, 403);
+        if (url.pathname === "/fixture/session" && request.method === "GET") {
+          const subject = url.searchParams.get("subject");
+          if (subject !== "owner" && subject !== "other") return reply({ error: "Invalid identity" }, 400);
+          return reply({ subject, token: tokens[subject], anonKey: database.storage.anonKey, reviewId });
+        }
+        if (url.pathname === "/fixture/conflict" && request.method === "POST") {
+          await query("UPDATE public.starter_reviews SET version=version+1 WHERE id=$1 AND state='draft'", [reviewId]);
+          return reply({ advanced: true });
+        }
+        if (url.pathname === "/fixture/evidence" && request.method === "GET") {
+          return reply({ identity: "local-signed-not-live-SupAuth", approvalRequests, droppedResponses,
+            reviews: await query("SELECT id,state,version FROM public.starter_reviews"),
+            receipts: await query("SELECT operation_key FROM supacloud_commands.execution_receipts ORDER BY operation_key"),
+            audit: await query("SELECT operation_key FROM supacloud_commands.execution_audit ORDER BY operation_key"),
+            attachments: await query("SELECT artifact_id,object_path FROM public.starter_attachments"),
+            objects: await query("SELECT name FROM storage.objects WHERE bucket_id='review-attachments'") });
+        }
+        return reply({ error: "Not found" }, 404);
+      }
+      if (request.method === "GET" && url.pathname === "/") return new Response(html, {
+        headers: { "content-type": "text/html", "cache-control": "no-store",
+          "content-security-policy": "default-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'" },
+      });
+      if (request.method === "GET" && url.pathname === "/client.js") return new Response(javascript, {
+        headers: { "content-type": "text/javascript", "cache-control": "no-store" },
+      });
+      if (request.method === "GET" && url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
+      if (url.pathname.startsWith("/rest/v1/") || url.pathname.startsWith("/storage/v1/")) {
+        if (url.pathname.startsWith("/rest/v1/") && request.headers.get("x-fixture-fail-list") === "true") {
+          return reply({ message: "Synthetic list failure" }, 503);
+        }
+        const target = new URL(url.pathname + url.search, database.storage.url);
+        return fetch(new Request(target, request), { redirect: "error" });
+      }
+      if (url.pathname.startsWith("/reviews/")) {
+        const approval = request.method === "POST" && url.pathname.endsWith("/approve");
+        if (approval) approvalRequests++;
+        const response = await app.handle(request);
+        if (approval && response.ok && request.headers.get("x-fixture-lose-response") === "true") {
+          droppedResponses++;
+          // The real command committed. Do not expose its successful response to the browser.
+          return reply({ code: "FIXTURE_RESPONSE_LOST" }, 502);
+        }
+        return response;
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  console.log(JSON.stringify({ url: server.url.origin, evidence: "source-only-local-signed-identity", cleanup: "SIGINT/SIGTERM" }));
+  await new Promise<void>(resolve => { shutdown = resolve; if (abort.signal.aborted) resolve(); });
+} finally {
+  server?.stop(true);
+  await database.close();
+  process.removeListener("SIGINT", stop);
+  process.removeListener("SIGTERM", stop);
+}

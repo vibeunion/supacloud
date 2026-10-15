@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,8 @@ test("the emitted client reference executes its behavior tests without a UI fram
       expect({ code, failure: code ? output : "" }).toEqual({ code: 0, failure: "" });
     } finally { clearTimeout(timer); if (child.exitCode === null) { child.kill(); await child.exited; } }
     const cli = fileURLToPath(new URL("../../../", import.meta.url));
+    await copyFile(new URL("../../../../../scripts/fixtures/starter-browser-client.fixture", import.meta.url),
+      join(root, "tests/starter-browser-client.ts"));
     await writeFile(join(root, "tests/sdk-types.ts"), [
       'import type { SupabaseClient } from "@supabase/supabase-js";',
       'import type { ReviewSupabaseClient } from "../src/client/review-transport";',
@@ -70,7 +72,7 @@ test("the emitted client reference executes its behavior tests without a UI fram
           "@supabase/supabase-js": [join(cli, "node_modules/@supabase/supabase-js")],
           "@supacloud/js/contracts": [join(cli, "../contracts/src/authenticated_fetch.ts")],
         },
-      }, include: ["src/client/*.ts", "tests/review-client.test.ts", "tests/sdk-types.ts",
+      }, include: ["src/client/*.ts", "tests/review-client.test.ts", "tests/sdk-types.ts", "tests/starter-browser-client.ts",
         join(cli, "scripts/check-starter-dependencies.mjs")],
     }));
     const types = Bun.spawn([process.execPath, join(cli, "node_modules/typescript/bin/tsc"), "-p", join(root, "tsconfig.json")], {

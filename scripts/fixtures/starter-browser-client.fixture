@@ -1,0 +1,101 @@
+import { createClient } from "@supabase/supabase-js";
+import { createAuthenticatedFetch } from "@supacloud/js/contracts";
+import { createReviewClient, createReviewPendingStore } from "../src/client/reviews";
+import { createReviewTransport } from "../src/client/review-transport";
+
+function element<T extends HTMLElement>(id: string, kind: { new(): T }): T {
+  const value = document.getElementById(id);
+  if (!(value instanceof kind)) throw new Error("Missing fixture control: " + id);
+  return value;
+}
+const identity = element("identity", HTMLSelectElement);
+const lose = element("lose", HTMLInputElement);
+const failList = element("fail-list", HTMLInputElement);
+const file = element("file", HTMLInputElement);
+const approve = element("approve", HTMLButtonElement);
+const upload = element("upload", HTMLButtonElement);
+const recover = element("recover", HTMLButtonElement);
+const output = element("result", HTMLPreElement);
+const fixture = (path: string, method = "GET") => fetch("/fixture/" + path, {
+  method, headers: { "x-starter-fixture": "browser" }, cache: "no-store",
+});
+const subject = sessionStorage.getItem("fixture-subject") === "other" ? "other" : "owner";
+identity.value = subject;
+const response = await fixture("session?subject=" + subject);
+const session: unknown = await response.json();
+if (!session || typeof session !== "object" || !("token" in session) || typeof session.token !== "string"
+  || !("anonKey" in session) || typeof session.anonKey !== "string"
+  || !("reviewId" in session) || typeof session.reviewId !== "string") throw new Error("Invalid fixture session");
+const bearer = session.token;
+const reviewId = session.reviewId;
+const supabase = createClient(location.origin, session.anonKey, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  global: {
+    headers: { Authorization: "Bearer " + bearer },
+    fetch: new Proxy(fetch, {
+      apply(send, _receiver: unknown, [input, init]: Parameters<typeof fetch>) {
+        const headers = new Headers(init?.headers);
+        if (failList.checked) headers.set("x-fixture-fail-list", "true");
+        return send(input, { ...init, headers });
+      },
+    }),
+  },
+});
+const authenticatedFetch = createAuthenticatedFetch({
+  getAccessToken: async () => bearer,
+  fetch: (input, init) => {
+    const request = new Request(input, init);
+    const headers = new Headers(request.headers);
+    if (lose.checked) headers.set("x-fixture-lose-response", "true");
+    return fetch(new Request(request, { headers }));
+  },
+});
+const transport = createReviewTransport({ supabase, authenticatedFetch, apiOrigin: location.origin });
+const client = createReviewClient(transport, createReviewPendingStore(localStorage, {
+  projectId: "starter-test", tenantId: "starter-test", applicationId: "reviews", subject,
+}));
+const render = () => {
+  const state = client.snapshot();
+  element("list-status", HTMLOutputElement).textContent = state.list.status;
+  element("mutation-status", HTMLOutputElement).textContent = state.mutation.status;
+  element("operation", HTMLOutputElement).textContent = state.mutation.operation?.operationId ?? "";
+  const list = element("rows", HTMLUListElement);
+  list.replaceChildren(...state.list.rows.map(row => {
+    const item = document.createElement("li");
+    item.textContent = row.id + " " + row.state + " v" + row.version;
+    return item;
+  }));
+  const disabled = state.mutation.status === "unknown" || state.mutation.status === "submitting"
+    || state.list.status !== "ready" || state.list.rows[0]?.state !== "draft";
+  approve.disabled = disabled;
+  upload.disabled = disabled || !file.files?.length;
+  recover.disabled = state.mutation.status !== "unknown" || !state.mutation.operation;
+};
+const unsubscribe = client.subscribe(render);
+identity.onchange = () => {
+  unsubscribe(); client.dispose();
+  sessionStorage.setItem("fixture-subject", identity.value);
+  location.reload();
+};
+window.addEventListener("pagehide", () => { unsubscribe(); client.dispose(); }, { once: true });
+file.onchange = render;
+element("refresh", HTMLButtonElement).onclick = () => { void client.load(); };
+approve.onclick = () => { const row = client.snapshot().list.rows[0]; if (row) void client.approve(row); };
+upload.onclick = () => {
+  const row = client.snapshot().list.rows[0], selected = file.files?.[0];
+  if (row && selected) void client.upload(row, selected);
+};
+recover.onclick = () => { void client.reconcile(); };
+element("conflict", HTMLButtonElement).onclick = async () => {
+  output.textContent = JSON.stringify(await (await fixture("conflict", "POST")).json());
+};
+element("denied", HTMLButtonElement).onclick = async () => {
+  output.textContent = JSON.stringify(await transport.approve({
+    kind: "approve", reviewId, expectedVersion: 1, operationId: crypto.randomUUID(),
+  }));
+};
+element("evidence", HTMLButtonElement).onclick = async () => {
+  output.textContent = JSON.stringify(await (await fixture("evidence")).json(), null, 2);
+};
+render();
+await client.load();

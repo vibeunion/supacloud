@@ -58,6 +58,18 @@ Scenario: Explain deployment and recovery
   Then failed, unknown and missing evidence is identified by component
   And read-back actions retain release and activation identity
   And code rollback never claims data restoration or authenticated smoke success
+
+Scenario: Complete browser operations against an isolated real backend
+  Given the generated reference client and a disposable native database
+  When the browser reads rows, uploads a private attachment and approves a review
+  Then each operation is checked against durable database and object evidence
+  And another identity cannot read or mutate the owner's review
+
+Scenario: Reload after losing a committed response
+  Given an approval committed but its response was lost
+  When the browser reloads with its persisted operation identity
+  Then the client remains unknown until a matching receipt is read
+  And the original command and audit record occur exactly once
 ```
 
 ## Evidence boundary
@@ -147,6 +159,51 @@ followed by a reloaded client recovering the original operation. Upload receipt
 lookup uses the real command store but seeds the upload receipt independently;
 list refresh is stubbed in this fixture. It is not published/browser acceptance.
 
+### Browser acceptance
+
+The source-only browser harness uses the generated client, compiled application,
+native PostgreSQL, Lite HTTP reads and private filesystem objects. It creates an
+ephemeral self-signed certificate and synthetic user identities. It listens only
+on loopback; fixture controls require a same-origin custom header. Service-role
+credentials stay server-side. This is an acceptance harness, not a production
+frontend or authentication implementation.
+
+Install the frozen Lite dependencies as well as the packages listed above, then:
+
+```sh
+SUPACLOUD_STARTER_POSTGRES_BIN=/opt/homebrew/opt/postgresql@16/bin \
+  bun scripts/serve_starter_browser.ts
+```
+
+Use the printed HTTPS URL in a dedicated Playwright CLI session:
+
+```sh
+playwright-cli -s=starter-review open <printed-url> \
+  --config scripts/fixtures/starter-browser.playwright.json
+playwright-cli -s=starter-review snapshot
+playwright-cli -s=starter-review run-code \
+  --filename scripts/fixtures/starter-browser-acceptance.js
+playwright-cli -s=starter-review close
+```
+
+The configuration ignores certificate errors only for this disposable local
+fixture. If Chrome is not installed, supply a local config with
+`browser.launchOptions.executablePath` pointing to an existing Playwright
+Chromium binary; do not change application TLS requirements.
+Stop the launcher with SIGINT/SIGTERM to close the owned backend and remove its
+database, objects, keys and generated sources. Run the scenario once per fresh
+launcher: it deliberately leaves a committed approved review.
+
+The scenario checks failed-list recovery, real upload/download bytes, duplicate
+submission suppression, version conflict refresh, a committed approval with a
+lost response, reload with the same pending ID, read-only receipt confirmation,
+and foreign-identity list/write/object denial. Database evidence must contain
+exactly one upload and one approval receipt/audit; recovery must not increase
+the approval request counter. Screenshots go to `output/playwright/`.
+The fixture's browser client is also strictly type-checked by
+`app-starter-client.test.ts`. This does not cover real SupAuth, actual SVAdmin
+components, workflow workers, cross-tab ownership or a full restore.
+
 ## Published consumer gate
 
 Before publishing the CLI, `bun run check:release-bundle` (also called by
@@ -163,7 +220,7 @@ Run from this repository, with explicit published versions:
 
 ```sh
 bun scripts/check_published_customer.ts \
-  --cli-version 0.99.0 --lite-version 0.28.2 \
+  --cli-version 0.99.0 --lite-version 0.28.3 \
   --postgres-bin /opt/homebrew/opt/postgresql@16/bin \
   --report /tmp/supacloud-published-customer.json
 ```
@@ -180,12 +237,15 @@ Failure diagnostics are in an adjacent mode-0600 `.diagnostic.txt` file;
 inspect locally and redact before sharing. A cleanup failure fails acceptance.
 Local signed fixture identities never count as live SupAuth smoke.
 
-On 2026-10-15 the published `@supacloud/cli@0.99.0` run failed at
-`install-consumer`: its generated `@supacloud/js@^0.42.0` dependency was not
-available in npm (the queried published version was `0.41.1`). No downstream
-business, browser or recovery acceptance was reached. Publish a compatible
-package set through the normal release process, then rerun this gate; do not
-silently downgrade the contract or inject a local package to claim success.
+On 2026-10-15 a follow-up run with `@supacloud/cli@0.99.0` and
+`@supacloud/lite@0.28.3` resolved `@supacloud/js@0.42.1`. Registry installation,
+frozen offline installation, generation, compilation, drift checks and consumer
+type checks passed. It then failed at `client-states` because that published CLI
+does not emit `tests/review-client.test.ts`. This supersedes the earlier
+dependency-unavailable failure; durable-business acceptance still was not reached.
+Release the CLI containing the reference client and receipt routes through the
+normal process, then rerun this gate. Never inject workspace files to claim
+published acceptance.
 
 After synchronizing PR #1950 with the October 15 release commit `206d711a0`,
 the new guard was also run directly against the source-emitted manifest.
@@ -223,7 +283,7 @@ real-session business smoke after upgrading or recovering.
 ## Remaining acceptance
 
 This increment is not evidence of completed platform acceptance. The published
-package dependency closure must first be repaired by a release. Live SupAuth
-business smoke, browser/SVAdmin acceptance, cross-component tracing acceptance
+CLI must first include this increment in a release. Live SupAuth
+business smoke, actual SVAdmin component acceptance, cross-component tracing acceptance
 and an approved full database/object-storage restore drill remain required
 before all three customer outcomes can be signed off.
