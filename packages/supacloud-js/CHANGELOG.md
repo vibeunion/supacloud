@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.42.1...supacloud-js-v0.43.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** generate typed paginated review queries ([#1951](https://github.com/vibeunion/supacloud/issues/1951)) ([50e841e](https://github.com/vibeunion/supacloud/commit/50e841ee06e0ea54a52632bd570c2c51fd5cb381))
+
 ## [0.42.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.42.0...supacloud-js-v0.42.1) (2026-10-15)
 
 
