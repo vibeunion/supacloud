@@ -5,6 +5,8 @@ import { databaseService } from "../../src/services/database.service";
 import { config } from "../../src/config";
 import { jwtService } from "../../src/services/jwt.service";
 import { isStoredServiceRoleKeyAligned } from "../../src/utils/service-role";
+import { generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 
 describe("runtimeEnvService", () => {
   test("repairs stale HS256 service-role keys before exposing runtime env", async () => {
@@ -12,6 +14,7 @@ describe("runtimeEnvService", () => {
     const staleKey = await jwtService.generateServiceRoleKey(
       "old-jwt-secret-with-at-least-32-characters",
     );
+    const keyMaterial = await generateOidcJwtKeyMaterial(currentSecret);
     let storedProject = {
       id: "proj_id",
       ref: "proj_1",
@@ -34,8 +37,8 @@ describe("runtimeEnvService", () => {
       config: {
         auth: {
           oauth_server: {
-            jwt_keys: [{ kty: "EC", kid: "kid_1", alg: "ES256", key_ops: ["sign"] }],
-            jwt_jwks: { keys: [{ kty: "EC", kid: "kid_1", alg: "ES256" }] },
+            jwt_keys: keyMaterial.jwt_keys,
+            jwt_jwks: keyMaterial.jwt_jwks,
           },
         },
         api_url: "https://api.example.com",
@@ -53,14 +56,22 @@ describe("runtimeEnvService", () => {
 
       expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
       expect(env?.JWT_SECRET).toBe(currentSecret);
-      expect(env?.JWT_KEYS).toContain("kid_1");
+      expect(env?.JWT_KEYS).toContain(keyMaterial.key_id);
       expect(env?.JWT_KEYS).not.toContain("legacy-hs256");
-      expect(env?.JWT_JWKS).toContain("kid_1");
+      expect(env?.JWT_JWKS).toContain(keyMaterial.key_id);
       expect(env?.SUPABASE_SERVICE_ROLE_KEY).toBe(storedProject.service_role_key);
       await expect(isStoredServiceRoleKeyAligned({
         service_role_key: String(env?.SUPABASE_SERVICE_ROLE_KEY || ""),
         jwt_secret: currentSecret,
       })).resolves.toBe(true);
+      const durableKey = String(env?.SUPABASE_SERVICE_ROLE_KEY);
+      expect(decodeProtectedHeader(durableKey).alg).toBe("HS256");
+      const payload = decodeJwt(durableKey);
+      expect(Number(payload.exp) - Number(payload.iat)).toBeGreaterThan(86400);
+      const refreshedEnv = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
+      expect(refreshedEnv?.SUPABASE_SERVICE_ROLE_KEY).toBe(durableKey);
+      expect(storedProject.service_role_key).toBe(durableKey);
+      expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
     } finally {
       findByRefSpy.mockRestore();
       updateApiKeysSpy.mockRestore();
