@@ -6,6 +6,7 @@
       "name": "@supacloud/elysia",
       "dependencies": {
         "@supacloud/app": "file:../app",
+        "@supacloud/commands": "file:../commands",
         "@supacloud/contracts": "file:../contracts",
         "effect": "4.0.5",
         "exact-mirror": "1.2.6",
@@ -13,7 +14,6 @@
         "typebox": "1.3.37",
       },
       "devDependencies": {
-        "@supacloud/commands": "file:../commands",
         "@supacloud/compiler": "file:../compiler",
         "@supacloud/db": "file:../db",
         "@supacloud/delivery": "file:../delivery",
