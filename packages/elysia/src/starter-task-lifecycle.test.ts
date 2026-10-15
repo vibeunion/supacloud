@@ -11,7 +11,7 @@ import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { PGMQ_SQL } from "../../supacloud-lite/src/runtime/db/emulated";
 import { startStarterPostgres, type StarterPostgres } from "../../../scripts/lib/starter-postgres";
 import { SupaCloudWorkflowsClient } from "../../supacloud-js/dist/index.mjs";
-import { createApplication, type ApplicationOptions, type CompiledModule, type SupAuthContextOptions } from "@supacloud/elysia";
+import type { ApplicationOptions, CompiledModule, SupAuthContextOptions } from "./index";
 
 type SqlValue = string | number | boolean | null;
 interface Retry { reviewId: string; expectedVersion: number; expectedRunId: string; recoveryId: string }
@@ -75,6 +75,7 @@ function text(value: unknown): string {
 }
 
 native("generated review task lifecycle", () => {
+  let createApplication: typeof import("./index").createApplication;
   let root: string;
   let database: StarterPostgres;
   let modules: CompiledModule[];
@@ -107,6 +108,10 @@ native("generated review task lifecycle", () => {
     } };
   }
   beforeAll(async () => {
+    // Source typechecks run before this package is built. Native acceptance still
+    // loads the same built adapter as the generated host, preserving class identity.
+    const runtime: typeof import("./index") = await import(new URL("../dist/index.js", import.meta.url).href);
+    createApplication = runtime.createApplication;
     root = await mkdtemp(join(import.meta.dir, ".task-lifecycle-"));
     for (const [path, source] of Object.entries(files)) {
       await mkdir(dirname(join(root, path)), { recursive: true });
