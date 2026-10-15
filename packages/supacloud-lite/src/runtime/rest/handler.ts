@@ -178,9 +178,10 @@ export class RestHandler {
             ...explain.options.map((o) => o.toUpperCase()),
             `FORMAT ${explain.format}`,
           ].join(', ')
-          const res = await this.db.withContext(ctx, (query) =>
-            query(`explain (${explainOpts}) ${plan.sql}`, plan.params)
-          )
+          const res = await this.db.withContext(ctx, async (query) => {
+            await query('set transaction read only')
+            return query(`explain (${explainOpts}) ${plan.sql}`, plan.params)
+          })
           const cell = (res.rows[0] as Record<string, unknown>)['QUERY PLAN']
           if (explain.format === 'JSON') {
             const body = typeof cell === 'string' ? cell : JSON.stringify(cell)
@@ -197,6 +198,8 @@ export class RestHandler {
         }
         const built = builder.buildSelect(table, { count: prefer.count !== undefined })
         const { rows, count } = await this.db.withContext(ctx, async (query) => {
+          // Views and RLS predicates can call functions that write, even in SELECTs.
+          await query('set transaction read only')
           const res = await query(built.sql, built.params)
           let count: number | null = null
           if (built.countSql) {
