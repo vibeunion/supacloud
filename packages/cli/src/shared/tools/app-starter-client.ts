@@ -352,6 +352,9 @@ test("double submit sends one write; unknown retains its identity and only a loo
   await client.approve(draft);
   expect(sends).toBe(1);
   expect(client.snapshot().mutation).toEqual({ status: "unknown", operation });
+  await client.reconcile();
+  expect(sends).toBe(1); expect(lookups).toBe(1);
+  expect(client.snapshot().mutation.status).toBe("confirmed");
 });
 test("conflict refreshes but does not retry the write; wrong receipt remains unknown", async () => {
   let writes = 0, reads = 0;
