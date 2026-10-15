@@ -29,7 +29,7 @@ import {
   readEdgeRuntimeProjectSecrets,
   verifyEdgeRuntimeJwtContext,
   withVerifiedJwtContext,
-  type EdgeRuntimeAuthRuntimeMode,
+  type EdgeRuntimeProjectSecrets,
   type EdgeRuntimeJwtVerificationResult,
 } from "./jwt-verifier";
 import {
@@ -1056,32 +1056,14 @@ async function preheatActivationSnapshot(
   });
 }
 
-interface ProjectSecrets {
-  anonKey: string;
-  serviceRoleKey: string;
-  jwtSecret: string;
-  jwtJwks: ReturnType<typeof normalizeJwtJwks>;
-  thirdParty: ReturnType<typeof normalizeThirdPartyJwtPolicy>;
-  authRuntimeMode: EdgeRuntimeAuthRuntimeMode;
-  authIssuer: string;
-}
-
 async function getProjectSecrets(
   projectRef: string,
-): Promise<ProjectSecrets | null> {
+): Promise<EdgeRuntimeProjectSecrets | null> {
   try {
     const runtimeEnv = await loadTenantEnv(projectRef);
     const runtimeSecrets = readEdgeRuntimeProjectSecrets(runtimeEnv);
     if (runtimeSecrets) {
-      return {
-        anonKey: runtimeSecrets.anonKey || "",
-        serviceRoleKey: runtimeSecrets.serviceRoleKey || "",
-        jwtSecret: runtimeSecrets.jwtSecret || "",
-        jwtJwks: runtimeSecrets.jwtJwks || null,
-        thirdParty: runtimeSecrets.thirdParty || null,
-        authRuntimeMode: runtimeSecrets.authRuntimeMode || "unknown",
-        authIssuer: runtimeSecrets.authIssuer || "",
-      };
+      return runtimeSecrets;
     }
 
     const [keysRes, detailRes, authRuntimeRes] = await Promise.all([
