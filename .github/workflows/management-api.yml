@@ -236,9 +236,8 @@ jobs:
             working-directory: packages/cli
             test_timings: cli-test-timings.json
             prepare_script: |
+              bun run ../../scripts/build-command-dependencies.ts cli
               bun install --frozen-lockfile
-              (cd ../app && bun install --frozen-lockfile)
-              (cd ../delivery && bun run build)
             typecheck_script: |
               bun run typecheck
             test_script: |

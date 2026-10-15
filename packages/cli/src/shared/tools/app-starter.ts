@@ -51,8 +51,8 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
-                effect: "4.0.2",
-                elysia: "2.0.0-beta.21",
+                effect: "4.0.5",
+                elysia: "2.0.0-beta.32",
                 rxjs: appMetadata.dependencies.rxjs,
             },
             devDependencies: {

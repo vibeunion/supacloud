@@ -164,6 +164,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
 
   // Import the installed starter and exercise its compiled handler against the
   // actual Lite database bootstrap, not a memory implementation of PostgreSQL.
+  await run(starterInstallArgs("workspace"), join(repo, "packages/supacloud-lite"));
   const persistence: {
     verifyPersistentStarter(
       database: CommandDatabase & { exec(sql: string): Promise<void>; restart(): Promise<void> },

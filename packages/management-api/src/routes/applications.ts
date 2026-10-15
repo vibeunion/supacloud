@@ -172,7 +172,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
   });
   const routes = new Elysia({ prefix: "/v1/projects/:ref/applications", name: "application-releases" })
-    .error(({ error }) => {
+    .onError(({ error }) => {
       if (error instanceof ApplicationPromotionError) {
         return status(error.statusCode, { code: error.code, error: "Application promotion plan is unavailable" });
       }
@@ -212,7 +212,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       }
       return status(500, { code: "APPLICATION_RELEASE_FAILED", error: "Application release request failed" });
     })
-    .beforeHandle(async ({ request, params: values }) => {
+    .onBeforeHandle(async ({ request, params: values }) => {
       const denied = await authorize(request, values.ref);
       if (denied) return status(denied.status, denied.body);
       if (!await exists(values.ref)) return status(404, { code: "PROJECT_NOT_FOUND", error: "Project not found" });
