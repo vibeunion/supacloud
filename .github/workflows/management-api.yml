@@ -623,6 +623,8 @@ jobs:
     name: Application Activation Native PostgreSQL
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      SUPACLOUD_STARTER_POSTGRES_BIN: /usr/lib/postgresql/18/bin
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -635,19 +637,18 @@ jobs:
           (cd packages/delivery && bun install --frozen-lockfile)
           (cd packages/management-api && bun install --frozen-lockfile)
           sudo apt-get update
-          sudo apt-get install -y postgresql
+          sudo apt-get install -y ca-certificates curl
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update
+          sudo apt-get install -y postgresql-18
       - name: Verify activation journal on an owned cluster
         run: |
-          postgres_bin=""
-          for candidate in /usr/lib/postgresql/*/bin; do
-            if [[ -x "$candidate/initdb" && -x "$candidate/pg_ctl" ]]; then
-              postgres_bin="$candidate"
-            fi
-          done
-          test -n "$postgres_bin"
-          "$postgres_bin/postgres" --version
-          SUPACLOUD_STARTER_POSTGRES_BIN="$postgres_bin" \
-            bun --no-env-file test scripts/lib/application-activation-native.test.ts scripts/lib/application-migrations-native.test.ts
+          "$SUPACLOUD_STARTER_POSTGRES_BIN/postgres" --version
+          bun --no-env-file test scripts/lib/application-activation-native.test.ts scripts/lib/application-migrations-native.test.ts
 
   docker-and-scripts-checks:
     name: Docker & Scripts Checks

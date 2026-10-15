@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,33 +19,35 @@ let postgres: StarterPostgres | undefined;
 let database: SQL | undefined;
 let root: string | undefined;
 
-beforeAll(async () => {
-  if (!postgresBin) return;
-  root = await mkdtemp(join(tmpdir(), "application-native-"));
-  postgres = await startStarterPostgres(postgresBin);
-  database = await postgres.withConnection(async url => new SQL({ url, max: 6 }));
-  // Minimal prerequisite tables; the mutation schema and migrations below are
-  // the production implementation, not a copied or simplified journal schema.
-  await executeSqlStatements(database, `
-    CREATE TABLE organizations(id uuid PRIMARY KEY, owner_id text);
-    CREATE TABLE organization_members(organization_id uuid, user_id text);
-    CREATE TABLE projects(ref varchar(20) PRIMARY KEY, organization_id uuid, deleted_at timestamptz);
-    CREATE TABLE project_tasks(project_ref varchar(20), status text, payload jsonb);
-    CREATE TABLE audit_logs(id uuid PRIMARY KEY, project_ref varchar(50), created_at timestamptz);
-    INSERT INTO projects(ref) VALUES ('demo');
-  `);
-  await ensurePlatformV2SchemaInTransaction(database);
-}, 60_000);
+const suite = postgresBin ? describe.serial : describe.skip;
 
-afterAll(async () => {
-  try { await database?.close({ timeout: 1 }); }
-  finally {
-    await postgres?.close();
-    if (root) await rm(root, { recursive: true, force: true });
-  }
-});
+suite("application activation native PostgreSQL", () => {
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "application-native-"));
+    postgres = await startStarterPostgres(postgresBin!);
+    database = await postgres.withConnection(async url => new SQL({ url, max: 6 }));
+    // Minimal prerequisite tables; the mutation schema and migrations below are
+    // the production implementation, not a copied or simplified journal schema.
+    await executeSqlStatements(database, `
+      CREATE TABLE organizations(id uuid PRIMARY KEY, owner_id text);
+      CREATE TABLE organization_members(organization_id uuid, user_id text);
+      CREATE TABLE projects(ref varchar(20) PRIMARY KEY, organization_id uuid, deleted_at timestamptz);
+      CREATE TABLE project_tasks(project_ref varchar(20), status text, payload jsonb);
+      CREATE TABLE audit_logs(id uuid PRIMARY KEY, project_ref varchar(50), created_at timestamptz);
+      INSERT INTO projects(ref) VALUES ('demo');
+    `);
+    await ensurePlatformV2SchemaInTransaction(database);
+  }, 60_000);
 
-test.skipIf(!postgresBin)("management mutation lease survives a host operation longer than 30 seconds", async () => {
+  afterAll(async () => {
+    try { await database?.close({ timeout: 1 }); }
+    finally {
+      await postgres?.close();
+      if (root) await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("management mutation lease survives a host operation longer than 30 seconds", async () => {
   if (!postgres) throw new Error("Native fixture missing");
   const db = await postgres.withConnection(async url =>
     new SQL({ url, max: 2, idleTimeout: MANAGEMENT_SQL_IDLE_TIMEOUT }));
@@ -76,9 +78,9 @@ test.skipIf(!postgresBin)("management mutation lease survives a host operation l
       await db.close({ timeout: 1 });
     }
   }
-}, 60_000);
+  }, 60_000);
 
-test.skipIf(!postgresBin)("native mutation journal survives restart and fences unresolved application activation", async () => {
+  test("native mutation journal survives restart and fences unresolved application activation", async () => {
   if (!database || !postgres || !root) throw new Error("Native fixture missing");
   const storage = new ApplicationActiveStorage(join(root, "authority"));
   let route: ApplicationActiveRecord | null = null;
@@ -193,9 +195,9 @@ test.skipIf(!postgresBin)("native mutation journal survives restart and fences u
   conflicting.runtime.activationId = "21234567-89ab-4def-8123-456789abcdef";
   await expect(makeService(database).activate(conflicting)).rejects.toThrow("resource_busy");
   expect((await storage.read(input.runtime))?.runtime.activationId).toBe(prepared.runtime.activationId);
-}, 60_000);
+  }, 60_000);
 
-test.skipIf(!postgresBin)("expired committed activation is reconciled after restart without replaying runtime effects", async () => {
+  test("expired committed activation is reconciled after restart without replaying runtime effects", async () => {
   if (!database || !postgres || !root) throw new Error("Native fixture missing");
   let directorySyncFails = false;
   const authority = new ApplicationActiveStorage(join(root, "recovery-authority"), {
@@ -324,4 +326,5 @@ test.skipIf(!postgresBin)("expired committed activation is reconciled after rest
   const beforeSyncEffects = [...effects];
   expect((await make(database).reconcile(durabilityRecovery)).replayed).toBe(true);
   expect(effects).toEqual(beforeSyncEffects);
-}, 60_000);
+  }, 60_000);
+});
