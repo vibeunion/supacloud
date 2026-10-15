@@ -45,7 +45,7 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
     ?? tenantRuntimeService.ensurePgredisTenantConfig.bind(tenantRuntimeService);
 
   const platformRoutes = new Elysia({ prefix: "/v1/cache" })
-    .beforeHandle(async ({ request }) => {
+    .onBeforeHandle(async ({ request }) => {
       const authError = await requireAdmin(request);
       if (authError) return status(authError.status, authError.body);
     })
@@ -54,7 +54,7 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
     }, () => service.platformStatus());
 
   const projectRoutes = new Elysia({ prefix: "/v1/projects/:ref/cache" })
-    .beforeHandle(async ({ params, request }) => {
+    .onBeforeHandle(async ({ params, request }) => {
       const authError = await requireProject(request, params.ref);
       if (authError) return status(authError.status, authError.body);
     })
@@ -111,7 +111,7 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
     });
 
   return new Elysia({ name: "pgredis-routes" })
-    .error(({ error, set }) => {
+    .onError(({ error, set }) => {
       if (!isAppError(error)) return;
       set.status = error.statusCode;
       return error.toJSON();

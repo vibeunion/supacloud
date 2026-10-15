@@ -8,11 +8,11 @@ is a separately authorized business command, never an assumed rollback.
 
 ## Compatibility and Acceptance Boundary
 
-The Elysia peer and development dependency are pinned to `2.0.0-beta.21`.
-The runtime adapter pins Effect `4.0.2` and consumes its `Exit`-based
+The Elysia peer and development dependency are pinned to `2.0.0-beta.32`.
+The runtime adapter pins Effect `4.0.5` and consumes its `Exit`-based
 execution boundary.
 `compatibility.json` records the acceptance target: Bun 1.4.3, Elysia
-2.0.0-beta.21, Effect 4.0.2, `typebox` 1.3.34, `exact-mirror` 1.2.6,
+2.0.0-beta.32, Effect 4.0.5, `typebox` 1.3.37, `exact-mirror` 1.2.6,
 TypeScript CLI 7.0.2 and the compiler's separate TypeScript 6 semantic API 6.0.2.
 The matrix is a
 required target, not proof of an execution. See the dated, commit-specific
@@ -319,7 +319,7 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 ## Installation
 
 ```bash
-bun add --exact @supacloud/elysia elysia@2.0.0-beta.21
+bun add --exact @supacloud/elysia elysia@2.0.0-beta.32
 ```
 
 ## Usage

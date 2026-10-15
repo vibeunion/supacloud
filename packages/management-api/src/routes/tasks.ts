@@ -85,7 +85,7 @@ async function getTaskDetailAuth(
 }
 
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
-    .error(({ error }) => {
+    .onError(({ error }) => {
         if (error instanceof PgflowTaskError) {
             return status(error.status, { message: error.message, code: "PGFLOW_TASK_ERROR" });
         }
@@ -95,7 +95,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(cause.status, { message: "Queue request body could not be accepted", code: "PGMQ_REQUEST_BODY_INVALID" });
         }
     })
-    .beforeHandle(async ({ params, request, route }) => {
+    .onBeforeHandle(async ({ params, request, route }) => {
         if (route && isTaskDetailRead(request, route)) return;
         const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);

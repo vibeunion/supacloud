@@ -20,10 +20,10 @@ SupaCloud Lite 使用 ElectricSQL PGlite 作为嵌入式 PostgreSQL 引擎。
 
 Lite also bundles the official PGlite extension packages:
 
-- `@electric-sql/pglite-pgvector` 0.0.9
-- `@electric-sql/pglite-postgis` 0.2.8
-- `@electric-sql/pglite-pg_textsearch` 0.0.10
-- `@electric-sql/pglite-pgmq` 0.0.6
+- `@electric-sql/pglite-pgvector` 0.0.11
+- `@electric-sql/pglite-postgis` 0.2.10
+- `@electric-sql/pglite-pg_textsearch` 0.0.12
+- `@electric-sql/pglite-pgmq` 0.0.8
 
 These packages are published by ElectricSQL under Apache-2.0 and their
 extension archives are embedded in the standalone binary.

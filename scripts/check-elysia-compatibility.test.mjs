@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { checkElysiaCompatibility, parseLockfile } from './check-elysia-compatibility.mjs';
 
-const version = '2.0.0-beta.21';
+const version = '2.0.0-beta.32';
 const templates = [
   'packages/cli/src/shared/tools/advanced-tools.ts',
   'packages/cli/src/shared/tools/app-starter.ts',
@@ -26,28 +26,28 @@ function fixture(t) {
   };
   write('package.json', { private: true });
   write('packages/elysia/compatibility.json', {
-    bun: '1.4.3', packages: { elysia: version, effect: '4.0.2', typebox: '1.3.34', 'exact-mirror': '1.2.6' },
+    bun: '1.4.3', packages: { elysia: version, effect: '4.0.5', typebox: '1.3.37', 'exact-mirror': '1.2.6' },
   });
   for (const name of ['app', 'compiler']) {
-    write(`packages/${name}/package.json`, { name: `@supacloud/${name}`, dependencies: { typebox: '1.3.34' } });
+    write(`packages/${name}/package.json`, { name: `@supacloud/${name}`, dependencies: { typebox: '1.3.37' } });
   }
   const adapter = {
-    name: '@supacloud/elysia', dependencies: { effect: '4.0.2', typebox: '1.3.34', 'exact-mirror': '1.2.6' },
+    name: '@supacloud/elysia', dependencies: { effect: '4.0.5', typebox: '1.3.37', 'exact-mirror': '1.2.6' },
     peerDependencies: { elysia: version }, devDependencies: { elysia: version },
   };
   write('packages/elysia/package.json', adapter);
   write('packages/elysia/bun.lock', {
     workspaces: { '': adapter }, packages: {
-      elysia: [`elysia@${version}`], effect: ['effect@4.0.2'], typebox: ['typebox@1.3.34'], 'exact-mirror': ['exact-mirror@1.2.6'],
+      elysia: [`elysia@${version}`], effect: ['effect@4.0.5'], typebox: ['typebox@1.3.37'], 'exact-mirror': ['exact-mirror@1.2.6'],
     },
   });
-  const lite = { name: '@supacloud/lite', dependencies: { typebox: '1.3.34' }, devDependencies: { effect: '4.0.2', elysia: version } };
+  const lite = { name: '@supacloud/lite', dependencies: { typebox: '1.3.37' }, devDependencies: { effect: '4.0.5', elysia: version } };
   write('packages/supacloud-lite/package.json', lite);
   write('packages/supacloud-lite/bun.lock', {
     workspaces: { '': lite }, packages: {
       elysia: [`elysia@${version}`],
-      effect: ['effect@4.0.2'],
-      typebox: ['typebox@1.3.34'],
+      effect: ['effect@4.0.5'],
+      typebox: ['typebox@1.3.37'],
       '@supacloud/elysia': ['@supacloud/elysia@file:../elysia', adapter],
     },
   });
@@ -66,18 +66,32 @@ test('parses emitted trailing commas without rewriting strings or evaluating cod
 });
 test('rejects a widened beta peer', (t) => {
   const f = fixture(t);
-  f.edit('packages/elysia/package.json', (p) => { p.peerDependencies.elysia = '>=2.0.0-beta.21 <3'; });
+  f.edit('packages/elysia/package.json', (p) => { p.peerDependencies.elysia = '>=2.0.0-beta.32 <3'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /peerDependencies\.elysia must equal/);
 });
 test('rejects stale adapter workspace lock metadata', (t) => {
   const f = fixture(t);
-  f.edit('packages/elysia/bun.lock', (p) => { p.workspaces[''].peerDependencies.elysia = '>=2.0.0-beta.21 <3'; });
+  f.edit('packages/elysia/bun.lock', (p) => { p.workspaces[''].peerDependencies.elysia = '>=2.0.0-beta.32 <3'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale workspace peerDependencies\.elysia/);
 });
 test('rejects stale copied adapter metadata in a consumer lockfile', (t) => {
   const f = fixture(t);
   f.edit('packages/supacloud-lite/bun.lock', (p) => {
-    p.packages['@supacloud/elysia'][1].peerDependencies.elysia = '>=2.0.0-beta.21 <3';
+    p.packages['@supacloud/elysia'][1].peerDependencies.elysia = '>=2.0.0-beta.32 <3';
+  });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local @supacloud\/elysia peer metadata/);
+});
+test('allows empty indirect adapter placeholders but rejects populated snapshots without a peer', (t) => {
+  const f = fixture(t);
+  f.write('packages/admin/package.json', { name: '@supacloud/admin' });
+  f.write('packages/admin/bun.lock', { packages: {
+    '@supacloud/cli/@supacloud/elysia': ['@supacloud/elysia@file:../elysia', {}],
+  } });
+  assert.deepEqual(checkElysiaCompatibility(f.root), []);
+  f.edit('packages/admin/bun.lock', (p) => {
+    p.packages['@supacloud/cli/@supacloud/elysia'][1] = {
+      dependencies: { typebox: '1.3.37' },
+    };
   });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local @supacloud\/elysia peer metadata/);
 });
@@ -115,7 +129,7 @@ test('rejects a legacy-only schema matrix and mismatched active schema declarati
 });
 test('rejects an unpinned compatibility target', (t) => {
   const f = fixture(t);
-  f.edit('packages/elysia/compatibility.json', (p) => { p.packages.elysia = '^2.0.0-beta.21'; });
+  f.edit('packages/elysia/compatibility.json', (p) => { p.packages.elysia = '^2.0.0-beta.32'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /exact Elysia 2\.0 beta version/);
 });
 test('does not rewrite historical third-party adapter dependencies', (t) => {
@@ -154,7 +168,7 @@ test('rejects a drifted direct Effect declaration and resolved version', (t) => 
   const f = fixture(t);
   f.edit('packages/supacloud-lite/package.json', (p) => { p.devDependencies.effect = '3.22.1'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /devDependencies\.effect must equal/);
-  f.edit('packages/supacloud-lite/package.json', (p) => { p.devDependencies.effect = '4.0.2'; });
+  f.edit('packages/supacloud-lite/package.json', (p) => { p.devDependencies.effect = '4.0.5'; });
   f.edit('packages/supacloud-lite/bun.lock', (p) => { p.packages.effect[0] = 'effect@3.22.1'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /resolved Effect version/);
 });
@@ -177,7 +191,7 @@ test('accepts current local schema snapshots', (t) => {
   const f = fixture(t);
   f.edit('packages/elysia/bun.lock', (p) => {
     p.packages['@supacloud/app'] = [
-      '@supacloud/app@file:../app', { dependencies: { typebox: '1.3.34' } },
+      '@supacloud/app@file:../app', { dependencies: { typebox: '1.3.37' } },
     ];
     p.packages['@supacloud/compiler/@supacloud/delivery'] = [
       '@supacloud/delivery@file:../delivery', {},
