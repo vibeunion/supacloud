@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.31.0...elysia-v0.31.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **cli:** recover committed attachment results before job replay ([#1953](https://github.com/vibeunion/supacloud/issues/1953)) ([d7dcf24](https://github.com/vibeunion/supacloud/commit/d7dcf2487441b4e223b64137f1660af0be7434e7))
+
 ## [0.31.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.30.1...elysia-v0.31.0) (2026-10-15)
 
 
