@@ -3,6 +3,8 @@ import { generateKeyPair, SignJWT } from "jose";
 import { createClient } from "@supabase/supabase-js";
 import { compileProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
 import { COMMAND_PERSISTENCE_SQL } from "@supacloud/db";
+import { SupaCloudWorkflowsClient } from "@supacloud/js";
+import type { ExecutionEvent } from "@supacloud/elysia";
 import { startStarterLite } from "#starter-lite";
 
 // A source-only browser harness. No production credentials or remote database.
@@ -12,6 +14,9 @@ if (compiled.diagnostics.some(item => item.severity === "error")) throw new Erro
 const { createApp } = await import("../src/application");
 const { createReviewPostgresAdapters } = await import("../src/host/review-postgres");
 const { createReviewUploadAdapters } = await import("../src/host/review-uploads");
+const { createReviewAttachmentAdapters } = await import("../src/host/review-attachments");
+const { createReviewAttachmentWorker } = await import("../src/host/review-attachment-worker");
+const { createCompiledModules } = await import("../generated/application");
 const abort = new AbortController();
 let shutdown = () => { abort.abort(); };
 const stop = () => shutdown();
@@ -19,6 +24,7 @@ process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 const database = await startStarterLite(process.cwd(), abort.signal, process.env["SUPACLOUD_STARTER_POSTGRES_BIN"]);
 let server: ReturnType<typeof Bun.serve> | undefined;
+let worker: Awaited<ReturnType<typeof createReviewAttachmentWorker>> | undefined;
 try {
   await database.exec(COMMAND_PERSISTENCE_SQL);
   for (const file of ["001-review.sql", "002-review-attachments.sql", "003-review-uploads.sql"]) {
@@ -43,7 +49,12 @@ try {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
   const uploads = await createReviewUploadAdapters({ database, service, projectId: "starter-test", tenantId: "starter-test" });
+  const attachmentOptions = { database, service, projectId: "starter-test", tenantId: "starter-test" };
+  const { enqueue } = await createReviewAttachmentAdapters(attachmentOptions);
+  const events: Readonly<ExecutionEvent>[] = [];
+  const onExecution = (event: Readonly<ExecutionEvent>) => { if (events.length < 1000) events.push(event); };
   const adapters = await createReviewPostgresAdapters({ database, uploads, tenantId: "starter-test",
+    afterApproved: enqueue,
     identity: { issuer, audience: "starter-test", clientId: "starter-client", projectId: "starter-test",
       jwksUrl: issuer + "/jwks", keyResolver: async () => keys.publicKey } });
   database.configureIdentity({
@@ -52,13 +63,28 @@ try {
       return identity.subject === "owner" ? subjects.owner : identity.subject === "other" ? subjects.other : null;
     },
   });
-  const app = createApp(adapters);
-  const bundle = await Bun.build({ entrypoints: ["tests/starter-browser-client.ts"], target: "browser",
-    tsconfig: process.cwd() + "/tsconfig.json" });
+  const app = createApp({ ...adapters, onExecution });
+  worker = await createReviewAttachmentWorker({
+    ...attachmentOptions, modules: createCompiledModules(), workflows: new SupaCloudWorkflowsClient(service),
+    workerId: "browser-fixture-worker", queueOwnership: "exclusive-review-attachments", pollIntervalMs: 20, onExecution,
+  });
+  let workerFailure = false;
+  void worker.failure.catch(() => { workerFailure = true; });
+  await worker.start();
+  const svadmin = process.env["SUPACLOUD_STARTER_SVADMIN"] === "1"
+    ? await (await import("#starter-svadmin")).starterSvadminBundle() : undefined;
+  const bundle = await Bun.build({
+    entrypoints: [svadmin ? "tests/starter-svadmin-client.ts" : "tests/starter-browser-client.ts"], target: "browser",
+    tsconfig: process.cwd() + "/tsconfig.json", ...(svadmin ? { plugins: [svadmin.plugin] } : {}),
+  });
   if (!bundle.success) throw new Error("Browser fixture build failed: " + bundle.logs.join("\n"));
   const javascript = await bundle.outputs[0]!.text();
+  const css = svadmin ? await svadmin.css() : "";
   let approvalRequests = 0, droppedResponses = 0;
-  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+  const html = svadmin ? `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+    <title>Review acceptance fixture</title><link rel="stylesheet" href="/client.css">
+    <body><div id="svadmin"></div><script type="module" src="/client.js"></script></body></html>`
+    : `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
     <title>Review acceptance fixture</title><body><main>
     <h1>Review acceptance fixture</h1>
     <label>Identity <select id="identity"><option>owner</option><option>other</option></select></label>
@@ -101,7 +127,10 @@ try {
             reviews: await query("SELECT id,state,version FROM public.starter_reviews"),
             receipts: await query("SELECT operation_key FROM supacloud_commands.execution_receipts ORDER BY operation_key"),
             audit: await query("SELECT operation_key FROM supacloud_commands.execution_audit ORDER BY operation_key"),
-            attachments: await query("SELECT artifact_id,object_path FROM public.starter_attachments"),
+            attachments: await query("SELECT review_id,artifact_id,run_id,object_path FROM public.starter_attachments"),
+            results: await query("SELECT review_id,version,artifact_id FROM public.starter_attachment_results"),
+            runs: await query("SELECT id,status FROM supacloud_workflows.runs"),
+            workerFailure, events,
             objects: await query("SELECT name FROM storage.objects WHERE bucket_id='review-attachments'") });
         }
         return reply({ error: "Not found" }, 404);
@@ -112,6 +141,9 @@ try {
       });
       if (request.method === "GET" && url.pathname === "/client.js") return new Response(javascript, {
         headers: { "content-type": "text/javascript", "cache-control": "no-store" },
+      });
+      if (request.method === "GET" && url.pathname === "/client.css") return new Response(css, {
+        headers: { "content-type": "text/css", "cache-control": "no-store" },
       });
       if (request.method === "GET" && url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
       if (url.pathname.startsWith("/rest/v1/") || url.pathname.startsWith("/storage/v1/")) {
@@ -135,11 +167,12 @@ try {
       return new Response(null, { status: 404 });
     },
   });
-  console.log(JSON.stringify({ url: server.url.origin, evidence: "source-only-local-signed-identity", cleanup: "SIGINT/SIGTERM" }));
+  console.log(JSON.stringify({ url: server.url.origin, view: svadmin ? "svadmin" : "dom",
+    evidence: "source-only-local-signed-identity", cleanup: "SIGINT/SIGTERM" }));
   await new Promise<void>(resolve => { shutdown = resolve; if (abort.signal.aborted) resolve(); });
 } finally {
   server?.stop(true);
-  await database.close();
+  try { await worker?.close(); } finally { await database.close(); }
   process.removeListener("SIGINT", stop);
   process.removeListener("SIGTERM", stop);
 }

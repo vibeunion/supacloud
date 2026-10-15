@@ -1,4 +1,4 @@
-export const STARTER_ATTACHMENT_WORKER = `import { createWorker, type CompiledModule } from "@supacloud/elysia";
+export const STARTER_ATTACHMENT_WORKER = `import { createWorker, type CompiledModule, type ExecutionObserver } from "@supacloud/elysia";
 import {
   createSupaCloudWorkflowTransport,
   type SupaCloudWorkflowClaim,
@@ -12,6 +12,7 @@ export interface ReviewAttachmentWorkerOptions extends ReviewAttachmentOptions {
   workerId: string;
   queueOwnership: "exclusive-review-attachments";
   pollIntervalMs?: number;
+  onExecution?: ExecutionObserver;
 }
 
 export async function createReviewAttachmentWorker(options: ReviewAttachmentWorkerOptions) {
@@ -50,6 +51,7 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
     modules: options.modules, deps: { dbClient: store }, workerId, concurrency: 1,
     pollIntervalMs: options.pollIntervalMs ?? 1000,
     onError: fatal,
+    ...(options.onExecution === undefined ? {} : { onExecution: options.onExecution }),
     transport: {
       async claim(signal): Promise<SupaCloudWorkflowClaim | null> {
         if (halted || signal.aborted) return null;

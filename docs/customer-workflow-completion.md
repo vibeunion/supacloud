@@ -70,6 +70,19 @@ Scenario: Reload after losing a committed response
   When the browser reloads with its persisted operation identity
   Then the client remains unknown until a matching receipt is read
   And the original command and audit record occur exactly once
+
+Scenario: Correlate a browser operation with durable asynchronous work
+  Given an uploaded attachment and an approved review
+  When the real workflow worker completes attachment verification
+  Then route and command events identify the approval operation
+  And the attachment links its upload operation to the workflow run and database result
+  And worker events identify that same run without logging credentials or payloads
+
+Scenario: Reuse the reference state with actual SVAdmin components
+  Given the installed SVAdmin button and table components in a Svelte view
+  When the browser repeats the reference business and recovery scenarios
+  Then those components display the same confirmed, denied and unknown states
+  And disposing the view prevents late updates without deleting pending evidence
 ```
 
 ## Evidence boundary
@@ -201,8 +214,32 @@ and foreign-identity list/write/object denial. Database evidence must contain
 exactly one upload and one approval receipt/audit; recovery must not increase
 the approval request counter. Screenshots go to `output/playwright/`.
 The fixture's browser client is also strictly type-checked by
-`app-starter-client.test.ts`. This does not cover real SupAuth, actual SVAdmin
-components, workflow workers, cross-tab ownership or a full restore.
+`app-starter-client.test.ts`. The backend now runs the real attachment worker:
+the approval transaction queues work, the worker consumes it through the SDK,
+and exactly one verified attachment result must be persisted. Metadata-only
+route/command events carry the approval operation ID. The attachment's
+`artifact_id`/`run_id` joins the upload operation, workflow, worker events and
+database result. These are distinct operation identities linked by the review,
+not a fabricated single trace ID for every action.
+
+For actual SVAdmin components, install the frozen Web Console dependencies and
+add `--svadmin` to the launcher command. This selects a Svelte view using the
+installed `@svadmin/ui` Button and Table components and their shipped stylesheet.
+The launcher first runs a strict, fixture-scoped `svelte-check`, including warnings.
+The same browser scenario verifies either view; Svelte subscriptions are disposed
+on unmount and identity changes. UI dependencies remain outside the generated
+application. This is component-level integration, not the complete SVAdmin
+resource provider, pagination or customer application's UI.
+
+On 2026-10-16 Chromium acceptance passed both the DOM trace path and the SVAdmin
+view (`@svadmin/ui@0.83.1`, Svelte `5.57.2`). The SVAdmin run produced one private
+object, two command receipts/audits, one completed workflow and one database
+result; 42 execution metadata events were observed, including denied/conflicting
+requests. Recovery did not add an approval request. Expected injected HTTP
+503/409/502 and permission-denied responses are not browser runtime exceptions.
+
+These checks do not prove real SupAuth, gateway-to-log-collector propagation,
+cross-tab ownership, deployed customer UI or a full customer-snapshot restore.
 
 ## Published consumer gate
 
@@ -253,6 +290,14 @@ It stopped at unavailable `@supacloud/elysia@^0.30.1`. This is a second,
 source-manifest visibility failure, not a rerun of the installed CLI acceptance
 above, and not proof that the remaining dependencies are available.
 
+The 2026-10-16 rerun with CLI `0.101.2` and Lite `0.29.1` again passed installation,
+generation, compilation, drift and consumer types, then failed at `client-states`
+because `tests/review-client.test.ts` is absent. It selected compiler `0.46.4`,
+Elysia adapter `0.31.1`, contracts `0.10.0` and SDK `0.43.0`. This is a published
+template-content gap, not the earlier missing-dependency failure. Source-branch
+checks cannot waive it. The local npm identity check also returned HTTP 401;
+no direct publication was attempted or claimed.
+
 Focused follow-up verification on October 15:
 `bun test src/shared/tools/app-starter-client.test.ts` from `packages/cli`
 passed both parent tests, including all 14 emitted behavior tests and strict
@@ -283,7 +328,17 @@ real-session business smoke after upgrading or recovering.
 ## Remaining acceptance
 
 This increment is not evidence of completed platform acceptance. The published
-CLI must first include this increment in a release. Live SupAuth
-business smoke, actual SVAdmin component acceptance, cross-component tracing acceptance
-and an approved full database/object-storage restore drill remain required
-before all three customer outcomes can be signed off.
+CLI must first include this increment in a release. Live SupAuth business smoke,
+deployed gateway/log tracing and an approved customer-snapshot restore remain
+required before all three customer outcomes can be signed off. The component
+fixture and application-level HTTP/workflow/database correlation are now locally
+verified, but do not replace deployed customer acceptance.
+
+Only read-only inspection was performed on test host `root@192.168.200.112`.
+No existing project, user, permission, MFA or authentication policy was changed.
+Live acceptance requires an explicitly allocated test project and dedicated
+temporary SupAuth identities/client, or an owner-supplied equivalent with clear
+ownership and cleanup evidence. Do not reset or reuse unrelated shared accounts.
+The inspected backup directory did not provide a complete approved snapshot
+matching the full-project restore contract. See the isolated synthetic results
+in [project restore drills](project-restore-drill.md); those are not a substitute.

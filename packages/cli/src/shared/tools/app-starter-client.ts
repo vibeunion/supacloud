@@ -510,7 +510,7 @@ test("unavailable recovery storage prevents dispatch, and disposal leaves pendin
   const op = closed.snapshot().mutation.operation!;
   closed.dispose();
   resolve({ status: "confirmed", operationId: op.operationId, reviewId: op.reviewId }); await request;
-  expect(saved).toEqual(op); expect(cleared).toBe(0);
+  expect<ReviewOperation | null>(saved).toEqual(op); expect(cleared).toBe(0);
 });
 
 test("default recovery transport performs one read without body or mutation retry", async () => {

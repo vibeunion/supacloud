@@ -132,8 +132,13 @@ unmount must not delete unknown operations. Stored pending data contains no
 tokens, business rows or file bytes; storage corruption blocks writes.
 
 See [customer workflow acceptance](customer-workflow-completion.md#browser-acceptance)
-for the reproducible browser-to-native-database fixture. That fixture uses plain
-DOM bindings, not SVAdmin components; actual SVAdmin acceptance remains separate.
+for the reproducible browser-to-native-database fixture. Its optional `--svadmin`
+view uses installed SVAdmin Button/Table components, Svelte subscriptions and
+unmount cleanup. On October 16, 2026 that view passed the same real-database
+upload, approval, conflict, reload-recovery and foreign-identity scenarios as
+the DOM view, with strict Svelte diagnostics enabled. This verifies those
+components and the reference binding, not every SVAdmin provider or the deployed
+customer UI. Neither the template nor the SDK gains a hard UI dependency.
 
 ## Compatibility before upgrading the task adapter
 

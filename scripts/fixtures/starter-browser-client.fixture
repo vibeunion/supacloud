@@ -1,7 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
-import { createAuthenticatedFetch } from "@supacloud/js/contracts";
-import { createReviewClient, createReviewPendingStore } from "../src/client/reviews";
-import { createReviewTransport } from "../src/client/review-transport";
+import { createFixtureClient, fixture, fixtureSubject } from "./starter-browser-session";
 
 function element<T extends HTMLElement>(id: string, kind: { new(): T }): T {
   const value = document.getElementById(id);
@@ -16,44 +13,11 @@ const approve = element("approve", HTMLButtonElement);
 const upload = element("upload", HTMLButtonElement);
 const recover = element("recover", HTMLButtonElement);
 const output = element("result", HTMLPreElement);
-const fixture = (path: string, method = "GET") => fetch("/fixture/" + path, {
-  method, headers: { "x-starter-fixture": "browser" }, cache: "no-store",
-});
-const subject = sessionStorage.getItem("fixture-subject") === "other" ? "other" : "owner";
+const subject = fixtureSubject();
 identity.value = subject;
-const response = await fixture("session?subject=" + subject);
-const session: unknown = await response.json();
-if (!session || typeof session !== "object" || !("token" in session) || typeof session.token !== "string"
-  || !("anonKey" in session) || typeof session.anonKey !== "string"
-  || !("reviewId" in session) || typeof session.reviewId !== "string") throw new Error("Invalid fixture session");
-const bearer = session.token;
-const reviewId = session.reviewId;
-const supabase = createClient(location.origin, session.anonKey, {
-  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  global: {
-    headers: { Authorization: "Bearer " + bearer },
-    fetch: new Proxy(fetch, {
-      apply(send, _receiver: unknown, [input, init]: Parameters<typeof fetch>) {
-        const headers = new Headers(init?.headers);
-        if (failList.checked) headers.set("x-fixture-fail-list", "true");
-        return send(input, { ...init, headers });
-      },
-    }),
-  },
+const { client, transport, reviewId } = await createFixtureClient(subject, {
+  loseResponse: () => lose.checked, failList: () => failList.checked,
 });
-const authenticatedFetch = createAuthenticatedFetch({
-  getAccessToken: async () => bearer,
-  fetch: (input, init) => {
-    const request = new Request(input, init);
-    const headers = new Headers(request.headers);
-    if (lose.checked) headers.set("x-fixture-lose-response", "true");
-    return fetch(new Request(request, { headers }));
-  },
-});
-const transport = createReviewTransport({ supabase, authenticatedFetch, apiOrigin: location.origin });
-const client = createReviewClient(transport, createReviewPendingStore(localStorage, {
-  projectId: "starter-test", tenantId: "starter-test", applicationId: "reviews", subject,
-}));
 const render = () => {
   const state = client.snapshot();
   element("list-status", HTMLOutputElement).textContent = state.list.status;
@@ -62,6 +26,7 @@ const render = () => {
   const list = element("rows", HTMLUListElement);
   list.replaceChildren(...state.list.rows.map(row => {
     const item = document.createElement("li");
+    item.dataset["reviewRow"] = "";
     item.textContent = row.id + " " + row.state + " v" + row.version;
     return item;
   }));

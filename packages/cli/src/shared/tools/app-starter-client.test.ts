@@ -56,6 +56,8 @@ test("the emitted client reference executes its behavior tests without a UI fram
     const cli = fileURLToPath(new URL("../../../", import.meta.url));
     await copyFile(new URL("../../../../../scripts/fixtures/starter-browser-client.fixture", import.meta.url),
       join(root, "tests/starter-browser-client.ts"));
+    await copyFile(new URL("../../../../../scripts/fixtures/starter-browser-session.fixture", import.meta.url),
+      join(root, "tests/starter-browser-session.ts"));
     await writeFile(join(root, "tests/sdk-types.ts"), [
       'import type { SupabaseClient } from "@supabase/supabase-js";',
       'import type { ReviewSupabaseClient } from "../src/client/review-transport";',

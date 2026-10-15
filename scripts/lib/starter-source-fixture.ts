@@ -35,6 +35,7 @@ export async function prepareStarterSourceFixture(root: string): Promise<void> {
     "drizzle-orm/*": [join(repo, "packages/db/node_modules/drizzle-orm/*")],
     "#starter-postgres": [join(repo, "scripts/lib/starter-postgres.ts")],
     "#starter-lite": [join(repo, "scripts/lib/starter-lite.ts")],
+    "#starter-svadmin": [join(repo, "scripts/lib/starter-svadmin.ts")],
     "#starter-bootstrap": [join(repo, "packages/supacloud-lite/src/runtime/db/bootstrap.ts")],
     "#starter-runtime": [join(repo, "packages/supacloud-lite/src/runtime/db/emulated.ts")],
     "@supacloud/compiler": [join(repo, "packages/cli/node_modules/@supacloud/compiler/dist/index.js")],

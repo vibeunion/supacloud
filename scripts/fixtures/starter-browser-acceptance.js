@@ -12,16 +12,24 @@ async page => {
     return { status: object.status, body: object.ok ? await object.text() : null };
   }, { subject, path });
   const evidence = async () => {
-    await page.getByRole("button", { name: "Read evidence", exact: true }).click();
-    await page.waitForFunction(() => document.getElementById("result")?.textContent?.includes("approvalRequests"));
-    return JSON.parse(await page.locator("#result").textContent());
+    const [response] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === "/fixture/evidence"),
+      page.getByRole("button", { name: "Read evidence", exact: true }).click(),
+    ]);
+    return response.json();
   };
   await state("list-status", "ready");
-  check(await page.locator("#rows li").count() === 1, "Owner must see one review");
+  const svadmin = await page.locator("[data-svadmin-fixture]").count() === 1;
+  const screenshotPrefix = "output/playwright/starter-" + (svadmin ? "svadmin" : "dom");
+  if (svadmin) {
+    check(await page.locator('[data-slot="button"]').count() >= 7, "Expected actual SVAdmin buttons");
+    check(await page.locator('[data-slot="table"]').count() === 1, "Expected actual SVAdmin table");
+  }
+  check(await page.locator("[data-review-row]").count() === 1, "Owner must see one review");
   await page.getByRole("checkbox", { name: "Fail list request" }).check();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await state("list-status", "error");
-  check(await page.locator("#rows li").count() === 0, "Read error must clear stale rows");
+  check(await page.locator("[data-review-row]").count() === 0, "Read error must clear stale rows");
   await page.getByRole("checkbox", { name: "Fail list request" }).uncheck();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await state("list-status", "ready");
@@ -48,7 +56,7 @@ async page => {
   });
   await state("mutation-status", "conflict");
   await state("list-status", "ready");
-  check((await page.locator("#rows").textContent()).includes("draft v2"), "Conflict must refresh current version");
+  check(/draft\s*v2/.test(await page.locator("#rows").textContent()), "Conflict must refresh current version");
   await page.getByRole("checkbox", { name: "Lose approval response" }).check();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await state("mutation-status", "unknown");
@@ -59,7 +67,7 @@ async page => {
   check(committed.reviews[0].state === "approved" && committed.reviews[0].version === 3, "Lost response must follow real commit");
   check(committed.droppedResponses === 1 && committed.approvalRequests === 2, "Conflict and lost approval must each send once");
   check(committed.receipts.length === 2 && committed.audit.length === 2, "Exactly one approval and upload must commit");
-  await page.screenshot({ path: "output/playwright/starter-unknown.png", fullPage: true });
+  await page.screenshot({ path: screenshotPrefix + "-unknown.png" });
 
   await page.reload();
   await state("list-status", "ready");
@@ -79,12 +87,33 @@ async page => {
     && JSON.stringify(recovered.audit) === JSON.stringify(committed.audit), "Readback must not mutate receipts or audit");
   check(await page.evaluate(() => Object.keys(localStorage)
     .filter(key => key.startsWith("supacloud.review.pending.v1:")).length) === 0, "Confirmed recovery must clear pending record");
-  await page.screenshot({ path: "output/playwright/starter-recovered.png", fullPage: true });
+  await page.waitForFunction(async () => {
+    const evidence = await (await fetch("/fixture/evidence", { headers: { "x-starter-fixture": "browser" } })).json();
+    if (evidence.workerFailure) throw new Error("Workflow worker failed");
+    return evidence.runs.length === 1 && evidence.runs[0].status === "completed";
+  });
+  const traced = await evidence();
+  const attachment = traced.attachments[0];
+  check(traced.results.length === 1 && traced.results[0].review_id === attachment.review_id
+    && traced.results[0].artifact_id === attachment.artifact_id && traced.results[0].version === 3,
+    "Worker must persist exactly one result for the approved version");
+  check(attachment.run_id === attachment.artifact_id && traced.runs[0].id === attachment.run_id,
+    "Upload operation, attachment and workflow must share durable correlation");
+  for (const kind of ["route", "command"]) {
+    check(traced.events.some(event => event.kind === kind && event.requestId === operation && event.phase === "succeeded"),
+      "Approval must expose correlated " + kind + " execution events");
+  }
+  check(traced.events.some(event => event.kind === "job" && event.requestId === attachment.run_id
+    && event.phase === "succeeded"), "Worker events must carry the durable workflow run");
+  check(traced.events.every(event => Object.keys(event).every(key =>
+    ["kind", "operation", "stage", "phase", "requestId", "durationMs"].includes(key))),
+    "Telemetry must not contain credentials, payloads or results");
+  await page.screenshot({ path: screenshotPrefix + "-recovered.png" });
 
   await page.getByRole("combobox", { name: "Identity" }).selectOption("other");
   await state("list-status", "empty");
   await state("mutation-status", "idle");
-  check(await page.locator("#rows li").count() === 0, "Identity change must not expose owner rows");
+  check(await page.locator("[data-review-row]").count() === 0, "Identity change must not expose owner rows");
   await page.getByRole("button", { name: "Probe foreign approval", exact: true }).click();
   await page.waitForFunction(() => document.getElementById("result")?.textContent === '{"status":"denied"}');
   const objectAccess = await download("other", uploaded.objects[0].name);
@@ -92,9 +121,9 @@ async page => {
   const denied = await evidence();
   check(denied.receipts.length === 2 && denied.audit.length === 2 && denied.approvalRequests === 3,
     "Denied foreign write must not leave receipts or audit");
-  await page.screenshot({ path: "output/playwright/starter-denied.png", fullPage: true });
-  return { status: "passed", identity: "local-signed-not-live-SupAuth",
+  await page.screenshot({ path: screenshotPrefix + "-denied.png" });
+  return { status: "passed", view: svadmin ? "svadmin" : "dom", identity: "local-signed-not-live-SupAuth",
     checks: ["list", "read-failure-recovery", "private-upload", "conflict-refresh", "committed-response-loss",
-      "reload-identity", "read-only-recovery", "foreign-list-write-object-denial"],
-    evidence: denied };
+      "reload-identity", "read-only-recovery", "foreign-list-write-object-denial", "route-command-workflow-database-correlation"],
+    evidence: { ...denied, events: denied.events.length } };
 }
