@@ -75,6 +75,13 @@ create function public.authenticated_only_rpc() returns boolean
 
 revoke all on function public.authenticated_only_rpc() from public;
 grant execute on function public.authenticated_only_rpc() to authenticated;
+
+create function public.rename_todos(target_title text, next_title text)
+  returns setof public.todos language sql volatile security invoker
+  as $$
+    update public.todos set title = next_title
+    where title = target_title returning *;
+  $$;
 `
 
 const functionSource = `
@@ -111,7 +118,7 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     await writeFile(join(rootDir, 'supabase', 'functions', '.env'), 'FUNCTION_SECRET=lite-secret\n')
     await writeFile(join(rootDir, 'supabase', 'functions', 'hello', 'index.ts'), functionSource)
 
-    project = await startProjectServer({ projectDir: rootDir, port: 0, log: () => {} })
+    project = await startProjectServer({ projectDir: rootDir, engine: 'pglite', port: 0, log: () => {} })
     anonClient = createClient(project.url, project.backend.anonKey, clientOptions('bootstrap-user'))
     serviceClient = createClient(project.url, project.backend.serviceRoleKey, clientOptions('service-role'))
 
@@ -200,6 +207,131 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
 
     const removed = await userClient.from('todos').delete().eq('id', inserted.data.id)
     expect(removed.error).toBeNull()
+  })
+
+  test('isolates signed-in users and rolls back rejected RLS writes', async () => {
+    const credentials = { email: 'rls-observer@example.com', password: 'correct-horse-battery-staple' }
+    const created = await serviceClient.auth.admin.createUser({ ...credentials, email_confirm: true })
+    expect(created.error).toBeNull()
+    const otherClient = createClient(project.url, project.backend.anonKey, clientOptions('rls-observer'))
+    const login = await otherClient.auth.signInWithPassword(credentials)
+    expect(login.error).toBeNull()
+    const otherId = login.data.user!.id
+    const title = 'rls-isolation'
+    try {
+      const own = await userClient.from('todos').insert({ title }).select().single()
+      const other = await otherClient.from('todos').insert({ title }).select().single()
+      expect(own.error).toBeNull()
+      expect(other.error).toBeNull()
+      expect(own.data.user_id).toBe(userId)
+      expect(other.data.user_id).toBe(otherId)
+
+      for (const [client, expected] of [
+        [userClient, [own.data]],
+        [otherClient, [other.data]],
+        [anonClient, []],
+      ] as Array<[typeof userClient, unknown[]]>) {
+        const rows = await client.from('todos').select('*', { count: 'exact' }).eq('title', title)
+        expect(rows.error).toBeNull()
+        expect(rows.data).toEqual(expected)
+        expect(rows.count).toBe(expected.length)
+      }
+      const crossUpdate = await otherClient.from('todos').update({ done: true }).eq('id', own.data.id).select()
+      expect(crossUpdate.error).toBeNull()
+      expect(crossUpdate.data).toEqual([])
+      const crossDelete = await otherClient.from('todos').delete().eq('id', own.data.id).select()
+      expect(crossDelete.error).toBeNull()
+      expect(crossDelete.data).toEqual([])
+      const transfer = await userClient.from('todos').update({ user_id: otherId }).eq('id', own.data.id)
+      expect(transfer.error?.code).toBe('42501')
+      const anonymousWrite = await anonClient.from('todos').insert({ title, user_id: userId })
+      expect(anonymousWrite.error?.code).toBe('42501')
+      const partialWrite = await otherClient.from('todos').insert([
+        { title, user_id: otherId },
+        { title, user_id: userId },
+      ])
+      expect(partialWrite.error?.code).toBe('42501')
+
+      const allRows = await serviceClient.from('todos').select('*').eq('title', title).order('id')
+      expect(allRows.error).toBeNull()
+      expect(allRows.data).toEqual([own.data, other.data])
+      const refreshed = await otherClient.auth.refreshSession()
+      expect(refreshed.error).toBeNull()
+      const afterFailure = await otherClient.from('todos').select('*').eq('title', title)
+      expect(afterFailure.error).toBeNull()
+      expect(afterFailure.data).toEqual([other.data])
+    } finally {
+      await serviceClient.from('todos').delete().eq('title', title)
+      await serviceClient.auth.admin.deleteUser(otherId)
+    }
+  })
+
+  for (const operation of ['insert', 'update', 'upsert', 'delete', 'rpc', 'rpc-empty'] as const) {
+    test(`rolls back ${operation} when a singular response cannot be produced`, async () => {
+      const title = `singular-${operation}`
+      const changedTitle = `${title}-changed`
+      try {
+        const seeded = await userClient.from('todos').insert([{ title }, { title }]).select().order('id')
+        expect(seeded.error).toBeNull()
+        expect(seeded.data).toHaveLength(2)
+        const originals = seeded.data!
+        const changes = originals.map((row) => ({ id: row.id, user_id: userId, title: changedTitle }))
+        function mutation() {
+          switch (operation) {
+            case 'insert':
+              return userClient.from('todos').insert([{ title: changedTitle }, { title: changedTitle }]).select()
+            case 'update':
+              return userClient.from('todos').update({ title: changedTitle }).eq('title', title).select()
+            case 'upsert':
+              return userClient.from('todos').upsert(changes).select()
+            case 'delete':
+              return userClient.from('todos').delete().eq('title', title).select()
+            case 'rpc':
+              return userClient.rpc('rename_todos', { target_title: title, next_title: changedTitle })
+            case 'rpc-empty':
+              return userClient.rpc('rename_todos', { target_title: title, next_title: changedTitle }).eq('id', -1)
+          }
+        }
+        const result = await mutation().single()
+        expect(result.status).toBe(406)
+        expect(result.error?.code).toBe('PGRST116')
+        expect(result.error?.details).toBe(`The result contains ${operation === 'rpc-empty' ? 0 : 2} rows`)
+        expect(result.data).toBeNull()
+
+        const persisted = await serviceClient.from('todos').select('*').in('title', [title, changedTitle]).order('id')
+        expect(persisted.error).toBeNull()
+        expect(persisted.data).toEqual(originals)
+      } finally {
+        await serviceClient.from('todos').delete().in('title', [title, changedTitle])
+      }
+    })
+  }
+
+  test('commits singular upsert, RPC and delete when exactly one row is returned', async () => {
+    const title = 'singular-success'
+    const changedTitle = `${title}-changed`
+    try {
+      const inserted = await userClient.from('todos').insert({ title }).select().single()
+      expect(inserted.error).toBeNull()
+      const id = inserted.data.id
+      const upserted = await userClient.from('todos').upsert({ id, title, done: true }).select().single()
+      expect(upserted.error).toBeNull()
+      expect(upserted.data.done).toBe(true)
+      const renamed = await userClient.rpc('rename_todos', { target_title: title, next_title: changedTitle }).single()
+      expect(renamed.error).toBeNull()
+      expect(renamed.data).toMatchObject({ id, title: changedTitle, done: true })
+      const persisted = await serviceClient.from('todos').select('*').eq('id', id).single()
+      expect(persisted.error).toBeNull()
+      expect(persisted.data).toEqual(renamed.data)
+      const deleted = await userClient.from('todos').delete().eq('id', id).select().single()
+      expect(deleted.error).toBeNull()
+      expect(deleted.data).toEqual(renamed.data)
+      const remaining = await serviceClient.from('todos').select('*').eq('id', id)
+      expect(remaining.error).toBeNull()
+      expect(remaining.data).toEqual([])
+    } finally {
+      await serviceClient.from('todos').delete().in('title', [title, changedTitle])
+    }
   })
 
   test('supports Storage upload, download, list, and remove', async () => {
