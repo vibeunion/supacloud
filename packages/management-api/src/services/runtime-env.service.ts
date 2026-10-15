@@ -10,6 +10,7 @@ import {
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import {
   resolveAlignedServiceRoleKey,
+  resolveProjectServiceJwtVerifier,
   resolveStoredServiceRoleKey,
 } from "../utils/service-role";
 import {
@@ -100,6 +101,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   }
 
   const customSecrets = await databaseService.getSecrets(projectRef);
+  const serviceJwtVerifier = resolveProjectServiceJwtVerifier(projectRef, project.config);
   const env: Record<string, string> = {};
   for (const secret of customSecrets) {
     env[secret.name] = secret.value;
@@ -110,6 +112,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     SUPABASE_URL: supabaseUrl,
     SUPABASE_ANON_KEY: project.anon_key,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    SUPACLOUD_SERVICE_JWT_VERIFIER: serviceJwtVerifier ? JSON.stringify(serviceJwtVerifier) : "",
     ...(project.publishable_key ? { SUPABASE_PUBLISHABLE_KEY: project.publishable_key } : {}),
     ...(project.secret_key_encrypted ? {
       SUPABASE_SECRET_KEY: decryptSecretIfNeeded(project.secret_key_encrypted),
