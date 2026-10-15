@@ -130,7 +130,7 @@ function releaseError(error: unknown) {
 
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
   // Group guard: delegated proofs must pass operations capability checks to prevent unauthorized deployments or env updates
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })

@@ -14,7 +14,7 @@ function toHttpError(error: unknown) {
 }
 
 export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     if (isInvitationAcceptanceRequest(request)) return;
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);

@@ -123,6 +123,7 @@ export function checkElysiaCompatibility(root) {
       }
       if (Array.isArray(entry) && typeof entry[0] === 'string'
         && entry[0].startsWith('@supacloud/elysia@file:')
+        && entry[1] && Object.keys(entry[1]).length > 0
         && entry[1]?.peerDependencies?.elysia !== expected) {
         problems.push(`${lockPath}: stale local @supacloud/elysia peer metadata`);
       }

@@ -131,7 +131,7 @@ export function createProjectDeploymentRoutes(
   const authorize = auth.authorize ?? requireProjectOrAdminAuth;
   const principalFor = auth.principal ?? getVerifiedRequestPrincipal;
   return new Elysia({ prefix: "/v1/projects/:ref/environments/:environmentId/deployments", name: "project-deployments" })
-    .error(({ error }) => {
+    .onError(({ error }) => {
       if (error instanceof Error && "code" in error && (error.code === "validation" || error.code === "parse")) {
         return status(400, { ok: false, code: "PROJECT_DEPLOYMENT_REQUEST_INVALID", error: "Invalid deployment request" });
       }
@@ -139,7 +139,7 @@ export function createProjectDeploymentRoutes(
         ok: false, code: "PROJECT_DEPLOYMENT_UNAVAILABLE", error: "Project deployment state is unavailable",
       });
     })
-    .beforeHandle(async ({ params, request, set }) => {
+    .onBeforeHandle(async ({ params, request, set }) => {
       set.headers["Cache-Control"] = "no-store";
       const denied = await authorize(request, params.ref);
       if (denied) return status(denied.status, denied.body);

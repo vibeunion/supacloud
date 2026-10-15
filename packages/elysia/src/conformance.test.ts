@@ -177,9 +177,9 @@ describe("native Elysia and compiled adapter conformance", () => {
     const nativeEvents: string[] = [];
     const adapterEvents: string[] = [];
     const root = (events: string[]) => new Elysia()
-      .request(() => { events.push("request"); })
-      .beforeHandle(() => { events.push("before"); })
-      .afterHandle(() => { events.push("after"); });
+      .onRequest(() => { events.push("request"); })
+      .onBeforeHandle(() => { events.push("before"); })
+      .onAfterHandle(() => { events.push("after"); });
     const native = root(nativeEvents).use(new Elysia().post("/probe", () => {
       nativeEvents.push("handler");
       return { ok: true };
@@ -198,7 +198,7 @@ describe("native Elysia and compiled adapter conformance", () => {
   test("parent early return prevents controller execution", async () => {
     let calls = 0;
     const handler = () => { calls++; return { ok: true }; };
-    const root = () => new Elysia().beforeHandle(() => status(403, "denied"));
+    const root = () => new Elysia().onBeforeHandle(() => status(403, "denied"));
     const native = root().use(new Elysia().post("/probe", handler));
     const adapted = root().use(pluginFor(handler));
     const request = jsonRequest("{}");
@@ -210,7 +210,7 @@ describe("native Elysia and compiled adapter conformance", () => {
 
   test("keeps local sibling hooks encapsulated", async () => {
     const root = () => new Elysia().use(
-      new Elysia().beforeHandle(() => status(418, "local")).get("/local", () => "unused"),
+      new Elysia().onBeforeHandle(() => status(418, "local")).get("/local", () => "unused"),
     );
     const native = root().use(new Elysia().post("/probe", () => "ok"));
     const adapted = root().use(pluginFor(() => "ok"));

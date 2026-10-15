@@ -282,7 +282,7 @@ function authorizedActor(request: Request): TrustedPrincipal {
 }
 
 export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     try {

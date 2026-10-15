@@ -5,7 +5,7 @@
     "": {
       "name": "@supacloud/query",
       "dependencies": {
-        "@tanstack/query-core": "^5.104.1",
+        "@tanstack/query-core": "^5.104.2",
       },
       "devDependencies": {
         "@types/bun": "^1.4.3",
@@ -14,7 +14,7 @@
     },
   },
   "packages": {
-    "@tanstack/query-core": ["@tanstack/query-core@5.104.1", "https://registry.npmmirror.com/@tanstack/query-core/-/query-core-5.104.1.tgz", {}, "sha512-TiRghcrGkUTE+M4JBxvpPSpBhxvIzQairw+cksrHYGr+2uwC77yW1SY9nYxnYRYOppvucf8rEg6b5byoz4rTpw=="],
+    "@tanstack/query-core": ["@tanstack/query-core@5.104.2", "", {}, "sha512-/qbsxJK5c3Ve1aFIULWYNcT2jeRUAiD4HME6Eu2ZdpofHoVgAjpkQhLg5xHuOoBkTPQUJLfP7zOxy0qsBcqROA=="],
 
     "@types/bun": ["@types/bun@1.4.3", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.3.tgz", { "dependencies": { "bun-types": "1.4.3" } }, "sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw=="],
 

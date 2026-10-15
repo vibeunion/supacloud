@@ -409,8 +409,8 @@ async function migrateProjectToOidc(
 }
 
 export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .request(({ set }) => { set.headers["cache-control"] = "no-store"; })
-  .error(({ error }) => {
+  .onRequest(({ set }) => { set.headers["cache-control"] = "no-store"; })
+  .onError(({ error }) => {
     if (error instanceof ExternalOAuthManagementError) {
       return Response.json({
         code: "AUTH_RUNTIME_NOT_LOCAL", message: "OAuth management is not available for a non-local Auth runtime",
@@ -420,7 +420,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       return Response.json(error.toJSON(), { status: 503, headers: { "cache-control": "no-store" } });
     }
   })
-  .beforeHandle(requireAuthRuntimeManagement("oauth"))
+  .onBeforeHandle(requireAuthRuntimeManagement("oauth"))
   .get(
     "/oauth-server",
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth server status" } },
