@@ -5,6 +5,7 @@ import {
 } from "./authoritative_command.js";
 import { decodeHttpContract } from "./http_contract.js";
 import type { CommandLockStorage } from "./durable_locks.js";
+import { canonicalCommandJson } from "./receipts.js";
 
 export interface PendingCommandOptions<Input> {
   storage: CommandLockStorage;
@@ -13,6 +14,60 @@ export interface PendingCommandOptions<Input> {
   /** Default is lookup, even after a valid acknowledgement. */
   confirmation?: "lookup" | "response";
   unknownError(input: Input, lookupFailure?: unknown): Error;
+}
+
+export interface PendingCommandRecoveryOptions<Input> extends Pick<PendingCommandOptions<Input>, "key" | "unknownError"> {
+  storage: Pick<CommandLockStorage, "getItem" | "removeItem">;
+}
+
+function clearPendingCommand(
+  storage: Pick<CommandLockStorage, "getItem" | "removeItem">,
+  key: string,
+  serialized: string,
+): void {
+  // Do not erase a newer operation placed in this slot while a request was pending.
+  if (storage.getItem(key) === serialized) {
+    storage.removeItem(key);
+    if (storage.getItem(key) === serialized) throw new Error("Pending command was not cleared");
+  }
+}
+
+/**
+ * Recovers the stored request with one read and no send capability.
+ * Null means no marker exists, not that a command was rolled back or confirmed.
+ */
+export function createPendingCommandRecovery<Input, Authority>(
+  contract: Pick<AuthoritativeCommandContract<Input, unknown, Authority>, "input" | "authority" | "matches">,
+  transport: Pick<AuthoritativeCommandTransport<Input>, "lookup">,
+  options: PendingCommandRecoveryOptions<Input>,
+): () => Promise<{ input: Input; authority: Authority } | null> {
+  const { storage, key, unknownError } = options;
+  if (!key.trim()) throw new TypeError("Invalid pending command configuration");
+  return async () => {
+    const serialized = storage.getItem(key);
+    if (serialized === null) return null;
+    const parsed: unknown = JSON.parse(serialized);
+    const persisted = canonicalCommandJson(parsed);
+    const input = decodeHttpContract(contract.input, parsed, "request");
+    if (canonicalCommandJson(input) !== persisted) {
+      throw new TypeError("Pending command input changes after serialization");
+    }
+    let raw: unknown;
+    // Keep the stored identity stable even if a transport mutates its argument.
+    try { raw = await transport.lookup(structuredClone(input)); }
+    catch (cause) { throw unknownError(input, cause); }
+    let authority: Authority;
+    let matched: boolean;
+    try {
+      authority = decodeHttpContract(contract.authority, raw, "response");
+      matched = contract.matches(structuredClone(input), authority) === true;
+    } catch {
+      throw unknownError(input);
+    }
+    if (!matched) throw unknownError(input);
+    clearPendingCommand(storage, key, serialized);
+    return { input, authority };
+  };
 }
 
 /**
@@ -46,13 +101,6 @@ export function createPendingCommandClient<Input, Acknowledgement, Authority>(
     }
     storage.setItem(key, serialized);
     if (storage.getItem(key) !== serialized) throw new Error("Pending command was not persisted");
-    const release = () => {
-      // Do not erase a newer operation placed in this slot while a request was pending.
-      if (storage.getItem(key) === serialized) {
-        storage.removeItem(key);
-        if (storage.getItem(key) === serialized) throw new Error("Pending command was not cleared");
-      }
-    };
     let writeFailure: unknown;
     let lookupFailure: unknown;
     const execute = createAuthoritativeCommandClient({
@@ -72,11 +120,11 @@ export function createPendingCommandClient<Input, Acknowledgement, Authority>(
     }, { confirmation });
     const outcome = await execute(input);
     if (outcome.status === "confirmed") {
-      release();
+      clearPendingCommand(storage, key, serialized);
       return outcome.authority;
     }
     if (outcome.status === "denied") {
-      release();
+      clearPendingCommand(storage, key, serialized);
       throw writeFailure;
     }
     throw unknownError(input, lookupFailure);
