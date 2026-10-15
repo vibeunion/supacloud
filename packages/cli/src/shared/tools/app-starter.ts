@@ -283,11 +283,10 @@ import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,
 } from "@supacloud/app";
-import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
-import { ApproveBody, HealthResult, Params, ReviewResult } from "./contracts";
+import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "@supacloud/elysia";
+import { ApproveBody, HealthResult, Params, ReviewResult, type ApprovalBody, type Review } from "./contracts";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
-import type { ReviewRow } from "../../db/schema";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -302,7 +301,6 @@ export const reviewSpec = defineFeatureSpec({
   },
 });
 
-type Review = Pick<ReviewRow, "state" | "version">;
 // Production implementations must bind both operations to the current transaction.
 export interface ReviewStore extends Partial<ReviewUploadPort> {
   get(table: string, key: string): unknown;
@@ -315,13 +313,12 @@ export const requireRequest: Aspect = (context, next) => {
   return next();
 };
 
+const decodeReview = createSchemaDecoder(ReviewResult, { normalize: false });
 function readReview(value: unknown): Review {
-  if (typeof value !== "object" || value === null ||
-      !("state" in value) || (value.state !== "draft" && value.state !== "approved") ||
-      !("version" in value) || typeof value.version !== "number") {
+  try { return decodeReview(value); }
+  catch {
     throw new ApplicationError("Review not found", { status: 404, code: "REVIEW_NOT_FOUND" });
   }
-  return { state: value.state, version: value.version };
 }
 
 @Command({
@@ -353,7 +350,7 @@ type ReviewError =
     | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
     | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
     | { readonly _tag: "COMMAND_REJECTED" }
-    | { readonly _tag: "REVIEW_COMMAND_UNSUPPORTED" }
+    | { readonly _tag: "COMMAND_BINDING_MISMATCH" }
     | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
 
 @Controller("/reviews")
@@ -382,13 +379,13 @@ export class ReviewController {
         { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
         { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
         { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
-        { tag: "REVIEW_COMMAND_UNSUPPORTED", status: 501, code: "REVIEW_COMMAND_UNSUPPORTED" },
+        { tag: "COMMAND_BINDING_MISMATCH", status: 501, code: "COMMAND_BINDING_MISMATCH" },
         { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
       ],
       retry: "none",
     },
   })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Effect.Effect<Review, ReviewError, never> {
+  approve(@Param("id") id: string, @Body() body: ApprovalBody): Effect.Effect<Review, ReviewError, never> {
     return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
   }
 }
@@ -400,13 +397,16 @@ export const ReviewFeature = defineFeatureSlice({
 });
 `,
         "src/review/attachment.ts": STARTER_REVIEW_JOB,
-        "src/review/contracts.ts": `import { t } from "elysia";
+        "src/review/contracts.ts": `import { t, type UnwrapSchema } from "elysia";
 export const Params = t.Object({ id: t.String({ minLength: 1 }) });
-export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1 }) });
+export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1, maximum: 9007199254740991 }) });
+export const ApprovalInput = t.Object({ ...Params.properties, ...ApproveBody.properties }, { additionalProperties: false });
+export type ApprovalBody = UnwrapSchema<typeof ApproveBody>;
 export const ReviewResult = t.Object({
   state: t.Union([t.Literal("draft"), t.Literal("approved")]),
-  version: t.Integer({ minimum: 1 }),
+  version: t.Integer({ minimum: 1, maximum: 9007199254740991 }),
 });
+export type Review = UnwrapSchema<typeof ReviewResult>;
 export const HealthResult = t.Object({ ok: t.Boolean() });
 export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
 export const UploadBody = t.Object({

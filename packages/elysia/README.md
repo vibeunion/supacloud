@@ -193,6 +193,14 @@ concurrent request isolation. Run it with `bun run typecheck:test` as well as
 
 ## Persistent Command Adapters
 
+For a local compiled Command whose handler must run in a PostgreSQL transaction,
+use `createTransactionalCommandGovernance` with `createPostgresCommandStore`.
+It supplies the governance callbacks and a request-isolated `transaction()`
+accessor, delegating receipt, authorization-on-replay and audit to the existing
+durable executor. The approval starter uses this binding and derives decoders
+from its HTTP contracts. See [transactional defaults](../../docs/transactional-command-defaults.md)
+for ownership, migration and native acceptance boundaries.
+
 `createPersistentCommandAdapter(command, { identity, input })` binds a
 `createTransactionalCommand` or `createExternalCommand` from `@supacloud/commands`
 to `commandGovernance.rpc`.
