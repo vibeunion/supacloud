@@ -116,11 +116,6 @@ supacloud --env staging deploy
 supacloud --env staging frontend get_active_release --ref abc123 --id web
 supacloud --env staging frontend rollback --ref abc123 --id web
 supacloud --env staging frontend rollback --ref abc123 --id web --release_id <retained-sha256>
-supacloud --env staging frontend rollback --ref abc123 --id web \
-  --release_id <retained-sha256> \
-  --expected_active_release_id <current-sha256> \
-  --expected_activation_id <current-activation-uuid> \
-  --mutation_id <rollback-uuid>
 ```
 
 Default rollback uses the platform's verified activation journal; an explicit
@@ -134,14 +129,18 @@ On an uncertain rollback, report the mutation ID for read-only reconciliation;
 do not generate another activation or automatically restore a database.
 This command represents an explicit operator decision against the observed
 current deployment. Automated compensation owned by an earlier release receipt
-must pass its original expected CAS identity and a separately persisted rollback
-mutation ID. SupaCloud refuses the rollback when a different publisher owns the
-current authority. Repeating an already committed rollback verifies its original
-journal fingerprint and live artifact without another mutation.
+belongs in deployment orchestration, which must persist the original expected
+CAS identity and rollback mutation ID. The internal rollback primitive supports
+this binding, but automatic compensation orchestration is not implemented here.
+The interactive CLI rejects these binding fields; its normal rollback path
+observes current authority, generates an operation ID and retains CAS checks
+and final artifact readback.
 
 ## Ownership And Follow-Up
 
-### Receipt-Bound Compensation Acceptance
+### Internal Receipt-Bound Compensation Acceptance
+
+These scenarios exercise the internal rollback primitive, not public CLI flags.
 
 ```gherkin
 Scenario: A release receipt still owns the active deployment
@@ -195,7 +194,7 @@ rollback; records without immutable target/CAS evidence must fail closed.
 | Immutable frontend artifact integrity and CAS | SupaCloud platform | Existing primitives plus active snapshot in this PR |
 | Rollback target selection/activation without CAS/UUID boilerplate | SupaCloud platform/CLI | One command defaults to the journal-verified previous release; explicit retained targets remain supported |
 | Current/previous activation authority | SupaCloud platform | Active and previous-release snapshots verified under the deployment lock |
-| Receipt-bound rollback CAS and mutation identity | SupaCloud CLI/platform contract | Bind compensation to the original current release, activation and mutation IDs |
+| Receipt-bound rollback CAS and mutation identity | Internal release-control primitive | Bind compensation to the original current release, activation and mutation IDs; no public CLI flags or automatic orchestration |
 | Full activation history, legacy artifact capture, protected retention/GC | SupaCloud platform | Follow-up; not achieved by CLI fallback |
 | Environment bindings, public config versus credentials, initialization/doctor | SupaCloud compiler/CLI | Consolidate existing context/compiler paths; do not require every app to invent profiles |
 | Build cache, content-addressed upload deduplication, skip unchanged resources | SupaCloud compiler/CLI/platform | Extend existing deploy identity support with measured cold/warm/no-op budgets |

@@ -38,22 +38,14 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
             health_check_path: optional(Type.String(), "[create/update] SSR readiness path (default: /)"),
             env_vars: optional(Type.Record(Type.String(), Type.String()), "[create/update/set_env] Environment variables"),
             release_id: optional(Type.String(), "[get_release] SHA-256 release ID; [rollback] optional, defaults to journal-verified previous release"),
-            expected_active_release_id: optional(Type.String(), "[rollback] receipt's active release SHA-256; requires release_id, expected_activation_id and mutation_id"),
-            expected_activation_id: optional(Type.String(), "[rollback] receipt's active UUIDv4; requires release_id, expected_active_release_id and mutation_id"),
-            mutation_id: optional(Type.String(), "[rollback] persisted rollback UUIDv4; requires release_id and both expected identities"),
             cursor: optional(Type.String(), "[list_releases] Last release SHA-256 cursor"),
             limit: optional(Type.Number(), "[list_releases] Page size, 1-100 (default 50)"),
         },
         async (args) => {
             const {
                 action, ref, id, name, framework, domain, build_command, output_dir, install_command,
-                node_version, health_check_path, env_vars, release_id,
-                expected_active_release_id, expected_activation_id, mutation_id, cursor, limit,
+                node_version, health_check_path, env_vars, release_id, cursor, limit,
             } = args;
-            if (action !== "rollback" && (expected_active_release_id !== undefined
-                || expected_activation_id !== undefined || mutation_id !== undefined)) {
-                throw new Error("Rollback binding flags require action 'rollback'");
-            }
             const need: <T>(field: string, value: T) => asserts value is NonNullable<T> = (field, value) => {
                 if (value === undefined || value === null || value === "") throw new Error(`'${field}' required for '${action}'`);
             };
@@ -126,11 +118,7 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
                     return getActiveFrontendRelease(http, ref, id);
                 case "rollback":
                     need("ref", ref); need("id", id);
-                    return rollbackFrontendRelease(http, ref, id, release_id, {
-                        expectedActiveReleaseId: expected_active_release_id,
-                        expectedActivationId: expected_activation_id,
-                        mutationId: mutation_id,
-                    });
+                    return rollbackFrontendRelease(http, ref, id, release_id);
                 default: text = `❌ Unknown action`;
             }
             return { content: [{ type: "text" as const, text }] };

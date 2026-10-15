@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
 import { HttpTransport } from "../transports/http";
 import type { ToolInvocation } from "../tool-server";
@@ -28,9 +27,8 @@ const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 const ROLLBACK_ID = "00000000-0000-4000-8000-000000000003";
 const TARGET_RELEASE_ID = "c".repeat(64);
 const boundRollbackArgs = {
-    action: "rollback", ref: PROJECT_REF, id: DEPLOYMENT_ID,
-    release_id: TARGET_RELEASE_ID, expected_active_release_id: RELEASE_ID,
-    expected_activation_id: MUTATION_ID, mutation_id: ROLLBACK_ID,
+    releaseId: TARGET_RELEASE_ID, expectedActiveReleaseId: RELEASE_ID,
+    expectedActivationId: MUTATION_ID, mutationId: ROLLBACK_ID,
 };
 
 function release(releaseId = RELEASE_ID, treeSha = TREE_SHA) {
@@ -119,14 +117,14 @@ function boundRollbackFixture() {
     });
     servers.push(server);
     const http = new HttpTransport({ baseUrl: server.url.toString(), token: "local-rollback-fixture" });
-    let callback: ToolInvocation | undefined;
-    registerFrontendTools({
-        tool(name, _description, _schema, handler) {
-            if (name === "frontend") callback = handler;
+    const invoke = (args: Partial<typeof boundRollbackArgs>) => rollbackFrontendRelease(
+        http, PROJECT_REF, DEPLOYMENT_ID, args.releaseId, {
+            expectedActiveReleaseId: args.expectedActiveReleaseId,
+            expectedActivationId: args.expectedActivationId,
+            mutationId: args.mutationId,
         },
-    }, http);
-    if (!callback) throw new Error("Frontend tool not registered");
-    return { state, calls, invoke: callback, url: server.url.toString() };
+    );
+    return { state, calls, invoke, http };
 }
 
 afterEach(async () => {
@@ -409,7 +407,7 @@ describe("immutable frontend release control", () => {
     });
 
     test.each([
-        "release_id", "expected_active_release_id", "expected_activation_id", "mutation_id",
+        "releaseId", "expectedActiveReleaseId", "expectedActivationId", "mutationId",
     ] as const)("bound rollback rejects missing %s before HTTP", async field => {
         const fixture = boundRollbackFixture();
         await expect(fixture.invoke({ ...boundRollbackArgs, [field]: undefined })).rejects.toThrow("required together");
@@ -417,10 +415,9 @@ describe("immutable frontend release control", () => {
     });
 
     test.each([
-        { release_id: "latest" }, { expected_active_release_id: "absent" },
-        { expected_activation_id: "absent" }, { mutation_id: "invalid" },
-        { release_id: RELEASE_ID }, { mutation_id: MUTATION_ID },
-        { action: "get" },
+        { releaseId: "latest" }, { expectedActiveReleaseId: "absent" },
+        { expectedActivationId: "absent" }, { mutationId: "invalid" },
+        { releaseId: RELEASE_ID }, { mutationId: MUTATION_ID },
     ])("bound rollback rejects invalid binding %j before HTTP", async override => {
         const fixture = boundRollbackFixture();
         await expect(fixture.invoke({ ...boundRollbackArgs, ...override })).rejects.toThrow();
@@ -440,47 +437,22 @@ describe("immutable frontend release control", () => {
         expect(response.content[0].text).not.toContain("must-not-escape");
     });
 
-    test("Bun CLI accepts the binding flags, keeps safety gates, and replays without another POST", async () => {
+    test.each(["rollback", "get"])("frontend tool rejects internal binding fields for %s before HTTP", async action => {
         const fixture = boundRollbackFixture();
-        const cwd = await mkdtemp(join(tmpdir(), "frontend-bound-cli-"));
-        roots.add(cwd);
-        const entry = fileURLToPath(new URL("../../index.ts", import.meta.url));
-        const args = ["frontend", "rollback", ...Object.entries(boundRollbackArgs)
-            .filter(([key]) => key !== "action").flatMap(([key, value]) => [`--${key}`, value])];
-        const run = async (overrides: Record<string, string> = {}) => {
-            const child = Bun.spawn([process.execPath, "--no-env-file", entry, ...args], {
-                cwd, stdout: "pipe", stderr: "pipe",
-                env: {
-                    PATH: process.env.PATH ?? "", HOME: cwd,
-                    SUPACLOUD_ENV: "test", SUPACLOUD_PROJECT_REF: PROJECT_REF,
-                    SUPACLOUD_API_URL: fixture.url, SUPACLOUD_API_TOKEN: "local-cli-fixture",
-                    ...overrides,
-                },
-            });
-            const [code, out, err] = await Promise.all([
-                child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-            ]);
-            return { code, out, err };
-        };
-        const readOnly = await run({ SUPACLOUD_READ_ONLY: "true" });
-        expect(readOnly.code).toBe(1);
-        expect(readOnly.err).toContain("blocked in read-only mode");
-        const production = await run({ SUPACLOUD_ENV: "production" });
-        expect(production.code).toBe(1);
-        expect(production.err).toContain(`--confirm-production ${PROJECT_REF}`);
+        let invoke: ToolInvocation | undefined;
+        registerFrontendTools({
+            tool(name, _description, _schema, handler) {
+                if (name === "frontend") invoke = handler;
+            },
+        }, fixture.http);
+        if (!invoke) throw new Error("Frontend tool not registered");
+        await expect(invoke({
+            action, ref: PROJECT_REF, id: DEPLOYMENT_ID, release_id: TARGET_RELEASE_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            mutation_id: ROLLBACK_ID,
+        })).rejects.toThrow("Invalid arguments");
         expect(fixture.calls).toEqual([]);
-        const result = await run();
-        if (result.err) throw new Error(result.err);
-        expect(result.code).toBe(0);
-        expect(JSON.parse(result.out)).toMatchObject({
-            operation: "frontend.rollback", rollback: true, mutation_id: ROLLBACK_ID,
-        });
-        const replay = await run();
-        expect(replay.code).toBe(0);
-        expect(JSON.parse(replay.out)).toEqual(JSON.parse(result.out));
-        expect(fixture.calls.filter(call => call.method === "POST")).toHaveLength(1);
-        expect(result.out + result.err + replay.out + replay.err).not.toContain("local-cli-fixture");
-    }, 20_000);
+    });
 
     test("default rollback requires a strict scoped previous-release snapshot before any mutation", async () => {
         const valid = {

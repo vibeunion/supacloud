@@ -402,10 +402,6 @@ supacloud frontend get_active_release --ref abc123 --id web
 supacloud frontend get_release --ref abc123 --id web --release_id <sha256>
 supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 supacloud frontend rollback --ref abc123 --id web
-supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256> \
-  --expected_active_release_id <current-sha256> \
-  --expected_activation_id <current-activation-uuid> \
-  --mutation_id <rollback-uuid>
 ```
 
 `deploy_git`, `deploy_upload`, `redeploy`, `upload_release` and `activate_release`
@@ -422,20 +418,12 @@ to any retained release. It never infers a target from content-hash-sorted
 history, reuploads assets or restores a database.
 An uncertain result includes the mutation ID for read-only reconciliation and
 must not be blindly retried.
-For release-receipt compensation, pass the receipt's expected current release
-and activation together with an explicit retained target and a separately
-persisted rollback UUID. All three binding flags are required together. The
-target must differ from the expected current release, and the rollback UUID
-must differ from the current activation UUID.
-SupaCloud never replaces the supplied CAS with a newer observed identity.
-A stale receipt returns `STALE_AUTHORITY` without a write. If the same target
-and rollback UUID are already active, repeating the exact command only verifies
-the original journal fingerprint and live artifact; missing or conflicting
-evidence remains `OUTCOME_UNKNOWN`. A later publisher is never overwritten,
-even if it activated the same target bytes.
-Success and failure results retain the bound request identity. This is not a
-database restore, legacy archive importer, or permission to retry unknown
-writes automatically.
+Automated release-receipt compensation belongs in deployment orchestration,
+which must persist the original CAS identity and mutation ID. The internal
+rollback primitive supports this binding; this change does not wire up an
+automatic compensation workflow. The interactive CLI does not accept these
+binding fields. It observes current authority and generates its operation ID
+internally, retaining CAS checks and final readback.
 
 ### Immutable application releases
 
