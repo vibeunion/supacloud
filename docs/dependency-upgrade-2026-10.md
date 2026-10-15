@@ -16,8 +16,10 @@ databases. `latest` is not used to downgrade an existing prerelease.
   together; old fluent names fail at runtime. Multipart deployment routes use
   `parse: "formdata"` instead of the removed `type: "multipart"` option.
 - Effect moves to `4.0.5`; TypeBox moves to `1.3.37`.
-- GraphQL moves to `17.0.2`; compiler code generation and promise helpers are
-  updated for the GraphQL 17 graph.
+- GraphQL remains on the compatible `^16` range (`16.14.2` in the compiler
+  lockfile). GraphQL 17 cannot currently be loaded by the code generation
+  chain's CommonJS `graphql-tag` dependency. Code generation and promise
+  helpers are updated without adopting that incompatible major version.
 - PGlite `0.5.10`, pgvector `0.0.11`, PostGIS `0.2.10`, pg_textsearch `0.0.12`
   and PGMQ `0.0.8` form one set. Back up existing data directories before using
   the new WASM/extension assets; do not mix old and new extension bundles.
@@ -29,11 +31,14 @@ databases. `latest` is not used to downgrade an existing prerelease.
   already current. SvelteKit and svelte-check still require TypeScript 6;
   keep TypeScript `6.0.3` for their semantic API and the native CLI alias on
   `7.0.2`. The compiler's separate `@typescript/typescript6` stays at `6.0.2`.
-- Angular core/compiler move together to `22.2.3`. Tar streaming, module lexer,
+- Angular core/compiler development dependencies move together to `22.2.3`.
+  Angular core is a host-provided peer (`^22.2.2`) so minimum-version consumers
+  do not install a second runtime. Tar streaming, module lexer,
   GraphQL tools, sanitization and HTTP security overrides are refreshed.
 - Lite uses published `@supacloud/db@0.17.0`; the umbrella package uses published
   CLI `0.98.0`. CLI adapter development uses the local candidate so beta.32 is
   tested with the matching adapter, not a published beta.21 peer.
+  Lite explicitly installs the local contracts candidate for its DB dependency.
 
 ## Consumer migration
 

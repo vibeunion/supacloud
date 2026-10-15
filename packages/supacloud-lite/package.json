@@ -66,6 +66,7 @@
   },
   "devDependencies": {
     "@supacloud/app": "file:../app",
+    "@supacloud/contracts": "file:../contracts",
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/elysia": "file:../elysia",
     "@supabase/supabase-js": "^2.117.3",

@@ -37,6 +37,7 @@ test("minimal source compiles and its colocated health test executes with the ne
   const config = JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8"));
   config.compilerOptions.paths = {
     "@supacloud/app/core": [join(repo, "packages/app/src/core.ts")],
+    "@supacloud/elysia": [join(repo, "packages/elysia/src/index.ts")],
   };
   await writeFile(join(root, "tsconfig.json"), JSON.stringify(config));
   await symlink(join(repo, "packages/cli/node_modules"), join(root, "node_modules"), "dir");
