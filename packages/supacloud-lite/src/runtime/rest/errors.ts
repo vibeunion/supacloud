@@ -8,6 +8,10 @@ import { ParseError } from './parse.js'
 
 /** HTTP status for a Postgres SQLSTATE, following PostgREST's mapping. */
 export function statusForSqlState(code: string, authenticated = true): number {
+  if (code.startsWith('PT')) {
+    // Fetch Response accepts only final status codes from 200 through 599.
+    return /^PT[2-5][0-9]{2}$/.test(code) ? Number(code.slice(2)) : 500
+  }
   switch (code) {
     case '42501':
       return authenticated ? 403 : 401
@@ -62,13 +66,14 @@ export function errorToResponse(e: unknown, authenticated = true): Response {
   return jsonResponse(500, { code: 'PGRST500', message, details: null, hint: null })
 }
 
-/** JSON Response helper; status 204 sends no body. */
+/** JSON Response helper; null-body HTTP statuses never serialize a payload. */
 export function jsonResponse(
   status: number,
   body: unknown,
   headers: Record<string, string> = {}
 ): Response {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
+  const bodyless = status === 204 || status === 205 || status === 304
+  return new Response(bodyless ? null : JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', ...headers },
   })
