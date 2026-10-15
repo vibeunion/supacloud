@@ -395,7 +395,7 @@ describe("pending command recovery", () => {
   });
 
   test("type contracts require recovery transport, matching and compatible response authority", () => {
-    if (false) {
+    const checkTypeContracts = () => {
       const options = { storage: pendingStorage(), key, unknownError };
       // @ts-expect-error Recovery requires an explicit read-only lookup.
       createPendingCommandClient(pendingContract, { send: async () => state }, options);
@@ -407,7 +407,7 @@ describe("pending command recovery", () => {
         // @ts-expect-error Direct and recovered authority must have the same result type.
         responseAuthority: () => "not an authority",
       }, { send: async () => state, lookup: async () => state }, options);
-    }
-    expect(true).toBe(true);
+    };
+    expectTypeOf(checkTypeContracts).returns.toEqualTypeOf<void>();
   });
 });
