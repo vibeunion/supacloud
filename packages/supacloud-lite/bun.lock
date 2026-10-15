@@ -103,7 +103,7 @@
 
     "@supacloud/db": ["@supacloud/db@0.6.0", "https://registry.npmmirror.com/@supacloud/db/-/db-0.6.0.tgz", {}, "sha512-HRyPI8ss6GOQhhv3g/YJ3Wc3r13506bDRkJo3gNCxDmtnSw4VtmRuLyHIOafFwt0VvvsIp6VW+jnI8VymgtqGg=="],
 
-    "@supacloud/elysia": ["@supacloud/elysia@file:../elysia", { "dependencies": { "@supacloud/app": "file:../app", "@supacloud/contracts": "file:../contracts", "effect": "4.0.2", "exact-mirror": "1.2.6", "jose": "^6.2.12", "typebox": "1.3.36" }, "devDependencies": { "@supacloud/commands": "file:../commands", "@supacloud/compiler": "file:../compiler", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "@types/bun": "^1.4.3", "elysia": "2.0.0-beta.21", "typescript": "^7.0.2" }, "peerDependencies": { "elysia": "2.0.0-beta.21" } }],
+    "@supacloud/elysia": ["@supacloud/elysia@file:../elysia", { "dependencies": { "@supacloud/app": "file:../app", "@supacloud/commands": "file:../commands", "@supacloud/contracts": "file:../contracts", "effect": "4.0.2", "exact-mirror": "1.2.6", "jose": "^6.2.12", "typebox": "1.3.36" }, "devDependencies": { "@supacloud/compiler": "file:../compiler", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "@types/bun": "^1.4.3", "elysia": "2.0.0-beta.21", "typescript": "^7.0.2" }, "peerDependencies": { "elysia": "2.0.0-beta.21" } }],
 
     "@types/bun": ["@types/bun@1.4.3", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.3.tgz", { "dependencies": { "bun-types": "1.4.3" } }, "sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw=="],
 
@@ -249,18 +249,14 @@
 
     "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
 
-    "@supacloud/elysia/@supacloud/app": ["@supacloud/app@file:../app", { "dependencies": { "@angular/core": "^22.2.2", "@supacloud/contracts": "file:../contracts", "rxjs": "7.8.2", "typebox": "1.3.36" }, "devDependencies": { "@angular/compiler": "22.2.2", "@types/bun": "^1.4.3", "@types/node": "^26.6.5", "typescript": "^7.0.2" } }],
+    "@supacloud/elysia/@supacloud/app": ["@supacloud/app@file:../app", {}],
 
     "@supacloud/elysia/@supacloud/commands": ["@supacloud/commands@file:../commands", {}],
 
-    "@supacloud/elysia/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.1.1", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/delivery": "file:../delivery", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.3.36" }, "devDependencies": { "@supabase/supabase-js": "2.117.3", "@types/bun": "^1.4.3", "drizzle-orm": "1.0.0-rc.5-169397b", "typescript": "^7.0.2" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
+    "@supacloud/elysia/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", {}],
 
     "@supacloud/elysia/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", {}],
 
     "@supacloud/elysia/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
-
-    "@supacloud/elysia/@supacloud/app/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", {}],
-
-    "@supacloud/elysia/@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
   }
 }

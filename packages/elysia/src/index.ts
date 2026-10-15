@@ -82,6 +82,8 @@ export type {
   SchemaNormalizeMode,
 } from "./schema_contract";
 export { createPersistentCommandAdapter, type PersistentCommandHandler } from "./persistent-command";
+export { createTransactionalCommandGovernance } from "./transactional-command";
+export type { TransactionalCommandGovernanceOptions } from "./transactional-command";
 export { createDocumentationPlugin } from "./documentation";
 export type {
   ApplicationDocumentationOptions,
