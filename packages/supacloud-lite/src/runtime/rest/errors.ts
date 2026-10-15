@@ -11,6 +11,8 @@ export function statusForSqlState(code: string): number {
   switch (code) {
     case '42501':
       return 403
+    case '25006': // read_only_sql_transaction
+      return 405
     case '23503':
     case '23505':
       return 409
