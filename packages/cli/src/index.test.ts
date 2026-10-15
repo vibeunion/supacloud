@@ -326,9 +326,10 @@ describe("supacloud process contract", () => {
         expect(response.stderr).not.toContain("upload_release");
         expect(response.stderr).not.toContain("activate_release");
         expect(response.stderr).not.toContain("--archive_path");
-        expect(response.stderr).not.toContain("--expected_active_release_id");
-        expect(response.stderr).not.toContain("--expected_activation_id");
-        expect(response.stderr).not.toContain("--mutation_id");
+        // rollback is the supported immutable release action; its all-or-none receipt binding is advertised.
+        expect(response.stderr).toContain("--expected_active_release_id");
+        expect(response.stderr).toContain("--expected_activation_id");
+        expect(response.stderr).toContain("--mutation_id");
     });
 
     test("runs migration lint locally without project credentials", async () => {
