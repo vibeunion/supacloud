@@ -352,15 +352,15 @@ describe("supacloud process contract", () => {
     });
 
     test.each([
-        ["--expected_active_release_id", "a".repeat(64)],
-        ["--expected_activation_id", EXPECTED_ACTIVATION_ID],
-        ["--mutation_id", COMMITTED_ACTIVATION_ID],
-        [
+        { flags: ["--expected_active_release_id", "a".repeat(64)] },
+        { flags: ["--expected_activation_id", EXPECTED_ACTIVATION_ID] },
+        { flags: ["--mutation_id", COMMITTED_ACTIVATION_ID] },
+        { flags: [
             "--expected_active_release_id", "a".repeat(64),
             "--expected_activation_id", EXPECTED_ACTIVATION_ID,
             "--mutation_id", COMMITTED_ACTIVATION_ID,
-        ],
-    ])("rejects internal frontend rollback flags before HTTP: %j", async (...flags: string[]) => {
+        ] },
+    ])("rejects internal frontend rollback flags before HTTP: %j", async ({ flags }) => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-rollback-internal-flags-"));
         temporaryDirectories.push(workspace);
         let requestCount = 0;
