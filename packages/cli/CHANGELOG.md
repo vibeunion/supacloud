@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.97.0](https://github.com/vibeunion/supacloud/compare/cli-v0.96.2...cli-v0.97.0) (2026-10-14)
+
+
+### Features
+
+* **cli:** scaffold governed approval feature slices ([#1917](https://github.com/vibeunion/supacloud/issues/1917)) ([94affda](https://github.com/vibeunion/supacloud/commit/94affda9aafa8cce92813421b656374d6646298d))
+
 ## [0.96.2](https://github.com/vibeunion/supacloud/compare/cli-v0.96.1...cli-v0.96.2) (2026-10-14)
 
 
