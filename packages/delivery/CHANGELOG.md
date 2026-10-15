@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.18.0...delivery-v0.18.1) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
 ## [0.18.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.17.0...delivery-v0.18.0) (2026-10-14)
 
 
