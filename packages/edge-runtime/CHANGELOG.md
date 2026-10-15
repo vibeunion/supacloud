@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.6](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.5...edge-runtime-v0.32.6) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
 ## [0.32.5](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.4...edge-runtime-v0.32.5) (2026-10-15)
 
 
