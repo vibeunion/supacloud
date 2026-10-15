@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.118.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.0...management-api-v0.118.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **runtime:** preserve durable project service credentials ([#1945](https://github.com/vibeunion/supacloud/issues/1945)) ([8ba63e1](https://github.com/vibeunion/supacloud/commit/8ba63e16769f23627ecdee8fff5e65756ea21b17))
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
 ## [0.118.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.117.2...management-api-v0.118.0) (2026-10-15)
 
 
