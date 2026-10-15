@@ -40,6 +40,10 @@ export function createPendingCommandClient<Input, Acknowledgement, Authority>(
     if (serialized === undefined) throw new TypeError("Pending command is not serializable");
     // Execute exactly the identity that survives a reload, never an unpersisted value.
     const input = decodeHttpContract(contract.input, JSON.parse(serialized), "request");
+    // A decoder must not change the durable identity or business values on readback.
+    if (JSON.stringify(input) !== serialized) {
+      throw new TypeError("Pending command input changes after serialization");
+    }
     storage.setItem(key, serialized);
     if (storage.getItem(key) !== serialized) throw new Error("Pending command was not persisted");
     const release = () => {
