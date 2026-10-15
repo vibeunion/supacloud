@@ -462,6 +462,10 @@ export class RestHandler {
     }
 
     // table/composite results: apply select/filters/order/pagination
+    if (this.maxRows !== undefined) {
+      const requested = q.limits.get('')
+      q.limits.set('', requested === undefined ? this.maxRows : Math.min(requested, this.maxRows))
+    }
     const alias = '_f'
     const exprs: string[] = []
     for (const item of q.select) {
