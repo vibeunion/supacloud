@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.7](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.6...edge-runtime-v0.32.7) (2026-10-15)
+
+
+### Bug Fixes
+
+* **auth:** bind service JWT verification to project public signer ([#1958](https://github.com/vibeunion/supacloud/issues/1958)) ([21846c2](https://github.com/vibeunion/supacloud/commit/21846c2b8f7973739c848257a8a7c753b0b3fb4b))
+
 ## [0.32.6](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.5...edge-runtime-v0.32.6) (2026-10-15)
 
 

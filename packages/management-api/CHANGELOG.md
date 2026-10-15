@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.118.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.1...management-api-v0.118.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **auth:** bind service JWT verification to project public signer ([#1958](https://github.com/vibeunion/supacloud/issues/1958)) ([21846c2](https://github.com/vibeunion/supacloud/commit/21846c2b8f7973739c848257a8a7c753b0b3fb4b))
+
 ## [0.118.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.0...management-api-v0.118.1) (2026-10-15)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.9.0...contracts-v0.10.0) (2026-10-15)
+
+
+### Features
+
+* **contracts:** compose persisted pending command recovery ([#1957](https://github.com/vibeunion/supacloud/issues/1957)) ([0947e2f](https://github.com/vibeunion/supacloud/commit/0947e2f2650d96e452d3fa2cd5ab5ff619b88778))
+
 ## [0.9.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.8.1...contracts-v0.9.0) (2026-10-14)
 
 
