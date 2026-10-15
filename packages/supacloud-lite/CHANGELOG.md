@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.1...supacloud-lite-v0.28.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** enforce RPC transaction access modes ([#1936](https://github.com/vibeunion/supacloud/issues/1936)) ([fb90dcc](https://github.com/vibeunion/supacloud/commit/fb90dcc43ed49a45656e1877493eaa641ef494da))
+
 ## [0.28.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.0...supacloud-lite-v0.28.1) (2026-10-15)
 
 
