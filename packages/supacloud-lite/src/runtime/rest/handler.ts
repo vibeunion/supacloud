@@ -4,7 +4,7 @@
  * to {@link QueryBuilder}, and renders PostgREST-shaped responses (Content-Range
  * counts, singular-object media type, Prefer handling).
  */
-import { quoteIdent, quoteLiteral, type Database, type FunctionInfo } from '../db/database.js'
+import { quoteIdent, quoteLiteral, type Database, type FunctionInfo, type Querier } from '../db/database.js'
 import { ApiError, type RequestContext } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './build.js'
@@ -428,15 +428,22 @@ export class RestHandler {
     schema: string,
     method: string
   ): Promise<Response> {
+    const withRpcContext = <T>(run: (query: Querier) => Promise<T>): Promise<T> =>
+      this.db.withContext(ctx, async (query) => {
+        // Only POST to VOLATILE functions may write, regardless of return type.
+        if (method !== 'POST' || fn.volatility !== 'v') await query('set transaction read only')
+        return run(query)
+      })
+
     // void
     if (fn.returnType === 'void' && !fn.returnsSet) {
-      await this.db.withContext(ctx, (query) => query(`select ${call}`, []))
+      await withRpcContext((query) => query(`select ${call}`, []))
       return new Response(null, { status: 204 })
     }
 
     // scalar (non-set base/domain/enum type)
     if (!fn.returnsSet && ['b', 'd', 'e'].includes(fn.returnTypType)) {
-      const res = await this.db.withContext(ctx, (query) =>
+      const res = await withRpcContext((query) =>
         query(`select to_json(${call}) as result`, [])
       )
       const value = (res.rows[0] as { result: unknown }).result
@@ -445,7 +452,7 @@ export class RestHandler {
 
     // set-returning scalar
     if (fn.returnsSet && ['b', 'd', 'e'].includes(fn.returnTypType)) {
-      const res = await this.db.withContext(ctx, (query) =>
+      const res = await withRpcContext((query) =>
         query(`select coalesce(json_agg(_v), '[]'::json) as body from ${call} as _t(_v)`, [])
       )
       return jsonResponse(200, (res.rows[0] as { body: unknown }).body)
@@ -485,7 +492,7 @@ export class RestHandler {
       ? `with ${quoteIdent('_rpc_result')} as (select * from ${call}) select (${bodySql}) as body, (select count(*)::int from ${resultSource} as ${quoteIdent(alias)}${where}) as count`
       : bodySql
 
-    const { rows, count } = await this.db.withContext(ctx, async (query) => {
+    const { rows, count } = await withRpcContext(async (query) => {
       const res = await query(sql, [])
       const rows = (res.rows[0] as { body: unknown[] }).body
       if (wantsObject && !wantsCsv) assertObjectCardinality(rows)
