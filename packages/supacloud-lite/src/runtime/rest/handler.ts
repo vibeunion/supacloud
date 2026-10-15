@@ -405,7 +405,7 @@ export class RestHandler {
       }
     }
 
-    const fn = pickOverload(fns, Object.keys(args))
+    const fn = pickOverload(schema, fnName, fns, Object.keys(args))
     const call = renderCall(schema, fn, args)
     const q = parseQuery(searchParams)
     if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
@@ -530,20 +530,16 @@ function assertObjectCardinality(rows: unknown[]): void {
   }
 }
 
-function pickOverload(fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
+function pickOverload(schema: string, name: string, fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
   const provided = new Set(providedNames)
-  const exact: FunctionInfo[] = []
-  let best: FunctionInfo | null = null
-  for (const fn of fns) {
+  const matches = fns.filter((fn) => {
     const names = new Set(fn.args.map((a) => a.name))
-    const allProvidedKnown = [...provided].every((p) => names.has(p))
-    if (!allProvidedKnown) continue
-    if (fn.args.length === provided.size) exact.push(fn)
-    if (!best) best = fn
-  }
-  // Argument values must not choose between identically named type overloads.
-  if (exact.length > 1) {
-    const candidates = exact.map((fn) =>
+    return [...provided].every((p) => names.has(p))
+      && fn.args.slice(0, fn.requiredArgCount).every((arg) => provided.has(arg.name))
+  })
+  // An exact signature does not take precedence over applicable defaulted ones.
+  if (matches.length > 1) {
+    const candidates = matches.map((fn) =>
       `${fn.schema}.${fn.name}(${fn.args.map((arg) => `${arg.name} => ${arg.type}`).join(', ')})`
     )
     throw new ApiError(300, {
@@ -553,7 +549,16 @@ function pickOverload(fns: FunctionInfo[], providedNames: string[]): FunctionInf
       hint: 'Try renaming the parameters or the function itself in the database so function overloading can be resolved',
     })
   }
-  return exact[0] ?? best ?? fns[0]
+  const match = matches[0]
+  if (!match) {
+    throw new ApiError(404, {
+      code: 'PGRST202',
+      message: `Could not find the function ${schema}.${name}(${[...provided].sort().join(', ')}) in the schema cache`,
+      details: null,
+      hint: null,
+    })
+  }
+  return match
 }
 
 function renderCall(schema: string, fn: FunctionInfo, args: Record<string, unknown>): string {
