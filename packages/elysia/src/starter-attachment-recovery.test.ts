@@ -6,8 +6,7 @@ import type { CommandDatabase, CommandTransaction } from "../../db/src/command-a
 import { COMMAND_PERSISTENCE_SQL } from "../../db/src/command-schema";
 import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { PGMQ_SQL } from "../../supacloud-lite/src/runtime/db/emulated";
-import { decodeWorkflowClaim } from "../../supacloud-js/src/workflow-claim";
-import type { SupaCloudWorkflowClaim } from "../../supacloud-js/src/workflows";
+import { SupaCloudWorkflowsClient, type SupaCloudWorkflowClaim } from "../../supacloud-js/dist/index.mjs";
 import { startStarterPostgres, type StarterPostgres } from "../../../scripts/lib/starter-postgres";
 
 interface Input { reviewId: string; version: number; artifactId: string }
@@ -161,8 +160,22 @@ native("generated attachment recovery on PostgreSQL with Lite SQL queue compatib
     return (await rows("SELECT supacloud_workflows.snapshot($1::uuid,false) AS value", [runId]))[0]?.["value"];
   }
   async function claim(worker: string) {
-    const claimed = decodeWorkflowClaim(
-      (await rows("SELECT supacloud_workflows.claim_step($1,15) AS value", [worker]))[0]?.["value"], worker);
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toEndWith("/rest/v1/rpc/supacloud_workflow_claim");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        request: { workerId: worker, visibilityTimeoutSeconds: 15 },
+      });
+      return Response.json(
+        (await rows("SELECT supacloud_workflows.claim_step($1,15) AS value", [worker]))[0]?.["value"],
+      );
+    };
+    const service = createClient("https://workflows.test.invalid", "server-fixture-key", {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: Object.assign(fetcher, { preconnect: fetch.preconnect }) },
+    });
+    const claimed = await new SupaCloudWorkflowsClient(service).claim({
+      workerId: worker, visibilityTimeoutSeconds: 15,
+    });
     if (!claimed || claimed.status !== "claimed") throw new Error("Expected an owned Workflow claim");
     return claimed;
   }
@@ -289,6 +302,20 @@ native("generated attachment recovery on PostgreSQL with Lite SQL queue compatib
     expect(f.state.requests).toBeGreaterThan(0);
     expect(f.state.writes).toBe(0);
     expect(await f.adapters.store.readResult(f.input)).toBeNull();
+  });
+
+  test("first execution rejects mismatched artifacts while committed receipts avoid another read", async () => {
+    const f = await fixture();
+    await rows("UPDATE public.starter_attachments SET object_path='wrong-path' WHERE review_id=$1", [f.input.reviewId]);
+    await expect(f.job.run(f.input)).rejects.toThrow("Invalid attachment artifact");
+    expect(f.state.writes).toBe(0);
+    expect(await f.adapters.store.readResult(f.input)).toBeNull();
+    await persist(f.input, f.result);
+    f.state.unavailable = true;
+    const requests = f.state.requests;
+    expect(await f.job.run(f.input)).toEqual(f.result);
+    expect(f.state.requests).toBe(requests);
+    expect(f.state.writes).toBe(0);
   });
 
   test("new writes obey the same result contract and read failures do not become cache misses", async () => {

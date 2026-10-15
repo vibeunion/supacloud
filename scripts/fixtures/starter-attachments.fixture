@@ -396,6 +396,12 @@ export async function setupStarterAttachments(options: {
       const second = await claim(15);
       assert.equal(second.attempt, 2);
       const expected = { reviewId: attachment.reviewId, artifactId: attachment.artifactId, version: 2, sha256, bytes: body.byteLength };
+      await query("UPDATE public.starter_attachments SET object_path='wrong-path' WHERE review_id=$1", [attachment.reviewId]);
+      try { await assert.rejects(execute(second.input), /Invalid attachment artifact/); }
+      finally {
+        await query("UPDATE public.starter_attachments SET object_path=$2 WHERE review_id=$1", [attachment.reviewId, attachment.path]);
+      }
+      assert.equal(await count(attachment.reviewId), 0);
       assert.deepEqual(await execute(second.input), expected);
       assert.equal(await count(attachment.reviewId), 1);
       for (const change of [
@@ -405,8 +411,6 @@ export async function setupStarterAttachments(options: {
           restore: "UPDATE public.starter_application SET tenant_id='starter-test'", error: /authorization or review revision/ },
         { sql: "UPDATE public.starter_application SET project_id='other'",
           restore: "UPDATE public.starter_application SET project_id='starter-test'", error: /authorization or review revision/ },
-        { sql: "UPDATE public.starter_attachments SET object_path='wrong-path' WHERE review_id=$1",
-          restore: "UPDATE public.starter_attachments SET object_path=$2 WHERE review_id=$1", error: /Invalid attachment artifact/ },
       ]) {
         const scoped = change.sql.includes("$1");
         await query(change.sql, scoped ? [attachment.reviewId] : []);
