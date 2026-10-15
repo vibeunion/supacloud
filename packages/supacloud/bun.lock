@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.28.0",
-        "@supacloud/cli": "^0.99.0",
+        "@supacloud/cli": "^0.101.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.3",
@@ -23,11 +23,11 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.28.0", "https://registry.npmmirror.com/@supacloud/admin/-/admin-0.28.0.tgz", { "dependencies": { "@supacloud/cli": "0.94.0", "@supacloud/delivery": "0.16.0", "ssh2": "^1.17.0", "typebox": "1.3.36" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-JP2Hg+Xm5xoVDVnzidiO+VxoNOX/je+5gloPHSuXfJV6M2oA9C4WIax/9HBNPdE2X4HXSVYVQKVdsdmk9oYtag=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.99.0", "", { "dependencies": { "@supacloud/compiler": "^0.46.1", "@supacloud/db": "0.17.0", "@supacloud/delivery": "0.18.0", "typebox": "1.3.36" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-eJLv7GtalPsKOXwmZKuAGb6xMdkFCHXfeIC2zvXkkIPgVs/PIH0Pm3anvBZmGYx2pSF+eC8NtG6+P2z1Jy9TFw=="],
+    "@supacloud/cli": ["@supacloud/cli@0.101.0", "", { "dependencies": { "@supacloud/compiler": "^0.46.3", "@supacloud/db": "0.17.1", "@supacloud/delivery": "0.18.1", "typebox": "1.3.37" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-xEn3Vm6AnVvA2/1PaNl/29Pa75ap8QJm6SZIlFSp9YKREuCJbofZwsao/5Uo+qNc8b7XeRISVx7Zp1pBKSiscw=="],
 
-    "@supacloud/contracts": ["@supacloud/contracts@0.8.1", "https://registry.npmmirror.com/@supacloud/contracts/-/contracts-0.8.1.tgz", {}, "sha512-/wOCVo5EOktT7FeVtoGpUK6cki6CrGnpX3SuP/7S0roOMLS1MmUgmxSX88OB5+1sYJHg62HAqfnicPg21JsQcg=="],
+    "@supacloud/contracts": ["@supacloud/contracts@0.9.0", "", {}, "sha512-EsOyE9JIRFi7momkPOg5eENAt37HAb+4sknhb26P19iuMi4uoT9B3v0yecqi0YSJhkJqR842Ix7z6quZfwmubA=="],
 
-    "@supacloud/db": ["@supacloud/db@0.17.0", "", { "dependencies": { "@supacloud/contracts": "0.8.1", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-169397b" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-m1Pv3UQhfKpxMeObt/vV00akujmdGUOYOVjVdK+mz624Wwvrm15CxjC0dXbASmFSJDYHL4ReeURpsjPgenI6Gw=="],
+    "@supacloud/db": ["@supacloud/db@0.17.1", "", { "dependencies": { "@supacloud/contracts": "0.9.0", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-5935859" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-BoqaQyYCMqy6wxiS9GvcguQncFYpX9Y5SLBfdrjvoyIgrUzfwulSJfQMqMdDS6kRLjzcPTaBxvpLpBODAoogmQ=="],
 
     "@types/bun": ["@types/bun@1.4.3", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.3.tgz", { "dependencies": { "bun-types": "1.4.3" } }, "sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw=="],
 
@@ -111,10 +111,14 @@
 
     "@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
 
+    "@supacloud/cli/typebox": ["typebox@1.3.37", "", {}, "sha512-k+Qogwk7lztlItGvFf5v4GZPPStFAFehAyOKYeuqIHzi3dfTFqPOTx38JG09hmpcK6TQgctrTD06U/0CTTpM1g=="],
+
     "@supacloud/admin/@supacloud/cli/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", {}],
 
     "@supacloud/admin/@supacloud/cli/@supacloud/db": ["@supacloud/db@0.16.2", "https://registry.npmmirror.com/@supacloud/db/-/db-0.16.2.tgz", { "dependencies": { "@supacloud/contracts": "0.8.1", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-169397b" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-CywJ78P1w4Yrgda8jUIR1dYlNjVlGL2HXetEyWPw3MwE4GswpWbYYXf2gjQTJRYi44sqVeeMhAur38GiCinMeg=="],
 
     "@supacloud/admin/@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/db/@supacloud/contracts": ["@supacloud/contracts@0.8.1", "https://registry.npmmirror.com/@supacloud/contracts/-/contracts-0.8.1.tgz", {}, "sha512-/wOCVo5EOktT7FeVtoGpUK6cki6CrGnpX3SuP/7S0roOMLS1MmUgmxSX88OB5+1sYJHg62HAqfnicPg21JsQcg=="],
   }
 }
