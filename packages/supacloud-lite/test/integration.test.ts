@@ -230,7 +230,7 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
         [userClient, [own.data]],
         [otherClient, [other.data]],
         [anonClient, []],
-      ] as const) {
+      ] as Array<[typeof userClient, unknown[]]>) {
         const rows = await client.from('todos').select('*', { count: 'exact' }).eq('title', title)
         expect(rows.error).toBeNull()
         expect(rows.data).toEqual(expected)
