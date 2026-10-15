@@ -304,7 +304,7 @@ export async function getFrontendRelease(
     const response = await http.get(releasePath(projectRef, deploymentId, releaseId), {
         maxJsonBytes: RESPONSE_MAX_BYTES,
     });
-    const release = response.ok
+    const release = response.ok && response.status === 200
         ? releaseEnvelope(response.data, { projectRef, deploymentId, releaseId })
         : null;
     if (!release) {
@@ -588,7 +588,7 @@ async function activeReleaseReadback(
         identity.deploymentId,
         identity.releaseId,
     ), { maxJsonBytes: RESPONSE_MAX_BYTES });
-    const release = releaseRead.ok
+    const release = releaseRead.ok && releaseRead.status === 200
         ? releaseEnvelope(releaseRead.data, {
             projectRef: identity.projectRef,
             deploymentId: identity.deploymentId,
@@ -916,7 +916,7 @@ export async function activateFrontendRelease(
         responseTimeoutMs: MUTATION_RESPONSE_TIMEOUT_MS,
     });
     const release = activationReceipt(response.data, { ...input, mutationId });
-    if (!response.ok || !release) {
+    if (!response.ok || response.status !== 200 || !release) {
         if (response.status >= 400 && response.status < 500 && response.status !== 408
             && !response.transportError) {
             return releaseFailure("frontend.activate_release", "HTTP_ERROR", response.status);
@@ -953,7 +953,7 @@ async function activationReadback(
         { maxJsonBytes: RESPONSE_MAX_BYTES },
     );
     const mutationEnvelope = mutationRead.data as Record<string, unknown> | null;
-    const mutation = mutationRead.ok ? publicMutationReceipt(mutationRead.data, {
+    const mutation = mutationRead.ok && mutationRead.status === 200 ? publicMutationReceipt(mutationRead.data, {
         projectRef: input.projectRef,
         mutationId,
         resourceKey: activationResourceKey(input.deploymentId),
