@@ -4016,6 +4016,104 @@ describe("WorkerPool module cache", () => {
   });
 });
 
+describe("WorkerPool binary transfers", () => {
+  test("transfers the consumed request buffer without changing binary response bytes", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-transfer-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async (request: Request) => new Response(await request.arrayBuffer(), {
+        headers: { "content-type": "application/octet-stream" },
+      });
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000, smol: true });
+    pools.push(pool);
+    try {
+      const expected = Uint8Array.from({ length: 2 * 1024 * 1024 }, (_, i) => i % 251);
+      const consumed = expected.slice().buffer;
+      const request = new Request("http://edge.local/fn", { method: "POST", body: expected });
+      request.arrayBuffer = async () => consumed;
+      const response = await pool.dispatch({
+        functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {}, request,
+      });
+      expect(response.status).toBe(200);
+      expect(consumed.byteLength).toBe(0);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(expected);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("transfers response buffers while preserving tenant-owned response data", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-response-transfer-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      const source = new Uint8Array([0, 1, 127, 128, 255]);
+      let consumed: ArrayBuffer | undefined;
+      const read = Response.prototype.arrayBuffer;
+      Response.prototype.arrayBuffer = async function () {
+        consumed = await read.call(this);
+        return consumed;
+      };
+      export default (request: Request) => {
+        if (new URL(request.url).pathname.endsWith("/state")) {
+          return Response.json({ transferredBytes: consumed?.byteLength, source: Array.from(source) });
+        }
+        return new Response(source);
+      };
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (suffix: string) => pool.dispatch({
+      functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {},
+      request: new Request(`http://edge.local/fn${suffix}`, {
+        headers: { traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-00` },
+      }),
+    });
+    try {
+      for (let i = 0; i < 2; i++) {
+        const response = await dispatch("");
+        expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([0, 1, 127, 128, 255]);
+        expect(await (await dispatch("/state")).json()).toEqual({
+          transferredBytes: 0, source: [0, 1, 127, 128, 255],
+        });
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("transfers exact SSE subviews without detaching reusable Buffer storage", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-stream-transfer-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      const source = Buffer.from("prefixdata: ok\\n\\nsuffix");
+      export default () => {
+        let sent = 0;
+        return new Response(new ReadableStream({
+          async pull(controller) {
+            if (sent++ === 2) { controller.close(); return; }
+            await Bun.sleep(5);
+            controller.enqueue(source.subarray(6, source.length - 6));
+          },
+        }), { headers: { "content-type": "text/event-stream" } });
+      };
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    try {
+      for (let i = 0; i < 2; i++) {
+        const response = await pool.dispatch({
+          functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {},
+          request: new Request("http://edge.local/fn"),
+        });
+        expect(await response.text()).toBe("data: ok\n\ndata: ok\n\n");
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("WorkerPool body size limit", () => {
   test("enforces per-function request and response limits", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-limits-"));
