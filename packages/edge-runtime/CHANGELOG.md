@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.4](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.3...edge-runtime-v0.32.4) (2026-10-15)
+
+
+### Bug Fixes
+
+* **edge-runtime:** transfer binary payloads without extra copies ([#1928](https://github.com/vibeunion/supacloud/issues/1928)) ([022ec59](https://github.com/vibeunion/supacloud/commit/022ec59d0e1e11f74b7ce5c2f7cfeec9ac90a864))
+
 ## [0.32.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.2...edge-runtime-v0.32.3) (2026-10-14)
 
 
