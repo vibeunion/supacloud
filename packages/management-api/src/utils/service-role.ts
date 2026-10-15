@@ -1,4 +1,4 @@
-import { signOidcServiceRoleJwt } from "./project-jwt";
+import { normalizeProjectJwtKeys, signOidcServiceRoleJwt } from "./project-jwt";
 import { normalizeProjectConfig } from "./project-config";
 import { decryptSecretIfNeeded } from "./secret-crypto";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -94,6 +94,32 @@ function resolveOauthIssuer(ref: string | undefined, oauthServer: Record<string,
   return ref ? `supacloud-${ref}` : "supacloud";
 }
 
+export function resolveProjectServiceJwtVerifier(projectRef: string, config: unknown) {
+  const oauthServer = resolveOauthServerConfig(config);
+  try {
+    const signer = normalizeProjectJwtKeys(oauthServer.jwt_keys)?.find(
+      (key) => key.alg === "ES256" && key.kty === "EC" && typeof key.d === "string",
+    );
+    if (!projectRef || !signer || signer.crv !== "P-256" ||
+      typeof signer.kid !== "string" || !signer.kid ||
+      typeof signer.x !== "string" || !signer.x ||
+      typeof signer.y !== "string" || !signer.y) return null;
+    // Only this project's service signer; never shared-owner or third-party keys.
+    return {
+      schema: "supacloud.service-jwt-verifier.v1",
+      project_ref: projectRef,
+      issuer: resolveOauthIssuer(projectRef, oauthServer),
+      algorithm: "ES256",
+      jwks: { keys: [{
+        kty: "EC", crv: "P-256", alg: "ES256", use: "sig",
+        kid: signer.kid, x: signer.x, y: signer.y,
+      }] },
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveProjectServiceRoleKey(projectOrRef: string | {
   ref?: string | null;
   service_role_key?: string | null;
@@ -105,9 +131,12 @@ export async function resolveProjectServiceRoleKey(projectOrRef: string | {
     : projectOrRef;
 
   const oauthServer = resolveOauthServerConfig(project?.config);
+  const projectRef = project?.ref ?? (typeof projectOrRef === "string" ? projectOrRef : undefined);
   const oidcServiceRoleKey = await signOidcServiceRoleJwt(
     oauthServer.jwt_keys,
-    resolveOauthIssuer(project?.ref ?? (typeof projectOrRef === "string" ? projectOrRef : undefined), oauthServer),
+    resolveOauthIssuer(projectRef, oauthServer),
+    300,
+    projectRef,
   );
   if (oidcServiceRoleKey) {
     return oidcServiceRoleKey;

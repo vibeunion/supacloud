@@ -417,6 +417,7 @@ export async function signOidcServiceRoleJwt(
   jwtKeysValue: unknown,
   issuer: string,
   ttlSeconds = 300,
+  projectRef?: string,
 ): Promise<string | null> {
   let jwtKeys: JWK[] | null = null;
   try {
@@ -436,7 +437,7 @@ export async function signOidcServiceRoleJwt(
     const header: { alg: "ES256"; typ: "JWT"; kid?: string } = { alg: "ES256", typ: "JWT" };
     if (typeof signingJwk.kid === "string") header.kid = signingJwk.kid;
 
-    return new SignJWT({ role: "service_role" })
+    return new SignJWT({ role: "service_role", ...(projectRef ? { ref: projectRef } : {}) })
       .setProtectedHeader(header)
       .setIssuer(issuer)
       .setIssuedAt(now)

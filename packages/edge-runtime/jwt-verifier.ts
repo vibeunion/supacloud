@@ -1,4 +1,4 @@
-import { createLocalJWKSet, jwtVerify, type JWK, type JWTPayload } from "jose";
+import { createLocalJWKSet, importJWK, jwtVerify, type JWK, type JWTPayload } from "jose";
 
 export const VERIFIED_JWT_SUB_HEADER = "x-supacloud-jwt-sub";
 
@@ -24,6 +24,8 @@ export type EdgeRuntimeProjectSecrets = {
   thirdParty?: EdgeRuntimeThirdPartyJwtPolicy | null;
   authRuntimeMode?: EdgeRuntimeAuthRuntimeMode;
   authIssuer?: string;
+  serviceVerifier?: string;
+  projectRef?: string;
 };
 
 export type EdgeRuntimeThirdPartyJwtPolicy = {
@@ -106,6 +108,8 @@ export function readEdgeRuntimeProjectSecrets(
     thirdParty: normalizeThirdPartyJwtPolicy(env.SUPACLOUD_THIRD_PARTY_JWT_POLICY),
     authRuntimeMode,
     authIssuer: env.SUPACLOUD_AUTH_ISSUER || "",
+    serviceVerifier: env.SUPACLOUD_SERVICE_JWT_VERIFIER || "",
+    projectRef: env.SUPACLOUD_PROJECT_REF || "",
   };
 }
 
@@ -135,6 +139,51 @@ function isThirdPartyCandidate(
 function isExternalKey(key: JWK, policy: EdgeRuntimeThirdPartyJwtPolicy | null): boolean {
   return Boolean(policy?.jwtJwks.keys.some((external) =>
     external.kid === key.kid && external.alg === key.alg));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function verifyProjectServiceJwt(
+  token: string,
+  header: Record<string, unknown>,
+  secrets: EdgeRuntimeProjectSecrets,
+): Promise<JWTPayload | null> {
+  try {
+    if (!secrets.projectRef || !secrets.serviceVerifier || header.alg !== "ES256" ||
+      typeof header.kid !== "string" || !header.kid) return null;
+    const verifier: unknown = JSON.parse(secrets.serviceVerifier);
+    if (!isRecord(verifier) || verifier.schema !== "supacloud.service-jwt-verifier.v1" ||
+      verifier.project_ref !== secrets.projectRef || verifier.algorithm !== "ES256" ||
+      typeof verifier.issuer !== "string" || !verifier.issuer ||
+      !isRecord(verifier.jwks) || !Array.isArray(verifier.jwks.keys) ||
+      verifier.jwks.keys.length !== 1) return null;
+    const candidate: unknown = verifier.jwks.keys[0];
+    if (!isRecord(candidate) || candidate.kty !== "EC" || candidate.crv !== "P-256" ||
+      candidate.alg !== "ES256" || candidate.kid !== header.kid || candidate.use !== "sig" ||
+      typeof candidate.x !== "string" || !candidate.x ||
+      typeof candidate.y !== "string" || !candidate.y || "d" in candidate || "k" in candidate) return null;
+    if ("key_ops" in candidate && (!Array.isArray(candidate.key_ops) ||
+      candidate.key_ops.length !== 1 || candidate.key_ops[0] !== "verify")) return null;
+    const key = await importJWK({
+      kty: "EC", crv: "P-256", alg: "ES256", kid: header.kid,
+      x: candidate.x, y: candidate.y,
+    }, "ES256");
+    const { payload } = await jwtVerify(token, key, {
+      algorithms: ["ES256"], issuer: verifier.issuer,
+      requiredClaims: ["exp", "iat", "iss", "role", "ref"],
+      maxTokenAge: 300, clockTolerance: 0,
+    });
+    if (payload.role !== "service_role" || payload.ref !== secrets.projectRef ||
+      typeof payload.exp !== "number" || !Number.isInteger(payload.exp) ||
+      typeof payload.iat !== "number" || !Number.isInteger(payload.iat) ||
+      (payload.nbf !== undefined && !Number.isInteger(payload.nbf)) ||
+      payload.exp <= payload.iat || payload.exp - payload.iat > 300) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 export async function verifyEdgeRuntimeJwtContext(
@@ -176,6 +225,13 @@ export async function verifyEdgeRuntimeJwtContext(
   const payload = decodeJwtPart(parts[1]);
   if (!header || !payload || typeof header.alg !== "string") {
     return { verified: false, source: "none" };
+  }
+
+  if (secrets.serviceVerifier && payload.role === "service_role") {
+    const verified = await verifyProjectServiceJwt(token, header, secrets);
+    return verified
+      ? { verified: true, source: "jwt", payload: verified }
+      : { verified: false, source: "none" };
   }
 
   if (
