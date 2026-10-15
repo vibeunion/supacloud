@@ -532,15 +532,28 @@ function assertObjectCardinality(rows: unknown[]): void {
 
 function pickOverload(fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
   const provided = new Set(providedNames)
+  const exact: FunctionInfo[] = []
   let best: FunctionInfo | null = null
   for (const fn of fns) {
     const names = new Set(fn.args.map((a) => a.name))
     const allProvidedKnown = [...provided].every((p) => names.has(p))
     if (!allProvidedKnown) continue
-    if (fn.args.length === provided.size) return fn
+    if (fn.args.length === provided.size) exact.push(fn)
     if (!best) best = fn
   }
-  return best ?? fns[0]
+  // Argument values must not choose between identically named type overloads.
+  if (exact.length > 1) {
+    const candidates = exact.map((fn) =>
+      `${fn.schema}.${fn.name}(${fn.args.map((arg) => `${arg.name} => ${arg.type}`).join(', ')})`
+    )
+    throw new ApiError(300, {
+      code: 'PGRST203',
+      message: `Could not choose the best candidate function between: ${candidates.join(', ')}`,
+      details: null,
+      hint: 'Try renaming the parameters or the function itself in the database so function overloading can be resolved',
+    })
+  }
+  return exact[0] ?? best ?? fns[0]
 }
 
 function renderCall(schema: string, fn: FunctionInfo, args: Record<string, unknown>): string {
