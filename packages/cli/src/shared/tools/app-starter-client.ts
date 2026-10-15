@@ -24,17 +24,80 @@ export interface ReviewClientState {
   };
 }
 
-export function createReviewClient(transport: ReviewTransport) {
+export interface ReviewPendingStore {
+  load(): ReviewOperation | null;
+  save(operation: ReviewOperation): void;
+  clear(operation: ReviewOperation): void;
+}
+
+/** Keep operation identity, not tokens, file bytes or row data. Storage is not authorization. */
+export function createReviewPendingStore(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">,
+  scope: { projectId: string; tenantId: string; applicationId: string; subject: string }): ReviewPendingStore {
+  const identity = [scope.projectId, scope.tenantId, scope.applicationId, scope.subject];
+  if (identity.some(value => !value.trim())) throw new Error("Explicit recovery scope required");
+  const key = "supacloud.review.pending.v1:" + JSON.stringify(identity);
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  function decode(value: unknown): ReviewOperation {
+    if (!isRecord(value)) throw new Error("Invalid pending operation");
+    const item = value;
+    if ((item["kind"] !== "approve" && item["kind"] !== "upload")
+      || typeof item["reviewId"] !== "string" || !item["reviewId"].trim()
+      || typeof item["operationId"] !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item["operationId"])
+      || typeof item["expectedVersion"] !== "number" || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) {
+      throw new Error("Invalid pending operation");
+    }
+    return { kind: item["kind"], reviewId: item["reviewId"], operationId: item["operationId"], expectedVersion: item["expectedVersion"] };
+  }
+  const load = () => {
+    const value = storage.getItem(key);
+    if (value === null) return null;
+    const parsed: unknown = JSON.parse(value);
+    return decode(parsed);
+  };
+  return {
+    load,
+    save(operation) {
+      const previous = load();
+      if (previous && JSON.stringify(previous) !== JSON.stringify(decode(operation))) {
+        throw new Error("Another unresolved operation exists");
+      }
+      storage.setItem(key, JSON.stringify(decode(operation)));
+    },
+    clear(operation) {
+      const previous = load();
+      if (previous && JSON.stringify(previous) !== JSON.stringify(decode(operation))) {
+        throw new Error("Pending operation identity changed");
+      }
+      storage.removeItem(key);
+    },
+  };
+}
+
+export function createReviewClient(transport: ReviewTransport, pending?: ReviewPendingStore) {
   let state: ReviewClientState = { list: { status: "idle", rows: [] }, mutation: { status: "idle", operation: null } };
-  let generation = 0, closed = false, recovering = false;
+  try {
+    const operation = pending?.load();
+    if (operation) state.mutation = { status: "unknown", operation };
+  } catch { state.mutation = { status: "unknown", operation: null }; }
+  let generation: number = 0, closed: boolean = false, recovering: boolean = false;
   const listeners = new Set<() => void>();
   const snapshot = (): ReviewClientState => structuredClone(state);
-  const notify = () => { for (const listener of listeners) listener(); };
+  const notify = () => {
+    for (const listener of listeners) {
+      // A view subscriber cannot interrupt persistence or change a write outcome.
+      try { listener(); } catch {}
+    }
+  };
   function finish(operation: ReviewOperation, result: ReviewWriteResult) {
     if (closed) return;
-    const status = result.status === "confirmed"
+    let status = result.status === "confirmed"
       && (result.operationId !== operation.operationId || result.reviewId !== operation.reviewId)
       ? "unknown" : result.status;
+    if (status !== "unknown") {
+      try { pending?.clear(operation); } catch { status = "unknown"; }
+    }
     state = { ...state, mutation: { status, operation } };
     notify();
   }
@@ -61,11 +124,18 @@ export function createReviewClient(transport: ReviewTransport) {
     const operation: ReviewOperation = {
       kind, reviewId: row.id, expectedVersion: row.version, operationId: crypto.randomUUID(),
     };
+    try { pending?.save(operation); }
+    catch {
+      state = { ...state, mutation: { status: "unknown", operation } };
+      notify();
+      return;
+    }
     state = { ...state, mutation: { status: "submitting", operation } };
     notify();
     let result: ReviewWriteResult;
     try {
-      result = kind === "approve" ? await transport.approve(operation) : await transport.upload(operation, file!);
+      result = kind === "approve" ? await transport.approve(structuredClone(operation))
+        : file ? await transport.upload(structuredClone(operation), file) : { status: "unknown" };
     } catch {
       result = { status: "unknown" };
     }
@@ -84,7 +154,8 @@ export function createReviewClient(transport: ReviewTransport) {
       recovering = true;
       try {
         const result = await transport.lookup(structuredClone(operation));
-        finish(operation, result);
+        // Denial or conflict during lookup does not prove the original write did not commit.
+        finish(operation, result.status === "confirmed" ? result : { status: "unknown" });
         if (snapshot().mutation.status === "confirmed") await load();
       } catch {
         finish(operation, { status: "unknown" });
@@ -98,14 +169,30 @@ export function createReviewClient(transport: ReviewTransport) {
 export class ReviewAccessDenied extends Error {}
 `;
 
-export const STARTER_REVIEW_TRANSPORT = String.raw`import type { SupabaseClient } from "@supabase/supabase-js";
-import type { SingleAttemptFetch } from "@supacloud/js/contracts";
+export const STARTER_REVIEW_TRANSPORT = String.raw`import type { SingleAttemptFetch } from "@supacloud/js/contracts";
 import { ReviewAccessDenied, type ReviewOperation, type ReviewRow, type ReviewTransport, type ReviewWriteResult } from "./reviews";
 
-function record(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid response");
-  return value as Record<string, unknown>;
+/** Structural SDK boundary: application data is decoded, never propagated as SDK generics. */
+export interface ReviewSupabaseClient {
+  from(table: "starter_reviews"): {
+    select(columns: "id,state,version"): {
+      order(column: "id"): { limit(count: number): PromiseLike<{ data: unknown; error: unknown; status: number }> };
+    };
+  };
+  storage: {
+    from(bucket: string): {
+      upload(path: string, file: Blob, options: { upsert: boolean; contentType: string }): Promise<{ error: unknown }>;
+    };
+  };
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function record(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error("Invalid response");
+  return value;
+}
+function isList(value: unknown): value is unknown[] { return Array.isArray(value); }
 function row(value: unknown): ReviewRow {
   const item = record(value);
   if (typeof item["id"] !== "string" || (item["state"] !== "draft" && item["state"] !== "approved")
@@ -124,7 +211,7 @@ function rejected(status: number, body: unknown): ReviewWriteResult {
 
 /** Use the same user-scoped Supabase client and createAuthenticatedFetch session supplier. */
 export function createReviewTransport(options: {
-  supabase: SupabaseClient;
+  supabase: ReviewSupabaseClient;
   authenticatedFetch: SingleAttemptFetch;
   apiOrigin: string;
   lookup?: ReviewTransport["lookup"];
@@ -132,16 +219,32 @@ export function createReviewTransport(options: {
   const origin = new URL(options.apiOrigin);
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.search || origin.hash
     || origin.pathname !== "/") throw new Error("A fixed trusted HTTPS origin is required");
-  async function request(path: string, body: unknown, operationId: string) {
+  async function request(path: string, body: unknown, operationId: string): Promise<{ response: Response; body: unknown }> {
     const response = await options.authenticatedFetch(new URL(path, origin), {
       method: "POST", redirect: "error", signal: AbortSignal.timeout(15000),
       headers: { "content-type": "application/json", "idempotency-key": operationId, "x-request-id": operationId },
       body: JSON.stringify(body),
     });
-    return { response, body: await response.json() as unknown };
+    const result: unknown = await response.json();
+    return { response, body: result };
   }
   return {
-    ...(options.lookup ? { lookup: options.lookup } : {}),
+    lookup: options.lookup ?? (async operation => {
+      const url = new URL("/reviews/" + encodeURIComponent(operation.reviewId)
+        + "/operations/" + encodeURIComponent(operation.operationId), origin);
+      url.searchParams.set("kind", operation.kind);
+      url.searchParams.set("expectedVersion", String(operation.expectedVersion));
+      const response = await options.authenticatedFetch(url, {
+        method: "GET", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15000),
+        headers: { "x-request-id": operation.operationId },
+      });
+      if (!response.ok) return { status: "unknown" };
+      const body: unknown = await response.json();
+      const receipt = record(body);
+      if (receipt["status"] !== "confirmed" || receipt["operationId"] !== operation.operationId
+        || receipt["reviewId"] !== operation.reviewId) return { status: "unknown" };
+      return { status: "confirmed", operationId: operation.operationId, reviewId: operation.reviewId };
+    }),
     async list() {
       const { data, error, status } = await options.supabase.from("starter_reviews")
         .select("id,state,version").order("id").limit(100);
@@ -149,7 +252,7 @@ export function createReviewTransport(options: {
         if (status === 401 || status === 403) throw new ReviewAccessDenied();
         throw new Error("Review read failed");
       }
-      if (!Array.isArray(data)) throw new Error("Invalid list");
+      if (!isList(data)) throw new Error("Invalid list");
       return data.map(row);
     },
     async approve(operation: ReviewOperation) {
@@ -190,7 +293,7 @@ export function createReviewTransport(options: {
 `;
 
 export const STARTER_REVIEW_CLIENT_TEST = String.raw`import { expect, test } from "bun:test";
-import { createReviewClient, ReviewAccessDenied, type ReviewTransport, type ReviewRow, type ReviewWriteResult } from "../src/client/reviews";
+import { createReviewClient, createReviewPendingStore, ReviewAccessDenied, type ReviewTransport, type ReviewRow, type ReviewWriteResult } from "../src/client/reviews";
 import { createReviewTransport } from "../src/client/review-transport";
 
 const draft: ReviewRow = { id: "review-one", state: "draft", version: 1 };
@@ -329,5 +432,106 @@ test("private upload verifies its binding and checksum; a lost registration resp
         sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" }),
   });
   expect((await confirmed.upload(operation, file)).status).toBe("confirmed");
+});
+
+test("reload restores pending identity, denies replay and resolves only a matching durable receipt", async () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+  const scope = { projectId: "p", tenantId: "t", applicationId: "reviews", subject: "owner" };
+  const pending = createReviewPendingStore(storage, scope);
+  let writes = 0;
+  const first = createReviewClient(transport({ approve: async () => { writes++; return { status: "unknown" }; } }), pending);
+  await first.approve(draft);
+  const operation = first.snapshot().mutation.operation!;
+  first.dispose();
+  const reloaded = createReviewClient(transport({
+    approve: async () => { writes++; return { status: "unknown" }; },
+    lookup: async op => ({ status: "confirmed", operationId: op.operationId, reviewId: op.reviewId }),
+  }), createReviewPendingStore(storage, scope));
+  expect(reloaded.snapshot().mutation).toEqual({ status: "unknown", operation });
+  await reloaded.approve(draft);
+  expect(writes).toBe(1);
+  expect(createReviewPendingStore(storage, { ...scope, subject: "other" }).load()).toBeNull();
+  expect(createReviewPendingStore(storage, { ...scope, projectId: "other" }).load()).toBeNull();
+  await reloaded.reconcile();
+  expect(reloaded.snapshot().mutation.status).toBe("confirmed");
+  expect(pending.load()).toBeNull();
+});
+
+test("denied or conflicting recovery never unlocks an unknown operation", async () => {
+  for (const status of ["denied", "conflict"] as const) {
+    let writes = 0;
+    const client = createReviewClient(transport({
+      approve: async () => { writes++; return { status: "unknown" }; },
+      lookup: async () => ({ status }),
+    }));
+    await client.approve(draft);
+    const original = client.snapshot().mutation.operation;
+    await client.reconcile(); await client.approve(draft);
+    expect(writes).toBe(1);
+    expect(client.snapshot().mutation).toEqual({ status: "unknown", operation: original });
+  }
+});
+
+test("unavailable recovery storage prevents dispatch, and disposal leaves pending evidence", async () => {
+  let writes = 0;
+  const client = createReviewClient(transport({ approve: async () => { writes++; return { status: "unknown" }; } }), {
+    load: () => null, save: () => { throw new Error("Storage unavailable"); }, clear: () => {},
+  });
+  await client.approve(draft);
+  expect(writes).toBe(0);
+  expect(client.snapshot().mutation.status).toBe("unknown");
+  let saved: unknown, cleared = 0, resolve: (result: ReviewWriteResult) => void = () => {};
+  const closed = createReviewClient(transport({ approve: () => new Promise(done => { resolve = done; }) }), {
+    load: () => null, save: op => { saved = op; }, clear: () => { cleared++; },
+  });
+  const request = closed.approve(draft);
+  const op = closed.snapshot().mutation.operation!;
+  closed.dispose();
+  resolve({ status: "confirmed", operationId: op.operationId, reviewId: op.reviewId }); await request;
+  expect(saved).toEqual(op); expect(cleared).toBe(0);
+});
+
+test("default recovery transport performs one read without body or mutation retry", async () => {
+  let calls = 0;
+  const operation = { kind: "approve" as const, reviewId: draft.id, expectedVersion: 1, operationId: crypto.randomUUID() };
+  const adapter = createReviewTransport({
+    supabase: {} as Parameters<typeof createReviewTransport>[0]["supabase"],
+    apiOrigin: "https://reviews.example.test",
+    authenticatedFetch: async (input, init) => {
+      calls++;
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/reviews/" + draft.id + "/operations/" + operation.operationId);
+      expect(url.searchParams.get("expectedVersion")).toBe("1");
+      expect(init?.method).toBe("GET"); expect(init?.body).toBeUndefined();
+      expect(init?.cache).toBe("no-store");
+      return Response.json({ status: "confirmed", operationId: operation.operationId, reviewId: operation.reviewId });
+    },
+  });
+  expect((await adapter.lookup!(operation)).status).toBe("confirmed");
+  expect(calls).toBe(1);
+});
+
+test("corrupt pending records fail closed and cannot be overwritten by another operation", async () => {
+  let value: string | null = "{broken", writes = 0;
+  const pending = createReviewPendingStore({
+    getItem: () => value, setItem: (_key, next) => { value = next; }, removeItem: () => { value = null; },
+  }, { projectId: "p", tenantId: "t", applicationId: "a", subject: "s" });
+  const blocked = createReviewClient(transport({ approve: async () => { writes++; return { status: "unknown" }; } }), pending);
+  await blocked.approve(draft);
+  expect(writes).toBe(0);
+  expect(blocked.snapshot().mutation).toEqual({ status: "unknown", operation: null });
+  expect(value).toBe("{broken");
+  value = null;
+  const original = { kind: "approve" as const, reviewId: draft.id, expectedVersion: 1, operationId: crypto.randomUUID() };
+  pending.save(original);
+  const other = { ...original, operationId: crypto.randomUUID() };
+  expect(() => pending.save(other)).toThrow("Another unresolved operation");
+  expect(() => pending.clear(other)).toThrow("identity changed");
+  expect(pending.load()).toEqual(original);
 });
 `;

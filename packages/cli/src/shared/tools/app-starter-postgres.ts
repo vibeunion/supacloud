@@ -25,7 +25,7 @@ import { CommandError } from "@supacloud/contracts";
 import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction } from "@supacloud/db";
 import {
   ApplicationError, createSupAuthRequestContext, requireTrustedIdentity, requireIdempotencyKey,
-  type CommandInvocation, type SupAuthContextOptions,
+  type SupAuthContextOptions,
 } from "@supacloud/elysia";
 import type { AppAdapters } from "../application";
 import type { ReviewStore } from "../review/review";
@@ -107,6 +107,37 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   };
   const store: ReviewStore = {
     ...options.uploads,
+    async lookupOperation(context, operation) {
+      const subject = actor(context);
+      try {
+        let confirmed: boolean = false;
+        if (operation.kind === "upload") {
+          if (!options.uploads?.lookupUpload) {
+            throw new ApplicationError("Upload receipt lookup unavailable", { status: 503, code: "RECEIPTS_UNAVAILABLE" });
+          }
+          confirmed = await options.uploads.lookupUpload(context, {
+            reviewId: operation.reviewId, artifactId: operation.operationId, expectedVersion: operation.expectedVersion,
+          });
+        } else {
+          const command = createTransactionalCommand({
+            name: "review.approve", store: commandStore, inputCodec: plaintextCommandInput, input, result,
+            authorize: authorizeApproval,
+            execute: async () => { throw new Error("Receipt lookup cannot execute a command"); },
+            audit: { event: "review.approved", details: request => ({ reviewId: request.id }) },
+          });
+          const receipt = await command.lookup({ actorId: subject, tenantId }, operation.operationId,
+            { id: operation.reviewId, expectedVersion: operation.expectedVersion });
+          confirmed = receipt?.status === "confirmed";
+        }
+        return { status: confirmed ? "confirmed" : "unknown", operationId: operation.operationId, reviewId: operation.reviewId };
+      } catch (error) {
+        if (error instanceof ApplicationError) throw error;
+        if (error instanceof CommandError && ["COMMAND_REJECTED", "COMMAND_IDEMPOTENCY_CONFLICT"].includes(error.code)) {
+          throw new ApplicationError(error.code, { code: error.code, status: error.code === "COMMAND_REJECTED" ? 403 : 409 });
+        }
+        throw new ApplicationError("Receipt lookup unavailable", { status: 503, code: "RECEIPTS_UNAVAILABLE" });
+      }
+    },
     async get(table, id) {
       if (table !== "reviews") throw new Error("Unsupported review table");
       return rows(await transaction().query(
@@ -124,9 +155,9 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
       await afterApproved?.(transaction(), id, review.version);
     },
   };
-  function actor(invocation: CommandInvocation): string {
-    const who = requireTrustedIdentity(invocation.requestContext);
-    const access = record(record(invocation.requestContext)["access"]);
+  function actor(context: unknown): string {
+    const who = requireTrustedIdentity(context);
+    const access = record(record(context)["access"]);
     if (access["projectId"] !== projectId || access["tenantId"] !== tenantId
       || !Array.isArray(access["permissions"]) || !access["permissions"].includes("review.approve")) {
       throw new ApplicationError("Command permission denied", { status: 403, code: "REVIEW_PERMISSION_DENIED" });
@@ -134,6 +165,16 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
     return who.subject;
   }
   const commandStore = createPostgresCommandStore(database);
+  async function authorizeApproval(who: { actorId: string; tenantId: string }, request: Approval, tx: CommandTransaction): Promise<"allow" | "deny"> {
+    const found = rows(await tx.query(
+      "SELECT r.id FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id " +
+      "CROSS JOIN public.starter_application a " +
+      "WHERE r.id=$1 AND r.owner_id=$2 AND m.enabled AND m.can_approve " +
+      "AND a.singleton AND a.project_id=$3 AND a.tenant_id=$4 FOR UPDATE OF r,m FOR SHARE OF a",
+      [request.id, who.actorId, projectId, who.tenantId],
+    ));
+    return found.length === 1 ? "allow" : "deny";
+  }
   return {
     deps: { dbClient: store }, requestContext,
     commandGovernance: {
@@ -144,22 +185,13 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
           || command.audit !== "review.approved" || command.rpc !== undefined) {
           throw new ApplicationError("Unsupported review command", { status: 501, code: "REVIEW_COMMAND_UNSUPPORTED" });
         }
-        actor(invocation);
+        actor(invocation.requestContext);
       },
       async idempotency(invocation, next) {
         const command = createTransactionalCommand({
           name: invocation.command.name, store: commandStore,
           inputCodec: plaintextCommandInput, input, result,
-          async authorize(who, request, tx) {
-            const found = rows(await tx.query(
-              "SELECT r.id FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id " +
-              "CROSS JOIN public.starter_application a " +
-              "WHERE r.id=$1 AND r.owner_id=$2 AND m.enabled AND m.can_approve " +
-              "AND a.singleton AND a.project_id=$3 AND a.tenant_id=$4 FOR UPDATE OF r,m FOR SHARE OF a",
-              [request.id, who.actorId, projectId, who.tenantId],
-            ));
-            return found.length === 1 ? "allow" : "deny";
-          },
+          authorize: authorizeApproval,
           execute: tx => scope.run(tx, async () => {
             try { return await next(); }
             catch (error) {
@@ -173,7 +205,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
         });
         try {
           const receipt = await command.execute(
-            { actorId: actor(invocation), tenantId }, requireIdempotencyKey(invocation),
+            { actorId: actor(invocation.requestContext), tenantId }, requireIdempotencyKey(invocation),
             { id: invocation.input.params["id"], expectedVersion: record(invocation.input.body)["expectedVersion"] },
             invocation.request.signal,
           );

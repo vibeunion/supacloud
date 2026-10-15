@@ -24,6 +24,11 @@ test("the emitted client reference executes its behavior tests without a UI fram
       expect({ code, failure: code ? output : "" }).toEqual({ code: 0, failure: "" });
     } finally { clearTimeout(timer); if (child.exitCode === null) { child.kill(); await child.exited; } }
     const cli = fileURLToPath(new URL("../../../", import.meta.url));
+    await writeFile(join(root, "tests/sdk-types.ts"), [
+      'import type { SupabaseClient } from "@supabase/supabase-js";',
+      'import type { ReviewSupabaseClient } from "../src/client/review-transport";',
+      "export function acceptExistingClient(client: SupabaseClient): ReviewSupabaseClient { return client; }",
+    ].join("\n"));
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({
       compilerOptions: {
         target: "ES2022", module: "ESNext", moduleResolution: "bundler", strict: true,
@@ -34,7 +39,7 @@ test("the emitted client reference executes its behavior tests without a UI fram
           "@supabase/supabase-js": [join(cli, "node_modules/@supabase/supabase-js")],
           "@supacloud/js/contracts": [join(cli, "../contracts/src/authenticated_fetch.ts")],
         },
-      }, include: ["src/client/*.ts", "tests/review-client.test.ts"],
+      }, include: ["src/client/*.ts", "tests/review-client.test.ts", "tests/sdk-types.ts"],
     }));
     const types = Bun.spawn([process.execPath, join(cli, "node_modules/typescript/bin/tsc"), "-p", join(root, "tsconfig.json")], {
       cwd: root, stdout: "pipe", stderr: "pipe",

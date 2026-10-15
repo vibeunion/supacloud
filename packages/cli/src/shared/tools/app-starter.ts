@@ -12,6 +12,7 @@ import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
 import { STARTER_REVIEW_CLIENT, STARTER_REVIEW_TRANSPORT, STARTER_REVIEW_CLIENT_TEST } from "./app-starter-client";
+import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
@@ -286,6 +287,7 @@ import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
 import { ApproveBody, HealthResult, Params, ReviewResult } from "./contracts";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
+import { ReviewReceipts, ReviewReceiptsController, type ReviewReceiptPort } from "./receipts";
 import type { ReviewRow } from "../../db/schema";
 
 export const reviewSpec = defineFeatureSpec({
@@ -303,7 +305,7 @@ export const reviewSpec = defineFeatureSpec({
 
 type Review = Pick<ReviewRow, "state" | "version">;
 // Production implementations must bind both operations to the current transaction.
-export interface ReviewStore extends Partial<ReviewUploadPort> {
+export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewReceiptPort> {
   get(table: string, key: string): unknown;
   set(table: string, key: string, value: Review): void | Promise<void>;
 }
@@ -394,7 +396,8 @@ export class ReviewController {
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads], controllers: [ReviewController, ReviewUploadsController],
+  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts],
+  controllers: [ReviewController, ReviewUploadsController, ReviewReceiptsController],
   jobs: [VerifyReviewAttachment],
 });
 `,
@@ -418,7 +421,19 @@ export const UploadResult = t.Object({
   artifactId: t.String({ format: "uuid" }), runId: t.String({ format: "uuid" }),
   objectPath: t.String(), sha256: t.String({ pattern: "^[a-f0-9]{64}$" }), bytes: t.Integer({ minimum: 1, maximum: 1048576 }),
 });
+export const ReceiptParams = t.Object({
+  id: t.String({ minLength: 1 }), operationId: t.String({ format: "uuid" }),
+});
+export const ReceiptQuery = t.Object({
+  kind: t.Union([t.Literal("approve"), t.Literal("upload")]),
+  expectedVersion: t.String({ pattern: "^[1-9][0-9]*$", maxLength: 16 }),
+}, { additionalProperties: false });
+export const ReceiptResult = t.Object({
+  status: t.Union([t.Literal("confirmed"), t.Literal("unknown")]),
+  operationId: t.String({ format: "uuid" }), reviewId: t.String({ minLength: 1 }),
+});
 `,
+        "src/review/receipts.ts": STARTER_REVIEW_RECEIPTS,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
         "src/client/reviews.ts": STARTER_REVIEW_CLIENT,
         "src/client/review-transport.ts": STARTER_REVIEW_TRANSPORT,
@@ -530,10 +545,18 @@ reads and private uploads to the existing user-scoped Supabase client, and
 approval/registration to createAuthenticatedFetch. It never uses a service key.
 Bind snapshot/subscribe to the view or SVAdmin store; dispose on identity change.
 The example lists at most 100 rows. Loading and permission failures clear rows.
-Unknown writes keep their operation ID and block resubmission. Optional lookup
-must be a read-only, identity-bound receipt endpoint; current row state alone
-cannot confirm that this operation committed. Without such an endpoint, retain
-unknown and use the operation ID for operator reconciliation.
+Unknown writes keep their operation ID and block resubmission. The default
+lookup calls GET /reviews/:id/operations/:operationId with kind and
+expectedVersion. It rechecks current authorization and reads the original
+durable receipt; current row state alone cannot confirm the operation.
+Construct createReviewPendingStore(localStorage, { projectId, tenantId,
+applicationId, subject }) and pass it as createReviewClient's second argument.
+The scope must come from the current authenticated session and application
+binding. It stores no token or file bytes. Reload restores unknown, then
+reconcile() performs only a receipt read; denied/conflicting lookup stays
+unknown. Storage failures block writes. Dispose never deletes pending evidence.
+Use one active mutation owner per identity/application: localStorage is not a
+cross-tab atomic lock. Do not clear unresolved records to enable another write.
 
 Use @supacloud/js as the platform SDK around your existing user-scoped
 @supabase/supabase-js client. Pass that same client to existing UI providers;

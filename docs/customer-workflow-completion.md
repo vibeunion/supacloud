@@ -79,25 +79,51 @@ SVAdmin or other UI framework dependency is added.
    `@supacloud/js/contracts` using the same current session. Never use a service
    key in a browser. Configure one trusted HTTPS application origin.
 2. Pass them to `createReviewTransport`, then to `createReviewClient`.
-   Bind `snapshot()` and `subscribe()` to the view or SVAdmin store.
+   Supply `createReviewPendingStore(localStorage, { projectId, tenantId,
+   applicationId, subject })` as the client's second argument, using the current
+   authenticated session and application binding. Bind `snapshot()` and
+   `subscribe()` to the view or SVAdmin store.
 3. Map list loading, empty, denied and error states separately. The reference
    reads the first 100 rows; production pagination is an application extension.
 4. Bind approve/upload actions to the controller methods. Disable writes while
    submitting or unknown; keep the original operation ID for investigation.
    Conflict refreshes the list but does not retry the mutation.
-5. Use a read-only, identity-scoped durable receipt lookup for `reconcile()`.
-   Matching row state is not proof of the original operation. The reference
-   exposes this extension but does not ship a new backend lookup endpoint.
-   Without it, an unknown write remains blocked pending operator read-back.
+5. `reconcile()` uses the shipped `GET /reviews/:id/operations/:operationId`
+   endpoint with `kind` and `expectedVersion`. Both approval and upload lookup
+   recheck the current permission and tenant/application binding through the
+   original command store. Missing receipt stays unknown; denial or fingerprint
+   conflict during recovery also stays unknown and does not unlock new writes.
 6. Unsubscribe and dispose on logout, session identity changes and unmount.
-   Do not share a client instance across users. An application must preserve
-   pending operation identities in user/project-scoped recovery storage before
-   allowing page reload to discard an unresolved write.
+   Do not share a client instance across users. Pending operation IDs are saved
+   before dispatch, contain no token/file bytes, and survive disposal and reload.
+   Corrupt/unavailable storage blocks writes; a matching confirmed receipt clears
+   the record. Local storage is not a cross-tab atomic lock: use one active
+   mutation owner per identity/application and never erase unresolved records
+   merely to enable a new write.
 
 The transport uploads private text attachments without overwrite and verifies
 the registration's artifact, path, byte count and SHA-256. Failed or lost
 responses do not trigger replay. Local port and HTTP-adapter tests do not
 constitute a browser or live identity acceptance test.
+
+Focused source verification:
+
+```sh
+cd packages/cli
+bun test src/shared/tools/app-starter-client.test.ts
+SUPACLOUD_STARTER_POSTGRES_BIN=/opt/homebrew/opt/postgresql@16/bin \
+  bun test src/shared/tools/app-starter-recovery.test.ts
+```
+
+Install frozen dependencies in the CLI, app, elysia, commands, contracts, db,
+query and supacloud-js packages first. This source-only fixture uses explicit
+source paths, strict compiler diagnostics, a disposable native PostgreSQL
+cluster and locally signed identities. It checks compiled GET routes, revoked
+permissions, foreign subjects/tenant bindings, input fingerprint conflicts,
+database restart, no lookup mutations, and a committed-but-lost approval response
+followed by a reloaded client recovering the original operation. Upload receipt
+lookup uses the real command store but seeds the upload receipt independently;
+list refresh is stubbed in this fixture. It is not published/browser acceptance.
 
 ## Published consumer gate
 
@@ -152,6 +178,6 @@ real-session business smoke after upgrading or recovering.
 
 This increment is not evidence of completed platform acceptance. The published
 package dependency closure must first be repaired by a release. Live SupAuth
-business smoke, browser/SVAdmin acceptance, concrete backend receipt lookup and
-pending-write persistence, and an approved full database/object-storage restore
-drill remain required before all three customer outcomes can be signed off.
+business smoke, browser/SVAdmin acceptance, cross-component tracing acceptance
+and an approved full database/object-storage restore drill remain required
+before all three customer outcomes can be signed off.

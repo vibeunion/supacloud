@@ -20,6 +20,7 @@ type RegisterUploadError =
 export interface ReviewUploadPort {
   previewUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadLocation>;
   registerUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadResult>;
+  lookupUpload?(context: unknown, input: ReviewUploadInput): Promise<boolean>;
 }
 @Injectable({ scope: "request" })
 export class ReviewUploads {
@@ -201,6 +202,23 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
     return allowed[0]["storage_subject"] + "/" + input.reviewId + "/" + input.artifactId + ".txt";
   }
   return {
+    async lookupUpload(context, value) {
+      const input = capture(value), subject = actor(context);
+      const command = createTransactionalCommand({
+        name: "review.attach", store: createPostgresCommandStore(database), inputCodec: plaintextCommandInput,
+        input: capture, result,
+        async authorize(who, request, tx) {
+          try { await authorize(tx, who.actorId, request, true); return "allow"; }
+          catch (error) {
+            if (error instanceof ApplicationError && error.code === "UPLOAD_DENIED") return "deny";
+            throw error;
+          }
+        },
+        execute: async () => { throw new Error("Receipt lookup cannot register an upload"); },
+        audit: { event: "review.attachment-bound", details: request => ({ reviewId: request.reviewId, artifactId: request.artifactId }) },
+      });
+      return (await command.lookup({ actorId: subject, tenantId }, input.artifactId, input))?.status === "confirmed";
+    },
     async previewUpload(context, value) {
       const input = capture(value), subject = actor(context);
       const objectPath = await database.transaction(tx => authorize(tx, subject, input));

@@ -107,13 +107,13 @@ async function main(args: string[]) {
       await copyFile(new URL(`./fixtures/starter-${name}.fixture`, import.meta.url), join(project, "tests", `${name}.ts`));
     }
     const fixture: {
-      verifyPersistentStarter(database: StarterLite, options: { signal: AbortSignal }): Promise<unknown>;
+      verifyPersistentStarter(database: StarterLite, options: { signal: AbortSignal; verifyReceipts: boolean }): Promise<unknown>;
     } = await import(join(project, "tests/persistence.ts"));
     const publicLite = Bun.resolveSync("@supacloud/lite", project);
     assert.ok(publicLite.startsWith(join(project, "node_modules") + "/"), "Runtime must be an installed package");
     backend = await startStarterLite(join(root, "database"), signal.signal, values["postgres-bin"], publicLite);
-    report.databaseEvidence = await fixture.verifyPersistentStarter(backend, { signal: signal.signal });
-    report.checks.push("durable-approval", "restart-and-replay", "permissions", "attachments-and-worker");
+    report.databaseEvidence = await fixture.verifyPersistentStarter(backend, { signal: signal.signal, verifyReceipts: true });
+    report.checks.push("durable-approval", "restart-and-replay", "permissions", "attachments-and-worker", "read-only-receipt-recovery");
     report.stage = "complete";
     report.status = "passed";
   } catch (error) {
