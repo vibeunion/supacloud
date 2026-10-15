@@ -82,10 +82,11 @@ async function runProjectCli(
 async function runProjectCliPath(
     entryPath: string,
     args: string[],
+    environment: Record<string, string> = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const processHandle = Bun.spawn([entryPath, ...args], {
         cwd: PACKAGE_ROOT,
-        env: cleanEnvironment(),
+        env: cleanEnvironment(environment),
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -245,10 +246,11 @@ describe("supacloud process contract", () => {
         ], { cwd: PACKAGE_ROOT });
         expect(build.exitCode).toBe(0);
         const builtEntry = join(buildDirectory, "index.js");
-        expect(readFileSync(builtEntry, "utf8").split("\n", 1)[0]).toBe("#!/usr/bin/env node");
+        expect(readFileSync(builtEntry, "utf8").split("\n", 1)[0]).toBe("#!/usr/bin/env bun");
 
         const bunPath = join(sandbox, "bun-bin");
         mkdirSync(bunPath);
+        symlinkSync(process.execPath, join(bunPath, "bun"));
         const bunProcess = Bun.spawn([process.execPath, builtEntry, "--version"], {
             cwd: PACKAGE_ROOT,
             env: cleanEnvironment({ PATH: bunPath }),
@@ -269,7 +271,8 @@ describe("supacloud process contract", () => {
         const linkedEntry = join(binDirectory, "supacloud");
         symlinkSync(builtEntry, linkedEntry);
 
-        const response = await runProjectCliPath(linkedEntry, ["--version"]);
+        // Only Bun is available: the installed bin must not silently select Node.
+        const response = await runProjectCliPath(linkedEntry, ["--version"], { PATH: bunPath });
 
         expect(response.exitCode).toBe(0);
         expect(response.stdout.trim()).toBe(packageMetadata.version);

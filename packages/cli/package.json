@@ -34,7 +34,7 @@
     "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source --external @supacloud/compiler --external @supacloud/db && bun run build:tool-runtime && bun run build:types",
     "build:tool-runtime": "bun build src/tool-runtime.ts --outdir dist --target node --external typebox && tsc -p tsconfig.tool-runtime.json --emitDeclarationOnly",
     "build:types": "tsc --emitDeclarationOnly",
-    "check:release-bundle": "node scripts/check-release-bundle.mjs",
+    "check:release-bundle": "bun scripts/check-release-bundle.mjs",
     "pretypecheck": "bun install --cwd ../delivery --frozen-lockfile && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun run prepare:db",
     "prepublishOnly": "bun run build && bun run check:release-bundle",
     "typecheck": "tsc --noEmit"
