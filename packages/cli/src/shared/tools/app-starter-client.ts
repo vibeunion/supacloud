@@ -96,7 +96,12 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
       && (result.operationId !== operation.operationId || result.reviewId !== operation.reviewId)
       ? "unknown" : result.status;
     if (status !== "unknown") {
-      try { pending?.clear(operation); } catch { status = "unknown"; }
+      try {
+        if (pending) {
+          pending.clear(structuredClone(operation));
+          if (pending.load() !== null) throw new Error("Pending operation was not cleared");
+        }
+      } catch { status = "unknown"; }
     }
     state = { ...state, mutation: { status, operation } };
     notify();
@@ -124,8 +129,16 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
     const operation: ReviewOperation = {
       kind, reviewId: row.id, expectedVersion: row.version, operationId: crypto.randomUUID(),
     };
-    try { pending?.save(operation); }
-    catch {
+    try {
+      if (pending) {
+        pending.save(structuredClone(operation));
+        const stored = pending.load();
+        if (!stored || stored.kind !== operation.kind || stored.reviewId !== operation.reviewId
+          || stored.expectedVersion !== operation.expectedVersion || stored.operationId !== operation.operationId) {
+          throw new Error("Pending operation was not persisted");
+        }
+      }
+    } catch {
       let original: ReviewOperation | null = null;
       try { original = pending?.load() ?? null; } catch {}
       state = { ...state, mutation: { status: "unknown", operation: original } };
@@ -339,9 +352,6 @@ test("double submit sends one write; unknown retains its identity and only a loo
   await client.approve(draft);
   expect(sends).toBe(1);
   expect(client.snapshot().mutation).toEqual({ status: "unknown", operation });
-  await client.reconcile();
-  expect(sends).toBe(1); expect(lookups).toBe(1);
-  expect(client.snapshot().mutation.status).toBe("confirmed");
 });
 test("conflict refreshes but does not retry the write; wrong receipt remains unknown", async () => {
   let writes = 0, reads = 0;
@@ -489,9 +499,9 @@ test("unavailable recovery storage prevents dispatch, and disposal leaves pendin
   await client.approve(draft);
   expect(writes).toBe(0);
   expect(client.snapshot().mutation.status).toBe("unknown");
-  let saved: unknown, cleared = 0, resolve: (result: ReviewWriteResult) => void = () => {};
+  let saved: ReviewOperation | null = null, cleared = 0, resolve: (result: ReviewWriteResult) => void = () => {};
   const closed = createReviewClient(transport({ approve: () => new Promise(done => { resolve = done; }) }), {
-    load: () => null, save: op => { saved = op; }, clear: () => { cleared++; },
+    load: () => saved, save: op => { saved = op; }, clear: () => { cleared++; },
   });
   const request = closed.approve(draft);
   const op = closed.snapshot().mutation.operation!;
@@ -604,4 +614,89 @@ test("registration rejection after object upload retains pending identity and ne
     expect(requests).toBe(2);
   }
 });
+
+
+for (const kind of ["approve", "upload"] as const) {
+  const submit = (client: ReturnType<typeof createReviewClient>) => kind === "approve"
+    ? client.approve(draft) : client.upload(draft, new Blob(["hello"], { type: "text/plain" }));
+  for (const failure of ["silent", "read-error", "operation", "version", "kind"] as const) {
+    test(kind + " verifies pending readback before any transport: " + failure, async () => {
+      let saved: ReviewOperation | null = null, attempted = false, sends = 0;
+      const client = createReviewClient(transport({
+        approve: async () => { sends++; return { status: "unknown" }; },
+        upload: async () => { sends++; return { status: "unknown" }; },
+      }), {
+        load() {
+          if (attempted && failure === "read-error") throw new Error("private storage failure");
+          return saved;
+        },
+        save(operation) {
+          attempted = true;
+          if (failure === "silent") return;
+          saved = { ...operation };
+          if (failure === "operation") saved.operationId = crypto.randomUUID();
+          if (failure === "version") saved.expectedVersion++;
+          if (failure === "kind") saved.kind = kind === "approve" ? "upload" : "approve";
+        },
+        clear() { throw new Error("Must not clear an unconfirmed operation"); },
+      });
+      await submit(client);
+      await submit(client);
+      expect(sends).toBe(0);
+      expect(client.snapshot().mutation.status).toBe("unknown");
+      expect(JSON.stringify(client.snapshot())).not.toContain("private storage failure");
+      expect(client.snapshot().mutation.operation).toEqual(failure === "read-error" ? null : saved);
+    });
+  }
+  for (const resultStatus of ["confirmed", "denied", "conflict"] as const) {
+    test(kind + " retains pending after silent cleanup: " + resultStatus, async () => {
+      let saved: ReviewOperation | null = null, sends = 0, clears = 0;
+      const send = async (operation: ReviewOperation): Promise<ReviewWriteResult> => {
+        sends++;
+        return resultStatus === "confirmed"
+          ? { status: "confirmed", operationId: operation.operationId, reviewId: operation.reviewId }
+          : { status: resultStatus };
+      };
+      const client = createReviewClient(transport({ approve: send, upload: send }), {
+        load: () => saved, save: operation => { saved = operation; }, clear: () => { clears++; },
+      });
+      await submit(client);
+      expect(client.snapshot().mutation).toEqual({ status: "unknown", operation: saved });
+      await submit(client);
+      expect(sends).toBe(1);
+      expect(clears).toBe(1);
+      expect(saved).not.toBeNull();
+    });
+  }
+  test(kind + " accepts exact JSON readback and recovers once without another write", async () => {
+    const values = new Map<string, string>();
+    const pending = createReviewPendingStore({
+      getItem: key => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value); },
+      removeItem: key => { values.delete(key); },
+    }, { projectId: "project", tenantId: "tenant", applicationId: "reviews", subject: "owner" });
+    let sends = 0, reads = 0;
+    const send = async (operation: ReviewOperation): Promise<ReviewWriteResult> => {
+      sends++;
+      // Stored field ordering differs from the newly created operation.
+      expect(pending.load()).toEqual(operation);
+      return { status: "unknown" };
+    };
+    const client = createReviewClient(transport({
+      approve: send, upload: send,
+      lookup: async operation => {
+        reads++;
+        return { status: "confirmed", operationId: operation.operationId, reviewId: operation.reviewId };
+      },
+    }), pending);
+    await submit(client);
+    await submit(client);
+    expect(sends).toBe(1);
+    await client.reconcile();
+    expect(client.snapshot().mutation.status).toBe("confirmed");
+    expect(pending.load()).toBeNull();
+    expect(sends).toBe(1);
+    expect(reads).toBe(1);
+  });
+}
 `;
