@@ -12,7 +12,7 @@ import { requireAuthRuntimeManagement } from "./auth-runtime";
  * WeChat OAuth routes — miniprogram, official account (mp), and open platform
  */
 export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .beforeHandle(requireAuthRuntimeManagement("providers"))
+  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
   .post(
     "/wechat/miniprogram",
     {

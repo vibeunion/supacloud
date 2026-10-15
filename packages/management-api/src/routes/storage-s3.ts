@@ -185,7 +185,7 @@ async function authenticate(request: Request, ref: string): Promise<boolean> {
 }
 
 export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
-  .beforeHandle(async ({ params, request, set }) => {
+  .onBeforeHandle(async ({ params, request, set }) => {
     if (new URL(request.url).pathname.endsWith("/credentials")) {
       const authResult = await getAuthContext(request);
       if ("status" in authResult) {

@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
+import { HttpTransport } from "../transports/http";
+import type { ToolInvocation } from "../tool-server";
+import { registerFrontendTools } from "./frontend-tools";
 import {
     activateFrontendRelease,
     getActiveFrontendRelease,
@@ -19,6 +23,13 @@ const RELEASE_ID = "a".repeat(64);
 const TREE_SHA = "b".repeat(64);
 const MUTATION_ID = "00000000-0000-4000-8000-000000000001";
 const roots = new Set<string>();
+const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+const ROLLBACK_ID = "00000000-0000-4000-8000-000000000003";
+const TARGET_RELEASE_ID = "c".repeat(64);
+const boundRollbackArgs = {
+    releaseId: TARGET_RELEASE_ID, expectedActiveReleaseId: RELEASE_ID,
+    expectedActivationId: MUTATION_ID, mutationId: ROLLBACK_ID,
+};
 
 function release(releaseId = RELEASE_ID, treeSha = TREE_SHA) {
     return {
@@ -39,7 +50,85 @@ function parsed(response: { content: Array<{ text: string }> }): Record<string, 
     return JSON.parse(response.content[0].text) as Record<string, unknown>;
 }
 
+function boundRollbackFixture() {
+    const base = `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}`;
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    const state = {
+        activeReleaseId: RELEASE_ID, activeActivationId: MUTATION_ID,
+        activeStatus: 200, postStatus: 200, commit: true, journalVisible: true,
+        fingerprint: createHash("sha256").update(JSON.stringify({
+            activation_id: ROLLBACK_ID, deployment_id: DEPLOYMENT_ID,
+            expected_activation_id: MUTATION_ID, expected_active_release_id: RELEASE_ID,
+            project_ref: PROJECT_REF, release_id: TARGET_RELEASE_ID,
+        })).digest("hex"),
+        artifactProject: PROJECT_REF,
+    };
+    const server = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        async fetch(request) {
+            const path = new URL(request.url).pathname;
+            const body: unknown = request.method === "POST" ? await request.json() : undefined;
+            calls.push({ method: request.method, path, ...(body === undefined ? {} : { body }) });
+            if (request.method === "GET" && path === `${base}/active-release`) {
+                return Response.json(state.activeStatus === 200 ? {
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: state.activeReleaseId, active_activation_id: state.activeActivationId,
+                    releases: [release(state.activeReleaseId)], next_cursor: null,
+                } : { token: "must-not-escape" }, { status: state.activeStatus });
+            }
+            if (request.method === "GET" && path === `${base}/releases/${TARGET_RELEASE_ID}`) {
+                return Response.json({
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    release: { ...release(TARGET_RELEASE_ID), project_ref: state.artifactProject },
+                });
+            }
+            if (request.method === "GET" && path === `/v1/projects/${PROJECT_REF}/mutations/${ROLLBACK_ID}`) {
+                if (!state.journalVisible) return Response.json({}, { status: 404 });
+                return Response.json({
+                    project_ref: PROJECT_REF,
+                    mutation: {
+                        project_ref: PROJECT_REF, mutation_id: ROLLBACK_ID,
+                        operation: "frontend.release.activate", resource_key: "v1/frontend_release/ZmEtd2Vi",
+                        request_fingerprint: state.fingerprint,
+                        principal: { type: "project", id: `project:${PROJECT_REF}` },
+                        status: "succeeded", checkpoint: {}, receipt: {},
+                        response_status: 200, failure_code: null,
+                        lease: { owner: null, expires_at: null, fencing_epoch: 1 },
+                        completed_at: "2026-08-12T00:00:00.000Z",
+                        created_at: "2026-08-12T00:00:00.000Z",
+                        updated_at: "2026-08-12T00:00:00.000Z",
+                    },
+                });
+            }
+            if (request.method === "POST" && path === `${base}/releases/${TARGET_RELEASE_ID}/activate`) {
+                if (state.commit) {
+                    state.activeReleaseId = TARGET_RELEASE_ID;
+                    state.activeActivationId = ROLLBACK_ID;
+                }
+                return Response.json(state.postStatus === 200 ? {
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: TARGET_RELEASE_ID, activation_id: ROLLBACK_ID,
+                    release: release(TARGET_RELEASE_ID),
+                    mutation: { mutation_id: ROLLBACK_ID, status: "succeeded", replayed: false },
+                } : { token: "must-not-escape" }, { status: state.postStatus });
+            }
+            return Response.json({}, { status: 404 });
+        },
+    });
+    servers.push(server);
+    const http = new HttpTransport({ baseUrl: server.url.toString(), token: "local-rollback-fixture" });
+    const invoke = (args: Partial<typeof boundRollbackArgs>) => rollbackFrontendRelease(
+        http, PROJECT_REF, DEPLOYMENT_ID, args.releaseId, {
+            expectedActiveReleaseId: args.expectedActiveReleaseId,
+            expectedActivationId: args.expectedActivationId,
+            mutationId: args.mutationId,
+        },
+    );
+    return { state, calls, invoke, http };
+}
+
 afterEach(async () => {
+    for (const server of servers.splice(0)) server.stop(true);
     await Promise.all([...roots].map((root) => rm(root, { recursive: true, force: true })));
     roots.clear();
 });
@@ -243,6 +332,126 @@ describe("immutable frontend release control", () => {
         });
         expect(calls).toEqual([`/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/rollback-release`]);
         expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([
+        { activeReleaseId: "d".repeat(64) },
+        { activeActivationId: "00000000-0000-4000-8000-000000000004" },
+        { activeReleaseId: TARGET_RELEASE_ID },
+    ])("bound rollback refuses changed authority without POST: %j", async change => {
+        const fixture = boundRollbackFixture();
+        Object.assign(fixture.state, change);
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback", mutation_id: ROLLBACK_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            error: { code: "STALE_AUTHORITY", http_status: 409 },
+        });
+        expect(fixture.calls.map(call => call.method)).toEqual(["GET"]);
+    });
+
+    test.each([200, 503])("bound rollback verifies commit with response HTTP %s and replays read-only", async status => {
+        const fixture = boundRollbackFixture();
+        fixture.state.postStatus = status;
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).not.toBe(true);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback", rollback: true, mutation_id: ROLLBACK_ID,
+            active_release_id: TARGET_RELEASE_ID, activation_id: ROLLBACK_ID,
+            previous_release_id: RELEASE_ID, previous_activation_id: MUTATION_ID,
+        });
+        const replay = await fixture.invoke(boundRollbackArgs);
+        expect(replay.isError).not.toBe(true);
+        expect(parsed(replay)).toEqual(parsed(response));
+        expect(fixture.calls.filter(call => call.method === "POST").map(call => call.body)).toEqual([{
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            mutation_id: ROLLBACK_ID,
+        }]);
+        expect(fixture.calls.some(call => call.path.endsWith(`/mutations/${ROLLBACK_ID}`))).toBe(true);
+        expect(response.content[0].text + replay.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each(["missing-journal", "wrong-fingerprint", "foreign-artifact"] as const)(
+        "bound replay cannot succeed with %s",
+        async fault => {
+            const fixture = boundRollbackFixture();
+            fixture.state.activeReleaseId = TARGET_RELEASE_ID;
+            fixture.state.activeActivationId = ROLLBACK_ID;
+            if (fault === "missing-journal") fixture.state.journalVisible = false;
+            if (fault === "wrong-fingerprint") fixture.state.fingerprint = "d".repeat(64);
+            if (fault === "foreign-artifact") fixture.state.artifactProject = "other";
+            const response = await fixture.invoke(boundRollbackArgs);
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({
+                mutation_id: ROLLBACK_ID, error: { code: "OUTCOME_UNKNOWN" },
+            });
+            expect(fixture.calls.every(call => call.method === "GET")).toBe(true);
+        },
+    );
+
+    test.each([409, 503])("bound rollback never refreshes CAS or auto-retries HTTP %s", async status => {
+        const fixture = boundRollbackFixture();
+        fixture.state.postStatus = status;
+        fixture.state.commit = false;
+        fixture.state.journalVisible = false;
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            mutation_id: ROLLBACK_ID, target_release_id: TARGET_RELEASE_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            error: { code: status === 409 ? "HTTP_ERROR" : "OUTCOME_UNKNOWN" },
+        });
+        expect(fixture.calls.filter(call => call.method === "POST")).toHaveLength(1);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([
+        "releaseId", "expectedActiveReleaseId", "expectedActivationId", "mutationId",
+    ] as const)("bound rollback rejects missing %s before HTTP", async field => {
+        const fixture = boundRollbackFixture();
+        await expect(fixture.invoke({ ...boundRollbackArgs, [field]: undefined })).rejects.toThrow("required together");
+        expect(fixture.calls).toEqual([]);
+    });
+
+    test.each([
+        { releaseId: "latest" }, { expectedActiveReleaseId: "absent" },
+        { expectedActivationId: "absent" }, { mutationId: "invalid" },
+        { releaseId: RELEASE_ID }, { mutationId: MUTATION_ID },
+    ])("bound rollback rejects invalid binding %j before HTTP", async override => {
+        const fixture = boundRollbackFixture();
+        await expect(fixture.invoke({ ...boundRollbackArgs, ...override })).rejects.toThrow();
+        expect(fixture.calls).toEqual([]);
+    });
+
+    test("bound rollback preserves identity on a denied authority read", async () => {
+        const fixture = boundRollbackFixture();
+        fixture.state.activeStatus = 403;
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback", mutation_id: ROLLBACK_ID,
+            error: { code: "HTTP_ERROR", http_status: 403 },
+        });
+        expect(fixture.calls.map(call => call.method)).toEqual(["GET"]);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each(["rollback", "get"])("frontend tool rejects internal binding fields for %s before HTTP", async action => {
+        const fixture = boundRollbackFixture();
+        let invoke: ToolInvocation | undefined;
+        registerFrontendTools({
+            tool(name, _description, _schema, handler) {
+                if (name === "frontend") invoke = handler;
+            },
+        }, fixture.http);
+        if (!invoke) throw new Error("Frontend tool not registered");
+        await expect(invoke({
+            action, ref: PROJECT_REF, id: DEPLOYMENT_ID, release_id: TARGET_RELEASE_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            mutation_id: ROLLBACK_ID,
+        })).rejects.toThrow("Invalid arguments");
+        expect(fixture.calls).toEqual([]);
     });
 
     test("default rollback requires a strict scoped previous-release snapshot before any mutation", async () => {

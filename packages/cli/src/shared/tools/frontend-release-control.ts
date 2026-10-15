@@ -7,6 +7,7 @@ import {
 } from "@supacloud/delivery/frontend-archive";
 import type { HttpResult } from "../transports/http";
 import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
+import { safeMutationStatus } from "../mutation-protocol";
 
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,20}$/u;
 const DEPLOYMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
@@ -81,7 +82,7 @@ function toolResponse(payload: object): ToolResponse {
 
 function releaseFailure(
     operation: string,
-    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "NO_ACTIVE_RELEASE"
+    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "STALE_AUTHORITY" | "NO_ACTIVE_RELEASE"
         | "NO_PREVIOUS_RELEASE" | "PREVIOUS_RELEASE_UNSUPPORTED",
     status: number | null,
 ): ToolResponse {
@@ -304,7 +305,7 @@ export async function getFrontendRelease(
     const response = await http.get(releasePath(projectRef, deploymentId, releaseId), {
         maxJsonBytes: RESPONSE_MAX_BYTES,
     });
-    const release = response.ok
+    const release = response.ok && response.status === 200
         ? releaseEnvelope(response.data, { projectRef, deploymentId, releaseId })
         : null;
     if (!release) {
@@ -318,6 +319,16 @@ export async function uploadFrontendRelease(
     projectRef: string,
     deploymentId: string,
     archivePath: string,
+): Promise<ToolResponse> {
+    return uploadFrontendReleaseWithReadback(http, projectRef, deploymentId, archivePath, true);
+}
+
+async function uploadFrontendReleaseWithReadback(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+    archivePath: string,
+    verifyReadback: boolean,
 ): Promise<ToolResponse> {
     const endpoint = releaseEndpoint(projectRef, deploymentId);
     const archive = await verifiedArchive(archivePath);
@@ -337,7 +348,7 @@ export async function uploadFrontendRelease(
     } finally {
         await archive.handle.close();
     }
-    const release = response.ok
+    const release = response.ok && (response.status === 200 || response.status === 201)
         ? releaseEnvelope(response.data, { projectRef, deploymentId, releaseId: archive.sha256 })
         : null;
     if (!release) {
@@ -347,6 +358,8 @@ export async function uploadFrontendRelease(
         }
         return uploadReadback(http, projectRef, deploymentId, archive.sha256, response.status);
     }
+    // Normal deploy verifies this artifact again during activation and its final active snapshot.
+    if (!verifyReadback) return toolResponse({ project_ref: projectRef, deployment_id: deploymentId, release });
     const readback = await http.get(`${endpoint}/${release.release_id}`, { maxJsonBytes: RESPONSE_MAX_BYTES });
     const verified = readback.ok
         ? releaseEnvelope(readback.data, { projectRef, deploymentId, releaseId: release.release_id })
@@ -466,7 +479,7 @@ async function uploadReadback(
     const response = await http.get(releasePath(projectRef, deploymentId, releaseId), {
         maxJsonBytes: RESPONSE_MAX_BYTES,
     });
-    const release = response.ok
+    const release = response.ok && response.status === 200
         ? releaseEnvelope(response.data, { projectRef, deploymentId, releaseId })
         : null;
     if (!release) {
@@ -529,25 +542,17 @@ function publicMutationReceipt(candidate: unknown, expected: {
 }): PublicMutationReceipt | null {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
     const envelope = candidate as Record<string, unknown>;
-    const mutation = envelope.mutation as Record<string, unknown> | null;
-    const expectedKeys = [
-        "project_ref", "mutation_id", "operation", "resource_key", "request_fingerprint",
-        "principal", "status", "checkpoint", "receipt", "response_status", "failure_code",
-        "lease", "completed_at", "created_at", "updated_at",
-    ] as const;
+    const mutation = safeMutationStatus(envelope.mutation);
     if (!mutation || !exactKeys(envelope, ["project_ref", "mutation"])
-        || !exactKeys(mutation, expectedKeys) || envelope.project_ref !== expected.projectRef
+        || envelope.project_ref !== expected.projectRef
         || mutation.project_ref !== expected.projectRef || mutation.mutation_id !== expected.mutationId
         || mutation.resource_key !== expected.resourceKey
-        || mutation.request_fingerprint !== expected.requestFingerprint
-        || typeof mutation.operation !== "string" || typeof mutation.status !== "string"
-        || !(mutation.response_status === null || Number.isSafeInteger(mutation.response_status))
-        || !(mutation.failure_code === null || typeof mutation.failure_code === "string")) return null;
+        || mutation.request_fingerprint !== expected.requestFingerprint) return null;
     return {
         operation: mutation.operation,
         status: mutation.status,
-        responseStatus: mutation.response_status as number | null,
-        failureCode: mutation.failure_code as string | null,
+        responseStatus: mutation.response_status,
+        failureCode: mutation.failure_code,
     };
 }
 
@@ -576,19 +581,14 @@ async function activeReleaseReadback(
     http: FrontendReleaseHttp,
     identity: ActivationIdentity,
 ): Promise<ActiveReleaseReadback> {
-    const snapshot = await readActiveFrontendRelease(http, identity.projectRef, identity.deploymentId);
-    if ("failure" in snapshot) return { release: null, status: snapshot.status };
-    const inventory = snapshot.inventory;
-    if (inventory.active_release_id !== identity.releaseId
-        || inventory.active_activation_id !== identity.mutationId) {
-        return { release: null, status: 200 };
-    }
+    const snapshot = await activeReleaseSnapshotReadback(http, identity);
+    if (!snapshot.release) return snapshot;
     const releaseRead = await http.get(releasePath(
         identity.projectRef,
         identity.deploymentId,
         identity.releaseId,
     ), { maxJsonBytes: RESPONSE_MAX_BYTES });
-    const release = releaseRead.ok
+    const release = releaseRead.ok && releaseRead.status === 200
         ? releaseEnvelope(releaseRead.data, {
             projectRef: identity.projectRef,
             deploymentId: identity.deploymentId,
@@ -596,6 +596,20 @@ async function activeReleaseReadback(
         })
         : null;
     return { release, status: releaseRead.status };
+}
+
+async function activeReleaseSnapshotReadback(
+    http: FrontendReleaseHttp,
+    identity: ActivationIdentity,
+): Promise<ActiveReleaseReadback> {
+    const snapshot = await readActiveFrontendRelease(http, identity.projectRef, identity.deploymentId);
+    if ("failure" in snapshot) return { release: null, status: snapshot.status };
+    const inventory = snapshot.inventory;
+    if (inventory.active_release_id !== identity.releaseId
+        || inventory.active_activation_id !== identity.mutationId) {
+        return { release: null, status: 200 };
+    }
+    return { release: inventory.releases[0] ?? null, status: 200 };
 }
 
 async function readActiveFrontendRelease(
@@ -653,7 +667,7 @@ export async function publishFrontendRelease(
     http: FrontendReleaseHttp,
     projectRef: string,
     deploymentId: string,
-    archivePath: string,
+    archiveSource: string | (() => Promise<{ archivePath: string; cleanup(): Promise<void> }>),
     expectedTreeSha256: string,
 ): Promise<ToolResponse> {
     const authority = await readActiveFrontendRelease(http, projectRef, deploymentId);
@@ -667,7 +681,13 @@ export async function publishFrontendRelease(
             release: current, unchanged: true,
         });
     }
-    const uploaded = await uploadFrontendRelease(http, projectRef, deploymentId, archivePath);
+    const archive = typeof archiveSource === "string" ? { archivePath: archiveSource } : await archiveSource();
+    let uploaded: ToolResponse;
+    try {
+        uploaded = await uploadFrontendReleaseWithReadback(http, projectRef, deploymentId, archive.archivePath, false);
+    } finally {
+        if ("cleanup" in archive) await archive.cleanup();
+    }
     if (uploaded.isError) return uploaded;
     const value: unknown = JSON.parse(uploaded.content[0]!.text);
     const envelope = value && typeof value === "object" && !Array.isArray(value)
@@ -680,11 +700,11 @@ export async function publishFrontendRelease(
         return releaseFailure("frontend.deploy", "INVALID_RESPONSE", 200);
     }
     const mutationId = crypto.randomUUID();
-    const activated = await activateFrontendRelease(http, {
+    const activated = await activateFrontendReleaseWithReadback(http, {
         projectRef, deploymentId, releaseId: release.release_id, mutationId,
         expectedActiveReleaseId: inventory.active_release_id ?? "absent",
         expectedActivationId: inventory.active_activation_id ?? "absent",
-    });
+    }, activeReleaseSnapshotReadback);
     const activatedPayload: Record<string, unknown> = JSON.parse(activated.content[0]!.text);
     const active = activatedPayload.release;
     const treeMismatch = !activated.isError && (!active || typeof active !== "object"
@@ -702,14 +722,91 @@ export async function publishFrontendRelease(
     };
 }
 
+type FrontendRollbackIdentity = ActivationIdentity & {
+    expectedActiveReleaseId: string;
+    expectedActivationId: string;
+};
+
+function boundRollbackResponse(result: ToolResponse, input: FrontendRollbackIdentity): ToolResponse {
+    const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+    return {
+        ...toolResponse({
+            ...payload,
+            operation: "frontend.rollback",
+            project_ref: input.projectRef,
+            deployment_id: input.deploymentId,
+            target_release_id: input.releaseId,
+            mutation_id: input.mutationId,
+            expected_active_release_id: input.expectedActiveReleaseId,
+            expected_activation_id: input.expectedActivationId,
+            ...(!result.isError ? {
+                rollback: true,
+                previous_release_id: input.expectedActiveReleaseId,
+                previous_activation_id: input.expectedActivationId,
+            } : {}),
+        }),
+        ...(result.isError ? { isError: true } : {}),
+    };
+}
+
+async function rollbackBoundFrontendRelease(
+    http: FrontendReleaseHttp,
+    input: FrontendRollbackIdentity,
+): Promise<ToolResponse> {
+    const authority = await readActiveFrontendRelease(http, input.projectRef, input.deploymentId);
+    if ("failure" in authority) return boundRollbackResponse(authority.failure, input);
+    const current = authority.inventory;
+    // A repeated completed request must prove its original fingerprint, not just its target.
+    if (current.active_release_id === input.releaseId && current.active_activation_id === input.mutationId) {
+        return boundRollbackResponse(await activationReadback(http, input, input.mutationId, 200), input);
+    }
+    if (current.active_release_id !== input.expectedActiveReleaseId
+        || current.active_activation_id !== input.expectedActivationId) {
+        return boundRollbackResponse(releaseFailure("frontend.rollback", "STALE_AUTHORITY", 409), input);
+    }
+    const target = await getFrontendRelease(http, input.projectRef, input.deploymentId, input.releaseId);
+    if (target.isError) return boundRollbackResponse(target, input);
+    return boundRollbackResponse(await activateFrontendRelease(http, input), input);
+}
+
 export async function rollbackFrontendRelease(
     http: FrontendReleaseHttp,
     projectRef: string,
     deploymentId: string,
     releaseId?: string,
+    options: {
+        expectedActiveReleaseId?: string;
+        expectedActivationId?: string;
+        mutationId?: string;
+    } = {},
 ): Promise<ToolResponse> {
     if (releaseId !== undefined && !RELEASE_ID_PATTERN.test(releaseId)) {
         throw new Error("'release_id' must be a SHA-256 digest");
+    }
+    const bound = options.expectedActiveReleaseId !== undefined
+        || options.expectedActivationId !== undefined
+        || options.mutationId !== undefined;
+    if (bound) {
+        const { expectedActiveReleaseId, expectedActivationId, mutationId } = options;
+        if (releaseId === undefined || expectedActiveReleaseId === undefined
+            || expectedActivationId === undefined || mutationId === undefined) {
+            throw new Error("'release_id', 'expected_active_release_id', 'expected_activation_id', and 'mutation_id' are required together for a bound rollback");
+        }
+        if (!RELEASE_ID_PATTERN.test(expectedActiveReleaseId)) {
+            throw new Error("'expected_active_release_id' must be a SHA-256 digest");
+        }
+        if (!MUTATION_ID_PATTERN.test(expectedActivationId)) {
+            throw new Error("'expected_activation_id' must be a UUIDv4");
+        }
+        if (!MUTATION_ID_PATTERN.test(mutationId)) {
+            throw new Error("'mutation_id' must be a UUIDv4");
+        }
+        if (releaseId === expectedActiveReleaseId || mutationId === expectedActivationId) {
+            throw new Error("Bound rollback requires a different target release and a distinct mutation UUID");
+        }
+        return rollbackBoundFrontendRelease(http, {
+            projectRef, deploymentId, releaseId, expectedActiveReleaseId, expectedActivationId, mutationId,
+        });
     }
     const authority: ActiveReleaseSnapshot & { previousRelease?: FrontendReleaseRecord } = releaseId === undefined
         ? await readPreviousFrontendRelease(http, projectRef, deploymentId)
@@ -821,6 +918,14 @@ export async function activateFrontendRelease(
         mutationId: string;
     },
 ): Promise<ToolResponse> {
+    return activateFrontendReleaseWithReadback(http, input, activeReleaseReadback);
+}
+
+async function activateFrontendReleaseWithReadback(
+    http: FrontendReleaseHttp,
+    input: ActivationIdentity & { expectedActiveReleaseId: string; expectedActivationId: string },
+    readActive: (http: FrontendReleaseHttp, identity: ActivationIdentity) => Promise<ActiveReleaseReadback>,
+): Promise<ToolResponse> {
     const mutationId = input.mutationId;
     if (!MUTATION_ID_PATTERN.test(mutationId)) throw new Error("'mutation_id' must be a UUIDv4");
     if (input.expectedActiveReleaseId !== "absent" && !RELEASE_ID_PATTERN.test(input.expectedActiveReleaseId)) {
@@ -839,14 +944,14 @@ export async function activateFrontendRelease(
         responseTimeoutMs: MUTATION_RESPONSE_TIMEOUT_MS,
     });
     const release = activationReceipt(response.data, { ...input, mutationId });
-    if (!response.ok || !release) {
+    if (!response.ok || response.status !== 200 || !release) {
         if (response.status >= 400 && response.status < 500 && response.status !== 408
             && !response.transportError) {
             return releaseFailure("frontend.activate_release", "HTTP_ERROR", response.status);
         }
         return activationReadback(http, input, mutationId, response.status);
     }
-    const readback = await activeReleaseReadback(http, { ...input, mutationId });
+    const readback = await readActive(http, { ...input, mutationId });
     if (!readback.release || readback.release.tree_sha256 !== release.tree_sha256) {
         return releaseFailure("frontend.activate_release", "OUTCOME_UNKNOWN", readback.status);
     }
@@ -876,7 +981,7 @@ async function activationReadback(
         { maxJsonBytes: RESPONSE_MAX_BYTES },
     );
     const mutationEnvelope = mutationRead.data as Record<string, unknown> | null;
-    const mutation = mutationRead.ok ? publicMutationReceipt(mutationRead.data, {
+    const mutation = mutationRead.ok && mutationRead.status === 200 ? publicMutationReceipt(mutationRead.data, {
         projectRef: input.projectRef,
         mutationId,
         resourceKey: activationResourceKey(input.deploymentId),

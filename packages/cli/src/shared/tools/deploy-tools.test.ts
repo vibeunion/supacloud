@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { createBuildEnvironment, createFrontendArchive, registerDeployTools } fr
 import { registerFrontendTools } from "./frontend-tools";
 import { registerDeveloperExperienceTools } from "./developer-experience-tools";
 import { requireProjectDeploymentProtocol } from "./project-deployment";
+import { publishFrontendRelease } from "./frontend-release-control";
 import type { ToolInvocation, ToolResult } from "../tool-server";
 import type { ToolSchema } from "../schema";
 import { HttpTransport } from "../transports/http";
@@ -263,46 +264,28 @@ describe("current deployment only", () => {
         expect(api.requests).toEqual([]);
     });
 
-    test("uploads one bound Web artifact without reading CAS or activating from the CLI", async () => {
+    test("explicit backend deployment neither builds nor uploads the configured frontend", async () => {
         const directory = await workspace({
-            application: { id: "orders" }, frontend: { id: "web", root: ".", outputDirectory: "dist" },
+            application: { id: "orders", environmentId: "test" },
+            frontend: { id: "web", root: ".", buildCommand: "touch build-ran", outputDirectory: "dist" },
         });
-        const archive = await createFrontendArchive(join(directory, "dist"));
-        const release = {
-            schema: "supacloud.frontend-release.v2", project_ref: "test-ref", deployment_id: "web",
-            release_id: archive.sha256, sha256: archive.sha256, tree_sha256: archive.treeSha256,
-            size_bytes: archive.archiveBytes, file_count: archive.fileCount,
-            created_at: "2026-10-13T00:00:00.000Z", kind: "prebuilt_static", archive_format: "tar.zst",
-        };
-        await archive.cleanup();
-        const api = server(async request => {
-            const path = new URL(request.url).pathname;
-            if (path.endsWith("/protocol")) return Response.json(protocol);
-            if (request.method === "GET" && path.endsWith("/frontend/deployments")) {
-                return Response.json([{ id: "web", name: "web", framework: "static", output_dir: "dist" }]);
-            }
-            if (request.method === "POST" && path.endsWith("/deployments/web-release")) {
-                expect(new URL(request.url).searchParams.get("deployment_id")).toBe("web");
-                expect((await request.arrayBuffer()).byteLength).toBe(release.size_bytes);
-                return Response.json({
-                    ok: true, project_ref: "test-ref", environment_id: "test",
-                    deployment_id: "web", release_id: release.release_id, release,
-                }, { status: 201 });
-            }
-            return new Response("Unexpected legacy request", { status: 400 });
-        });
+        const api = server();
         const tool = deploy(api.http, directory);
-        await tool.run({ skip_build: true, json: true });
+        await tool.run({ backend: true, json: true });
         expect(tool.calls).toHaveLength(1);
-        expect(tool.calls[0]?.web_release).toEqual({ deployment_id: "web", release_id: release.release_id });
+        expect(tool.calls[0]).not.toHaveProperty("web_release");
         expect(api.requests).toEqual([
             "GET /v1/projects/test-ref/environments/test/deployments/protocol",
-            "GET /v1/projects/test-ref/frontend/deployments",
-            "POST /v1/projects/test-ref/environments/test/deployments/web-release",
         ]);
+        await expect(readFile(join(directory, "build-ran"))).rejects.toThrow();
     });
 
-    test.each(["static", "mixed", "initial", "conflict", "unknown", "unchanged", "tree-mismatch"] as const)(
+    test.each([
+        "static", "mixed", "initial", "conflict", "unknown", "unchanged", "tree-mismatch",
+        "cli", "lazy", "upload-unknown", "upload-malformed", "upload-rejected", "upload-pending",
+        "active-stale", "activation-stale", "active-tree-mismatch", "active-unavailable",
+        "active-nonfinal", "active-foreign", "active-malformed",
+    ] as const)(
         "assets-only publication preserves backend boundaries: %s", async mode => {
             const directory = await workspace({
                 ...(mode === "mixed" ? { application: { id: "orders" },
@@ -310,7 +293,12 @@ describe("current deployment only", () => {
                         api: { type: "edge_function", root: "." },
                         web: { type: "frontend", root: ".", id: "web", outputDirectory: "dist" },
                     },
-                } : { frontend: { id: "web", root: ".", outputDirectory: "dist" } }),
+                } : { frontend: {
+                    id: "web", root: ".", outputDirectory: "dist",
+                    ...(mode === "cli" ? {
+                        buildCommand: "node -e \"require('node:fs').appendFileSync('build-ran','once'); console.log('build-output'); console.error('build-diagnostic')\"",
+                    } : {}),
+                } }),
             });
             if (mode === "mixed") {
                 await mkdir(join(directory, "supacloud", "fa"), { recursive: true });
@@ -338,21 +326,34 @@ describe("current deployment only", () => {
                     return Response.json([{ id: "web", name: "web", framework: "static", output_dir: "dist" }]);
                 }
                 if (request.method === "GET" && path === `${base}/active-release`) {
+                    if (activations > 0 && mode === "active-unavailable") return Response.json({}, { status: 403 });
+                    const observed = activations > 0 && mode === "active-stale" ? previous
+                        : activations > 0 && mode === "active-tree-mismatch" ? { ...active, tree_sha256: "e".repeat(64) }
+                        : active;
                     return Response.json({
-                        project_ref: "test-ref", deployment_id: "web",
-                        active_release_id: mode === "initial" && activations === 0 ? null : active.release_id,
-                        active_activation_id: mode === "initial" && activations === 0 ? null : activationId,
-                        releases: mode === "initial" && activations === 0 ? [] : [active], next_cursor: null,
-                    });
+                        project_ref: activations > 0 && mode === "active-foreign" ? "foreign" : "test-ref",
+                        deployment_id: "web",
+                        active_release_id: mode === "initial" && activations === 0 ? null : observed.release_id,
+                        active_activation_id: mode === "initial" && activations === 0 ? null
+                            : activations > 0 && mode === "activation-stale" ? previousActivation : activationId,
+                        releases: (mode === "initial" && activations === 0)
+                            || (activations > 0 && mode === "active-malformed") ? [] : [observed],
+                        next_cursor: null,
+                    }, { status: activations > 0 && mode === "active-nonfinal" ? 202 : 200 });
                 }
                 if (path === `${base}/releases` && request.method === "POST") {
                     expect((await request.arrayBuffer()).byteLength).toBe(release.size_bytes);
+                    expect(request.headers.get("x-supacloud-content-sha256")).toBe(release.sha256);
+                    if (mode === "upload-rejected") return Response.json({}, { status: 403 });
+                    if (mode === "upload-unknown") return Response.json({}, { status: 503 });
+                    if (mode === "upload-malformed") return Response.json({}, { status: 201 });
                     return Response.json({ project_ref: "test-ref", deployment_id: "web",
                         release: mode === "tree-mismatch" ? { ...release, tree_sha256: "c".repeat(64) } : release,
-                    }, { status: 201 });
+                    }, { status: mode === "upload-pending" ? 202 : 201 });
                 }
                 if (path === `${base}/releases/${release.release_id}` && request.method === "GET") {
-                    return Response.json({ project_ref: "test-ref", deployment_id: "web", release });
+                    return Response.json({ project_ref: "test-ref", deployment_id: "web", release },
+                        { status: mode === "upload-pending" ? 202 : 200 });
                 }
                 if (path === `${base}/releases/${release.release_id}/activate` && request.method === "POST") {
                     activations++;
@@ -373,16 +374,45 @@ describe("current deployment only", () => {
                 return Response.json({ code: "UNEXPECTED_REQUEST" }, { status: 404 });
             });
             const tool = deploy(api.http, directory);
-            const result = await tool.run({ skip_build: true, ...(mode === "mixed" ? { assets_only: true } : {}) });
+            let result: ToolResult;
+            if (mode === "cli") {
+                const processResult = await runCli(directory, api.url, ["deploy", "--json"]);
+                expect(processResult.exitCode).toBe(0);
+                expect(processResult.stderr).toContain("build-output");
+                expect(processResult.stderr).toContain("build-diagnostic");
+                expect(await readFile(join(directory, "build-ran"), "utf8")).toBe("once");
+                result = { content: [{ type: "text", text: processResult.stdout }] };
+            } else if (mode === "lazy") {
+                let created = 0;
+                let archivePath = "";
+                result = await publishFrontendRelease(api.http, "test-ref", "web", async () => {
+                    created++;
+                    const archive = await createFrontendArchive(join(directory, "dist"));
+                    archivePath = archive.archivePath;
+                    return archive;
+                }, release.tree_sha256);
+                expect(created).toBe(1);
+                await expect(readFile(archivePath)).rejects.toThrow();
+            } else {
+                const compression = mode === "unchanged" ? spyOn(Bun, "zstdCompress").mockImplementation(() => {
+                    throw new Error("Unchanged deployment must not compress an archive");
+                }) : undefined;
+                try {
+                    result = await tool.run({ skip_build: true });
+                    if (compression) expect(compression).not.toHaveBeenCalled();
+                } finally {
+                    compression?.mockRestore();
+                }
+            }
             const receipt = JSON.parse(result.content[0]!.text);
             expect(tool.calls).toEqual([]);
-            expect(activations).toBe(mode === "unchanged" || mode === "tree-mismatch" ? 0 : 1);
-            if (mode === "conflict" || mode === "unknown") {
+            expect(activations).toBe(["unchanged", "tree-mismatch", "upload-rejected", "upload-pending"].includes(mode) ? 0 : 1);
+            if (mode === "conflict" || mode === "unknown" || mode.startsWith("active-") || mode === "activation-stale") {
                 expect(result.isError).toBe(true);
                 expect(receipt.mutation_id).toBeString();
                 expect(receipt.target_release_id).toBe(release.release_id);
-                expect(receipt.error.code).toBe(mode === "unknown" ? "OUTCOME_UNKNOWN" : "HTTP_ERROR");
-            } else if (mode === "tree-mismatch") {
+                expect(receipt.error.code).toBe(mode === "conflict" ? "HTTP_ERROR" : "OUTCOME_UNKNOWN");
+            } else if (mode === "tree-mismatch" || mode === "upload-rejected" || mode === "upload-pending") {
                 expect(result.isError).toBe(true);
             } else {
                 expect(result.isError).not.toBe(true);
@@ -394,14 +424,71 @@ describe("current deployment only", () => {
             }
             expect(api.requests.every(path => path.includes("/frontend/") || path.endsWith("/protocol")
                 || (mode === "unknown" && path.includes("/mutations/")))).toBe(true);
+            const preflight = mode === "lazy" ? [] : [
+                "GET /v1/projects/test-ref/environments/test/deployments/protocol",
+                "GET /v1/projects/test-ref/frontend/deployments",
+            ];
+            if (mode === "unchanged") {
+                expect(api.requests).toEqual([...preflight, `GET ${base}/active-release`]);
+            } else if (!result.isError) {
+                expect(api.requests).toEqual([
+                    ...preflight, `GET ${base}/active-release`, `POST ${base}/releases`,
+                    ...(["upload-unknown", "upload-malformed"].includes(mode) ? [`GET ${base}/releases/${release.release_id}`] : []),
+                    `POST ${base}/releases/${release.release_id}/activate`, `GET ${base}/active-release`,
+                ]);
+            }
         },
     );
+
+    test("does not prepare an archive after a failed authority read", async () => {
+        const api = server(() => Response.json({}, { status: 409 }));
+        let prepared = false;
+        const result = await publishFrontendRelease(api.http, "test-ref", "web", async () => {
+            prepared = true;
+            throw new Error("Archive preparation must not run");
+        }, "a".repeat(64));
+        expect(result.isError).toBe(true);
+        expect(prepared).toBe(false);
+        expect(api.requests).toEqual(["GET /v1/projects/test-ref/frontend/deployments/web/active-release"]);
+    });
+
+    test("cleans a lazily prepared archive when its upload fails", async () => {
+        const api = server(() => Response.json({
+            project_ref: "test-ref", deployment_id: "web",
+            active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+        }));
+        const directory = await workspace();
+        let cleaned = false;
+        await expect(publishFrontendRelease(api.http, "test-ref", "web", async () => ({
+            archivePath: join(directory, "missing.tar.zst"),
+            cleanup: async () => { cleaned = true; },
+        }), "a".repeat(64))).rejects.toThrow();
+        expect(cleaned).toBe(true);
+        expect(api.requests).toHaveLength(1);
+    });
 
     test("assets-only requires explicit frontend configuration before remote access", async () => {
         const directory = await workspace();
         const api = server();
         await expect(deploy(api.http, directory).run({ assets_only: true })).rejects.toThrow("frontend configuration");
         expect(api.requests).toEqual([]);
+    });
+
+    test("status is read-only in production and never builds or publishes", async () => {
+        const directory = await workspace({ frontend: { buildCommand: "touch build-ran", outputDirectory: "dist" } });
+        const deploymentId = "11234567-89ab-4def-8123-456789abcdef";
+        const api = server(() => Response.json({
+            schema: "supacloud.project-deployment-status.v1", deployment_id: deploymentId,
+            operation: "application.release.deploy", project_ref: "test-ref", application_id: "orders",
+            environment_id: "production", status: "pending", phase: "queued",
+        }));
+        const result = await runCli(directory, api.url, ["deploy", "--status", deploymentId], {
+            SUPACLOUD_ENV: "production", SUPACLOUD_READ_ONLY: "true",
+        });
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({ status: "pending", phase: "queued" });
+        expect(api.requests).toEqual([`GET /v1/projects/test-ref/environments/production/deployments/${deploymentId}`]);
+        await expect(readFile(join(directory, "build-ran"))).rejects.toThrow();
     });
 
     test.each(["exact", "missing", "duplicate"] as const)(
@@ -431,11 +518,11 @@ describe("current deployment only", () => {
         },
     );
 
-    test("mixed frontend repositories require explicit assets-only selection", async () => {
+    test("explicit backend deployment still rejects a legacy manifest", async () => {
         const directory = await workspace({ frontend: { outputDirectory: "dist" } });
         await writeFile(join(directory, "deploy-manifest.json"), "{}");
         const api = server();
-        await expect(deploy(api.http, directory).run({ skip_build: true })).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
+        await expect(deploy(api.http, directory).run({ skip_build: true, backend: true })).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
         expect(api.requests).toEqual([]);
     });
 

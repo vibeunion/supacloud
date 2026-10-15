@@ -14,6 +14,30 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.99.0](https://github.com/vibeunion/supacloud/compare/cli-v0.98.0...cli-v0.99.0) (2026-10-15)
+
+
+### Features
+
+* **deploy:** separate frontend releases from backend jobs ([#1939](https://github.com/vibeunion/supacloud/issues/1939)) ([2230abe](https://github.com/vibeunion/supacloud/commit/2230abea24fd0a9fe99cdea91ad72f35274f12d1))
+
+
+### Performance Improvements
+
+* **cli:** streamline direct frontend deploy ([#1934](https://github.com/vibeunion/supacloud/issues/1934)) ([04e11ad](https://github.com/vibeunion/supacloud/commit/04e11ad81b8ca07405177263e05d33f26b1d8a08))
+
+## [0.98.0](https://github.com/vibeunion/supacloud/compare/cli-v0.97.1...cli-v0.98.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** bind internal frontend rollback to release receipts ([#1931](https://github.com/vibeunion/supacloud/issues/1931)) ([d349f79](https://github.com/vibeunion/supacloud/commit/d349f7936fe67d5644846d79572030414c7d8726))
+
+
+### Bug Fixes
+
+* **cli:** launch installed executable with Bun ([#1926](https://github.com/vibeunion/supacloud/issues/1926)) ([343d5b5](https://github.com/vibeunion/supacloud/commit/343d5b5d4b06321c107856f0c3fdfde413c72f83))
+
 ## [0.97.1](https://github.com/vibeunion/supacloud/compare/cli-v0.97.0...cli-v0.97.1) (2026-10-15)
 
 

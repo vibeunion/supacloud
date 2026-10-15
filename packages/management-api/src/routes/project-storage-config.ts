@@ -45,7 +45,7 @@ export interface ProjectStorageRouteDependencies {
 
 export function createProjectStorageConfigRoutes(dependencies: ProjectStorageRouteDependencies) {
   return new Elysia({ prefix: '/v1/projects/:ref/storage' })
-    .beforeHandle(async ({ request }) => {
+    .onBeforeHandle(async ({ request }) => {
       const denied = await dependencies.authorize(request);
       if (denied) return status(denied.status, denied.body);
     })

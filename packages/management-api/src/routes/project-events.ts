@@ -11,7 +11,7 @@ export function createProjectEventRoutes(dependencies: ProjectEventRouteDependen
   const authorize = dependencies.authorize ?? authMiddleware.requireProjectOrAdminAuth;
   const list = dependencies.list ?? listUnifiedEvents;
   return new Elysia({ prefix: "/v1/projects/:ref/events" })
-    .beforeHandle(async ({ params, request }) => {
+    .onBeforeHandle(async ({ params, request }) => {
       const authError = await authorize(request, params.ref);
       if (authError) return status(authError.status, authError.body);
     })

@@ -902,7 +902,7 @@ async function buildProjectSettingsResponse(
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Group guard: uniformly protects all project-scoped routes (including addConfigRoutes factory and .use subroutes),
   // preventing individual endpoint omissions that could allow delegated members/viewers to bypass tenant.config.read / operations.read
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const ref = (params as { ref?: string }).ref;
     if (!ref) return;
     const authError = await requireProjectOrAdminAuth(request, ref);

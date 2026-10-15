@@ -6,13 +6,13 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
-import { ApplicationIdSchema, type ApplicationDeployRequest } from "@supacloud/delivery";
+import { ApplicationIdSchema } from "@supacloud/delivery";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
-import { publishFrontendRelease, uploadProjectWebRelease } from "./frontend-release-control";
+import { publishFrontendRelease } from "./frontend-release-control";
 import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
-import { requireProjectDeploymentProtocol } from "./project-deployment";
+import { readProjectDeploymentStatus, requireProjectDeploymentProtocol } from "./project-deployment";
 
 const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 
@@ -101,6 +101,8 @@ export const deployToolSchema = {
     cwd: optional(Type.String(), "Project directory (default: current directory)"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
     assets_only: optional(Type.Boolean(), "Publish only configured static assets; leave backend Functions, schedules and migrations unchanged"),
+    backend: optional(Type.Boolean(), "Publish the application backend independently; do not build or activate frontend assets"),
+    status: optional(Type.String({ format: "uuid" }), "Read a backend deployment status without publishing"),
     json: optional(Type.Boolean(), "Print only the final JSON result"),
 };
 
@@ -523,6 +525,13 @@ export async function createFrontendArchive(outputDirectory: string): Promise<{
     cleanup(): Promise<void>;
 }> {
     const collected = await collectArchiveFiles(outputDirectory);
+    return createCollectedFrontendArchive(outputDirectory, collected);
+}
+
+async function createCollectedFrontendArchive(
+    outputDirectory: string,
+    collected: Awaited<ReturnType<typeof collectArchiveFiles>>,
+) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "supacloud-deploy-"));
     const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.tar.zst`);
     try {
@@ -544,29 +553,14 @@ export async function createFrontendArchive(outputDirectory: string): Promise<{
     }
 }
 
-function payload(response: ToolResponse): Record<string, unknown> {
-    if (response.isError) throw new Error(response.content[0]?.text || "Deployment operation failed");
-    const text = response.content.find((chunk) => chunk.type === "text")?.text;
-    const parsed = text ? record(JSON.parse(text)) : null;
-    if (!parsed) throw new Error("Deployment operation returned an invalid response");
-    return parsed;
-}
-
-interface StagedApplicationWeb {
-    request?: ApplicationDeployRequest["web_release"];
-    result?: ToolResponse;
-}
-
-async function stageApplicationWebRelease(
+async function publishConfiguredFrontend(
     http: HttpTransport,
     projectRef: string,
-    environmentId: string,
     configRoot: string,
     skipBuild: boolean,
     json: boolean,
     environmentVariables?: Readonly<Record<string, string>>,
-    assetsOnly = false,
-): Promise<StagedApplicationWeb | null> {
+): Promise<ToolResponse | null> {
     const target = selectFrontendTarget(configRoot, await readDeployConfig(configRoot));
     if (!target) return null;
     const projectDirectory = target.root;
@@ -594,29 +588,11 @@ async function stageApplicationWebRelease(
         await runBuild(buildCommand, projectDirectory, build.env, json);
     }
 
-    const archive = await createFrontendArchive(outputDirectory);
-    try {
-        if (assetsOnly) {
-            return { result: await publishFrontendRelease(
-                http, projectRef, selected.id, archive.archivePath, archive.treeSha256,
-            ) };
-        }
-        const uploaded = payload(await uploadProjectWebRelease(
-            http, projectRef, environmentId, selected.id, archive.archivePath,
-        ));
-        const release = record(uploaded.release);
-        const releaseId = requiredString(release?.release_id, "release.release_id");
-        if (releaseId !== archive.sha256) throw new Error("Uploaded Web release identity does not match the local archive");
-        if (release?.tree_sha256 !== archive.treeSha256) throw new Error("Uploaded Web release tree does not match the local build");
-        return {
-            request: {
-                deployment_id: selected.id,
-                release_id: releaseId,
-            },
-        };
-    } finally {
-        await archive.cleanup();
-    }
+    const collected = await collectArchiveFiles(outputDirectory);
+    return publishFrontendRelease(
+        http, projectRef, selected.id,
+        () => createCollectedFrontendArchive(outputDirectory, collected), collected.treeSha256,
+    );
 }
 
 export function registerDeployTools(
@@ -632,6 +608,13 @@ export function registerDeployTools(
             const invocationDirectory = resolve(String(args.cwd || options.cwd || process.cwd()));
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");
+            if (args.assets_only === true && args.backend === true) throw new Error("Choose either frontend assets or backend deployment");
+            if (typeof args.status === "string") {
+                if (args.assets_only === true || args.backend === true) throw new Error("Status cannot be combined with publishing options");
+                const environmentId = options.environment?.trim() || options.application?.environmentId?.trim();
+                if (!environmentId) throw new Error("Deployment status requires SUPACLOUD_ENV");
+                return readProjectDeploymentStatus(http, projectRef, environmentId, args.status);
+            }
             const configRoot = await findDeployConfigRoot(invocationDirectory, options.environment ?? undefined);
 
             const config = await readDeployConfig(configRoot);
@@ -642,9 +625,7 @@ export function registerDeployTools(
                 } : undefined;
             const legacyManifest = await hasProjectReleaseManifest(configRoot);
             const assetsOnly = args.assets_only === true
-                || (!application?.id && selectFrontendTarget(configRoot, config) !== null
-                    && !legacyManifest
-                    && !Object.values(config.targets ?? {}).some(target => target.type === "edge_function"));
+                || (args.backend !== true && selectFrontendTarget(configRoot, config) !== null);
             if (assetsOnly) {
                 if (!selectFrontendTarget(configRoot, config)) {
                     throw new Error("Static asset deployment requires a frontend configuration in supacloud.json");
@@ -654,12 +635,12 @@ export function registerDeployTools(
                     throw new Error("Static asset deployment requires SUPACLOUD_ENV");
                 }
                 await requireProjectDeploymentProtocol(http, projectRef, environmentId);
-                const staged = await stageApplicationWebRelease(
-                    http, projectRef, environmentId, configRoot,
-                    args.skip_build === true, args.json === true, options.environmentVariables, true,
+                const result = await publishConfiguredFrontend(
+                    http, projectRef, configRoot,
+                    args.skip_build === true, args.json === true, options.environmentVariables,
                 );
-                if (!staged?.result) throw new Error("Static asset deployment did not produce a receipt");
-                return staged.result;
+                if (!result) throw new Error("Static asset deployment did not produce a receipt");
+                return result;
             }
             if (legacyManifest) {
                 throw new Error(`${DEPLOYMENT_UPGRADE} Replace deploy-manifest.json with the current application delivery configuration; no remote mutation was performed.`);
@@ -682,15 +663,6 @@ export function registerDeployTools(
                     throw new Error("Application profile must set only one of SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
                 }
                 await requireProjectDeploymentProtocol(http, projectRef, environmentId);
-                const stagedWeb = await stageApplicationWebRelease(
-                    http,
-                    projectRef,
-                    environmentId,
-                    configRoot,
-                    args.skip_build === true,
-                    args.json === true,
-                    options.environmentVariables,
-                );
                 const result = await options.applicationRelease({
                     action: "release",
                     ref: projectRef,
@@ -701,7 +673,6 @@ export function registerDeployTools(
                     ...(configurationId ? { configuration_id: configurationId } : {}),
                     ...(application.manifestPath ? { manifest_path: application.manifestPath } : {}),
                     ...(args.skip_build === true ? { skip_build: true } : {}),
-                    ...(stagedWeb?.request === undefined ? {} : { web_release: stagedWeb.request }),
                     ...(args.json === true ? { format: "json", json: true } : {}),
                 });
                 return result;

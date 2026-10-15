@@ -145,7 +145,7 @@ test("cache bypasses native responses, cookies, errors, oversized output and req
   for (const scenario of ["native", "cookie", "error", "large", "request-no-store", "vary", "response-no-store"]) {
     let writes = 0;
     const suite = createHttpPolicySuite({ auth: auth(), cacheNamespace: "test-v1", cacheStore: createMemoryHttpCacheStore() });
-    const http = new Elysia().beforeHandle(({ set }) => {
+    const http = new Elysia().onBeforeHandle(({ set }) => {
       if (scenario === "cookie") set.headers["set-cookie"] = "session=test; HttpOnly";
       if (scenario === "vary") set.headers.vary = "accept-language";
       if (scenario === "response-no-store") set.headers["cache-control"] = "no-store";

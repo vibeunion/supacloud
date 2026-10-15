@@ -35,7 +35,7 @@ function readWebhookConfig(projectConfig: Record<string, unknown> | null | undef
 }
 
 export const taskEventRoutes = new Elysia({ prefix: "/v1/projects/:ref/task-events" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })

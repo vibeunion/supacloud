@@ -27,7 +27,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@tanstack/query-core": "^5.104.1"
+    "@tanstack/query-core": "^5.104.2"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",

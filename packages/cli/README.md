@@ -5,6 +5,12 @@ Project-scoped CLI for SupaCloud users.
 The only command-line executable is `supacloud`. The compiled server binary
 installed at `/usr/local/bin/supacloud` is a separate managed-host installation.
 
+The CLI executable runs on Bun, including when installed with npm. Put Bun on
+`PATH`; frontend archives use `Bun.zstdCompress`. For an older package whose
+executable still selects Node, invoke that installed entrypoint explicitly with
+Bun until upgrading. Installing a system `zstd` executable does not select the
+JavaScript runtime.
+
 Tool adapters import `@supacloud/cli/tool-runtime` for typed registration and
 schema decoding. This side-effect-free entrypoint does not initialize the CLI.
 Registration accepts unknown boundary input, decodes it before invoking the
@@ -418,6 +424,12 @@ to any retained release. It never infers a target from content-hash-sorted
 history, reuploads assets or restores a database.
 An uncertain result includes the mutation ID for read-only reconciliation and
 must not be blindly retried.
+Automated release-receipt compensation belongs in deployment orchestration,
+which must persist the original CAS identity and mutation ID. The internal
+rollback primitive supports this binding; this change does not wire up an
+automatic compensation workflow. The interactive CLI does not accept these
+binding fields. It observes current authority and generates its operation ID
+internally, retaining CAS checks and final readback.
 
 ### Immutable application releases
 
@@ -647,12 +659,19 @@ FA-owned business features are documented in
 
 `deploy --target`, `--id`, `--build_command`, `--output_dir`, `--plan`, `--diff`
 and `--dry_run` are removed. Put build settings in `supacloud.json`; use
-`app deploy-plan` for read-only review. Historical project-specific manifests
-and standalone Function targets must move to application delivery configuration.
-The CLI rejects them rather than silently falling back to a partial Web deployment.
-For an intentional Web-only release in a mixed repository, use
-`supacloud --env test deploy --assets_only`. This preserves historical manifests,
-Functions, schedules and migrations without invoking application compilation.
+`app deploy-plan` for read-only review. With a frontend configured, `supacloud deploy`
+publishes only its static assets, even in a mixed repository. `--assets_only`
+remains an explicit alias. This preserves historical manifests, Functions,
+Storage, schedules and migrations without invoking application compilation.
+Use `supacloud --env test deploy --backend` to publish the configured Application
+independently; it never builds or uploads Web. Unsupported historical backend
+manifests and standalone Function targets still fail closed on that Application path.
+
+Application deployments return `accepted` after durable queue insertion, not a
+successful activation. Inspect the receipt with the read-only
+`supacloud --env test deploy --status <deployment-id>`. Queue delivery survives
+restart; interrupted side effects require reconciliation rather than blind retry.
+
 Static publication reuses immutable archives, pre-upload CAS, mutation receipts
 and exact post-activation readback. It never retries a conflicting activation.
 

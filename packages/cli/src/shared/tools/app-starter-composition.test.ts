@@ -27,8 +27,8 @@ for (const [template, feature, source] of [
         expect(files["supacloud.config.ts"]).toContain('moduleBoundaryPreset: "modular-monolith"');
         expect(files["supacloud.config.ts"]).toContain("detectOrphanModules: true");
         const manifest = JSON.parse(files["package.json"]!);
-        expect(manifest.dependencies.elysia).toBe("2.0.0-beta.21");
-        expect(manifest.dependencies.effect).toBe("4.0.2");
+        expect(manifest.dependencies.elysia).toBe("2.0.0-beta.32");
+        expect(manifest.dependencies.effect).toBe("4.0.5");
         expect(manifest.scripts.inspect).toBe("bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js graph --json");
         expect(files["README.md"]).toContain("--register-in src/app.module.ts");
         expect(files["README.md"]).toContain("not a live mounted-route report");

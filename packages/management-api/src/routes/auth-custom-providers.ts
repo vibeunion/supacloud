@@ -67,7 +67,7 @@ async function proxyCustomProviderAdmin(
 }
 
 export const authCustomProviderRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth/custom-providers" })
-  .beforeHandle(requireAuthRuntimeManagement("providers"))
+  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
   .get("/", {
     params: t.Object({ ref: t.String() }),
     query: t.Object({ type: t.Optional(t.Union([t.Literal("oauth2"), t.Literal("oidc")])) }),

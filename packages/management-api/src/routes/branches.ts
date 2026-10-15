@@ -50,7 +50,7 @@ async function saveBranches(parentRef: string, branches: BranchRecord[]): Promis
 }
 
 export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })

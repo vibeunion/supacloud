@@ -129,10 +129,64 @@ On an uncertain rollback, report the mutation ID for read-only reconciliation;
 do not generate another activation or automatically restore a database.
 This command represents an explicit operator decision against the observed
 current deployment. Automated compensation owned by an earlier release receipt
-must use its original expected CAS identity, not observe and overwrite a newer
-deployment through the high-level command.
+belongs in deployment orchestration, which must persist the original expected
+CAS identity and rollback mutation ID. The internal rollback primitive supports
+this binding, but automatic compensation orchestration is not implemented here.
+The interactive CLI rejects these binding fields; its normal rollback path
+observes current authority, generates an operation ID and retains CAS checks
+and final artifact readback.
 
 ## Ownership And Follow-Up
+
+### Internal Receipt-Bound Compensation Acceptance
+
+These scenarios exercise the internal rollback primitive, not public CLI flags.
+
+```gherkin
+Scenario: A release receipt still owns the active deployment
+  Given an explicit retained target and the receipt's current release and activation
+  When rollback is requested with a persisted mutation UUID
+  Then activation uses exactly those identities and verifies the resulting artifact
+
+Scenario: A newer publisher has taken over
+  Given the receipt's release or activation no longer matches the active deployment
+  When receipt-bound rollback is requested
+  Then no mutation is sent and STALE_AUTHORITY is returned
+
+Scenario: A rollback completed but its response was lost
+  Given the target and original rollback mutation are now active
+  When the same bound request is repeated
+  Then its journal fingerprint and live artifact are verified without another POST
+  And missing or contradictory evidence remains OUTCOME_UNKNOWN
+
+Scenario: A partial binding is supplied
+  Given any missing or invalid target, expected identity or mutation UUID
+  When receipt-bound rollback is requested
+  Then input validation fails before HTTP
+```
+
+### Customer Stability Responsibilities
+
+SupaCloud owns reusable mechanisms; an application owns its domain assertions.
+The existing FA tuple, matrix and stability schemas in `packages/delivery` are
+consumer acceptance profiles, not evidence that a deployed combination passed.
+Do not add another FA-specific runtime orchestrator or move FA tables into the
+platform to finish customer acceptance.
+
+| Workstream | SupaCloud responsibility | FA / operator responsibility |
+| --- | --- | --- |
+| Version combination | Artifact identity, provenance and compatibility checks | Pin the consumed versions and supply deployed FA commit evidence |
+| Business acceptance | Isolated execution, retained receipts and integration hooks | Define roles, uploads, tasks and persisted business outcomes |
+| Upgrade matrix | Contract parsing, safe rejection, isolation and replay infrastructure | Declare supported combinations and exercise real FA behavior |
+| Verification gates | Focused command/transport tests and platform release gates | Business checks with real deployed dependencies, separate from unit tests |
+| Error policy | Mutation identity, CAS, bounded transport and outcome reconciliation | Domain idempotency, permissions and operation-specific recovery UX |
+| SLO evidence | Correlated observations, aggregation and alert delivery mechanisms | Approved owner, objectives, observation window and operational response |
+
+This change implements only receipt-bound frontend rollback. It does not
+approve SLOs, claim live acceptance, restore databases/runtime, reupload legacy
+archives, re-enable removed commands or include report export. FA adoption must
+retain historical receipt validation separately from executing a translated
+rollback; records without immutable target/CAS evidence must fail closed.
 
 | Concern | Owner | Delivery boundary |
 | --- | --- | --- |
@@ -140,6 +194,7 @@ deployment through the high-level command.
 | Immutable frontend artifact integrity and CAS | SupaCloud platform | Existing primitives plus active snapshot in this PR |
 | Rollback target selection/activation without CAS/UUID boilerplate | SupaCloud platform/CLI | One command defaults to the journal-verified previous release; explicit retained targets remain supported |
 | Current/previous activation authority | SupaCloud platform | Active and previous-release snapshots verified under the deployment lock |
+| Receipt-bound rollback CAS and mutation identity | Internal release-control primitive | Bind compensation to the original current release, activation and mutation IDs; no public CLI flags or automatic orchestration |
 | Full activation history, legacy artifact capture, protected retention/GC | SupaCloud platform | Follow-up; not achieved by CLI fallback |
 | Environment bindings, public config versus credentials, initialization/doctor | SupaCloud compiler/CLI | Consolidate existing context/compiler paths; do not require every app to invent profiles |
 | Build cache, content-addressed upload deduplication, skip unchanged resources | SupaCloud compiler/CLI/platform | Extend existing deploy identity support with measured cold/warm/no-op budgets |

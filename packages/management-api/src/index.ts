@@ -319,12 +319,12 @@ let routeProjectionSource: Pick<AnyElysia, "routes"> | undefined;
 
 const app = new Elysia({ strictPath: false })
   .use(websocket())
-  .request(({ request, set }) => {
+  .onRequest(({ request, set }) => {
     const context = beginRequestObservability(request);
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, context);
   })
-  .error("global", ({ request, error, set }) => {
+  .onError("global", ({ request, error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
@@ -357,7 +357,7 @@ const app = new Elysia({ strictPath: false })
   })
   // Elysia's Swagger adapter omits cookie parameters. Project that field from
   // the same compiled route table before the adapter serializes its document.
-  .afterHandle(({ request, responseValue: response }) => {
+  .onAfterHandle(({ request, responseValue: response }) => {
     if (new URL(request.url).pathname !== "/swagger/json") return response;
     return routeProjectionSource === undefined
       ? response
@@ -441,7 +441,7 @@ const app = new Elysia({ strictPath: false })
   )
 
   // Rate limit headers + API version (Studio compatibility)
-  .afterHandle(({ request, set }) => {
+  .onAfterHandle(({ request, set }) => {
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
     set.headers["x-ratelimit-limit"] ??= "1000";
@@ -451,7 +451,7 @@ const app = new Elysia({ strictPath: false })
     );
     set.headers["x-supabase-api-version"] = "2024-01-01";
   })
-  .afterResponse("global", ({ request, responseValue: response, set }) => {
+  .onAfterResponse("global", ({ request, responseValue: response, set }) => {
     const observation = recordRequestObservation(
       request, response instanceof Response ? response.status : Number(set.status || 200),
     );
@@ -840,14 +840,14 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
 
   return (
     new Elysia({ name: "api-routes" })
-      .request(({ request }) => {
+      .onRequest(({ request }) => {
         if (isDisabledMutationReconciliation(request)) {
           return status(403, { error: "Mutation reconciliation is not permitted" });
         }
       })
       .use(bffProofBodyCapture)
       // Auth guard runs before every route in this group
-      .beforeHandle(async ({ request, set }) => {
+      .onBeforeHandle(async ({ request, set }) => {
         const rateLimit = checkRateLimit(request);
         for (const [key, value] of Object.entries(rateLimit.headers)) {
           set.headers[key] = value;
@@ -871,13 +871,13 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           }
         }
       })
-      .afterHandle(async ({ request, set }) => {
+      .onAfterHandle(async ({ request, set }) => {
         if (shouldAuditRequest(request)) {
           await logAuditEvent({ request, status: Number(set.status || 200) });
         }
       })
-      .error("global", async ({ request, error, set }) => {
-    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
+      .onError("global", async ({ request, error, set }) => {
+        const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
         if (code === "PARSE") {
           if (shouldAuditRequest(request)) {
             await logAuditEvent({ request, status: 400, action: "error:PARSE" });
@@ -1495,6 +1495,8 @@ async function bootstrap() {
     });
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
+    const { applicationDeploymentWorker } = await import("./routes");
+    applicationDeploymentWorker.start();
     const { startPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
     startPgflowTaskWorker();
 
@@ -1589,6 +1591,8 @@ export function startManagementApi(): void {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
+      const { applicationDeploymentWorker } = await import("./routes");
+      await applicationDeploymentWorker.stop();
       const { stopPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
       await stopPgflowTaskWorker();
       if (config.edgeRuntimeMode === "embedded") {

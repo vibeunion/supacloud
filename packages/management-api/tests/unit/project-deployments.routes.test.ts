@@ -5,6 +5,7 @@ import type { FrontendReleaseRecord } from "../../src/services/frontend-release-
 import { createProjectDeploymentRoutes } from "../../src/routes/project-deployments";
 import { delegatedProjectCapability } from "../../src/middleware/auth";
 import type { ApplicationDeploymentStatus } from "../../src/services/application-deployment-orchestrator";
+import { stableSha256 } from "../../src/utils/stable-json";
 
 const deploymentId = "11234567-89ab-4def-8123-456789abcdef";
 const configurationId = "21234567-89ab-4def-8123-456789abcdef";
@@ -46,6 +47,7 @@ function fixture(options: {
   result?: ApplicationDeployResult; state?: ApplicationDeploymentStatus | null;
 } = {}) {
   const calls: unknown[] = [];
+  const submissions: unknown[] = [];
   const reads: unknown[] = [];
   const app = createProjectDeploymentRoutes({
     execute: async input => {
@@ -61,8 +63,19 @@ function fixture(options: {
   }, {
     authorize: async () => options.denied ? { status: 403, body: { error: "Denied" } } : undefined,
     principal: async () => options.missingPrincipal ? null : { type: "project", id: "project:demo" },
+  }, undefined, {
+    submit: async input => {
+      submissions.push(input);
+      if (options.error) throw options.error;
+      return { replayed: false };
+    },
+    status: async (project, mutation) => {
+      reads.push({ project, mutation });
+      if (options.error) throw options.error;
+      return options.state === undefined ? state() : options.state;
+    },
   });
-  return { app, calls, reads };
+  return { app, calls, reads, submissions };
 }
 
 function post(url = base, value: unknown = body) {
@@ -71,13 +84,22 @@ function post(url = base, value: unknown = body) {
   });
 }
 
-test("project endpoint submits one bound application request and returns a verified receipt", async () => {
+test("project endpoint durably submits without executing or claiming release success", async () => {
   const f = fixture();
   const response = await f.app.handle(post());
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(202);
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toEqual({ ok: true, ...receipt() });
-  expect(f.calls).toEqual([{
+  expect(response.headers.get("location")).toEndWith(`/${deploymentId}`);
+  expect(await response.json()).toEqual({
+    ok: true, schema: "supacloud.project-deployment-accepted.v1", status: "accepted",
+    project_ref: "demo", application_id: "reviews", environment_id: "test",
+    deployment_id: deploymentId, release_id: body.release_id, replayed: false,
+    request_sha256: stableSha256({
+      mutation_id: deploymentId, release_id: body.release_id, configuration_id: configurationId,
+    }),
+  });
+  expect(f.calls).toEqual([]);
+  expect(f.submissions).toEqual([{
     projectRef: "demo", applicationId: "reviews", environmentId: "test",
     principal: { type: "project", id: "project:demo" },
     request: { mutation_id: deploymentId, release_id: body.release_id, configuration_id: configurationId },
@@ -91,6 +113,7 @@ test("authorization rejection prevents all deployment and status calls", async (
   }
   expect(f.calls).toEqual([]);
   expect(f.reads).toEqual([]);
+  expect(f.submissions).toEqual([]);
 });
 
 test("protocol discovery is bound to the authorized project and environment without execution", async () => {
@@ -111,11 +134,21 @@ test("missing verified principal prevents a mutation", async () => {
   expect(f.calls).toEqual([]);
 });
 
-test("foreign success is rejected rather than rebound to the requested environment", async () => {
-  const f = fixture({ result: { ...receipt(), environment_id: "production" } });
-  const response = await f.app.handle(post());
+test("foreign success receipt is rejected rather than rebound to the requested environment", async () => {
+  const f = fixture({ state: { ...state(), receipt: { ...receipt(), environment_id: "production" } } });
+  const response = await f.app.handle(new Request(`${base}/${deploymentId}`));
   expect(response.status).toBe(503);
-  expect(await response.json()).toMatchObject({ ok: false, code: "PROJECT_DEPLOYMENT_OUTCOME_UNKNOWN" });
+  expect(await response.json()).toMatchObject({ ok: false, code: "PROJECT_DEPLOYMENT_UNAVAILABLE" });
+});
+
+test("queued deployment is visible without a success receipt", async () => {
+  const f = fixture({ state: { ...state(), status: "pending", phase: "queued", receipt: null } });
+  const response = await f.app.handle(new Request(`${base}/${deploymentId}`));
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result).toMatchObject({ status: "pending", phase: "queued", application_id: "reviews" });
+  expect(result).not.toHaveProperty("receipt");
+  expect(f.calls).toEqual([]);
 });
 
 test("private provider errors never escape POST or status", async () => {

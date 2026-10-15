@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.118.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.117.2...management-api-v0.118.0) (2026-10-15)
+
+
+### Features
+
+* **deploy:** separate frontend releases from backend jobs ([#1939](https://github.com/vibeunion/supacloud/issues/1939)) ([2230abe](https://github.com/vibeunion/supacloud/commit/2230abea24fd0a9fe99cdea91ad72f35274f12d1))
+
 ## [0.117.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.117.1...management-api-v0.117.2) (2026-10-15)
 
 

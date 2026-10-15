@@ -63,7 +63,7 @@ function endpointProjection(project: ProjectEndpointRoutingSource) {
 }
 
 export const projectEndpointRoutes = new Elysia({ prefix: "/v1/projects" })
-  .error(({ error, set }) => {
+  .onError(({ error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     if (code === "VALIDATION") return validationErrorResponse(set);
     logger.error(`[ProjectEndpoints] Unhandled error [${code}]:`, error);

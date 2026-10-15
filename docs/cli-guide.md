@@ -92,9 +92,15 @@ supacloud frontend list_releases --ref abc123 --id web
 
 ### One-command deploy
 
-`supacloud deploy` publishes a linked application through the unified project
-deployment endpoint. The CLI builds and uploads artifacts; SupaCloud plans the
-release, handles migrations, reads CAS, activates Web and verifies the result.
+`supacloud deploy` publishes the configured static frontend through its direct
+release path. It does not wait for the Application backend, migrations, Edge
+Functions or Storage. Use `supacloud deploy --backend` for an Application
+backend release; it builds and uploads the immutable artifact, inserts a durable
+job, and returns `accepted` before background migration/runtime activation.
+Use `supacloud deploy --status <deployment-id>` to read its verified state.
+Only a later `succeeded` receipt means the backend is complete. The CLI builds
+and uploads artifacts; SupaCloud plans the release, reads CAS and verifies the
+result.
 The CLI first performs a bounded read-only protocol check. A missing, mismatched
 or cross-environment response stops the command before building or uploading.
 Upgrade the CLI and server together; there is no legacy deployment fallback.

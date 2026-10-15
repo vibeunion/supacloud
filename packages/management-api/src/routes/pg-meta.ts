@@ -23,7 +23,7 @@ async function projectGuard(ref: string): Promise<boolean> {
 }
 
 export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })

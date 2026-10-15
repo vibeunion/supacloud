@@ -12,7 +12,7 @@ const CHINA_PROVIDERS: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtal
  * China OAuth provider routes — QQ, Weibo, Alipay, DingTalk, Douyin, etc.
  */
 export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .beforeHandle(requireAuthRuntimeManagement("providers"))
+  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
   .get(
     "/china/providers",
     {
