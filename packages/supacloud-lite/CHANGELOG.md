@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.0...supacloud-lite-v0.29.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** enforce read-only table and view requests ([#1941](https://github.com/vibeunion/supacloud/issues/1941)) ([d726716](https://github.com/vibeunion/supacloud/commit/d726716a1492a5a581f99a1aa40f15a1125a23aa))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.3...supacloud-lite-v0.29.0) (2026-10-15)
 
 
