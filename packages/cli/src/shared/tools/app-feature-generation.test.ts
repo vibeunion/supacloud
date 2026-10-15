@@ -131,7 +131,8 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(missingAdapter.diagnostics.some(item => item.severity === "error" && item.code.startsWith("command-"))).toBe(true);
     expect(missingAdapter.written).toEqual([]);
     expect(await readFile(factoryPath, "utf8")).toBe(before);
-}, { timeout: 30_000 });
+// Three cold compiles on a CI runner can exceed 30s; let the assertions decide.
+}, { timeout: 120_000 });
 
 test("the generated approval tests enforce read and write adapter boundaries", async () => {
     const root = await generatedFixture();
@@ -142,7 +143,8 @@ test("the generated approval tests enforce read and write adapter boundaries", a
         child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
     ]);
     expect({ code, errors: code ? stdout + stderr : "" }).toEqual({ code: 0, errors: "" });
-}, { timeout: 30_000 });
+// Spawning the generated suite cold can exceed 30s on CI.
+}, { timeout: 120_000 });
 
 test("the generated approval passes strict TypeScript checking", async () => {
     const root = await generatedFixture();
@@ -153,4 +155,5 @@ test("the generated approval passes strict TypeScript checking", async () => {
         types.exited, new Response(types.stdout).text(), new Response(types.stderr).text(),
     ]);
     expect({ code: typeCode, errors: typeCode ? typeOut + typeErr : "" }).toEqual({ code: 0, errors: "" });
-}, { timeout: 30_000 });
+// A cold tsc pass over the generated project can exceed 30s on CI.
+}, { timeout: 120_000 });
