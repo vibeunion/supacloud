@@ -81,7 +81,7 @@ function toolResponse(payload: object): ToolResponse {
 
 function releaseFailure(
     operation: string,
-    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "NO_ACTIVE_RELEASE"
+    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "STALE_AUTHORITY" | "NO_ACTIVE_RELEASE"
         | "NO_PREVIOUS_RELEASE" | "PREVIOUS_RELEASE_UNSUPPORTED",
     status: number | null,
 ): ToolResponse {
@@ -702,14 +702,91 @@ export async function publishFrontendRelease(
     };
 }
 
+type FrontendRollbackIdentity = ActivationIdentity & {
+    expectedActiveReleaseId: string;
+    expectedActivationId: string;
+};
+
+function boundRollbackResponse(result: ToolResponse, input: FrontendRollbackIdentity): ToolResponse {
+    const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+    return {
+        ...toolResponse({
+            ...payload,
+            operation: "frontend.rollback",
+            project_ref: input.projectRef,
+            deployment_id: input.deploymentId,
+            target_release_id: input.releaseId,
+            mutation_id: input.mutationId,
+            expected_active_release_id: input.expectedActiveReleaseId,
+            expected_activation_id: input.expectedActivationId,
+            ...(!result.isError ? {
+                rollback: true,
+                previous_release_id: input.expectedActiveReleaseId,
+                previous_activation_id: input.expectedActivationId,
+            } : {}),
+        }),
+        ...(result.isError ? { isError: true } : {}),
+    };
+}
+
+async function rollbackBoundFrontendRelease(
+    http: FrontendReleaseHttp,
+    input: FrontendRollbackIdentity,
+): Promise<ToolResponse> {
+    const authority = await readActiveFrontendRelease(http, input.projectRef, input.deploymentId);
+    if ("failure" in authority) return boundRollbackResponse(authority.failure, input);
+    const current = authority.inventory;
+    // A repeated completed request must prove its original fingerprint, not just its target.
+    if (current.active_release_id === input.releaseId && current.active_activation_id === input.mutationId) {
+        return boundRollbackResponse(await activationReadback(http, input, input.mutationId, 200), input);
+    }
+    if (current.active_release_id !== input.expectedActiveReleaseId
+        || current.active_activation_id !== input.expectedActivationId) {
+        return boundRollbackResponse(releaseFailure("frontend.rollback", "STALE_AUTHORITY", 409), input);
+    }
+    const target = await getFrontendRelease(http, input.projectRef, input.deploymentId, input.releaseId);
+    if (target.isError) return boundRollbackResponse(target, input);
+    return boundRollbackResponse(await activateFrontendRelease(http, input), input);
+}
+
 export async function rollbackFrontendRelease(
     http: FrontendReleaseHttp,
     projectRef: string,
     deploymentId: string,
     releaseId?: string,
+    options: {
+        expectedActiveReleaseId?: string;
+        expectedActivationId?: string;
+        mutationId?: string;
+    } = {},
 ): Promise<ToolResponse> {
     if (releaseId !== undefined && !RELEASE_ID_PATTERN.test(releaseId)) {
         throw new Error("'release_id' must be a SHA-256 digest");
+    }
+    const bound = options.expectedActiveReleaseId !== undefined
+        || options.expectedActivationId !== undefined
+        || options.mutationId !== undefined;
+    if (bound) {
+        const { expectedActiveReleaseId, expectedActivationId, mutationId } = options;
+        if (releaseId === undefined || expectedActiveReleaseId === undefined
+            || expectedActivationId === undefined || mutationId === undefined) {
+            throw new Error("'release_id', 'expected_active_release_id', 'expected_activation_id', and 'mutation_id' are required together for a bound rollback");
+        }
+        if (!RELEASE_ID_PATTERN.test(expectedActiveReleaseId)) {
+            throw new Error("'expected_active_release_id' must be a SHA-256 digest");
+        }
+        if (!MUTATION_ID_PATTERN.test(expectedActivationId)) {
+            throw new Error("'expected_activation_id' must be a UUIDv4");
+        }
+        if (!MUTATION_ID_PATTERN.test(mutationId)) {
+            throw new Error("'mutation_id' must be a UUIDv4");
+        }
+        if (releaseId === expectedActiveReleaseId || mutationId === expectedActivationId) {
+            throw new Error("Bound rollback requires a different target release and a distinct mutation UUID");
+        }
+        return rollbackBoundFrontendRelease(http, {
+            projectRef, deploymentId, releaseId, expectedActiveReleaseId, expectedActivationId, mutationId,
+        });
     }
     const authority: ActiveReleaseSnapshot & { previousRelease?: FrontendReleaseRecord } = releaseId === undefined
         ? await readPreviousFrontendRelease(http, projectRef, deploymentId)
