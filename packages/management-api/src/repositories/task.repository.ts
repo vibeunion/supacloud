@@ -536,6 +536,15 @@ export async function getTaskByIdAndType(id: string, projectRef: string, taskTyp
   });
 }
 
+export async function getTaskByIdempotencyKey(projectRef: string, key: string): Promise<ProjectTask | null> {
+  const [task] = await sql`
+    SELECT * FROM project_tasks
+    WHERE project_ref = ${projectRef} AND idempotency_key = ${key}
+    LIMIT 1
+  `;
+  return task ? mapTask(task) : null;
+}
+
 export async function listTasksByProject(projectRef: string, limit = 50): Promise<ProjectTask[]> {
   return listTasksByProjectFiltered(projectRef, { limit });
 }
@@ -1090,6 +1099,7 @@ export const taskRepository = {
   updateStatus,
   updateTaskError,
   getTaskById,
+  getTaskByIdempotencyKey,
   getTaskByIdAndType,
   listTasksByProject,
   listTasksByProjectFiltered,

@@ -1,5 +1,6 @@
 import { createDefaultApplicationRouteComposition } from "../services/application-deployment-composition";
 import { createProjectDeploymentRoutes } from "./project-deployments";
+import { ApplicationDeploymentWorker } from "../workers/application-deployment.worker";
 
 export { projectRoutes } from "./projects";
 export { projectDashboardRoutes } from "./project-dashboard";
@@ -38,6 +39,7 @@ const defaultApplicationRouteComposition = createDefaultApplicationRouteComposit
 export const applicationRoutes = defaultApplicationRouteComposition.routes;
 export const applicationPreviews = defaultApplicationRouteComposition.previews;
 export const projectDeploymentRoutes = createProjectDeploymentRoutes(defaultApplicationRouteComposition.deploymentOrchestrator);
+export const applicationDeploymentWorker = new ApplicationDeploymentWorker(defaultApplicationRouteComposition.deploymentOrchestrator);
 export { createDefaultApplicationRouteComposition };
 export { webhookRoutes } from "./webhook";
 export { deployRoutes } from "./deploy";

@@ -1345,6 +1345,7 @@ async function runAppRelease(
         schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
         ok: true,
         operation: "applications.release",
+        ...(deployReceipt.status === "accepted" ? { status: "accepted" } : {}),
         project_ref: ref,
         application_id: id,
         environment_id: environmentId,
@@ -1355,18 +1356,20 @@ async function runAppRelease(
         build: buildReceipt ? completed.build : { skipped: true, manifest_path: manifestPath },
         phases: completed,
         no_op: deployReceipt.action === "no-op" || deployReceipt.no_op === true,
-        execution_performed: deployReceipt.execution_performed === true,
+        ...(deployReceipt.status === "accepted" ? {} : { execution_performed: deployReceipt.execution_performed === true }),
         ...(typeof deployReceipt.activation_id === "string" ? { activation_id: deployReceipt.activation_id } : {}),
         ...(deployReceipt.web === undefined ? {} : { web: deployReceipt.web }),
     };
     return request.format === "json" || request.json === true
         ? textResult(JSON.stringify(result, null, 2))
         : textResult([
-            `${ref}/${id}/${environmentId}: ${result.no_op ? "no-op" : "released"}`,
+            `${ref}/${id}/${environmentId}: ${deployReceipt.status === "accepted" ? "accepted" : result.no_op ? "no-op" : "released"}`,
             `Release: ${releaseId}`,
             `Configuration: ${configurationId}`,
             `Activation: ${result.activation_id ?? "not performed"}`,
             ...(result.deployment_id === undefined ? [] : [`Deployment: ${result.deployment_id}`]),
+            ...(deployReceipt.status === "accepted" && result.deployment_id !== undefined
+                ? [`Status: supacloud deploy --status ${result.deployment_id}`] : []),
             `Build: ${request.skip_build ? "skipped" : "completed"}`,
         ].join("\n"));
 }
