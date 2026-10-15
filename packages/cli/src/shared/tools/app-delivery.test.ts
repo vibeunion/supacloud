@@ -30,19 +30,24 @@ function schema(): ToolSchema {
     return captured;
 }
 
-async function fixture() {
+async function fixture(withResponseContract = true) {
     const root = await mkdtemp(join(packageRoot, ".app-delivery-test-"));
     await mkdir(join(root, "src"));
     await Bun.write(join(root, "tsconfig.json"), JSON.stringify({
         compilerOptions: { experimentalDecorators: true, target: "ES2022", module: "ESNext", moduleResolution: "bundler" },
     }));
+    await Bun.write(join(root, "src/orders.contracts.ts"), `
+import { Type } from "typebox";
+export const OrdersResponse = Type.String();
+`);
     await Bun.write(join(root, "src/orders.ts"), `
+import { OrdersResponse } from "./orders.contracts";
 function Module(_options: unknown): ClassDecorator { return () => {}; }
 function Controller(_path: string): ClassDecorator { return () => {}; }
-function Get(_path: string): MethodDecorator { return () => {}; }
+function Get(_path: string, _options?: unknown): MethodDecorator { return () => {}; }
 @Controller("/orders")
 export class OrdersController {
-    @Get("/")
+    @Get("/"${withResponseContract ? ", { responses: { 200: OrdersResponse } }" : ""})
     list(): string { return "orders"; }
 }
 @Module({ name: "orders", providers: [], controllers: [OrdersController] })
@@ -114,6 +119,35 @@ test("build reuses compiler manifest output without delegating deployment", asyn
         expect(result.isError, JSON.stringify(body.diagnostics)).toBe(false);
         expect(body.manifest).not.toBeNull();
         expect(body.written.length).toBeGreaterThan(0);
+        expect(calls).toBe(0);
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
+test("missing response contracts block plan, build and release before writes or upload", async () => {
+    const root = await fixture(false);
+    try {
+        const before = await snapshot(root);
+        let calls = 0;
+        for (const action of ["plan", "build", "release"] as const) {
+            const result = await runAppTool({
+                action, root, format: "json", ref: identity.ref, id: identity.id,
+                environment_id: identity.environment_id,
+            }, {
+                getApplications: () => async () => { calls++; throw new Error("Unexpected upload"); },
+                projectDeployment: async () => { calls++; throw new Error("Unexpected deployment"); },
+            });
+            const body = JSON.parse(result.content[0]!.text);
+            expect(result.isError).toBe(true);
+            const compilation = action === "release" ? body.phase_result : body;
+            expect(compilation.diagnostics).toContainEqual(expect.objectContaining({
+                severity: "error", code: "route-contract-required",
+            }));
+            expect(compilation.written).toEqual([]);
+            if (action === "release") {
+                expect(body).toMatchObject({ phase: "build", error: { code: "BUILD_FAILED" } });
+            }
+            expect(await snapshot(root)).toEqual(before);
+        }
         expect(calls).toBe(0);
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);

@@ -90,7 +90,7 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
     }
 });
 
-test("the generated approval compiles only with the explicit persistent capability", async () => {
+async function generatedFixture() {
     const root = await fixture();
     expect((await runAppTool({ ...feature, root })).isError).toBe(false);
     await symlink(join(import.meta.dir, "../../../node_modules"), join(root, "node_modules"), "dir");
@@ -105,6 +105,11 @@ test("the generated approval compiles only with the explicit persistent capabili
         },
         include: ["src/**/*.ts"],
     }));
+    return root;
+}
+
+test("the generated approval compiles only with the explicit persistent capability", async () => {
+    const root = await generatedFixture();
     const options = { rootDir: join(root, "src"), outDir: join(root, "generated"), strict: true };
     const blocked = await compileProject(options);
     expect(blocked.diagnostics.some(item => item.severity === "error" && item.code.startsWith("command-"))).toBe(true);
@@ -126,6 +131,10 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(missingAdapter.diagnostics.some(item => item.severity === "error" && item.code.startsWith("command-"))).toBe(true);
     expect(missingAdapter.written).toEqual([]);
     expect(await readFile(factoryPath, "utf8")).toBe(before);
+}, { timeout: 30_000 });
+
+test("the generated approval tests enforce read and write adapter boundaries", async () => {
+    const root = await generatedFixture();
     const child = Bun.spawn([
         process.execPath, "--no-env-file", "test", "src/features/case-approval/case-approval.feature.test.ts",
     ], { cwd: root, stdout: "pipe", stderr: "pipe" });
@@ -133,6 +142,10 @@ test("the generated approval compiles only with the explicit persistent capabili
         child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
     ]);
     expect({ code, errors: code ? stdout + stderr : "" }).toEqual({ code: 0, errors: "" });
+}, { timeout: 30_000 });
+
+test("the generated approval passes strict TypeScript checking", async () => {
+    const root = await generatedFixture();
     const types = Bun.spawn([
         process.execPath, join(root, "node_modules/typescript/bin/tsc"), "--project", join(root, "tsconfig.json"),
     ], { cwd: root, stdout: "pipe", stderr: "pipe" });
