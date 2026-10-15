@@ -8,11 +8,11 @@ import { extensionOperationFailure } from "../services/extension-policy";
 const ErrorResponse = t.Object({ message: t.String() });
 
 export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extensions" })
-    .beforeHandle(async ({ params, request, set }) => {
+    .onBeforeHandle(async ({ params, request, set }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) { set.status = authError.status; return authError.body; }
     })
-    .error(({ error, set }) => {
+    .onError(({ error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
         const failure = extensionOperationFailure(error);
         if (failure) { set.status = failure.status; return { message: failure.message }; }
@@ -85,11 +85,11 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     });
 
 export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/extensions" })
-    .beforeHandle(async ({ params, request, set }) => {
+    .onBeforeHandle(async ({ params, request, set }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) { set.status = authError.status; return authError.body; }
     })
-    .error(({ error, set }) => {
+    .onError(({ error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
         const failure = extensionOperationFailure(error);
         if (failure) { set.status = failure.status; return { message: failure.message }; }
@@ -155,7 +155,7 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
     });
 
 export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions" })
-    .error(({ error, set }) => {
+    .onError(({ error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
         logger.error(`[SystemExtensions] Unhandled error [${code}]:`, error);
         set.status = 500;

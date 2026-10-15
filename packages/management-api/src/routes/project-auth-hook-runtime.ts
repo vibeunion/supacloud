@@ -25,7 +25,7 @@ async function runtimeHookStatus(ref: string, hookName: string) {
 }
 
 export const projectAuthHookRuntimeRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })

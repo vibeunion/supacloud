@@ -116,7 +116,7 @@ function scheduleHeaders(
 }
 
 export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/scheduled-functions" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     if (!PROJECT_REF_PATTERN.test(params.ref)) return status(400, { error: "Project ref is invalid" });
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);

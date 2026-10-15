@@ -35,7 +35,7 @@ existing compiled-module boundary.
 
 These checks are compatibility signals, not a claim that an Elysia 1 package
 cannot run on a beta release. A package is not an approved dependency until it
-passes the repository's Elysia `2.0.0-beta.21` test and type gates.
+passes the repository's Elysia `2.0.0-beta.32` test and type gates.
 
 ### Local probe on 2026-09-29
 

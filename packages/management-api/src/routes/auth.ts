@@ -430,7 +430,7 @@ export async function safeProjectSettingsAuthConfig(
  *   - ./auth-users.ts
  */
 export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .beforeHandle(requireAuthRuntimeManagement("configuration"))
+  .onBeforeHandle(requireAuthRuntimeManagement("configuration"))
   .get(
     "/providers",
     {

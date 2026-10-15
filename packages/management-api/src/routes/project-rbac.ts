@@ -15,7 +15,7 @@ async function actorId(request: Request): Promise<string> {
 }
 
 export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })

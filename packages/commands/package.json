@@ -34,12 +34,12 @@
     "@supacloud/contracts": "file:../contracts"
   },
   "devDependencies": {
-    "typebox": "1.3.36",
+    "typebox": "1.3.37",
     "@types/bun": "1.4.3",
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "typebox": "1.3.36"
+    "typebox": "1.3.37"
   },
   "peerDependenciesMeta": {
     "typebox": {
