@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.2...supacloud-lite-v0.28.3) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
 ## [0.28.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.1...supacloud-lite-v0.28.2) (2026-10-15)
 
 
