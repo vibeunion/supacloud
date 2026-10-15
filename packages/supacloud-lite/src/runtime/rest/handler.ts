@@ -408,6 +408,7 @@ export class RestHandler {
     const fn = pickOverload(fns, Object.keys(args))
     const call = renderCall(schema, fn, args)
     const q = parseQuery(searchParams)
+    if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
 
     // A VOLATILE function may have run DDL (create/alter/drop), so drop the
     // schema/function caches afterwards - otherwise REST keeps serving a stale
