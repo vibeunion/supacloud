@@ -13,6 +13,14 @@ from the root. This is a breaking import-path change with no framework dependenc
 - `createAuthoritativeCommandClient`: validate input, acknowledgement and authority
   independently. By default even a valid acknowledgement triggers one authoritative
   lookup. One invocation sends at most one write and one lookup; it never retries.
+- `createPendingCommandClient` (`/client`): combine that confirmation flow with an
+  existing JSON pending marker. Input must be persisted and read back before sending;
+  an existing or corrupt marker blocks a new write. Confirmed authority or definitive
+  write denial clears only the unchanged marker. Unknown outcomes retain it.
+  Supply `responseAuthority` when explicitly using `confirmation: "response"` and
+  the direct committed result differs from the lookup receipt. Both paths still
+  require the domain matcher. `unknownError(input, lookupFailure)` maps a failed
+  lookup without mistaking a missing/malformed receipt for a network failure.
 - `createAuthenticatedFetch`: obtain a current token **before** sending over HTTPS.
   It preserves request credentials and cancellation, rejects redirects, and never
   refreshes/replays a write after 401. The supplied fetch must itself be single-attempt.
@@ -39,6 +47,12 @@ Only configure `isDefinitiveWriteFailure` for a contract that guarantees no busi
 effect. A lock is not server-side idempotency. Persist operation identifiers before
 sending, namespace locks by tenant/actor/command/target, and clear only after
 authoritative confirmation or an explicit domain recovery decision.
+
+Pending markers are UI recovery hints, not a second business ledger. The pending
+client does not provide cross-tab atomicity, request timeouts, authorization or
+database idempotency. Retain those existing controls; use coordinated durable
+locks when cross-tab ownership is required. A cleanup error propagates without
+resending. Neither the pending client nor its transports may retry a write.
 
 Existing authentication providers can be retained through `getAccessToken()`.
 Do not supply an authenticated SDK transport that secretly retries writes. The
