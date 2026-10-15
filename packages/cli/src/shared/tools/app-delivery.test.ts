@@ -181,7 +181,7 @@ test("check and doctor surface database gate failures without regenerating contr
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
-test("app release composes build, upload, configure and one deployment", async () => {
+test.each([false, true])("app release composes one deployment and preserves acceptance (async=%s)", async accepted => {
     const root = await fixture();
     const configurationPath = join(root, "configuration.json");
     await Bun.write(configurationPath, JSON.stringify({
@@ -219,9 +219,11 @@ test("app release composes build, upload, configure and one deployment", async (
                     project_ref: identity.ref, application_id: identity.id,
                     environment_id: identity.environment_id, release_id: releaseId,
                     configuration_id: configurationId, deployment_id: args.mutation_id,
-                    mutation_id: args.mutation_id, activation_id: identity.activation_id,
+                    mutation_id: args.mutation_id,
+                    ...(accepted ? { status: "accepted" } : { activation_id: identity.activation_id,
+                        execution_performed: true }),
                     expected_activation_id: null, plan_sha256: "d".repeat(64),
-                    action: "activate", replayed: false, execution_performed: true,
+                    action: "activate", replayed: false,
                 }) }],
             }),
         });
@@ -229,9 +231,13 @@ test("app release composes build, upload, configure and one deployment", async (
         expect(result.isError).toBe(false);
         expect(output).toMatchObject({
             ok: true, operation: "applications.release", release_id: releaseId,
-            configuration_id: configurationId, activation_id: expect.any(String),
-            execution_performed: true,
+            configuration_id: configurationId,
+            ...(accepted ? { status: "accepted" } : { activation_id: expect.any(String), execution_performed: true }),
         });
+        if (accepted) {
+            expect(output).not.toHaveProperty("activation_id");
+            expect(output).not.toHaveProperty("execution_performed");
+        }
         expect(calls.map(call => call.action)).toEqual([
             "upload_release",
         ]);
