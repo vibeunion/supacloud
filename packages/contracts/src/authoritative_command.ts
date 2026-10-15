@@ -4,6 +4,8 @@ export interface AuthoritativeCommandContract<Input, Acknowledgement, Authority>
   input: ContractDecoder<Input>;
   acknowledgement: ContractDecoder<Acknowledgement>;
   authority: ContractDecoder<Authority>;
+  /** Optional direct-response decoder when a committed response and a receipt differ. */
+  responseAuthority?: ContractDecoder<Authority>;
   matches(input: Input, authority: Authority): boolean;
 }
 
@@ -75,10 +77,10 @@ export function createAuthoritativeCommandClient<Input, Acknowledgement, Authori
       diagnostics.push({ stage: "write", code: "WRITE_OUTCOME_UNKNOWN" });
     }
 
-    const confirm = (raw: unknown): { authority: Authority } | undefined => {
+    const confirm = (raw: unknown, decode = contract.authority): { authority: Authority } | undefined => {
       let authority: Authority;
       try {
-        authority = decodeHttpContract(contract.authority, raw, "response");
+        authority = decodeHttpContract(decode, raw, "response");
       } catch {
         diagnostics.push({ stage: "authority", code: "INVALID_AUTHORITY" });
         return undefined;
@@ -102,7 +104,7 @@ export function createAuthoritativeCommandClient<Input, Acknowledgement, Authori
         diagnostics.push({ stage: "acknowledgement", code: "INVALID_ACKNOWLEDGEMENT" });
       }
       if (confirmation === "response" && acknowledgement.status === "validated") {
-        const result = confirm(response.value);
+        const result = confirm(response.value, contract.responseAuthority ?? contract.authority);
         if (result !== undefined) {
           return { status: "confirmed", ...result, acknowledgement, source: "response", diagnostics };
         }
