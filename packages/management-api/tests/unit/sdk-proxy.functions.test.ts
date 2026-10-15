@@ -1558,4 +1558,45 @@ describe("sdkProxyRoutes functions proxy", () => {
       }
     });
   });
+
+  test.each(["GET", "POST"])("reports connection refusal as 503 without replaying %s", async (method) => {
+    await withSdkProxyTestContext(async () => {
+      for (const error of [
+        new Error("ECONNREFUSED: Unable to connect. Is the computer able to access the url?"),
+        Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }),
+        new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } }),
+      ]) {
+        let attempts = 0;
+        setSdkProxyFetchForTests((() => {
+          attempts++;
+          return Promise.reject(error);
+        }) as typeof fetch);
+        const response = await request("/functions/v1/hello", {
+          method,
+          headers: { "x-project-ref": "proj_1", apikey: "anon" },
+          ...(method === "POST" ? { body: "payload" } : {}),
+        });
+        expect(attempts).toBe(1);
+        expect(response.status).toBe(503);
+        expect(response.headers.get("retry-after")).toBe("2");
+        expect(await response.json()).toEqual({ message: "Upstream Temporarily Unavailable" });
+      }
+    });
+  });
+
+  test("keeps unrelated proxy errors and ambiguous disconnects non-retryable", async () => {
+    await withSdkProxyTestContext(async () => {
+      const cyclic = new Error("internal failure");
+      cyclic.cause = cyclic;
+      for (const error of [new Error("Internal failure"), cyclic, new Error("ECONNRESET")]) {
+        setSdkProxyFetchForTests((() => Promise.reject(error)) as typeof fetch);
+        const response = await request("/functions/v1/hello", {
+          headers: { "x-project-ref": "proj_1", apikey: "anon" },
+        });
+        expect(response.status).toBe(500);
+        expect(response.headers.has("retry-after")).toBe(false);
+        expect(await response.json()).toEqual({ message: "Internal Proxy Error" });
+      }
+    });
+  });
 });
