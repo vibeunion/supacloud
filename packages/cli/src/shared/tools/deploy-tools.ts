@@ -523,6 +523,13 @@ export async function createFrontendArchive(outputDirectory: string): Promise<{
     cleanup(): Promise<void>;
 }> {
     const collected = await collectArchiveFiles(outputDirectory);
+    return createCollectedFrontendArchive(outputDirectory, collected);
+}
+
+async function createCollectedFrontendArchive(
+    outputDirectory: string,
+    collected: Awaited<ReturnType<typeof collectArchiveFiles>>,
+) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "supacloud-deploy-"));
     const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.tar.zst`);
     try {
@@ -594,13 +601,15 @@ async function stageApplicationWebRelease(
         await runBuild(buildCommand, projectDirectory, build.env, json);
     }
 
-    const archive = await createFrontendArchive(outputDirectory);
+    const collected = await collectArchiveFiles(outputDirectory);
+    if (assetsOnly) {
+        return { result: await publishFrontendRelease(
+            http, projectRef, selected.id,
+            () => createCollectedFrontendArchive(outputDirectory, collected), collected.treeSha256,
+        ) };
+    }
+    const archive = await createCollectedFrontendArchive(outputDirectory, collected);
     try {
-        if (assetsOnly) {
-            return { result: await publishFrontendRelease(
-                http, projectRef, selected.id, archive.archivePath, archive.treeSha256,
-            ) };
-        }
         const uploaded = payload(await uploadProjectWebRelease(
             http, projectRef, environmentId, selected.id, archive.archivePath,
         ));

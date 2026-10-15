@@ -215,6 +215,10 @@ describe("supacloud process contract", () => {
         const args = ["frontend", "rollback", "--ref", projectRef, "--id", deploymentId];
         const denied = await runProjectCli(args, { ...env, SUPACLOUD_READ_ONLY: "true" }, workspace);
         expect(denied.exitCode).toBe(1);
+        expect(denied.stderr).toContain("blocked in read-only mode");
+        const production = await runProjectCli(args, { ...env, SUPACLOUD_ENV: "production" }, workspace);
+        expect(production.exitCode).toBe(1);
+        expect(production.stderr).toContain(`--confirm-production ${projectRef}`);
         expect(calls).toEqual([]);
         const rolledBack = await runProjectCli(args, env, workspace);
         expect(rolledBack.exitCode).toBe(0);
@@ -326,12 +330,64 @@ describe("supacloud process contract", () => {
         expect(response.exitCode).toBe(0);
         expect(response.stderr).toContain("list_releases");
         expect(response.stderr).toContain("get_release");
+        expect(response.stderr).toContain("get_active_release");
+        expect(response.stderr).toContain("rollback");
         expect(response.stderr).not.toContain("upload_release");
         expect(response.stderr).not.toContain("activate_release");
         expect(response.stderr).not.toContain("--archive_path");
         expect(response.stderr).not.toContain("--expected_active_release_id");
         expect(response.stderr).not.toContain("--expected_activation_id");
         expect(response.stderr).not.toContain("--mutation_id");
+    });
+
+    test("keeps frontend rollback help focused on the target without project configuration", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-rollback-help-"));
+        temporaryDirectories.push(workspace);
+        const response = await runProjectCli(["frontend", "rollback", "--help"], {}, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("Usage: supacloud frontend rollback");
+        expect(response.stderr).toContain("--release_id");
+        expect(response.stderr).not.toContain("--expected_active_release_id");
+        expect(response.stderr).not.toContain("--expected_activation_id");
+        expect(response.stderr).not.toContain("--mutation_id");
+        expect(response.stdout).toBe("");
+    });
+
+    test.each([
+        { flags: ["--expected_active_release_id", "a".repeat(64)] },
+        { flags: ["--expected_activation_id", EXPECTED_ACTIVATION_ID] },
+        { flags: ["--mutation_id", COMMITTED_ACTIVATION_ID] },
+        { flags: [
+            "--expected_active_release_id", "a".repeat(64),
+            "--expected_activation_id", EXPECTED_ACTIVATION_ID,
+            "--mutation_id", COMMITTED_ACTIVATION_ID,
+        ] },
+    ])("rejects internal frontend rollback flags before HTTP: %j", async ({ flags }) => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-rollback-internal-flags-"));
+        temporaryDirectories.push(workspace);
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch() {
+                requestCount++;
+                return Response.json({}, { status: 500 });
+            },
+        });
+        servers.push(server);
+        const response = await runProjectCli([
+            "frontend", "rollback", "--ref", "abc123", "--id", "web",
+            "--release_id", "f".repeat(64), ...flags,
+        ], {
+            SUPACLOUD_ENV: "test", SUPACLOUD_PROJECT_REF: "abc123",
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "rollback-rejected-flags-token",
+        }, workspace);
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Invalid arguments");
+        expect(requestCount).toBe(0);
+        expect(response.stdout + response.stderr).not.toContain("rollback-rejected-flags-token");
     });
 
     test("runs migration lint locally without project credentials", async () => {

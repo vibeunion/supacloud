@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.5](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.4...edge-runtime-v0.32.5) (2026-10-15)
+
+
+### Bug Fixes
+
+* **edge-runtime:** exclude immediate dispatch from queue wait ([#1932](https://github.com/vibeunion/supacloud/issues/1932)) ([609ec39](https://github.com/vibeunion/supacloud/commit/609ec39dfad5b773852ad316adddd328f0a65842))
+
 ## [0.32.4](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.3...edge-runtime-v0.32.4) (2026-10-15)
 
 
