@@ -71,6 +71,8 @@ export interface FunctionInfo {
   returnTypType: string
   /** pg_proc.provolatile: v=volatile, s=stable, i=immutable. Volatile calls may run DDL. */
   volatility: string
+  /** Leading input arguments without a PostgreSQL default. */
+  requiredArgCount: number
   args: FunctionArg[]
 }
 
@@ -492,12 +494,23 @@ export class Database {
       return_type: string
       return_typtype: string
       volatility: string
-      identity_args: string
+      required_arg_count: number
+      input_args: FunctionArg[]
     }>(
       `select p.proname as name, p.proretset as returns_set,
               t.typname as return_type, t.typtype as return_typtype,
               p.provolatile as volatility,
-              pg_get_function_identity_arguments(p.oid) as identity_args
+              p.pronargs - p.pronargdefaults as required_arg_count,
+              coalesce((
+                select json_agg(json_build_object(
+                  'name', coalesce(a.name, ''),
+                  'type', format_type(a.type, null)
+                ) order by a.ordinal)
+                from unnest(coalesce(p.proallargtypes, p.proargtypes::oid[]),
+                            p.proargnames, p.proargmodes)
+                  with ordinality as a(type, name, mode, ordinal)
+                where a.mode is null or a.mode in ('i', 'b', 'v')
+              ), '[]'::json) as input_args
        from pg_proc p
        join pg_namespace n on n.oid = p.pronamespace
        join pg_type t on t.oid = p.prorettype
@@ -511,7 +524,8 @@ export class Database {
       returnType: r.return_type,
       returnTypType: r.return_typtype,
       volatility: r.volatility,
-      args: parseIdentityArgs(r.identity_args),
+      requiredArgCount: r.required_arg_count,
+      args: r.input_args,
     }))
     this.fnCache.set(key, fns)
     return fns
