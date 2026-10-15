@@ -408,6 +408,7 @@ export class RestHandler {
     const fn = pickOverload(fns, Object.keys(args))
     const call = renderCall(schema, fn, args)
     const q = parseQuery(searchParams)
+    if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
 
     // A VOLATILE function may have run DDL (create/alter/drop), so drop the
     // schema/function caches afterwards - otherwise REST keeps serving a stale
@@ -462,6 +463,10 @@ export class RestHandler {
     }
 
     // table/composite results: apply select/filters/order/pagination
+    if (this.maxRows !== undefined) {
+      const requested = q.limits.get('')
+      q.limits.set('', requested === undefined ? this.maxRows : Math.min(requested, this.maxRows))
+    }
     const alias = '_f'
     const exprs: string[] = []
     for (const item of q.select) {
