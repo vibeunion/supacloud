@@ -495,7 +495,7 @@ export class WorkerPool {
       const worker = this.takeIdleWorker(this.projectKey(opts));
       if (worker) {
         this.lastDispatchedProjectRef = this.projectKey(opts);
-        this.execute(worker, opts, enqueuedAt, resolve).catch(reject);
+        this.execute(worker, opts, null, resolve).catch(reject);
       } else {
         this.totalQueuedRequests++;
         this.enqueueQueued({ opts, enqueuedAt, resolve, reject });
@@ -679,11 +679,11 @@ export class WorkerPool {
   private async execute(
     worker: Worker,
     opts: ScheduledDispatch,
-    enqueuedAt: number,
+    enqueuedAt: number | null,
     resolve: (response: Response) => void,
   ) {
     this.assignWorkerProject(worker, this.projectKey(opts));
-    const queueWaitMs = Math.round(performance.now() - enqueuedAt);
+    const queueWaitMs = enqueuedAt === null ? 0 : Math.round(performance.now() - enqueuedAt);
     this.totalQueueWaitMs += queueWaitMs;
     const cancelGraceMs = 3_000;
 
