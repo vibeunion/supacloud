@@ -278,7 +278,7 @@ async function runtimePreheatSuccess(
     resolvedVersion,
     artifactSha256,
     verifyJwt: targetConfig.verifyJwt,
-    activationId: requestedActivationId,
+    activationId: targetConfig.activationId,
   };
   const foregroundAttestation = testPreheatAttestation(identity, "foreground");
   const backgroundAttestation = testPreheatAttestation(identity, "background");
@@ -439,6 +439,68 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
+  test.each(["active", "missing", "stale"] as const)(
+    "active readiness omits candidate headers and validates %s activation identity",
+    async (identityCase) => {
+      const ref = `proj_active_readiness_${identityCase}`;
+      const slug = "hello";
+      const candidateHeaders: Headers[] = [];
+      globalThis.fetch = runtimeSuccessFetch(async (url, init) => {
+        candidateHeaders.push(new Headers(init?.headers));
+        return runtimePreheatSuccess(url, init);
+      });
+      const deployed = await deployConditionalRelease({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('hello') };",
+      });
+      expect(deployed.success).toBe(true);
+      const active = await edgeFunctionService.getConfig(ref, slug);
+      expect(candidateHeaders.length).toBeGreaterThan(0);
+      for (const headers of candidateHeaders) {
+        expect(headers.get("x-supacloud-function-version")).toBe(deployed.version!);
+        expect(headers.get("x-supacloud-activation-id")).toBe(active.activation_id);
+      }
+
+      let readinessRequests = 0;
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (new URL(url).pathname === "/health") return new Response("ok");
+        readinessRequests++;
+        const headers = new Headers(init?.headers);
+        expect(headers.has("x-supacloud-function-version")).toBe(false);
+        expect(headers.has("x-supacloud-activation-id")).toBe(false);
+        const response = await runtimePreheatSuccess(url, init);
+        const body = await response.json() as {
+          attestation: { activation_id: string | null };
+          foreground: { attestation: { activation_id: string | null } };
+          background: { attestation: { activation_id: string | null } };
+        };
+        expect(body.attestation.activation_id).toBe(active.activation_id);
+        if (identityCase !== "active") {
+          const activationId = identityCase === "missing" ? null : crypto.randomUUID();
+          body.attestation.activation_id = activationId;
+          body.foreground.attestation.activation_id = activationId;
+          body.background.attestation.activation_id = activationId;
+        }
+        return Response.json(body);
+      }) as typeof fetch;
+
+      const readiness = await edgeFunctionService.runtimeCheck(ref, slug);
+      expect(readinessRequests).toBe(1);
+      expect(readiness.runtime_healthy).toBe(true);
+      expect(readiness.artifact_exists).toBe(true);
+      expect(readiness.active_version).toBe(deployed.version!);
+      expect(readiness.preheat_status).toBe(200);
+      expect(readiness.preheat_ok).toBe(identityCase === "active");
+      if (identityCase === "active") {
+        expect(readiness.error).toBeUndefined();
+      } else {
+        expect(readiness.error).toContain("invalid preheat attestation");
+      }
+    },
+  );
+
   test("rejects an unattested Edge Runtime preheat failure", async () => {
     const ref = "proj_preheat_diagnostic";
     const slug = "computed-import";
