@@ -700,6 +700,15 @@ the existing Workflow and invokes the compiled Job with a ReviewAttachmentStore.
 Its reader authorizes the worker independently; its writer rechecks the review
 revision/artifact binding and persists the result idempotently before acknowledgement.
 After a lost acknowledgement, reconcile that result instead of repeating effects.
+The generated Job first calls store.readResult. The PostgreSQL adapter rechecks
+current permission, ownership, revision and project/tenant binding inside the
+read transaction, then validates a stored result with AttachmentResult. A valid
+committed result skips Storage download and result insertion on redelivery.
+Revoked access or a malformed/conflicting result fails closed, not as a cache miss.
+Existing custom ReviewAttachmentStore implementations must add readResult with
+these same authorization and validation guarantees when adopting this Job.
+This does not automatically restart a halted worker, reset the attempt budget,
+or make external side effects atomic with the database.
 
 src/host/review-attachments.ts supplies createReviewAttachmentAdapters with a
 durable store and enqueue callback for the approval adapter's afterApproved hook.
