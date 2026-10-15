@@ -631,9 +631,9 @@ function isParentMessage(message: unknown): message is ParentMessage {
   return isExecuteMessage(candidate);
 }
 
-function postToParent(message: unknown) {
+function postToParent(message: unknown, transferList: ArrayBuffer[] = []) {
   if (retiring) return;
-  parentPort!.postMessage(message);
+  parentPort!.postMessage(message, transferList);
 }
 
 function installOutboundHostPolicy(allowedHosts: string[] | undefined): () => void {
@@ -849,12 +849,14 @@ async function onParentMessage(msg: unknown): Promise<void> {
                 await reader.cancel();
                 throw new FunctionResponseLimitError(maxResponseBody);
               }
+              // Buffer.slice() shares storage; never detach a producer-owned chunk.
+              const chunk = new Uint8Array(value).buffer;
               postToParent({
                 type: "stream_chunk",
                 streamId,
-                chunk: Buffer.from(value).buffer,
+                chunk,
                 done: false,
-              });
+              }, [chunk]);
             }
           } catch (err: unknown) {
             traceStatus = 500;
@@ -870,9 +872,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
           return;
         }
 
-        const resBody = response.body
-          ? Buffer.from(await response.arrayBuffer()).buffer
-          : null;
+        const resBody = response.body ? await response.arrayBuffer() : null;
         if (maxResponseBody !== undefined && resBody && resBody.byteLength > maxResponseBody) {
           throw new FunctionResponseLimitError(maxResponseBody);
         }
@@ -896,19 +896,21 @@ async function onParentMessage(msg: unknown): Promise<void> {
           waitUntilPending: currentWaitUntilTasks.length > 0,
           moduleCacheHit: moduleLoad.cacheHit,
           moduleCacheSize: moduleLoad.moduleCacheSize,
-        });
+        }, resBody ? [resBody] : []);
         await flushWaitUntilTasks(functionId);
       }), () => traceStatus);
   } catch (err: unknown) {
     const aborted = currentAbortController?.signal.aborted || (err instanceof Error && err.name === "AbortError");
     const message = err instanceof Error ? err.message : String(err);
+    const errorBody = new TextEncoder().encode(JSON.stringify({
+      error: message,
+      name: err instanceof Error ? err.name : "Error",
+    })).buffer;
     postToParent({
       status: aborted ? 499 : err instanceof FunctionResponseLimitError ? 502 : 500,
       headers: { "Content-Type": "application/json" },
-      body: Buffer.from(
-        JSON.stringify({ error: message, name: err instanceof Error ? err.name : "Error" }),
-      ).buffer,
-    });
+      body: errorBody,
+    }, [errorBody]);
   } finally {
     runCleanup(restoreOutboundHostPolicy);
     runCleanup(restoreFetchTlsPolicy);
