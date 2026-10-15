@@ -34,6 +34,24 @@ Scenario: Verify what customers install
   And installed version identities and business evidence are reported separately
   And unavailable or failing acceptance remains incomplete
 
+Scenario: Reject an incomplete CLI package release
+  Given a built CLI whose command starter references unpublished framework packages
+  When its prepublication bundle check runs
+  Then it generates a disposable project with that built CLI
+  And it fails on missing registry dependencies without a local package substitution
+
+Scenario: Preserve an upload with an unresolved registration
+  Given a private object upload succeeded
+  When attachment registration is denied or conflicts
+  Then the client retains the original pending operation as unknown
+  And a new operation cannot replace it
+
+Scenario: Stop a write when its view is disposed
+  Given a pending operation was persisted before dispatch
+  When a submitting subscriber disposes the client on logout
+  Then no transport write is dispatched
+  And the pending identity remains available for investigation
+
 Scenario: Explain deployment and recovery
   Given a validated scope-bound deployment receipt
   When the customer requests its report
@@ -100,6 +118,10 @@ SVAdmin or other UI framework dependency is added.
    the record. Local storage is not a cross-tab atomic lock: use one active
    mutation owner per identity/application and never erase unresolved records
    merely to enable a new write.
+   If another pending record is found before dispatch, the client recovers that
+   original record rather than the new, undispatched operation. An upload whose
+   object was already stored stays unknown even if registration returns denial
+   or conflict; those responses do not prove the object was rolled back.
 
 The transport uploads private text attachments without overwrite and verifies
 the registration's artifact, path, byte count and SHA-256. Failed or lost
@@ -126,6 +148,16 @@ lookup uses the real command store but seeds the upload receipt independently;
 list refresh is stubbed in this fixture. It is not published/browser acceptance.
 
 ## Published consumer gate
+
+Before publishing the CLI, `bun run check:release-bundle` (also called by
+`prepublishOnly`) generates the command starter using the built executable.
+It checks every direct `@supacloud/*` dependency and dev dependency against
+the public npm registry, including the SDK and compiler. An unavailable range,
+registry error or invalid response fails the release check. This is a direct
+dependency visibility guard, not a transitive install, runtime or browser test.
+It does not publish packages, downgrade a contract or provide a workspace
+fallback. Publish the compatible dependency set through the existing release
+process before retrying CLI publication.
 
 Run from this repository, with explicit published versions:
 
@@ -154,6 +186,20 @@ available in npm (the queried published version was `0.41.1`). No downstream
 business, browser or recovery acceptance was reached. Publish a compatible
 package set through the normal release process, then rerun this gate; do not
 silently downgrade the contract or inject a local package to claim success.
+
+After synchronizing PR #1950 with the October 15 release commit `206d711a0`,
+the new guard was also run directly against the source-emitted manifest.
+It stopped at unavailable `@supacloud/elysia@^0.30.1`. This is a second,
+source-manifest visibility failure, not a rerun of the installed CLI acceptance
+above, and not proof that the remaining dependencies are available.
+
+Focused follow-up verification on October 15:
+`bun test src/shared/tools/app-starter-client.test.ts` from `packages/cli`
+passed both parent tests, including all 14 emitted behavior tests and strict
+generated-client/SDK compatibility types. The release guard cases use injected
+npm responses to verify missing/invalid/error handling without publishing.
+`git diff --check` passed. No full suite, publication, deployment, browser test,
+live SupAuth smoke or recovery drill was run by this follow-up.
 
 ## Deployment and recovery report
 

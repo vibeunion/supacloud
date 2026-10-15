@@ -126,12 +126,15 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
     };
     try { pending?.save(operation); }
     catch {
-      state = { ...state, mutation: { status: "unknown", operation } };
+      let original: ReviewOperation | null = null;
+      try { original = pending?.load() ?? null; } catch {}
+      state = { ...state, mutation: { status: "unknown", operation: original } };
       notify();
       return;
     }
     state = { ...state, mutation: { status: "submitting", operation } };
     notify();
+    if (closed) return;
     let result: ReviewWriteResult;
     try {
       result = kind === "approve" ? await transport.approve(structuredClone(operation))
@@ -279,7 +282,8 @@ export function createReviewTransport(options: {
         .upload(location["objectPath"], file, { upsert: false, contentType: "text/plain" });
       if (stored.error) return { status: "unknown" };
       const registered = await request(base + "/attachment-registration", input, operation.operationId);
-      if (!registered.response.ok) return rejected(registered.response.status, registered.body);
+      // The object is already stored. A rejection cannot roll back that side effect.
+      if (!registered.response.ok) return { status: "unknown" };
       const value = record(registered.body);
       const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer())),
         byte => byte.toString(16).padStart(2, "0")).join("");
@@ -293,7 +297,7 @@ export function createReviewTransport(options: {
 `;
 
 export const STARTER_REVIEW_CLIENT_TEST = String.raw`import { expect, test } from "bun:test";
-import { createReviewClient, createReviewPendingStore, ReviewAccessDenied, type ReviewTransport, type ReviewRow, type ReviewWriteResult } from "../src/client/reviews";
+import { createReviewClient, createReviewPendingStore, ReviewAccessDenied, type ReviewOperation, type ReviewTransport, type ReviewRow, type ReviewWriteResult } from "../src/client/reviews";
 import { createReviewTransport } from "../src/client/review-transport";
 
 const draft: ReviewRow = { id: "review-one", state: "draft", version: 1 };
@@ -533,5 +537,71 @@ test("corrupt pending records fail closed and cannot be overwritten by another o
   expect(() => pending.save(other)).toThrow("Another unresolved operation");
   expect(() => pending.clear(other)).toThrow("identity changed");
   expect(pending.load()).toEqual(original);
+});
+
+test("a competing pending operation is recovered instead of the undispatched attempt", async () => {
+  let value: string | null = null, writes = 0, lookedUp: unknown;
+  const pending = createReviewPendingStore({
+    getItem: () => value, setItem: (_key, next) => { value = next; }, removeItem: () => { value = null; },
+  }, { projectId: "p", tenantId: "t", applicationId: "a", subject: "s" });
+  const client = createReviewClient(transport({
+    approve: async () => { writes++; return { status: "unknown" }; },
+    lookup: async op => {
+      lookedUp = op;
+      return { status: "confirmed", operationId: op.operationId, reviewId: op.reviewId };
+    },
+  }), pending);
+  const original = { kind: "upload" as const, reviewId: draft.id, expectedVersion: 1, operationId: crypto.randomUUID() };
+  pending.save(original);
+  await client.approve(draft);
+  expect(writes).toBe(0);
+  expect(client.snapshot().mutation).toEqual({ status: "unknown", operation: original });
+  await client.reconcile();
+  expect(lookedUp).toEqual(original);
+  expect(pending.load()).toBeNull();
+});
+
+test("disposal during submitting notification prevents dispatch and preserves pending identity", async () => {
+  let writes = 0, saved: ReviewOperation | null = null;
+  const client = createReviewClient(transport({
+    approve: async () => { writes++; return { status: "unknown" }; },
+  }), { load: () => saved, save: op => { saved = op; }, clear: () => { saved = null; } });
+  client.subscribe(() => { if (client.snapshot().mutation.status === "submitting") client.dispose(); });
+  await client.approve(draft);
+  expect(writes).toBe(0);
+  expect(client.snapshot().mutation.operation).toEqual(saved);
+  expect(saved).not.toBeNull();
+});
+
+test("registration rejection after object upload retains pending identity and never submits a replacement", async () => {
+  for (const [status, code] of [[403, "UPLOAD_DENIED"], [409, "COMMAND_IDEMPOTENCY_CONFLICT"]] as const) {
+    let uploads = 0, requests = 0, saved: ReviewOperation | null = null;
+    const adapter = createReviewTransport({
+      supabase: {
+        storage: { from: () => ({ upload: async () => { uploads++; return { error: null }; } }) },
+      } as unknown as Parameters<typeof createReviewTransport>[0]["supabase"],
+      apiOrigin: "https://reviews.example.test",
+      authenticatedFetch: async (input, init) => {
+        requests++;
+        if (String(input).endsWith("/attachment-upload")) {
+          const operationId = new Headers(init?.headers).get("idempotency-key")!;
+          return Response.json({ artifactId: operationId, bucketId: "review-attachments",
+            objectPath: "owner/" + draft.id + "/" + operationId + ".txt" });
+        }
+        return Response.json({ code }, { status });
+      },
+    });
+    const client = createReviewClient(adapter, {
+      load: () => saved, save: op => { saved = op; }, clear: () => { saved = null; },
+    });
+    const file = new Blob(["hello"], { type: "text/plain" });
+    await client.upload(draft, file);
+    expect(client.snapshot().mutation.status).toBe("unknown");
+    expect(client.snapshot().mutation.operation).toEqual(saved);
+    expect(saved).not.toBeNull();
+    await client.upload(draft, file);
+    expect(uploads).toBe(1);
+    expect(requests).toBe(2);
+  }
 });
 `;

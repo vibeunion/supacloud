@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkCliStarterDependencies } from "./check-starter-dependencies.mjs";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const bundlePath = join(packageRoot, "dist", "index.js");
@@ -28,3 +29,4 @@ if (!/^\d+\.\d+\.\d+(?:\r?\n)?$/.test(result.stdout)) {
 }
 
 console.log(`CLI release bundle verified: ${result.stdout.trim()}`);
+await checkCliStarterDependencies(bundlePath);
