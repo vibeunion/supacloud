@@ -11,6 +11,7 @@ import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER }
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
+import { STARTER_REVIEW_CLIENT, STARTER_REVIEW_TRANSPORT, STARTER_REVIEW_CLIENT_TEST } from "./app-starter-client";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
@@ -419,6 +420,9 @@ export const UploadResult = t.Object({
 });
 `,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
+        "src/client/reviews.ts": STARTER_REVIEW_CLIENT,
+        "src/client/review-transport.ts": STARTER_REVIEW_TRANSPORT,
+        "tests/review-client.test.ts": STARTER_REVIEW_CLIENT_TEST,
         "src/host/review-uploads.ts": STARTER_UPLOAD_ADAPTER,
         "src/host/review-postgres.ts": STARTER_REVIEW_POSTGRES,
         "src/host/review-attachments.ts": STARTER_ATTACHMENT_POSTGRES,
@@ -519,6 +523,17 @@ HTTP schemas, permission denial, transaction rollback, idempotency and audit.
 It is not a complete Maker-Checker workflow or a production authorization policy.
 
 ## Frontend SDK Boundary
+
+src/client/reviews.ts supplies framework-neutral loading/empty/denied/error and
+submission/conflict/unknown states. src/client/review-transport.ts binds ordinary
+reads and private uploads to the existing user-scoped Supabase client, and
+approval/registration to createAuthenticatedFetch. It never uses a service key.
+Bind snapshot/subscribe to the view or SVAdmin store; dispose on identity change.
+The example lists at most 100 rows. Loading and permission failures clear rows.
+Unknown writes keep their operation ID and block resubmission. Optional lookup
+must be a read-only, identity-bound receipt endpoint; current row state alone
+cannot confirm that this operation committed. Without such an endpoint, retain
+unknown and use the operation ID for operator reconciliation.
 
 Use @supacloud/js as the platform SDK around your existing user-scoped
 @supabase/supabase-js client. Pass that same client to existing UI providers;
