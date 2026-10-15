@@ -264,43 +264,20 @@ describe("current deployment only", () => {
         expect(api.requests).toEqual([]);
     });
 
-    test("uploads one bound Web artifact without reading CAS or activating from the CLI", async () => {
+    test("explicit backend deployment neither builds nor uploads the configured frontend", async () => {
         const directory = await workspace({
-            application: { id: "orders" }, frontend: { id: "web", root: ".", outputDirectory: "dist" },
+            application: { id: "orders", environmentId: "test" },
+            frontend: { id: "web", root: ".", buildCommand: "touch build-ran", outputDirectory: "dist" },
         });
-        const archive = await createFrontendArchive(join(directory, "dist"));
-        const release = {
-            schema: "supacloud.frontend-release.v2", project_ref: "test-ref", deployment_id: "web",
-            release_id: archive.sha256, sha256: archive.sha256, tree_sha256: archive.treeSha256,
-            size_bytes: archive.archiveBytes, file_count: archive.fileCount,
-            created_at: "2026-10-13T00:00:00.000Z", kind: "prebuilt_static", archive_format: "tar.zst",
-        };
-        await archive.cleanup();
-        const api = server(async request => {
-            const path = new URL(request.url).pathname;
-            if (path.endsWith("/protocol")) return Response.json(protocol);
-            if (request.method === "GET" && path.endsWith("/frontend/deployments")) {
-                return Response.json([{ id: "web", name: "web", framework: "static", output_dir: "dist" }]);
-            }
-            if (request.method === "POST" && path.endsWith("/deployments/web-release")) {
-                expect(new URL(request.url).searchParams.get("deployment_id")).toBe("web");
-                expect((await request.arrayBuffer()).byteLength).toBe(release.size_bytes);
-                return Response.json({
-                    ok: true, project_ref: "test-ref", environment_id: "test",
-                    deployment_id: "web", release_id: release.release_id, release,
-                }, { status: 201 });
-            }
-            return new Response("Unexpected legacy request", { status: 400 });
-        });
+        const api = server();
         const tool = deploy(api.http, directory);
-        await tool.run({ skip_build: true, json: true });
+        await tool.run({ backend: true, json: true });
         expect(tool.calls).toHaveLength(1);
-        expect(tool.calls[0]?.web_release).toEqual({ deployment_id: "web", release_id: release.release_id });
+        expect(tool.calls[0]).not.toHaveProperty("web_release");
         expect(api.requests).toEqual([
             "GET /v1/projects/test-ref/environments/test/deployments/protocol",
-            "GET /v1/projects/test-ref/frontend/deployments",
-            "POST /v1/projects/test-ref/environments/test/deployments/web-release",
         ]);
+        await expect(readFile(join(directory, "build-ran"))).rejects.toThrow();
     });
 
     test.each([
@@ -421,7 +398,7 @@ describe("current deployment only", () => {
                     throw new Error("Unchanged deployment must not compress an archive");
                 }) : undefined;
                 try {
-                    result = await tool.run({ skip_build: true, ...(mode === "mixed" ? { assets_only: true } : {}) });
+                    result = await tool.run({ skip_build: true });
                     if (compression) expect(compression).not.toHaveBeenCalled();
                 } finally {
                     compression?.mockRestore();
@@ -497,6 +474,23 @@ describe("current deployment only", () => {
         expect(api.requests).toEqual([]);
     });
 
+    test("status is read-only in production and never builds or publishes", async () => {
+        const directory = await workspace({ frontend: { buildCommand: "touch build-ran", outputDirectory: "dist" } });
+        const deploymentId = "11234567-89ab-4def-8123-456789abcdef";
+        const api = server(() => Response.json({
+            schema: "supacloud.project-deployment-status.v1", deployment_id: deploymentId,
+            operation: "application.release.deploy", project_ref: "test-ref", application_id: "orders",
+            environment_id: "production", status: "pending", phase: "queued",
+        }));
+        const result = await runCli(directory, api.url, ["deploy", "--status", deploymentId], {
+            SUPACLOUD_ENV: "production", SUPACLOUD_READ_ONLY: "true",
+        });
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({ status: "pending", phase: "queued" });
+        expect(api.requests).toEqual([`GET /v1/projects/test-ref/environments/production/deployments/${deploymentId}`]);
+        await expect(readFile(join(directory, "build-ran"))).rejects.toThrow();
+    });
+
     test.each(["exact", "missing", "duplicate"] as const)(
         "assets-only selects an exact named site among multiple deployments: %s", async mode => {
             const directory = await workspace({ frontend: { name: "fa-web", outputDirectory: "dist" } });
@@ -524,11 +518,11 @@ describe("current deployment only", () => {
         },
     );
 
-    test("mixed frontend repositories require explicit assets-only selection", async () => {
+    test("explicit backend deployment still rejects a legacy manifest", async () => {
         const directory = await workspace({ frontend: { outputDirectory: "dist" } });
         await writeFile(join(directory, "deploy-manifest.json"), "{}");
         const api = server();
-        await expect(deploy(api.http, directory).run({ skip_build: true })).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
+        await expect(deploy(api.http, directory).run({ skip_build: true, backend: true })).rejects.toThrow("DEPLOYMENT_UPGRADE_REQUIRED");
         expect(api.requests).toEqual([]);
     });
 

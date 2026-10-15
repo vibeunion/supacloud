@@ -17,6 +17,8 @@ import {
   frontendReleaseService,
 } from "../services/frontend-release.service";
 import type { FrontendReleaseService } from "../services/frontend-release.service";
+import { ApplicationDeploymentTasks } from "../services/application-deployment-task";
+import { stableSha256 } from "../utils/stable-json";
 
 const projectRef = t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" });
 const environmentId = t.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" });
@@ -124,6 +126,7 @@ export function createProjectDeploymentRoutes(
     principal?: typeof getVerifiedRequestPrincipal;
   } = {},
   frontend: Pick<FrontendReleaseService, "prepareReleaseUpload" | "createRelease"> = frontendReleaseService,
+  queue: Pick<ApplicationDeploymentTasks, "submit" | "status"> = new ApplicationDeploymentTasks(orchestrator),
 ) {
   const authorize = auth.authorize ?? requireProjectOrAdminAuth;
   const principalFor = auth.principal ?? getVerifiedRequestPrincipal;
@@ -190,8 +193,8 @@ export function createProjectDeploymentRoutes(
     .post("", {
       params: t.Object({ ref: projectRef, environmentId }),
       body: requestBody,
-      detail: { tags: ["deployments"], summary: "Deploy the project backend and Web as one durable mutation" },
-    }, async ({ params, body, request }) => {
+      detail: { tags: ["deployments"], summary: "Queue a durable backend deployment without waiting for execution" },
+    }, async ({ params, body, request, set }) => {
       const principal = await principalFor(request);
       if (!principal) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
       const requestValue = {
@@ -209,17 +212,27 @@ export function createProjectDeploymentRoutes(
         return status(400, { code: "PROJECT_DEPLOYMENT_REQUEST_INVALID", error: "Invalid deployment request" });
       }
       try {
-        const receipt = await orchestrator.execute({
+        const queued = await queue.submit({
           projectRef: params.ref,
           applicationId: body.application_id,
           environmentId: params.environmentId,
           request: requestValue,
           principal,
         });
-        return { ok: true, ...parseApplicationDeployResult(receipt, {
-          project_ref: params.ref, application_id: body.application_id,
-          environment_id: params.environmentId, request: requestValue,
-        }) };
+        set.status = 202;
+        set.headers["Location"] = `/v1/projects/${params.ref}/environments/${params.environmentId}/deployments/${body.deployment_id}`;
+        return {
+          ok: true,
+          schema: "supacloud.project-deployment-accepted.v1",
+          status: "accepted",
+          deployment_id: body.deployment_id,
+          project_ref: params.ref,
+          application_id: body.application_id,
+          environment_id: params.environmentId,
+          release_id: body.release_id,
+          request_sha256: stableSha256(requestValue),
+          replayed: queued.replayed,
+        };
       } catch (error) {
         const code = error instanceof ApplicationDeploymentOrchestrationError
           && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)
@@ -241,7 +254,7 @@ export function createProjectDeploymentRoutes(
       params: t.Object({ ref: projectRef, environmentId, deploymentId }),
       detail: { tags: ["deployments"], summary: "Read one project deployment receipt and phase" },
     }, async ({ params }) => {
-      const state = await orchestrator.status(params.ref, params.deploymentId);
+      const state = await queue.status(params.ref, params.deploymentId);
       if (state === null) return status(404, { code: "PROJECT_DEPLOYMENT_NOT_FOUND", error: "Deployment not found" });
       if (state.environment_id !== params.environmentId || state.project_ref !== params.ref
         || state.mutation_id !== params.deploymentId) {
@@ -254,7 +267,7 @@ export function createProjectDeploymentRoutes(
       body: t.Object({}, { additionalProperties: false }),
       detail: { tags: ["deployments"], summary: "Re-read a project deployment after an unknown response" },
     }, async ({ params }) => {
-      const state = await orchestrator.status(params.ref, params.deploymentId);
+      const state = await queue.status(params.ref, params.deploymentId);
       if (state === null || state.environment_id !== params.environmentId
         || state.project_ref !== params.ref || state.mutation_id !== params.deploymentId) {
         return status(404, { code: "PROJECT_DEPLOYMENT_NOT_FOUND", error: "Deployment not found" });

@@ -1495,6 +1495,8 @@ async function bootstrap() {
     });
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
+    const { applicationDeploymentWorker } = await import("./routes");
+    applicationDeploymentWorker.start();
     const { startPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
     startPgflowTaskWorker();
 
@@ -1589,6 +1591,8 @@ export function startManagementApi(): void {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
+      const { applicationDeploymentWorker } = await import("./routes");
+      await applicationDeploymentWorker.stop();
       const { stopPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
       await stopPgflowTaskWorker();
       if (config.edgeRuntimeMode === "embedded") {

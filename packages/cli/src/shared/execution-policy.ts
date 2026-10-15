@@ -115,6 +115,7 @@ function declaredMode(moduleName: string, action: string): ExecutionMode | undef
 }
 
 export function executionMode(moduleName: string, action: string, args: Record<string, unknown>): ExecutionMode | undefined {
+    if (moduleName === "deploy" && typeof args.status === "string") return "read";
     if (moduleName === "deploy" && (args.dry_run === true || args.plan === true || args.diff === true)) return "read";
     if (moduleName === "database"
         && ["push_migrations", "baseline_migrations"].includes(action)
