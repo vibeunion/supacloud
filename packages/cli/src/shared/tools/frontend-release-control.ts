@@ -7,6 +7,7 @@ import {
 } from "@supacloud/delivery/frontend-archive";
 import type { HttpResult } from "../transports/http";
 import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
+import { safeMutationStatus } from "../mutation-protocol";
 
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,20}$/u;
 const DEPLOYMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
@@ -529,25 +530,17 @@ function publicMutationReceipt(candidate: unknown, expected: {
 }): PublicMutationReceipt | null {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
     const envelope = candidate as Record<string, unknown>;
-    const mutation = envelope.mutation as Record<string, unknown> | null;
-    const expectedKeys = [
-        "project_ref", "mutation_id", "operation", "resource_key", "request_fingerprint",
-        "principal", "status", "checkpoint", "receipt", "response_status", "failure_code",
-        "lease", "completed_at", "created_at", "updated_at",
-    ] as const;
+    const mutation = safeMutationStatus(envelope.mutation);
     if (!mutation || !exactKeys(envelope, ["project_ref", "mutation"])
-        || !exactKeys(mutation, expectedKeys) || envelope.project_ref !== expected.projectRef
+        || envelope.project_ref !== expected.projectRef
         || mutation.project_ref !== expected.projectRef || mutation.mutation_id !== expected.mutationId
         || mutation.resource_key !== expected.resourceKey
-        || mutation.request_fingerprint !== expected.requestFingerprint
-        || typeof mutation.operation !== "string" || typeof mutation.status !== "string"
-        || !(mutation.response_status === null || Number.isSafeInteger(mutation.response_status))
-        || !(mutation.failure_code === null || typeof mutation.failure_code === "string")) return null;
+        || mutation.request_fingerprint !== expected.requestFingerprint) return null;
     return {
         operation: mutation.operation,
         status: mutation.status,
-        responseStatus: mutation.response_status as number | null,
-        failureCode: mutation.failure_code as string | null,
+        responseStatus: mutation.response_status,
+        failureCode: mutation.failure_code,
     };
 }
 
