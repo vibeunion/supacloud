@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import type { ApplicationDeployResult } from "@supacloud/delivery";
 import { HttpTransport } from "../transports/http";
-import { runProjectDeployment } from "./project-deployment";
+import { readProjectDeploymentStatus, runProjectDeployment } from "./project-deployment";
+import { mutationRequestFingerprint } from "../mutation-protocol";
 
 const mutationId = "11234567-89ab-4def-8123-456789abcdef";
 const configurationId = "21234567-89ab-4def-8123-456789abcdef";
@@ -151,4 +152,43 @@ test("invalid input makes no HTTP request", async () => {
     const result = await runProjectDeployment(fixture.http, { ...request, mutation_id: "bad" });
     expect(result.isError).toBe(true);
     expect(fixture.calls).toHaveLength(0);
+});
+
+function accepted() {
+    const { ref: _ref, id: _id, environment_id: _environment, ...candidate } = request;
+    return {
+        schema: "supacloud.project-deployment-accepted.v1", ok: true, status: "accepted",
+        deployment_id: mutationId, project_ref: "demo", application_id: "reviews", environment_id: "test",
+        release_id: request.release_id, replayed: false, request_sha256: mutationRequestFingerprint(candidate),
+    };
+}
+
+test("202 acceptance returns immediately without a receipt or polling", async () => {
+    const f = transport(accepted(), {}, 202);
+    const result = await runProjectDeployment(f.http, request);
+    expect(result.isError).not.toBe(true);
+    const body = JSON.parse(result.content[0]!.text);
+    expect(body).toMatchObject({ ok: true, status: "accepted", deployment_id: mutationId });
+    expect(body).not.toHaveProperty("backend_receipt");
+    expect(body).not.toHaveProperty("execution_performed");
+    expect(f.calls).toHaveLength(1);
+});
+
+test.each([
+    { request_sha256: "0".repeat(64) }, { release_id: "0".repeat(64) },
+    { schema: "other" }, { secret: "private" }, { environment_id: "other" },
+])("does not trust an unbound acceptance: %j", async change => {
+    const f = transport({ ...accepted(), ...change }, {}, 202, 404);
+    const result = await runProjectDeployment(f.http, request);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).not.toContain("private");
+});
+
+test("status reads a queued task without publishing or manufacturing success", async () => {
+    const { receipt: _receipt, ...queued } = state();
+    const f = transport({}, { ...queued, status: "pending", phase: "queued" });
+    const result = await readProjectDeploymentStatus(f.http, "demo", "test", mutationId);
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "pending", phase: "queued" });
+    expect(f.calls.map(call => call.method)).toEqual(["GET"]);
 });

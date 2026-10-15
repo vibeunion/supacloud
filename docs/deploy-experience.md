@@ -4,27 +4,72 @@ The CLI owns the local build and one final result; Management owns immutable
 artifacts, active authority, CAS, compatibility, mutation receipts and recovery.
 Applications declare business schema, RLS, OAuth bindings and acceptance checks.
 
+## Independent Release Paths
+
+With a static frontend configured, `supacloud deploy` publishes only that frontend.
+It does not compile the backend, run migrations, deploy Functions, converge
+Storage or schedules, or wait for an Application deployment. `--assets_only`
+remains an explicit frontend-only selection. A repository without a frontend
+continues to use its configured Application path.
+
+```bash
+supacloud --env test deploy
+supacloud --env test deploy --backend
+supacloud --env test deploy --status <deployment-id>
+```
+
+The backend path builds and uploads the Application, pins an immutable
+configuration, and inserts one durable `project_tasks` job before returning HTTP
+202 and `status: accepted`. Configuration values remain in encrypted revisions,
+not in public task payloads. The worker wakes through PostgreSQL notification,
+with one-second fallback polling and bounded host concurrency. It executes the
+existing migration/activation orchestrator independently of the HTTP request.
+Local builds and uploads still take their actual time; 202 is not a latency claim.
+
+Only a scope-bound, verified mutation receipt means `succeeded`. Queue success
+alone cannot prove activation. A retry with the same identity must match the
+original request and principal. Delivery after a lost acknowledgement reads a
+completed receipt without re-executing. Transient failures before a mutation
+starts may retry up to three attempts; interrupted side effects remain unknown
+and require reconciliation. This does not implement arbitrary checkpoint resume.
+Do not have CI treat `accepted` as release completion; read deployment status
+until a verified terminal outcome before promoting dependent consumers.
+
+These changes apply to Application artifacts and their archived migrations.
+Standalone Function, database and Storage commands remain independent and are
+not silently routed through this job type. A generic async migration/Storage
+pipeline and a multi-Function submission protocol are not implemented here.
+Static uploads still use whole archives; file-level incremental upload is
+separate work. No fixed 30-second deadline is imposed.
+
+### References
+
+- [Wrangler commands](https://developers.cloudflare.com/workers/wrangler/commands/):
+  Worker deployment and D1 migration application are distinct commands.
+- [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/):
+  migration state is tracked independently of Worker code.
+- [Worker versions and deployments](https://developers.cloudflare.com/workers/versions-and-deployments/):
+  preparing code and assigning traffic are separate operations.
+- [Vercel deploy](https://vercel.com/docs/cli/deploy) and
+  [promote](https://vercel.com/docs/cli/promote): `--no-wait` separates submission
+  from waiting for readiness, while production assignment is a separate concern.
+
+These are separation-of-responsibility references, not evidence that either
+provider implements the same queue or guarantees a particular deployment time.
+
 ## Read-Only Comparison
 
 ```bash
-supacloud --env staging deploy --dry_run
-supacloud --env staging deploy --plan --json
-supacloud --env staging deploy --diff --skip_build --json
+supacloud --env staging app deploy-plan \
+  --id orders --environment_id staging \
+  --release_id <release-id> --configuration_id <configuration-id> --json
 ```
 
-`dry_run` resolves the target without building. Frontend `plan` and `diff` run the
-configured local build unless `skip_build` is set, package a temporary immutable
-archive, and compare it with the platform's current authority. They perform only
-remote GETs and delete the temporary archive. Builds are trusted local project
-commands, not sandboxed code. The comparison is release-level, not a source-code
-or per-file patch. It includes environment, both hashes, bytes, files, expected
-CAS and prospective upload/activation actions. Never apply a saved plan without
-reobserving authority; a plan is evidence, not a reusable write token.
-
-Existing `deploy` behavior is preserved: without planning flags it publishes,
-subject to read-only mode and exact production confirmation. `plan`/`diff` cannot
-be combined with `dry_run`. Edge Function `plan` is resolution-only; multi-Function
-release comparison requires an immutable version manifest.
+The removed `deploy --dry_run`, `--plan` and `--diff` flags are not supported.
+Use Application planning for an existing backend candidate. A saved plan is
+evidence, not a reusable write token. Publishing remains subject to read-only
+mode and exact production confirmation; status reads require neither a build
+nor production write confirmation.
 
 Content-equivalent frontend trees skip upload and activation even if archive hashes
 differ. Current integrity gates and exact post-activation readback remain.
@@ -37,8 +82,8 @@ For the normal application path, the CLI provides one profile-backed release
 workflow:
 
 ```bash
-supacloud --env test deploy
-supacloud --env production deploy --confirm-production production-ref
+supacloud --env test deploy --backend
+supacloud --env production deploy --backend --confirm-production production-ref
 ```
 
 Declare the Application once in `supacloud.json`:
@@ -55,7 +100,8 @@ The selected `.env.supacloud.<name>` supplies the project credentials and
 continues to select its own `SUPACLOUD_APPLICATION_ENVIRONMENT_ID` (or
 `SUPACLOUD_ENV`). Configuration is resolved from the platform unless a
 configuration path or immutable revision is explicitly declared. `deploy`
-uses the project deployment resource for this Application path. Test and
+uses the project deployment resource for this Application path when selected
+with `--backend` (or when no frontend is configured). Test and
 production use the same command shape. The explicit advanced form remains available:
 
 ```bash
@@ -64,17 +110,18 @@ supacloud --env test app release \
 ```
 
 `app release` builds the local delivery manifest and uploads the immutable
-release, then submits one project deployment mutation. SupaCloud owns the
-deployment plan, backup, migration, runtime readiness, Web binding and CAS
-activation behind that mutation. Use
+release, then submits one durable project deployment job. SupaCloud owns the
+deployment plan, backup, migration, runtime readiness and CAS activation behind
+the mutation. The normal CLI does not include a Web binding. Use
 `--configuration_id <uuid> --skip_build --manifest_path <path>` when reusing an
-already reviewed configuration and manifest. `--format json` returns one receipt
-containing every completed phase, the release/configuration identities and the
-activation result. Phase evidence belongs to the platform receipt; the standard
+already reviewed configuration and manifest. `--format json` preserves the
+acceptance status and deployment identity without claiming activation.
+Activation evidence belongs to the later platform receipt; the standard
 deployment output does not add phase timing or ask users to orchestrate those steps.
 
 The workflow stops on the first failed or uncertain phase. A lost or malformed
-deployment response triggers a bounded GET for the same deployment ID. Only a
+deployment response triggers a bounded GET for the same deployment ID. A valid
+202 returns immediately without polling. Only a
 verified terminal receipt matching the project, environment, application,
 candidate, configuration, backend and requested Web release confirms success.
 The CLI never rewrites a foreign receipt's identity or sends a second deployment
@@ -88,24 +135,25 @@ does not implement backup, restore, activation or downgrade orchestration.
 
 ## Current Project Boundary
 
-The project endpoint currently orchestrates an Application delivery artifact
-(HTTP/Worker runtime and its archived migrations) plus an optional Web release.
+The project deployment endpoint currently queues an Application delivery artifact
+(HTTP/Worker runtime and its archived migrations), independently of static Web.
+The legacy Application orchestrator still supports an optional Web binding,
+but the project endpoint rejects that binding.
 It does **not** yet accept FA's standalone migration packages, multi-Function
 inventory, schedule convergence or business release manifest. Adding this
 endpoint alone does not satisfy the FA one-command acceptance criteria.
 
-Normal `deploy` rejects detected unsupported project release manifests and
-backend declarations before any remote request instead of silently publishing
-only Web. Detection covers `deploy-manifest.json`, one-level
+The backend Application path rejects detected unsupported project release manifests
+and backend declarations before any remote request. Detection covers `deploy-manifest.json`, one-level
 `supacloud/*/deploy-manifest.json`, declared Edge Function targets, a compiler
 configuration without an Application binding, and conventional Supabase backend
 directories. This is a fail-closed guard, not a complete discovery engine for
-arbitrary repository layouts. An explicit `--target` remains a component command,
-not proof of a complete project release.
+arbitrary repository layouts. The static path intentionally leaves these declarations
+untouched and reports only a frontend receipt, never a complete project release.
 
-The missing platform implementation must consume the complete candidate, compare
-it with verified target inventory, and select Web-only versus backend-plus-Web
-internally. Customer scope creation/rebinding, Git diff classification and
+Future standalone backend submission must compare its candidate with verified
+target inventory without introducing work into the static path.
+Customer scope creation/rebinding, Git diff classification and
 manual inventory comparison are not an acceptable replacement. Destructive
 migrations require an explicit reviewed decision; routine release planning does
 not. See `fa-deployment-capability-boundary.md` for ownership and acceptance.
@@ -215,7 +263,7 @@ Web uploads still send complete tar.zst archives. The next separate optimization
 is a server-owned content manifest/upload session that requests missing files,
 validates completion and binds the immutable result to deployment. Database state
 is not a code-version rollback: migration and recovery policies remain separate.
-The target of at most 30 seconds excluding builds is not yet a measured guarantee.
+There is no fixed timing promise; cold, warm and no-op paths need separate measurements.
 
 ```gherkin
 Scenario: Prepare a complete Function release
@@ -254,11 +302,11 @@ Those policies and live legacy cutover execution are not implemented by this cha
 ## Acceptance
 
 ```gherkin
-Scenario: Review without publishing
-  Given a read-only production profile and a prebuilt frontend
-  When deploy --diff --skip_build is requested
+Scenario: Read queued deployment without publishing
+  Given a read-only production profile and an accepted backend deployment
+  When deploy --status is requested
   Then only remote GETs are sent
-  And the plan binds project, deployment, tree and expected CAS
+  And pending is not reported as succeeded
 
 Scenario: Equivalent output needs no activation
   Given an active artifact with a different archive hash but the same verified tree
@@ -272,16 +320,32 @@ Scenario: Preserve an uncertain write
   And the CLI never submits another activation
 
 Scenario: The repository selects the Application path
-  Given an application ID in supacloud.json and a selected test profile
+  Given an application ID without a frontend in supacloud.json and a selected test profile
   When deploy is requested without an application ID environment variable
   Then the CLI submits the Application candidate for the test environment
   And the platform resolves the current configuration and backend plan
 
-Scenario: Never claim a partial release is a project release
-  Given a Web target and detected backend declarations not supported by the orchestrator
+Scenario: Static publication does not invoke backend work
+  Given a Web target and backend declarations
   When default deploy is requested
-  Then it reports PROJECT_DEPLOYMENT_UNSUPPORTED before remote requests
-  And it does not suggest manually authoring a scope as the normal workflow
+  Then only the frontend is built and published
+  And Functions, migrations, Storage and schedules remain untouched
+
+Scenario: Acknowledge only durable backend submissions
+  Given a validated Application request
+  When the queue insertion commits
+  Then HTTP 202 reports accepted without executing the deployment in the handler
+  And replaying the same request uses the existing task
+
+Scenario: Restart after lost acknowledgement
+  Given a completed mutation and a task whose acknowledgement was lost
+  When a worker receives that task again
+  Then it verifies the existing receipt without repeating migration or activation
+
+Scenario: Unknown side effects are not automatically retried
+  Given an interrupted mutation with effects that cannot be verified
+  When a worker receives that task again
+  Then reconciliation is required instead of re-executing the deployment
 
 Scenario: A successful response must be bound
   Given HTTP 200 with ok true but a foreign or incomplete receipt

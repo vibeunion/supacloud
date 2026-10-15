@@ -6,6 +6,7 @@ import {
 import type { ToolResult } from "../tool-server";
 import type { HttpTransport } from "../transports/http";
 import { releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess } from "./release-control-response";
+import { mutationRequestFingerprint } from "../mutation-protocol";
 
 export async function requireProjectDeploymentProtocol(
     http: Pick<HttpTransport, "get">,
@@ -35,6 +36,16 @@ const scopeSchema = Type.Object({
     application_id: ApplicationIdSchema,
     environment_id: ApplicationIdSchema,
 });
+const acceptedSchema = Type.Object({
+    schema: Type.Literal("supacloud.project-deployment-accepted.v1"),
+    ok: Type.Literal(true),
+    status: Type.Literal("accepted"),
+    deployment_id: ApplicationDeployRequestSchema.properties.mutation_id,
+    ...scopeSchema.properties,
+    release_id: ApplicationDeployRequestSchema.properties.release_id,
+    request_sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    replayed: Type.Boolean(),
+}, { additionalProperties: false });
 const statusSchema = Type.Object({
     schema: Type.Literal("supacloud.project-deployment-status.v1"),
     deployment_id: ApplicationDeployRequestSchema.properties.mutation_id,
@@ -87,7 +98,21 @@ export async function runProjectDeployment(
     const result = await http.post(endpoint, {
         ...candidate, deployment_id: mutation_id, application_id: scope.application_id,
     }, { timeoutMs: 120_000, maxJsonBytes: 131_072, responseTimeoutMs: 30_000 });
-    if (result.ok && result.status === 200) {
+    if (result.ok && result.status === 202) {
+        const accepted = result.data;
+        if (Value.Check(acceptedSchema, accepted)
+            && accepted.deployment_id === mutation_id && accepted.project_ref === scope.project_ref
+            && accepted.application_id === scope.application_id && accepted.environment_id === scope.environment_id
+            && accepted.release_id === request.release_id
+            && accepted.request_sha256 === mutationRequestFingerprint(request)) {
+            return releaseControlSuccess(operation, {
+                status: "accepted", deployment_id: mutation_id, project_ref: scope.project_ref,
+                application_id: scope.application_id, environment_id: scope.environment_id,
+                release_id: request.release_id, replayed: accepted.replayed,
+                status_path: `${endpoint}/${mutation_id}`,
+            });
+        }
+    } else if (result.ok && result.status === 200) {
         try {
             return releaseControlSuccess(operation, {
                 ...responseReceipt(result.data, expected), deployment_id: mutation_id,
@@ -116,5 +141,35 @@ export async function runProjectDeployment(
     } catch {
         return releaseControlFailure(operation, "OUTCOME_UNKNOWN",
             result.transportError ? null : result.status, identity);
+    }
+}
+
+export async function readProjectDeploymentStatus(
+    http: Pick<HttpTransport, "get">,
+    projectRef: string, environmentId: string, deploymentId: string,
+): Promise<ToolResult> {
+    if (!/^[a-z0-9-]{1,20}$/.test(projectRef) || !Value.Check(ApplicationIdSchema, environmentId)
+        || !Value.Check(ApplicationDeployRequestSchema.properties.mutation_id, deploymentId)) {
+        return releaseControlFailure(operation, "INVALID_RESPONSE", null);
+    }
+    const path = `/v1/projects/${encodeURIComponent(projectRef)}/environments/${encodeURIComponent(environmentId)}/deployments/${deploymentId}`;
+    const response = await http.get(path, { retry: false, totalTimeoutMs: 10_000, maxJsonBytes: 131_072 });
+    try {
+        const state = response.data;
+        if (!response.ok || response.status !== 200 || !Value.Check(statusSchema, state)
+            || state.project_ref !== projectRef || state.environment_id !== environmentId
+            || state.deployment_id !== deploymentId) throw new Error();
+        if (state.status === "succeeded") {
+            const receipt = parseApplicationDeployResult(state.receipt);
+            if (state.phase !== "verifying" || receipt.project_ref !== projectRef
+                || receipt.environment_id !== environmentId || receipt.application_id !== state.application_id
+                || receipt.mutation_id !== deploymentId) throw new Error();
+        } else if (state.receipt !== undefined) throw new Error();
+        return state.status === "outcome_unknown" || state.status === "failed_terminal"
+            ? releaseControlFailure(operation, state.status === "outcome_unknown" ? "OUTCOME_UNKNOWN" : "MUTATION_NOT_SUCCEEDED",
+                response.status, { ...state })
+            : releaseControlSuccess(operation, { ...state });
+    } catch {
+        return releaseControlFailure(operation, "INVALID_RESPONSE", response.status);
     }
 }
