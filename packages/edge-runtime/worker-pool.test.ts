@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -2511,8 +2511,16 @@ describe("WorkerPool metrics NaN fix", () => {
     const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
     pools.push(pool);
 
+    let clockMs = 0;
+    // Immediate dispatch must not count scheduling overhead as queue wait.
+    const clock = spyOn(performance, "now").mockImplementation(() => {
+      const now = clockMs;
+      clockMs += 10;
+      return now;
+    });
+
     try {
-      const res = await pool.dispatch({
+      const response = pool.dispatch({
         functionId: "test_nan",
         projectRef: "test-project",
         functionPath,
@@ -2520,6 +2528,8 @@ describe("WorkerPool metrics NaN fix", () => {
         env: {},
         request: new Request("http://edge.local/functions/v1/test"),
       });
+      clock.mockRestore();
+      const res = await response;
       expect(res.status).toBe(200);
 
       const metrics = pool.snapshotMetrics("test");
@@ -2527,7 +2537,10 @@ describe("WorkerPool metrics NaN fix", () => {
         expect(Number.isNaN(value)).toBe(false);
       }
       expect(metrics["test_avg_queue_wait_ms"]).toBe(0);
+      expect(metrics["test_total_queue_wait_ms"]).toBe(0);
+      expect(metrics["test_total_queued_requests"]).toBe(0);
     } finally {
+      clock.mockRestore();
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
@@ -2576,6 +2589,8 @@ describe("WorkerPool metrics NaN fix", () => {
       }
       // At least one request was queued, so total_queue_wait_ms > 0
       expect(metrics["testq_total_queue_wait_ms"]).toBeGreaterThan(0);
+      expect(metrics["testq_avg_queue_wait_ms"]).toBeGreaterThan(0);
+      expect(metrics["testq_total_queued_requests"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
