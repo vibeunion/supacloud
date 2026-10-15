@@ -133,7 +133,7 @@ const recordUserDeletionUncertaintySpy = spyOn(
 
 const { userManagementRoutes } = await import("../../src/routes/auth-users");
 const app = new Elysia()
-  .afterHandle(({ request, responseValue }) => new URL(request.url).pathname === "/swagger/json"
+  .onAfterHandle(({ request, responseValue }) => new URL(request.url).pathname === "/swagger/json"
     ? augmentManagementOpenApiDocument(responseValue, app)
     : responseValue)
   .use(openapi({ path: "/swagger" }))

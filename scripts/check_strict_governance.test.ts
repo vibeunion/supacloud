@@ -33,7 +33,7 @@ test("reports a disabled strict compiler option", async () => {
   }));
   await writeFile(join(root, "tsconfig.tools.json"), JSON.stringify({ extends: "./tsconfig.strict.json", compilerOptions: {} }));
   await mkdir(join(root, "packages/elysia"), { recursive: true });
-  await writeFile(join(root, "packages/elysia/compatibility.json"), JSON.stringify({ packages: { effect: "4.0.2" } }));
+  await writeFile(join(root, "packages/elysia/compatibility.json"), JSON.stringify({ packages: { effect: "4.0.5" } }));
   await mkdir(join(root, "packages/cli/src/shared/tools"), { recursive: true });
   await writeFile(join(root, "packages/cli/src/shared/tools/app-starter.ts"), strictStarterSource());
   await writeFile(join(root, "packages/cli/src/shared/tools/app-starter-templates.ts"), strictStarterSource());

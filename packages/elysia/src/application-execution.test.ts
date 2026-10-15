@@ -80,7 +80,7 @@ describe("Elysia 2 native HTTP with portable application execution", () => {
       });
     const app = new Elysia()
       .use(http)
-      .error(({ error }) => defaultErrorResponse(error))
+      .onError(({ error }) => defaultErrorResponse(error))
       .post("/native", {
         applicationContext: true,
         body: t.Object({ value: t.Number() }),
@@ -102,7 +102,7 @@ describe("Elysia 2 native HTTP with portable application execution", () => {
     let writes = 0;
     const run = createCommandPipeline({ authorize: () => {} });
     const app = new Elysia()
-      .error(({ error }) => defaultErrorResponse(error))
+      .onError(({ error }) => defaultErrorResponse(error))
       .post("/missing-transaction", {}, () => run({
         ...invocation({}), command: { ...descriptor, transaction: "required" },
       }, () => { writes++; }));

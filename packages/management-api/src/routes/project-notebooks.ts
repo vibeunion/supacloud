@@ -40,7 +40,7 @@ export function createProjectNotebookRoutes(dependencies: Dependencies = {}) {
       : status(404, { message: "Notebook not found" });
   };
   return new Elysia({ prefix: "/v1/projects", name: "project-notebooks" })
-  .error(({ error }) => {
+  .onError(({ error }) => {
     if (error instanceof Error) {
       if (("code" in error && error.code === "23505") || ("errno" in error && error.errno === "23505")) return nameConflict();
       if ("code" in error && (error.code === "validation" || error.code === "parse")) {
@@ -49,7 +49,7 @@ export function createProjectNotebookRoutes(dependencies: Dependencies = {}) {
     }
     return status(500, { message: "Notebook storage unavailable" });
   })
-  .beforeHandle(async ({ request, params, set }) => {
+  .onBeforeHandle(async ({ request, params, set }) => {
     set.headers["Cache-Control"] = "no-store";
     const denied = await authorize(request, params.ref);
     if (denied) return status(denied.status, denied.body);

@@ -39,8 +39,8 @@ improvement, zero overhead or framework portability is established by this PR.
 ## Beta policy
 
 `packages/elysia/compatibility.json` records the required acceptance target, not
-proof that a test run passed. The Elysia target is `2.0.0-beta.21`, with active
-`typebox` 1.3.36 and `exact-mirror` 1.2.6. Bun and both TypeScript engines are
+proof that a test run passed. The Elysia target is `2.0.0-beta.32`, with active
+`typebox` 1.3.37 and `exact-mirror` 1.2.6. Bun and both TypeScript engines are
 also recorded. The adapter peer and development dependencies, repository-owned
 direct Elysia consumers, CLI scaffold literals and compiler migration target must
 agree. Published templates retain version literals so that the compiler and CLI

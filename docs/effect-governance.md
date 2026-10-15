@@ -4,7 +4,7 @@ SupaCloud treats Effect as an execution contract for complex routes and
 commands. Elysia remains the HTTP boundary, while the SupaCloud compiler owns
 static application rules and generated route metadata.
 
-SupaCloud currently pins Effect `4.0.2`. The adapter follows the Effect 4
+SupaCloud currently pins Effect `4.0.5`. The adapter follows the Effect 4
 execution model: the framework boundary receives an `Exit`, maps
 `Cause.squash(exit.cause)`, and does not depend on the removed v3
 `Runtime<R>` type or FiberFailure wrapper APIs.
