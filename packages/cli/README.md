@@ -424,6 +424,12 @@ to any retained release. It never infers a target from content-hash-sorted
 history, reuploads assets or restores a database.
 An uncertain result includes the mutation ID for read-only reconciliation and
 must not be blindly retried.
+Automated release-receipt compensation belongs in deployment orchestration,
+which must persist the original CAS identity and mutation ID. The internal
+rollback primitive supports this binding; this change does not wire up an
+automatic compensation workflow. The interactive CLI does not accept these
+binding fields. It observes current authority and generates its operation ID
+internally, retaining CAS checks and final readback.
 
 ### Immutable application releases
 
