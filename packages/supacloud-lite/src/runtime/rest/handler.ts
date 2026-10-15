@@ -279,7 +279,10 @@ export class RestHandler {
     const { rows, affected } = await this.db.withContext(ctx, async (query) => {
       const res = await query(built.sql, built.params)
       if (opts.queryReturning) {
-        return { rows: (res.rows[0] as { body: unknown[] }).body, affected: null }
+        const rows = (res.rows[0] as { body: unknown[] }).body
+        // Reject singular responses before committing writes or publishing CDC.
+        if (opts.wantsObject && !opts.wantsCsv) assertObjectCardinality(rows)
+        return { rows, affected: null }
       }
       return { rows: null, affected: res.affectedRows ?? 0 }
     })
@@ -332,14 +335,7 @@ export class RestHandler {
     }
 
     if (opts.wantsObject) {
-      if (rows.length !== 1) {
-        return jsonResponse(406, {
-          code: 'PGRST116',
-          message: 'JSON object requested, multiple (or no) rows returned',
-          details: `The result contains ${rows.length} rows`,
-          hint: null,
-        })
-      }
+      assertObjectCardinality(rows)
       headers['content-type'] = `${OBJECT_MEDIA}; charset=utf-8`
       return new Response(opts.head ? null : JSON.stringify(rows[0]), {
         status: opts.status,
@@ -487,12 +483,14 @@ export class RestHandler {
 
     const { rows, count } = await this.db.withContext(ctx, async (query) => {
       const res = await query(sql, [])
+      const rows = (res.rows[0] as { body: unknown[] }).body
+      if (wantsObject && !wantsCsv) assertObjectCardinality(rows)
       let count: number | null = null
       if (countSql) {
         const c = await query(countSql, [])
         count = (c.rows[0] as { count: number }).count
       }
-      return { rows: (res.rows[0] as { body: unknown[] }).body, count }
+      return { rows, count }
     })
 
     return this.dataResponse(rows, {
@@ -502,6 +500,17 @@ export class RestHandler {
       wantsObject,
       wantsCsv,
       head: method === 'HEAD',
+    })
+  }
+}
+
+function assertObjectCardinality(rows: unknown[]): void {
+  if (rows.length !== 1) {
+    throw new ApiError(406, {
+      code: 'PGRST116',
+      message: 'JSON object requested, multiple (or no) rows returned',
+      details: `The result contains ${rows.length} rows`,
+      hint: null,
     })
   }
 }
