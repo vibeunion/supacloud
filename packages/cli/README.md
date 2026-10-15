@@ -5,6 +5,12 @@ Project-scoped CLI for SupaCloud users.
 The only command-line executable is `supacloud`. The compiled server binary
 installed at `/usr/local/bin/supacloud` is a separate managed-host installation.
 
+The CLI executable runs on Bun, including when installed with npm. Put Bun on
+`PATH`; frontend archives use `Bun.zstdCompress`. For an older package whose
+executable still selects Node, invoke that installed entrypoint explicitly with
+Bun until upgrading. Installing a system `zstd` executable does not select the
+JavaScript runtime.
+
 Tool adapters import `@supacloud/cli/tool-runtime` for typed registration and
 schema decoding. This side-effect-free entrypoint does not initialize the CLI.
 Registration accepts unknown boundary input, decodes it before invoking the

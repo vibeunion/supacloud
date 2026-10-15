@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const bundlePath = join(packageRoot, "dist", "index.js");
 const bundle = readFileSync(bundlePath, "utf8");
+if (bundle.split("\n", 1)[0] !== "#!/usr/bin/env bun") {
+  throw new Error("CLI release executable must select the Bun runtime");
+}
 
 for (const forbidden of ["/home/runner/work/", "libpg-query/wasm/libpg-query.js"]) {
   if (bundle.includes(forbidden)) {
@@ -13,7 +16,7 @@ for (const forbidden of ["/home/runner/work/", "libpg-query/wasm/libpg-query.js"
   }
 }
 
-const result = spawnSync(process.execPath, [bundlePath, "--version"], {
+const result = spawnSync(bundlePath, ["--version"], {
   cwd: packageRoot,
   encoding: "utf8",
 });

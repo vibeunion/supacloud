@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { Type } from "typebox";
 import { stringEnum, validateToolArguments } from "./shared/schema";
