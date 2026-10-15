@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.117.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.117.1...management-api-v0.117.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **edge-runtime:** transfer binary payloads without extra copies ([#1928](https://github.com/vibeunion/supacloud/issues/1928)) ([022ec59](https://github.com/vibeunion/supacloud/commit/022ec59d0e1e11f74b7ce5c2f7cfeec9ac90a864))
+
 ## [0.117.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.117.0...management-api-v0.117.1) (2026-10-14)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.0...supacloud-lite-v0.28.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** roll back rejected singular REST writes ([#1925](https://github.com/vibeunion/supacloud/issues/1925)) ([0af235d](https://github.com/vibeunion/supacloud/commit/0af235d55a3619ffd150e4b16751a27a32d1f2e0))
+
 ## [0.28.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.27.1...supacloud-lite-v0.28.0) (2026-10-14)
 
 
