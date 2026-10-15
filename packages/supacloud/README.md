@@ -9,6 +9,10 @@ supacloudctl admin → @supacloud/admin  (platform operations: install / SSH / t
 
 ## 安装
 
+The executable requires Bun on `PATH`, including when installed with npm or run
+through npx. `supacloudctl` starts both installed child CLIs with that same Bun
+runtime; installing npm packages alone does not install Bun.
+
 ```bash
 npm install -g supacloud
 supacloudctl --help
