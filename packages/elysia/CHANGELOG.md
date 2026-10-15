@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.30.1...elysia-v0.31.0) (2026-10-15)
+
+
+### Features
+
+* reduce approval infrastructure wiring and reuse business contracts ([#1948](https://github.com/vibeunion/supacloud/issues/1948)) ([7c68543](https://github.com/vibeunion/supacloud/commit/7c6854338968209c2bbd658782224db238650aeb))
+
 ## [0.30.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.30.0...elysia-v0.30.1) (2026-10-15)
 
 
