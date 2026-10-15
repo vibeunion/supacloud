@@ -7,10 +7,10 @@ import { ApiError } from '../types.js'
 import { ParseError } from './parse.js'
 
 /** HTTP status for a Postgres SQLSTATE, following PostgREST's mapping. */
-export function statusForSqlState(code: string): number {
+export function statusForSqlState(code: string, authenticated = true): number {
   switch (code) {
     case '42501':
-      return 403
+      return authenticated ? 403 : 401
     case '25006': // read_only_sql_transaction
       return 405
     case '23503':
@@ -42,7 +42,7 @@ interface PgError {
  * their status; anything with a 5-char SQLSTATE is mapped via
  * {@link statusForSqlState}; everything else becomes a 500.
  */
-export function errorToResponse(e: unknown): Response {
+export function errorToResponse(e: unknown, authenticated = true): Response {
   if (e instanceof ApiError) {
     return jsonResponse(e.status, e.body)
   }
@@ -51,7 +51,7 @@ export function errorToResponse(e: unknown): Response {
   }
   const pg = e as PgError
   if (pg && typeof pg.code === 'string' && /^[0-9A-Z]{5}$/.test(pg.code)) {
-    return jsonResponse(statusForSqlState(pg.code), {
+    return jsonResponse(statusForSqlState(pg.code, authenticated), {
       code: pg.code,
       message: pg.message,
       details: pg.detail ?? null,
