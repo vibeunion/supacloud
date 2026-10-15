@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.99.0](https://github.com/vibeunion/supacloud/compare/cli-v0.98.0...cli-v0.99.0) (2026-10-15)
+
+
+### Features
+
+* **deploy:** separate frontend releases from backend jobs ([#1939](https://github.com/vibeunion/supacloud/issues/1939)) ([2230abe](https://github.com/vibeunion/supacloud/commit/2230abea24fd0a9fe99cdea91ad72f35274f12d1))
+
+
+### Performance Improvements
+
+* **cli:** streamline direct frontend deploy ([#1934](https://github.com/vibeunion/supacloud/issues/1934)) ([04e11ad](https://github.com/vibeunion/supacloud/commit/04e11ad81b8ca07405177263e05d33f26b1d8a08))
+
 ## [0.98.0](https://github.com/vibeunion/supacloud/compare/cli-v0.97.1...cli-v0.98.0) (2026-10-15)
 
 
