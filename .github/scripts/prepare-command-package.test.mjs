@@ -266,7 +266,7 @@ test('elysia publication preserves beta support without waiting for build-only o
     }),
   );
   const result = prepareCommandPackage(input, localSiblings);
-  assert.deepEqual(result.required, ['app', 'contracts'].map((name) => {
+  assert.deepEqual(result.required, ['app', 'commands', 'contracts'].map((name) => {
     const pkg = localSiblings.get(`@supacloud/${name}`);
     return `${pkg.name}@${pkg.version}`;
   }));
