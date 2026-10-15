@@ -94,8 +94,8 @@ export function checkStrictGovernance(root: string): string[] {
   const compatibility = readJson(resolve(root, "packages/elysia/compatibility.json"));
   const compatibilityPackages = record(compatibility["packages"]);
   const effectVersion = compatibilityPackages?.["effect"];
-  if (effectVersion !== "4.0.2") {
-    problems.push("packages/elysia/compatibility.json must pin Effect to 4.0.2.");
+  if (effectVersion !== "4.0.5") {
+    problems.push("packages/elysia/compatibility.json must pin Effect to 4.0.5.");
   }
 
   const packagesRoot = resolve(root, "packages");

@@ -31,7 +31,7 @@ async function authorizeOrganizationRequest(request: Request, ref: string): Prom
 }
 
 export const projectOrganizationRoutes = new Elysia({ prefix: "/v1/projects/:ref/organizations" })
-  .beforeHandle(async ({ params, request }) => {
+  .onBeforeHandle(async ({ params, request }) => {
     if (isInvitationAcceptanceRequest(request)) return;
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);

@@ -12,7 +12,7 @@ const runBody = t.Optional(t.Object({
 }));
 
 const diagnosticsApi = new Elysia({ prefix: "/v1/diagnostics" })
-  .beforeHandle(async ({ request }) => {
+  .onBeforeHandle(async ({ request }) => {
     const authError = await requireAdminAuth(request);
     if (authError) return status(authError.status, authError.body);
   })

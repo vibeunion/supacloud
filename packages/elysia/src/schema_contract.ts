@@ -485,7 +485,7 @@ export function registerElysiaRoute<
   app.method(
     route.method,
     route.path,
-    toElysiaRouteSchema(route.contract),
+    { ...toElysiaRouteSchema(route.contract) },
     handler as ((context: unknown) => unknown),
   );
   return app;

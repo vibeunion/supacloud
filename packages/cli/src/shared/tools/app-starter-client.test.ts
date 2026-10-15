@@ -24,7 +24,6 @@ test("the emitted client reference executes its behavior tests without a UI fram
       expect({ code, failure: code ? output : "" }).toEqual({ code: 0, failure: "" });
     } finally { clearTimeout(timer); if (child.exitCode === null) { child.kill(); await child.exited; } }
     const cli = fileURLToPath(new URL("../../../", import.meta.url));
-    const sdk = join(cli, "../supacloud-js");
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({
       compilerOptions: {
         target: "ES2022", module: "ESNext", moduleResolution: "bundler", strict: true,
@@ -32,7 +31,7 @@ test("the emitted client reference executes its behavior tests without a UI fram
         noPropertyAccessFromIndexSignature: true, skipLibCheck: true, noEmit: true,
         types: ["bun"], typeRoots: [join(cli, "node_modules/@types")],
         paths: {
-          "@supabase/supabase-js": [join(sdk, "node_modules/@supabase/supabase-js")],
+          "@supabase/supabase-js": [join(cli, "node_modules/@supabase/supabase-js")],
           "@supacloud/js/contracts": [join(cli, "../contracts/src/authenticated_fetch.ts")],
         },
       }, include: ["src/client/*.ts", "tests/review-client.test.ts"],

@@ -309,7 +309,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         metadata: t.Optional(t.Any()),
         file: t.Optional(t.Any()),
       }),
-      type: "multipart",
+      parse: "formdata",
       detail: { tags: ["frontend"], summary: "Deploy function via multipart upload" },
     },
     async ({ params, body, query, request }) => {
