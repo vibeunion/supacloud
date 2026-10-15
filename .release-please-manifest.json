@@ -15,7 +15,7 @@
   "packages/app-svelte": "0.5.1",
   "packages/app": "0.27.1",
   "packages/delivery": "0.18.1",
-  "packages/compiler": "0.46.3",
+  "packages/compiler": "0.46.4",
   "packages/elysia": "0.31.1",
   "packages/db": "0.17.1",
   "packages/testing": "0.6.1"
