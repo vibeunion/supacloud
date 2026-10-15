@@ -669,6 +669,21 @@ type ProxyInterceptors = {
     timeoutMs?: number;
 };
 
+function isUpstreamConnectionRefused(error: unknown): boolean {
+    const seen = new Set<unknown>();
+    let current: unknown = error;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const message = current instanceof Error ? current.message : String(current);
+        if ((typeof current === "object" && "code" in current && current.code === "ECONNREFUSED")
+            || /\bECONNREFUSED\b/.test(message)) {
+            return true;
+        }
+        current = typeof current === "object" && "cause" in current ? current.cause : undefined;
+    }
+    return false;
+}
+
 async function executeProxy(request: Request, targetUrl: string, interceptors: ProxyInterceptors) {
     try {
         // OPTIONS preflight is forwarded like any other method: each upstream
@@ -773,6 +788,14 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
             return new Response(JSON.stringify({ message: 'Upstream Proxy Timeout' }), {
                 status: 504,
                 headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (isUpstreamConnectionRefused(err)) {
+            logger.warn(`[SDK Proxy] Upstream temporarily unavailable: ${targetUrl}`, { error: message });
+            return new Response(JSON.stringify({ message: 'Upstream Temporarily Unavailable' }), {
+                status: 503,
+                headers: { 'Content-Type': 'application/json', 'Retry-After': '2' }
             });
         }
 

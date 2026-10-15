@@ -1057,7 +1057,7 @@ export class WorkerPool {
         method: opts.request.method,
         headers,
         body,
-      });
+      }, body ? [body] : []);
     } catch (error) {
       onErr(error instanceof Error ? error : new Error(String(error)));
       return;
