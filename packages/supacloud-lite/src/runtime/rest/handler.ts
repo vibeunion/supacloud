@@ -139,7 +139,7 @@ export class RestHandler {
       }
       return await this.handleTable(req, ctx, url, schema, decodeURIComponent(rest))
     } catch (e) {
-      return errorToResponse(e)
+      return errorToResponse(e, ctx.role !== 'anon')
     }
   }
 
