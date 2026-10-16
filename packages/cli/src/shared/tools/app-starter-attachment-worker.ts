@@ -1,4 +1,4 @@
-export const STARTER_ATTACHMENT_WORKER = `import { createWorker, type CompiledModule } from "@supacloud/elysia";
+export const STARTER_ATTACHMENT_WORKER = `import { createWorker, type CompiledModule, type ExecutionObserver } from "@supacloud/elysia";
 import {
   createSupaCloudWorkflowTransport,
   type SupaCloudWorkflowClaim,
@@ -12,6 +12,7 @@ export interface ReviewAttachmentWorkerOptions extends ReviewAttachmentOptions {
   workerId: string;
   queueOwnership: "exclusive-review-attachments";
   pollIntervalMs?: number;
+  onExecution?: ExecutionObserver;
 }
 
 export async function createReviewAttachmentWorker(options: ReviewAttachmentWorkerOptions) {
@@ -52,6 +53,7 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
     modules: options.modules, deps: { dbClient: store }, workerId, concurrency: 1,
     pollIntervalMs: options.pollIntervalMs ?? 1000,
     onError: fatal,
+    ...(options.onExecution === undefined ? {} : { onExecution: options.onExecution }),
     transport: {
       async claim(signal): Promise<SupaCloudWorkflowClaim | null> {
         if (halted || signal.aborted) return null;
@@ -108,6 +110,7 @@ import { SupaCloudWorkflowsClient } from "@supacloud/js";
 import { createBunCommandDatabase } from "@supacloud/db/bun";
 import type { CompiledModule } from "@supacloud/elysia";
 import { createReviewAttachmentWorker } from "./host/review-attachment-worker";
+import { createReviewWorkerObserver } from "./host/review-worker-observability";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -151,6 +154,7 @@ export async function createDeliveryWorker(modules: CompiledModule[], lifecycle:
       database: createBunCommandDatabase(pool), service, projectId: settings.projectId,
       tenantId: settings.tenantId, modules, workerId: settings.workerId,
       workflows: new SupaCloudWorkflowsClient(service), queueOwnership: "exclusive-review-attachments",
+      onExecution: createReviewWorkerObserver(settings.workerId),
     });
     lifecycle.signal.throwIfAborted();
     return {

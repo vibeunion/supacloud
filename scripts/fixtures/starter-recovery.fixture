@@ -1,0 +1,168 @@
+import { expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { generateKeyPair, SignJWT } from "jose";
+import { compileProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+import { COMMAND_PERSISTENCE_SQL } from "@supacloud/db";
+import { createTransactionalCommand, plaintextCommandInput } from "@supacloud/commands";
+import { createPostgresCommandStore } from "@supacloud/db";
+import { startStarterPostgres } from "#starter-postgres";
+import { BOOTSTRAP_SQL } from "#starter-bootstrap";
+import { PGMQ_SQL, WORKFLOWS_SQL } from "#starter-runtime";
+
+test("real database receipts and compiled GET route enforce current identity without mutation", async () => {
+  // Database-source generation has a separate gate; retain every source/route safety rule.
+  const { databaseGovernance, ...options } = compileOptionsFromConfig(await loadSupacloudConfig());
+  const compiled = await compileProject(options);
+  expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+  const { createApp } = await import("../src/application");
+  const { createReviewPostgresAdapters } = await import("../src/host/review-postgres");
+  const { createReviewUploadAdapters } = await import("../src/host/review-uploads");
+  const { createReviewClient, createReviewPendingStore } = await import("../src/client/reviews");
+  const { createReviewTransport } = await import("../src/client/review-transport");
+  const abort = new AbortController();
+  const stop = () => abort.abort();
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+  const database = await startStarterPostgres(process.env["SUPACLOUD_STARTER_POSTGRES_BIN"]!, abort.signal);
+  try {
+    await database.exec(BOOTSTRAP_SQL);
+    await database.exec(PGMQ_SQL);
+    await database.exec(WORKFLOWS_SQL);
+    await database.exec(COMMAND_PERSISTENCE_SQL);
+    await database.exec(await readFile(new URL("../migrations/001-review.sql", import.meta.url), "utf8"));
+    await database.exec(await readFile(new URL("../migrations/002-review-attachments.sql", import.meta.url), "utf8"));
+    await database.exec(`
+      ALTER TABLE public.starter_members ADD COLUMN storage_subject uuid;
+      INSERT INTO public.starter_application(project_id,tenant_id) VALUES ('starter-test','starter-test');
+      INSERT INTO public.starter_members(subject,can_approve,storage_subject)
+        VALUES ('owner',true,'11111111-1111-4111-8111-111111111111'),('other',true,'22222222-2222-4222-8222-222222222222');
+    `);
+    const query = (sql: string, parameters: readonly (string | number)[] = []) =>
+      database.transaction(tx => tx.query(sql, parameters));
+    const keys = await generateKeyPair("ES256"), issuer = "https://identity.example.test";
+    const token = (subject: string) => new SignJWT({ client_id: "starter-client", role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256" }).setIssuer(issuer).setAudience("starter-test")
+      .setSubject(subject).setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+    const owner = await token("owner"), other = await token("other");
+    const identity = { issuer, audience: "starter-test", clientId: "starter-client", projectId: "starter-test",
+      jwksUrl: issuer + "/jwks", keyResolver: async () => keys.publicKey };
+    // Any accidental storage or platform call during lookup is a test failure.
+    const { createClient } = await import("@supabase/supabase-js");
+    let platformCalls = 0;
+    const service = createClient("http://127.0.0.1:1", "synthetic-service-key", {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: async () => { platformCalls++; throw new Error("Lookup called a platform mutation"); } },
+    });
+    const uploads = await createReviewUploadAdapters({ database, service, projectId: "starter-test", tenantId: "starter-test" });
+    const adapters = await createReviewPostgresAdapters({ database, identity, tenantId: "starter-test", uploads });
+    const app = createApp(adapters);
+    const id = crypto.randomUUID(), operationId = crypto.randomUUID();
+    await query("INSERT INTO public.starter_reviews VALUES($1,'owner','draft',1)", [id]);
+    const lookup = (key = operationId, bearer = owner, version = 1, kind = "approve", reviewId = id) =>
+      app.handle(new Request(`http://localhost/reviews/${reviewId}/operations/${key}?kind=${kind}&expectedVersion=${version}`, {
+        headers: bearer ? { authorization: "Bearer " + bearer } : {},
+      }));
+    const absent = await lookup();
+    expect(absent.status).toBe(200);
+    expect(await absent.json()).toEqual({ status: "unknown", operationId, reviewId: id });
+    expect((await lookup(operationId, "")).status).toBe(401);
+    expect((await lookup(operationId, other)).status).toBe(403);
+    expect([400, 422]).toContain((await lookup("invalid-operation")).status);
+    expect([400, 422]).toContain((await lookup(operationId, owner, 0)).status);
+    expect((await lookup(operationId, owner, Number.MAX_SAFE_INTEGER + 1)).status).toBe(400);
+    const write = await app.handle(new Request(`http://localhost/reviews/${id}/approve`, {
+      method: "POST", headers: { authorization: "Bearer " + owner, "content-type": "application/json", "idempotency-key": operationId },
+      body: JSON.stringify({ expectedVersion: 1 }),
+    }));
+    expect({ status: write.status, body: await write.json() }).toEqual({ status: 200, body: { state: "approved", version: 2 } });
+    const before = await query("SELECT (SELECT count(*) FROM supacloud_commands.execution_receipts) AS receipts, (SELECT count(*) FROM supacloud_commands.execution_audit) AS audit");
+    for (let i = 0; i < 3; i++) {
+      const found = await lookup();
+      expect(found.status).toBe(200);
+      expect(await found.json()).toEqual({ status: "confirmed", operationId, reviewId: id });
+    }
+    expect((await lookup(operationId, owner, 2)).status).toBe(409);
+    await query("UPDATE public.starter_members SET can_approve=false WHERE subject='owner'");
+    expect((await lookup()).status).toBe(403);
+    await query("UPDATE public.starter_members SET can_approve=true WHERE subject='owner'");
+    await database.restart();
+    expect((await lookup()).status).toBe(200);
+    expect(await query("SELECT (SELECT count(*) FROM supacloud_commands.execution_receipts) AS receipts, (SELECT count(*) FROM supacloud_commands.execution_audit) AS audit")).toEqual(before);
+    expect(await query("SELECT state,version FROM public.starter_reviews WHERE id=$1", [id]))
+      .toEqual([{ state: "approved", version: 2 }]);
+
+    const lostId = crypto.randomUUID();
+    await query("INSERT INTO public.starter_reviews VALUES($1,'owner','draft',1)", [lostId]);
+    let writes = 0;
+    const transport = createReviewTransport({
+      supabase: service, apiOrigin: "https://reviews.example.test",
+      authenticatedFetch: async (url, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("authorization", "Bearer " + owner);
+        const response = await app.handle(new Request(url, { ...init, headers }));
+        if (init?.method === "POST") {
+          writes++;
+          expect(response.status).toBe(200);
+          throw new Error("Committed response lost");
+        }
+        return response;
+      },
+    });
+    const values = new Map<string, string>();
+    const pending = createReviewPendingStore({
+      getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); },
+      removeItem: key => { values.delete(key); },
+    }, { projectId: "starter-test", tenantId: "starter-test", applicationId: "reviews", subject: "owner" });
+    // This test scopes list refresh to its database assertion; PostgREST has a separate fixture.
+    const clientTransport = { ...transport, list: async () => [] };
+    const firstClient = createReviewClient(clientTransport, pending);
+    await firstClient.approve({ id: lostId, state: "draft", version: 1 });
+    expect(firstClient.snapshot().mutation.status).toBe("unknown");
+    const original = firstClient.snapshot().mutation.operation;
+    firstClient.dispose();
+    const reloadedClient = createReviewClient(clientTransport, pending);
+    await reloadedClient.approve({ id: lostId, state: "draft", version: 1 });
+    await reloadedClient.reconcile();
+    expect(reloadedClient.snapshot().mutation).toEqual({ status: "confirmed", operation: original });
+    expect(writes).toBe(1); expect(pending.load()).toBeNull();
+    expect(await query("SELECT state,version FROM public.starter_reviews WHERE id=$1", [lostId]))
+      .toEqual([{ state: "approved", version: 2 }]);
+
+    const uploadId = crypto.randomUUID(), artifactId = crypto.randomUUID();
+    await query("INSERT INTO public.starter_reviews VALUES($1,'owner','draft',1)", [uploadId]);
+    const objectPath = "11111111-1111-4111-8111-111111111111/" + uploadId + "/" + artifactId + ".txt";
+    const uploadInput = { reviewId: uploadId, artifactId, expectedVersion: 1 };
+    const missingUpload = await lookup(artifactId, owner, 1, "upload", uploadId);
+    expect(missingUpload.status).toBe(200);
+    expect(await missingUpload.json()).toEqual({ status: "unknown", operationId: artifactId, reviewId: uploadId });
+    // Seed a committed upload receipt through the real command store, not by mutating receipt rows.
+    const command = createTransactionalCommand({
+      name: "review.attach", store: createPostgresCommandStore(database), inputCodec: plaintextCommandInput,
+      input: (value: unknown) => value, result: (value: unknown) => value,
+      authorize: () => "allow",
+      async execute(tx) {
+        await tx.query("INSERT INTO public.starter_attachments VALUES($1,$2,'owner',$2,$3)", [uploadId, artifactId, objectPath]);
+        return { artifactId, runId: artifactId, objectPath, sha256: "a".repeat(64), bytes: 5 };
+      },
+      audit: { event: "review.attachment-bound", details: () => ({ reviewId: uploadId, artifactId }) },
+    });
+    await command.execute({ actorId: "owner", tenantId: "starter-test" }, artifactId, uploadInput);
+    const uploadEvidence = await query("SELECT (SELECT count(*) FROM supacloud_commands.execution_receipts) AS receipts, (SELECT count(*) FROM supacloud_commands.execution_audit) AS audit");
+    const uploaded = await lookup(artifactId, owner, 1, "upload", uploadId);
+    expect(uploaded.status).toBe(200);
+    expect(await uploaded.json()).toEqual({ status: "confirmed", operationId: artifactId, reviewId: uploadId });
+    expect((await lookup(artifactId, other, 1, "upload", uploadId)).status).toBe(403);
+    await query("UPDATE public.starter_reviews SET state='approved',version=2 WHERE id=$1", [uploadId]);
+    expect((await lookup(artifactId, owner, 1, "upload", uploadId)).status).toBe(200);
+    await query("UPDATE public.starter_members SET can_approve=false WHERE subject='owner'");
+    expect((await lookup(artifactId, owner, 1, "upload", uploadId)).status).toBe(403);
+    await query("UPDATE public.starter_members SET can_approve=true WHERE subject='owner'");
+    await query("UPDATE public.starter_application SET tenant_id='foreign'");
+    expect((await lookup(artifactId, owner, 1, "upload", uploadId)).status).toBe(403);
+    expect(await query("SELECT (SELECT count(*) FROM supacloud_commands.execution_receipts) AS receipts, (SELECT count(*) FROM supacloud_commands.execution_audit) AS audit")).toEqual(uploadEvidence);
+    expect(platformCalls).toBe(0);
+  } finally {
+    try { await database.close(); }
+    finally { process.removeListener("SIGTERM", stop); process.removeListener("SIGINT", stop); }
+  }
+}, 60_000);

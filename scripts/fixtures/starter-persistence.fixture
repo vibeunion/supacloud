@@ -33,7 +33,7 @@ function result(value: unknown): Review {
 /** Exercises the installed starter's compiled handler, not a second approval implementation. */
 export async function verifyPersistentStarter(
   database: VerificationDatabase,
-  verification: { onExecution?(event: Readonly<ExecutionEvent>): void; signal?: AbortSignal } = {},
+  verification: { onExecution?(event: Readonly<ExecutionEvent>): void; signal?: AbortSignal; verifyReceipts?: boolean } = {},
 ) {
   await database.exec(COMMAND_PERSISTENCE_SQL);
   await database.exec(await readFile(new URL("../migrations/001-review.sql", import.meta.url), "utf8"));
@@ -136,6 +136,23 @@ export async function verifyPersistentStarter(
   app = await application();
   assert.equal((await request(id, key)).status, 200);
   assert.equal(executions, 1, "Reopening the database and recreating the app must preserve idempotency");
+  if (verification.verifyReceipts) {
+    const lookup = (bearer: string, version = 1) => app.handle(new Request(
+      `http://localhost/reviews/${id}/operations/${key}?kind=approve&expectedVersion=${version}`,
+      { headers: { authorization: "Bearer " + bearer } },
+    ));
+    const found = await lookup(tokens.owner);
+    assert.equal(found.status, 200, await found.clone().text());
+    assert.deepEqual(await found.json(), { status: "confirmed", operationId: key, reviewId: id });
+    assert.equal((await lookup(tokens.other)).status, 403);
+    assert.equal((await lookup(tokens.owner, 2)).status, 409);
+    await query("UPDATE public.starter_members SET can_approve=false WHERE subject='owner'");
+    try { assert.equal((await lookup(tokens.owner)).status, 403); }
+    finally { await query("UPDATE public.starter_members SET can_approve=true WHERE subject='owner'"); }
+    assert.equal(executions, 1, "Receipt reads must not execute approval");
+    assert.equal(await count("execution_receipts", key), 1);
+    assert.equal(await count("execution_audit", key), 1);
+  }
   await query("UPDATE public.starter_application SET tenant_id='other'");
   try {
     const mismatched = await request(id, key);
@@ -216,6 +233,7 @@ export async function verifyPersistentStarter(
       database: database as AttachmentDatabase, context, tokens,
       seed, approve: request, onExecution: observe,
       signal: verification.signal ?? new AbortController().signal,
+      verifyReceipts: verification.verifyReceipts === true,
       async application(uploads) {
         return createApp({ ...await createReviewPostgresAdapters({ ...adapterOptions, uploads }), onExecution: observe });
       },
@@ -233,5 +251,6 @@ export async function verifyPersistentStarter(
   }
   assert.ok(!JSON.stringify(events).includes(tokens.owner));
   return { authenticated: "signed-local-token", concurrency: 8, replay: "database-reopened",
-    rollback: ["write", "audit"], objectAuthorization: "passed", tracing: "metadata-only", attachments };
+    rollback: ["write", "audit"], objectAuthorization: "passed", tracing: "metadata-only",
+    receiptRecovery: verification.verifyReceipts ? "passed" : "not-run", attachments };
 }

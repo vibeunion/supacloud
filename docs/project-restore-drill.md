@@ -159,3 +159,30 @@ rejected a corrupted object before database restore. This strengthens the local
 independent-data-recovery evidence, but remains synthetic data and does not
 prove an approved production snapshot, production RPO/RTO, or full-platform
 application rollback.
+
+Local rerun on October 16, 2026 used the explicit `orbstack` context and the
+cached `supacloud-restore-drill:ci` image (PostgreSQL 18.6). Both methods passed:
+
+| Method | Checks | Measured RPO | Measured RTO |
+| --- | --- | --- | --- |
+| `logical-full` | 8 | 9109 ms | 21776 ms |
+| `pgbackrest` | 9 | 30476 ms | 21661 ms |
+
+The run retained independently verified signed receipts and rejected duplicate
+IDs and corrupted objects. All owned drill containers and the temporary volume
+were removed. These timings include this workstation's container workload and
+are synthetic measurements, not a service guarantee.
+
+Receipt identifiers:
+- logical drill `7a4e5325-15af-43e3-a01b-6025b43aba6e`,
+  snapshot `da3559ec-d0e4-4401-8d90-9e2522f6ac01`;
+- PITR drill `ea536928-7a01-4f15-913b-22bfc472228f`,
+  snapshot `74b819bc-3412-4907-ba85-f4a234f8f3bb`.
+
+The signed receipts and synthetic snapshot inventory were moved out of the
+temporary directory into the private workspace evidence directory
+`output/customer-acceptance/2026-10-16/restore-drill`.
+These files are excluded from Git and remain local to the acceptance workspace;
+archive them independently before deleting that workspace.
+No customer backup was copied, no shared test database was restored and no
+production state was changed.

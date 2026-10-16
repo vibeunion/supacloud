@@ -1,0 +1,66 @@
+import { createFixtureClient, fixture, fixtureSubject } from "./starter-browser-session";
+
+function element<T extends HTMLElement>(id: string, kind: { new(): T }): T {
+  const value = document.getElementById(id);
+  if (!(value instanceof kind)) throw new Error("Missing fixture control: " + id);
+  return value;
+}
+const identity = element("identity", HTMLSelectElement);
+const lose = element("lose", HTMLInputElement);
+const failList = element("fail-list", HTMLInputElement);
+const file = element("file", HTMLInputElement);
+const approve = element("approve", HTMLButtonElement);
+const upload = element("upload", HTMLButtonElement);
+const recover = element("recover", HTMLButtonElement);
+const output = element("result", HTMLPreElement);
+const subject = fixtureSubject();
+identity.value = subject;
+const { client, transport, reviewId } = await createFixtureClient(subject, {
+  loseResponse: () => lose.checked, failList: () => failList.checked,
+});
+const render = () => {
+  const state = client.snapshot();
+  element("list-status", HTMLOutputElement).textContent = state.list.status;
+  element("mutation-status", HTMLOutputElement).textContent = state.mutation.status;
+  element("operation", HTMLOutputElement).textContent = state.mutation.operation?.operationId ?? "";
+  const list = element("rows", HTMLUListElement);
+  list.replaceChildren(...state.list.rows.map(row => {
+    const item = document.createElement("li");
+    item.dataset["reviewRow"] = "";
+    item.textContent = row.id + " " + row.state + " v" + row.version;
+    return item;
+  }));
+  const disabled = state.mutation.status === "unknown" || state.mutation.status === "submitting"
+    || state.list.status !== "ready" || state.list.rows[0]?.state !== "draft";
+  approve.disabled = disabled;
+  upload.disabled = disabled || !file.files?.length;
+  recover.disabled = state.mutation.status !== "unknown" || !state.mutation.operation;
+};
+const unsubscribe = client.subscribe(render);
+identity.onchange = () => {
+  unsubscribe(); client.dispose();
+  sessionStorage.setItem("fixture-subject", identity.value);
+  location.reload();
+};
+window.addEventListener("pagehide", () => { unsubscribe(); client.dispose(); }, { once: true });
+file.onchange = render;
+element("refresh", HTMLButtonElement).onclick = () => { void client.load(); };
+approve.onclick = () => { const row = client.snapshot().list.rows[0]; if (row) void client.approve(row); };
+upload.onclick = () => {
+  const row = client.snapshot().list.rows[0], selected = file.files?.[0];
+  if (row && selected) void client.upload(row, selected);
+};
+recover.onclick = () => { void client.reconcile(); };
+element("conflict", HTMLButtonElement).onclick = async () => {
+  output.textContent = JSON.stringify(await (await fixture("conflict", "POST")).json());
+};
+element("denied", HTMLButtonElement).onclick = async () => {
+  output.textContent = JSON.stringify(await transport.approve({
+    kind: "approve", reviewId, expectedVersion: 1, operationId: crypto.randomUUID(),
+  }));
+};
+element("evidence", HTMLButtonElement).onclick = async () => {
+  output.textContent = JSON.stringify(await (await fixture("evidence")).json(), null, 2);
+};
+render();
+await client.load();

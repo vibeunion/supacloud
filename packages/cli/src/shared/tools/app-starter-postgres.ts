@@ -19,13 +19,13 @@ ALTER TABLE public.starter_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.starter_members ENABLE ROW LEVEL SECURITY;
 `;
 
-export const STARTER_REVIEW_POSTGRES = `import { plaintextCommandInput } from "@supacloud/commands";
+export const STARTER_REVIEW_POSTGRES = `import { createTransactionalCommand, plaintextCommandInput } from "@supacloud/commands";
 import { CommandError } from "@supacloud/contracts";
 import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction } from "@supacloud/db";
 import {
   ApplicationError, createSchemaDecoder, createSupAuthRequestContext, requireTrustedIdentity,
   createTransactionalCommandGovernance,
-  type CommandInvocation, type SupAuthContextOptions,
+  type SupAuthContextOptions,
 } from "@supacloud/elysia";
 import type { AppAdapters } from "../application";
 import type { ReviewStore } from "../review/review";
@@ -95,6 +95,37 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   const store: ReviewStore = {
     ...options.uploads,
     ...options.tasks,
+    async lookupOperation(context, operation) {
+      const subject = actor(context);
+      try {
+        let confirmed: boolean = false;
+        if (operation.kind === "upload") {
+          if (!options.uploads?.lookupUpload) {
+            throw new ApplicationError("Upload receipt lookup unavailable", { status: 503, code: "RECEIPTS_UNAVAILABLE" });
+          }
+          confirmed = await options.uploads.lookupUpload(context, {
+            reviewId: operation.reviewId, artifactId: operation.operationId, expectedVersion: operation.expectedVersion,
+          });
+        } else {
+          const command = createTransactionalCommand({
+            name: "review.approve", store: commandStore, inputCodec: plaintextCommandInput, input, result,
+            authorize: authorizeApproval,
+            execute: async () => { throw new Error("Receipt lookup cannot execute a command"); },
+            audit: { event: "review.approved", details: request => ({ reviewId: request.id }) },
+          });
+          const receipt = await command.lookup({ actorId: subject, tenantId }, operation.operationId,
+            { id: operation.reviewId, expectedVersion: operation.expectedVersion });
+          confirmed = receipt?.status === "confirmed";
+        }
+        return { status: confirmed ? "confirmed" : "unknown", operationId: operation.operationId, reviewId: operation.reviewId };
+      } catch (error) {
+        if (error instanceof ApplicationError) throw error;
+        if (error instanceof CommandError && ["COMMAND_REJECTED", "COMMAND_IDEMPOTENCY_CONFLICT"].includes(error.code)) {
+          throw new ApplicationError(error.code, { code: error.code, status: error.code === "COMMAND_REJECTED" ? 403 : 409 });
+        }
+        throw new ApplicationError("Receipt lookup unavailable", { status: 503, code: "RECEIPTS_UNAVAILABLE" });
+      }
+    },
     async get(table, id) {
       if (table !== "reviews") throw new Error("Unsupported review table");
       return rows(await transaction().query(
@@ -112,35 +143,37 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
       await afterApproved?.(transaction(), id, review.version);
     },
   };
-  function actor(invocation: CommandInvocation): string {
-    const who = requireTrustedIdentity(invocation.requestContext);
-    const access = record(record(invocation.requestContext)["access"]);
+  function actor(context: unknown): string {
+    const who = requireTrustedIdentity(context);
+    const access = record(record(context)["access"]);
     if (access["projectId"] !== projectId || access["tenantId"] !== tenantId
       || !Array.isArray(access["permissions"]) || !access["permissions"].includes("review.approve")) {
       throw new ApplicationError("Command permission denied", { status: 403, code: "REVIEW_PERMISSION_DENIED" });
     }
     return who.subject;
   }
+  const commandStore = createPostgresCommandStore(database);
+  async function authorizeApproval(who: { actorId: string; tenantId: string }, request: ReturnType<typeof input>, tx: CommandTransaction): Promise<"allow" | "deny"> {
+    const found = rows(await tx.query(
+      "SELECT r.id FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id " +
+      "CROSS JOIN public.starter_application a " +
+      "WHERE r.id=$1 AND r.owner_id=$2 AND m.enabled AND m.can_approve " +
+      "AND a.singleton AND a.project_id=$3 AND a.tenant_id=$4 FOR UPDATE OF r,m FOR SHARE OF a",
+      [request.id, who.actorId, projectId, who.tenantId],
+    ));
+    return found.length === 1 ? "allow" : "deny";
+  }
   const commandBinding = createTransactionalCommandGovernance({
     permission: "review.approve",
-    identity: invocation => ({ actorId: actor(invocation), tenantId }),
+    identity: invocation => ({ actorId: actor(invocation.requestContext), tenantId }),
     input: invocation => ({
       ...record(invocation.input.body), id: invocation.input.params["id"],
     }),
     rejection: error => isPublicConflict(error) ? new CommandError("COMMAND_IDEMPOTENCY_CONFLICT") : undefined,
     definition: {
-      name: "review.approve", store: createPostgresCommandStore(database),
+      name: "review.approve", store: commandStore,
       inputCodec: plaintextCommandInput, input, result,
-      async authorize(who, request, tx) {
-        const found = rows(await tx.query(
-          "SELECT r.id FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id " +
-          "CROSS JOIN public.starter_application a " +
-          "WHERE r.id=$1 AND r.owner_id=$2 AND m.enabled AND m.can_approve " +
-          "AND a.singleton AND a.project_id=$3 AND a.tenant_id=$4 FOR UPDATE OF r,m FOR SHARE OF a",
-          [request.id, who.actorId, projectId, who.tenantId],
-        ));
-        return found.length === 1 ? "allow" : "deny";
-      },
+      authorize: authorizeApproval,
       audit: { event: "review.approved", details: request => ({ reviewId: request.id }) },
     },
   });
@@ -197,6 +230,7 @@ import { createReviewPostgresAdapters } from "./host/review-postgres";
 import { createReviewAttachmentAdapters } from "./host/review-attachments";
 import { createReviewUploadAdapters } from "./host/review-uploads";
 import { createReviewTaskAdapters } from "./host/review-tasks";
+import { createReviewHttpObserver } from "./host/review-execution-observability";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -257,7 +291,7 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     });
     lifecycle.signal.throwIfAborted();
     stage = "application";
-    const app = createApplication({ name: "review", modules, ...adapters });
+    const app = createApplication({ name: "review", modules, ...adapters, onExecution: createReviewHttpObserver() });
     return { fetch: (request: Request) => app.handle(request), close };
   } catch (error) {
     await close();

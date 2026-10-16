@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { databaseSources } from "@supacloud/db/source-contracts";
 import { buildReferenceDeliveryArchive, prepareArchivedDelivery, type ArchivedDelivery } from "./delivery-archive";
 
 // Only the generated, owned test project is modified; shipped starter sources stay unchanged.
@@ -9,6 +10,9 @@ export async function buildReferenceUpgradeArchive(directory: string, signal: Ab
   const project = dirname(dirname(import.meta.path));
   const adapter = join(project, "src/host/review-attachments.ts");
   const original = await readFile(adapter, "utf8");
+  const contractsRoot = join(project, "db/contracts");
+  const originalContracts = new Map(await Promise.all((await readdir(contractsRoot)).map(async name =>
+    [name, await readFile(join(contractsRoot, name))] as const)));
   const before = "INSERT INTO public.starter_attachment_results VALUES($1,$2,$3,$4::text::jsonb)";
   const after = "INSERT INTO public.starter_attachment_results " +
     "(review_id,version,artifact_id,result,writer_revision) VALUES($1,$2,$3,$4::text::jsonb,'v2')";
@@ -80,10 +84,23 @@ export async function createDeliveryWorker(...args: Parameters<typeof original>)
       created.push(path);
     }
     await writeFile(adapter, original.replace(before, after));
+    // The owned upgrade adds a migration, so explicitly regenerate its source
+    // contracts rather than disabling the build's stale-contract check.
+    const generated = await databaseSources(project, "generate");
+    assert.ok(generated.ok, JSON.stringify(generated.findings));
     return await buildReferenceDeliveryArchive(directory, signal, 2);
   } finally {
     try { await writeFile(adapter, original); }
-    finally { await Promise.all(created.map(path => rm(path, { force: true }))); }
+    finally {
+      await Promise.all(created.map(path => rm(path, { force: true })));
+      // This fixture temporarily branched from the baseline; restore its exact
+      // contracts along with its sources, never regenerate rewritten history.
+      for (const name of await readdir(contractsRoot)) {
+        if (!originalContracts.has(name)) await rm(join(contractsRoot, name));
+      }
+      await Promise.all([...originalContracts].map(([name, contents]) =>
+        writeFile(join(contractsRoot, name), contents)));
+    }
   }
 }
 
