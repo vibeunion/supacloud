@@ -13,6 +13,7 @@ import { PGMQ_SQL } from "../../supacloud-lite/src/runtime/db/emulated";
 import { startStarterPostgres, type StarterPostgres } from "../../../scripts/lib/starter-postgres";
 import { SupaCloudWorkflowsClient } from "../../supacloud-js/dist/index.mjs";
 import type { ApplicationOptions, CompiledModule, SupAuthContextOptions } from "./index";
+import type { TSchema } from "elysia";
 
 type SqlValue = string | number | boolean | null;
 interface Retry { reviewId: string; expectedVersion: number; expectedRunId: string; recoveryId: string }
@@ -466,10 +467,29 @@ void status; void retry; void receipt; void receiptOperation; void createReviewT
     restored.dispose();
   });
 
-  test("the final PostgreSQL review version commits and replays but cannot be incremented again", async () => {
+  test("attachment input and output contracts reject versions outside the shared database range", async () => {
+    const runtime: typeof import("./index") = await import(new URL("../dist/index.js", import.meta.url).href);
+    const schemas: { AttachmentInput: TSchema; AttachmentResult: TSchema } =
+      await import(join(root, "src/review/attachment.ts"));
+    const decodeInput = runtime.createSchemaDecoder(schemas.AttachmentInput, { normalize: false });
+    const decodeResult = runtime.createSchemaDecoder(schemas.AttachmentResult, { normalize: false });
+    const input = { reviewId: "review", artifactId: crypto.randomUUID(), version: 2 };
+    for (const version of [2, 2147483647]) {
+      expect(decodeInput({ ...input, version })).toEqual({ ...input, version });
+    }
+    for (const version of [1, 0, -1, 2.5, 2147483648, Number.MAX_SAFE_INTEGER]) {
+      expect(() => decodeInput({ ...input, version })).toThrow();
+      expect(() => decodeResult({ ...input, version, sha256: "a".repeat(64), bytes: 1 })).toThrow();
+    }
+  });
+
+  test("the final PostgreSQL review version commits, runs its task and replays but cannot be incremented again", async () => {
     const f = await fixture();
     await sql("UPDATE public.starter_reviews SET version=2147483646 WHERE id=$1", [f.id]);
     const body = { expectedVersion: 2147483646 };
+    expect((await f.send("attachment-registration", {
+      artifactId: f.artifactId, expectedVersion: body.expectedVersion,
+    })).status).toBe(200);
     const approved = await f.send("approve", body);
     expect(approved.status).toBe(200);
     expect(await approved.json()).toEqual({ state: "approved", version: 2147483647 });
@@ -478,6 +498,10 @@ void status; void retry; void receipt; void receiptOperation; void createReviewT
     expect(await replay.json()).toEqual({ state: "approved", version: 2147483647 });
     expect(await approvalCounts({ kind: "approve", reviewId: f.id,
       operationId: f.artifactId, expectedVersion: body.expectedVersion })).toEqual([{ receipts: 1, audits: 1 }]);
+    await driveWorker(f.artifactId, "completed");
+    expect(await f.status()).toMatchObject({
+      state: "completed", version: 2147483647, result: { version: 2147483647 },
+    });
 
     const exhausted = await fixture();
     await sql("UPDATE public.starter_reviews SET version=2147483647 WHERE id=$1", [exhausted.id]);
