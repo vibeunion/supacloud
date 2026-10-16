@@ -445,6 +445,14 @@ export const ReceiptResult = t.Object({
   status: t.Union([t.Literal("confirmed"), t.Literal("unknown")]),
   operationId: t.String({ format: "uuid" }), reviewId: t.String({ minLength: 1 }),
 });
+export const ReceiptOperation = t.Object({
+  kind: ReceiptQuery.properties.kind,
+  reviewId: ReceiptParams.properties.id,
+  operationId: ReceiptParams.properties.operationId,
+  expectedVersion: ApprovalInput.properties.expectedVersion,
+}, { additionalProperties: false });
+export type ReviewOperation = UnwrapSchema<typeof ReceiptOperation>;
+export type ReviewReceipt = UnwrapSchema<typeof ReceiptResult>;
 export type ReviewUploadBody = UnwrapSchema<typeof UploadBody>;
 export type ReviewUploadInput = UnwrapSchema<typeof UploadInput>;
 export type ReviewUploadLocation = UnwrapSchema<typeof UploadLocation>;

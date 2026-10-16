@@ -1,14 +1,11 @@
 export const STARTER_REVIEW_RECEIPTS = `import { Effect } from "effect";
 import { Controller, DB_CLIENT, Get, Inject, Injectable, Param, Query, REQUEST_CONTEXT } from "@supacloud/app";
-import { ApplicationError } from "@supacloud/elysia";
-import { ReceiptParams, ReceiptQuery, ReceiptResult } from "./contracts";
+import { ApplicationError, createSchemaDecoder } from "@supacloud/elysia";
+import { ReceiptOperation, ReceiptParams, ReceiptQuery, ReceiptResult,
+  type ReviewOperation, type ReviewReceipt } from "./contracts";
+export type { ReviewOperation, ReviewReceipt } from "./contracts";
 
-export interface ReviewOperation {
-  kind: "approve" | "upload"; reviewId: string; operationId: string; expectedVersion: number;
-}
-export interface ReviewReceipt {
-  status: "confirmed" | "unknown"; operationId: string; reviewId: string;
-}
+const decodeOperation = createSchemaDecoder(ReceiptOperation, { normalize: false });
 export interface ReviewReceiptPort {
   lookupOperation(context: unknown, operation: ReviewOperation): Promise<ReviewReceipt>;
 }
@@ -26,13 +23,15 @@ export class ReviewReceipts {
   constructor(@Inject(DB_CLIENT) private readonly store: Partial<ReviewReceiptPort>,
     @Inject(REQUEST_CONTEXT) private readonly context: unknown) {}
   lookup(operation: ReviewOperation): Promise<ReviewReceipt> {
-    if (!Number.isSafeInteger(operation.expectedVersion) || operation.expectedVersion < 1) {
-      throw new ApplicationError("Invalid operation version", { status: 400, code: "RECEIPT_INPUT_INVALID" });
+    let input: ReviewOperation;
+    try { input = decodeOperation(operation); }
+    catch {
+      throw new ApplicationError("Invalid receipt input", { status: 400, code: "RECEIPT_INPUT_INVALID" });
     }
     if (!this.store.lookupOperation) {
       throw new ApplicationError("Receipt lookup is unavailable", { status: 503, code: "RECEIPTS_UNAVAILABLE" });
     }
-    return this.store.lookupOperation(this.context, operation);
+    return this.store.lookupOperation(this.context, input);
   }
 }
 
@@ -55,7 +54,7 @@ export class ReviewReceiptsController {
     },
   })
   lookup(@Param("id") reviewId: string, @Param("operationId") operationId: string,
-    @Query("kind") kind: "approve" | "upload", @Query("expectedVersion") expectedVersion: string): Effect.Effect<ReviewReceipt, ReceiptError, never> {
+    @Query("kind") kind: ReviewOperation["kind"], @Query("expectedVersion") expectedVersion: string): Effect.Effect<ReviewReceipt, ReceiptError, never> {
     return Effect.promise(() => this.receipts.lookup({ reviewId, operationId, kind, expectedVersion: Number(expectedVersion) }));
   }
 }
