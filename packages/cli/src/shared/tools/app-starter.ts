@@ -879,6 +879,14 @@ Context packs include directional dependencies, relevant aspect files, diagnosti
 and static execution plans, without provider values or source expressions.
 The optional --events example expects a trusted host
 to capture approved onExecution metadata in { "version": 1, "events": [...] }.
+It also accepts a bounded JSON-lines export containing only the generated
+review-http-execution and review-worker-execution records. Pass that file
+directly as --events execution.ndjson; use the HTTP request ID or Workflow run
+ID appropriate to the selected operation. Unknown log records, extra fields,
+malformed lines and oversized files fail the entire read rather than being
+silently skipped. Wrapper timestamps, component names and worker IDs are
+validated then excluded from the context metadata. Review the export before
+sharing; context correlation still does not authenticate the log source.
 It selects one opaque request ID, omits payloads and source expressions, and applies
 input/output size limits. It does not read arbitrary logs, prove deployment versions,
 identify a root cause or apply repairs. Never put credentials or business data in
