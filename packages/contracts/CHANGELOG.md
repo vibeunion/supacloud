@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.11.0...contracts-v0.11.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **contracts:** isolate persisted command identity from callbacks ([#1978](https://github.com/vibeunion/supacloud/issues/1978)) ([8b408fd](https://github.com/vibeunion/supacloud/commit/8b408fdb79e2c77c3e8c618e5d5d00fe12623285))
+
 ## [0.11.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.10.0...contracts-v0.11.0) (2026-10-15)
 
 

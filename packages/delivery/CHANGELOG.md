@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.18.1...delivery-v0.19.0) (2026-10-16)
+
+
+### Features
+
+* connect scoped AI workflows, reference clients and deployment evidence ([#1950](https://github.com/vibeunion/supacloud/issues/1950)) ([aa1737a](https://github.com/vibeunion/supacloud/commit/aa1737a68ce7c4429e432c9526be579f6888a9dd))
+
 ## [0.18.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.18.0...delivery-v0.18.1) (2026-10-15)
 
 
