@@ -131,7 +131,7 @@ Options:
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
   --json              Print machine-readable output for compile/check/graph/explain/context/doctor/migration-assess/plan/build-delivery/openapi-export/openapi-diff
-  --events <file>     Read bounded execution metadata for context (requires --request-id and --json)
+  --events <file>     Read a metadata JSON envelope or starter execution JSON lines (requires --request-id and --json)
   --request-id <id>   Select one opaque request ID from --events; context remains read-only
   --delivery-manifest <file>  Correlate context using an immutable build, not current source
   --delivery-target <name>    Target in --delivery-manifest (requires execution metadata)
