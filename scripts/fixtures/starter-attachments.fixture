@@ -135,7 +135,9 @@ export async function setupStarterAttachments(options: {
     projectId: "starter-test", tenantId: "starter-test", service,
     database: {
       transaction: async <T>(run: (tx: CommandTransaction) => Promise<T>) => {
-        if (revokeUploadBeforeBinding && uploadAuthorizations === 1) {
+        // A committed-receipt lookup authorizes first, so two `SELECT m.storage_subject`
+        // authorizations (lookup, pre-download) precede the binding transaction.
+        if (revokeUploadBeforeBinding && uploadAuthorizations === 2) {
           revokeUploadBeforeBinding = false;
           await query("UPDATE public.starter_members SET enabled=false WHERE subject='owner'");
         }
