@@ -36,6 +36,19 @@ Feature: Approval without application-owned execution infrastructure
     When HTTP validation and durable execution accept a request
     Then both use the same schemas
     And no hand-maintained duplicate input or result validator is needed
+
+  Scenario: Inspect an uncertain operation without submitting it
+    Given the original operation key and input
+    When the host calls binding.lookup with verified request context
+    Then the current business authorization is checked
+    And a committed receipt is returned without invoking the business handler
+    And an absent receipt returns null without creating a write, receipt or audit
+
+  Scenario: Recovery fails closed
+    Given a pending client operation
+    When access was revoked, its input changed or the database is unavailable
+    Then lookup reports denial, conflict or an unavailable/unknown outcome respectively
+    And no failure is translated into an absent receipt or another execution
 ```
 
 ## Ownership
@@ -51,6 +64,47 @@ definition's authorization callback checks current business access inside the
 transaction, including on replay. The application supplies business SQL and
 state transitions. Use `binding.transaction()` only during the awaited command
 continuation; repositories must not cache transactions or start detached work.
+
+## Read-only recovery
+
+The returned binding also exposes `lookup(invocation)`. Supply the same compiled
+Command metadata, original idempotency-key header and original input mapping,
+with freshly verified request context. It reuses the existing durable executor's
+lookup, schema decoding and transactional authorization. It never calls the
+business continuation, inserts a receipt, writes audit or invokes the rejection
+mapper. No separate receipt store or second Command definition is needed.
+
+```ts
+const receipt = await binding.lookup(invocation);
+if (receipt === null) {
+  // Keep the client's pending marker; absence is not proof of rollback.
+  return { status: "unresolved" as const };
+}
+return { status: "confirmed" as const, result: receipt.result };
+```
+
+This is a host API, not an automatically installed HTTP endpoint. The host owns
+the authenticated lookup route and its response contract. Map the validated
+result into that contract; do not forward internal receipt identifiers or input
+payloads by default. Client `createPendingCommandRecovery` transports can use
+that route and match the authority against the original request.
+
+Lookup checks the same metadata binding as execution and maps protocol failures
+to the same HTTP status/retry metadata. A changed body with the same key conflicts;
+revoked access is denied even when a receipt exists. Database/receipt errors are
+not converted to null. A connection failure before the transaction starts reports
+`COMMAND_UNAVAILABLE`; an unconfirmed transaction reports `COMMAND_OUTCOME_UNKNOWN`.
+Neither response proves the outcome of the original write.
+Do not use null to clear a pending client marker, generate
+a replacement key or automatically call execute: it is only an observation at
+the lookup's transaction boundary, not proof that an in-flight request cannot
+still commit.
+
+"Read-only" means no command execution or receipt/audit mutation, not a
+PostgreSQL READ ONLY transaction: authorization and serialization can acquire
+locks. Keep authorization callbacks lookup-safe; do not perform business writes
+or external effects in them. Lookup does not expose `binding.transaction()` to
+route handlers. No new schema, privilege or migration is required.
 
 The binding rejects mismatched command metadata and RPC/external commands.
 Protocol failures use the existing public status and retry metadata. An explicit
