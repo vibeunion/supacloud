@@ -52,10 +52,10 @@ export type {
 export {
   DEPLOYMENT_EVIDENCE_SCHEMA, DatabaseProviderSchema, DeploymentComponentEvidenceSchema,
   DeploymentEvidenceSchema, deriveDeploymentEvidenceStatus, formatDeploymentEvidence,
-  parseDeploymentEvidence,
+  parseDeploymentEvidence, summarizeDeploymentEvidence,
 } from "./deployment-evidence";
 export type {
-  DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus,
+  DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus, DeploymentEvidenceIssue,
 } from "./deployment-evidence";
 export {
   DELIVERY_TUPLE_SCHEMA, FaDeliveryTupleSchema, formatFaDeliveryTuple,

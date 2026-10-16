@@ -12,6 +12,10 @@ operation, an observable result, and an acceptance check.
 
 For the concrete Pigsty/pgBackRest operating procedure, see
 [Pigsty Backup Operations](./pigsty-backup-operations.md).
+For bounded AI workflows, reference client integration, published-consumer
+checks and customer-readable recovery evidence, see
+[Customer Workflow Completion](./customer-workflow-completion.md), including
+its explicit remaining acceptance boundaries.
 
 ## Ownership Boundary
 

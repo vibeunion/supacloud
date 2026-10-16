@@ -26,17 +26,26 @@ export interface StarterLite extends CommandDatabase {
 }
 
 /** Real loopback HTTP, private filesystem objects and an explicitly owned database. */
-export async function startStarterLite(root: string, signal: AbortSignal, postgresBin?: string): Promise<StarterLite> {
+export async function startStarterLite(root: string, signal: AbortSignal, postgresBin?: string, publishedEntry?: string): Promise<StarterLite> {
   signal.throwIfAborted();
+  // Published acceptance supplies the installed package's public export. Never
+  // fall back to workspace runtime code when that export is absent or fails.
+  const published: {
+    createLiteBackend(config: BackendConfig): Promise<Backend>;
+    FsStorageDriver: new (root: string) => StorageDriver;
+    createSupAuthLiteIdentity(options: Parameters<StarterLite["configureIdentity"]>[0] & { projectId: string }): ExternalIdentityVerifier;
+    createNativeEngine(options: { dataDir: string; installDir: string }): Promise<DbEngine>;
+  } | undefined = publishedEntry ? await import(publishedEntry) : undefined;
   const runtime: { createBackend(config: BackendConfig): Promise<Backend> } =
-    await import(new URL("../../packages/supacloud-lite/src/runtime/index.ts", import.meta.url).href);
+    published ? { createBackend: published.createLiteBackend }
+      : await import(new URL("../../packages/supacloud-lite/src/runtime/index.ts", import.meta.url).href);
   const storage: { FsStorageDriver: new (root: string) => StorageDriver } =
-    await import(new URL("../../packages/supacloud-lite/src/runtime/node/fs-driver.ts", import.meta.url).href);
+    published ?? await import(new URL("../../packages/supacloud-lite/src/runtime/node/fs-driver.ts", import.meta.url).href);
   const identities: {
     createSupAuthLiteIdentity(options: Parameters<StarterLite["configureIdentity"]>[0] & { projectId: string }): ExternalIdentityVerifier;
-  } = await import(new URL("../../packages/supacloud-lite/src/runtime/identity.ts", import.meta.url).href);
+  } = published ?? await import(new URL("../../packages/supacloud-lite/src/runtime/identity.ts", import.meta.url).href);
   const native: { createNativeEngine(options: { dataDir: string; installDir: string }): Promise<DbEngine> } | undefined = postgresBin
-    ? await import(new URL("../../packages/supacloud-lite/src/runtime/node/native/engine.ts", import.meta.url).href)
+    ? published ?? await import(new URL("../../packages/supacloud-lite/src/runtime/node/native/engine.ts", import.meta.url).href)
     : undefined;
   const jwtSecret = crypto.randomUUID() + crypto.randomUUID();
   const vaultKey = crypto.randomUUID() + crypto.randomUUID();

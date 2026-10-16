@@ -71,6 +71,10 @@ test("delivery compatibility uses a new migration after task recovery", () => {
   assert.ok(archive.includes('source: "migrations/006-reference-compatibility.sql", version: "6"'));
   assert.ok(archive.includes("archive.migrations.length, revision === 2 ? 6 : 5"));
   assert.ok(archive.includes('item.executor === "operator-provisioning").length, 3'));
-  assert.ok(readFixture("starter-delivery-compatibility.fixture").includes("migrations/006-reference-compatibility.sql"));
+  const compatibility = readFixture("starter-delivery-compatibility.fixture");
+  assert.ok(compatibility.includes("migrations/006-reference-compatibility.sql"));
+  assert.ok(compatibility.indexOf('databaseSources(project, "generate")') < compatibility.indexOf("return await buildReferenceDeliveryArchive"));
+  assert.ok(compatibility.includes("writeFile(join(contractsRoot, name), contents)"),
+    "The temporary upgrade must restore the baseline contracts exactly");
   assert.ok(readFixture("starter-attachments.fixture").includes('item.version === "6"'));
 });
