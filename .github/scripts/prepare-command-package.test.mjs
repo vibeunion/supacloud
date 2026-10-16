@@ -427,6 +427,7 @@ test('registry retries wait long enough for provenance visibility', () => {
 });
 
 test('fresh protocol consumers all publish the same exact contracts version', () => {
+  /** @param {string} name */
   const readPackage = (name) => JSON.parse(readFileSync(new URL(`../../packages/${name}/package.json`, import.meta.url), 'utf8'));
   const names = ['contracts', 'commands', 'db', 'app', 'elysia', 'compiler', 'delivery', 'supacloud-js', 'query', 'app-svelte'];
   const manifests = new Map(names.map((name) => {
@@ -442,6 +443,7 @@ test('fresh protocol consumers all publish the same exact contracts version', ()
 });
 
 test('Lite publishes a current exact database dependency after database publication', () => {
+  /** @param {string} name */
   const readPackage = (name) => JSON.parse(readFileSync(new URL(`../../packages/${name}/package.json`, import.meta.url), 'utf8'));
   const names = ['contracts', 'commands', 'db', 'app', 'elysia', 'compiler', 'delivery'];
   const manifests = new Map(names.map((name) => {
@@ -457,7 +459,7 @@ test('Lite publishes a current exact database dependency after database publicat
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   const lite = workflow.indexOf('- name: Publish SupaCloud Lite to NPM');
   assert.ok(lite > workflow.indexOf('- name: Publish database governance to NPM'));
-  const block = workflow.slice(lite).split('\n      - name:')[0];
+  const block = workflow.slice(lite).split('\n      - name:')[0] ?? '';
   assert.match(block, /bun run check[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
   assert.match(block, /git -C \"\$GITHUB_WORKSPACE\" archive HEAD \| tar -x -C \"\$build_root\"/);
   assert.match(block, /cd \"\$build_root\/packages\/supacloud-lite\"/);
