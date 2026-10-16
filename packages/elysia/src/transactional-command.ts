@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createTransactionalCommand, type PersistentCommandDefinition } from "@supacloud/commands";
 import {
-  CommandError, commandFailureMetadata, decodeCommandIdentity, type CommandIdentity,
+  CommandError, commandFailureMetadata, decodeCommandIdentity, type CommandIdentity, type DurableCommandReceipt,
 } from "@supacloud/contracts";
 import { ApplicationError, requireIdempotencyKey, type CommandGovernance, type CommandInvocation } from "./index";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
@@ -22,7 +22,12 @@ export interface TransactionalCommandGovernanceOptions<Input, Result, Transactio
  */
 export function createTransactionalCommandGovernance<Input, Result, Transaction>(
   options: TransactionalCommandGovernanceOptions<Input, Result, Transaction>,
-): { governance: CommandGovernance; transaction(): Transaction } {
+): {
+  governance: CommandGovernance;
+  transaction(): Transaction;
+  /** Reauthorize and inspect the original key/input, without invoking the handler. */
+  lookup(invocation: CommandInvocation): Promise<DurableCommandReceipt<Result> | null>;
+} {
   const { definition, permission, identity, input, rejection } = options;
   const { name, audit } = definition;
   if (!permission.trim()) throw new TypeError("Command permission is required");
@@ -48,6 +53,13 @@ export function createTransactionalCommandGovernance<Input, Result, Transaction>
       throw new ApplicationError("Unsupported transactional command", { status: 501, code: "COMMAND_BINDING_MISMATCH" });
     }
   }
+  function failure(error: unknown): never {
+    const code = commandErrorCode(error);
+    if (!code) throw error;
+    throw new ApplicationError(code, {
+      code, status: commandErrorStatus(code), metadata: commandFailureMetadata(code),
+    });
+  }
   const command = createTransactionalCommand({
     ...definition,
     async execute(transaction) {
@@ -62,6 +74,13 @@ export function createTransactionalCommandGovernance<Input, Result, Transaction>
   });
   return {
     transaction: () => current().transaction,
+    async lookup(invocation) {
+      assertBinding(invocation);
+      try {
+        const actor = decodeCommandIdentity(await identity(invocation));
+        return await command.lookup(actor, requireIdempotencyKey(invocation), input(invocation));
+      } catch (error) { return failure(error); }
+    },
     governance: {
       async authorize(invocation) {
         assertBinding(invocation);
@@ -77,13 +96,7 @@ export function createTransactionalCommandGovernance<Input, Result, Transaction>
             () => command.execute(actor, key, value, invocation.request.signal));
           if (receipt.status !== "confirmed") throw new CommandError("COMMAND_OUTCOME_UNKNOWN");
           return receipt.result;
-        } catch (error) {
-          const code = commandErrorCode(error);
-          if (!code) throw error;
-          throw new ApplicationError(code, {
-            code, status: commandErrorStatus(code), metadata: commandFailureMetadata(code),
-          });
-        }
+        } catch (error) { return failure(error); }
       },
       transaction(invocation, next) { current(invocation); return next(); },
       // The durable executor writes the audit after validation, before commit.
