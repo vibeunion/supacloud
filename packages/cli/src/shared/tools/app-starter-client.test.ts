@@ -39,7 +39,8 @@ test("the emitted client reference executes its behavior tests without a UI fram
   const root = await mkdtemp(join(tmpdir(), "starter-client-"));
   try {
     const files = appStarterFiles("reference");
-    for (const path of ["src/client/reviews.ts", "src/client/review-transport.ts", "tests/review-client.test.ts"]) {
+    for (const path of ["src/client/reviews.ts", "src/client/review-transport.ts",
+      "src/review/contracts.ts", "tests/review-client.test.ts"]) {
       const content = files[path];
       expect(content).toBeDefined();
       await mkdir(join(root, path, ".."), { recursive: true });
@@ -71,6 +72,7 @@ test("the emitted client reference executes its behavior tests without a UI fram
         allowJs: true, checkJs: true,
         types: ["bun"], typeRoots: [join(cli, "node_modules/@types")],
         paths: {
+          "elysia": [join(cli, "node_modules/elysia")],
           "@supabase/supabase-js": [join(cli, "node_modules/@supabase/supabase-js")],
           "@supacloud/js/contracts": [join(cli, "../contracts/src/authenticated_fetch.ts")],
         },
