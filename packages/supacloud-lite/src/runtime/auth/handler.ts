@@ -1430,6 +1430,13 @@ export class AuthHandler {
       return authError(422, 'mfa_verification_failed', 'Invalid TOTP code entered')
     }
     const session = await this.db.transaction(async (query) => {
+      const currentUsers = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const currentUser = currentUsers.rows[0]
+      if (!currentUser) return null
       const claimed = await query(
         `update auth.mfa_challenges set verified_at = now()
          where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
@@ -1440,7 +1447,7 @@ export class AuthHandler {
       if (factor.status !== 'verified') {
         await query(`update auth.mfa_factors set status = 'verified', updated_at = now() where id = $1`, [factorId])
       }
-      return this.sessionFor(user, undefined, {
+      return this.sessionFor(currentUser, undefined, {
         aal: 'aal2',
         amr: [
           { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
@@ -1620,8 +1627,12 @@ export class AuthHandler {
   private async userFromBearer(req: Request): Promise<UserRow | null> {
     const claims = await this.claimsFromBearer(req)
     if (!claims?.sub) return null
-    const res = await this.db.query(`select * from auth.users where id = $1`, [claims.sub])
-    return (res.rows[0] as UserRow) ?? null
+    const res = await this.db.query<UserRow>(
+      `select * from auth.users where id = $1 and deleted_at is null
+         and (banned_until is null or banned_until <= now())`,
+      [claims.sub],
+    )
+    return res.rows[0] ?? null
   }
 
   private async claimsFromBearer(req: Request): Promise<JwtClaims | null> {
