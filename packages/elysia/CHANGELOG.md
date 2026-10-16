@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.32.0...elysia-v0.33.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** share receipt contracts and verify client recovery ([#1989](https://github.com/vibeunion/supacloud/issues/1989)) ([8e319cd](https://github.com/vibeunion/supacloud/commit/8e319cdfb7933d1291dc666f047da56841135b72))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.31.1...elysia-v0.32.0) (2026-10-16)
 
 

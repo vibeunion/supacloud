@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.3...supacloud-lite-v0.29.4) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lite:** classify PL/pgSQL failures as server errors ([#1986](https://github.com/vibeunion/supacloud/issues/1986)) ([27c5e29](https://github.com/vibeunion/supacloud/commit/27c5e29b351e2b6bc0d3da55a1ccb6607e4e06a5))
+
 ## [0.29.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.2...supacloud-lite-v0.29.3) (2026-10-16)
 
 

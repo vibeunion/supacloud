@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.103.0](https://github.com/vibeunion/supacloud/compare/cli-v0.102.0...cli-v0.103.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** share receipt contracts and verify client recovery ([#1989](https://github.com/vibeunion/supacloud/issues/1989)) ([8e319cd](https://github.com/vibeunion/supacloud/commit/8e319cdfb7933d1291dc666f047da56841135b72))
+
 ## [0.102.0](https://github.com/vibeunion/supacloud/compare/cli-v0.101.4...cli-v0.102.0) (2026-10-16)
 
 
