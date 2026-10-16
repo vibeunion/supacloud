@@ -373,6 +373,7 @@ EXAMPLES
   ${preferredCommand} app explain --target CaseService
   ${preferredCommand} app context --root . --format json
   ${preferredCommand} app context --root . --target CaseModule --format json
+  ${preferredCommand} app context --root . --target CaseModule --events execution.ndjson --request-id request-123 --format json
   ${preferredCommand} app doctor --root .
   ${preferredCommand} app fix --root . --fix fix.json --write
   ${preferredCommand} generate --kind module --name billing
