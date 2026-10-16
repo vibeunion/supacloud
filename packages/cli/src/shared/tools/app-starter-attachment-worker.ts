@@ -110,6 +110,7 @@ import { SupaCloudWorkflowsClient } from "@supacloud/js";
 import { createBunCommandDatabase } from "@supacloud/db/bun";
 import type { CompiledModule } from "@supacloud/elysia";
 import { createReviewAttachmentWorker } from "./host/review-attachment-worker";
+import { createReviewWorkerObserver } from "./host/review-worker-observability";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -153,6 +154,7 @@ export async function createDeliveryWorker(modules: CompiledModule[], lifecycle:
       database: createBunCommandDatabase(pool), service, projectId: settings.projectId,
       tenantId: settings.tenantId, modules, workerId: settings.workerId,
       workflows: new SupaCloudWorkflowsClient(service), queueOwnership: "exclusive-review-attachments",
+      onExecution: createReviewWorkerObserver(settings.workerId),
     });
     lifecycle.signal.throwIfAborted();
     return {
