@@ -37,7 +37,7 @@ try {
   child = Bun.spawn([process.execPath, "run", "--no-env-file", "--tsconfig-override", join(root, "tsconfig.json"),
     "tests/starter-browser.ts"], {
     cwd: root,
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", LC_ALL: "C", LANG: "C",
+    env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", LC_ALL: "C", LANG: "C",
       SUPACLOUD_STARTER_POSTGRES_BIN: postgresBin, SUPACLOUD_STARTER_SVADMIN: values.svadmin ? "1" : "0" },
     stdout: "inherit", stderr: "inherit",
   });

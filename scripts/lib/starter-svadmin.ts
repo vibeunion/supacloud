@@ -1,7 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { BunPlugin } from "bun";
-import { compile, compileModule } from "../../packages/web-console/node_modules/svelte/compiler";
 
 export async function checkStarterSvadmin(root: string): Promise<void> {
   const repo = resolve(import.meta.dir, "../.."), web = join(repo, "packages/web-console");
@@ -23,7 +22,7 @@ export async function checkStarterSvadmin(root: string): Promise<void> {
   }));
   const child = Bun.spawn([process.execPath, join(web, "node_modules/svelte-check/bin/svelte-check"),
     "--workspace", root, "--tsconfig", config, "--fail-on-warnings"], {
-    cwd: root, env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" }, stdout: "pipe", stderr: "pipe",
+    cwd: root, env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "" }, stdout: "pipe", stderr: "pipe",
   });
   const timer = setTimeout(() => child.kill(), 60_000);
   try {
@@ -37,6 +36,14 @@ export async function checkStarterSvadmin(root: string): Promise<void> {
 /** Optional acceptance adapter; no Svelte dependency enters the generated starter. */
 export async function starterSvadminBundle() {
   const web = resolve(import.meta.dir, "../../packages/web-console");
+  // Resolve the public export only when this optional fixture is requested.
+  // Tooling-only checks do not install the Web Console's UI dependency graph.
+  const { compile, compileModule }: {
+    compile(source: string, options: { filename: string; generate: "client"; css: "external" }): {
+      js: { code: string }; css: { code: string } | null;
+    };
+    compileModule(source: string, options: { filename: string; generate: "client" }): { js: { code: string } };
+  } = await import(Bun.resolveSync("svelte/compiler", web));
   const styles: string[] = [];
   const plugin: BunPlugin = {
     name: "starter-svadmin-acceptance",
