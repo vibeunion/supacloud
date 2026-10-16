@@ -33,7 +33,11 @@ interface AttachmentHost {
     };
   }>;
 }
-interface UploadHost { createReviewUploadAdapters(options: AttachmentOptions): Promise<unknown> }
+interface UploadHost {
+  createReviewUploadAdapters(options: AttachmentOptions): Promise<{
+    registerUpload(context: unknown, input: { reviewId: string; artifactId: string; expectedVersion: number }): Promise<unknown>;
+  }>;
+}
 interface PostgresHost {
   createReviewPostgresAdapters(options: {
     database: CommandDatabase; tenantId: string; identity: Omit<SupAuthContextOptions, "resolveAccess">;
@@ -111,24 +115,35 @@ native("generated review task lifecycle", () => {
   let service: SupabaseClient;
   let workflows: SupaCloudWorkflowsClient;
   const artifacts = new Map<string, Record<string, unknown>>();
-  const transport = { offline: false, downloads: 0 };
-  const fault = { loseCommit: false };
+  const transport = { offline: false, downloads: 0, registrations: 0 };
+  const fault = { loseCommit: false, loseUploadCommit: false, failUploadLookup: false, corruptUploadLookup: false };
   async function sql(query: string, parameters: readonly SqlValue[] = []) {
     return rows(await database.transaction(tx => tx.query(query, parameters)));
   }
   function scoped(role: "starter_review_http" | "starter_review_worker"): CommandDatabase {
     return { async transaction(run) {
-      let recoveryWrite = false;
+      let recoveryWrite = false, uploadWrite = false;
       const result = await database.transaction(async tx => {
         await tx.query(`SET LOCAL ROLE ${role}`);
-        return run({ query(query, parameters) {
+        return run({ async query(query, parameters) {
           if (query.startsWith("INSERT INTO public.starter_attachment_retries")) recoveryWrite = true;
-          return tx.query(query, parameters);
+          if (query.startsWith("INSERT INTO public.starter_attachments ")) uploadWrite = true;
+          const uploadLookup = query.includes("FROM supacloud_commands.execution_receipts")
+            && parameters?.[2] === "review.attach";
+          if (fault.failUploadLookup && uploadLookup) throw new Error("Private receipt database failure");
+          const result = await tx.query(query, parameters);
+          // Simulate a malformed adapter response without weakening terminal receipt protection.
+          if (fault.corruptUploadLookup && uploadLookup) return rows(result).map(row => ({ ...row, result_json: "{}" }));
+          return result;
         } });
       });
       if (recoveryWrite && fault.loseCommit) {
         fault.loseCommit = false;
         throw new Error("Private connection string: lost commit acknowledgement");
+      }
+      if (uploadWrite && fault.loseUploadCommit) {
+        fault.loseUploadCommit = false;
+        throw new Error("Private upload commit acknowledgement lost");
       }
       return result;
     } };
@@ -229,6 +244,7 @@ native("generated review task lifecycle", () => {
       }
       const artifactId = text(request["artifactId"]);
       if (name === "supacloud_artifact_register") {
+        transport.registrations++;
         const previous = artifacts.get(artifactId);
         const value = { ...request, objectVersion: "", createdAt: "2026-10-16T00:00:00Z", parents: [] };
         if (!previous) artifacts.set(artifactId, value);
@@ -253,6 +269,9 @@ native("generated review task lifecycle", () => {
   beforeEach(async () => {
     transport.offline = false;
     fault.loseCommit = false;
+    fault.loseUploadCommit = false;
+    fault.failUploadLookup = false;
+    fault.corruptUploadLookup = false;
     await database.exec(`DO $$ DECLARE r record; BEGIN
       FOR r IN SELECT id FROM supacloud_workflows.runs WHERE status IN ('queued','running') LOOP
         PERFORM supacloud_workflows.cancel_run(r.id,'Test isolation');
@@ -365,6 +384,14 @@ native("generated review task lifecycle", () => {
         WHERE command='review.approve' AND operation_key=$1) AS receipts,
       (SELECT count(*)::integer FROM supacloud_commands.execution_audit
         WHERE command='review.approve' AND operation_key=$1) AS audits`, [operation.operationId]);
+  }
+  async function uploadCounts(id: string, artifactId: string) {
+    return sql(`SELECT
+      (SELECT count(*)::integer FROM public.starter_attachments WHERE review_id=$1) AS bindings,
+      (SELECT count(*)::integer FROM supacloud_commands.execution_receipts
+        WHERE command='review.attach' AND operation_key=$2) AS receipts,
+      (SELECT count(*)::integer FROM supacloud_commands.execution_audit
+        WHERE command='review.attach' AND operation_key=$2) AS audits`, [id, artifactId]);
   }
 
   test("generated routes, client, OpenAPI and source contracts compile without manual artifact edits", async () => {
@@ -585,6 +612,93 @@ void status; void retry; void receipt; void receiptOperation; void createReviewT
     expect(calls).toBe(0);
     expect(await service.lookup(valid)).toEqual(valid);
     expect(calls).toBe(1);
+  });
+
+  test("committed upload registration replays after approval without Storage or Artifact calls", async () => {
+    const f = await fixture();
+    const before = { downloads: transport.downloads, registrations: transport.registrations };
+    const body = { artifactId: f.artifactId, expectedVersion: 1 };
+    const registered = await f.send("attachment-registration", body);
+    expect(registered.status).toBe(200);
+    const saved: unknown = await registered.json();
+    expect(transport.downloads).toBe(before.downloads + 1);
+    expect(transport.registrations).toBe(before.registrations + 1);
+    expect((await f.send("approve", { expectedVersion: 1 })).status).toBe(200);
+    transport.offline = true;
+    const replay = await f.send("attachment-registration", body);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(saved);
+    const recreated = await uploads.createReviewUploadAdapters({
+      database: scoped("starter_review_http"), service, projectId: "project", tenantId: "tenant",
+    });
+    const context = await f.adapters.requestContext(f.request("/reviews/health"));
+    expect(await recreated.registerUpload(context, { ...body, reviewId: f.id })).toEqual(saved);
+    expect(transport.downloads).toBe(before.downloads + 1);
+    expect(transport.registrations).toBe(before.registrations + 1);
+    expect(await uploadCounts(f.id, f.artifactId)).toEqual([{ bindings: 1, receipts: 1, audits: 1 }]);
+  });
+
+  test("upload registration reconciles a lost commit response before repeating any external call", async () => {
+    const f = await fixture(), body = { artifactId: f.artifactId, expectedVersion: 1 };
+    fault.loseUploadCommit = true;
+    const first = await f.send("attachment-registration", body);
+    expect(first.status).toBe(503);
+    expect(await first.json()).toMatchObject({ code: "UPLOAD_OUTCOME_UNKNOWN" });
+    expect(await uploadCounts(f.id, f.artifactId)).toEqual([{ bindings: 1, receipts: 1, audits: 1 }]);
+    const before = { downloads: transport.downloads, registrations: transport.registrations };
+    transport.offline = true;
+    const replay = await f.send("attachment-registration", body);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ artifactId: f.artifactId, runId: f.artifactId, bytes: content.length });
+    expect(transport.downloads).toBe(before.downloads);
+    expect(transport.registrations).toBe(before.registrations);
+    expect(await uploadCounts(f.id, f.artifactId)).toEqual([{ bindings: 1, receipts: 1, audits: 1 }]);
+  });
+
+  test("revoked upload access and conflicting original inputs fail before external registration", async () => {
+    const f = await fixture(), body = { artifactId: f.artifactId, expectedVersion: 1 };
+    expect((await f.send("attachment-registration", body)).status).toBe(200);
+    const before = { downloads: transport.downloads, registrations: transport.registrations };
+    await sql("UPDATE public.starter_reviews SET version=2 WHERE id=$1", [f.id]);
+    const conflict = await f.send("attachment-registration", { ...body, expectedVersion: 2 });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "COMMAND_IDEMPOTENCY_CONFLICT" });
+    await sql("UPDATE public.starter_reviews SET version=1 WHERE id=$1", [f.id]);
+    const staleContext = await f.adapters.requestContext(f.request("/reviews/health"));
+    const recreated = await uploads.createReviewUploadAdapters({
+      database: scoped("starter_review_http"), service, projectId: "project", tenantId: "tenant",
+    });
+    await sql("UPDATE public.starter_members SET can_approve=false WHERE subject=$1", [f.actor]);
+    await expect(recreated.registerUpload(staleContext, { ...body, reviewId: f.id }))
+      .rejects.toMatchObject({ status: 403, code: "COMMAND_REJECTED" });
+    expect((await f.send("attachment-registration", body)).status).toBe(403);
+    expect(transport.downloads).toBe(before.downloads);
+    expect(transport.registrations).toBe(before.registrations);
+    expect(await uploadCounts(f.id, f.artifactId)).toEqual([{ bindings: 1, receipts: 1, audits: 1 }]);
+  });
+
+  test("failed receipt reads and malformed upload receipts cannot fall through to external calls", async () => {
+    const f = await fixture(), body = { artifactId: f.artifactId, expectedVersion: 1 };
+    const before = { downloads: transport.downloads, registrations: transport.registrations };
+    fault.failUploadLookup = true;
+    const unavailable = await f.send("attachment-registration", body);
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({ code: "UPLOAD_OUTCOME_UNKNOWN" });
+    expect(transport.downloads).toBe(before.downloads);
+    expect(transport.registrations).toBe(before.registrations);
+    expect(await uploadCounts(f.id, f.artifactId)).toEqual([{ bindings: 0, receipts: 0, audits: 0 }]);
+    fault.failUploadLookup = false;
+    expect((await f.send("attachment-registration", body)).status).toBe(200);
+    await expect(sql(`UPDATE supacloud_commands.execution_receipts SET result='{}'::jsonb
+      WHERE command='review.attach' AND operation_key=$1`, [f.artifactId]))
+      .rejects.toThrow("SUPACLOUD_COMMAND_TERMINAL_RECEIPT");
+    fault.corruptUploadLookup = true;
+    const malformed = await f.send("attachment-registration", body);
+    expect(malformed.status).toBe(503);
+    expect(await malformed.json()).toMatchObject({ code: "UPLOAD_OUTCOME_UNKNOWN" });
+    expect(transport.downloads).toBe(before.downloads + 1);
+    expect(transport.registrations).toBe(before.registrations + 1);
+    expect(await uploadCounts(f.id, f.artifactId)).toEqual([{ bindings: 1, receipts: 1, audits: 1 }]);
   });
 
   test("authenticated customer flow submits, sees failure, retries and completes through the generated Worker", async () => {
