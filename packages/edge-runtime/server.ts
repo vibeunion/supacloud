@@ -70,6 +70,7 @@ import {
   resolveMemoryCgroups,
 } from "./memory-pressure";
 
+const AOT_CAPTURE = process.env.ELYSIA_AOT_BUILD === "1";
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
@@ -121,6 +122,7 @@ const PGREDIS_RUNTIME_ENDPOINT: PgredisRuntimeEndpointConfig | undefined = PGRED
 
 // Empty clusters and CI environments might not have created the function directory yet; create on startup to prevent crashing before health checks.
 async function ensureDir(dir: string): Promise<string> {
+  if (AOT_CAPTURE) return dir;
   try {
     return await fs.realpath(dir);
   } catch {
@@ -328,7 +330,7 @@ function requestRuntimeRecycle(): void {
 }
 
 const pool = new WorkerPool({
-  size: POOL_SIZE,
+  size: AOT_CAPTURE ? 0 : POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
@@ -336,7 +338,7 @@ const pool = new WorkerPool({
 });
 
 const backgroundPool = new WorkerPool({
-  size: BACKGROUND_POOL_SIZE,
+  size: AOT_CAPTURE ? 0 : BACKGROUND_POOL_SIZE,
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
@@ -1907,11 +1909,9 @@ const app = new Elysia()
       { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
     )
-  )
+  );
 
-  .listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
-
-console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
+export { app };
 
 const gracefulShutdown = async (signal: string, exitCode = 0) => {
   if (shuttingDown) return;
@@ -1947,34 +1947,39 @@ const gracefulShutdown = async (signal: string, exitCode = 0) => {
   process.exit(exitCode);
 };
 
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+if (!AOT_CAPTURE) {
+  app.listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
+  console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
 
-process.on("uncaughtException", (err) => {
-  console.error("[EdgeRuntime] FATAL uncaughtException:", err);
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[EdgeRuntime] unhandledRejection:", reason);
-});
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-const memoryCgroups = await resolveMemoryCgroups();
-if (memoryCgroups.length > 0) {
-  const monitor = createMemoryPressureMonitor({
-    sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
-    onPressure: (snapshot) => {
-      console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
-        ...snapshot,
-        ...pool.snapshotMetrics("supacloud_edge"),
-        ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
-      });
-      void gracefulShutdown("cgroup memory pressure", 1);
-    },
-    onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+  process.on("uncaughtException", (err) => {
+    console.error("[EdgeRuntime] FATAL uncaughtException:", err);
+    process.exit(1);
   });
-  setInterval(() => { void monitor.poll(); }, 1_000).unref();
-}
+  process.on("unhandledRejection", (reason) => {
+    console.error("[EdgeRuntime] unhandledRejection:", reason);
+  });
 
-// Keep the main runtime process alive so systemd can supervise the actual server
-// process instead of observing Bun's temporary bootstrap completion.
-await new Promise<void>(() => {});
+  const memoryCgroups = await resolveMemoryCgroups();
+  if (memoryCgroups.length > 0) {
+    const monitor = createMemoryPressureMonitor({
+      sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
+      onPressure: (snapshot) => {
+        console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
+          ...snapshot,
+          ...pool.snapshotMetrics("supacloud_edge"),
+          ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
+        });
+        void gracefulShutdown("cgroup memory pressure", 1);
+      },
+      onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+    });
+    setInterval(() => { void monitor.poll(); }, 1_000).unref();
+  }
+
+  // Keep the main runtime process alive so systemd can supervise the actual server
+  // process instead of observing Bun's temporary bootstrap completion.
+  await new Promise<void>(() => {});
+}

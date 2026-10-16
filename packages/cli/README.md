@@ -660,6 +660,14 @@ policy again, rejects any normalization that would change the code, and stores
 the submitted bytes unchanged as both immutable source and runtime artifact.
 `--prebundled-path` is mutually exclusive with `--path`, `--code`, and
 `--minify`.
+For trusted Elysia source, `deploy --path <entry> --framework elysia --aot`
+captures the app during the local publish step and uploads the exact output as
+a verified prebundled artifact. Use `--aot-entry <module>` when the request
+handler entry and the module exporting `app` are different. This is opt-in,
+requires Bun plus the Function's Elysia dependency, and executes app
+initialization in the isolated build process; do not enable it for untrusted
+source. Fetch, Hono, SvelteKit, inline `--code`, and server-side dynamic
+bundling remain unchanged.
 `deploy_bundle --files` accepts a JSON object in shell usage.
 Use `source --output <file>` for large Functions so terminal or automation output
 limits cannot truncate the original TS/JS source code. The destination must not

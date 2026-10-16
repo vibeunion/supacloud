@@ -20,6 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
+import { buildFunctionAot, validateFunctionAot } from "./function-aot";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
 import type { HttpResult, HttpTransport } from "../transports/http";
@@ -305,6 +306,17 @@ async function preparedDeployCode(args: Record<string, unknown>): Promise<Prepar
     }
     if (typeof codeArg === "string") return { code: codeArg, prebundled: false };
     if (typeof pathArg !== "string") throw new Error("Function deploy source is invalid");
+    if (args.aot === true) {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-function-aot-"));
+        try {
+            return await buildFunctionAot(resolveEntrypoint(pathArg), join(directory, "index.js"), {
+                ...(typeof args["aot-entry"] === "string" ? { appEntry: args["aot-entry"] } : {}),
+                minify: args.minify === true,
+            });
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    }
     return bundledDeployCode(pathArg);
 }
 
@@ -989,6 +1001,8 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             "bundle-dir": optional(Type.String(), "[deploy_bundle] Local self-contained UTF-8 bundle directory; excludes node_modules, .git, AppleDouble, symlinks, and special files"),
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
+            aot: optional(Type.Boolean(), "[deploy] Locally precompile a trusted Elysia app before uploading; off by default"),
+            "aot-entry": optional(Type.String(), "[deploy --aot] Module exporting the Elysia app (defaults to path)"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
             framework: optional(withDescription(stringEnum(["fetch", "elysia", "hono", "sveltekit-function"]), "[deploy/deploy_bundle/config/scaffold] Fetch framework adapter profile")),
@@ -1012,6 +1026,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             ),
         },
         async (args: any) => {
+            validateFunctionAot(args);
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             if (args.action === "scaffold") {
                 return { content: [{ type: "text" as const, text: scaffoldFunction(args.path, args.slug, args.framework) }] };
