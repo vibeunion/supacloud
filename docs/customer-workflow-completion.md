@@ -118,6 +118,23 @@ Scenario: Preserve HTTP results when logging is unavailable
   Given an unavailable execution log sink
   When a route or command succeeds or fails
   Then its original result or failure is preserved without a retry
+
+Scenario: Use execution logs directly in a bounded context
+  Given a bounded JSON-lines export of generated HTTP or worker execution logs
+  When context selects an explicit request ID
+  Then it correlates metadata against the selected source graph
+  And log wrapper fields do not enter the context pack
+
+Scenario: Reject mixed or unsafe log input
+  Given an execution log export containing unknown fields or malformed records
+  When context reads the file
+  Then it rejects the entire input without echoing its contents
+  And it does not silently skip records or relax the input limits
+
+Scenario: Preserve the existing execution envelope
+  Given a version-one execution metadata JSON envelope
+  When context reads the file
+  Then the existing graph correlation and untrusted-evidence boundaries are unchanged
 ```
 
 ## Evidence boundary
@@ -458,6 +475,33 @@ selection, route/command phases and sink-failure isolation. Tests execute the
 generated observers and the real execution dispatcher; host wiring is checked
 structurally, not through a deployed HTTP service. No full suite, live identity
 test, published-consumer run or deployment was performed for this increment.
+
+### Execution logs in AI context
+
+`supacloud-compiler context` now accepts the generated hosts' JSON-lines logs
+directly through the existing `--events` option, alongside the version-one JSON
+metadata envelope:
+
+```sh
+bunx supacloud-compiler context review --root src \
+  --events execution.ndjson --request-id request-123 --json
+```
+
+Export only `review-http-execution` and `review-worker-execution` records,
+without collector prefixes or unrelated access/error log entries. A single
+record or newline-delimited records, including CRLF and blank separator lines,
+are supported. Unknown records, additional fields, invalid wrapper identities,
+timestamps or execution metadata reject the entire input without echoing it.
+The existing 1 MiB raw-file and 2048-event limits remain in force. This command
+does not collect logs, modify sources or regenerate artifacts.
+
+Validated timestamp/component/worker fields are removed before the existing
+metadata and graph correlation steps. The selected request ID remains explicit:
+use the HTTP request ID for HTTP events or the Workflow run ID for worker events.
+No common trace identity or retry attempt is inferred from timestamps or line
+order. Source correlation continues to report `eventsTrusted: false` and
+`deploymentVerified: false`; use the existing delivery-manifest context when
+correlating with a specific build. This does not prove live deployment identity.
 
 ### Release and live acceptance
 
