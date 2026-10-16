@@ -110,6 +110,7 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
     const request = ++generation;
     state = { ...state, list: { status: "loading", rows: [] } };
     notify();
+    if (closed || request !== generation) return;
     try {
       const rows = await transport.list();
       if (closed || request !== generation) return;
@@ -349,6 +350,34 @@ test("list has loading, empty, permission and failure states; old results cannot
     expect(JSON.stringify(failed.snapshot())).not.toContain("private");
   }
 });
+test("disposing from a loading subscriber prevents read dispatch", async () => {
+  let reads = 0;
+  const client = createReviewClient(transport({ list: async () => { reads++; return [draft]; } }));
+  client.subscribe(() => {
+    if (client.snapshot().list.status === "loading") client.dispose();
+  });
+  await client.load();
+  expect(reads).toBe(0);
+  await client.load();
+  expect(reads).toBe(0);
+});
+
+test("a reentrant newer load supersedes the outer read before dispatch", async () => {
+  let reads = 0, replaced = false;
+  let replacement: Promise<void> | undefined;
+  const client = createReviewClient(transport({ list: async () => { reads++; return [draft]; } }));
+  client.subscribe(() => {
+    if (!replaced && client.snapshot().list.status === "loading") {
+      replaced = true;
+      replacement = client.load();
+    }
+  });
+  await client.load();
+  await replacement;
+  expect(reads).toBe(1);
+  expect(client.snapshot().list).toEqual({ status: "ready", rows: [draft] });
+});
+
 test("double submit sends one write; unknown retains its identity and only a lookup can confirm it", async () => {
   let sends = 0, lookups = 0, resolve: (result: ReviewWriteResult) => void = () => {};
   const client = createReviewClient(transport({
