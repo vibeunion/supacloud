@@ -1853,7 +1853,7 @@ async function preheatRuntimeFunction(
     if (expected.requestedVersion) {
       headers["x-supacloud-function-version"] = expected.requestedVersion;
     }
-    if (expected.activationId) {
+    if (expected.requestedVersion !== null && expected.activationId) {
       headers["x-supacloud-activation-id"] = expected.activationId;
     }
     const preheatRes = await fetch(
