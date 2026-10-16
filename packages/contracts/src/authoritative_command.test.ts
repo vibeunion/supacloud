@@ -4,7 +4,7 @@ import {
   type AuthoritativeCommandContract,
   type AuthoritativeCommandOutcome,
 } from "./contract_client";
-import { createPendingCommandClient } from "./client";
+import { createPendingCommandClient, createPendingCommandRecovery } from "./client";
 
 function input(value: unknown): { id: string } {
   if (!value || typeof value !== "object" || !("id" in value)
@@ -392,6 +392,166 @@ describe("pending command recovery", () => {
     await expect(client(state)).rejects.toThrow("Pending command was not cleared");
     await expect(client(state)).rejects.toThrow("unknown:target");
     expect(writes).toBe(1);
+  });
+
+  test("manual recovery after reload uses the stored input and never sends", async () => {
+    const storage = pendingStorage();
+    let writes = 0, reads = 0;
+    const options = { storage, key, unknownError };
+    const client = createPendingCommandClient(pendingContract, {
+      send: async () => { writes++; throw new Error("lost response"); },
+      lookup: async () => { reads++; return null; },
+    }, options);
+    await expect(client({ id: "target" })).rejects.toThrow("unknown:target");
+    const recoveryTransport = {
+      lookup: async (original: { id: string }) => {
+        reads++;
+        expect(original).toEqual({ id: "target" });
+        return { receipt: state };
+      },
+      send: async () => { writes++; throw new Error("must not send"); },
+    };
+    const recover = createPendingCommandRecovery(pendingContract, recoveryTransport, options);
+    expect(await recover()).toEqual({ input: { id: "target" }, authority: state });
+    expect(storage.getItem(key)).toBeNull();
+    expect(await recover()).toBeNull();
+    expect([writes, reads]).toEqual([1, 2]);
+    expectTypeOf<Awaited<ReturnType<typeof recover>>>().toEqualTypeOf<{
+      input: { id: string }; authority: typeof state;
+    } | null>();
+  });
+
+  test("manual recovery has no effects for an absent marker or invalid key", async () => {
+    let calls = 0;
+    const storage = { getItem: () => null, removeItem: () => { calls++; } };
+    const transport = { lookup: async () => { calls++; return { receipt: state }; } };
+    expect(await createPendingCommandRecovery(pendingContract, transport, { storage, key, unknownError })()).toBeNull();
+    expect(() => createPendingCommandRecovery(pendingContract, transport, {
+      storage, key: " ", unknownError,
+    })).toThrow("Invalid pending command configuration");
+    expect(calls).toBe(0);
+  });
+
+  test("manual recovery fails closed on corrupt, invalid or identity-changing stored input", async () => {
+    for (const serialized of ["", "{", "null", "{}", '{"id":" target "}', '{"id":"target","extra":true}']) {
+      const storage = pendingStorage();
+      storage.setItem(key, serialized);
+      let reads = 0;
+      const recover = createPendingCommandRecovery(pendingContract, {
+        lookup: async () => { reads++; return { receipt: state }; },
+      }, { storage, key, unknownError });
+      await expect(recover()).rejects.toThrow();
+      expect(storage.getItem(key)).toBe(serialized);
+      expect(reads).toBe(0);
+    }
+  });
+
+  test("manual recovery compares JSON values without requiring stored whitespace or key order", async () => {
+    const storage = pendingStorage();
+    storage.setItem(key, ' { "enabled": true, "id": "target" } ');
+    const recover = createPendingCommandRecovery({ ...pendingContract, input: authority }, {
+      lookup: async original => { expect(original).toEqual(state); return { receipt: state }; },
+    }, { storage, key, unknownError });
+    expect(await recover()).toEqual({ input: state, authority: state });
+    expect(storage.getItem(key)).toBeNull();
+  });
+
+  test("manual recovery retains pending on lookup failure, invalid authority or matcher failure", async () => {
+    for (const mode of ["offline", "missing", "foreign", "uncommitted", "matcher"] as const) {
+      const storage = pendingStorage();
+      const serialized = JSON.stringify({ id: "target" });
+      storage.setItem(key, serialized);
+      let reads = 0;
+      const failure = new Error("private lookup failure");
+      let mappedCause: unknown;
+      const recover = createPendingCommandRecovery({
+        ...pendingContract,
+        matches: (original, result) => {
+          if (mode === "matcher") throw new Error("private matcher failure");
+          return contract.matches(original, result);
+        },
+      }, {
+        lookup: async () => {
+          reads++;
+          if (mode === "offline") throw failure;
+          if (mode === "missing") return null;
+          return { receipt: { ...state, id: mode === "foreign" ? "other" : "target", enabled: mode !== "uncommitted" } };
+        },
+      }, {
+        storage, key,
+        unknownError: (original, cause) => { mappedCause = cause; return unknownError(original, cause); },
+      });
+      await expect(recover()).rejects.toThrow(mode === "offline" ? "lookup-unavailable:target" : "unknown:target");
+      expect(mappedCause).toBe(mode === "offline" ? failure : undefined);
+      expect(storage.getItem(key)).toBe(serialized);
+      expect(reads).toBe(1);
+    }
+  });
+
+  test("manual recovery preserves a replacement while an old lookup is in flight", async () => {
+    const storage = pendingStorage();
+    storage.setItem(key, JSON.stringify({ id: "target" }));
+    const response = Promise.withResolvers<unknown>();
+    const recover = createPendingCommandRecovery(pendingContract, {
+      lookup: () => response.promise,
+    }, { storage, key, unknownError });
+    const recovery = recover();
+    const replacement = JSON.stringify({ id: "replacement" });
+    storage.setItem(key, replacement);
+    response.resolve({ receipt: state });
+    expect(await recovery).toEqual({ input: { id: "target" }, authority: state });
+    expect(storage.getItem(key)).toBe(replacement);
+  });
+
+  test("manual recovery cannot confirm an identity mutated by lookup", async () => {
+    const storage = pendingStorage();
+    const serialized = JSON.stringify({ id: "target" });
+    storage.setItem(key, serialized);
+    const recover = createPendingCommandRecovery(pendingContract, {
+      lookup: async original => { original.id = "foreign"; return { receipt: { ...state, id: "foreign" } }; },
+    }, { storage, key, unknownError });
+    await expect(recover()).rejects.toThrow("unknown:target");
+    expect(storage.getItem(key)).toBe(serialized);
+  });
+
+  test("manual recovery storage errors propagate instead of claiming successful cleanup", async () => {
+    for (const mode of ["read", "remove", "silent"] as const) {
+      const base = pendingStorage();
+      const serialized = JSON.stringify({ id: "target" });
+      base.setItem(key, serialized);
+      const storage = {
+        getItem: (name: string) => {
+          if (mode === "read") throw new Error("storage read failed");
+          return base.getItem(name);
+        },
+        removeItem: () => { if (mode === "remove") throw new Error("storage remove failed"); },
+      };
+      let reads = 0;
+      const recover = createPendingCommandRecovery(pendingContract, {
+        lookup: async () => { reads++; return { receipt: state }; },
+      }, { storage, key, unknownError });
+      await expect(recover()).rejects.toThrow(mode === "silent" ? "Pending command was not cleared" : `storage ${mode} failed`);
+      expect(base.getItem(key)).toBe(serialized);
+      expect(reads).toBe(mode === "read" ? 0 : 1);
+    }
+  });
+
+  test("manual recovery type contracts require lookup and matching, not a write transport", () => {
+    const checkTypeContracts = () => {
+      const options = { storage: pendingStorage(), key, unknownError };
+      const transport = { lookup: async () => ({ receipt: state }) };
+      // @ts-expect-error Recovery requires a lookup.
+      createPendingCommandRecovery(pendingContract, {}, options);
+      const { matches: _matches, ...unbound } = pendingContract;
+      // @ts-expect-error Receipt matching is mandatory for recovery.
+      createPendingCommandRecovery(unbound, transport, options);
+      // @ts-expect-error A fresh recovery transport cannot declare a send capability.
+      createPendingCommandRecovery(pendingContract, { ...transport, send: async () => state }, options);
+      const recover = createPendingCommandRecovery(pendingContract, transport, options);
+      // @ts-expect-error Recovery reads storage; callers cannot substitute request identity.
+      recover({ id: "different" });
+    };
+    expectTypeOf(checkTypeContracts).returns.toEqualTypeOf<void>();
   });
 
   test("type contracts require recovery transport, matching and compatible response authority", () => {
