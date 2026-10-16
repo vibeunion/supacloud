@@ -1,13 +1,10 @@
 /** Framework-neutral reference state, shared by Svelte/SVAdmin or other view adapters. */
-export const STARTER_REVIEW_CLIENT = String.raw`export interface ReviewRow { id: string; state: "draft" | "approved"; version: number }
-export interface ReviewOperation {
-  kind: "approve" | "upload";
-  reviewId: string;
-  expectedVersion: number;
-  operationId: string;
-}
+export const STARTER_REVIEW_CLIENT = String.raw`import type { ReviewOperation, ReviewReceipt } from "../review/contracts";
+export type { ReviewOperation } from "../review/contracts";
+
+export interface ReviewRow { id: string; state: "draft" | "approved"; version: number }
 export type ReviewWriteResult =
-  | { status: "confirmed"; operationId: string; reviewId: string }
+  | (ReviewReceipt & { status: "confirmed" })
   | { status: "denied" | "conflict" | "unknown" };
 export interface ReviewTransport {
   list(): Promise<ReviewRow[]>;

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { compileProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+import { createAuthenticatedFetch } from "../../contracts/src/authenticated_fetch";
 import { databaseSources } from "../../db/src/source-contracts";
 import type { CommandDatabase, CommandTransaction } from "../../db/src/command-adapter";
 import { COMMAND_PERSISTENCE_SQL } from "../../db/src/command-schema";
@@ -56,6 +57,30 @@ interface GeneratedClient {
     };
   };
 }
+interface ReviewOperation {
+  kind: "approve" | "upload"; reviewId: string; expectedVersion: number; operationId: string;
+}
+interface PendingStore {
+  load(): ReviewOperation | null;
+  save(operation: ReviewOperation): void;
+  clear(operation: ReviewOperation): void;
+}
+interface ReferenceClient {
+  approve(row: { id: string; state: "draft"; version: number }): Promise<void>;
+  reconcile(): Promise<void>;
+  snapshot(): { mutation: { status: string; operation: ReviewOperation | null } };
+  dispose(): void;
+}
+interface ReferenceClientModule {
+  createReviewClient(transport: unknown, pending: PendingStore): ReferenceClient;
+  createReviewPendingStore(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">,
+    scope: { projectId: string; tenantId: string; applicationId: string; subject: string }): PendingStore;
+}
+interface ReferenceTransportModule {
+  createReviewTransport(options: {
+    supabase: unknown; authenticatedFetch: ReturnType<typeof createAuthenticatedFetch>; apiOrigin: string;
+  }): unknown;
+}
 const bin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 if (!bin && process.env["SUPACLOUD_REQUIRE_RUNTIME_SAFETY"] === "1") throw new Error("PostgreSQL binaries are required");
 const native = bin ? describe : describe.skip;
@@ -80,6 +105,7 @@ native("generated review task lifecycle", () => {
   let database: StarterPostgres;
   let modules: CompiledModule[];
   let tasks: TaskHost, attachments: AttachmentHost, uploads: UploadHost, postgres: PostgresHost, workerHost: WorkerHost;
+  let reference: ReferenceClientModule, referenceTransport: ReferenceTransportModule;
   let identity: Omit<SupAuthContextOptions, "resolveAccess">;
   let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
   let service: SupabaseClient;
@@ -145,6 +171,8 @@ native("generated review task lifecycle", () => {
     uploads = await import(join(root, "src/host/review-uploads.ts"));
     postgres = await import(join(root, "src/host/review-postgres.ts"));
     workerHost = await import(join(root, "src/host/review-attachment-worker.ts"));
+    reference = await import(join(root, "src/client/reviews.ts"));
+    referenceTransport = await import(join(root, "src/client/review-transport.ts"));
     database = await startStarterPostgres(bin!);
     await database.exec("CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;");
     await database.exec(PGMQ_SQL);
@@ -299,17 +327,65 @@ native("generated review task lifecycle", () => {
     } finally { await worker.close(); }
   }
 
+  function recoveryClient(f: Awaited<ReturnType<typeof fixture>>) {
+    const memory = new Map<string, string>();
+    const pending = reference.createReviewPendingStore({
+      getItem: key => memory.get(key) ?? null,
+      setItem: (key, value) => { memory.set(key, value); },
+      removeItem: key => { memory.delete(key); },
+    }, { projectId: "project", tenantId: "tenant", applicationId: "review-test", subject: f.actor });
+    const requests = { writes: 0, lookups: 0, lookupStatus: 0, loseResponse: true, bearer: f.jwt };
+    const transport = referenceTransport.createReviewTransport({
+      apiOrigin: "https://app.test.invalid",
+      authenticatedFetch: createAuthenticatedFetch({
+        getAccessToken: async () => requests.bearer,
+        async fetch(input, init) {
+          const request = new Request(input, init);
+          const lookup = request.method === "GET";
+          if (lookup) requests.lookups++; else requests.writes++;
+          const response = await f.app.handle(request);
+          if (lookup) requests.lookupStatus = response.status;
+          if (!lookup && requests.loseResponse && response.ok) {
+            requests.loseResponse = false;
+            throw new Error("Lost HTTP acknowledgement after commit");
+          }
+          return response;
+        },
+      }),
+      // List refresh is outside this acceptance; writes and receipt reads use real HTTP/SQL.
+      supabase: { from: () => ({ select: () => ({ order: () => ({
+        limit: async () => ({ data: [], error: null, status: 200 }),
+      }) }) }) },
+    });
+    return { pending, requests, create: () => reference.createReviewClient(transport, pending) };
+  }
+  async function approvalCounts(operation: ReviewOperation) {
+    return sql(`SELECT
+      (SELECT count(*)::integer FROM supacloud_commands.execution_receipts
+        WHERE command='review.approve' AND operation_key=$1) AS receipts,
+      (SELECT count(*)::integer FROM supacloud_commands.execution_audit
+        WHERE command='review.approve' AND operation_key=$1) AS audits`, [operation.operationId]);
+  }
+
   test("generated routes, client, OpenAPI and source contracts compile without manual artifact edits", async () => {
     const openapi: { OPENAPI_DOCUMENT: { paths: Record<string, unknown> } } = await import(join(root, "generated/openapi.ts"));
     expect(openapi.OPENAPI_DOCUMENT.paths["/reviews/{id}/attachment-task"]).toBeDefined();
     expect(openapi.OPENAPI_DOCUMENT.paths["/reviews/{id}/attachment-task/retry"]).toBeDefined();
+    expect(openapi.OPENAPI_DOCUMENT.paths["/reviews/{id}/operations/{operationId}"]).toBeDefined();
     await writeFile(join(root, "consumer.ts"), `import { createApiClient } from "./generated/client";
 import type { ReviewTaskStatus, ReviewRetryResult } from "./src/review/task-contracts";
+import type { ReviewOperation, ReviewReceipt } from "./src/review/contracts";
+import type { ReviewOperation as ClientOperation } from "./src/client/reviews";
+import { createReviewTransport } from "./src/client/review-transport";
 const api = createApiClient();
+const operation: ClientOperation = { kind: "approve", reviewId: "review", expectedVersion: 1, operationId: crypto.randomUUID() };
+const receiptOperation: ReviewOperation = operation;
+const receipt: Promise<ReviewReceipt> = api.reviewReceipts.lookup({ params: { id: operation.reviewId, operationId: operation.operationId },
+  query: { kind: operation.kind, expectedVersion: String(operation.expectedVersion) } });
 const status: Promise<ReviewTaskStatus> = api.reviewTasks.status({ params: { id: "review" } });
 const retry: Promise<ReviewRetryResult> = api.reviewTasks.retry({ params: { id: "review" },
   body: { expectedVersion: 2, expectedRunId: crypto.randomUUID(), recoveryId: crypto.randomUUID() } });
-void status; void retry;
+void status; void retry; void receipt; void receiptOperation; void createReviewTransport;
 `);
     async function typecheck() {
       const child = Bun.spawn([join(import.meta.dir, "../node_modules/.bin/tsc"),
@@ -333,7 +409,109 @@ void status; void retry;
       expect((await databaseSources(root, "check")).ok).toBe(false);
     } finally { await writeFile(join(root, "db/schema.ts"), schema); }
     expect((await databaseSources(root, "check")).ok).toBe(true);
+    const contracts = files["src/review/contracts.ts"]!;
+    try {
+      await writeFile(join(root, "src/review/contracts.ts"),
+        contracts.replace("operationId: ReceiptParams.properties.operationId,", "operationId: t.Integer(),"));
+      const stale = await typecheck();
+      expect(stale.code).not.toBe(0);
+      expect(stale.output).toContain("client/reviews.ts");
+    } finally { await writeFile(join(root, "src/review/contracts.ts"), contracts); }
   }, 30_000);
+
+  test("a recreated reference client confirms a lost approval response by GET without another write", async () => {
+    const f = await fixture(), harness = recoveryClient(f), original = harness.create();
+    await original.approve({ id: f.id, state: "draft", version: 1 });
+    expect(original.snapshot().mutation.status).toBe("unknown");
+    const operation = harness.pending.load();
+    if (!operation) throw new Error("Missing durable client marker");
+    expect(await approvalCounts(operation)).toEqual([{ receipts: 1, audits: 1 }]);
+    original.dispose();
+    const restored = harness.create();
+    expect(restored.snapshot().mutation.operation).toEqual(operation);
+    await restored.reconcile();
+    expect(restored.snapshot().mutation.status).toBe("confirmed");
+    expect(harness.pending.load()).toBeNull();
+    expect(harness.requests).toMatchObject({ writes: 1, lookups: 1, lookupStatus: 200 });
+    expect(await approvalCounts(operation)).toEqual([{ receipts: 1, audits: 1 }]);
+    expect(await sql("SELECT state,version FROM public.starter_reviews WHERE id=$1", [f.id]))
+      .toEqual([{ state: "approved", version: 2 }]);
+    restored.dispose();
+  });
+
+  test("missing, denied and mismatched receipt lookups retain the pending operation without resending", async () => {
+    const f = await fixture(), harness = recoveryClient(f);
+    const operation: ReviewOperation = {
+      kind: "approve", reviewId: f.id, operationId: crypto.randomUUID(), expectedVersion: 1,
+    };
+    harness.pending.save(operation);
+    const missing = harness.create();
+    await missing.reconcile();
+    await missing.approve({ id: f.id, state: "draft", version: 1 });
+    expect(missing.snapshot().mutation.status).toBe("unknown");
+    expect(harness.pending.load()).toEqual(operation);
+    expect(harness.requests).toMatchObject({ writes: 0, lookups: 1, lookupStatus: 200 });
+    expect(await approvalCounts(operation)).toEqual([{ receipts: 0, audits: 0 }]);
+    missing.dispose();
+
+    const submitted = recoveryClient(f), client = submitted.create();
+    await client.approve({ id: f.id, state: "draft", version: 1 });
+    const committed = submitted.pending.load();
+    if (!committed) throw new Error("Missing committed marker");
+    client.dispose();
+    submitted.pending.clear(committed);
+    const mismatched = { ...committed, expectedVersion: 2 };
+    submitted.pending.save(mismatched);
+    const conflict = submitted.create();
+    await conflict.reconcile();
+    expect(submitted.requests.lookupStatus).toBe(409);
+    expect(conflict.snapshot().mutation.status).toBe("unknown");
+    expect(submitted.pending.load()).toEqual(mismatched);
+    conflict.dispose();
+
+    submitted.pending.clear(mismatched);
+    submitted.pending.save(committed);
+    const denied = submitted.create();
+    submitted.requests.bearer = await token(crypto.randomUUID());
+    await denied.reconcile();
+    expect(submitted.requests.lookupStatus).toBe(403);
+    expect(submitted.pending.load()).toEqual(committed);
+    submitted.requests.bearer = f.jwt;
+    await sql("UPDATE public.starter_members SET can_approve=false WHERE subject=$1", [f.actor]);
+    await denied.reconcile();
+    await denied.approve({ id: f.id, state: "draft", version: 1 });
+    expect(submitted.requests.lookupStatus).toBe(403);
+    expect(denied.snapshot().mutation.status).toBe("unknown");
+    expect(submitted.pending.load()).toEqual(committed);
+    expect(submitted.requests.writes).toBe(1);
+    expect(await approvalCounts(committed)).toEqual([{ receipts: 1, audits: 1 }]);
+    denied.dispose();
+  });
+
+  test("receipt services validate the shared operation contract before calling the persistence port", async () => {
+    const receipts: {
+      ReviewReceipts: new (store: { lookupOperation(context: unknown, operation: unknown): Promise<unknown> },
+        context: unknown) => { lookup(operation: unknown): Promise<unknown> };
+    } = await import(join(root, "src/review/receipts.ts"));
+    let calls = 0;
+    const service = new receipts.ReviewReceipts({
+      async lookupOperation(_context, operation) { calls++; return operation; },
+    }, {});
+    const valid: ReviewOperation = {
+      kind: "approve", reviewId: "review-one", operationId: crypto.randomUUID(), expectedVersion: 1,
+    };
+    for (const invalid of [
+      { ...valid, kind: "delete" }, { ...valid, expectedVersion: "1" },
+      { ...valid, expectedVersion: 0 }, { ...valid, expectedVersion: Number.MAX_SAFE_INTEGER + 1 },
+      { ...valid, operationId: "invalid" }, { ...valid, reviewId: "" }, { ...valid, injected: true },
+    ]) {
+      await expect(Promise.resolve().then(() => service.lookup(invalid)))
+        .rejects.toMatchObject({ status: 400, code: "RECEIPT_INPUT_INVALID" });
+    }
+    expect(calls).toBe(0);
+    expect(await service.lookup(valid)).toEqual(valid);
+    expect(calls).toBe(1);
+  });
 
   test("authenticated customer flow submits, sees failure, retries and completes through the generated Worker", async () => {
     const f = await fixture();
