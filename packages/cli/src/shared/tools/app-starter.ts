@@ -7,10 +7,13 @@ import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates"
 import { STARTER_REVIEW_JOB, STARTER_REVIEW_JOB_TEST } from "./app-starter-review-job";
 import { STARTER_ATTACHMENT_POSTGRES, STARTER_ATTACHMENT_SCHEMA } from "./app-starter-attachments";
 import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from "./app-starter-attachment-worker";
+import { STARTER_EXECUTION_OBSERVABILITY, STARTER_WORKER_OBSERVABILITY } from "./app-starter-execution-observability";
 import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER } from "./app-starter-upload";
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
+import { STARTER_REVIEW_CLIENT, STARTER_REVIEW_TRANSPORT, STARTER_REVIEW_CLIENT_TEST } from "./app-starter-client";
+import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
 import { STARTER_REVIEW_QUERY } from "./app-starter-query";
 import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
@@ -293,6 +296,7 @@ import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "
 import { ApproveBody, HealthResult, Params, ReviewResult, type ApprovalBody, type Review } from "./contracts";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
+import { ReviewReceipts, ReviewReceiptsController, type ReviewReceiptPort } from "./receipts";
 import { ReviewTasks, ReviewTasksController, type ReviewTaskPort } from "./tasks";
 
 export const reviewSpec = defineFeatureSpec({
@@ -309,7 +313,7 @@ export const reviewSpec = defineFeatureSpec({
 });
 
 // Production implementations must bind both operations to the current transaction.
-export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewTaskPort> {
+export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewReceiptPort>, Partial<ReviewTaskPort> {
   get(table: string, key: string): unknown;
   set(table: string, key: string, value: Review): void | Promise<void>;
 }
@@ -399,8 +403,8 @@ export class ReviewController {
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewTasks],
-  controllers: [ReviewController, ReviewUploadsController, ReviewTasksController],
+  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts, ReviewTasks],
+  controllers: [ReviewController, ReviewUploadsController, ReviewReceiptsController, ReviewTasksController],
   jobs: [VerifyReviewAttachment],
 });
 `,
@@ -430,16 +434,33 @@ export const UploadResult = t.Object({
   artifactId: t.String({ format: "uuid" }), runId: t.String({ format: "uuid" }),
   objectPath: t.String(), sha256: t.String({ pattern: "^[a-f0-9]{64}$" }), bytes: t.Integer({ minimum: 1, maximum: 1048576 }),
 });
+export const ReceiptParams = t.Object({
+  id: t.String({ minLength: 1 }), operationId: t.String({ format: "uuid" }),
+});
+export const ReceiptQuery = t.Object({
+  kind: t.Union([t.Literal("approve"), t.Literal("upload")]),
+  expectedVersion: t.String({ pattern: "^[1-9][0-9]*$", maxLength: 16 }),
+}, { additionalProperties: false });
+export const ReceiptResult = t.Object({
+  status: t.Union([t.Literal("confirmed"), t.Literal("unknown")]),
+  operationId: t.String({ format: "uuid" }), reviewId: t.String({ minLength: 1 }),
+});
 export type ReviewUploadBody = UnwrapSchema<typeof UploadBody>;
 export type ReviewUploadInput = UnwrapSchema<typeof UploadInput>;
 export type ReviewUploadLocation = UnwrapSchema<typeof UploadLocation>;
 export type ReviewUploadResult = UnwrapSchema<typeof UploadResult>;
 `,
+        "src/review/receipts.ts": STARTER_REVIEW_RECEIPTS,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
+        "src/client/reviews.ts": STARTER_REVIEW_CLIENT,
+        "src/client/review-transport.ts": STARTER_REVIEW_TRANSPORT,
+        "tests/review-client.test.ts": STARTER_REVIEW_CLIENT_TEST,
         "src/host/review-uploads.ts": STARTER_UPLOAD_ADAPTER,
         "src/host/review-postgres.ts": STARTER_REVIEW_POSTGRES,
         "src/host/review-attachments.ts": STARTER_ATTACHMENT_POSTGRES,
         "src/host/review-attachment-worker.ts": STARTER_ATTACHMENT_WORKER,
+        "src/host/review-worker-observability.ts": STARTER_WORKER_OBSERVABILITY,
+        "src/host/review-execution-observability.ts": STARTER_EXECUTION_OBSERVABILITY,
         "src/delivery-worker.ts": STARTER_ATTACHMENT_DELIVERY_WORKER,
         "src/delivery-host.ts": STARTER_REVIEW_DELIVERY_HOST,
         "migrations/001-review.sql": STARTER_REVIEW_SCHEMA,
@@ -536,6 +557,25 @@ HTTP schemas, permission denial, transaction rollback, idempotency and audit.
 It is not a complete Maker-Checker workflow or a production authorization policy.
 
 ## Frontend SDK Boundary
+
+src/client/reviews.ts supplies framework-neutral loading/empty/denied/error and
+submission/conflict/unknown states. src/client/review-transport.ts binds ordinary
+reads and private uploads to the existing user-scoped Supabase client, and
+approval/registration to createAuthenticatedFetch. It never uses a service key.
+Bind snapshot/subscribe to the view or SVAdmin store; dispose on identity change.
+The example lists at most 100 rows. Loading and permission failures clear rows.
+Unknown writes keep their operation ID and block resubmission. The default
+lookup calls GET /reviews/:id/operations/:operationId with kind and
+expectedVersion. It rechecks current authorization and reads the original
+durable receipt; current row state alone cannot confirm the operation.
+Construct createReviewPendingStore(localStorage, { projectId, tenantId,
+applicationId, subject }) and pass it as createReviewClient's second argument.
+The scope must come from the current authenticated session and application
+binding. It stores no token or file bytes. Reload restores unknown, then
+reconcile() performs only a receipt read; denied/conflicting lookup stays
+unknown. Storage failures block writes. Dispose never deletes pending evidence.
+Use one active mutation owner per identity/application: localStorage is not a
+cross-tab atomic lock. Do not clear unresolved records to enable another write.
 
 Use @supacloud/js as the platform SDK around your existing user-scoped
 @supabase/supabase-js client. Pass that same client to existing UI providers;
@@ -799,6 +839,28 @@ Ordinary Job failures use canonical Workflow retry/fail; completion follows the
 committed idempotent result. The host's failure promise makes the executable exit
 nonzero with bounded cleanup. Restart only after investigating an ownership or
 receipt failure; repeated automatic restart can exhaust an unknown run's attempts.
+
+The delivery worker emits review-worker-execution JSON lines to stdout using
+src/host/review-worker-observability.ts, which re-exports the shared observer
+from src/host/review-execution-observability.ts. Events contain timestamp, workerId,
+kind, operation, stage, phase and optional requestId/durationMs. For attachment
+jobs, requestId is the Workflow run ID; join it to starter_attachments.run_id
+or the current starter_attachment_retries lineage, not to an HTTP request ID.
+Only selected execution metadata is serialized, never input, output, errors,
+credentials or database parameters. Correlation identifiers must be opaque,
+non-secret identifiers; malformed identifiers and invalid durations are omitted.
+Logging is best effort and cannot alter a job outcome. A succeeded stage is not
+proof of queue settlement: confirm the Workflow receipt and durable attachment
+result separately. Configure stdout collection in the deployment environment;
+the starter does not install a collector or prove gateway trace propagation.
+
+The HTTP delivery host uses the same serializer for review-http-execution events
+with component review-http. Route and command events preserve their requestId
+from the existing request context and do not contain a workerId. Do not equate
+that request ID with a Workflow run ID or an idempotency key. Identity resolution
+and failures before an execution observer is reached are not covered by these
+events; use the platform's existing request/identity logs for those failures.
+Both hosts emit only execution metadata, not access logs or audit receipts.
 
 The memory demo does not start this worker. The included unit tests exercise the
 handler contract, not production Storage, queue delivery or external identity.

@@ -78,3 +78,29 @@ test("parent-directory sources cannot enumerate a sibling project using native p
   expect(plan.tests).toEqual([]);
   expect(plan.manual).toContain("A source directory is outside the project; select its owning project explicitly");
 });
+
+test("separate command sources are included and uncovered directories remain explicit", async () => {
+  const { root, graph } = await fixture();
+  await mkdir(join(root, "src/commands"));
+  graph.moduleHandlerFiles = { health: ["src/commands/approve.ts"] };
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.files).toContain("src/commands/approve.ts");
+  expect(plan.ready).toBe(false);
+  expect(plan.manual).toContain("No colocated tests for source directory: src/commands");
+  expect(plan.coverage).toContainEqual({
+    directory: "src/commands", tests: [], basis: "colocated-not-proven",
+  });
+  await writeFile(join(root, "src/commands/approve.test.ts"), "");
+  const covered = await createVerificationPlan(root, graph, "health");
+  expect(covered.ready).toBe(true);
+  expect(covered.tests).toEqual(["src/commands/approve.test.ts", "src/health/health.test.ts"]);
+  expect(covered.limitations).toContain("Colocation selects candidates; it does not prove behavioral coverage");
+});
+
+test("missing source directories produce a manual gap, not an unstructured failure", async () => {
+  const { root, graph } = await fixture();
+  graph.moduleHandlerFiles = { health: ["src/missing/command.ts"] };
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.ready).toBe(false);
+  expect(plan.manual).toContain("Source directory is missing: src/missing");
+});

@@ -350,6 +350,7 @@ EXAMPLES
   ${preferredCommand} app diff --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
   ${preferredCommand} app deploy --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
   ${preferredCommand} app status --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app evidence --ref abc123 --id orders --environment_id test
   ${preferredCommand} app diff --ref abc123 --id orders --environment_id production --source_ref staging --source_environment_id staging --source_release_id <sha256>
   ${preferredCommand} --env production app promote-plan --id orders --environment_id production --source_ref staging --source_environment_id staging --source_release_id <sha256>
   ${preferredCommand} app preview-plan --ref abc123 --id orders --environment_id test --release_id <sha256> --branch_ref preview-orders

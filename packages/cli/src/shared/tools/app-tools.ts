@@ -6,6 +6,7 @@ import { Value } from "typebox/value";
 import type { ApplicationDeployRequest } from "@supacloud/delivery";
 import { ApplicationActivationHistorySchema, parseApplicationActivationHistory } from "@supacloud/delivery";
 import { parseApplicationDeployPlan } from "@supacloud/delivery";
+import { formatDeploymentEvidence, parseDeploymentEvidence } from "@supacloud/delivery";
 import { parseApplicationReleaseTransferPlan, parseApplicationReleaseTransferResult, parseApplicationPromotionPlan } from "@supacloud/delivery";
 import {
     applyDiagnosticFix,
@@ -60,6 +61,7 @@ const REMOTE_APP_ACTIONS = {
     "deploy-plan": "get_deploy_plan",
     diff: "get_deploy_plan",
     status: "get_runtime",
+    evidence: "get_deployment_evidence",
     rollback: "rollback_release",
     "rollback-plan": "get_rollback_snapshot",
     history: "get_history",
@@ -542,11 +544,48 @@ function formatModuleContextPack(pack: ReturnType<typeof createContextPack>): st
  * `--target <name>` resolves a module or owned symbol to its module neighborhood.
  */
 async function runContext(args: AppToolArguments): Promise<ToolResult> {
-    const { root, configFile, outDir, result } = await projectCompileConfig(args);
+    const { root, sourceDir, configFile, outDir, result } = await projectCompileConfig(args);
     const subject = args.target?.trim();
     if (subject) {
         const pack = createContextPack({ ...result.graph, diagnostics: result.diagnostics }, subject);
-        return textResult(args.format === "json" ? JSON.stringify(pack, null, 2) : formatModuleContextPack(pack));
+        const verification = await createVerificationPlan(root, result.graph, pack.subject, sourceDir);
+        const repairs = createDiagnosticRepairPlan(pack.diagnostics);
+        const workflow = {
+            root,
+            sourceRoot: sourceDir,
+            generatedDir: outDir,
+            allowedDependencies: await readAllowedDependencies(root),
+            editFiles: verification.files,
+            referenceFiles: pack.files,
+            verification,
+            repairs,
+            rules: {
+                generatedFiles: "do-not-edit",
+                permissions: "explicit-business-input-required",
+                writeRetry: "disabled",
+                fixDefault: "preview",
+            },
+            daily: [
+                ["supacloud", "app", "doctor", "--target", pack.subject, "--format", "json"],
+                ["supacloud", "app", "fix", "--fix", "<reviewed-fix.json>"],
+                ["supacloud", "app", "compile"],
+                ...verification.commands,
+            ],
+            release: {
+                first: ["supacloud", "app", "check", "--format", "json"],
+                rule: "Check committed artifacts before any regeneration; never repair drift to make this gate pass",
+                additionalEvidence: verification.releaseOnly,
+            },
+            executed: false,
+        };
+        return textResult(args.format === "json" ? JSON.stringify({ ...pack, workflow }, null, 2) : [
+            formatModuleContextPack(pack),
+            `  edit files (project-relative): ${workflow.editFiles.join(", ") || "-"}`,
+            `  focused tests: ${verification.tests.join(", ") || "-"}`,
+            ...verification.manual.map(item => `  manual: ${item}`),
+            "  fixes: preview first; business policy requires explicit input",
+            "  release: app check before regeneration; local tests do not prove deployment",
+        ].join("\n"));
     }
     const project: ProjectContextPack = {
         version: 1,
@@ -644,8 +683,12 @@ async function findUnwiredContracts(rootDir: string): Promise<UnwiredContract[]>
 
 async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const { root, outDir, result } = await projectCompileConfig(args);
-    const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
-    const database = checkAppDatabaseSources(root);
+    const target = args.target?.trim();
+    const context = target ? createContextPack({ ...result.graph, diagnostics: result.diagnostics }, target) : undefined;
+    const doctor = doctorProject(root, outDir,
+        { ...result.graph, ...(context ? { modules: context.modules } : {}), diagnostics: [] },
+        result.upToDate, context?.diagnostics ?? result.diagnostics);
+    const database = context ? null : checkAppDatabaseSources(root);
     if (database) {
         doctor.checks.push(database);
         if (!database.ok) doctor.errors += 1;
@@ -654,14 +697,22 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const autoFixable = fixPlan.filter((repair) => repair.readiness === "preview").length;
     const inputRequired = fixPlan.filter((repair) => repair.readiness === "input-required").length;
     const manualFixes = fixPlan.filter((repair) => repair.readiness === "manual").length;
-    const unwiredContracts = await findUnwiredContracts(root);
+    const unwiredContracts = context ? [] : await findUnwiredContracts(root);
+    const scope = context ? {
+        target: context.subject, files: context.files,
+        omittedProjectDiagnostics: result.diagnostics.length - context.diagnostics.length,
+        notChecked: ["unwired contracts outside graph", "additional database source CLI check"],
+        generatedArtifactCheck: "project-wide",
+    } : undefined;
     if (args.format === "json") {
         return textResult(
-            JSON.stringify({ ok: doctor.errors === 0, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts, ...doctor }, null, 2),
+            JSON.stringify({ ok: doctor.errors === 0, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts,
+                ...(scope ? { scope } : {}), ...doctor }, null, 2),
             doctor.errors > 0,
         );
     }
     const lines = doctor.checks.map((check) => `${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
+    if (scope) lines.unshift(`TARGET ${scope.target}; omitted project diagnostics=${scope.omittedProjectDiagnostics}; generated drift remains project-wide`);
     for (const diagnostic of doctor.diagnostics ?? []) {
         lines.push(formatDiagnostic(diagnostic));
     }
@@ -1638,6 +1689,25 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         };
         validateToolArguments(APPLICATION_TOOL_SCHEMA, args);
         const result = await delegate(args);
+        if (request.action === "evidence" && format !== "json" && json !== true && !result.isError) {
+            try {
+                const payload: unknown = JSON.parse(result.content[0]!.text);
+                if (payload === null || typeof payload !== "object"
+                    || !("project_ref" in payload) || payload.project_ref !== args.ref
+                    || !("application_id" in payload) || payload.application_id !== request.id
+                    || !("environment_id" in payload) || payload.environment_id !== request.environment_id
+                    || !("evidence" in payload)) throw new Error();
+                if (payload.evidence === null) return textResult(
+                    "DEPLOYMENT incomplete: no recorded evidence. Read runtime status and obtain authenticated smoke and recovery evidence.",
+                );
+                const evidence = parseDeploymentEvidence(payload.evidence);
+                if (evidence.scope.project_ref !== args.ref || evidence.scope.application_id !== request.id
+                    || evidence.scope.environment_id !== request.environment_id) throw new Error();
+                return textResult(formatDeploymentEvidence(evidence));
+            } catch {
+                return textResult("DEPLOYMENT unknown: invalid or mismatched evidence; no mutation was attempted.", true);
+            }
+        }
         if (request.action === "history" && format !== "json" && json !== true) {
             return historyText(result, request, args.ref);
         }
@@ -1699,7 +1769,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
-                "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
+                "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "evidence", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
