@@ -22,7 +22,7 @@ test("the context consumer gate exercises actual CLI processes and preserves gen
     await verifyPublishedExecutionContext(root, cli, (args, success = true) => {
       calls.push(args);
       return runStarterCommand(args, {
-        cwd: root, env: { PATH: process.env.PATH ?? "", HOME: home },
+        cwd: root, env: { PATH: process.env["PATH"] ?? "", HOME: home },
         signal: abort.signal, timeoutMs: 15_000, success,
       });
     });
