@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.5](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.4...supacloud-lite-v0.29.5) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lite:** reject ineligible password logins ([#1998](https://github.com/vibeunion/supacloud/issues/1998)) ([479e967](https://github.com/vibeunion/supacloud/commit/479e96719209f7aed26c44663d78e1442a7097f0))
+
 ## [0.29.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.3...supacloud-lite-v0.29.4) (2026-10-16)
 
 
