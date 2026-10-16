@@ -29,7 +29,13 @@ export function statusForSqlState(code: string, authenticated = true): number {
       return 409
     case '57014': // query_canceled
       return 408
+    case '57P01': // admin_shutdown
+      return 503
+    case '53400': // configuration_limit_exceeded: PostgREST's 500 exception in class 53
+      return 500
     default:
+      // Connection exceptions and insufficient resources are server failures.
+      if (code.startsWith('08') || code.startsWith('53')) return 503
       return 400
   }
 }
