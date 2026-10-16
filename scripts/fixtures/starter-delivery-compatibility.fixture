@@ -14,7 +14,7 @@ export async function buildReferenceUpgradeArchive(directory: string, signal: Ab
     "(review_id,version,artifact_id,result,writer_revision) VALUES($1,$2,$3,$4::text::jsonb,'v2')";
   assert.equal(original.split(before).length, 2, "Reference Worker insertion contract changed");
   const files = new Map([
-    ["migrations/005-reference-compatibility.sql", `
+    ["migrations/006-reference-compatibility.sql", `
 ALTER TABLE public.starter_application ADD COLUMN delivery_revision integer NOT NULL DEFAULT 2;
 ALTER TABLE public.starter_attachment_results ADD COLUMN writer_revision text NOT NULL DEFAULT 'v1';
 `],

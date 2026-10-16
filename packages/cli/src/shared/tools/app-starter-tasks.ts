@@ -116,10 +116,13 @@ ALTER TABLE public.starter_attachment_retries ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.starter_attachment_retries FROM PUBLIC, anon, authenticated;
 GRANT SELECT,INSERT ON public.starter_attachment_retries TO starter_review_http;
 GRANT SELECT ON public.starter_attachment_retries TO starter_review_worker;
+DROP POLICY IF EXISTS starter_http_retry_read ON public.starter_attachment_retries;
 CREATE POLICY starter_http_retry_read ON public.starter_attachment_retries
   FOR SELECT TO starter_review_http USING (true);
+DROP POLICY IF EXISTS starter_http_retry_insert ON public.starter_attachment_retries;
 CREATE POLICY starter_http_retry_insert ON public.starter_attachment_retries
   FOR INSERT TO starter_review_http WITH CHECK (true);
+DROP POLICY IF EXISTS starter_worker_retry_read ON public.starter_attachment_retries;
 CREATE POLICY starter_worker_retry_read ON public.starter_attachment_retries
   FOR SELECT TO starter_review_worker USING (true);
 -- Trusted HTTP adapters authorize the review before inspecting its bound run.

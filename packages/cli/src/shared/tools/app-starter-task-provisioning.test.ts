@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { renderStarterTaskRecoverySchema } from "./app-starter-task-provisioning";
 import { STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
+const readFixture = (name: string) => readFileSync(new URL("../../../../../scripts/fixtures/" + name, import.meta.url), "utf8");
+
 // The renderer must not rewrite historical migrations or broaden recovery grants.
 test("default task provisioning preserves the exact new migration", () => {
   assert.equal(renderStarterTaskRecoverySchema("starter_review_http", "starter_review_worker"), STARTER_TASK_SCHEMA);
@@ -50,4 +52,25 @@ test("delivery fixtures provision and archive all five starter migrations", () =
     assert.ok(source.includes('file.path.startsWith("bundle/migrations/")).length, 5'));
     assert.ok(source.includes('file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 3'));
   }
+});
+
+test("all attachment fixtures provision recovery before starting the current worker", () => {
+  const attachments = readFixture("starter-attachments.fixture");
+  const provision = attachments.indexOf("await provisionStarterRuntimeRoles(database)");
+  assert.ok(provision > attachments.indexOf("003-review-uploads.sql"));
+  assert.ok(provision < attachments.indexOf("const verifyWorker ="));
+  assert.ok(provision < attachments.indexOf("if (database.workerConnection)"),
+    "PGlite and native fixtures both need the recovery table before the worker claims");
+  const roles = readFixture("starter-runtime-roles.fixture");
+  const connections = roles.slice(roles.indexOf("export async function setupRuntimeRoleConnections"));
+  assert.ok(!connections.includes("../migrations/"), "Opening native connections must not reapply migrations");
+});
+
+test("delivery compatibility uses a new migration after task recovery", () => {
+  const archive = readFixture("starter-delivery-archive.fixture");
+  assert.ok(archive.includes('source: "migrations/006-reference-compatibility.sql", version: "6"'));
+  assert.ok(archive.includes("archive.migrations.length, revision === 2 ? 6 : 5"));
+  assert.ok(archive.includes('item.executor === "operator-provisioning").length, 3'));
+  assert.ok(readFixture("starter-delivery-compatibility.fixture").includes("migrations/006-reference-compatibility.sql"));
+  assert.ok(readFixture("starter-attachments.fixture").includes('item.version === "6"'));
 });

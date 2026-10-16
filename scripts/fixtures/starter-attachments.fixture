@@ -13,7 +13,7 @@ import { createReviewUploadAdapters } from "../src/host/review-uploads";
 import type { ReviewUploadPort } from "../src/review/uploads";
 import { verifyAttachmentWorkerDelivery } from "./attachment-worker-delivery";
 import { verifyReviewDelivery } from "./review-delivery";
-import { setupRuntimeRoleConnections } from "./runtime-roles";
+import { provisionStarterRuntimeRoles, setupRuntimeRoleConnections } from "./runtime-roles";
 import { buildReferenceDeliveryArchive, prepareArchivedDelivery } from "./delivery-archive";
 import { buildReferenceUpgradeArchive, verifyReferenceUpgradeRefused } from "./delivery-compatibility";
 import { readDeliveryMigrationArchive } from "@supacloud/compiler";
@@ -56,6 +56,7 @@ export async function setupStarterAttachments(options: {
   };
   await database.exec(await readFile(new URL("../migrations/002-review-attachments.sql", import.meta.url), "utf8"));
   await database.exec(await readFile(new URL("../migrations/003-review-uploads.sql", import.meta.url), "utf8"));
+  await provisionStarterRuntimeRoles(database);
   await database.exec(`
     UPDATE public.starter_members SET storage_subject='${subjects.owner}' WHERE subject='owner';
     UPDATE public.starter_members SET storage_subject='${subjects.other}' WHERE subject='other';
@@ -528,7 +529,7 @@ export async function setupStarterAttachments(options: {
           const httpMigrations = await readDeliveryMigrationArchive(upgraded.api.manifestPath, "api");
           const workerMigrations = await readDeliveryMigrationArchive(upgraded.jobs.manifestPath, "jobs");
           assert.deepEqual(workerMigrations.migrations, httpMigrations.migrations);
-          const migration = httpMigrations.migrations.find(item => item.version === "5");
+          const migration = httpMigrations.migrations.find(item => item.version === "6");
           assert.ok(migration);
           assert.equal(migration.executor, "project-migration");
           // Owned fixture DDL only: no platform migration execution receipt is asserted.

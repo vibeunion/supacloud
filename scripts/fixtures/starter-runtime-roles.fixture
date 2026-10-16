@@ -5,10 +5,14 @@ import type { VerificationDatabase } from "./persistence";
 
 type Connection = { socketPath: string; database: string; username: string };
 
-/** Only called for the owned native-Lite cluster and its private test socket. */
-export async function setupRuntimeRoleConnections(database: VerificationDatabase, connection: Connection) {
+/** Provision every owned fixture database before any current Worker claims a task. */
+export async function provisionStarterRuntimeRoles(database: VerificationDatabase) {
   await database.exec(await readFile(new URL("../migrations/004-review-runtime-roles.sql", import.meta.url), "utf8"));
   await database.exec(await readFile(new URL("../migrations/005-review-task-recovery.sql", import.meta.url), "utf8"));
+}
+
+/** Only called for the already provisioned native-Lite cluster and its private test socket. */
+export async function setupRuntimeRoleConnections(database: VerificationDatabase, connection: Connection) {
   await database.exec(`
     CREATE ROLE starter_http_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
     CREATE ROLE starter_worker_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
