@@ -13,7 +13,7 @@ import { PGMQ_SQL } from "../../supacloud-lite/src/runtime/db/emulated";
 import { startStarterPostgres, type StarterPostgres } from "../../../scripts/lib/starter-postgres";
 import { SupaCloudWorkflowsClient } from "../../supacloud-js/dist/index.mjs";
 import type { ApplicationOptions, CompiledModule, SupAuthContextOptions } from "./index";
-import type { TSchema } from "elysia";
+import type { TSchema } from "typebox";
 
 type SqlValue = string | number | boolean | null;
 interface Retry { reviewId: string; expectedVersion: number; expectedRunId: string; recoveryId: string }
