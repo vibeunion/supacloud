@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.103.1](https://github.com/vibeunion/supacloud/compare/cli-v0.103.0...cli-v0.103.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **cli:** align starter review versions with postgres integer ([#2000](https://github.com/vibeunion/supacloud/issues/2000)) ([76e8cf2](https://github.com/vibeunion/supacloud/commit/76e8cf22ec7b4b62c6fa0c214294d0054b063fe3))
+* **cli:** reconcile committed upload registrations before storage ([#1995](https://github.com/vibeunion/supacloud/issues/1995)) ([7a9fef8](https://github.com/vibeunion/supacloud/commit/7a9fef833cf182e9aa59efd23518b17128b3a9ca))
+
 ## [0.103.0](https://github.com/vibeunion/supacloud/compare/cli-v0.102.0...cli-v0.103.0) (2026-10-16)
 
 
