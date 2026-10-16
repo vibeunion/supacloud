@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.118.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.4...management-api-v0.118.5) (2026-10-16)
+
+
+### Bug Fixes
+
+* **management-api:** diagnose rejected preheat attestations safely ([#1984](https://github.com/vibeunion/supacloud/issues/1984)) ([955f689](https://github.com/vibeunion/supacloud/commit/955f689dc2d55b397de2dc9be08591f525fb6c31))
+
 ## [0.118.4](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.3...management-api-v0.118.4) (2026-10-16)
 
 
