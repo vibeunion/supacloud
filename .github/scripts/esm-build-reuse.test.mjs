@@ -24,7 +24,7 @@ test('all runtime consumers use one upstream build without rebuilding candidates
   assert.doesNotMatch(build, /matrix:|continue-on-error/);
   assert.match(consumers, /needs: \[esm-policy, esm-build\]/);
   assert.match(consumers, /node: \['22\.12\.0', '24\.x', '26\.x'\]/);
-  assert.match(consumers, /actions\/download-artifact@v6/);
+  assert.match(consumers, /actions\/download-artifact@v8/);
   assert.doesNotMatch(consumers, /bun run build|bun install|continue-on-error/);
   assert.match(consumers, /esm-package\.acceptance\.mjs --sdk-only/);
   assert.match(consumers, /else\n {12}node .github\/scripts\/esm-package\.acceptance\.mjs/);
