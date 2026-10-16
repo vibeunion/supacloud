@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { initializeAppProject } from "../packages/cli/src/shared/tools/app-starter";
 import { renderStarterRuntimeRolesSchema } from "../packages/cli/src/shared/tools/app-starter-roles";
+import { renderStarterTaskRecoverySchema } from "../packages/cli/src/shared/tools/app-starter-task-provisioning";
 import { buildDeliveryProject, compileProject, compileOptionsFromConfig, loadSupacloudConfig } from "../packages/compiler/src";
 import { readDeliveryExecutableArchive } from "../packages/delivery/src";
 
@@ -19,6 +20,8 @@ try {
   if (rolePrefix) {
     await writeFile(join(project, "migrations/004-review-runtime-roles.sql"),
       renderStarterRuntimeRolesSchema(`${rolePrefix}_http`, `${rolePrefix}_worker`));
+    await writeFile(join(project, "migrations/005-review-task-recovery.sql"),
+      renderStarterTaskRecoverySchema(`${rolePrefix}_http`, `${rolePrefix}_worker`));
   }
   const dependencies = new Map<string, string>();
   for (const name of ["app", "elysia", "contracts", "commands", "db", "compiler", "delivery", "js"]) {

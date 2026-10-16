@@ -96,9 +96,9 @@ export async function verifyReviewDelivery(options: {
     assert.ok(built.ok, JSON.stringify(built.diagnostics));
     const object = built.manifest.objects.find(entry => entry.name === "api");
     assert.ok(object);
-    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 4);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 5);
     assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/project-migration/")).length, 2);
-    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 2);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 3);
     assert.equal(object.entryKind, "bun-http-application");
     assert.equal(built.manifest.deploymentReady, false);
     assert.equal(built.manifest.objects.find(entry => entry.name === "jobs")?.entryKind, "compiled-module-factory");

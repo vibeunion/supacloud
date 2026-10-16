@@ -8,6 +8,7 @@ type Connection = { socketPath: string; database: string; username: string };
 /** Only called for the owned native-Lite cluster and its private test socket. */
 export async function setupRuntimeRoleConnections(database: VerificationDatabase, connection: Connection) {
   await database.exec(await readFile(new URL("../migrations/004-review-runtime-roles.sql", import.meta.url), "utf8"));
+  await database.exec(await readFile(new URL("../migrations/005-review-task-recovery.sql", import.meta.url), "utf8"));
   await database.exec(`
     CREATE ROLE starter_http_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
     CREATE ROLE starter_worker_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -30,6 +31,7 @@ export async function setupRuntimeRoleConnections(database: VerificationDatabase
       assert.deepEqual({ ...roles[0] }, { name: login.username, login: login.username,
         rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false });
       assert.equal((await pool.unsafe("SELECT * FROM public.starter_application")).length, 1);
+      assert.equal((await pool.unsafe("SELECT * FROM public.starter_attachment_retries")).length, 0);
       const denied = async (sql: string) =>
         assert.rejects(pool.unsafe(sql), /permission denied|row-level security|must be owner/);
       await denied("CREATE TABLE public.runtime_role_forbidden(id integer)");
@@ -44,6 +46,8 @@ export async function setupRuntimeRoleConnections(database: VerificationDatabase
       await denied("DELETE FROM public.starter_reviews WHERE false");
       await denied("DELETE FROM public.starter_attachments WHERE false");
       await denied("UPDATE public.starter_attachments SET review_id=review_id");
+      await denied("UPDATE public.starter_attachment_retries SET generation=generation");
+      await denied("DELETE FROM public.starter_attachment_retries WHERE false");
       if (kind === "http") {
         await denied("INSERT INTO public.starter_attachment_results VALUES ('missing',2,gen_random_uuid(),'{}')");
         await denied("UPDATE supacloud_commands.execution_audit SET event='forbidden'");
@@ -55,6 +59,7 @@ export async function setupRuntimeRoleConnections(database: VerificationDatabase
         await denied("INSERT INTO public.starter_attachments VALUES ('missing',gen_random_uuid(),'owner',gen_random_uuid(),'forbidden')");
         await denied("UPDATE public.starter_attachment_results SET result='{}'");
         await denied("DELETE FROM public.starter_attachment_results WHERE false");
+        await denied("INSERT INTO public.starter_attachment_retries VALUES (gen_random_uuid(),'missing',gen_random_uuid(),1)");
         await denied("SELECT * FROM supacloud_commands.execution_receipts");
         await denied("SELECT supacloud_workflows.start_run(gen_random_uuid(),'forbidden','1','step','{}',1)");
       }
