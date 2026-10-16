@@ -41,7 +41,7 @@ test("consumer subprocesses cannot discover the developer home configuration", a
     await mkdir(sourceHome);
     await mkdir(home);
     await writeFile(join(sourceHome, ".npmrc"), "developer-config-marker");
-    child = Bun.spawn([process.execPath, "--no-env-file", "--eval", `
+    const running = Bun.spawn([process.execPath, "--no-env-file", "--eval", `
       import { homedir } from "node:os";
       import { existsSync } from "node:fs";
       import { join } from "node:path";
@@ -50,10 +50,11 @@ test("consumer subprocesses cannot discover the developer home configuration", a
       cwd: root, stdout: "pipe", stderr: "pipe",
       env: publishedConsumerEnvironment({ PATH: process.env["PATH"], HOME: sourceHome, USERPROFILE: sourceHome }, home),
     });
-    const timer = setTimeout(() => child?.kill(), 5_000);
+    child = running;
+    const timer = setTimeout(() => running.kill(), 5_000);
     try {
       const [code, stdout, stderr] = await Promise.all([
-        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+        running.exited, new Response(running.stdout).text(), new Response(running.stderr).text(),
       ]);
       expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
       expect(JSON.parse(stdout)).toEqual({ home, config: false });
