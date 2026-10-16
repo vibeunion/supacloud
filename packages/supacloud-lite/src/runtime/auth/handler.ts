@@ -6,7 +6,7 @@ import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
 import type { Mailer, RequestContext, SmsMessage, SmsSender } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
-import { OAuthService, type OAuthProviderConfig } from './oauth.js'
+import { OAuthAccountIneligibleError, OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { qrSvgDataUri } from './qr.js'
 import { DEFAULT_AUTH_SETTINGS, type AuthSettings } from './settings.js'
@@ -334,6 +334,7 @@ export class AuthHandler {
       if (path.startsWith('admin/')) return await this.admin(req, ctx, path, method)
       return authError(404, 'not_found', `unknown auth endpoint: ${path}`)
     } catch (e) {
+      if (e instanceof OAuthAccountIneligibleError) return authError(400, e.code, e.message)
       const msg = e instanceof Error ? e.message : String(e)
       return authError(500, 'unexpected_failure', msg)
     }
@@ -456,8 +457,7 @@ export class AuthHandler {
       if (!authCode || !verifier) return authError(400, 'validation_failed', 'auth_code and code_verifier required')
       const userId = await this.oauth.exchangePkce(authCode, verifier)
       if (!userId) return authError(403, 'flow_state_not_found', 'invalid or expired auth code')
-      const ures = await this.db.query(`select * from auth.users where id = $1`, [userId])
-      return json(200, await this.sessionForOAuth(ures.rows[0] as UserRow))
+      return json(200, await this.sessionForOAuth(userId))
     }
 
     return authError(400, 'invalid_grant', `unsupported grant_type: ${grantType}`)
@@ -1649,17 +1649,26 @@ export class AuthHandler {
     }
   }
 
-  private sessionForOAuth(user: UserRow): Promise<Record<string, unknown>> {
-    return this.sessionFor(user, undefined, {
-      amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+  private sessionForOAuth(userId: string): Promise<Record<string, unknown>> {
+    return this.db.transaction(async (query) => {
+      const res = await query<UserRow & { is_banned: boolean }>(
+        `select *, coalesce(banned_until > now(), false) as is_banned
+         from auth.users where id = $1 for update`,
+        [userId],
+      )
+      const user = res.rows[0]
+      if (!user || user.deleted_at !== null) throw new OAuthAccountIneligibleError('user_not_found')
+      if (user.is_banned) throw new OAuthAccountIneligibleError('user_banned')
+      return this.sessionFor(user, undefined, {
+        amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+      }, query)
     })
   }
 
   private async oauthSessionTokensFor(
     userId: string
   ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-    const res = await this.db.query(`select * from auth.users where id = $1`, [userId])
-    const session = (await this.sessionForOAuth(res.rows[0] as UserRow)) as {
+    const session = (await this.sessionForOAuth(userId)) as {
       access_token: string
       refresh_token: string
       expires_in: number
