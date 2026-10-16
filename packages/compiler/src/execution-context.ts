@@ -153,17 +153,17 @@ function executionLogEnvelope(entries: unknown[]): { version: 1; events: Executi
   if (!entries.length || entries.length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
   const events = entries.map(entry => {
     const log = record(entry);
-    const http = log.event === "review-http-execution" && log.component === "review-http";
-    const worker = log.event === "review-worker-execution" && log.component === "review-attachment-worker";
+    const http = log["event"] === "review-http-execution" && log["component"] === "review-http";
+    const worker = log["event"] === "review-worker-execution" && log["component"] === "review-attachment-worker";
     if ((!http && !worker)
-      || (http && (log.kind !== "route" && log.kind !== "command" || "workerId" in log))
-      || (worker && log.kind !== "job")
-      || ("workerId" in log && !requestIdentifier(log.workerId))
+      || (http && (log["kind"] !== "route" && log["kind"] !== "command" || "workerId" in log))
+      || (worker && log["kind"] !== "job")
+      || ("workerId" in log && !requestIdentifier(log["workerId"]))
       || Object.keys(log).some(key => !metadataFields.includes(key)
         && !["event", "component", "timestamp", "workerId"].includes(key))
-      || typeof log.timestamp !== "string" || log.timestamp.length > 32
-      || !Number.isFinite(Date.parse(log.timestamp))
-      || new Date(log.timestamp).toISOString() !== log.timestamp) return invalid();
+      || typeof log["timestamp"] !== "string" || log["timestamp"].length > 32
+      || !Number.isFinite(Date.parse(log["timestamp"]))
+      || new Date(log["timestamp"]).toISOString() !== log["timestamp"]) return invalid();
     // Strip only validated wrapper fields, never silently ignore an unknown log record.
     return Object.fromEntries(Object.entries(log).filter(([key]) => metadataFields.includes(key)));
   });

@@ -230,7 +230,7 @@ test("starter JSON-lines logs normalize to the existing untrusted execution cont
     const file = join(root, "execution.ndjson");
     const source = graph();
     source.modules[0]!.jobs = [{ name: "review.verify", className: "VerifyJob", serviceKey: "verifyJob", scope: "job" }];
-    const job = { ...event, kind: "job", operation: "review.verify", stage: "handler", requestId: "workflow-run-1" };
+    const job = { ...event, kind: "job" as const, operation: "review.verify", stage: "handler", requestId: "workflow-run-1" };
     const worker = { ...httpLog(job), event: "review-worker-execution", component: "review-attachment-worker", workerId: "worker-1" };
     await writeFile(file, [httpLog(), worker, httpLog({ ...event, requestId: "other-request" })]
       .map(log => JSON.stringify(log)).join("\r\n\n") + "\r\n");
