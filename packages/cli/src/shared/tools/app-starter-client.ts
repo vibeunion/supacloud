@@ -182,7 +182,10 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
       try {
         const result = await transport.lookup(structuredClone(operation));
         // Denial or conflict during lookup does not prove the original write did not commit.
-        finish(operation, outcome(operation, result) === "confirmed" ? result : { status: "unknown" });
+        // Normalize once: custom adapter accessors may change between reads.
+        finish(operation, outcome(operation, result) === "confirmed"
+          ? { status: "confirmed", operationId: operation.operationId, reviewId: operation.reviewId }
+          : { status: "unknown" });
         if (snapshot().mutation.status === "confirmed") await load();
       } catch {
         finish(operation, { status: "unknown" });
@@ -433,6 +436,28 @@ test("malformed adapter outcomes preserve pending evidence across writes and rec
     }
   }
 });
+test("recovery validates adapter accessors once before clearing pending evidence", async () => {
+  let saved: ReviewOperation | null = null, reads = 0, sends = 0, clears = 0;
+  const client = createReviewClient(transport({
+    approve: async () => { sends++; return { status: "unknown" }; },
+    lookup: async operation => ({
+      get status() { return ++reads === 1 ? "confirmed" as const : "denied" as const; },
+      operationId: operation.operationId, reviewId: operation.reviewId,
+    }),
+  }), {
+    load: () => saved, save: operation => { saved = operation; },
+    clear: () => { clears++; saved = null; },
+  });
+  await client.approve(draft);
+  expect(client.snapshot().mutation.status).toBe("unknown");
+  await client.reconcile();
+  expect(reads).toBe(1);
+  expect(client.snapshot().mutation.status).toBe("confirmed");
+  expect(saved).toBeNull();
+  expect(clears).toBe(1);
+  expect(sends).toBe(1);
+});
+
 test("upload validates size/type, retains failure identity, and disposal drops late results", async () => {
   let uploads = 0;
   const client = createReviewClient(transport({ upload: async () => { uploads++; throw new Error("private"); } }));
