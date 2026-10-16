@@ -426,6 +426,28 @@ reached, and no workspace files were injected. The missing template must be
 released normally before that exact-version gate can pass; a safe source merge
 and completed installed-customer acceptance are separate decisions.
 
+### Post-merge publication ordering repair (2026-10-16)
+
+PR #1950 merged as `aa1737a68`; this does not prove npm publication.
+A fresh consumer run from main `e9198c5ad` with CLI `0.101.4` and Lite `0.29.4`
+passed generation, registry/frozen installation, database-source generation,
+compilation, drift and types. It still failed at `client-states` because the
+installed CLI did not emit `tests/review-client.test.ts`. Durable business
+acceptance was not reached; no workspace files were substituted.
+
+Release workflow run `38892915777` explains the publication gap: the CLI step
+tried to install `@supacloud/elysia@0.33.0` before the later Elysia publish step.
+That exact adapter version is now visible, but CLI `0.103.0` was not visible
+during this follow-up. The newer successful release workflow alone does not
+prove that a skipped CLI step published it.
+
+The workflow now publishes Elysia before installing/building/publishing the CLI.
+An Elysia publication failure blocks the CLI step; an intentionally skipped
+adapter step still permits CLI-only releases using existing published packages.
+The single `release-publish-gating.test.mjs` file passed all nine checks.
+No publication or deployment was triggered. Normal protected integration,
+publication recovery and a fresh exact-version consumer run remain necessary.
+
 ## Remaining acceptance
 
 ### Delivery worker execution logs
