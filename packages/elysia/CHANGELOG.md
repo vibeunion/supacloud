@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.33.0...elysia-v0.33.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **cli:** align starter review versions with postgres integer ([#2000](https://github.com/vibeunion/supacloud/issues/2000)) ([76e8cf2](https://github.com/vibeunion/supacloud/commit/76e8cf22ec7b4b62c6fa0c214294d0054b063fe3))
+* **cli:** reconcile committed upload registrations before storage ([#1995](https://github.com/vibeunion/supacloud/issues/1995)) ([7a9fef8](https://github.com/vibeunion/supacloud/commit/7a9fef833cf182e9aa59efd23518b17128b3a9ca))
+
 ## [0.33.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.32.0...elysia-v0.33.0) (2026-10-16)
 
 
