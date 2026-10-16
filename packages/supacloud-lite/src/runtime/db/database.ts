@@ -66,6 +66,8 @@ export interface FunctionInfo {
   schema: string
   name: string
   returnsSet: boolean
+  /** Explicit RETURNS TABLE outputs, including a single base/domain/enum column. */
+  returnsTable: boolean
   returnType: string
   /** pg_type.typtype: b=base, c=composite, p=pseudo, d=domain, e=enum */
   returnTypType: string
@@ -491,6 +493,7 @@ export class Database {
     const res = await this.engine.query<{
       name: string
       returns_set: boolean
+      returns_table: boolean
       return_type: string
       return_typtype: string
       volatility: string
@@ -498,6 +501,7 @@ export class Database {
       input_args: FunctionArg[]
     }>(
       `select p.proname as name, p.proretset as returns_set,
+              coalesce('t' = any(p.proargmodes), false) as returns_table,
               t.typname as return_type, t.typtype as return_typtype,
               p.provolatile as volatility,
               p.pronargs - p.pronargdefaults as required_arg_count,
@@ -521,6 +525,7 @@ export class Database {
       schema,
       name: r.name,
       returnsSet: r.returns_set,
+      returnsTable: r.returns_table,
       returnType: r.return_type,
       returnTypType: r.return_typtype,
       volatility: r.volatility,
