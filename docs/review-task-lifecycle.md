@@ -98,6 +98,16 @@ fields. No identity mapping or Storage policy is changed by this increment.
 
 ## Acceptance
 
+- Given a committed approval whose HTTP response was lost, when the reference
+  client is recreated with its pending marker and reconciles, then it uses only
+  the authenticated receipt GET route, confirms the original operation and
+  clears the marker without another approval or audit.
+- Given a missing receipt, revoked access or a mismatched original version,
+  when that client reconciles, then it retains the pending operation and cannot
+  issue another approval. Those outcomes do not prove the original write failed.
+- Given receipt operation contracts, when server and browser types compile,
+  then they derive from the same maintained schema. The server decodes the
+  numeric operation before calling the receipt port.
 - Given a registered attachment, when its owner approves, then approval,
   receipt/audit and Workflow submission commit together and status becomes queued.
 - Given a failed run, when its authorized owner requests recovery, then a linked
@@ -128,6 +138,29 @@ compatibility. Artifact/Storage HTTP responses are fixtures.
 This proves the local reference integration, not native pgmq, a real SupAuth
 tenant, real Storage, published package availability, remote deployment, or
 xigu-fa adoption. Those are separate acceptance records, not implied by a PR.
+
+### Reference Client Recovery
+
+`ReviewOperation` and `ReviewReceipt` now derive from `ReceiptOperation` and
+`ReceiptResult` in `src/review/contracts.ts`. Server receipt ports and browser
+operation types use those exports. Browser imports are type-only: no Elysia
+runtime is added to the client bundle. Keep the maintained contracts available
+to the browser typecheck; do not copy a second interface into the client.
+The persisted-marker decoder remains a separate storage-boundary check.
+
+The native acceptance compiles the generated client and the maintained browser
+transport against these contracts. It deliberately changes an operation field
+type and verifies that stale browser code fails to typecheck. It also exercises
+the reference client's lost-response recovery through real authenticated route
+handlers and PostgreSQL receipts. This is client-state reconstruction, not a
+real-browser refresh test; the list refresh is stubbed and is not PostgREST
+acceptance.
+
+No SQL migration or stored-marker format changes are introduced. Existing custom
+receipt ports retain their method signatures. The receipt service now rejects
+invalid operation kinds, identifiers, extra fields and out-of-range numeric
+versions before invoking a port. Continue retaining unresolved markers on
+missing, denied or conflicting lookups; none proves that the write rolled back.
 
 ## Complete Reference Paths
 
