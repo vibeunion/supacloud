@@ -221,7 +221,8 @@ test("attachment worker uses explicit queue ownership and a fatal delivery signa
     expect(worker).toContain('queueOwnership !== "exclusive-review-attachments"');
     expect(worker).toContain('claim.workflowVersion !== "1"');
     expect(worker).toContain('claim.stepKey !== "verify"');
-    expect(worker).toContain("AND run_id=$3");
+    expect(worker).toContain("public.starter_attachment_retries");
+    expect(worker).toContain("Attachment workflow ownership mismatch");
     expect(worker).toContain("failure: failure.promise");
     expect(worker).toContain("halted = true");
     expect(worker).toContain("createSupaCloudWorkflowTransport");

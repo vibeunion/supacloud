@@ -12,6 +12,7 @@ import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
 import { STARTER_REVIEW_QUERY } from "./app-starter-query";
+import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
@@ -22,6 +23,10 @@ export function appStarterFiles(name: string): Record<string, string> {
     return {
         ...starterDatabaseFiles(),
         "src/review/list-reviews.ts": STARTER_REVIEW_QUERY,
+        "src/review/task-contracts.ts": STARTER_TASK_CONTRACTS,
+        "src/review/tasks.ts": STARTER_TASK_FEATURE,
+        "src/host/review-tasks.ts": STARTER_TASK_HOST,
+        "migrations/005-review-task-recovery.sql": STARTER_TASK_SCHEMA,
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
             engines: { bun: ">=1.4.3" },
@@ -114,6 +119,7 @@ export default defineSupacloudConfig({
         { source: "migrations/002-review-attachments.sql", version: "2", name: "review_attachments", executor: "project-migration" },
         { source: "migrations/003-review-uploads.sql", version: "3", name: "review_uploads", executor: "operator-provisioning" },
         { source: "migrations/004-review-runtime-roles.sql", version: "4", name: "review_runtime_roles", executor: "operator-provisioning" },
+        { source: "migrations/005-review-task-recovery.sql", version: "5", name: "review_task_recovery", executor: "operator-provisioning" },
       ],
     },
   },
@@ -287,6 +293,7 @@ import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "
 import { ApproveBody, HealthResult, Params, ReviewResult, type ApprovalBody, type Review } from "./contracts";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
+import { ReviewTasks, ReviewTasksController, type ReviewTaskPort } from "./tasks";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -302,7 +309,7 @@ export const reviewSpec = defineFeatureSpec({
 });
 
 // Production implementations must bind both operations to the current transaction.
-export interface ReviewStore extends Partial<ReviewUploadPort> {
+export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewTaskPort> {
   get(table: string, key: string): unknown;
   set(table: string, key: string, value: Review): void | Promise<void>;
 }
@@ -392,7 +399,8 @@ export class ReviewController {
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads], controllers: [ReviewController, ReviewUploadsController],
+  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewTasks],
+  controllers: [ReviewController, ReviewUploadsController, ReviewTasksController],
   jobs: [VerifyReviewAttachment],
 });
 `,
@@ -410,7 +418,10 @@ export type Review = UnwrapSchema<typeof ReviewResult>;
 export const HealthResult = t.Object({ ok: t.Boolean() });
 export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
 export const UploadBody = t.Object({
-  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1 }),
+  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1, maximum: 2147483647 }),
+}, { additionalProperties: false });
+export const UploadInput = t.Object({
+  reviewId: UploadParams.properties.id, ...UploadBody.properties,
 }, { additionalProperties: false });
 export const UploadLocation = t.Object({
   artifactId: t.String({ format: "uuid" }), bucketId: t.String(), objectPath: t.String(),
@@ -419,6 +430,10 @@ export const UploadResult = t.Object({
   artifactId: t.String({ format: "uuid" }), runId: t.String({ format: "uuid" }),
   objectPath: t.String(), sha256: t.String({ pattern: "^[a-f0-9]{64}$" }), bytes: t.Integer({ minimum: 1, maximum: 1048576 }),
 });
+export type ReviewUploadBody = UnwrapSchema<typeof UploadBody>;
+export type ReviewUploadInput = UnwrapSchema<typeof UploadInput>;
+export type ReviewUploadLocation = UnwrapSchema<typeof UploadLocation>;
+export type ReviewUploadResult = UnwrapSchema<typeof UploadResult>;
 `,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
         "src/host/review-uploads.ts": STARTER_UPLOAD_ADAPTER,
@@ -631,11 +646,12 @@ This is not production-role acceptance. Ordinary API clients cannot edit members
 or the database binding. No migration, binding, member or review is auto-created
 by the HTTP host. This SQL file is not a migration runner or a recovery receipt.
 
-The starter's delivery.build.migrations explicitly declares these four files.
+The starter's delivery.build.migrations explicitly declares these five files.
 Immutable targets archive their exact bytes and a migrations.json inventory;
 project migrations and operator provisioning use separate directories.
 001-002 declare project migration handling. 003 changes Storage policies and
-004 creates cluster-wide roles, so both declare operator provisioning; ordinary
+004 creates cluster-wide roles and 005 adds the task recovery ledger and scoped
+backend grants, so these declare operator provisioning; ordinary
 project-role permission to perform those changes has not been established.
 These raw SQL hashes are not the platform ledger's normalized-statement
 checksums. Building or copying an archive never applies SQL, proves compatibility
@@ -662,6 +678,16 @@ authenticated upload requests return 501. With that setting, SUPACLOUD_URL and
 SUPACLOUD_SERVICE_ROLE_KEY are required; shipped adapters register/bind uploads
 and enqueue attachment verification through afterApproved in the approval
 transaction. A separately delivered worker consumes it.
+With attachments enabled, GET /reviews/:id/attachment-task returns the current
+authorized task state. POST /reviews/:id/attachment-task/retry takes expectedVersion,
+expectedRunId and a new recoveryId UUID. Reuse that same body/recoveryId after an
+uncertain response; do not generate another key until the outcome is reconciled.
+Only failed runs can be retried. A retry creates a linked new run, receipt and audit
+in one transaction, preserving the old run and its attempts. Concurrent distinct
+recovery requests cannot both replace the same failed run. Read status after the
+receipt: its queued state describes submission, not necessarily the current state.
+Apply migration 005 before updating either HTTP or Worker code; it extends only
+backend capabilities. Do not grant Workflow access to browser roles.
 An HTTP listener or immutable build does not prove full-platform identity,
 migration compatibility, activation, application rollback or data recovery.
 

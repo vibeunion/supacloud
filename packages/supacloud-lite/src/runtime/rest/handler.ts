@@ -455,7 +455,7 @@ export class RestHandler {
     }
 
     // set-returning scalar
-    if (fn.returnsSet && ['b', 'd', 'e'].includes(fn.returnTypType)) {
+    if (fn.returnsSet && !fn.returnsTable && ['b', 'd', 'e'].includes(fn.returnTypType)) {
       const res = await withRpcContext((query) =>
         query(`select coalesce(json_agg(_v), '[]'::json) as body from ${call} as _t(_v)`, [])
       )

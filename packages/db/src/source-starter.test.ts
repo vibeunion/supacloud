@@ -53,9 +53,9 @@ test("generated database module loads real Drizzle names and its SQL passes gove
   const loaded = await import(pathToFileURL(join(root, "db/modules.ts")).href) as { default: DatabaseModule };
   expect(loaded.default.tables).toEqual([
     "public.starter_application", "public.starter_reviews", "public.starter_members",
-    "public.starter_attachments", "public.starter_attachment_results",
+    "public.starter_attachments", "public.starter_attachment_results", "public.starter_attachment_retries",
   ]);
-  expect(loaded.default.policies).toHaveLength(17);
+  expect(loaded.default.policies).toHaveLength(20);
   expect(await lintModule(loaded.default, path => readFile(join(root, path), "utf8"))).toEqual([]);
   for (const policy of loaded.default.policies) {
     expect(await readFile(join(root, policy.source), "utf8")).toContain(`CREATE POLICY ${policy.name} ON ${policy.table}`);

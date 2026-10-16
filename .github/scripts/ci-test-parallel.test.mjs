@@ -17,6 +17,14 @@ const job = workflow.jobs['package-checks'];
 const candidates = job.strategy.matrix.include.filter(entry =>
   ['Project CLI', 'App Compiler'].includes(entry.name));
 
+test('Lite has time for its complete serial suite and smoke gates', () => {
+  assert.equal(job['timeout-minutes'], "${{ matrix.name == 'SupaCloud Lite' && 35 || 20 }}");
+  const lite = job.strategy.matrix.include.find(entry => entry.name === 'SupaCloud Lite');
+  assert.match(lite.script, /bun run check/);
+  assert.match(lite.script, /audit_dependencies\.ts/);
+  assert.notEqual(job['continue-on-error'], true);
+});
+
 test('CLI and Compiler use three isolated workers without reducing test coverage', () => {
   assert.equal(candidates.length, 2);
   assert.equal(job.strategy['fail-fast'], false);
