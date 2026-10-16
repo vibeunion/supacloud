@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.118.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.2...management-api-v0.118.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **management-api:** distinguish active readiness from candidate preheat ([#1966](https://github.com/vibeunion/supacloud/issues/1966)) ([06644d0](https://github.com/vibeunion/supacloud/commit/06644d0fc23f2bc61e67ff62d78024d22473f92c))
+
 ## [0.118.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.1...management-api-v0.118.2) (2026-10-15)
 
 
