@@ -294,6 +294,7 @@ import {
 } from "@supacloud/app";
 import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "@supacloud/elysia";
 import { ApproveBody, HealthResult, Params, ReviewResult, type ApprovalBody, type Review } from "./contracts";
+import { REVIEW_VERSION_MAX } from "./limits";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
 import { ReviewReceipts, ReviewReceiptsController, type ReviewReceiptPort } from "./receipts";
@@ -343,6 +344,9 @@ export class ApproveReview {
     const current = readReview(await this.store.get("reviews", id));
     if (current.version !== expectedVersion) {
       throw new ApplicationError("Review state or version changed", { status: 409, code: "REVIEW_CONFLICT" });
+    }
+    if (current.version === REVIEW_VERSION_MAX) {
+      throw new ApplicationError("Review version is exhausted", { status: 409, code: "REVIEW_CONFLICT" });
     }
     const next = {
       state: assertFeatureTransition(reviewSpec, current.state, "approve"),
@@ -409,20 +413,25 @@ export const ReviewFeature = defineFeatureSlice({
 });
 `,
         "src/review/attachment.ts": STARTER_REVIEW_JOB,
+        "src/review/limits.ts": `// Matches the existing PostgreSQL integer version columns; widening requires a migration.
+export const REVIEW_VERSION_MAX = 2147483647;
+`,
         "src/review/contracts.ts": `import { t, type UnwrapSchema } from "elysia";
+import { REVIEW_VERSION_MAX } from "./limits";
 export const Params = t.Object({ id: t.String({ minLength: 1 }) });
-export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1, maximum: 9007199254740991 }) });
+export const ReviewVersion = t.Integer({ minimum: 1, maximum: REVIEW_VERSION_MAX });
+export const ApproveBody = t.Object({ expectedVersion: ReviewVersion });
 export const ApprovalInput = t.Object({ ...Params.properties, ...ApproveBody.properties }, { additionalProperties: false });
 export type ApprovalBody = UnwrapSchema<typeof ApproveBody>;
 export const ReviewResult = t.Object({
   state: t.Union([t.Literal("draft"), t.Literal("approved")]),
-  version: t.Integer({ minimum: 1, maximum: 9007199254740991 }),
+  version: ReviewVersion,
 });
 export type Review = UnwrapSchema<typeof ReviewResult>;
 export const HealthResult = t.Object({ ok: t.Boolean() });
 export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
 export const UploadBody = t.Object({
-  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1, maximum: 2147483647 }),
+  artifactId: t.String({ format: "uuid" }), expectedVersion: ReviewVersion,
 }, { additionalProperties: false });
 export const UploadInput = t.Object({
   reviewId: UploadParams.properties.id, ...UploadBody.properties,

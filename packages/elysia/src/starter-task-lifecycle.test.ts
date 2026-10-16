@@ -466,6 +466,80 @@ void status; void retry; void receipt; void receiptOperation; void createReviewT
     restored.dispose();
   });
 
+  test("the final PostgreSQL review version commits and replays but cannot be incremented again", async () => {
+    const f = await fixture();
+    await sql("UPDATE public.starter_reviews SET version=2147483646 WHERE id=$1", [f.id]);
+    const body = { expectedVersion: 2147483646 };
+    const approved = await f.send("approve", body);
+    expect(approved.status).toBe(200);
+    expect(await approved.json()).toEqual({ state: "approved", version: 2147483647 });
+    const replay = await f.send("approve", body);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({ state: "approved", version: 2147483647 });
+    expect(await approvalCounts({ kind: "approve", reviewId: f.id,
+      operationId: f.artifactId, expectedVersion: body.expectedVersion })).toEqual([{ receipts: 1, audits: 1 }]);
+
+    const exhausted = await fixture();
+    await sql("UPDATE public.starter_reviews SET version=2147483647 WHERE id=$1", [exhausted.id]);
+    const response = await exhausted.send("approve", { expectedVersion: 2147483647 });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "COMMAND_IDEMPOTENCY_CONFLICT" });
+    expect(await sql("SELECT state,version FROM public.starter_reviews WHERE id=$1", [exhausted.id]))
+      .toEqual([{ state: "draft", version: 2147483647 }]);
+    expect(await approvalCounts({ kind: "approve", reviewId: exhausted.id,
+      operationId: exhausted.artifactId, expectedVersion: 2147483647 })).toEqual([{ receipts: 0, audits: 0 }]);
+    const receipt = await exhausted.send(`operations/${exhausted.artifactId}?kind=approve&expectedVersion=2147483647`);
+    expect(receipt.status).toBe(200);
+    expect(await receipt.json()).toMatchObject({ status: "unknown" });
+    expect((await exhausted.send("attachment-upload", {
+      artifactId: exhausted.artifactId, expectedVersion: 2147483647,
+    })).status).toBe(200);
+    const uploadReceipt = await exhausted.send(`operations/${exhausted.artifactId}?kind=upload&expectedVersion=2147483647`);
+    expect(uploadReceipt.status).toBe(200);
+    expect(await uploadReceipt.json()).toMatchObject({ status: "unknown" });
+  });
+
+  test("out-of-range approval versions are rejected before business mutation", async () => {
+    const f = await fixture();
+    for (const version of [2147483648, Number.MAX_SAFE_INTEGER, 0, -1, 1.5]) {
+      const response = await f.send("approve", { expectedVersion: version });
+      expect(response.status).toBe(422);
+    }
+    expect(await sql("SELECT state,version FROM public.starter_reviews WHERE id=$1", [f.id]))
+      .toEqual([{ state: "draft", version: 1 }]);
+    expect(await approvalCounts({ kind: "approve", reviewId: f.id,
+      operationId: f.artifactId, expectedVersion: 1 })).toEqual([{ receipts: 0, audits: 0 }]);
+  });
+
+  test("browser version guards prevent impossible approvals without erasing old pending evidence", async () => {
+    const f = await fixture(), harness = recoveryClient(f), client = harness.create();
+    for (const version of [2147483647, 2147483648, Number.MAX_SAFE_INTEGER]) {
+      await client.approve({ id: f.id, state: "draft", version });
+    }
+    expect(client.snapshot().mutation).toEqual({ status: "idle", operation: null });
+    expect(harness.pending.load()).toBeNull();
+    expect(harness.requests.writes).toBe(0);
+    const invalid: ReviewOperation = { kind: "approve", reviewId: f.id,
+      operationId: crypto.randomUUID(), expectedVersion: 2147483648 };
+    expect(() => harness.pending.save(invalid)).toThrow("Invalid pending operation");
+    const serialized = JSON.stringify(invalid);
+    let persisted: string | null = serialized, sends = 0;
+    const pending = reference.createReviewPendingStore({
+      getItem: () => persisted, setItem: (_key, value) => { persisted = value; }, removeItem: () => { persisted = null; },
+    }, { projectId: "project", tenantId: "tenant", applicationId: "review-test", subject: f.actor });
+    const restored = reference.createReviewClient({
+      list: async () => [],
+      approve: async () => { sends++; throw new Error("Must not send"); },
+    }, pending);
+    await restored.approve({ id: f.id, state: "draft", version: 1 });
+    await restored.reconcile();
+    expect(restored.snapshot().mutation).toEqual({ status: "unknown", operation: null });
+    expect(sends).toBe(0);
+    expect(persisted).toBe(serialized);
+    restored.dispose();
+    client.dispose();
+  });
+
   test("missing, denied and mismatched receipt lookups retain the pending operation without resending", async () => {
     const f = await fixture(), harness = recoveryClient(f);
     const operation: ReviewOperation = {

@@ -183,7 +183,7 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
       "SELECT m.storage_subject::text AS storage_subject FROM public.starter_reviews r " +
       "JOIN public.starter_members m ON m.subject=r.owner_id CROSS JOIN public.starter_application p " +
       "WHERE r.id=$1 AND r.owner_id=$2 AND ((r.state='draft' AND r.version=$3) OR " +
-      "($6::boolean AND r.state='approved' AND r.version=$3+1 AND EXISTS (" +
+      "($6::boolean AND r.state='approved' AND r.version=$3::bigint+1 AND EXISTS (" +
       "SELECT 1 FROM public.starter_attachments b WHERE b.review_id=r.id AND b.artifact_id=$7::uuid AND b.owner_id=$2 " +
       "AND b.object_path=m.storage_subject::text || '/' || r.id || '/' || $7::text || '.txt'))) " +
       "AND m.enabled AND m.can_approve AND m.storage_subject IS NOT NULL " +

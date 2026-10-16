@@ -1,9 +1,11 @@
 export const STARTER_TASK_CONTRACTS = `import { t, type UnwrapSchema } from "elysia";
 import { AttachmentResult } from "./attachment";
+import { REVIEW_VERSION_MAX } from "./limits";
+import { ReviewVersion } from "./contracts";
 
 export const TaskParams = t.Object({ id: t.String({ minLength: 1, maxLength: 100 }) }, { additionalProperties: false });
 export const RetryBody = t.Object({
-  expectedVersion: t.Integer({ minimum: 2, maximum: 2147483647 }),
+  expectedVersion: t.Integer({ minimum: 2, maximum: REVIEW_VERSION_MAX }),
   expectedRunId: t.String({ format: "uuid" }),
   recoveryId: t.String({ format: "uuid" }),
 }, { additionalProperties: false });
@@ -12,7 +14,7 @@ export const RetryInput = t.Object({
 }, { additionalProperties: false });
 export const TaskStatus = t.Object({
   reviewId: TaskParams.properties.id,
-  version: t.Integer({ minimum: 1 }),
+  version: ReviewVersion,
   artifactId: t.Nullable(t.String({ format: "uuid" })),
   runId: t.Nullable(t.String({ format: "uuid" })),
   state: t.Union([t.Literal("not_submitted"), t.Literal("queued"), t.Literal("running"),
