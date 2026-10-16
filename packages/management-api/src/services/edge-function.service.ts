@@ -15,6 +15,7 @@ import {
 } from "./project-release-contract";
 import { isSystemManagedProjectSecretName } from "../utils/project-secret-visibility";
 import {
+  diagnoseEdgeRuntimePreheat,
   validateEdgeRuntimePreheat,
   type ExpectedEdgeRuntimePreheat,
   type ValidatedEdgeRuntimePreheat,
@@ -1845,8 +1846,15 @@ function publicPreheatPool(
 
 async function preheatRuntimeFunction(
   expected: ExpectedEdgeRuntimePreheat,
+  fence?: RuntimeFunctionActivationAck,
 ): Promise<RuntimePreheatOutcome> {
   const start = performance.now();
+  let stage: "request" | "response_body" | "validation" = "request";
+  const fenceDiagnostic = fence ? {
+    runtimeInstanceId: fence.runtimeInstanceId,
+    foregroundGeneration: fence.foregroundGeneration,
+    backgroundGeneration: fence.backgroundGeneration,
+  } : null;
   try {
     const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
     const headers = runtimeInternalHeaders();
@@ -1866,10 +1874,18 @@ async function preheatRuntimeFunction(
       },
     );
     const durationMs = Math.round(performance.now() - start);
-    const acknowledgement = validateEdgeRuntimePreheat(
-      await readRuntimeControlBody(preheatRes),
-      expected,
-    );
+    stage = "response_body";
+    const payload = await readRuntimeControlBody(preheatRes);
+    stage = "validation";
+    const acknowledgement = validateEdgeRuntimePreheat(payload, expected);
+    if (!acknowledgement) {
+      logger.error("[EdgeFunction] Preheat attestation rejected", {
+        stage,
+        diagnostic: diagnoseEdgeRuntimePreheat(payload, expected),
+        status: preheatRes.status,
+        fence: fenceDiagnostic,
+      });
+    }
     const foreground = publicPreheatPool(acknowledgement?.foreground);
     const background = publicPreheatPool(acknowledgement?.background);
     const acknowledgementError = acknowledgement
@@ -1889,6 +1905,9 @@ async function preheatRuntimeFunction(
     };
     return { summary, attestation: acknowledgement };
   } catch (error) {
+    logger.error("[EdgeFunction] Preheat control failed", {
+      stage, expected, fence: fenceDiagnostic,
+    });
     return {
       summary: {
         ok: false,
@@ -2601,6 +2620,20 @@ function assertPreheatFollowsFence(
   if (preheat.identity.runtimeInstanceId !== fence.runtimeInstanceId
     || preheat.foreground.generation !== fence.foregroundGeneration + 1
     || preheat.background.generation !== fence.backgroundGeneration + 1) {
+    logger.error("[EdgeFunction] Preheat fence rejected", {
+      stage: "fence",
+      activationId: preheat.identity.activationId,
+      fence: {
+        runtimeInstanceId: fence.runtimeInstanceId,
+        foregroundGeneration: fence.foregroundGeneration,
+        backgroundGeneration: fence.backgroundGeneration,
+      },
+      preheat: {
+        runtimeInstanceId: preheat.identity.runtimeInstanceId,
+        foregroundGeneration: preheat.foreground.generation,
+        backgroundGeneration: preheat.background.generation,
+      },
+    });
     throw runtimeActivationFailure(
       "runtime instance or worker generation changed after activation fence",
     );
@@ -2624,7 +2657,7 @@ async function preheatPreparedFunctionActivation(
     artifactSha256: activation.artifactSha256,
     verifyJwt: activation.nextConfig.verify_jwt,
     activationId: activation.authority.activation_id,
-  });
+  }, fence);
   const attestation = requiredPreheatAttestation(readiness, "candidate readiness");
   assertPreheatFollowsFence(fence, attestation);
   return readiness.summary;

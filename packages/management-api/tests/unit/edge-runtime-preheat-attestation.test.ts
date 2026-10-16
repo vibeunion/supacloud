@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  diagnoseEdgeRuntimePreheat,
   validateEdgeRuntimePreheat,
   type ExpectedEdgeRuntimePreheat,
 } from "../../src/services/edge-runtime-preheat-attestation";
@@ -106,6 +107,38 @@ describe("Edge Runtime preheat attestation", () => {
         rotation: { ...withParked.foreground.rotation, immediateReplacements: 2 },
       },
     }, EXPECTED)).toBeNull();
+  });
+
+  test("diagnoses failures without exposing unknown fields or runtime strings", () => {
+    const payload = preheatResponse();
+    const invalid = {
+      ...payload,
+      secret_key_name: "SECRET_TOKEN_VALUE",
+      attestation: preheatIdentity({ project_ref: "SECRET_TOKEN_VALUE" }),
+      foreground: { ...payload.foreground, succeeded: 0, error: "SECRET_TOKEN_VALUE" },
+      background: {
+        ...payload.background,
+        rotation: { ...payload.background.rotation, immediateReplacements: 9 },
+      },
+    };
+    const diagnostic = diagnoseEdgeRuntimePreheat(invalid, EXPECTED);
+    expect(diagnostic.valid).toBe(false);
+    expect(diagnostic.identity).toMatchObject({ valid: false, matches: { project_ref: false } });
+    expect(diagnostic.foreground).toMatchObject({ valid: false });
+    expect(diagnostic.foreground).toMatchObject({
+      fields: { error: { type: "string", length: 18 } },
+    });
+    expect(diagnostic.background).toMatchObject({ valid: false, rotationValid: false });
+    expect(JSON.stringify(diagnostic)).not.toContain("SECRET_TOKEN_VALUE");
+    expect(JSON.stringify(diagnostic)).not.toContain("secret_key_name");
+    expect(validateEdgeRuntimePreheat(invalid, EXPECTED)).toBeNull();
+  });
+
+  test("diagnostics handle malformed payloads and preserve successful validation", () => {
+    for (const payload of [null, [], "SECRET_TOKEN_VALUE", { foreground: false }]) {
+      expect(diagnoseEdgeRuntimePreheat(payload, EXPECTED).valid).toBe(false);
+    }
+    expect(diagnoseEdgeRuntimePreheat(preheatResponse(), EXPECTED).valid).toBe(true);
   });
 
   test("accepts a canonical worker acknowledgement", () => {
