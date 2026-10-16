@@ -7,6 +7,7 @@ import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage 
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 import { resolveManagementRecovery } from './recover-management-release.mjs';
 import { publishNpmPackage } from './publish-npm-package.mjs';
+import { isRecord } from './package-validation.mjs';
 
 test('failed delivery publication blocks its consumers without blocking independent packages', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
@@ -427,6 +428,7 @@ test('registry retries wait long enough for provenance visibility', () => {
 });
 
 test('fresh protocol consumers all publish the same exact contracts version', () => {
+  /** @param {string} name */
   const readPackage = (name) => JSON.parse(readFileSync(new URL(`../../packages/${name}/package.json`, import.meta.url), 'utf8'));
   const names = ['contracts', 'commands', 'db', 'app', 'elysia', 'compiler', 'delivery', 'supacloud-js', 'query', 'app-svelte'];
   const manifests = new Map(names.map((name) => {
@@ -436,12 +438,15 @@ test('fresh protocol consumers all publish the same exact contracts version', ()
   const contractsVersion = manifests.get('@supacloud/contracts').version;
   for (const name of ['commands', 'db', 'elysia', 'app', 'app-svelte', 'supacloud-js']) {
     const prepared = prepareCommandPackage(readPackage(name), manifests);
-    assert.equal(prepared.package.dependencies['@supacloud/contracts'], contractsVersion);
+    const dependencies = prepared.package['dependencies'];
+    assert.ok(isRecord(dependencies));
+    assert.equal(dependencies['@supacloud/contracts'], contractsVersion);
     assert.ok(prepared.required.includes(`@supacloud/contracts@${contractsVersion}`));
   }
 });
 
 test('Lite publishes a current exact database dependency after database publication', () => {
+  /** @param {string} name */
   const readPackage = (name) => JSON.parse(readFileSync(new URL(`../../packages/${name}/package.json`, import.meta.url), 'utf8'));
   const names = ['contracts', 'commands', 'db', 'app', 'elysia', 'compiler', 'delivery'];
   const manifests = new Map(names.map((name) => {
@@ -452,16 +457,18 @@ test('Lite publishes a current exact database dependency after database publicat
   assert.equal(candidate.dependencies['@supacloud/db'], 'file:../db');
   assert.equal(candidate.overrides['@supacloud/db'], 'file:../db');
   const prepared = prepareCommandPackage(candidate, manifests);
-  assert.equal(prepared.package.dependencies['@supacloud/db'], manifests.get('@supacloud/db').version);
+  const dependencies = prepared.package['dependencies'];
+  assert.ok(isRecord(dependencies));
+  assert.equal(dependencies['@supacloud/db'], manifests.get('@supacloud/db').version);
   assert.deepEqual(prepared.required, [`@supacloud/db@${manifests.get('@supacloud/db').version}`]);
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   const lite = workflow.indexOf('- name: Publish SupaCloud Lite to NPM');
   assert.ok(lite > workflow.indexOf('- name: Publish database governance to NPM'));
-  const block = workflow.slice(lite).split('\n      - name:')[0];
+  const block = workflow.slice(lite).split('\n      - name:')[0] ?? '';
   assert.match(block, /bun run check[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
   assert.match(block, /git -C \"\$GITHUB_WORKSPACE\" archive HEAD \| tar -x -C \"\$build_root\"/);
   assert.match(block, /cd \"\$build_root\/packages\/supacloud-lite\"/);
-  assert.doesNotMatch(block.split('prepare-command-package.mjs')[1], /bun install/);
+  assert.doesNotMatch(block.split('prepare-command-package.mjs')[1] ?? '', /bun install/);
   const script = readFileSync(new URL('./prepare-command-package.mjs', import.meta.url), 'utf8');
   assert.match(script, /'supacloud-lite'/);
   assert.match(script, /'@supacloud\/lite'/);

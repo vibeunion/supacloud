@@ -20,6 +20,7 @@ const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js
  * not become runtime dependencies or block on registry availability.
  * @param {unknown} candidate
  * @param {ReadonlyMap<string, unknown>} siblings
+ * @returns {{ package: Record<string, unknown>; required: string[] }}
  */
 export function prepareCommandPackage(candidate, siblings) {
   if (!isRecord(candidate) || typeof candidate['name'] !== 'string') throw new Error('Invalid package manifest');
