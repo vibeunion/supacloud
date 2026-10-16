@@ -167,7 +167,7 @@ function routeFixture() {
       return entries.map(entry => ({
         attempted: 1, succeeded: 1, cacheHits: 0, cacheMisses: 1, durationMs: 1,
         attestation: { ...entry.attestation!, module_loaded: true as const },
-        rotation: { generation, attempted: 1, idleRetired: 1, busyTainted: 0, alreadyTainted: 0, immediateReplacements: 1 },
+        rotation: { generation, attempted: 1, idleRetired: 1, parkedRetired: 0, busyTainted: 0, alreadyTainted: 0, immediateReplacements: 1 },
       }));
     },
   });

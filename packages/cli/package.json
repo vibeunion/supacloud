@@ -63,6 +63,7 @@
     "@graphql-tools/utils": "^12.0.4"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "2.117.3",
     "@supacloud/elysia": "file:../elysia",
     "@types/bun": "^1.4.3",
     "effect": "4.0.5",

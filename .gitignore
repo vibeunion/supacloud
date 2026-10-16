@@ -150,6 +150,7 @@ test-gotrue.sh
 .roo/
 .DS_Store
 output/playwright/
+output/customer-acceptance/
 
 
 servers.local.md

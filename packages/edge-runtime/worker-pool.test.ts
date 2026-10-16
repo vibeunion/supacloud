@@ -2894,6 +2894,8 @@ describe("WorkerPool parked project slots", () => {
       env: { PROJECT_OWNER: "b" }, moduleVersion: "v2",
     });
     expect(preheat.rotation.attempted).toBe(2);
+    expect(preheat.rotation.idleRetired).toBe(1);
+    expect(preheat.rotation.parkedRetired).toBe(1);
     expect(preheat.rotation.immediateReplacements).toBe(1);
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
     expect(await (await dispatch("a")).json()).not.toEqual(first);
@@ -3376,6 +3378,7 @@ describe("WorkerPool module cache", () => {
         generation: 1,
         attempted: 1,
         idleRetired: 1,
+        parkedRetired: 0,
         busyTainted: 0,
         alreadyTainted: 0,
         immediateReplacements: 1,
@@ -3441,6 +3444,7 @@ describe("WorkerPool module cache", () => {
         generation: 1,
         attempted: 2,
         idleRetired: 1,
+        parkedRetired: 0,
         busyTainted: 1,
         alreadyTainted: 0,
         immediateReplacements: 1,
@@ -3497,6 +3501,7 @@ describe("WorkerPool module cache", () => {
         generation: 1,
         attempted: 1,
         idleRetired: 1,
+        parkedRetired: 0,
         busyTainted: 0,
         alreadyTainted: 0,
         immediateReplacements: 1,

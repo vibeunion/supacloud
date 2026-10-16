@@ -179,14 +179,17 @@ function runtimeAttestation(
 
 function rotationGeneration(candidate: unknown): number | null {
   const rotation = objectRecord(candidate);
+  const hasParkedRetired = rotation !== null && Object.hasOwn(rotation, "parkedRetired");
+  const keys = hasParkedRetired ? [...ROTATION_KEYS, "parkedRetired"] : ROTATION_KEYS;
   if (rotation === null
-    || !exactKeys(rotation, ROTATION_KEYS)
-    || !ROTATION_KEYS.every((key) => nonNegativeInteger(rotation[key]))) return null;
+    || !exactKeys(rotation, keys)
+    || !keys.every((key) => nonNegativeInteger(rotation[key]))) return null;
   const attempted = rotation["attempted"] as number;
   const idleRetired = rotation["idleRetired"] as number;
+  const parkedRetired = hasParkedRetired ? rotation["parkedRetired"] as number : 0;
   const busyTainted = rotation["busyTainted"] as number;
   const alreadyTainted = rotation["alreadyTainted"] as number;
-  if (attempted !== idleRetired + busyTainted + alreadyTainted
+  if (attempted !== idleRetired + parkedRetired + busyTainted + alreadyTainted
     || rotation["immediateReplacements"] !== idleRetired) return null;
   return rotation["generation"] as number;
 }
@@ -286,7 +289,7 @@ export function diagnoseEdgeRuntimePreheat(
       ...shape(value, [...POOL_KEYS, "rotation", "error"]),
       valid: validatedPool(value, expected, profile) !== null,
       identity: identity(record?.["attestation"], profile),
-      rotation: shape(record?.["rotation"], ROTATION_KEYS),
+      rotation: shape(record?.["rotation"], [...ROTATION_KEYS, "parkedRetired"]),
       rotationValid: rotationGeneration(record?.["rotation"]) !== null,
     };
   };

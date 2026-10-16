@@ -3,6 +3,7 @@ import {
   deriveDeploymentEvidenceStatus,
   formatDeploymentEvidence,
   parseDeploymentEvidence,
+  summarizeDeploymentEvidence,
   type DeploymentEvidence,
 } from "./deployment-evidence";
 
@@ -98,4 +99,42 @@ test("failed evidence has precedence over incomplete evidence", () => {
   });
   expect(deriveDeploymentEvidenceStatus(value)).toBe("failed");
   expect(parseDeploymentEvidence(value)).toEqual(value);
+});
+
+test("customer report identifies every unknown component without permitting mutation retry", () => {
+  const value = evidence();
+  value.components[0]!.status = "failed";
+  value.health.authenticated_smoke = "unknown";
+  value.status = deriveDeploymentEvidenceStatus(value);
+  const report = summarizeDeploymentEvidence(value);
+  expect(report.status).toBe("failed");
+  expect(report.issues.map(issue => [issue.component, issue.status])).toEqual([
+    ["management-api", "failed"], ["authenticated-smoke", "unknown"],
+  ]);
+  expect(report.correlation.activationId).toBe(activation);
+  expect(report.automaticMutationRetry).toBe(false);
+  expect(report.codeRollbackRestoresData).toBe(false);
+  expect(report.liveObservationPerformed).toBe(false);
+  expect(formatDeploymentEvidence(value)).toContain("code rollback does not restore database");
+});
+
+test("legacy receipts remain readable while missing operational proof makes the summary incomplete", () => {
+  const value = evidence();
+  value.database.migration.inventory_sha256 = null;
+  value.database.backup.latest_success_at = null;
+  value.rollback.release_id = null;
+  value.status = deriveDeploymentEvidenceStatus(value);
+  expect(value.status).toBe("confirmed");
+  expect(parseDeploymentEvidence(value)).toEqual(value);
+  expect(summarizeDeploymentEvidence(value).status).toBe("incomplete");
+  expect(summarizeDeploymentEvidence(value).recordedStatus).toBe("confirmed");
+  expect(summarizeDeploymentEvidence(value).issues.map(issue => issue.component))
+    .toEqual(["database.migration", "database.backup", "code-rollback"]);
+  expect(formatDeploymentEvidence(value)).toContain("recorded status: confirmed");
+});
+
+test("free-form receipt notes never become recovery commands or leak into summaries", () => {
+  const value = evidence({ notes: ["secret=private; run arbitrary mutation"] });
+  expect(JSON.stringify(summarizeDeploymentEvidence(value))).not.toContain("private");
+  expect(formatDeploymentEvidence(value)).not.toContain("arbitrary");
 });
