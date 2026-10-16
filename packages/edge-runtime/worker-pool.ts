@@ -248,6 +248,7 @@ export type WorkerPoolGenerationRotationResult = {
   generation: number;
   attempted: number;
   idleRetired: number;
+  parkedRetired: number;
   busyTainted: number;
   alreadyTainted: number;
   immediateReplacements: number;
@@ -289,7 +290,7 @@ type RetiredWorker = {
   ageTimer: ReturnType<typeof setTimeout>;
 };
 
-type GenerationRotationDisposition = "idle-retired" | "busy-tainted" | "already-tainted";
+type GenerationRotationDisposition = "idle-retired" | "parked-retired" | "busy-tainted" | "already-tainted";
 
 function acceptedPreheatAttestation(
   candidate: unknown,
@@ -1406,7 +1407,11 @@ export class WorkerPool {
   }
 
   private rotateWorkerForGeneration(worker: Worker): GenerationRotationDisposition {
-    if (this.idle.includes(worker) || this.parkedWorkers.has(worker)) {
+    if (this.parkedWorkers.has(worker)) {
+      this.retireWorker(worker);
+      return "parked-retired";
+    }
+    if (this.idle.includes(worker)) {
       this.retireWorker(worker);
       return "idle-retired";
     }
@@ -1424,14 +1429,16 @@ export class WorkerPool {
     );
     const dispositions = workers.map((worker) => this.rotateWorkerForGeneration(worker));
     const idleRetired = dispositions.filter((value) => value === "idle-retired").length;
+    const parkedRetired = dispositions.filter((value) => value === "parked-retired").length;
     const busyTainted = dispositions.filter((value) => value === "busy-tainted").length;
     const alreadyTainted = dispositions.filter((value) => value === "already-tainted").length;
-    this.totalGenerationIdleRetirements += idleRetired;
+    this.totalGenerationIdleRetirements += idleRetired + parkedRetired;
     this.totalGenerationBusyTaints += busyTainted;
     return {
       generation: this.workerGeneration,
       attempted: workers.length,
       idleRetired,
+      parkedRetired,
       busyTainted,
       alreadyTainted,
       immediateReplacements: this.totalWorkerReplacements - replacementsBefore,
