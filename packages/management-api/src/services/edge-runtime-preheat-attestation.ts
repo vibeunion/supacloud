@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ATTESTED_REVISION_PATTERN } from "./runtime-revision";
 
 const PREHEAT_SCHEMA = "supacloud.edge-runtime-preheat-attestation.v1";
@@ -232,6 +233,74 @@ function sameRuntimeBase(left: RuntimeAttestation, right: RuntimeAttestation): b
     && left.envProof === right.envProof
     && left.verifyJwt === right.verifyJwt
     && left.activationId === right.activationId;
+}
+
+// Preserve protocol structure without logging arbitrary runtime strings or unknown fields.
+export function diagnoseEdgeRuntimePreheat(
+  payload: unknown,
+  expected: ExpectedEdgeRuntimePreheat,
+): Record<string, unknown> {
+  const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+  const shape = (value: unknown, keys: readonly string[]): Record<string, unknown> => {
+    const record = objectRecord(value);
+    if (!record) return { type: value === null ? "null" : typeof value };
+    return {
+      missing: keys.filter((key) => !Object.hasOwn(record, key)),
+      unknownKeyHashes: Object.keys(record).filter((key) => !keys.includes(key)).map(digest),
+      fields: Object.fromEntries(keys.filter((key) => Object.hasOwn(record, key)).map((key) => {
+        const entry = record[key];
+        const safe = entry === null || typeof entry === "boolean"
+          || (typeof entry === "number" && Number.isFinite(entry))
+          ? entry
+          : typeof entry === "string"
+            ? { type: "string", sha256: digest(entry), length: entry.length }
+            : { type: Array.isArray(entry) ? "array" : typeof entry };
+        return [key, safe];
+      })),
+    };
+  };
+  const identity = (value: unknown, profile: RuntimeAttestation["executionProfile"]) => {
+    const record = objectRecord(value);
+    const matches = {
+      schema: PREHEAT_SCHEMA,
+      project_ref: expected.projectRef,
+      function_slug: expected.functionSlug,
+      requested_version: expected.requestedVersion,
+      target_version: expected.resolvedVersion,
+      resolved_version: expected.resolvedVersion,
+      artifact_sha256: expected.artifactSha256,
+      verify_jwt: expected.verifyJwt,
+      activation_id: expected.activationId,
+      execution_profile: profile,
+      module_loaded: true,
+    };
+    return {
+      ...shape(value, ATTESTATION_KEYS),
+      valid: runtimeAttestation(value, expected, profile) !== null,
+      matches: Object.fromEntries(Object.entries(matches).map(([key, entry]) => [key, record?.[key] === entry])),
+      environment: shape(record?.["tenant_env"], ENV_KEYS),
+    };
+  };
+  const response = objectRecord(payload);
+  const pool = (profile: RuntimeAttestation["executionProfile"]) => {
+    const value = response?.[profile];
+    const record = objectRecord(value);
+    return {
+      ...shape(value, [...POOL_KEYS, "rotation", "error"]),
+      valid: validatedPool(value, expected, profile) !== null,
+      identity: identity(record?.["attestation"], profile),
+      rotation: shape(record?.["rotation"], [...ROTATION_KEYS, "parkedRetired"]),
+      rotationValid: rotationGeneration(record?.["rotation"]) !== null,
+    };
+  };
+  return {
+    expected,
+    response: shape(payload, RESPONSE_KEYS),
+    identity: identity(response?.["attestation"], "foreground"),
+    foreground: pool("foreground"),
+    background: pool("background"),
+    valid: validateEdgeRuntimePreheat(payload, expected) !== null,
+  };
 }
 
 export function validateEdgeRuntimePreheat(
