@@ -6,7 +6,7 @@ import { runStarterCommand } from "./check_app_starter";
 import { verifyPublishedExecutionContext } from "./check_published_customer";
 import { prepareStarterSourceFixture } from "./lib/starter-source-fixture";
 
-test("the context consumer gate exercises actual CLI processes and preserves generated drift", async () => {
+test("the context consumer gate isolates HTTP and worker identities through real CLI processes", async () => {
   const root = await mkdtemp(join(tmpdir(), "source-context-consumer-"));
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(new Error("Context consumer test timed out")), 55_000);
@@ -26,10 +26,11 @@ test("the context consumer gate exercises actual CLI processes and preserves gen
         signal: abort.signal, timeoutMs: 15_000, success,
       });
     });
-    expect(calls).toHaveLength(6);
+    expect(calls).toHaveLength(9);
     expect(calls.some(args => args.includes("--request-id"))).toBe(true);
     expect(calls.some(args => args.includes("--request_id"))).toBe(true);
     expect(calls.filter(args => args.includes("--write"))).toHaveLength(2);
+    expect(calls.filter(args => args.includes("published-context-run"))).toHaveLength(3);
     expect(await readFile(artifact, "utf8")).toBe(drift);
   } finally {
     clearTimeout(timer);
@@ -47,5 +48,24 @@ test("a missing consumer observer fails without invoking a process or adding a s
     })).rejects.toThrow();
     expect(invoked).toBe(false);
     expect(await readdir(root)).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a missing worker observer fails before dispatch without modifying the generated consumer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "missing-worker-context-consumer-"));
+  let invoked = false;
+  try {
+    await prepareStarterSourceFixture(root);
+    const worker = join(root, "src/host/review-worker-observability.ts");
+    await rm(worker);
+    const hostFiles = await readdir(join(root, "src/host"));
+    const artifact = await readFile(join(root, "generated/application.ts"), "utf8");
+    await expect(verifyPublishedExecutionContext(root, "unused-cli", async () => {
+      invoked = true;
+      return "";
+    })).rejects.toThrow();
+    expect(invoked).toBe(false);
+    expect(await readdir(join(root, "src/host"))).toEqual(hostFiles);
+    expect(await readFile(join(root, "generated/application.ts"), "utf8")).toBe(artifact);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
