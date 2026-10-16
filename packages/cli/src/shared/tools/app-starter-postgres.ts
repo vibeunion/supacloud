@@ -30,10 +30,13 @@ import {
 import type { AppAdapters } from "../application";
 import type { ReviewStore } from "../review/review";
 import type { ReviewUploadPort } from "../review/uploads";
+import type { ReviewTaskPort } from "../review/tasks";
 import { ApprovalInput, ReviewResult } from "../review/contracts";
+import type { ReviewRow } from "../../db/schema";
 
 const input = createSchemaDecoder(ApprovalInput, { normalize: false });
-const result = createSchemaDecoder(ReviewResult, { normalize: false });
+const result: (value: unknown) => Pick<ReviewRow, "state" | "version"> =
+  createSchemaDecoder(ReviewResult, { normalize: false });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -55,6 +58,7 @@ export interface ReviewPostgresOptions {
   tenantId: string;
   identity: Omit<SupAuthContextOptions, "resolveAccess">;
   uploads?: ReviewUploadPort;
+  tasks?: ReviewTaskPort;
   // Only database effects here: they commit/rollback with the approval and receipt.
   afterApproved?(tx: CommandTransaction, id: string, version: number): Promise<void>;
 }
@@ -90,6 +94,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   const transaction = () => commandBinding.transaction();
   const store: ReviewStore = {
     ...options.uploads,
+    ...options.tasks,
     async get(table, id) {
       if (table !== "reviews") throw new Error("Unsupported review table");
       return rows(await transaction().query(
@@ -191,6 +196,7 @@ import { createApplication, type CompiledModule } from "@supacloud/elysia";
 import { createReviewPostgresAdapters } from "./host/review-postgres";
 import { createReviewAttachmentAdapters } from "./host/review-attachments";
 import { createReviewUploadAdapters } from "./host/review-uploads";
+import { createReviewTaskAdapters } from "./host/review-tasks";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -241,10 +247,12 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     const durable = attachmentOptions ? await createReviewAttachmentAdapters(attachmentOptions) : undefined;
     stage = "uploads";
     const uploads = attachmentOptions ? await createReviewUploadAdapters(attachmentOptions) : undefined;
+    const tasks = attachmentOptions ? await createReviewTaskAdapters(attachmentOptions) : undefined;
     stage = "postgres";
     const adapters = await createReviewPostgresAdapters({
       database, tenantId: settings.tenantId, identity: settings.identity,
       ...(uploads ? { uploads } : {}),
+      ...(tasks ? { tasks } : {}),
       ...(durable ? { afterApproved: durable.enqueue } : {}),
     });
     lifecycle.signal.throwIfAborted();
