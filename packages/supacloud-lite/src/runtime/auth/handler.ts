@@ -827,13 +827,16 @@ export class AuthHandler {
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
   private static readonly MAX_OTP_ATTEMPTS = 5
 
-  private async redeem(token: string, types: string[], email?: string): Promise<UserRow | null> {
+  private async redeem(token: string, types: string[], email?: string): Promise<Record<string, unknown> | null> {
     const redemption: EmailTokenRedemption = {
       token,
       tokenTypes: `{${types.join(',')}}`,
       email: email?.toLowerCase().trim() ?? null,
     }
-    return this.db.transaction((query) => this.claimEmailToken(query, redemption))
+    return this.db.transaction(async (query) => {
+      const user = await this.claimEmailToken(query, redemption)
+      return user ? this.sessionFor(user, undefined, undefined, query) : null
+    })
   }
 
   private async claimEmailToken(query: Querier, redemption: EmailTokenRedemption): Promise<UserRow | null> {
@@ -854,7 +857,12 @@ export class AuthHandler {
   ): Promise<EmailTokenCandidate | null> {
     // Both alternatives share this row, so the lock serializes OTP/hash claims
     // before either transaction re-checks and removes its candidate token.
-    await query(`select id from auth.users where id = $1 for update`, [candidate.user_id])
+    const eligible = await query(
+      `select id from auth.users where id = $1 and deleted_at is null
+         and (banned_until is null or banned_until <= now()) for update`,
+      [candidate.user_id],
+    )
+    if (eligible.rows.length === 0) return null
     const claimedTokens = await query<EmailTokenCandidate>(
       `delete from auth.one_time_tokens
        where id = $1 and token = $2 and token_type = any($3::text[])
@@ -935,9 +943,9 @@ export class AuthHandler {
     // could mint a recovery session.
     const types =
       body.type === 'recovery' ? ['recovery'] : body.type === 'magiclink' ? ['magiclink'] : ['otp', 'magiclink']
-    const user = await this.redeem(token, types, body.email)
-    if (!user) return authError(403, 'otp_expired', 'Token has expired or is invalid')
-    return json(200, await this.sessionFor(user))
+    const session = await this.redeem(token, types, body.email)
+    if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+    return json(200, session)
   }
 
   private async redeemPhoneOtp(phone: string, code: string): Promise<Record<string, unknown> | null> {
@@ -1009,11 +1017,10 @@ export class AuthHandler {
       this.config.uriAllowList,
       this.config.enforceRedirectAllowList
     )
-    const user = await this.redeem(token, [type])
-    if (!user) {
+    const session = await this.redeem(token, [type])
+    if (!session) {
       return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
     }
-    const session = (await this.sessionFor(user)) as { access_token: string; refresh_token: string; expires_in: number }
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
   }
