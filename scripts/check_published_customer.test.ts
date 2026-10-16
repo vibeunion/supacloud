@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertRegistryManifest, exactPublishedVersion, publishedConsumerEnvironment, writePrivateAcceptanceFile } from "./check_published_customer";
@@ -24,10 +24,45 @@ test("consumer subprocesses preserve proxy trust settings but not application cr
     NODE_EXTRA_CA_CERTS: "/test/ca.pem", SSL_CERT_FILE: "/test/ca.pem",
     DATABASE_URL: "not-forwarded", SUPACLOUD_TOKEN: "not-forwarded", NPM_TOKEN: "not-forwarded",
     NODE_TLS_REJECT_UNAUTHORIZED: "0", BUN_CONFIG_SKIP_INSTALL_CHECK: "1",
-  })).toEqual({
+    HOME: "/developer/home", USERPROFILE: "/developer/home", XDG_CONFIG_HOME: "/developer/config",
+    BUN_INSTALL_CACHE_DIR: "/developer/cache",
+  }, "/test/isolated-home")).toEqual({
     PATH: "/test/bin", HTTPS_PROXY: "http://proxy.example.test:8080", no_proxy: "localhost,127.0.0.1",
     NODE_EXTRA_CA_CERTS: "/test/ca.pem", SSL_CERT_FILE: "/test/ca.pem",
+    HOME: "/test/isolated-home", USERPROFILE: "/test/isolated-home",
   });
+});
+
+test("consumer subprocesses cannot discover the developer home configuration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "published-isolated-home-"));
+  const sourceHome = join(root, "developer"), home = join(root, "consumer");
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  try {
+    await mkdir(sourceHome);
+    await mkdir(home);
+    await writeFile(join(sourceHome, ".npmrc"), "developer-config-marker");
+    child = Bun.spawn([process.execPath, "--no-env-file", "--eval", `
+      import { homedir } from "node:os";
+      import { existsSync } from "node:fs";
+      import { join } from "node:path";
+      console.log(JSON.stringify({ home: homedir(), config: existsSync(join(homedir(), ".npmrc")) }));
+    `], {
+      cwd: root, stdout: "pipe", stderr: "pipe",
+      env: publishedConsumerEnvironment({ PATH: process.env["PATH"], HOME: sourceHome, USERPROFILE: sourceHome }, home),
+    });
+    const timer = setTimeout(() => child?.kill(), 5_000);
+    try {
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+      expect(JSON.parse(stdout)).toEqual({ home, config: false });
+      expect(await readFile(join(sourceHome, ".npmrc"), "utf8")).toBe("developer-config-marker");
+    } finally { clearTimeout(timer); }
+  } finally {
+    if (child && child.exitCode === null) { child.kill(); await child.exited; }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test.skipIf(process.platform === "win32")("rerun diagnostics replace permissive files with private atomic output", async () => {

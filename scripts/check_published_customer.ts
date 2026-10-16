@@ -31,13 +31,14 @@ export function assertRegistryManifest(value: unknown): void {
 
 // Preserve transport settings required by proxied registries without inheriting
 // application credentials, package overrides, or insecure TLS bypass flags.
-export function publishedConsumerEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries([
-    "PATH", "HOME", "TMPDIR", "SYSTEMROOT",
+export function publishedConsumerEnvironment(source: NodeJS.ProcessEnv, home: string): Record<string, string> {
+  const transport = Object.fromEntries([
+    "PATH", "TMPDIR", "SYSTEMROOT",
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
     "http_proxy", "https_proxy", "no_proxy", "all_proxy",
     "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
   ].flatMap(key => source[key] === undefined ? [] : [[key, source[key]!]]));
+  return { ...transport, HOME: home, USERPROFILE: home };
 }
 
 /** Replace old reports without retaining permissive modes or following a destination symlink. */
@@ -124,11 +125,12 @@ async function main(args: string[]) {
   const reportFile = resolve(values.report);
   const root = await mkdtemp(join(tmpdir(), "supacloud-published-customer-"));
   const tools = join(root, "tools"), project = join(root, "application");
+  const isolatedHome = join(root, "home");
   const signal = new AbortController();
   const interrupt = () => signal.abort(new Error("Published customer acceptance interrupted"));
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
-  const env = publishedConsumerEnvironment(process.env);
+  const env = publishedConsumerEnvironment(process.env, isolatedHome);
   const report: {
     schema: string; status: "incomplete" | "failed" | "passed"; stage: string;
     versions: Record<string, string>; checks: string[];
@@ -144,6 +146,7 @@ async function main(args: string[]) {
   const run = (args: string[], cwd = project) => runStarterCommand(args, { cwd, env, signal: signal.signal });
   try {
     await mkdir(tools);
+    await mkdir(isolatedHome);
     await writeFile(join(tools, "package.json"), JSON.stringify({
       private: true, type: "module", dependencies: { "@supacloud/cli": cliVersion },
     }));
