@@ -87,6 +87,16 @@ native("transactional governance on isolated native PostgreSQL", () => {
       },
     });
   }
+  function invocation(value: unknown, key: string): CommandInvocation {
+    return {
+      command: descriptor,
+      request: new Request("https://test.invalid/reviews/approval-receipt", {
+        headers: { "idempotency-key": key },
+      }),
+      requestContext: identity, services: {},
+      input: { params: {}, query: {}, body: value },
+    };
+  }
   function run(
     bound: ReturnType<typeof binding>, value: unknown, key = crypto.randomUUID(),
     options: {
@@ -133,6 +143,86 @@ native("transactional governance on isolated native PostgreSQL", () => {
     expect(await count("execution_receipts", key)).toEqual([{ count: 1 }]);
     expect(await count("execution_audit", key)).toEqual([{ count: 1 }]);
     expect(() => bound.transaction()).toThrow("not active");
+  });
+
+  test("lookup returns no receipt without submitting a business write or audit", async () => {
+    const value = await fixture(), key = crypto.randomUUID(), bound = binding({ auditFailure: true });
+    expect(await bound.lookup(invocation(value, key))).toBeNull();
+    expect(await state(value.id)).toEqual([{ state: "draft", version: 1 }]);
+    expect(await count("execution_receipts", key)).toEqual([{ count: 0 }]);
+    expect(await count("execution_audit", key)).toEqual([{ count: 0 }]);
+    expect(() => bound.transaction()).toThrow("not active");
+  });
+
+  test("lookup from a recreated binding returns validated authority without auditing again", async () => {
+    const value = await fixture(), key = crypto.randomUUID();
+    await run(binding(), value, key);
+    const bound = binding({ auditFailure: true });
+    expect(await bound.lookup(invocation(value, key))).toMatchObject({
+      ...identity, command: descriptor.name, operationId: key,
+      status: "confirmed", audit: "complete", result: { state: "approved", version: 2 },
+    });
+    expect(await state(value.id)).toEqual([{ state: "approved", version: 2 }]);
+    expect(await count("execution_receipts", key)).toEqual([{ count: 1 }]);
+    expect(await count("execution_audit", key)).toEqual([{ count: 1 }]);
+    expect(() => bound.transaction()).toThrow("not active");
+  });
+
+  test("lookup checks current ownership and rejects changed inputs instead of returning authority", async () => {
+    const value = await fixture(), key = crypto.randomUUID(), bound = binding();
+    await run(bound, value, key);
+    await expect(bound.lookup(invocation({ ...value, expectedVersion: 2 }, key)))
+      .rejects.toMatchObject({ status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" });
+    for (const who of [{ ...identity, tenantId: "project-b" }, { ...identity, actorId: "actor-b" }]) {
+      await expect(bound.lookup({ ...invocation(value, key), requestContext: who }))
+        .rejects.toMatchObject({ status: 403, code: "COMMAND_REJECTED" });
+    }
+    await rows("UPDATE public.binding_reviews SET allowed=false WHERE id=$1", [value.id]);
+    await expect(bound.lookup(invocation(value, key)))
+      .rejects.toMatchObject({ status: 403, code: "COMMAND_REJECTED" });
+    // A missing key does not bypass current business authorization either.
+    await expect(bound.lookup(invocation(value, crypto.randomUUID())))
+      .rejects.toMatchObject({ status: 403, code: "COMMAND_REJECTED" });
+    expect(await count("execution_audit", key)).toEqual([{ count: 1 }]);
+  });
+
+  test("lookup never disguises a database failure as an absent receipt", async () => {
+    const value = await fixture(), key = crypto.randomUUID();
+    const bound = binding({ database: {
+      async transaction() { throw new Error("private database connection detail"); },
+    } });
+    await expect(bound.lookup(invocation(value, key))).rejects.toMatchObject({
+      status: 503, code: "COMMAND_UNAVAILABLE", message: "COMMAND_UNAVAILABLE",
+    });
+    const uncertain = binding({ database: {
+      async transaction(run) {
+        await database.transaction(run);
+        throw new Error("private connection lost after transaction");
+      },
+    } });
+    await expect(uncertain.lookup(invocation(value, key))).rejects.toMatchObject({
+      status: 503, code: "COMMAND_OUTCOME_UNKNOWN", message: "COMMAND_OUTCOME_UNKNOWN",
+    });
+    expect(await count("execution_receipts", key)).toEqual([{ count: 0 }]);
+  });
+
+  test("lookup validates command binding, original key and input before opening a transaction", async () => {
+    let transactions = 0;
+    const bound = binding({ database: {
+      async transaction() { transactions++; throw new Error("Should not connect"); },
+    } });
+    const value = { id: "not-persisted", expectedVersion: 1 }, key = crypto.randomUUID();
+    for (const change of [{ name: "other" }, { permission: "other" }, { audit: "other" },
+      { transaction: "none" }, { idempotency: "none" }, { rpc: "other" }]) {
+      await expect(bound.lookup({ ...invocation(value, key), command: { ...descriptor, ...change } }))
+        .rejects.toMatchObject({ code: "COMMAND_BINDING_MISMATCH" });
+    }
+    await expect(bound.lookup({
+      ...invocation(value, key), request: new Request("https://test.invalid/lookup"),
+    })).rejects.toMatchObject({ status: 400 });
+    await expect(bound.lookup(invocation({ ...value, expectedVersion: "1" }, key)))
+      .rejects.toMatchObject({ status: 400, code: "COMMAND_INPUT_INVALID" });
+    expect(transactions).toBe(0);
   });
 
   test("revoked access and other tenants/actors cannot replay a receipt", async () => {
@@ -208,7 +298,7 @@ native("transactional governance on isolated native PostgreSQL", () => {
     expect(await state(value.id)).toEqual([{ state: "draft", version: 1 }]);
   });
 
-  test("lost commit acknowledgement is recovered by replay, not an unguarded retry", async () => {
+  test("lost commit acknowledgement is recovered by lookup without resubmission", async () => {
     let lose = true;
     const bound = binding({ database: {
       async transaction(run) {
@@ -219,6 +309,11 @@ native("transactional governance on isolated native PostgreSQL", () => {
     } });
     const value = await fixture(), key = crypto.randomUUID();
     await expect(run(bound, value, key)).rejects.toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
+    expect(await bound.lookup(invocation(value, key))).toMatchObject({
+      status: "confirmed", audit: "complete", result: { state: "approved", version: 2 },
+    });
+    expect(await state(value.id)).toEqual([{ state: "approved", version: 2 }]);
+    expect(await count("execution_audit", key)).toEqual([{ count: 1 }]);
     expect(await run(bound, value, key)).toEqual({ state: "approved", version: 2 });
     expect(await count("execution_audit", key)).toEqual([{ count: 1 }]);
   });
