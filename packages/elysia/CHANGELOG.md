@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.31.1...elysia-v0.32.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** complete review task status and recovery lifecycle ([#1970](https://github.com/vibeunion/supacloud/issues/1970)) ([4ed6b7b](https://github.com/vibeunion/supacloud/commit/4ed6b7b8a9baced763de5602b67e1bb62d0479e2))
+* **elysia:** expose read-only transactional command lookup ([#1977](https://github.com/vibeunion/supacloud/issues/1977)) ([3452413](https://github.com/vibeunion/supacloud/commit/345241318e337eac6d52953c3e84ee51899e133a))
+
 ## [0.31.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.31.0...elysia-v0.31.1) (2026-10-15)
 
 

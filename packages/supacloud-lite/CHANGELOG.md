@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.2...supacloud-lite-v0.29.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lite:** preserve single-column table RPC responses ([#1971](https://github.com/vibeunion/supacloud/issues/1971)) ([63edb93](https://github.com/vibeunion/supacloud/commit/63edb937322130796260a1284c09cc895735214e))
+
 ## [0.29.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.1...supacloud-lite-v0.29.2) (2026-10-15)
 
 

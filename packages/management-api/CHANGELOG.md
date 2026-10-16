@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.118.4](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.3...management-api-v0.118.4) (2026-10-16)
+
+
+### Bug Fixes
+
+* **edge-runtime:** separate parked retirement attestation from execution slots ([#1985](https://github.com/vibeunion/supacloud/issues/1985)) ([575c8bd](https://github.com/vibeunion/supacloud/commit/575c8bd376c6e2d547db2581f05756e8d832f8e2))
+
 ## [0.118.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.2...management-api-v0.118.3) (2026-10-16)
 
 
