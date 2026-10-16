@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.1...supacloud-lite-v0.29.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** resolve RPC overloads using required arguments ([#1967](https://github.com/vibeunion/supacloud/issues/1967)) ([e00ffaf](https://github.com/vibeunion/supacloud/commit/e00ffafd41aa52c8f14c2e81f3bb8a8914b336c8))
+
 ## [0.29.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.0...supacloud-lite-v0.29.1) (2026-10-15)
 
 
