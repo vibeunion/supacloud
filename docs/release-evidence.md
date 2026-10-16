@@ -75,6 +75,34 @@ Rollback is recorded as separate paths, not a single switch:
 - **Fail closed.** A missing target, a malformed inventory or a hash mismatch
   fails with `RELEASE_EVIDENCE_TARGET_NOT_FOUND` / `RELEASE_EVIDENCE_INVALID`.
 
+## Customer Assessment
+
+Deployment summaries preserve the validated receipt's `recordedStatus` while
+assessing each operational issue. A failed migration compatibility check is a
+failure even if migration execution itself was confirmed. Summary precedence is
+`failed`, then `unknown`, then `incomplete`, then `confirmed`; missing proof
+must not hide a known failure or an uncertain rollback. Legacy receipt parsing
+and stored status derivation remain unchanged.
+
+```gherkin
+Scenario: Retain a known compatibility failure
+  Given a valid legacy receipt with confirmed migration execution and failed compatibility
+  When a customer reads its deployment summary
+  Then migration and overall assessment are failed
+  And the original recorded status is preserved
+
+Scenario: Retain rollback uncertainty
+  Given an otherwise confirmed receipt with unknown rollback readiness
+  When a customer reads its deployment summary
+  Then the assessment is unknown rather than merely incomplete
+  And the summary does not permit automatic mutation retry
+
+Scenario: Preserve failure precedence
+  Given a failed component and unknown rollback readiness
+  When a customer reads its deployment summary
+  Then the overall assessment remains failed and both issues are listed
+```
+
 ## Next steps
 
 1. Have the Management API persist and expose deployment evidence after each
