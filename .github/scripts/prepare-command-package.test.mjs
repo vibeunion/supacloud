@@ -463,7 +463,7 @@ test('Lite publishes a current exact database dependency after database publicat
   assert.match(block, /bun run check[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
   assert.match(block, /git -C \"\$GITHUB_WORKSPACE\" archive HEAD \| tar -x -C \"\$build_root\"/);
   assert.match(block, /cd \"\$build_root\/packages\/supacloud-lite\"/);
-  assert.doesNotMatch(block.split('prepare-command-package.mjs')[1], /bun install/);
+  assert.doesNotMatch(block.split('prepare-command-package.mjs')[1] ?? '', /bun install/);
   const script = readFileSync(new URL('./prepare-command-package.mjs', import.meta.url), 'utf8');
   assert.match(script, /'supacloud-lite'/);
   assert.match(script, /'@supacloud\/lite'/);
