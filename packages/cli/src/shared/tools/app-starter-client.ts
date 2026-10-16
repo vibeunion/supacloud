@@ -1,5 +1,6 @@
 /** Framework-neutral reference state, shared by Svelte/SVAdmin or other view adapters. */
 export const STARTER_REVIEW_CLIENT = String.raw`import type { ReviewOperation, ReviewReceipt } from "../review/contracts";
+import { REVIEW_VERSION_MAX } from "../review/limits";
 export type { ReviewOperation } from "../review/contracts";
 
 export interface ReviewRow { id: string; state: "draft" | "approved"; version: number }
@@ -42,7 +43,8 @@ export function createReviewPendingStore(storage: Pick<Storage, "getItem" | "set
     if ((item["kind"] !== "approve" && item["kind"] !== "upload")
       || typeof item["reviewId"] !== "string" || !item["reviewId"].trim()
       || typeof item["operationId"] !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item["operationId"])
-      || typeof item["expectedVersion"] !== "number" || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) {
+      || typeof item["expectedVersion"] !== "number" || !Number.isSafeInteger(item["expectedVersion"])
+      || item["expectedVersion"] < 1 || item["expectedVersion"] > REVIEW_VERSION_MAX) {
       throw new Error("Invalid pending operation");
     }
     return { kind: item["kind"], reviewId: item["reviewId"], operationId: item["operationId"], expectedVersion: item["expectedVersion"] };
@@ -121,10 +123,11 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
   async function submit(kind: ReviewOperation["kind"], row: ReviewRow, file?: Blob) {
     if (closed || recovering || state.mutation.status === "submitting" || state.mutation.status === "unknown") return;
     if (row.state !== "draft" || !Number.isSafeInteger(row.version) || row.version < 1 || !row.id.trim()) return;
+    if (row.version > REVIEW_VERSION_MAX || (kind === "approve" && row.version === REVIEW_VERSION_MAX)) return;
     // Upload contracts are narrower than approval/list IDs and PostgreSQL-safe versions.
     // Reject locally before creating an unresolved operation for an impossible request.
     if (kind === "upload" && (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.id)
-      || row.version > 2147483647 || !file || file.size < 1 || file.size > 1048576
+      || !file || file.size < 1 || file.size > 1048576
       || file.type.split(";")[0]?.trim().toLowerCase() !== "text/plain")) return;
     const operation: ReviewOperation = {
       kind, reviewId: row.id, expectedVersion: row.version, operationId: crypto.randomUUID(),

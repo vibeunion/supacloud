@@ -40,7 +40,7 @@ test("the emitted client reference executes its behavior tests without a UI fram
   try {
     const files = appStarterFiles("reference");
     for (const path of ["src/client/reviews.ts", "src/client/review-transport.ts",
-      "src/review/contracts.ts", "tests/review-client.test.ts"]) {
+      "src/review/contracts.ts", "src/review/limits.ts", "tests/review-client.test.ts"]) {
       const content = files[path];
       expect(content).toBeDefined();
       await mkdir(join(root, path, ".."), { recursive: true });
