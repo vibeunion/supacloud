@@ -44,7 +44,7 @@ test('CLI and Compiler use three isolated workers without reducing test coverage
   assert.notEqual(execution['continue-on-error'], true);
   const upload = job.steps.find(step => step.name === 'Upload package test timings');
   assert.equal(upload.if, "${{ always() && matrix.test_timings != '' }}");
-  assert.equal(upload.uses, 'actions/upload-artifact@v6');
+  assert.equal(upload.uses, 'actions/upload-artifact@v7');
   assert.equal(upload.with.path, '${{ runner.temp }}/${{ matrix.test_timings }}');
   assert.equal(upload.with.name, 'package-test-timings-${{ strategy.job-index }}');
   assert.equal(upload.with['retention-days'], 3);
