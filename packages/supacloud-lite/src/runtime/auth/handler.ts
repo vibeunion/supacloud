@@ -1528,14 +1528,28 @@ export class AuthHandler {
 
   private async rotateRefreshToken(token: string): Promise<Response> {
     return this.db.transaction(async (query) => {
+      const availableToken = await this.findAvailableRefreshToken(query, token)
+      if (!availableToken) return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
+      // Lock the user before the token, matching account deletion's cascade order.
+      const userResult = await query<UserRow & { is_banned: boolean }>(
+        `select *, coalesce(banned_until > now(), false) as is_banned
+         from auth.users where id = $1 for update`,
+        [availableToken.user_id],
+      )
+      const user = userResult.rows[0]
+      if (!user || user.deleted_at !== null) {
+        return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
+      }
+      if (user.is_banned) {
+        return authError(400, 'user_banned', 'Invalid Refresh Token: User Banned')
+      }
       const claimedToken = await this.claimRefreshToken(query, token)
       if (!claimedToken) return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
       const sessionStartedAt = await this.refreshSessionStartedAt(query, claimedToken)
       const expiryError = this.refreshExpiryError(claimedToken, sessionStartedAt)
       if (expiryError) return expiryError
-      const userResult = await query(`select * from auth.users where id = $1`, [claimedToken.user_id])
       const session = await this.sessionFor(
-        userResult.rows[0] as UserRow,
+        user,
         token,
         {
           sessionId: claimedToken.session_id ?? undefined,
@@ -1545,6 +1559,16 @@ export class AuthHandler {
       )
       return json(200, session)
     })
+  }
+
+  private async findAvailableRefreshToken(query: Querier, token: string): Promise<RefreshTokenRow | undefined> {
+    const available = await query<RefreshTokenRow>(
+      `select user_id, session_id, created_at
+       from auth.refresh_tokens
+       where token = $1 and revoked is not true`,
+      [token],
+    )
+    return available.rows[0]
   }
 
   private async claimRefreshToken(query: Querier, token: string): Promise<RefreshTokenRow | undefined> {
