@@ -175,7 +175,8 @@ jobs:
   package-checks:
     name: Package Checks (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Lite includes the full PGlite suite, package/standalone smoke, and audit.
+    timeout-minutes: ${{ matrix.name == 'SupaCloud Lite' && 35 || 20 }}
     strategy:
       fail-fast: false
       max-parallel: 12
