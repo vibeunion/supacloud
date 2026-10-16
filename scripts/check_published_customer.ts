@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { runStarterCommand, starterInstallArgs } from "./check_app_starter";
 import { startStarterLite, type StarterLite } from "./lib/starter-lite";
@@ -51,6 +51,15 @@ export async function writePrivateAcceptanceFile(file: string, content: string):
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+/** Normalize filesystem aliases without allowing package symlinks to escape the consumer install. */
+export async function assertInstalledPackagePath(path: string, nodeModules: string, label: string): Promise<void> {
+  const [resolvedPath, resolvedNodeModules] = await Promise.all([realpath(path), realpath(nodeModules)]);
+  const installedPath = relative(resolvedNodeModules, resolvedPath);
+  assert.ok(installedPath !== "" && !isAbsolute(installedPath)
+    && installedPath !== ".." && !installedPath.startsWith(".." + sep),
+    `${label} must be an installed package`);
 }
 
 /** Runs against the supplied consumer only; no templates or runtime modules are substituted. */
@@ -181,7 +190,7 @@ async function main(args: string[]) {
     report.checks.push("generated-contracts", "consumer-types");
     report.stage = "execution-context";
     const cliCompiler = Bun.resolveSync("@supacloud/compiler", join(tools, "node_modules/@supacloud/cli"));
-    assert.ok(cliCompiler.startsWith(join(tools, "node_modules") + "/"), "CLI compiler must be an installed package");
+    await assertInstalledPackagePath(cliCompiler, join(tools, "node_modules"), "CLI compiler");
     const cliCompilerManifest = record(JSON.parse(await readFile(join(dirname(cliCompiler), "../package.json"), "utf8")));
     assert.equal(cliCompilerManifest["name"], "@supacloud/compiler");
     assert.ok(typeof cliCompilerManifest["version"] === "string");
@@ -204,7 +213,7 @@ async function main(args: string[]) {
       verifyPersistentStarter(database: StarterLite, options: { signal: AbortSignal; verifyReceipts: boolean }): Promise<unknown>;
     } = await import(join(project, "tests/persistence.ts"));
     const publicLite = Bun.resolveSync("@supacloud/lite", project);
-    assert.ok(publicLite.startsWith(join(project, "node_modules") + "/"), "Runtime must be an installed package");
+    await assertInstalledPackagePath(publicLite, join(project, "node_modules"), "Runtime");
     backend = await startStarterLite(join(root, "database"), signal.signal, values["postgres-bin"], publicLite);
     report.databaseEvidence = await fixture.verifyPersistentStarter(backend, { signal: signal.signal, verifyReceipts: true });
     report.checks.push("durable-approval", "restart-and-replay", "permissions", "attachments-and-worker", "read-only-receipt-recovery");
