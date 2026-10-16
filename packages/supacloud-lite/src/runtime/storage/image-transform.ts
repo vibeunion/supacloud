@@ -119,7 +119,16 @@ export function parseImageTransform(query: URLSearchParams): ImageTransformParse
     return invalid('quality is supported only for jpeg and webp output')
   }
 
-  return { ok: true, value: { width, height, resize, quality, format } }
+  return {
+    ok: true,
+    value: {
+      resize,
+      format,
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
+      ...(quality === undefined ? {} : { quality }),
+    },
+  }
 }
 
 /** Encode a transform object into the query shape used by render/image URLs. */
