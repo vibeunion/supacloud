@@ -83,6 +83,24 @@ Scenario: Reuse the reference state with actual SVAdmin components
   When the browser repeats the reference business and recovery scenarios
   Then those components display the same confirmed, denied and unknown states
   And disposing the view prevents late updates without deleting pending evidence
+
+Scenario: Trace the deployed attachment worker
+  Given the generated delivery worker and its configured worker identity
+  When a job emits execution metadata
+  Then stdout contains structured events with the worker and workflow run identity
+  And a stage success is not presented as a confirmed queue receipt
+
+Scenario: Keep worker logs free of business payloads
+  Given execution metadata with extra input, result, error or credential fields
+  When the worker writes an execution event
+  Then only explicitly selected metadata fields are serialized
+  And malformed correlation identifiers and invalid durations are omitted
+
+Scenario: Preserve execution when logging fails
+  Given an unavailable execution log sink
+  When a job succeeds or fails
+  Then its original result or failure is preserved
+  And logging does not retry the business operation
 ```
 
 ## Evidence boundary
@@ -375,6 +393,33 @@ released normally before that exact-version gate can pass; a safe source merge
 and completed installed-customer acceptance are separate decisions.
 
 ## Remaining acceptance
+
+### Delivery worker execution logs
+
+The generated `src/delivery-worker.ts` now connects its attachment worker to
+`src/host/review-worker-observability.ts` by default. It emits one JSON line per
+execution event to stdout with `event: review-worker-execution`, component,
+timestamp, worker ID, operation, stage, phase and optional request ID/duration.
+For this worker, `requestId` is the canonical Workflow run ID. Join that ID
+through `starter_attachments.run_id` or the current retry lineage to find the
+attachment and its business operation; it is not the original HTTP request ID.
+
+The serializer selects fields instead of spreading event objects. Input,
+output, exception details, credentials and database parameters are excluded.
+Correlation IDs must be non-secret opaque identifiers; invalid identifiers and
+non-finite/negative durations are omitted. Execution logging remains best effort:
+the existing observer dispatcher isolates sink failures from business outcomes.
+Neither a logged successful stage nor absence of a failure log proves queue
+settlement. Confirm the Workflow receipt and durable database result separately.
+
+On 2026-10-16, the focused
+`packages/cli/src/shared/tools/app-starter-worker-observability.test.ts` passed
+five cases covering emitted host wiring, actual generated serializer behavior,
+metadata filtering, execution phases and sink failure isolation. These checks
+do not install a log collector, validate deployed stdout ingestion, rerun browser
+acceptance or prove gateway-to-worker propagation.
+
+### Release and live acceptance
 
 This increment is not evidence of completed platform acceptance. The published
 CLI must first include this increment in a release. Live SupAuth business smoke,
