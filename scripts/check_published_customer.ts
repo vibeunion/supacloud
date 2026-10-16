@@ -59,24 +59,35 @@ export async function verifyPublishedExecutionContext(
   cli: string,
   run: (args: string[], success?: boolean) => Promise<string>,
 ): Promise<void> {
-  const preserved = ["src/host/review-execution-observability.ts", "src/review/review.ts", "generated/application.ts"];
+  const preserved = ["src/host/review-execution-observability.ts", "src/host/review-worker-observability.ts",
+    "src/review/review.ts", "src/review/attachment.ts", "generated/application.ts"];
   const before = await Promise.all(preserved.map(file => readFile(join(project, file), "utf8")));
   const temporary = await mkdtemp(join(tmpdir(), "published-execution-context-"));
   try {
     // Synthetic observations test the installed logging/context contract, not business execution.
     const output = await run(["--eval", `
 const { createReviewHttpObserver } = await import("./src/host/review-execution-observability.ts");
+const { createReviewWorkerObserver } = await import("./src/host/review-worker-observability.ts");
 const observe = createReviewHttpObserver();
 for (const requestId of ["published-context-request", "unrelated-context-request"]) {
   observe({ kind: "command", operation: "review.approve", stage: "authorize", phase: "failed", requestId, durationMs: 1 });
 }
+const observeWorker = createReviewWorkerObserver("published-context-worker");
+for (const phase of ["started", "failed"]) {
+  observeWorker({ kind: "job", operation: "review.verify-attachment", stage: "handler",
+    phase, requestId: "published-context-run", durationMs: 2 });
+}
+observeWorker({ kind: "job", operation: "review.verify-attachment", stage: "handler",
+  phase: "succeeded", requestId: "unrelated-context-run", durationMs: 3 });
 `]);
     const lines = output.trim().split(/\r?\n/);
-    assert.equal(lines.length, 2, "Published observer must emit exactly two execution records");
-    for (const line of lines) {
+    assert.equal(lines.length, 5, "Published observers must emit exactly five execution records");
+    for (const [index, line] of lines.entries()) {
       const log = record(JSON.parse(line));
-      assert.equal(log["event"], "review-http-execution");
-      assert.equal(log["component"], "review-http");
+      const worker = index >= 2;
+      assert.equal(log["event"], worker ? "review-worker-execution" : "review-http-execution");
+      assert.equal(log["component"], worker ? "review-attachment-worker" : "review-http");
+      assert.equal(log["workerId"], worker ? "published-context-worker" : undefined);
     }
     const events = join(temporary, "execution.ndjson");
     await writeFile(events, output, { mode: 0o600 });
@@ -98,14 +109,52 @@ for (const requestId of ["published-context-request", "unrelated-context-request
         requestId: "published-context-request", durationMs: 1, index: 0, module: "review",
       }]);
       assert.ok(!response.includes("unrelated-context-request"));
+      assert.ok(!response.includes("published-context-run"));
+      assert.ok(!response.includes("unrelated-context-run"));
       const denied = await run([...args, "--write"], false);
       assert.ok(denied.includes("--write is not supported"));
+
+      const workerResponse = await run([cli, ...command, "--root", project, "--target", "review",
+        "--events", events, requestFlag, "published-context-run", "--format", "json"]);
+      const workerPack = record(JSON.parse(workerResponse));
+      const workerExecution = record(workerPack["execution"]);
+      assert.equal(record(workerPack["workflow"])["executed"], false);
+      assert.equal(workerExecution["correlation"], "current-graph-only");
+      assert.equal(workerExecution["eventsTrusted"], false);
+      assert.equal(workerExecution["deploymentVerified"], false);
+      assert.deepEqual(workerExecution["events"], ["started", "failed"].map((phase, index) => ({
+        kind: "job", operation: "review.verify-attachment", stage: "handler", phase,
+        requestId: "published-context-run", durationMs: 2, index: index + 2, module: "review",
+      })));
+      const timeline = workerExecution["timeline"];
+      assert.ok(Array.isArray(timeline) && timeline.length === 1);
+      const job = record(timeline[0]);
+      assert.equal(job["kind"], "job");
+      assert.equal(job["operation"], "review.verify-attachment");
+      const attempts = job["attempts"];
+      assert.ok(Array.isArray(attempts) && attempts.length === 1);
+      const attempt = record(attempts[0]);
+      assert.equal(attempt["failed"], true);
+      assert.equal(attempt["complete"], false);
+      assert.deepEqual(attempt["traceIds"], []);
+      assert.deepEqual(attempt["stages"], ["started", "failed"].map((phase, index) => ({
+        stage: "handler", phase, durationMs: 2, index: index + 2,
+      })));
+      for (const unrelated of ["published-context-request", "unrelated-context-request", "unrelated-context-run"]) {
+        assert.ok(!workerResponse.includes(unrelated));
+      }
     }
     await writeFile(events, lines[0] + '\n{"event":"PRIVATE_EXECUTION_INPUT"}\n');
     const denied = await run([cli, "app", "context", "--root", project, "--target", "review",
       "--events", events, "--request-id", "published-context-request", "--format", "json"], false);
     assert.ok(denied.includes("EXECUTION_METADATA_INVALID"));
     assert.ok(!denied.includes("PRIVATE_EXECUTION_INPUT"));
+    const invalidWorker = { ...record(JSON.parse(lines[2]!)), payload: "PRIVATE_WORKER_INPUT" };
+    await writeFile(events, lines[0] + "\n" + JSON.stringify(invalidWorker) + "\n");
+    const workerDenied = await run([cli, "context", "--root", project, "--target", "review",
+      "--events", events, "--request_id", "published-context-run", "--format", "json"], false);
+    assert.ok(workerDenied.includes("EXECUTION_METADATA_INVALID"));
+    assert.ok(!workerDenied.includes("PRIVATE_WORKER_INPUT"));
   } finally {
     await rm(temporary, { recursive: true, force: true });
     const after = await Promise.all(preserved.map(file => readFile(join(project, file), "utf8")));
@@ -189,7 +238,9 @@ async function main(args: string[]) {
     await verifyPublishedExecutionContext(project, join(tools, "node_modules/@supacloud/cli", entry),
       (args, success = true) => runStarterCommand(args, { cwd: project, env, signal: signal.signal, success }));
     report.checks.push("published-execution-observer", "published-app-context", "published-context-alias",
-      "execution-context-read-only", "execution-context-invalid-input-denied");
+      "execution-context-read-only", "execution-context-invalid-input-denied",
+      "published-worker-execution-observer", "execution-context-worker-timeline",
+      "execution-context-identity-isolation", "execution-context-worker-invalid-input-denied");
     report.stage = "client-states";
     // Missing published client examples fail; never inject workspace replacements.
     await readFile(join(project, "tests/review-client.test.ts"));
