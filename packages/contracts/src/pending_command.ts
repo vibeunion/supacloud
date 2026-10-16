@@ -48,10 +48,11 @@ export function createPendingCommandRecovery<Input, Authority>(
     if (serialized === null) return null;
     const parsed: unknown = JSON.parse(serialized);
     const persisted = canonicalCommandJson(parsed);
-    const input = decodeHttpContract(contract.input, parsed, "request");
-    if (canonicalCommandJson(input) !== persisted) {
+    const readback = decodeHttpContract(contract.input, parsed, "request");
+    if (canonicalCommandJson(readback) !== persisted) {
       throw new TypeError("Pending command input changes after serialization");
     }
+    const input = structuredClone(readback);
     let raw: unknown;
     // Keep the stored identity stable even if a transport mutates its argument.
     try { raw = await transport.lookup(structuredClone(input)); }
@@ -94,24 +95,27 @@ export function createPendingCommandClient<Input, Acknowledgement, Authority>(
     const serialized = JSON.stringify(decoded);
     if (serialized === undefined) throw new TypeError("Pending command is not serializable");
     // Execute exactly the identity that survives a reload, never an unpersisted value.
-    const input = decodeHttpContract(contract.input, JSON.parse(serialized), "request");
+    const readback = decodeHttpContract(contract.input, JSON.parse(serialized), "request");
     // A decoder must not change the durable identity or business values on readback.
-    if (JSON.stringify(input) !== serialized) {
+    if (JSON.stringify(readback) !== serialized) {
       throw new TypeError("Pending command input changes after serialization");
     }
+    // Detach decoder aliases and fail before persistence if the snapshot cannot be copied.
+    const input = structuredClone(readback);
     storage.setItem(key, serialized);
     if (storage.getItem(key) !== serialized) throw new Error("Pending command was not persisted");
     let writeFailure: unknown;
     let lookupFailure: unknown;
     const execute = createAuthoritativeCommandClient({
       ...contract, input: () => input,
+      matches: (request, authority) => contract.matches(structuredClone(request), authority),
     }, {
       send: async (request) => {
-        try { return await transport.send(request); }
+        try { return await transport.send(structuredClone(request)); }
         catch (cause) { writeFailure = cause; throw cause; }
       },
       lookup: async (request) => {
-        try { return await transport.lookup(request); }
+        try { return await transport.lookup(structuredClone(request)); }
         catch (cause) { lookupFailure = cause; throw cause; }
       },
       ...(transport.isDefinitiveWriteFailure === undefined ? {} : {
