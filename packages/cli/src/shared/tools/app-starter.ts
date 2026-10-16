@@ -7,7 +7,7 @@ import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates"
 import { STARTER_REVIEW_JOB, STARTER_REVIEW_JOB_TEST } from "./app-starter-review-job";
 import { STARTER_ATTACHMENT_POSTGRES, STARTER_ATTACHMENT_SCHEMA } from "./app-starter-attachments";
 import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from "./app-starter-attachment-worker";
-import { STARTER_WORKER_OBSERVABILITY } from "./app-starter-worker-observability";
+import { STARTER_EXECUTION_OBSERVABILITY, STARTER_WORKER_OBSERVABILITY } from "./app-starter-execution-observability";
 import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER } from "./app-starter-upload";
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
@@ -460,6 +460,7 @@ export type ReviewUploadResult = UnwrapSchema<typeof UploadResult>;
         "src/host/review-attachments.ts": STARTER_ATTACHMENT_POSTGRES,
         "src/host/review-attachment-worker.ts": STARTER_ATTACHMENT_WORKER,
         "src/host/review-worker-observability.ts": STARTER_WORKER_OBSERVABILITY,
+        "src/host/review-execution-observability.ts": STARTER_EXECUTION_OBSERVABILITY,
         "src/delivery-worker.ts": STARTER_ATTACHMENT_DELIVERY_WORKER,
         "src/delivery-host.ts": STARTER_REVIEW_DELIVERY_HOST,
         "migrations/001-review.sql": STARTER_REVIEW_SCHEMA,
@@ -840,7 +841,8 @@ nonzero with bounded cleanup. Restart only after investigating an ownership or
 receipt failure; repeated automatic restart can exhaust an unknown run's attempts.
 
 The delivery worker emits review-worker-execution JSON lines to stdout using
-src/host/review-worker-observability.ts. Events contain timestamp, workerId,
+src/host/review-worker-observability.ts, which re-exports the shared observer
+from src/host/review-execution-observability.ts. Events contain timestamp, workerId,
 kind, operation, stage, phase and optional requestId/durationMs. For attachment
 jobs, requestId is the Workflow run ID; join it to starter_attachments.run_id
 or the current starter_attachment_retries lineage, not to an HTTP request ID.
@@ -851,6 +853,14 @@ Logging is best effort and cannot alter a job outcome. A succeeded stage is not
 proof of queue settlement: confirm the Workflow receipt and durable attachment
 result separately. Configure stdout collection in the deployment environment;
 the starter does not install a collector or prove gateway trace propagation.
+
+The HTTP delivery host uses the same serializer for review-http-execution events
+with component review-http. Route and command events preserve their requestId
+from the existing request context and do not contain a workerId. Do not equate
+that request ID with a Workflow run ID or an idempotency key. Identity resolution
+and failures before an execution observer is reached are not covered by these
+events; use the platform's existing request/identity logs for those failures.
+Both hosts emit only execution metadata, not access logs or audit receipts.
 
 The memory demo does not start this worker. The included unit tests exercise the
 handler contract, not production Storage, queue delivery or external identity.

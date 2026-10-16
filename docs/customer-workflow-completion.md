@@ -101,6 +101,23 @@ Scenario: Preserve execution when logging fails
   When a job succeeds or fails
   Then its original result or failure is preserved
   And logging does not retry the business operation
+
+Scenario: Trace the deployed HTTP application
+  Given the generated HTTP delivery host and a resolved request context
+  When a route or command emits execution metadata
+  Then stdout contains structured HTTP execution events with the request ID
+  And it does not invent a worker ID or Workflow run ID
+
+Scenario: Keep HTTP and worker logging compatible
+  Given the existing generated worker observer entry point
+  When the HTTP host and worker serialize execution metadata
+  Then both use the same explicit field selection
+  And existing worker event names and component identities remain unchanged
+
+Scenario: Preserve HTTP results when logging is unavailable
+  Given an unavailable execution log sink
+  When a route or command succeeds or fails
+  Then its original result or failure is preserved without a retry
 ```
 
 ## Evidence boundary
@@ -418,6 +435,29 @@ five cases covering emitted host wiring, actual generated serializer behavior,
 metadata filtering, execution phases and sink failure isolation. These checks
 do not install a log collector, validate deployed stdout ingestion, rerun browser
 acceptance or prove gateway-to-worker propagation.
+
+### HTTP execution logs
+
+The HTTP delivery host now supplies `createReviewHttpObserver()` to the existing
+application factory without replacing request context, command governance or
+authorization. The generated `src/host/review-execution-observability.ts` owns
+the explicit metadata serializer shared by HTTP and worker hosts; the previous
+worker observer file remains a compatible re-export and its event format is
+unchanged.
+
+HTTP events use `event: review-http-execution` and `component: review-http`.
+They preserve route/command request IDs and omit worker identity. Request IDs,
+idempotency keys and Workflow run IDs are separate identifiers; this emitter
+does not fabricate a shared trace ID. Identity resolution failures and other
+failures before execution observation require the existing platform logs.
+These events are neither access logs nor transactional audit evidence.
+
+On 2026-10-16, the same focused observability test file passed 11 cases and 155
+assertions, retaining worker compatibility checks and adding HTTP field
+selection, route/command phases and sink-failure isolation. Tests execute the
+generated observers and the real execution dispatcher; host wiring is checked
+structurally, not through a deployed HTTP service. No full suite, live identity
+test, published-consumer run or deployment was performed for this increment.
 
 ### Release and live acceptance
 
