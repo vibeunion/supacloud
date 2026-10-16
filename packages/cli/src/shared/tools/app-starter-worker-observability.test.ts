@@ -1,10 +1,21 @@
 import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
-import type { ExecutionObserver } from "@supacloud/elysia";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { appStarterFiles } from "./app-starter";
+
+// This source-only fixture must also typecheck in the lean CLI package gate,
+// which does not build the optional Elysia adapter. Generated hosts separately
+// compile against its public ExecutionObserver export in consumer acceptance.
+type ExecutionObserver = (event: Readonly<{
+  kind: "route" | "command" | "job";
+  operation: string;
+  stage: string;
+  phase: "started" | "succeeded" | "failed";
+  requestId?: string;
+  durationMs?: number;
+}>) => void | Promise<void>;
 
 const { observeExecution }: {
   observeExecution<T>(
