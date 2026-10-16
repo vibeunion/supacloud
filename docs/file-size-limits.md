@@ -1,8 +1,7 @@
 # File Size Limits
 
 The optional document-conversion input limit and Lite image-transformation
-input/output limit are **500 MiB** by default. The document-conversion PDF
-output limit remains **64 MiB**. Image dimensions and pixel-count limits remain
+input/output limit are **500 MiB** by default. Image dimensions and pixel-count limits remain
 separate protections.
 
 These are processing limits, not a universal Storage quota. Storage buckets

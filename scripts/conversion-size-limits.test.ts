@@ -64,11 +64,11 @@ test("document default rejects a declared oversize buffer before copying or tran
   expect(calls).toBe(0);
 });
 
-test("document output ceiling remains 64 MiB", async () => {
+test("document output ceiling is 500 MiB", async () => {
   const converter = createCollaboraDocumentConverter({
     ...settings,
     fetch: async () => new Response("%PDF-1.7\n", { headers: {
-      "content-type": "application/pdf", "content-length": String(64 * 1024 * 1024 + 1),
+      "content-type": "application/pdf", "content-length": String(500 * 1024 * 1024 + 1),
     } }),
   });
   await expect(converter.convert(input(new Uint8Array([0x50, 0x4b, 3, 4]))))

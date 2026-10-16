@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 const MAX_INPUT_BYTES = 500 * 1024 * 1024;
-const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 500 * 1024 * 1024;
 const MIME_TYPES = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
