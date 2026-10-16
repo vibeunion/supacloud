@@ -4,6 +4,24 @@ The optional document-conversion and Lite image-transformation input/output
 limits are **500 MiB** by default. This includes the converted PDF output.
 Image dimensions and pixel-count limits remain separate protections.
 
+Document conversion environment variables:
+
+```text
+SUPACLOUD_DOCUMENT_CONVERSION_MAX_INPUT_BYTES
+SUPACLOUD_DOCUMENT_CONVERSION_MAX_OUTPUT_BYTES
+```
+
+Both accept positive integer byte counts up to 524288000. Lite image
+transformation uses `supabase/config.toml`:
+
+```toml
+[storage.image_transformation]
+max_input_bytes = "500MiB"
+max_output_bytes = "500MiB"
+```
+
+The programmatic Lite option is `storageImageTransformLimits`.
+
 These are processing limits, not a universal Storage quota. Storage buckets
 still use their configured `file_size_limit`; when omitted, the Lite runtime
 default is 50 MiB. A bucket or upload gateway may therefore reject a file

@@ -53,6 +53,8 @@ export interface DocumentConversionResult {
 
 export interface DocumentConverter {
   readonly enabled: boolean;
+  readonly maxInputBytes?: number;
+  readonly maxOutputBytes?: number;
   convert(input: DocumentConversionInput, signal?: AbortSignal): Promise<DocumentConversionResult>;
 }
 
@@ -206,6 +208,8 @@ export function createCollaboraDocumentConverter(options: DocumentConverterOptio
 
   return Object.freeze({
     enabled: true,
+    maxInputBytes,
+    maxOutputBytes,
     async convert(input: DocumentConversionInput, callerSignal?: AbortSignal): Promise<DocumentConversionResult> {
       if (!input || input.projectRef !== projectRef || input.renderProfile !== renderProfile) {
         throw new DocumentConversionError("DOCUMENT_CONVERSION_FORBIDDEN");
@@ -276,11 +280,19 @@ export function createDocumentConverterFromEnvironment(
   if (enabled !== undefined && enabled !== "false" && enabled !== "true") configError();
   if (enabled !== "true") return createCollaboraDocumentConverter();
   if (environment["SUPACLOUD_DOCUMENT_CONVERSION_ENGINE"] !== "collabora-online") configError();
+  function byteLimit(name: string, fallback: number): number {
+    const value = environment[name];
+    if (value === undefined) return fallback;
+    if (!/^[1-9][0-9]*$/.test(value)) configError();
+    return integer(Number(value), fallback, fallback);
+  }
   return createCollaboraDocumentConverter({
     enabled: true,
     projectRef: environment["SUPACLOUD_PROJECT_REF"] ?? "",
     renderProfile: environment["SUPACLOUD_DOCUMENT_CONVERSION_RENDER_PROFILE"] ?? "",
     baseUrl: environment["SUPACLOUD_DOCUMENT_CONVERSION_URL"] ?? "",
+    maxInputBytes: byteLimit("SUPACLOUD_DOCUMENT_CONVERSION_MAX_INPUT_BYTES", MAX_INPUT_BYTES),
+    maxOutputBytes: byteLimit("SUPACLOUD_DOCUMENT_CONVERSION_MAX_OUTPUT_BYTES", MAX_OUTPUT_BYTES),
     ...(environment["SUPACLOUD_DOCUMENT_CONVERSION_TOKEN"] === undefined ? {}
       : { bearerToken: environment["SUPACLOUD_DOCUMENT_CONVERSION_TOKEN"] }),
     ...(fetcher === undefined ? {} : { fetch: fetcher }),

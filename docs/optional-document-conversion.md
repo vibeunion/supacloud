@@ -61,6 +61,9 @@ SUPACLOUD_DOCUMENT_CONVERSION_ENGINE=collabora-online
 SUPACLOUD_PROJECT_REF=project-a
 SUPACLOUD_DOCUMENT_CONVERSION_URL=http://collabora.internal:9980
 SUPACLOUD_DOCUMENT_CONVERSION_RENDER_PROFILE=collabora-fonts-v1
+# Optional byte limits; defaults are 500 MiB each and cannot exceed 500 MiB.
+SUPACLOUD_DOCUMENT_CONVERSION_MAX_INPUT_BYTES=524288000
+SUPACLOUD_DOCUMENT_CONVERSION_MAX_OUTPUT_BYTES=524288000
 # Optional: bearer credential for your own internal gateway, not native
 # Collabora authentication:
 # SUPACLOUD_DOCUMENT_CONVERSION_TOKEN=...
@@ -86,7 +89,8 @@ application. Collabora has LibreOffice-derived rendering technology; this
 implementation selects Collabora's maintained service and does not claim a
 completely unrelated rendering codebase.
 
-Factory options can lower the 500 MiB input and 500 MiB output ceilings and set
+Factory options and the two environment variables can lower the 500 MiB input
+and output ceilings and set
 the request timeout (default 120 seconds, maximum 120 seconds). Default
 concurrency is one per instance; the hard cap is four. Busy requests fail
 immediately rather than queueing large buffers. This is not a distributed
