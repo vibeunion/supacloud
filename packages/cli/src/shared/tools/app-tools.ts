@@ -15,12 +15,14 @@ import {
     compileProject,
     compileOptionsFromConfig,
     createContextPack,
+    createExecutionContextPack,
     createDiagnosticRepairPlan,
     doctorProject,
     loadSupacloudConfig,
     formatDeliveryPlan,
     planDeliveryProject,
     resolveSupacloudConfig,
+    readExecutionMetadata,
     watchProject,
     type Diagnostic,
     type ModuleNode,
@@ -181,6 +183,11 @@ export interface AppToolArguments {
     search?: string;
     start?: string;
     end?: string;
+    /** `app context`: bounded JSON envelope or generated execution JSON-lines file. */
+    events?: string;
+    /** `app context`: exact opaque request ID to correlate from events. */
+    request_id?: string;
+    "request-id"?: string;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
@@ -548,6 +555,12 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
     const subject = args.target?.trim();
     if (subject) {
         const pack = createContextPack({ ...result.graph, diagnostics: result.diagnostics }, subject);
+        const execution = args.events === undefined ? undefined : createExecutionContextPack(
+            { ...result.graph, diagnostics: result.diagnostics },
+            subject,
+            await readExecutionMetadata(resolve(root, args.events)),
+            args.request_id!,
+        );
         const verification = await createVerificationPlan(root, result.graph, pack.subject, sourceDir);
         const repairs = createDiagnosticRepairPlan(pack.diagnostics);
         const workflow = {
@@ -578,7 +591,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             },
             executed: false,
         };
-        return textResult(args.format === "json" ? JSON.stringify({ ...pack, workflow }, null, 2) : [
+        return textResult(args.format === "json" ? JSON.stringify({ ...pack, ...(execution ? { execution } : {}), workflow }, null, 2) : [
             formatModuleContextPack(pack),
             `  edit files (project-relative): ${workflow.editFiles.join(", ") || "-"}`,
             `  focused tests: ${verification.tests.join(", ") || "-"}`,
@@ -1646,7 +1659,8 @@ async function runPromotion(
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
     if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
         || (request.register_in !== undefined && request["register-in"] !== undefined)
-        || (request.database_url !== undefined && request["database-url"] !== undefined)) {
+        || (request.database_url !== undefined && request["database-url"] !== undefined)
+        || (request.request_id !== undefined && request["request-id"] !== undefined)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
     }
     request = {
@@ -1654,7 +1668,15 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         ...(request["dry-run"] === undefined ? {} : { dry_run: request["dry-run"] }),
         ...(request["register-in"] === undefined ? {} : { register_in: request["register-in"] }),
         ...(request["database-url"] === undefined ? {} : { database_url: request["database-url"] }),
+        ...(request["request-id"] === undefined ? {} : { request_id: request["request-id"] }),
     };
+    if (request.events !== undefined || request.request_id !== undefined) {
+        if (request.action !== "context" || !request.events?.trim() || !request.target?.trim()
+            || !request.request_id || !/^[A-Za-z0-9._:-]{1,256}$/.test(request.request_id)
+            || request.format !== "json" || request.write !== undefined) {
+            throw new Error("Execution context requires app context, --target, --events, --request-id and --format json; --write is not supported");
+        }
+    }
     if ((request.dry_run !== undefined || request.register_in !== undefined) && request.action !== "generate") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--dry-run and --register-in apply only to app generate");
     }
@@ -1796,6 +1818,9 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             database_url: optional(Type.String(), "[dev] Explicit loopback integration URL; watch/once only inspect its shape"),
             "database-url": optional(Type.String(), "[dev] CLI alias of database_url"),
             target: optional(Type.String(), "[explain/context/verify-plan] Provider class name / token name / command name / job name / module name"),
+            events: optional(Type.String(), "[context] Project-relative execution metadata JSON or generated JSON-lines file"),
+            request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
+            "request-id": optional(Type.String(), "[context] CLI alias of request_id"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
             skip_build: optional(Type.Boolean(), "[release] Reuse --manifest_path instead of running the local delivery build"),
@@ -1830,6 +1855,9 @@ export function registerAppAliases(server: ToolServer): void {
         strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
         format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
         target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
+        events: optional(Type.String(), "[context] Project-relative execution metadata JSON or generated JSON-lines file"),
+        request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
+        "request-id": optional(Type.String(), "[context] CLI alias of request_id"),
         fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
         write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
     } satisfies ToolSchema;

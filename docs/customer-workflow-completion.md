@@ -135,6 +135,18 @@ Scenario: Preserve the existing execution envelope
   Given a version-one execution metadata JSON envelope
   When context reads the file
   Then the existing graph correlation and untrusted-evidence boundaries are unchanged
+
+Scenario: Correlate logs through the application entry point
+  Given an explicit module target and bounded execution metadata
+  When app context or its top-level alias selects a request ID in JSON mode
+  Then the existing module workflow is retained with a separate execution evidence block
+  And source files and generated drift remain unchanged
+
+Scenario: Reject ambiguous execution context requests
+  Given missing paired flags, conflicting request ID aliases or a write flag
+  When an execution context request is submitted
+  Then it fails before project inspection or remote dispatch
+  And other application actions cannot consume the context-only flags
 ```
 
 ## Evidence boundary
@@ -524,6 +536,39 @@ No common trace identity or retry attempt is inferred from timestamps or line
 order. Source correlation continues to report `eventsTrusted: false` and
 `deploymentVerified: false`; use the existing delivery-manifest context when
 correlating with a specific build. This does not prove live deployment identity.
+
+### Application context entry point
+
+The same execution metadata is now available through the main authoring entry
+point and its top-level alias, without calling the compiler CLI directly:
+
+```sh
+supacloud app context --root . --target review \
+  --events execution.ndjson --request-id request-123 --format json
+supacloud context --root . --target review \
+  --events execution.ndjson --request_id request-123 --format json
+```
+
+The existing module context and `workflow` remain unchanged; the optional
+`execution` object contains the compiler's bounded correlation, selected events,
+timeline and explicit `eventsTrusted: false` / `deploymentVerified: false`.
+Omitting execution flags preserves the existing output. Relative event paths
+are resolved from the selected project root; absolute paths are also accepted.
+
+Execution requests require `--target`, both event/request flags and JSON format.
+The two request-ID spellings are alternatives, not combinable. Write flags and
+execution flags on other actions fail before project inspection or remote
+dispatch. Unreadable, invalid and unmatched execution inputs retain the
+compiler's sanitized errors. This path only inspects source/generated state;
+it neither repairs drift nor replays operations.
+
+The focused `app-task-context.test.ts` passed two parent cases and 56 assertions
+on 2026-10-16, exercising both registered tool entry points, JSON/JSON-lines
+inputs, selection, malformed input, preserved source/generated drift and
+pre-dispatch argument rejection. It used the current local compiler JS build
+through an ignored dependency link, not a published compiler substitution in
+the installed-consumer gate. Publication must include a compiler release with
+JSON-lines support; installed-package acceptance remains separate.
 
 ### Release and live acceptance
 
