@@ -33,9 +33,12 @@ export function statusForSqlState(code: string, authenticated = true): number {
       return 503
     case '53400': // configuration_limit_exceeded: PostgREST's 500 exception in class 53
       return 500
+    case 'P0001': // default RAISE EXCEPTION remains a client error
+      return 400
     default:
       // Connection exceptions and insufficient resources are server failures.
       if (code.startsWith('08') || code.startsWith('53')) return 503
+      if (code.startsWith('P0')) return 500
       return 400
   }
 }
