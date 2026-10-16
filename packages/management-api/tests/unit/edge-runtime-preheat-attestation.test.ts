@@ -80,6 +80,34 @@ function preheatResponse() {
 }
 
 describe("Edge Runtime preheat attestation", () => {
+  test("accepts separately attested parked retirements without inventing replacements", () => {
+    const response = preheatResponse();
+    const withParked = {
+      ...response,
+      foreground: {
+        ...response.foreground,
+        rotation: { ...response.foreground.rotation, attempted: 2, parkedRetired: 1 },
+      },
+    };
+    expect(validateEdgeRuntimePreheat(withParked, EXPECTED)).not.toBeNull();
+    for (const parkedRetired of [null, undefined, -1, 0.5, "1", 0, 2]) {
+      expect(validateEdgeRuntimePreheat({
+        ...withParked,
+        foreground: {
+          ...withParked.foreground,
+          rotation: { ...withParked.foreground.rotation, parkedRetired },
+        },
+      }, EXPECTED)).toBeNull();
+    }
+    expect(validateEdgeRuntimePreheat({
+      ...withParked,
+      foreground: {
+        ...withParked.foreground,
+        rotation: { ...withParked.foreground.rotation, immediateReplacements: 2 },
+      },
+    }, EXPECTED)).toBeNull();
+  });
+
   test("accepts a canonical worker acknowledgement", () => {
     expect(validateEdgeRuntimePreheat(preheatResponse(), EXPECTED)).toEqual({
       identity: {
