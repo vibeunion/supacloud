@@ -230,6 +230,7 @@ import { createReviewPostgresAdapters } from "./host/review-postgres";
 import { createReviewAttachmentAdapters } from "./host/review-attachments";
 import { createReviewUploadAdapters } from "./host/review-uploads";
 import { createReviewTaskAdapters } from "./host/review-tasks";
+import { createReviewHttpObserver } from "./host/review-execution-observability";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -290,7 +291,7 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     });
     lifecycle.signal.throwIfAborted();
     stage = "application";
-    const app = createApplication({ name: "review", modules, ...adapters });
+    const app = createApplication({ name: "review", modules, ...adapters, onExecution: createReviewHttpObserver() });
     return { fetch: (request: Request) => app.handle(request), close };
   } catch (error) {
     await close();

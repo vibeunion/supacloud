@@ -1,15 +1,15 @@
-export const STARTER_WORKER_OBSERVABILITY = `import type { ExecutionObserver } from "@supacloud/elysia";
+export const STARTER_EXECUTION_OBSERVABILITY = `import type { ExecutionObserver } from "@supacloud/elysia";
 
 function correlationId(value: string | undefined): string | undefined {
   return typeof value === "string" && /^[A-Za-z0-9._:-]{1,256}$/.test(value) ? value : undefined;
 }
 
-export function createReviewWorkerObserver(workerId: string): ExecutionObserver {
+function createObserver(source: "http" | "worker", workerId?: string): ExecutionObserver {
   return metadata => {
     // Select fields explicitly: future observer extensions must not leak payloads.
     console.info(JSON.stringify({
-      event: "review-worker-execution",
-      component: "review-attachment-worker",
+      event: source === "http" ? "review-http-execution" : "review-worker-execution",
+      component: source === "http" ? "review-http" : "review-attachment-worker",
       timestamp: new Date().toISOString(),
       workerId: correlationId(workerId),
       kind: metadata.kind,
@@ -22,4 +22,15 @@ export function createReviewWorkerObserver(workerId: string): ExecutionObserver 
     }));
   };
 }
+
+export function createReviewHttpObserver(): ExecutionObserver {
+  return createObserver("http");
+}
+
+export function createReviewWorkerObserver(workerId: string): ExecutionObserver {
+  return createObserver("worker", workerId);
+}
+`;
+
+export const STARTER_WORKER_OBSERVABILITY = `export { createReviewWorkerObserver } from "./review-execution-observability";
 `;
