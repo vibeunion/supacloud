@@ -335,13 +335,20 @@ command store and original input fingerprint. The task-lifecycle changes through
 browser fixture now applies runtime-role and retry-lineage migrations before
 starting the worker.
 
-Two source-verification blockers were repaired without relaxing acceptance:
+Source-verification blockers were repaired without relaxing acceptance:
 
 - The CLI recovery test loads its repository-only fixture through a typed runtime
   import, so declaration builds no longer emit outside the CLI `rootDir`.
 - Published-consumer subprocesses retain standard proxy and CA settings needed
   for registry access, but exclude application credentials, package overrides
   and TLS-verification bypass flags. A regression test covers this boundary.
+- Reports and diagnostics use atomic private replacement, including on rerun:
+  existing permissive file modes are not retained and destination symlinks are
+  replaced without changing their targets.
+- Upload-specific UUID/version constraints are checked before pending persistence.
+  Explicit unavailable/invalid-input preview rejections are denied before any
+  object write, so they cannot permanently lock later approvals. Failures after
+  an object upload remain unknown and retain the original operation identity.
 
 After the first main integration, `scripts/check_app_generation.ts` passed the
 packed CLI HTTP/edge consumer path, including frozen installation, generated

@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -38,6 +38,19 @@ export function publishedConsumerEnvironment(source: NodeJS.ProcessEnv): Record<
     "http_proxy", "https_proxy", "no_proxy", "all_proxy",
     "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
   ].flatMap(key => source[key] === undefined ? [] : [[key, source[key]!]]));
+}
+
+/** Replace old reports without retaining permissive modes or following a destination symlink. */
+export async function writePrivateAcceptanceFile(file: string, content: string): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const temporary = await mkdtemp(join(dirname(file), ".supacloud-acceptance-"));
+  try {
+    const staged = join(temporary, "report");
+    await writeFile(staged, content, { mode: 0o600, flag: "wx" });
+    await rename(staged, file);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 
 async function main(args: string[]) {
@@ -129,8 +142,7 @@ async function main(args: string[]) {
   } catch (error) {
     // Keep detailed local diagnostics private and out of the portable receipt.
     const diagnosticFile = reportFile + ".diagnostic.txt";
-    await mkdir(dirname(diagnosticFile), { recursive: true });
-    await writeFile(diagnosticFile, error instanceof Error ? error.stack ?? error.message : "Unknown failure", { mode: 0o600 });
+    await writePrivateAcceptanceFile(diagnosticFile, error instanceof Error ? error.stack ?? error.message : "Unknown failure");
     report.status = "failed";
     report.failure = `Acceptance failed at ${report.stage}; inspect the adjacent private .diagnostic.txt file. No deployment was attempted.`;
     process.exitCode = 1;
@@ -145,8 +157,7 @@ async function main(args: string[]) {
     } finally {
       process.removeListener("SIGINT", interrupt);
       process.removeListener("SIGTERM", interrupt);
-      await mkdir(dirname(reportFile), { recursive: true });
-      await writeFile(reportFile, JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
+      await writePrivateAcceptanceFile(reportFile, JSON.stringify(report, null, 2) + "\n");
       console.log(JSON.stringify(report));
     }
   }

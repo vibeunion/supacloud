@@ -124,7 +124,10 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
   async function submit(kind: ReviewOperation["kind"], row: ReviewRow, file?: Blob) {
     if (closed || recovering || state.mutation.status === "submitting" || state.mutation.status === "unknown") return;
     if (row.state !== "draft" || !Number.isSafeInteger(row.version) || row.version < 1 || !row.id.trim()) return;
-    if (kind === "upload" && (!file || file.size < 1 || file.size > 1048576
+    // Upload contracts are narrower than approval/list IDs and PostgreSQL-safe versions.
+    // Reject locally before creating an unresolved operation for an impossible request.
+    if (kind === "upload" && (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.id)
+      || row.version > 2147483647 || !file || file.size < 1 || file.size > 1048576
       || file.type.split(";")[0]?.trim().toLowerCase() !== "text/plain")) return;
     const operation: ReviewOperation = {
       kind, reviewId: row.id, expectedVersion: row.version, operationId: crypto.randomUUID(),
@@ -283,7 +286,13 @@ export function createReviewTransport(options: {
       const input = { artifactId: operation.operationId, expectedVersion: operation.expectedVersion };
       const base = "/reviews/" + encodeURIComponent(operation.reviewId);
       const preview = await request(base + "/attachment-upload", input, operation.operationId);
-      if (!preview.response.ok) return rejected(preview.response.status, preview.body);
+      if (!preview.response.ok) {
+        // These explicit preview rejections happen before any object or registration write.
+        const code = record(preview.body)["code"];
+        if ((preview.response.status === 501 && code === "UPLOADS_UNAVAILABLE")
+          || (preview.response.status === 400 && code === "UPLOAD_INPUT_INVALID")) return { status: "denied" };
+        return rejected(preview.response.status, preview.body);
+      }
       const location = record(preview.body);
       if (location["artifactId"] !== operation.operationId || location["bucketId"] !== "review-attachments"
         || typeof location["objectPath"] !== "string"
@@ -314,6 +323,7 @@ import { createReviewClient, createReviewPendingStore, ReviewAccessDenied, type 
 import { createReviewTransport } from "../src/client/review-transport";
 
 const draft: ReviewRow = { id: "review-one", state: "draft", version: 1 };
+const uploadDraft: ReviewRow = { ...draft, id: "11111111-1111-4111-8111-111111111111" };
 function transport(overrides: Partial<ReviewTransport> = {}): ReviewTransport {
   return {
     list: async () => [draft],
@@ -374,16 +384,64 @@ test("conflict refreshes but does not retry the write; wrong receipt remains unk
 test("upload validates size/type, retains failure identity, and disposal drops late results", async () => {
   let uploads = 0;
   const client = createReviewClient(transport({ upload: async () => { uploads++; throw new Error("private"); } }));
-  await client.upload(draft, new Blob(["bad"], { type: "application/pdf" }));
+  await client.upload(uploadDraft, new Blob(["bad"], { type: "application/pdf" }));
   expect(uploads).toBe(0);
-  await client.upload(draft, new Blob(["ok"], { type: "text/plain" }));
+  await client.upload(uploadDraft, new Blob(["ok"], { type: "text/plain" }));
   expect(uploads).toBe(1);
   expect(client.snapshot().mutation.status).toBe("unknown");
   await client.reconcile();
   expect(uploads).toBe(1);
   client.dispose();
-  await client.upload(draft, new Blob(["ok"], { type: "text/plain" }));
+  await client.upload(uploadDraft, new Blob(["ok"], { type: "text/plain" }));
   expect(uploads).toBe(1);
+});
+
+test("upload-only input constraints never persist or dispatch an impossible request or block approval", async () => {
+  let saves = 0, uploads = 0, approvals = 0, saved: ReviewOperation | null = null;
+  const client = createReviewClient(transport({
+    upload: async () => { uploads++; return { status: "unknown" }; },
+    approve: async op => { approvals++; return { status: "confirmed", operationId: op.operationId, reviewId: op.reviewId }; },
+  }), {
+    load: () => saved, save: op => { saves++; saved = op; }, clear: () => { saved = null; },
+  });
+  await client.load();
+  expect(client.snapshot().list.rows).toEqual([draft]);
+  const file = new Blob(["hello"], { type: "text/plain" });
+  await client.upload(draft, file);
+  await client.upload({ ...uploadDraft, version: 2147483648 }, file);
+  expect(uploads).toBe(0); expect(saves).toBe(0); expect(saved).toBeNull();
+  expect(client.snapshot().mutation).toEqual({ status: "idle", operation: null });
+  await client.approve(draft);
+  expect(approvals).toBe(1); expect(saves).toBe(1);
+  expect(client.snapshot().mutation.status).toBe("confirmed");
+});
+
+test("explicit upload preview rejection clears pending before side effects, without retrying", async () => {
+  for (const [status, code] of [[501, "UPLOADS_UNAVAILABLE"], [400, "UPLOAD_INPUT_INVALID"]] as const) {
+    let requests = 0, uploads = 0, saved: ReviewOperation | null = null;
+    const adapter = createReviewTransport({
+      supabase: {
+        storage: { from: () => ({ upload: async () => { uploads++; return { error: null }; } }) },
+      } as unknown as Parameters<typeof createReviewTransport>[0]["supabase"],
+      apiOrigin: "https://reviews.example.test",
+      authenticatedFetch: async url => {
+        requests++;
+        return String(url).endsWith("/attachment-upload")
+          ? Response.json({ code }, { status }) : Response.json({ state: "approved", version: 2 });
+      },
+    });
+    const client = createReviewClient({ ...adapter, list: async () => [uploadDraft] }, {
+      load: () => saved, save: op => { saved = op; }, clear: () => { saved = null; },
+    });
+    await client.upload(uploadDraft, new Blob(["hello"], { type: "text/plain" }));
+    expect(client.snapshot().mutation.status).toBe("denied");
+    expect(saved).toBeNull(); expect(uploads).toBe(0); expect(requests).toBe(1);
+    await client.reconcile();
+    expect(requests).toBe(1);
+    await client.approve(uploadDraft);
+    expect(client.snapshot().mutation.status).toBe("confirmed");
+    expect(requests).toBe(2);
+  }
 });
 
 test("HTTP approval makes one authenticated request and preserves denied, conflict and unknown results", async () => {
@@ -416,7 +474,7 @@ test("HTTP approval makes one authenticated request and preserves denied, confli
 test("private upload verifies its binding and checksum; a lost registration response is never replayed", async () => {
   const operationId = crypto.randomUUID();
   const file = new Blob(["hello"], { type: "text/plain" });
-  const path = "owner/" + draft.id + "/" + operationId + ".txt";
+  const path = "owner/" + uploadDraft.id + "/" + operationId + ".txt";
   let uploads = 0, requests = 0;
   const supabase = {
     storage: { from(bucket: string) {
@@ -438,7 +496,7 @@ test("private upload verifies its binding and checksum; a lost registration resp
       throw new Error("Registration response lost");
     },
   });
-  const operation = { kind: "upload" as const, reviewId: draft.id, expectedVersion: 1, operationId };
+  const operation = { kind: "upload" as const, reviewId: uploadDraft.id, expectedVersion: 1, operationId };
   await expect(adapter.upload(operation, file)).rejects.toThrow("Registration response lost");
   expect(uploads).toBe(1); expect(requests).toBe(2);
   const confirmed = createReviewTransport({
@@ -564,7 +622,7 @@ test("a competing pending operation is recovered instead of the undispatched att
       return { status: "confirmed", operationId: op.operationId, reviewId: op.reviewId };
     },
   }), pending);
-  const original = { kind: "upload" as const, reviewId: draft.id, expectedVersion: 1, operationId: crypto.randomUUID() };
+  const original = { kind: "upload" as const, reviewId: uploadDraft.id, expectedVersion: 1, operationId: crypto.randomUUID() };
   pending.save(original);
   await client.approve(draft);
   expect(writes).toBe(0);
@@ -599,7 +657,7 @@ test("registration rejection after object upload retains pending identity and ne
         if (String(input).endsWith("/attachment-upload")) {
           const operationId = new Headers(init?.headers).get("idempotency-key")!;
           return Response.json({ artifactId: operationId, bucketId: "review-attachments",
-            objectPath: "owner/" + draft.id + "/" + operationId + ".txt" });
+            objectPath: "owner/" + uploadDraft.id + "/" + operationId + ".txt" });
         }
         return Response.json({ code }, { status });
       },
@@ -608,11 +666,11 @@ test("registration rejection after object upload retains pending identity and ne
       load: () => saved, save: op => { saved = op; }, clear: () => { saved = null; },
     });
     const file = new Blob(["hello"], { type: "text/plain" });
-    await client.upload(draft, file);
+    await client.upload(uploadDraft, file);
     expect(client.snapshot().mutation.status).toBe("unknown");
     expect(client.snapshot().mutation.operation).toEqual(saved);
     expect(saved).not.toBeNull();
-    await client.upload(draft, file);
+    await client.upload(uploadDraft, file);
     expect(uploads).toBe(1);
     expect(requests).toBe(2);
   }
@@ -621,7 +679,7 @@ test("registration rejection after object upload retains pending identity and ne
 
 for (const kind of ["approve", "upload"] as const) {
   const submit = (client: ReturnType<typeof createReviewClient>) => kind === "approve"
-    ? client.approve(draft) : client.upload(draft, new Blob(["hello"], { type: "text/plain" }));
+    ? client.approve(draft) : client.upload(uploadDraft, new Blob(["hello"], { type: "text/plain" }));
   for (const failure of ["silent", "read-error", "operation", "version", "kind"] as const) {
     test(kind + " verifies pending readback before any transport: " + failure, async () => {
       let saved: ReviewOperation | null = null, attempted = false, sends = 0;
