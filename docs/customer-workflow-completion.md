@@ -325,6 +325,48 @@ configuration; restoring database or object storage requires a separate
 approved restore plan and recovery drill. Recheck permissions and perform
 real-session business smoke after upgrading or recovering.
 
+## Source integration follow-up (2026-10-16)
+
+The integration retains main's paginated `listReviews` helper, schema-derived
+contracts and `createTransactionalCommandGovernance`. Approval execution and
+read-only receipt lookup share the same transactional authorization function,
+command store and original input fingerprint. The task-lifecycle changes through
+`f8d2ddf` are also preserved: task and receipt controllers coexist, and the
+browser fixture now applies runtime-role and retry-lineage migrations before
+starting the worker.
+
+Two source-verification blockers were repaired without relaxing acceptance:
+
+- The CLI recovery test loads its repository-only fixture through a typed runtime
+  import, so declaration builds no longer emit outside the CLI `rootDir`.
+- Published-consumer subprocesses retain standard proxy and CA settings needed
+  for registry access, but exclude application credentials, package overrides
+  and TLS-verification bypass flags. A regression test covers this boundary.
+
+After the first main integration, `scripts/check_app_generation.ts` passed the
+packed CLI HTTP/edge consumer path, including frozen installation, generated
+resource/feature types, runtime denial and generated-artifact preservation.
+This is candidate-package acceptance, not published command-starter acceptance.
+The built CLI release-bundle and direct registry-dependency guard also passed.
+
+After integrating task recovery, source verification passed 42 focused
+starter/client/provisioning/published-boundary tests, 12 native PostgreSQL
+receipt/governance tests, and all 13 native task-lifecycle tests. The latter use
+isolated PostgreSQL 18.4 with synthetic identities, including permission
+revocation, concurrent replay, rollback, receipt lookup, lost responses,
+bounded worker retries, explicit recovery and superseded-execution rejection.
+This follow-up did not rerun browser/SVAdmin visual acceptance or a restore drill,
+and does not claim remote CI, live SupAuth or deployment acceptance.
+
+A fresh exact npm run with CLI `0.101.4` and Lite `0.29.2` passed generation,
+registry/frozen installation, compilation, drift and consumer type checks. It
+still failed at `client-states`: the installed CLI does not contain
+`tests/review-client.test.ts`. It selected contracts `0.11.0`, compiler `0.46.4`,
+Elysia adapter `0.31.1` and SDK `0.43.0`. Durable-business acceptance was not
+reached, and no workspace files were injected. The missing template must be
+released normally before that exact-version gate can pass; a safe source merge
+and completed installed-customer acceptance are separate decisions.
+
 ## Remaining acceptance
 
 This increment is not evidence of completed platform acceptance. The published

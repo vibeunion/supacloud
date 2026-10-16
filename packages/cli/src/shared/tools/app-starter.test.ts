@@ -183,6 +183,23 @@ test("the reference PostgreSQL host is shipped separately from synthetic test id
     }
 });
 
+test("receipt recovery preserves shared command governance and the independent paginated read helper", () => {
+    const files = appStarterFiles("example");
+    const adapter = requireValue(files["src/host/review-postgres.ts"]);
+    expect(adapter).toContain("createTransactionalCommandGovernance({");
+    expect(adapter).toContain("const transaction = () => commandBinding.transaction()");
+    expect(adapter).toContain("actor(invocation.requestContext)");
+    expect(adapter.match(/authorize: authorizeApproval/g)).toHaveLength(2);
+    expect(adapter).toContain("command.lookup({ actorId: subject, tenantId }, operation.operationId");
+    expect(adapter).not.toContain("AsyncLocalStorage");
+    expect(files["src/review/list-reviews.ts"]).toContain(".range(start, start + pageSize - 1)");
+    expect(files["src/review/review.ts"]).toContain("ReviewReceiptsController");
+    expect(files["src/review/review.ts"]).toContain("ReviewTasksController");
+    expect(adapter).toContain("...options.tasks");
+    expect(files["src/client/reviews.ts"]).toContain("createReviewClient");
+    expect(files["tests/review-client.test.ts"]).toBeDefined();
+});
+
 test("starter distinguishes bounded execution context from unredacted source inspection", () => {
     const readme = appStarterFiles("example")["README.md"];
     expect(readme).toContain("--events execution-events.json --request-id request-123 --json");
@@ -221,7 +238,8 @@ test("attachment worker uses explicit queue ownership and a fatal delivery signa
     expect(worker).toContain('queueOwnership !== "exclusive-review-attachments"');
     expect(worker).toContain('claim.workflowVersion !== "1"');
     expect(worker).toContain('claim.stepKey !== "verify"');
-    expect(worker).toContain("AND run_id=$3");
+    expect(worker).toContain("public.starter_attachment_retries");
+    expect(worker).toContain("Attachment workflow ownership mismatch");
     expect(worker).toContain("failure: failure.promise");
     expect(worker).toContain("halted = true");
     expect(worker).toContain("createSupaCloudWorkflowTransport");

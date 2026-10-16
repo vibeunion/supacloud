@@ -5,6 +5,7 @@ import { preparationTargets, resolveProject } from './model.mjs';
 const additional = {
   '@supacloud/compiler': ['contracts', 'query'],
   '@supacloud/db': ['commands', 'compiler'],
+  '@supacloud/elysia': ['supacloud-js'],
   '@supacloud/lite': ['supacloud-js'],
   '@supacloud/js': ['compiler'],
 };

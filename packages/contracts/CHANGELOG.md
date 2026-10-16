@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.10.0...contracts-v0.11.0) (2026-10-15)
+
+
+### Features
+
+* **contracts:** add read-only pending command recovery ([#1968](https://github.com/vibeunion/supacloud/issues/1968)) ([f2e244c](https://github.com/vibeunion/supacloud/commit/f2e244cef6e4218827a92877732179ffbc23f3a6))
+
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.9.0...contracts-v0.10.0) (2026-10-15)
+
+
+### Features
+
+* **contracts:** compose persisted pending command recovery ([#1957](https://github.com/vibeunion/supacloud/issues/1957)) ([0947e2f](https://github.com/vibeunion/supacloud/commit/0947e2f2650d96e452d3fa2cd5ab5ff619b88778))
+
 ## [0.9.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.8.1...contracts-v0.9.0) (2026-10-14)
 
 

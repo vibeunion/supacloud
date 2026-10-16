@@ -1,11 +1,9 @@
 export const STARTER_UPLOAD_FEATURE = `import { Effect } from "effect";
 import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
 import { ApplicationError } from "@supacloud/elysia";
-import { UploadBody, UploadLocation, UploadParams, UploadResult } from "./contracts";
-
-export interface ReviewUploadInput { reviewId: string; artifactId: string; expectedVersion: number }
-export interface ReviewUploadLocation { artifactId: string; bucketId: string; objectPath: string }
-export interface ReviewUploadResult { artifactId: string; runId: string; objectPath: string; sha256: string; bytes: number }
+import { UploadBody, UploadLocation, UploadParams, UploadResult,
+  type ReviewUploadBody, type ReviewUploadInput, type ReviewUploadLocation, type ReviewUploadResult } from "./contracts";
+export type { ReviewUploadInput, ReviewUploadLocation, ReviewUploadResult } from "./contracts";
 type PreviewUploadError =
   | { readonly _tag: "AUTHENTICATION_REQUIRED" }
   | { readonly _tag: "UPLOAD_INPUT_INVALID" }
@@ -57,7 +55,7 @@ export class ReviewUploadsController {
       retry: "none",
     },
   })
-  preview(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadLocation, PreviewUploadError, never> {
+  preview(@Param("id") id: string, @Body() body: ReviewUploadBody): Effect.Effect<ReviewUploadLocation, PreviewUploadError, never> {
     return Effect.promise(() => this.uploads.preview({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
   @Post("/:id/attachment-registration", {
@@ -80,7 +78,7 @@ export class ReviewUploadsController {
       retry: "none",
     },
   })
-  register(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadResult, RegisterUploadError, never> {
+  register(@Param("id") id: string, @Body() body: ReviewUploadBody): Effect.Effect<ReviewUploadResult, RegisterUploadError, never> {
     return Effect.promise(() => this.uploads.register({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
 }
@@ -134,7 +132,8 @@ import { SupaCloudArtifactsClient } from "@supacloud/js";
 import { createTransactionalCommand, plaintextCommandInput } from "@supacloud/commands";
 import { CommandError } from "@supacloud/contracts";
 import { createPostgresCommandStore, type CommandTransaction } from "@supacloud/db";
-import { ApplicationError, requireTrustedIdentity } from "@supacloud/elysia";
+import { ApplicationError, createSchemaDecoder, requireTrustedIdentity } from "@supacloud/elysia";
+import { UploadInput, UploadResult } from "../review/contracts";
 import type { ReviewAttachmentOptions } from "./review-attachments";
 import type { ReviewUploadInput, ReviewUploadPort, ReviewUploadResult } from "../review/uploads";
 
@@ -149,20 +148,15 @@ function rows(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) throw new TypeError("Invalid upload database result");
   return value.map(record);
 }
+const decodeInput = createSchemaDecoder(UploadInput, { normalize: false });
+const result = createSchemaDecoder(UploadResult, { normalize: false });
 function capture(value: unknown): ReviewUploadInput {
-  const item = record(value), uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (typeof item["reviewId"] !== "string" || !uuid.test(item["reviewId"])
-    || typeof item["artifactId"] !== "string" || !uuid.test(item["artifactId"])
-    || typeof item["expectedVersion"] !== "number" || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) {
+  try {
+    const input = decodeInput(value);
+    return { ...input, reviewId: input.reviewId.toLowerCase(), artifactId: input.artifactId.toLowerCase() };
+  } catch {
     throw new ApplicationError("Invalid upload input", { status: 400, code: "UPLOAD_INPUT_INVALID" });
   }
-  return { reviewId: item["reviewId"].toLowerCase(), artifactId: item["artifactId"].toLowerCase(), expectedVersion: item["expectedVersion"] };
-}
-function result(value: unknown): ReviewUploadResult {
-  const item = record(value);
-  if (typeof item["artifactId"] !== "string" || typeof item["runId"] !== "string" || typeof item["objectPath"] !== "string"
-    || typeof item["sha256"] !== "string" || typeof item["bytes"] !== "number") throw new TypeError("Invalid upload receipt");
-  return { artifactId: item["artifactId"], runId: item["runId"], objectPath: item["objectPath"], sha256: item["sha256"], bytes: item["bytes"] };
 }
 
 export async function createReviewUploadAdapters(options: ReviewAttachmentOptions): Promise<ReviewUploadPort> {

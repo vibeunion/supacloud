@@ -13,6 +13,8 @@ import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_P
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
 import { STARTER_REVIEW_CLIENT, STARTER_REVIEW_TRANSPORT, STARTER_REVIEW_CLIENT_TEST } from "./app-starter-client";
 import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
+import { STARTER_REVIEW_QUERY } from "./app-starter-query";
+import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
@@ -22,6 +24,11 @@ const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 export function appStarterFiles(name: string): Record<string, string> {
     return {
         ...starterDatabaseFiles(),
+        "src/review/list-reviews.ts": STARTER_REVIEW_QUERY,
+        "src/review/task-contracts.ts": STARTER_TASK_CONTRACTS,
+        "src/review/tasks.ts": STARTER_TASK_FEATURE,
+        "src/host/review-tasks.ts": STARTER_TASK_HOST,
+        "migrations/005-review-task-recovery.sql": STARTER_TASK_SCHEMA,
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
             engines: { bun: ">=1.4.3" },
@@ -114,6 +121,7 @@ export default defineSupacloudConfig({
         { source: "migrations/002-review-attachments.sql", version: "2", name: "review_attachments", executor: "project-migration" },
         { source: "migrations/003-review-uploads.sql", version: "3", name: "review_uploads", executor: "operator-provisioning" },
         { source: "migrations/004-review-runtime-roles.sql", version: "4", name: "review_runtime_roles", executor: "operator-provisioning" },
+        { source: "migrations/005-review-task-recovery.sql", version: "5", name: "review_task_recovery", executor: "operator-provisioning" },
       ],
     },
   },
@@ -283,12 +291,12 @@ import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,
 } from "@supacloud/app";
-import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
-import { ApproveBody, HealthResult, Params, ReviewResult } from "./contracts";
+import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "@supacloud/elysia";
+import { ApproveBody, HealthResult, Params, ReviewResult, type ApprovalBody, type Review } from "./contracts";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
 import { ReviewReceipts, ReviewReceiptsController, type ReviewReceiptPort } from "./receipts";
-import type { ReviewRow } from "../../db/schema";
+import { ReviewTasks, ReviewTasksController, type ReviewTaskPort } from "./tasks";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -303,9 +311,8 @@ export const reviewSpec = defineFeatureSpec({
   },
 });
 
-type Review = Pick<ReviewRow, "state" | "version">;
 // Production implementations must bind both operations to the current transaction.
-export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewReceiptPort> {
+export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewReceiptPort>, Partial<ReviewTaskPort> {
   get(table: string, key: string): unknown;
   set(table: string, key: string, value: Review): void | Promise<void>;
 }
@@ -316,13 +323,12 @@ export const requireRequest: Aspect = (context, next) => {
   return next();
 };
 
+const decodeReview = createSchemaDecoder(ReviewResult, { normalize: false });
 function readReview(value: unknown): Review {
-  if (typeof value !== "object" || value === null ||
-      !("state" in value) || (value.state !== "draft" && value.state !== "approved") ||
-      !("version" in value) || typeof value.version !== "number") {
+  try { return decodeReview(value); }
+  catch {
     throw new ApplicationError("Review not found", { status: 404, code: "REVIEW_NOT_FOUND" });
   }
-  return { state: value.state, version: value.version };
 }
 
 @Command({
@@ -354,7 +360,7 @@ type ReviewError =
     | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
     | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
     | { readonly _tag: "COMMAND_REJECTED" }
-    | { readonly _tag: "REVIEW_COMMAND_UNSUPPORTED" }
+    | { readonly _tag: "COMMAND_BINDING_MISMATCH" }
     | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
 
 @Controller("/reviews")
@@ -383,36 +389,42 @@ export class ReviewController {
         { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
         { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
         { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
-        { tag: "REVIEW_COMMAND_UNSUPPORTED", status: 501, code: "REVIEW_COMMAND_UNSUPPORTED" },
+        { tag: "COMMAND_BINDING_MISMATCH", status: 501, code: "COMMAND_BINDING_MISMATCH" },
         { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
       ],
       retry: "none",
     },
   })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Effect.Effect<Review, ReviewError, never> {
+  approve(@Param("id") id: string, @Body() body: ApprovalBody): Effect.Effect<Review, ReviewError, never> {
     return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
   }
 }
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts],
-  controllers: [ReviewController, ReviewUploadsController, ReviewReceiptsController],
+  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts, ReviewTasks],
+  controllers: [ReviewController, ReviewUploadsController, ReviewReceiptsController, ReviewTasksController],
   jobs: [VerifyReviewAttachment],
 });
 `,
         "src/review/attachment.ts": STARTER_REVIEW_JOB,
-        "src/review/contracts.ts": `import { t } from "elysia";
+        "src/review/contracts.ts": `import { t, type UnwrapSchema } from "elysia";
 export const Params = t.Object({ id: t.String({ minLength: 1 }) });
-export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1 }) });
+export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1, maximum: 9007199254740991 }) });
+export const ApprovalInput = t.Object({ ...Params.properties, ...ApproveBody.properties }, { additionalProperties: false });
+export type ApprovalBody = UnwrapSchema<typeof ApproveBody>;
 export const ReviewResult = t.Object({
   state: t.Union([t.Literal("draft"), t.Literal("approved")]),
-  version: t.Integer({ minimum: 1 }),
+  version: t.Integer({ minimum: 1, maximum: 9007199254740991 }),
 });
+export type Review = UnwrapSchema<typeof ReviewResult>;
 export const HealthResult = t.Object({ ok: t.Boolean() });
 export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
 export const UploadBody = t.Object({
-  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1 }),
+  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1, maximum: 2147483647 }),
+}, { additionalProperties: false });
+export const UploadInput = t.Object({
+  reviewId: UploadParams.properties.id, ...UploadBody.properties,
 }, { additionalProperties: false });
 export const UploadLocation = t.Object({
   artifactId: t.String({ format: "uuid" }), bucketId: t.String(), objectPath: t.String(),
@@ -432,6 +444,10 @@ export const ReceiptResult = t.Object({
   status: t.Union([t.Literal("confirmed"), t.Literal("unknown")]),
   operationId: t.String({ format: "uuid" }), reviewId: t.String({ minLength: 1 }),
 });
+export type ReviewUploadBody = UnwrapSchema<typeof UploadBody>;
+export type ReviewUploadInput = UnwrapSchema<typeof UploadInput>;
+export type ReviewUploadLocation = UnwrapSchema<typeof UploadLocation>;
+export type ReviewUploadResult = UnwrapSchema<typeof UploadResult>;
 `,
         "src/review/receipts.ts": STARTER_REVIEW_RECEIPTS,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
@@ -584,6 +600,18 @@ Ordinary reads use PostgREST through the existing user-scoped
 Use the caller's session, RLS and grants; never introduce a second session store.
 Business writes continue through the governed Command/RPC boundary.
 
+Use listReviews from src/review/list-reviews.ts for the paginated review list.
+Type the existing client with ReviewReadDatabase (a read-only projection derived
+from db/schema.ts), then call listReviews(client, { page: 1, pageSize: 25, signal }).
+The helper returns data, total, page, pageSize and hasNextPage, orders by the unique
+id and preserves PostgREST errors. Pages are one-based and limited to 100 rows.
+Exact counts obey RLS but may be expensive on large tables; offset pages are not
+a cross-request snapshot when records change. No owner filter replaces RLS.
+Do not create a service-role client or a second auth session for this helper.
+Existing starters can add this file without a new migration only if their reviewed
+review-table grants and identity-mapping RLS from migration 003 are already applied.
+The projection is not a full database export and grants no write access.
+
 GraphQL is not generated or enabled by this starter. For a specific Query Contract,
 explicitly configure graphql.schema with a role-scoped database export and add
 checked query documents. Drizzle and append-only migrations remain the database
@@ -655,11 +683,12 @@ This is not production-role acceptance. Ordinary API clients cannot edit members
 or the database binding. No migration, binding, member or review is auto-created
 by the HTTP host. This SQL file is not a migration runner or a recovery receipt.
 
-The starter's delivery.build.migrations explicitly declares these four files.
+The starter's delivery.build.migrations explicitly declares these five files.
 Immutable targets archive their exact bytes and a migrations.json inventory;
 project migrations and operator provisioning use separate directories.
 001-002 declare project migration handling. 003 changes Storage policies and
-004 creates cluster-wide roles, so both declare operator provisioning; ordinary
+004 creates cluster-wide roles and 005 adds the task recovery ledger and scoped
+backend grants, so these declare operator provisioning; ordinary
 project-role permission to perform those changes has not been established.
 These raw SQL hashes are not the platform ledger's normalized-statement
 checksums. Building or copying an archive never applies SQL, proves compatibility
@@ -686,6 +715,16 @@ authenticated upload requests return 501. With that setting, SUPACLOUD_URL and
 SUPACLOUD_SERVICE_ROLE_KEY are required; shipped adapters register/bind uploads
 and enqueue attachment verification through afterApproved in the approval
 transaction. A separately delivered worker consumes it.
+With attachments enabled, GET /reviews/:id/attachment-task returns the current
+authorized task state. POST /reviews/:id/attachment-task/retry takes expectedVersion,
+expectedRunId and a new recoveryId UUID. Reuse that same body/recoveryId after an
+uncertain response; do not generate another key until the outcome is reconciled.
+Only failed runs can be retried. A retry creates a linked new run, receipt and audit
+in one transaction, preserving the old run and its attempts. Concurrent distinct
+recovery requests cannot both replace the same failed run. Read status after the
+receipt: its queued state describes submission, not necessarily the current state.
+Apply migration 005 before updating either HTTP or Worker code; it extends only
+backend capabilities. Do not grant Workflow access to browser roles.
 An HTTP listener or immutable build does not prove full-platform identity,
 migration compatibility, activation, application rollback or data recovery.
 
@@ -738,6 +777,15 @@ the existing Workflow and invokes the compiled Job with a ReviewAttachmentStore.
 Its reader authorizes the worker independently; its writer rechecks the review
 revision/artifact binding and persists the result idempotently before acknowledgement.
 After a lost acknowledgement, reconcile that result instead of repeating effects.
+The generated Job first calls store.readResult. The PostgreSQL adapter rechecks
+current permission, ownership, revision and project/tenant binding inside the
+read transaction, then validates a stored result with AttachmentResult. A valid
+committed result skips Storage download and result insertion on redelivery.
+Revoked access or a malformed/conflicting result fails closed, not as a cache miss.
+Existing custom ReviewAttachmentStore implementations must add readResult with
+these same authorization and validation guarantees when adopting this Job.
+This does not automatically restart a halted worker, reset the attempt budget,
+or make external side effects atomic with the database.
 
 src/host/review-attachments.ts supplies createReviewAttachmentAdapters with a
 durable store and enqueue callback for the approval adapter's afterApproved hook.

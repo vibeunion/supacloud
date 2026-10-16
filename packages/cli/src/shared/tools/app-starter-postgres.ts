@@ -19,20 +19,24 @@ ALTER TABLE public.starter_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.starter_members ENABLE ROW LEVEL SECURITY;
 `;
 
-export const STARTER_REVIEW_POSTGRES = `import { AsyncLocalStorage } from "node:async_hooks";
-import { createTransactionalCommand, plaintextCommandInput } from "@supacloud/commands";
+export const STARTER_REVIEW_POSTGRES = `import { createTransactionalCommand, plaintextCommandInput } from "@supacloud/commands";
 import { CommandError } from "@supacloud/contracts";
 import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction } from "@supacloud/db";
 import {
-  ApplicationError, createSupAuthRequestContext, requireTrustedIdentity, requireIdempotencyKey,
+  ApplicationError, createSchemaDecoder, createSupAuthRequestContext, requireTrustedIdentity,
+  createTransactionalCommandGovernance,
   type SupAuthContextOptions,
 } from "@supacloud/elysia";
 import type { AppAdapters } from "../application";
 import type { ReviewStore } from "../review/review";
 import type { ReviewUploadPort } from "../review/uploads";
+import type { ReviewTaskPort } from "../review/tasks";
+import { ApprovalInput, ReviewResult } from "../review/contracts";
+import type { ReviewRow } from "../../db/schema";
 
-interface Approval { id: string; expectedVersion: number }
-interface Review { state: "draft" | "approved"; version: number }
+const input = createSchemaDecoder(ApprovalInput, { normalize: false });
+const result: (value: unknown) => Pick<ReviewRow, "state" | "version"> =
+  createSchemaDecoder(ReviewResult, { normalize: false });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -49,24 +53,12 @@ function isPublicConflict(value: unknown): boolean {
   return value instanceof ApplicationError && value.status === 409
     || isRecord(value) && value["expose"] === true && value["status"] === 409 && typeof value["code"] === "string";
 }
-function input(value: unknown): Approval {
-  const item = record(value);
-  if (typeof item["id"] !== "string" || !item["id"].length || typeof item["expectedVersion"] !== "number"
-    || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) throw new TypeError("Invalid approval input");
-  return { id: item["id"], expectedVersion: item["expectedVersion"] };
-}
-function result(value: unknown): Review {
-  const item = record(value);
-  if ((item["state"] !== "draft" && item["state"] !== "approved") || typeof item["version"] !== "number"
-    || !Number.isSafeInteger(item["version"]) || item["version"] < 1) throw new TypeError("Invalid review result");
-  return { state: item["state"], version: item["version"] };
-}
-
 export interface ReviewPostgresOptions {
   database: CommandDatabase;
   tenantId: string;
   identity: Omit<SupAuthContextOptions, "resolveAccess">;
   uploads?: ReviewUploadPort;
+  tasks?: ReviewTaskPort;
   // Only database effects here: they commit/rollback with the approval and receipt.
   afterApproved?(tx: CommandTransaction, id: string, version: number): Promise<void>;
 }
@@ -99,14 +91,10 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
       } : null;
     },
   });
-  const scope = new AsyncLocalStorage<CommandTransaction>();
-  const transaction = () => {
-    const tx = scope.getStore();
-    if (!tx) throw new Error("Review storage requires its durable command transaction");
-    return tx;
-  };
+  const transaction = () => commandBinding.transaction();
   const store: ReviewStore = {
     ...options.uploads,
+    ...options.tasks,
     async lookupOperation(context, operation) {
       const subject = actor(context);
       try {
@@ -165,7 +153,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
     return who.subject;
   }
   const commandStore = createPostgresCommandStore(database);
-  async function authorizeApproval(who: { actorId: string; tenantId: string }, request: Approval, tx: CommandTransaction): Promise<"allow" | "deny"> {
+  async function authorizeApproval(who: { actorId: string; tenantId: string }, request: ReturnType<typeof input>, tx: CommandTransaction): Promise<"allow" | "deny"> {
     const found = rows(await tx.query(
       "SELECT r.id FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id " +
       "CROSS JOIN public.starter_application a " +
@@ -175,54 +163,21 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
     ));
     return found.length === 1 ? "allow" : "deny";
   }
-  return {
-    deps: { dbClient: store }, requestContext,
-    commandGovernance: {
-      authorize(invocation) {
-        const command = invocation.command;
-        if (command.name !== "review.approve" || command.permission !== "review.approve"
-          || command.transaction !== "required" || command.idempotency !== "required"
-          || command.audit !== "review.approved" || command.rpc !== undefined) {
-          throw new ApplicationError("Unsupported review command", { status: 501, code: "REVIEW_COMMAND_UNSUPPORTED" });
-        }
-        actor(invocation.requestContext);
-      },
-      async idempotency(invocation, next) {
-        const command = createTransactionalCommand({
-          name: invocation.command.name, store: commandStore,
-          inputCodec: plaintextCommandInput, input, result,
-          authorize: authorizeApproval,
-          execute: tx => scope.run(tx, async () => {
-            try { return await next(); }
-            catch (error) {
-              if (isPublicConflict(error)) {
-                throw new CommandError("COMMAND_IDEMPOTENCY_CONFLICT");
-              }
-              throw error;
-            }
-          }),
-          audit: { event: "review.approved", details: request => ({ reviewId: request.id }) },
-        });
-        try {
-          const receipt = await command.execute(
-            { actorId: actor(invocation.requestContext), tenantId }, requireIdempotencyKey(invocation),
-            { id: invocation.input.params["id"], expectedVersion: record(invocation.input.body)["expectedVersion"] },
-            invocation.request.signal,
-          );
-          if (receipt.status !== "confirmed") throw new CommandError("COMMAND_OUTCOME_UNKNOWN");
-          return receipt.result;
-        } catch (error) {
-          if (!(error instanceof CommandError)) throw error;
-          const status = error.code === "COMMAND_REJECTED" ? 403
-            : error.code === "COMMAND_IDEMPOTENCY_CONFLICT" ? 409 : 503;
-          throw new ApplicationError(error.code, { code: error.code, status });
-        }
-      },
-      transaction(_invocation, next) { transaction(); return next(); },
-      // The durable command owns the authoritative audit and receipt in the same transaction.
-      audit: { succeeded() { transaction(); }, failed() {} },
+  const commandBinding = createTransactionalCommandGovernance({
+    permission: "review.approve",
+    identity: invocation => ({ actorId: actor(invocation.requestContext), tenantId }),
+    input: invocation => ({
+      ...record(invocation.input.body), id: invocation.input.params["id"],
+    }),
+    rejection: error => isPublicConflict(error) ? new CommandError("COMMAND_IDEMPOTENCY_CONFLICT") : undefined,
+    definition: {
+      name: "review.approve", store: commandStore,
+      inputCodec: plaintextCommandInput, input, result,
+      authorize: authorizeApproval,
+      audit: { event: "review.approved", details: request => ({ reviewId: request.id }) },
     },
-  };
+  });
+  return { deps: { dbClient: store }, requestContext, commandGovernance: commandBinding.governance };
 }
 `;
 
@@ -260,9 +215,9 @@ test("PostgreSQL host never falls back to demo identity or unbound business stor
   await expect(adapters.requestContext(new Request("http://localhost/reviews/health")))
     .rejects.toMatchObject({ code: "AUTHENTICATION_REQUIRED" });
   const store = adapters.deps["dbClient"] as ReviewStore;
-  await expect(store.get("reviews", "example")).rejects.toThrow("durable command transaction");
+  await expect(store.get("reviews", "example")).rejects.toThrow("not active");
   await expect(store.set("reviews", "example", { state: "approved", version: 2 }))
-    .rejects.toThrow("durable command transaction");
+    .rejects.toThrow("not active");
   expect(db.queries).toHaveLength(1);
 });
 `;
@@ -274,6 +229,7 @@ import { createApplication, type CompiledModule } from "@supacloud/elysia";
 import { createReviewPostgresAdapters } from "./host/review-postgres";
 import { createReviewAttachmentAdapters } from "./host/review-attachments";
 import { createReviewUploadAdapters } from "./host/review-uploads";
+import { createReviewTaskAdapters } from "./host/review-tasks";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -324,10 +280,12 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     const durable = attachmentOptions ? await createReviewAttachmentAdapters(attachmentOptions) : undefined;
     stage = "uploads";
     const uploads = attachmentOptions ? await createReviewUploadAdapters(attachmentOptions) : undefined;
+    const tasks = attachmentOptions ? await createReviewTaskAdapters(attachmentOptions) : undefined;
     stage = "postgres";
     const adapters = await createReviewPostgresAdapters({
       database, tenantId: settings.tenantId, identity: settings.identity,
       ...(uploads ? { uploads } : {}),
+      ...(tasks ? { tasks } : {}),
       ...(durable ? { afterApproved: durable.enqueue } : {}),
     });
     lifecycle.signal.throwIfAborted();

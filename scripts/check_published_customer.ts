@@ -29,6 +29,17 @@ export function assertRegistryManifest(value: unknown): void {
   }
 }
 
+// Preserve transport settings required by proxied registries without inheriting
+// application credentials, package overrides, or insecure TLS bypass flags.
+export function publishedConsumerEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries([
+    "PATH", "HOME", "TMPDIR", "SYSTEMROOT",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+    "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+  ].flatMap(key => source[key] === undefined ? [] : [[key, source[key]!]]));
+}
+
 async function main(args: string[]) {
   const { values } = parseArgs({ args, strict: true, options: {
     "cli-version": { type: "string" }, "lite-version": { type: "string" },
@@ -44,8 +55,7 @@ async function main(args: string[]) {
   const interrupt = () => signal.abort(new Error("Published customer acceptance interrupted"));
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
-  const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "SYSTEMROOT"].flatMap(key =>
-    process.env[key] === undefined ? [] : [[key, process.env[key]!]]));
+  const env = publishedConsumerEnvironment(process.env);
   const report: {
     schema: string; status: "incomplete" | "failed" | "passed"; stage: string;
     versions: Record<string, string>; checks: string[];

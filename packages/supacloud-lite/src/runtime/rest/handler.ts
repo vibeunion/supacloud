@@ -139,7 +139,7 @@ export class RestHandler {
       }
       return await this.handleTable(req, ctx, url, schema, decodeURIComponent(rest))
     } catch (e) {
-      return errorToResponse(e)
+      return errorToResponse(e, ctx.role !== 'anon')
     }
   }
 
@@ -178,9 +178,10 @@ export class RestHandler {
             ...explain.options.map((o) => o.toUpperCase()),
             `FORMAT ${explain.format}`,
           ].join(', ')
-          const res = await this.db.withContext(ctx, (query) =>
-            query(`explain (${explainOpts}) ${plan.sql}`, plan.params)
-          )
+          const res = await this.db.withContext(ctx, async (query) => {
+            await query('set transaction read only')
+            return query(`explain (${explainOpts}) ${plan.sql}`, plan.params)
+          })
           const cell = (res.rows[0] as Record<string, unknown>)['QUERY PLAN']
           if (explain.format === 'JSON') {
             const body = typeof cell === 'string' ? cell : JSON.stringify(cell)
@@ -197,6 +198,8 @@ export class RestHandler {
         }
         const built = builder.buildSelect(table, { count: prefer.count !== undefined })
         const { rows, count } = await this.db.withContext(ctx, async (query) => {
+          // Views and RLS predicates can call functions that write, even in SELECTs.
+          await query('set transaction read only')
           const res = await query(built.sql, built.params)
           let count: number | null = null
           if (built.countSql) {
@@ -402,9 +405,10 @@ export class RestHandler {
       }
     }
 
-    const fn = pickOverload(fns, Object.keys(args))
+    const fn = pickOverload(schema, fnName, fns, Object.keys(args))
     const call = renderCall(schema, fn, args)
     const q = parseQuery(searchParams)
+    if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
 
     // A VOLATILE function may have run DDL (create/alter/drop), so drop the
     // schema/function caches afterwards - otherwise REST keeps serving a stale
@@ -459,6 +463,10 @@ export class RestHandler {
     }
 
     // table/composite results: apply select/filters/order/pagination
+    if (this.maxRows !== undefined) {
+      const requested = q.limits.get('')
+      q.limits.set('', requested === undefined ? this.maxRows : Math.min(requested, this.maxRows))
+    }
     const alias = '_f'
     const exprs: string[] = []
     for (const item of q.select) {
@@ -522,17 +530,35 @@ function assertObjectCardinality(rows: unknown[]): void {
   }
 }
 
-function pickOverload(fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
+function pickOverload(schema: string, name: string, fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
   const provided = new Set(providedNames)
-  let best: FunctionInfo | null = null
-  for (const fn of fns) {
+  const matches = fns.filter((fn) => {
     const names = new Set(fn.args.map((a) => a.name))
-    const allProvidedKnown = [...provided].every((p) => names.has(p))
-    if (!allProvidedKnown) continue
-    if (fn.args.length === provided.size) return fn
-    if (!best) best = fn
+    return [...provided].every((p) => names.has(p))
+      && fn.args.slice(0, fn.requiredArgCount).every((arg) => provided.has(arg.name))
+  })
+  // An exact signature does not take precedence over applicable defaulted ones.
+  if (matches.length > 1) {
+    const candidates = matches.map((fn) =>
+      `${fn.schema}.${fn.name}(${fn.args.map((arg) => `${arg.name} => ${arg.type}`).join(', ')})`
+    )
+    throw new ApiError(300, {
+      code: 'PGRST203',
+      message: `Could not choose the best candidate function between: ${candidates.join(', ')}`,
+      details: null,
+      hint: 'Try renaming the parameters or the function itself in the database so function overloading can be resolved',
+    })
   }
-  return best ?? fns[0]
+  const match = matches[0]
+  if (!match) {
+    throw new ApiError(404, {
+      code: 'PGRST202',
+      message: `Could not find the function ${schema}.${name}(${[...provided].sort().join(', ')}) in the schema cache`,
+      details: null,
+      hint: null,
+    })
+  }
+  return match
 }
 
 function renderCall(schema: string, fn: FunctionInfo, args: Record<string, unknown>): string {

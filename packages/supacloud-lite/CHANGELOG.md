@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.29.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.1...supacloud-lite-v0.29.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** resolve RPC overloads using required arguments ([#1967](https://github.com/vibeunion/supacloud/issues/1967)) ([e00ffaf](https://github.com/vibeunion/supacloud/commit/e00ffafd41aa52c8f14c2e81f3bb8a8914b336c8))
+
+## [0.29.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.0...supacloud-lite-v0.29.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** enforce read-only table and view requests ([#1941](https://github.com/vibeunion/supacloud/issues/1941)) ([d726716](https://github.com/vibeunion/supacloud/commit/d726716a1492a5a581f99a1aa40f15a1125a23aa))
+
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.3...supacloud-lite-v0.29.0) (2026-10-15)
+
+
+### Features
+
+* reduce approval infrastructure wiring and reuse business contracts ([#1948](https://github.com/vibeunion/supacloud/issues/1948)) ([7c68543](https://github.com/vibeunion/supacloud/commit/7c6854338968209c2bbd658782224db238650aeb))
+
 ## [0.28.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.2...supacloud-lite-v0.28.3) (2026-10-15)
 
 

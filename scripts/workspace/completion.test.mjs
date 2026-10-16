@@ -116,6 +116,7 @@ test('verification-only dependency targets preserve the old extra build contract
   assert.deepEqual(verificationTargets(w,find('db')).slice(1).map(x=>x.projects[0]),['@supacloud/commands','@supacloud/compiler']);
   assert.equal(verificationTargets(w,find('compiler'))[1].projects[0],'@supacloud/contracts');
   assert.equal(verificationTargets(w,find('supacloud-lite'))[1].projects[0],'@supacloud/js');
+  assert.equal(verificationTargets(w,find('elysia'))[1].projects[0],'@supacloud/js');
   assert.ok(!projectTargets(w,find('db'))['repo-build'].dependsOn.some(x=>x.target==='repo-verify-prepare'));
 });
 test('cache refuses dangling output links and symlinked nested output paths', (t) => {
@@ -130,7 +131,7 @@ test('all legacy consumer preparation closures preserve their previous artifact 
   const original={
     'supacloud-js':['compiler','contracts','db','delivery','query'], 'supacloud-lite':['contracts','supacloud-js','commands','delivery','compiler','db','app','elysia','query'],
     app:['contracts'],compiler:['contracts','db','delivery','query'],db:['contracts','commands','delivery','compiler','db'],
-    commands:['contracts'],'app-svelte':['contracts'],elysia:['contracts','commands','delivery','compiler','db','app'],
+    commands:['contracts'],'app-svelte':['contracts'],elysia:['contracts','commands','delivery','compiler','db','app','supacloud-js','query'],
   };
   const find=alias=>Object.values(w.projects).find(p=>p.root===`packages/${alias}`);
   // @supacloud/db verification builds @supacloud/compiler because db tests import compiler source

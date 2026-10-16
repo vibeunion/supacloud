@@ -4,9 +4,15 @@ import { projectRepository } from "../../src/repositories/project.repository";
 import { databaseService } from "../../src/services/database.service";
 import { config } from "../../src/config";
 import { jwtService } from "../../src/services/jwt.service";
-import { isStoredServiceRoleKeyAligned } from "../../src/utils/service-role";
+import {
+  isStoredServiceRoleKeyAligned,
+  resolveProjectServiceJwtVerifier,
+  resolveProjectServiceRoleKey,
+} from "../../src/utils/service-role";
 import { generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
-import { decodeJwt, decodeProtectedHeader } from "jose";
+import { decodeJwt, decodeProtectedHeader, importJWK, jwtVerify } from "jose";
+import { buildFallbackTenantEnv, normalizeTenantEnv } from "../../../edge-runtime/tenant-env";
+import { readEdgeRuntimeProjectSecrets, verifyEdgeRuntimeJwt } from "../../../edge-runtime/jwt-verifier";
 
 describe("runtimeEnvService", () => {
   test("repairs stale HS256 service-role keys before exposing runtime env", async () => {
@@ -49,12 +55,42 @@ describe("runtimeEnvService", () => {
       storedProject = { ...storedProject, ...keys };
       return storedProject;
     });
-    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([
+      { name: "SUPACLOUD_SERVICE_JWT_VERIFIER", value: "untrusted-custom-verifier" },
+    ]);
 
     try {
       const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
 
       expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
+      const verifier = resolveProjectServiceJwtVerifier("proj_1", storedProject.config);
+      expect(env?.SUPACLOUD_SERVICE_JWT_VERIFIER).toBe(JSON.stringify(verifier));
+      expect(verifier?.jwks.keys).toHaveLength(1);
+      expect(verifier?.jwks.keys[0]).not.toHaveProperty("d");
+      expect(verifier?.jwks.keys[0]).not.toHaveProperty("k");
+      const serviceToken = await resolveProjectServiceRoleKey(storedProject);
+      const publicKey = await importJWK(verifier!.jwks.keys[0]!, "ES256");
+      const verified = await jwtVerify(serviceToken!, publicKey, {
+        algorithms: ["ES256"], issuer: verifier!.issuer,
+        requiredClaims: ["ref", "iat", "exp", "role"],
+      });
+      expect(verified.payload.ref).toBe("proj_1");
+      expect(verified.payload.role).toBe("service_role");
+      expect(verified.payload.exp! - verified.payload.iat!).toBe(300);
+      for (const mode of ["local", "owner", "shared"]) {
+        const edgeSecrets = readEdgeRuntimeProjectSecrets({
+          ...env, SUPACLOUD_AUTH_RUNTIME_MODE: mode,
+          SUPACLOUD_AUTH_ISSUER: "https://different-owner.example.test/auth/v1",
+        })!;
+        expect(await verifyEdgeRuntimeJwt(edgeSecrets, `Bearer ${serviceToken}`)).toBe(true);
+        expect(await verifyEdgeRuntimeJwt({ ...edgeSecrets, projectRef: "foreign" },
+          `Bearer ${serviceToken}`)).toBe(false);
+        expect(await verifyEdgeRuntimeJwt({ ...edgeSecrets, serviceVerifier: "{}" },
+          `Bearer ${serviceToken}`)).toBe(false);
+      }
+      await expect(jwtVerify(serviceToken!, publicKey, {
+        currentDate: new Date((verified.payload.exp! + 1) * 1000),
+      })).rejects.toThrow();
       expect(env?.JWT_SECRET).toBe(currentSecret);
       expect(env?.JWT_KEYS).toContain(keyMaterial.key_id);
       expect(env?.JWT_KEYS).not.toContain("legacy-hs256");
@@ -77,6 +113,37 @@ describe("runtimeEnvService", () => {
       updateApiKeysSpy.mockRestore();
       secretsSpy.mockRestore();
     }
+  });
+
+  test("service verifier trusts only the actual project signer, never mixed public JWKS", async () => {
+    const material = await generateOidcJwtKeyMaterial("project-secret");
+    const projectConfig = { auth: { oauth_server: {
+      issuer: "https://project.example.test/auth/v1/",
+      jwt_keys: material.jwt_keys,
+      jwt_jwks: { keys: [{ kty: "EC", kid: "foreign-key", x: "foreign", y: "foreign" }] },
+    } } };
+    const verifier = resolveProjectServiceJwtVerifier("project", projectConfig);
+    expect(verifier?.issuer).toBe("https://project.example.test/auth/v1");
+    expect(verifier?.jwks.keys[0]?.kid).toBe(material.key_id);
+    for (const jwt_keys of [undefined, "{", [], [{ kty: "oct", k: "secret" }]]) {
+      expect(resolveProjectServiceJwtVerifier("project", {
+        auth: { oauth_server: { jwt_keys, jwt_jwks: material.jwt_jwks } },
+      })).toBeNull();
+    }
+  });
+
+  test("file fallback never reintroduces service verifier material into shared tenants", () => {
+    const value = JSON.stringify({ schema: "untrusted-file-material" });
+    const env = { SUPACLOUD_AUTH_RUNTIME_MODE: "shared", SUPACLOUD_SERVICE_JWT_VERIFIER: value };
+    expect(normalizeTenantEnv("project", env).SUPACLOUD_SERVICE_JWT_VERIFIER).toBe(value);
+    for (const mode of ["local", "owner", "shared"]) {
+      const input = { ...env, SUPACLOUD_AUTH_RUNTIME_MODE: mode };
+      expect(buildFallbackTenantEnv("project", input).SUPACLOUD_SERVICE_JWT_VERIFIER).toBeUndefined();
+      expect(buildFallbackTenantEnv("project", input, input).SUPACLOUD_SERVICE_JWT_VERIFIER).toBeUndefined();
+    }
+    expect(normalizeTenantEnv("project", {
+      SUPACLOUD_SERVICE_JWT_VERIFIER: value,
+    }).SUPACLOUD_SERVICE_JWT_VERIFIER).toBeUndefined();
   });
 
   test("uses tenant-local PostgREST port for internal REST URL", async () => {
@@ -110,10 +177,13 @@ describe("runtimeEnvService", () => {
       updated_at: new Date(),
       deleted_at: null,
     } as never);
-    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([
+      { name: "SUPACLOUD_SERVICE_JWT_VERIFIER", value: "untrusted-custom-verifier" },
+    ]);
 
     try {
       const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
+      expect(env?.SUPACLOUD_SERVICE_JWT_VERIFIER).toBe("");
 
       expect(env?.SUPACLOUD_INTERNAL_REST_URL).toBe("http://127.0.0.1:3272");
       expect(env?.SUPACLOUD_INTERNAL_POSTGREST_PORT).toBe("3272");

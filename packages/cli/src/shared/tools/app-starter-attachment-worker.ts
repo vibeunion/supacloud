@@ -39,7 +39,9 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
       throw new Error("Invalid attachment workflow input");
     }
     const bound = await options.database.transaction(tx => tx.query(
-      "SELECT run_id FROM public.starter_attachments WHERE review_id=$1 AND artifact_id=$2 AND run_id=$3",
+      "SELECT a.run_id FROM public.starter_attachments a WHERE a.review_id=$1 AND a.artifact_id=$2 " +
+      "AND COALESCE((SELECT r.run_id FROM public.starter_attachment_retries r " +
+      "WHERE r.review_id=a.review_id ORDER BY r.generation DESC LIMIT 1),a.run_id)=$3",
       [reviewId, artifactId, claim.runId],
     ));
     if (!Array.isArray(bound) || bound.length !== 1) throw new Error("Attachment workflow ownership mismatch");

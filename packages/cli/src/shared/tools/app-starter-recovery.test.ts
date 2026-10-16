@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { prepareStarterSourceFixture } from "../../../../../scripts/lib/starter-source-fixture";
+// Load the repository-only fixture at runtime so CLI declaration output stays
+// inside src; the helper is checked separately by tsconfig.tools.json.
+const { prepareStarterSourceFixture }: {
+  prepareStarterSourceFixture(root: string): Promise<void>;
+} = await import(new URL("../../../../../scripts/lib/starter-source-fixture.ts", import.meta.url).href);
 
 const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 
