@@ -45,6 +45,18 @@ test('every package publish step is gated on its own release component', () => {
   }
 });
 
+test('Elysia publishes before the CLI because the CLI consumes its registry package', () => {
+  const elysia = source.indexOf('- name: Publish elysia adapter to NPM');
+  const cli = source.indexOf('- name: Publish cli to NPM');
+  assert.ok(elysia >= 0, 'Missing the Elysia adapter publish step');
+  assert.ok(cli >= 0, 'Missing the CLI publish step');
+  assert.ok(elysia < cli, 'Elysia must publish before the CLI');
+  const elysiaStep = source.slice(elysia, cli);
+  assert.match(elysiaStep, /\n {8}id: publish_elysia\n/);
+  const cliStep = source.slice(cli, source.indexOf('\n      - name:', cli + 1));
+  assert.match(cliStep, /steps\.publish_elysia\.outcome != 'failure'/);
+});
+
 test('the query publish step is gated on query_released', () => {
   const query = publishSteps.find(step => step.name === 'Publish Query adapter to NPM');
   assert.ok(query, 'Missing the Query adapter publish step');
