@@ -53,6 +53,66 @@ export async function writePrivateAcceptanceFile(file: string, content: string):
   }
 }
 
+/** Runs against the supplied consumer only; no templates or runtime modules are substituted. */
+export async function verifyPublishedExecutionContext(
+  project: string,
+  cli: string,
+  run: (args: string[], success?: boolean) => Promise<string>,
+): Promise<void> {
+  const preserved = ["src/host/review-execution-observability.ts", "src/review/review.ts", "generated/application.ts"];
+  const before = await Promise.all(preserved.map(file => readFile(join(project, file), "utf8")));
+  const temporary = await mkdtemp(join(tmpdir(), "published-execution-context-"));
+  try {
+    // Synthetic observations test the installed logging/context contract, not business execution.
+    const output = await run(["--eval", `
+const { createReviewHttpObserver } = await import("./src/host/review-execution-observability.ts");
+const observe = createReviewHttpObserver();
+for (const requestId of ["published-context-request", "unrelated-context-request"]) {
+  observe({ kind: "command", operation: "review.approve", stage: "authorize", phase: "failed", requestId, durationMs: 1 });
+}
+`]);
+    const lines = output.trim().split(/\r?\n/);
+    assert.equal(lines.length, 2, "Published observer must emit exactly two execution records");
+    for (const line of lines) {
+      const log = record(JSON.parse(line));
+      assert.equal(log["event"], "review-http-execution");
+      assert.equal(log["component"], "review-http");
+    }
+    const events = join(temporary, "execution.ndjson");
+    await writeFile(events, output, { mode: 0o600 });
+    for (const [command, requestFlag] of [
+      [["app", "context"], "--request-id"], [["context"], "--request_id"],
+    ] as const) {
+      const args = [cli, ...command, "--root", project, "--target", "review",
+        "--events", events, requestFlag, "published-context-request", "--format", "json"];
+      const response = await run(args);
+      const pack = record(JSON.parse(response));
+      const execution = record(pack["execution"]), workflow = record(pack["workflow"]);
+      assert.equal(pack["subject"], "review");
+      assert.equal(workflow["executed"], false);
+      assert.equal(execution["correlation"], "current-graph-only");
+      assert.equal(execution["eventsTrusted"], false);
+      assert.equal(execution["deploymentVerified"], false);
+      assert.deepEqual(execution["events"], [{
+        kind: "command", operation: "review.approve", stage: "authorize", phase: "failed",
+        requestId: "published-context-request", durationMs: 1, index: 0, module: "review",
+      }]);
+      assert.ok(!response.includes("unrelated-context-request"));
+      const denied = await run([...args, "--write"], false);
+      assert.ok(denied.includes("--write is not supported"));
+    }
+    await writeFile(events, lines[0] + '\n{"event":"PRIVATE_EXECUTION_INPUT"}\n');
+    const denied = await run([cli, "app", "context", "--root", project, "--target", "review",
+      "--events", events, "--request-id", "published-context-request", "--format", "json"], false);
+    assert.ok(denied.includes("EXECUTION_METADATA_INVALID"));
+    assert.ok(!denied.includes("PRIVATE_EXECUTION_INPUT"));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+    const after = await Promise.all(preserved.map(file => readFile(join(project, file), "utf8")));
+    assert.deepEqual(after, before, "Execution context must not rewrite source or generated artifacts");
+  }
+}
+
 async function main(args: string[]) {
   const { values } = parseArgs({ args, strict: true, options: {
     "cli-version": { type: "string" }, "lite-version": { type: "string" },
@@ -119,6 +179,17 @@ async function main(args: string[]) {
     await run(["run", "check:generated"]);
     await run(["run", "typecheck"]);
     report.checks.push("generated-contracts", "consumer-types");
+    report.stage = "execution-context";
+    const cliCompiler = Bun.resolveSync("@supacloud/compiler", join(tools, "node_modules/@supacloud/cli"));
+    assert.ok(cliCompiler.startsWith(join(tools, "node_modules") + "/"), "CLI compiler must be an installed package");
+    const cliCompilerManifest = record(JSON.parse(await readFile(join(dirname(cliCompiler), "../package.json"), "utf8")));
+    assert.equal(cliCompilerManifest["name"], "@supacloud/compiler");
+    assert.ok(typeof cliCompilerManifest["version"] === "string");
+    report.versions["cli:@supacloud/compiler"] = cliCompilerManifest["version"];
+    await verifyPublishedExecutionContext(project, join(tools, "node_modules/@supacloud/cli", entry),
+      (args, success = true) => runStarterCommand(args, { cwd: project, env, signal: signal.signal, success }));
+    report.checks.push("published-execution-observer", "published-app-context", "published-context-alias",
+      "execution-context-read-only", "execution-context-invalid-input-denied");
     report.stage = "client-states";
     // Missing published client examples fail; never inject workspace replacements.
     await readFile(join(project, "tests/review-client.test.ts"));

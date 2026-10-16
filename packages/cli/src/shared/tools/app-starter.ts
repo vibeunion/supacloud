@@ -885,6 +885,7 @@ handler contract, not production Storage, queue delivery or external identity.
 ## Inspection And Repair
 
 \`\`\`sh
+supacloud app context --root . --target review --events execution.ndjson --request-id request-123 --format json
 bunx supacloud-compiler context review --root src --json
 bunx supacloud-compiler context review --root src --events execution-events.json --request-id request-123 --json
 bunx supacloud-compiler explain review --root src
@@ -894,6 +895,11 @@ bunx supacloud-compiler fix ./fix.json --dry-run
 
 Context packs include directional dependencies, relevant aspect files, diagnostics
 and static execution plans, without provider values or source expressions.
+The app context entry point retains its module workflow and adds a separate
+execution evidence block when --events and --request-id are provided together.
+It requires an explicit --target and --format json, rejects --write, and
+resolves relative event paths from --root. The top-level context alias supports
+the same flags. Omit both execution flags for the unchanged authoring context.
 The optional --events example expects a trusted host
 to capture approved onExecution metadata in { "version": 1, "events": [...] }.
 It also accepts a bounded JSON-lines export containing only the generated
