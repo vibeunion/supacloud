@@ -98,6 +98,13 @@ fields. No identity mapping or Storage policy is changed by this increment.
 
 ## Acceptance
 
+- Given a committed upload registration, when its original request is replayed
+  while Storage is unavailable, then current authorization and receipt validation
+  precede returning the stored result without downloads or Artifact registration.
+- Given an upload binding whose commit acknowledgement was lost, when the same
+  key/input is reconciled, then one attachment binding, receipt and audit remain.
+- Given denied access, changed input, a corrupt receipt or a receipt read failure,
+  when registration is replayed, then it fails closed before external calls.
 - Given a committed approval whose HTTP response was lost, when the reference
   client is recreated with its pending marker and reconciles, then it uses only
   the authenticated receipt GET route, confirms the original operation and
@@ -161,6 +168,33 @@ receipt ports retain their method signatures. The receipt service now rejects
 invalid operation kinds, identifiers, extra fields and out-of-range numeric
 versions before invoking a port. Continue retaining unresolved markers on
 missing, denied or conflicting lookups; none proves that the write rolled back.
+
+### Upload Registration Replay
+
+The upload host now checks the existing transactional `review.attach` receipt
+before downloading the object or calling Artifact registration. The lookup
+reauthorizes current project/tenant, ownership, membership, storage identity and
+revision, checks the original key/input fingerprint, and validates the stored
+result against `UploadResult`. A confirmed receipt returns that original result
+even if Storage is unavailable. It is not a new integrity check of the current
+object. A recreated host uses the same durable record, not an in-memory cache.
+
+Denied access, changed input, invalid receipts and database errors stop the
+request before those external calls. Only a successful lookup with no receipt
+continues through the existing registration path. That path still rechecks
+authorization before downloading and inside the binding transaction.
+
+This is an additive host behavior change with no new SQL migration, request
+shape or idempotency-key format. Adopt the updated generated
+`src/host/review-uploads.ts`; keep existing receipts and audit history.
+The reference browser continues using read-only GET reconciliation rather than
+automatically resending registration POSTs.
+
+This does not make Storage, Artifact registration and PostgreSQL atomic. Without
+a committed receipt, an earlier external effect may still exist; concurrent
+first requests may still reach the external service. Do not infer safe deletion,
+automatic re-upload or exactly-once external execution from this change.
+Unbound objects and incomplete external registration need separate reconciliation.
 
 ## Complete Reference Paths
 
