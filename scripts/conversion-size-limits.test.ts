@@ -65,6 +65,9 @@ test("document default rejects a declared oversize buffer before copying or tran
 });
 
 test("document output ceiling is 500 MiB", async () => {
+  expect(createCollaboraDocumentConverter({ ...settings, maxOutputBytes: limit }).enabled).toBe(true);
+  expect(() => createCollaboraDocumentConverter({ ...settings, maxOutputBytes: limit + 1 }))
+    .toThrow("DOCUMENT_CONVERSION_CONFIG_INVALID");
   const converter = createCollaboraDocumentConverter({
     ...settings,
     fetch: async () => new Response("%PDF-1.7\n", { headers: {
@@ -73,6 +76,19 @@ test("document output ceiling is 500 MiB", async () => {
   });
   await expect(converter.convert(input(new Uint8Array([0x50, 0x4b, 3, 4]))))
     .rejects.toMatchObject({ code: "DOCUMENT_CONVERSION_OUTPUT_TOO_LARGE" });
+});
+
+test("document default accepts PDF output larger than the old 64 MiB ceiling", async () => {
+  const bytes = new Uint8Array(65 * 1024 * 1024);
+  bytes.set(new TextEncoder().encode("%PDF-1.7\n"));
+  bytes.set(new TextEncoder().encode("%%EOF\n"), bytes.length - 6);
+  const converter = createCollaboraDocumentConverter({
+    ...settings,
+    fetch: async () => new Response(bytes, { headers: { "content-type": "application/pdf" } }),
+  });
+  const result = await converter.convert(input(new Uint8Array([0x50, 0x4b, 3, 4])));
+  expect(result.bytes.byteLength).toBe(bytes.byteLength);
+  expect(result.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 });
 
 test("image declared-size boundary accepts 500 MiB and rejects the next byte", async () => {
