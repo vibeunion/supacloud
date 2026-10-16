@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/vibeunion/supacloud/compare/db-v0.17.1...db-v0.18.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** complete review task status and recovery lifecycle ([#1970](https://github.com/vibeunion/supacloud/issues/1970)) ([4ed6b7b](https://github.com/vibeunion/supacloud/commit/4ed6b7b8a9baced763de5602b67e1bb62d0479e2))
+* connect scoped AI workflows, reference clients and deployment evidence ([#1950](https://github.com/vibeunion/supacloud/issues/1950)) ([aa1737a](https://github.com/vibeunion/supacloud/commit/aa1737a68ce7c4429e432c9526be579f6888a9dd))
+
 ## [0.17.1](https://github.com/vibeunion/supacloud/compare/db-v0.17.0...db-v0.17.1) (2026-10-15)
 
 
