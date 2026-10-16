@@ -104,3 +104,58 @@ test("Drizzle generates real SQL drafts without changing deployment migrations",
   expect(await readdir(join(root, "migrations"))).toEqual(migrationNames);
   expect(await Promise.all(migrationNames.map(name => readFile(join(root, "migrations", name), "utf8")))).toEqual(before);
 }, 30_000);
+
+test("temporary delivery upgrades regenerate contracts and restore the exact baseline on success or failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "db-starter-upgrade-"));
+  roots.push(root);
+  await initializeAppProject({ root, name: "example", template: "command" });
+  await symlink(resolve(import.meta.dir, "../../compiler/node_modules"), join(root, "node_modules"), "dir");
+  expect((await databaseSources(root, "generate")).ok).toBe(true);
+  const contracts = (await readdir(join(root, "db/contracts"))).sort();
+  const baseline = await Promise.all(contracts.map(name => readFile(join(root, "db/contracts", name), "utf8")));
+  const migrations = (await readdir(join(root, "migrations"))).sort();
+  const adapter = await readFile(join(root, "src/host/review-attachments.ts"), "utf8");
+  await writeFile(join(root, "tests/delivery-compatibility.ts"), await readFile(
+    resolve(import.meta.dir, "../../../scripts/fixtures/starter-delivery-compatibility.fixture"), "utf8"));
+  // Replace only the expensive archive builder, not the real fixture or source
+  // contract gate. Both ordinary database CI and the command gate run this test.
+  await writeFile(join(root, "tests/delivery-archive.ts"), `
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { databaseSources } from "@supacloud/db/source-contracts";
+export const observations: unknown[] = [];
+export let rejectBuild = false;
+export function failNextBuild() { rejectBuild = true; }
+export async function buildReferenceDeliveryArchive() {
+  const project = fileURLToPath(new URL("..", import.meta.url));
+  const report = await databaseSources(project, "check");
+  if (!report.ok) throw new Error(JSON.stringify(report.findings));
+  observations.push(JSON.parse(await readFile(new URL("../db/contracts/manifest.json", import.meta.url), "utf8")));
+  if (rejectBuild) throw new Error("Synthetic archive build failure");
+  return { verified: true };
+}
+export function prepareArchivedDelivery() { throw new Error("Not used by source-contract regression"); }
+`);
+  const fixture = await import(pathToFileURL(join(root, "tests/delivery-compatibility.ts")).href) as {
+    buildReferenceUpgradeArchive(directory: string, signal: AbortSignal): Promise<unknown>;
+  };
+  const builder = await import(pathToFileURL(join(root, "tests/delivery-archive.ts")).href) as {
+    observations: Array<{ migrations: Array<{ path: string }> }>;
+    failNextBuild(): void;
+  };
+  for (const reject of [false, true]) {
+    if (reject) builder.failNextBuild();
+    const build = fixture.buildReferenceUpgradeArchive(join(root, "output/upgrade"), new AbortController().signal);
+    if (reject) await expect(build).rejects.toThrow("Synthetic archive build failure");
+    else expect(await build).toEqual({ verified: true });
+    expect(builder.observations.at(-1)?.migrations.map(item => item.path)).toEqual([
+      ...migrations.map(name => "migrations/" + name), "migrations/006-reference-compatibility.sql",
+    ]);
+    expect((await readdir(join(root, "migrations"))).sort()).toEqual(migrations);
+    expect(await readFile(join(root, "src/host/review-attachments.ts"), "utf8")).toBe(adapter);
+    expect((await readdir(join(root, "db/contracts"))).sort()).toEqual(contracts);
+    expect(await Promise.all(contracts.map(name => readFile(join(root, "db/contracts", name), "utf8")))).toEqual(baseline);
+    expect((await databaseSources(root, "check")).ok).toBe(true);
+  }
+  expect(builder.observations).toHaveLength(2);
+}, 30_000);
