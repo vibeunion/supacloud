@@ -2,12 +2,29 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertRegistryManifest, exactPublishedVersion, publishedConsumerEnvironment, writePrivateAcceptanceFile } from "./check_published_customer";
+import { assertPublishedPackageManifest, assertRegistryManifest, exactPublishedVersion, publishedConsumerEnvironment, writePrivateAcceptanceFile } from "./check_published_customer";
 
 test("published acceptance requires an immutable registry version", () => {
   expect(exactPublishedVersion("0.99.0")).toBe("0.99.0");
   for (const version of ["latest", "^0.99.0", "file:../cli", "../cli", "", undefined]) {
     expect(() => exactPublishedVersion(version)).toThrow("exact published version");
+  }
+});
+test("published package evidence requires the expected package identity and exact version", () => {
+  expect(assertPublishedPackageManifest({ name: "@supacloud/lite", version: "0.29.5" }, "@supacloud/lite", "0.29.5"))
+    .toBe("0.29.5");
+  expect(() => assertPublishedPackageManifest({ name: "@supacloud/compiler", version: "latest" }, "@supacloud/compiler"))
+    .toThrow("exact");
+  expect(() => assertPublishedPackageManifest({ name: "@supacloud/app", version: "0.1.0" }, "@supacloud/lite"))
+    .toThrow("name");
+  expect(() => assertPublishedPackageManifest({ name: "@supacloud/lite", version: "0.29.4" }, "@supacloud/lite", "0.29.5"))
+    .toThrow("match");
+  for (const version of [undefined, 29, "", "^0.29.5", "workspace:*"]) {
+    expect(() => assertPublishedPackageManifest({ name: "@supacloud/lite", version }, "@supacloud/lite"))
+      .toThrow();
+  }
+  for (const manifest of [null, [], {}, { version: "0.29.5" }]) {
+    expect(() => assertPublishedPackageManifest(manifest, "@supacloud/lite")).toThrow();
   }
 });
 test("consumer verification cannot fall back to workspace, tarballs or URLs", () => {

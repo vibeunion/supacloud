@@ -28,6 +28,14 @@ export function assertRegistryManifest(value: unknown): void {
     }
   }
 }
+export function assertPublishedPackageManifest(value: unknown, expectedName: string, expectedVersion?: string): string {
+  const manifest = record(value);
+  assert.equal(manifest["name"], expectedName, `Installed package name must be ${expectedName}`);
+  const version = manifest["version"];
+  assert.ok(typeof version === "string" && exactPublishedVersion(version), `Installed ${expectedName} version must be exact`);
+  if (expectedVersion !== undefined) assert.equal(version, expectedVersion, `${expectedName} version must match the requested version`);
+  return version;
+}
 
 // Preserve transport settings required by proxied registries without inheriting
 // application credentials, package overrides, or insecure TLS bypass flags.
@@ -149,7 +157,7 @@ async function main(args: string[]) {
     }));
     await run(starterInstallArgs("consumer"), tools);
     const cliManifest = record(JSON.parse(await readFile(join(tools, "node_modules/@supacloud/cli/package.json"), "utf8")));
-    assert.equal(cliManifest["version"], cliVersion);
+    assertPublishedPackageManifest(cliManifest, "@supacloud/cli", cliVersion);
     const bin = record(cliManifest["bin"]);
     const entry = bin["supacloud"];
     assert.ok(typeof entry === "string" && /^dist\/[A-Za-z0-9._/-]+$/.test(entry) && !entry.includes(".."));
@@ -168,9 +176,9 @@ async function main(args: string[]) {
     await run(starterInstallArgs("consumer"));
     await run(starterInstallArgs("locked-consumer"));
     for (const name of ["app", "compiler", "elysia", "commands", "contracts", "db", "js", "lite"]) {
-      const installed = record(JSON.parse(await readFile(join(project, `node_modules/@supacloud/${name}/package.json`), "utf8")));
-      assert.ok(typeof installed["version"] === "string");
-      report.versions[`@supacloud/${name}`] = installed["version"];
+      const installed: unknown = JSON.parse(await readFile(join(project, `node_modules/@supacloud/${name}/package.json`), "utf8"));
+      report.versions[`@supacloud/${name}`] = assertPublishedPackageManifest(
+        installed, `@supacloud/${name}`, name === "lite" ? liteVersion : undefined);
     }
     report.checks.push("registry-install", "frozen-offline-install");
     report.stage = "compile";
@@ -183,9 +191,7 @@ async function main(args: string[]) {
     const cliCompiler = Bun.resolveSync("@supacloud/compiler", join(tools, "node_modules/@supacloud/cli"));
     assert.ok(cliCompiler.startsWith(join(tools, "node_modules") + "/"), "CLI compiler must be an installed package");
     const cliCompilerManifest = record(JSON.parse(await readFile(join(dirname(cliCompiler), "../package.json"), "utf8")));
-    assert.equal(cliCompilerManifest["name"], "@supacloud/compiler");
-    assert.ok(typeof cliCompilerManifest["version"] === "string");
-    report.versions["cli:@supacloud/compiler"] = cliCompilerManifest["version"];
+    report.versions["cli:@supacloud/compiler"] = assertPublishedPackageManifest(cliCompilerManifest, "@supacloud/compiler");
     await verifyPublishedExecutionContext(project, join(tools, "node_modules/@supacloud/cli", entry),
       (args, success = true) => runStarterCommand(args, { cwd: project, env, signal: signal.signal, success }));
     report.checks.push("published-execution-observer", "published-app-context", "published-context-alias",
