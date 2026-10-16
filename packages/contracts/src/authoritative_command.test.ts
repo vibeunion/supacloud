@@ -291,6 +291,130 @@ describe("pending command recovery", () => {
     expect(reads).toBe(1);
   });
 
+  test("send argument mutation cannot confirm a foreign response or clear the original marker", async () => {
+    const storage = pendingStorage();
+    let writes = 0, reads = 0;
+    const foreign = { ...state, id: "foreign" };
+    const client = createPendingCommandClient(pendingContract, {
+      send: async request => { writes++; request.id = foreign.id; return foreign; },
+      lookup: async () => { reads++; return { receipt: foreign }; },
+    }, { storage, key, unknownError, confirmation: "response" });
+    await expect(client({ id: "target" })).rejects.toThrow("unknown:target");
+    expect([writes, reads]).toEqual([1, 1]);
+    expect(storage.getItem(key)).toBe(JSON.stringify({ id: "target" }));
+  });
+
+  test("send argument mutation before response loss cannot redirect the recovery lookup", async () => {
+    const storage = pendingStorage();
+    let lookupInput: unknown;
+    const client = createPendingCommandClient(pendingContract, {
+      send: async request => { request.id = "foreign"; throw new Error("lost response"); },
+      lookup: async request => { lookupInput = request; return { receipt: state }; },
+    }, { storage, key, unknownError });
+    expect(await client({ id: "target" })).toEqual(state);
+    expect(lookupInput).toEqual({ id: "target" });
+    expect(storage.getItem(key)).toBeNull();
+  });
+
+  test("lookup argument mutation cannot confirm a foreign receipt", async () => {
+    const storage = pendingStorage();
+    let writes = 0, reads = 0;
+    const client = createPendingCommandClient(pendingContract, {
+      send: async () => { writes++; return state; },
+      lookup: async request => {
+        reads++;
+        request.id = "foreign";
+        return { receipt: { ...state, id: request.id } };
+      },
+    }, { storage, key, unknownError });
+    await expect(client({ id: "target" })).rejects.toThrow("unknown:target");
+    expect([writes, reads]).toEqual([1, 1]);
+    expect(storage.getItem(key)).toBe(JSON.stringify({ id: "target" }));
+  });
+
+  test("response matcher mutation cannot redirect the fallback lookup or its matcher", async () => {
+    const storage = pendingStorage();
+    let matches = 0;
+    let lookupInput: unknown;
+    const client = createPendingCommandClient({
+      ...pendingContract,
+      matches: (request, result) => {
+        if (++matches === 1) { request.id = "foreign"; return false; }
+        return contract.matches(request, result);
+      },
+    }, {
+      send: async () => state,
+      lookup: async request => { lookupInput = request; return { receipt: state }; },
+    }, { storage, key, unknownError, confirmation: "response" });
+    expect(await client({ id: "target" })).toEqual(state);
+    expect(lookupInput).toEqual({ id: "target" });
+    expect(matches).toBe(2);
+    expect(storage.getItem(key)).toBeNull();
+  });
+
+  test("nested input is isolated from both decoder aliases and transport arguments", async () => {
+    const storage = pendingStorage();
+    let decoderAlias: { id: string; details: { version: number } } | undefined;
+    let lookupInput: unknown;
+    const client = createPendingCommandClient<
+      { id: string; details: { version: number } }, typeof state, typeof state
+    >({
+      ...pendingContract,
+      input: raw => {
+        const value = input(raw);
+        if (!raw || typeof raw !== "object" || !("details" in raw)
+          || !raw.details || typeof raw.details !== "object" || !("version" in raw.details)
+          || typeof raw.details.version !== "number") throw new Error("Invalid details");
+        decoderAlias = { ...value, details: { version: raw.details.version } };
+        return decoderAlias;
+      },
+    }, {
+      send: async request => {
+        if (decoderAlias) decoderAlias.details.version = 99;
+        request.details.version = 42;
+        return state;
+      },
+      lookup: async request => { lookupInput = request; return { receipt: state }; },
+    }, { storage, key, unknownError });
+    const original = { id: "target", details: { version: 1 } };
+    expect(await client(original)).toEqual(state);
+    expect(lookupInput).toEqual(original);
+    expect(original.details.version).toBe(1);
+  });
+
+  test("failed lookup retains the persisted identity and original cause after callback mutation", async () => {
+    const storage = pendingStorage();
+    const unavailable = new Error("lookup offline");
+    let mapped: unknown;
+    const client = createPendingCommandClient(pendingContract, {
+      send: async request => { request.id = "write-mutated"; throw new Error("lost response"); },
+      lookup: async request => { request.id = "read-mutated"; throw unavailable; },
+    }, {
+      storage, key,
+      unknownError: (original, cause) => { mapped = cause; return unknownError(original, cause); },
+    });
+    await expect(client({ id: "target" })).rejects.toThrow("lookup-unavailable:target");
+    expect(mapped).toBe(unavailable);
+    expect(storage.getItem(key)).toBe(JSON.stringify({ id: "target" }));
+  });
+
+  test("non-cloneable decoded input fails before persistence, send or denial classification", async () => {
+    let writes = 0, calls = 0;
+    const storage = { ...pendingStorage(), setItem: () => { writes++; } };
+    const client = createPendingCommandClient<
+      { id: string; callback: () => undefined }, typeof state, typeof state
+    >({
+      ...pendingContract,
+      input: raw => ({ ...input(raw), callback: () => undefined }),
+    }, {
+      send: async () => { calls++; return state; },
+      lookup: async () => { calls++; return { receipt: state }; },
+      isDefinitiveWriteFailure: () => { calls++; return true; },
+    }, { storage, key, unknownError });
+    await expect(client({ id: "target", callback: () => undefined })).rejects.toThrow();
+    expect([writes, calls]).toEqual([0, 0]);
+  });
+
   test("unavailable lookup differs from missing, malformed or foreign receipts; all retain pending", async () => {
     for (const mode of ["unavailable", "missing", "foreign"] as const) {
       const storage = pendingStorage();
@@ -509,6 +633,24 @@ describe("pending command recovery", () => {
     storage.setItem(key, serialized);
     const recover = createPendingCommandRecovery(pendingContract, {
       lookup: async original => { original.id = "foreign"; return { receipt: { ...state, id: "foreign" } }; },
+    }, { storage, key, unknownError });
+    await expect(recover()).rejects.toThrow("unknown:target");
+    expect(storage.getItem(key)).toBe(serialized);
+  });
+
+  test("manual recovery detaches aliases retained by the input decoder", async () => {
+    const storage = pendingStorage();
+    const serialized = JSON.stringify({ id: "target" });
+    storage.setItem(key, serialized);
+    let decoderAlias: { id: string } | undefined;
+    const recover = createPendingCommandRecovery({
+      ...pendingContract,
+      input: raw => { decoderAlias = input(raw); return decoderAlias; },
+    }, {
+      lookup: async () => {
+        if (decoderAlias) decoderAlias.id = "foreign";
+        return { receipt: { ...state, id: "foreign" } };
+      },
     }, { storage, key, unknownError });
     await expect(recover()).rejects.toThrow("unknown:target");
     expect(storage.getItem(key)).toBe(serialized);

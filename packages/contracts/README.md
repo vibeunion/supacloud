@@ -60,8 +60,17 @@ database idempotency. Retain those existing controls; use coordinated durable
 locks when cross-tab ownership is required. A cleanup error propagates without
 resending. Neither the pending client nor its transports may retry a write.
 
+The pending client keeps a detached snapshot of the persisted request and gives
+send, lookup and matcher callbacks separate copies, including nested values.
+Mutating a callback argument cannot retarget later confirmation, recovery or
+unknown-error reporting. Decoded input must be structured-cloneable; otherwise
+execution rejects before saving a marker or calling a transport. A transport is
+still responsible for sending the correct request: isolation does not undo a
+wrong external write or replace server authorization and idempotency.
+
 Manual recovery requires the decoder to preserve the stored JSON values; it must
 not mint a new identity, normalize business values or drop fields on reload.
+Its internal snapshot is also detached from references retained by the decoder.
 Whitespace and object-key ordering do not matter for that validation. Cleanup
 still compares the exact original stored string, so a late lookup cannot remove
 a replacement marker. A storage error rejects, even after authority is confirmed.
