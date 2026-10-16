@@ -165,6 +165,24 @@ Scenario: Reject a missing published observer
   When the execution-context acceptance stage starts
   Then it fails before invoking the observer or context processes
   And no workspace template is substituted
+
+Scenario: Keep HTTP and worker context identities separate
+  Given mixed HTTP request and attachment worker run observations
+  When both installed context entry points select each identity
+  Then only the corresponding command or Job events are returned
+  And no shared trace identity or business success is inferred
+
+Scenario: Preserve the worker failure timeline
+  Given attachment handler started and failed observations for one run
+  When the installed CLI correlates that run with the current graph
+  Then the Job timeline retains both stages and reports the failed attempt
+  And the worker observer and attachment source remain unchanged
+
+Scenario: Reject missing or malformed worker evidence
+  Given a missing worker observer or a worker record containing extra fields
+  When the execution-context acceptance stage runs
+  Then missing files fail before process dispatch without substitution
+  And malformed records fail without echoing their contents
 ```
 
 ## Evidence boundary
@@ -407,6 +425,26 @@ exposed missing local dependency build output and then rejected the installed
 older compiler's unsupported log format; rebuilding and pairing the candidate
 dependencies resolved those local setup failures. No exact-version npm gate,
 full suite, remote CI or deployment was run for this increment.
+
+On 2026-10-17, the execution-context stage was extended to exercise the
+generated worker observer alongside HTTP observations in the same log file.
+Both installed CLI entry points independently select the HTTP request ID or
+Workflow run ID, and the worker selection must retain the attachment Job's
+started/failed handler timeline without inventing a shared trace or completion
+claim. A succeeded observation for another run must not contaminate that result.
+Worker records containing an extra payload field are rejected without echoing
+the payload. The worker observer and attachment Job source are now also checked
+for changes, and a missing worker observer fails before process dispatch.
+
+`bun test scripts/check_published_context.test.ts` passed all three focused
+cases using the source fixture and local candidate dependencies. The success
+case executes nine subprocesses: one mixed-observer probe, four context queries,
+two denied write requests and two denied malformed-log requests. The portable
+receipt names worker-observer, worker-timeline, identity-isolation and
+worker-invalid-input checks separately. These are synthetic contract checks,
+not execution of the real queue, confirmation of a Workflow receipt, or a
+published-package/live identity acceptance result. No full suite, publication,
+remote CI or deployment was performed.
 
 Focused follow-up verification on October 15:
 `bun test src/shared/tools/app-starter-client.test.ts` from `packages/cli`
