@@ -412,7 +412,7 @@ describe("document conversion worker integration boundary", () => {
     const domain: DocumentConversionDomain = {
       async authorize() { events.push("authorize"); return true; },
       async read(_request, maxBytes) {
-        expect(maxBytes).toBe(25 * 1024 * 1024);
+        expect(maxBytes).toBe(500 * 1024 * 1024);
         events.push("read");
         return source;
       },

@@ -86,7 +86,7 @@ application. Collabora has LibreOffice-derived rendering technology; this
 implementation selects Collabora's maintained service and does not claim a
 completely unrelated rendering codebase.
 
-Factory options can lower the 25 MiB input and 64 MiB output ceilings and set
+Factory options can lower the 500 MiB input and 64 MiB output ceilings and set
 the request timeout (default 120 seconds, maximum 120 seconds). Default
 concurrency is one per instance; the hard cap is four. Busy requests fail
 immediately rather than queueing large buffers. This is not a distributed

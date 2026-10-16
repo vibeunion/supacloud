@@ -68,7 +68,7 @@ export function createDocumentConversionTask(
       const source = decode(value);
       if (!await authorize(source, context)) throw new DocumentConversionError("DOCUMENT_CONVERSION_FORBIDDEN");
       context.signal.throwIfAborted();
-      const bytes = await domain.read(source, 25 * 1024 * 1024, context.signal);
+      const bytes = await domain.read(source, 500 * 1024 * 1024, context.signal);
       context.signal.throwIfAborted();
       const result = await converter.convert({
         projectRef: source.projectRef, renderProfile: source.renderProfile,

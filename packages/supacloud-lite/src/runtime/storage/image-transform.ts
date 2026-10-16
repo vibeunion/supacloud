@@ -43,7 +43,7 @@ const IMAGE_FORMAT_CONTENT_TYPES: Record<string, string> = {
   gif: 'image/gif',
 }
 const MAX_TRANSFORM_DIMENSION = 2500
-const MAX_TRANSFORM_BYTES = 25 * 1024 * 1024
+const MAX_TRANSFORM_BYTES = 500 * 1024 * 1024
 const MAX_TRANSFORM_PIXELS = 50_000_000
 
 function invalid(message: string): ImageTransformError {
@@ -188,7 +188,7 @@ export async function transformImage(
       ok: false,
       status: 413,
       error: 'ImageTooLarge',
-      message: 'The source image exceeds the 25MB transformation limit',
+      message: 'The source image exceeds the 500MB transformation limit',
     }
   }
   const image = new Bun.Image(source, { maxPixels: MAX_TRANSFORM_PIXELS })
@@ -229,7 +229,7 @@ export async function transformImage(
         ok: false,
         status: 413,
         error: 'ImageTooLarge',
-        message: 'The transformed image exceeds the 25MB transformation limit',
+        message: 'The transformed image exceeds the 500MB transformation limit',
       }
     }
     return { ok: true, bytes, contentType }

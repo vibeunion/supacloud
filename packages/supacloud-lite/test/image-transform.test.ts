@@ -77,7 +77,10 @@ describe('storage image transforms', () => {
   })
 
   test('enforces the actual Blob size when metadata understates it', async () => {
-    const oversizedBlob = new Blob([new Uint8Array(25 * 1024 * 1024 + 1)])
+    class OversizedBlob extends Blob {
+      override get size() { return 500 * 1024 * 1024 + 1 }
+    }
+    const oversizedBlob = new OversizedBlob()
     const result = await transformImage(oversizedBlob, parseOptions('format=png'), 1)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(413)
