@@ -422,8 +422,15 @@ export class AuthHandler {
 
     if (grantType === 'password') {
       const email = (body.email ?? '').toLowerCase().trim()
-      const res = await this.db.query(`select * from auth.users where email = $1`, [email])
-      const user = res.rows[0] as UserRow | undefined
+      const res = await this.db.query<UserRow & { is_banned: boolean }>(
+        `select *, coalesce(banned_until > now(), false) as is_banned
+         from auth.users where email = $1 and deleted_at is null`,
+        [email],
+      )
+      const user = res.rows[0]
+      if (user?.encrypted_password && user.is_banned) {
+        return authError(400, 'user_banned', 'User is banned')
+      }
       if (!user || !user.encrypted_password || !(await verifyPassword(body.password ?? '', user.encrypted_password))) {
         await this.audit('login_failed', { actorEmail: email, traits: { grant_type: 'password' } })
         return authError(400, 'invalid_credentials', 'Invalid login credentials')
