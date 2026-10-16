@@ -90,8 +90,9 @@ implementation selects Collabora's maintained service and does not claim a
 completely unrelated rendering codebase.
 
 Factory options and the two environment variables can lower the 500 MiB input
-and output ceilings and set
-the request timeout (default 120 seconds, maximum 120 seconds). Default
+and output ceilings. Environment byte counts must be positive decimal integers;
+invalid values fail initialization when conversion is enabled. Factory options
+can also set the request timeout (default 120 seconds, maximum 120 seconds). Default
 concurrency is one per instance; the hard cap is four. Busy requests fail
 immediately rather than queueing large buffers. This is not a distributed
 quota: use existing execution-group admission and host resource budgets for
