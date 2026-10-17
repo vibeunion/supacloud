@@ -933,7 +933,10 @@ export function isCanonicalEdgeFunctionSha256(candidate: string): boolean {
 
 // Build and final artifact policy failures must escape before a version can be written or preheated.
 async function buildFunctionCode(request: BundleFunctionRequest): Promise<string> {
-  const buildOptions: Parameters<typeof Bun.build>[0] & { importMap?: string } = {
+  const buildOptions: Parameters<typeof Bun.build>[0] & { importMap?: string; macros: false } = {
+    // Tenant macros run with management-process privileges during bundling, before
+    // runtime capability checks. Disable them for the entire dependency graph.
+    macros: false,
     entrypoints: [request.entrypoint],
     outdir: request.outdir,
     naming: "index.[ext]",
