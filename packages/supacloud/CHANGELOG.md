@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.21](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.20...supacloud-v0.16.21) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2041](https://github.com/vibeunion/supacloud/issues/2041)) ([be44641](https://github.com/vibeunion/supacloud/commit/be446416b87bf009eec892bc20368e3595d7326a))
+* recheck password issuance and align published tool dependencies ([#2039](https://github.com/vibeunion/supacloud/issues/2039)) ([250b1af](https://github.com/vibeunion/supacloud/commit/250b1afef3f78d6dd4ab34e94147f65beb8a8677))
+* **supacloud:** sync published CLI dependencies ([#2040](https://github.com/vibeunion/supacloud/issues/2040)) ([cee0a93](https://github.com/vibeunion/supacloud/commit/cee0a93803d2b1c4986489ac97af884964f5f8a0))
+
 ## [0.16.20](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.19...supacloud-v0.16.20) (2026-10-17)
 
 

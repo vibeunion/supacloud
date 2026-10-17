@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.47.1...compiler-v0.47.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2041](https://github.com/vibeunion/supacloud/issues/2041)) ([be44641](https://github.com/vibeunion/supacloud/commit/be446416b87bf009eec892bc20368e3595d7326a))
+
 ## [0.47.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.47.0...compiler-v0.47.1) (2026-10-17)
 
 

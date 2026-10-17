@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.4](https://github.com/vibeunion/supacloud/compare/elysia-v0.33.3...elysia-v0.33.4) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2041](https://github.com/vibeunion/supacloud/issues/2041)) ([be44641](https://github.com/vibeunion/supacloud/commit/be446416b87bf009eec892bc20368e3595d7326a))
+
 ## [0.33.3](https://github.com/vibeunion/supacloud/compare/elysia-v0.33.2...elysia-v0.33.3) (2026-10-17)
 
 
