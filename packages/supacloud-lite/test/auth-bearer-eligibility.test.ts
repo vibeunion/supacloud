@@ -162,7 +162,7 @@ describe('Bearer Auth endpoint account eligibility', () => {
     test(`rejects a user update when ${change} commits before the write`, async () => {
       const original = db!.transaction.bind(db!)
       let afterChange: Awaited<ReturnType<typeof snapshot>> | undefined
-      let identities: unknown
+      let identities: unknown[] | undefined
       const changed = spyOn(db!, 'transaction').mockImplementationOnce(
         async <T>(fn: (query: Querier) => Promise<T>): Promise<T> => {
           await db!.query(change, [userId])
@@ -175,7 +175,7 @@ describe('Bearer Auth endpoint account eligibility', () => {
         const response = await invoke('update-user')
         expect(response.status).toBe(401)
         expect(await response.json()).toMatchObject({ error_code: 'no_authorization' })
-        expect(afterChange).toBeDefined()
+        if (!afterChange || !identities) throw new Error('Expected account change snapshots before the write')
         expect(await snapshot()).toEqual(afterChange)
         expect((await db!.query('select * from auth.identities')).rows).toEqual(identities)
       } finally {
