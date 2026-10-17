@@ -885,9 +885,9 @@ export class AuthHandler {
     // Both alternatives share this row, so the lock serializes OTP/hash claims
     // before either transaction re-checks and removes its candidate token.
     const eligible = await query(
-      `select id from auth.users where id = $1 and deleted_at is null
-         and (banned_until is null or banned_until <= now()) for update`,
-      [candidate.user_id],
+      `select id from auth.users where id = $1 and lower(email) = lower($2)
+         and deleted_at is null and (banned_until is null or banned_until <= now()) for update`,
+      [candidate.user_id, candidate.email],
     )
     if (eligible.rows.length === 0) return null
     const claimedTokens = await query<EmailTokenCandidate>(
