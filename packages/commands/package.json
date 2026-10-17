@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/commands",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "Storage-independent durable command execution and recovery",
   "type": "module",
   "main": "./dist/index.js",

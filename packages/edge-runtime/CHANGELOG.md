@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.33.0...edge-runtime-v0.34.0) (2026-10-17)
+
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+* batch server-owned release preparation and simplify deploy output ([#1856](https://github.com/vibeunion/supacloud/issues/1856)) ([599d274](https://github.com/vibeunion/supacloud/commit/599d274285accb04a7e9e04617d8c91d40fa2b2a))
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+* **gateway:** auto-configure Function CORS origins ([#1749](https://github.com/vibeunion/supacloud/issues/1749)) ([5b6853b](https://github.com/vibeunion/supacloud/commit/5b6853bd563297cb632aee3b9b7e6729de18d0f4))
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
+
+### Bug Fixes
+
+* **auth:** bind service JWT verification to project public signer ([#1958](https://github.com/vibeunion/supacloud/issues/1958)) ([21846c2](https://github.com/vibeunion/supacloud/commit/21846c2b8f7973739c848257a8a7c753b0b3fb4b))
+* **edge-runtime:** apply memory admission backpressure ([#1894](https://github.com/vibeunion/supacloud/issues/1894)) ([5f0b310](https://github.com/vibeunion/supacloud/commit/5f0b3109ec00e6b207581cfda312466816214429))
+* **edge-runtime:** avoid recycling on idle memory plateau ([#1520](https://github.com/vibeunion/supacloud/issues/1520)) ([1241ee8](https://github.com/vibeunion/supacloud/commit/1241ee83ad1b6f411713a3c00923fdcb3c79de58))
+* **edge-runtime:** bound default worker memory ([#1896](https://github.com/vibeunion/supacloud/issues/1896)) ([8790b91](https://github.com/vibeunion/supacloud/commit/8790b9167543c36b6f39e9554f85f3bd01617c58))
+* **edge-runtime:** default Function CORS mode to auto ([#1834](https://github.com/vibeunion/supacloud/issues/1834)) ([61e1bdd](https://github.com/vibeunion/supacloud/commit/61e1bddd4b678933a09fe6ea9f45cbc7e9352c06))
+* **edge-runtime:** exclude immediate dispatch from queue wait ([#1932](https://github.com/vibeunion/supacloud/issues/1932)) ([609ec39](https://github.com/vibeunion/supacloud/commit/609ec39dfad5b773852ad316adddd328f0a65842))
+* **edge-runtime:** preserve guarded constructor identity ([#1680](https://github.com/vibeunion/supacloud/issues/1680)) ([2bae9a1](https://github.com/vibeunion/supacloud/commit/2bae9a12dd276bd2d4822e7fb2f978374a2e40d0))
+* **edge-runtime:** recover admission and retain project workers ([#1897](https://github.com/vibeunion/supacloud/issues/1897)) ([26e6faf](https://github.com/vibeunion/supacloud/commit/26e6faf545e2054b689e5b17e84f36f299aa453d))
+* **edge-runtime:** separate parked retirement attestation from execution slots ([#1985](https://github.com/vibeunion/supacloud/issues/1985)) ([575c8bd](https://github.com/vibeunion/supacloud/commit/575c8bd376c6e2d547db2581f05756e8d832f8e2))
+* **edge-runtime:** transfer binary payloads without extra copies ([#1928](https://github.com/vibeunion/supacloud/issues/1928)) ([022ec59](https://github.com/vibeunion/supacloud/commit/022ec59d0e1e11f74b7ce5c2f7cfeec9ac90a864))
+* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+* **deps-dev:** bump @types/node in /packages/edge-runtime ([#1713](https://github.com/vibeunion/supacloud/issues/1713)) ([d213b15](https://github.com/vibeunion/supacloud/commit/d213b1535d9970d52b71e74611a7c906f895e7d2))
+* **deps:** bump es-module-lexer in /packages/edge-runtime ([#1719](https://github.com/vibeunion/supacloud/issues/1719)) ([1a61870](https://github.com/vibeunion/supacloud/commit/1a6187085a154d86f6d8f13a068be33e2985364a))
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+* release main ([#1484](https://github.com/vibeunion/supacloud/issues/1484)) ([41b3e72](https://github.com/vibeunion/supacloud/commit/41b3e72d25dd8b1ea1d3dea5b75c90bdea9be797))
+* release main ([#1507](https://github.com/vibeunion/supacloud/issues/1507)) ([b7f3a59](https://github.com/vibeunion/supacloud/commit/b7f3a59885596742a8b11fc808d898165a8989ec))
+* release main ([#1561](https://github.com/vibeunion/supacloud/issues/1561)) ([3ee71e3](https://github.com/vibeunion/supacloud/commit/3ee71e301e7a5499780b45ec6c64e53698000029))
+* release main ([#1657](https://github.com/vibeunion/supacloud/issues/1657)) ([1a3f7ff](https://github.com/vibeunion/supacloud/commit/1a3f7ff901f05dda38ed4827d70a91a4acccd8b3))
+* release main ([#1681](https://github.com/vibeunion/supacloud/issues/1681)) ([c804f96](https://github.com/vibeunion/supacloud/commit/c804f96c450e193f37f182f81002fd5ff65dfe68))
+* release main ([#1695](https://github.com/vibeunion/supacloud/issues/1695)) ([2b9da10](https://github.com/vibeunion/supacloud/commit/2b9da1004b8cc1fd78cfcad79110d5c5eba5349d))
+* release main ([#1736](https://github.com/vibeunion/supacloud/issues/1736)) ([0916385](https://github.com/vibeunion/supacloud/commit/09163851882373d5cc1f647e9e8d94aa1d441187))
+* release main ([#1752](https://github.com/vibeunion/supacloud/issues/1752)) ([c7e8496](https://github.com/vibeunion/supacloud/commit/c7e8496de45420ac6da2513bd8e97c90f668469d))
+* release main ([#1767](https://github.com/vibeunion/supacloud/issues/1767)) ([d31bf06](https://github.com/vibeunion/supacloud/commit/d31bf06a2bfbdb353554a44576d0c54685f46193))
+* release main ([#1825](https://github.com/vibeunion/supacloud/issues/1825)) ([4819f95](https://github.com/vibeunion/supacloud/commit/4819f95ae7ce722b58f4858261c100c448c9975e))
+* release main ([#1836](https://github.com/vibeunion/supacloud/issues/1836)) ([e09aa0e](https://github.com/vibeunion/supacloud/commit/e09aa0ef48fa795be302333da8706d120fcc06bc))
+* release main ([#1857](https://github.com/vibeunion/supacloud/issues/1857)) ([6b98454](https://github.com/vibeunion/supacloud/commit/6b9845403733f7ffac7711587982979d928702b2))
+* release main ([#1895](https://github.com/vibeunion/supacloud/issues/1895)) ([6991743](https://github.com/vibeunion/supacloud/commit/69917439dd0feab442fd651a61da2d0bfb0fef53))
+* release main ([#1898](https://github.com/vibeunion/supacloud/issues/1898)) ([8c624dc](https://github.com/vibeunion/supacloud/commit/8c624dc4d8916700ec30401fe28864bf47789f7c))
+* release main ([#1900](https://github.com/vibeunion/supacloud/issues/1900)) ([a0db9b7](https://github.com/vibeunion/supacloud/commit/a0db9b7d013803c4d31605adf125f7b6759008cf))
+* release main ([#1930](https://github.com/vibeunion/supacloud/issues/1930)) ([2a0a7fa](https://github.com/vibeunion/supacloud/commit/2a0a7fa8ad5c2d88bd8b9ce76b9a6a1744428eb4))
+* release main ([#1933](https://github.com/vibeunion/supacloud/issues/1933)) ([6d06b9c](https://github.com/vibeunion/supacloud/commit/6d06b9cb6beddeb585f6717fd153862f5f97bb92))
+* release main ([#1944](https://github.com/vibeunion/supacloud/issues/1944)) ([206d711](https://github.com/vibeunion/supacloud/commit/206d711a0012bad9465283f2f2bfc5f4eb80d269))
+* release main ([#1960](https://github.com/vibeunion/supacloud/issues/1960)) ([1ea85ac](https://github.com/vibeunion/supacloud/commit/1ea85acbe15eed33570672f67f341a7612bf69ac))
+* release main ([#1982](https://github.com/vibeunion/supacloud/issues/1982)) ([02cb9a7](https://github.com/vibeunion/supacloud/commit/02cb9a7011588e7d02e22a84f972c324e4983de4))
+* release main ([#2030](https://github.com/vibeunion/supacloud/issues/2030)) ([2f7cf91](https://github.com/vibeunion/supacloud/commit/2f7cf91d941ab583ebe21d901069a16e55efc48a))
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.8...edge-runtime-v0.33.0) (2026-10-17)
+
+
+### Features
+
+* add bytecode-enabled release compilation and an opt-in Function bytecode cache with validated sidecar metadata ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* add isolated, opt-in Elysia AOT A/B evaluation builds; default platform AOT behavior remains unchanged ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+AOT remains experimental and opt-in. Database-backed business behavior, real authenticated/business WebSocket flows and full API parity remain unverified.
+
 ## [0.32.8](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.7...edge-runtime-v0.32.8) (2026-10-16)
 
 

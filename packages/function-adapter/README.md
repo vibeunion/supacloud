@@ -28,7 +28,10 @@ export default createSupaCloudHandler(createWorkerHttpHandler({
 }));
 ```
 
-The worker accepts an empty body or a JSON object with an optional `batchSize`.
+The worker accepts an empty body or a JSON object with an optional integer
+`batchSize`. Bodies are limited to 4096 bytes by default; `maxBodyBytes` can
+configure this limit. The limit is checked while reading the stream, regardless
+of `Content-Length`, and oversized bodies return HTTP 400 before executing work.
 The default header is `x-supacloud-worker-secret`; `secretHeader` and `errorCodes`
 can preserve an application's existing invocation contract. Batch bounds are
 validated when constructing the handler. Secrets must have at least 32
@@ -47,7 +50,10 @@ against the previous Web Crypto implementation, not end-to-end Function latency.
 For scheduled invocations, supply exactly one of `expectedBearer` (the full
 expected token, without the `Bearer ` prefix) or `authorize(request)`. A bearer
 is compared to the configured secret; this is not JWT claim verification.
-Use `authorize` for a platform JWT/signature verifier. Never authorize a token
+Use `authorize` for a platform JWT/signature verifier; only an explicit `true`
+result authorizes execution. The scheduled adapter does not parse the body:
+applications that consume it in `authorize` or `runBatch` must enforce their
+own input limits. Never authorize a token
 merely by decoding a `service_role` claim.
 
 Both adapters return `{ ok: true, result }` on success, with HTTP 200 by default.

@@ -43,8 +43,25 @@ const IMAGE_FORMAT_CONTENT_TYPES: Record<string, string> = {
   gif: 'image/gif',
 }
 const MAX_TRANSFORM_DIMENSION = 2500
-const MAX_TRANSFORM_BYTES = 25 * 1024 * 1024
+const MAX_TRANSFORM_BYTES = 500 * 1024 * 1024
 const MAX_TRANSFORM_PIXELS = 50_000_000
+
+export interface ImageTransformLimits {
+  maxInputBytes?: number
+  maxOutputBytes?: number
+}
+
+/** Operator-owned limits, never taken from image URL parameters. */
+export function resolveImageTransformLimits(options: ImageTransformLimits = {}): Required<ImageTransformLimits> {
+  const maxInputBytes = options.maxInputBytes === undefined ? MAX_TRANSFORM_BYTES : options.maxInputBytes
+  const maxOutputBytes = options.maxOutputBytes === undefined ? MAX_TRANSFORM_BYTES : options.maxOutputBytes
+  for (const [name, value] of Object.entries({ maxInputBytes, maxOutputBytes })) {
+    if (!Number.isSafeInteger(value) || value < 1 || value > MAX_TRANSFORM_BYTES) {
+      throw new Error(`Invalid image transformation ${name}: expected 1..${MAX_TRANSFORM_BYTES} bytes`)
+    }
+  }
+  return { maxInputBytes, maxOutputBytes }
+}
 
 function invalid(message: string): ImageTransformError {
   return { ok: false, status: 400, error: 'InvalidTransformation', message }
@@ -102,7 +119,16 @@ export function parseImageTransform(query: URLSearchParams): ImageTransformParse
     return invalid('quality is supported only for jpeg and webp output')
   }
 
-  return { ok: true, value: { width, height, resize, quality, format } }
+  return {
+    ok: true,
+    value: {
+      resize,
+      format,
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
+      ...(quality === undefined ? {} : { quality }),
+    },
+  }
 }
 
 /** Encode a transform object into the query shape used by render/image URLs. */
@@ -177,18 +203,20 @@ function applyResize(image: Bun.Image, metadata: Bun.Image.Metadata, options: Im
 export async function transformImage(
   source: Uint8Array | Blob,
   options: ImageTransformOptions,
-  knownSourceSize?: number
+  knownSourceSize?: number,
+  configuredLimits: ImageTransformLimits = {}
 ): Promise<ImageTransformResult> {
+  const limits = resolveImageTransformLimits(configuredLimits)
   const actualSourceSize = source instanceof Uint8Array
     ? source.byteLength
     : await Promise.resolve(source.size as number | Promise<number>)
   const sourceSize = Math.max(knownSourceSize ?? 0, actualSourceSize)
-  if (sourceSize > MAX_TRANSFORM_BYTES) {
+  if (sourceSize > limits.maxInputBytes) {
     return {
       ok: false,
       status: 413,
       error: 'ImageTooLarge',
-      message: 'The source image exceeds the 25MB transformation limit',
+      message: `The source image exceeds the transformation limit (${limits.maxInputBytes} bytes)`,
     }
   }
   const image = new Bun.Image(source, { maxPixels: MAX_TRANSFORM_PIXELS })
@@ -224,12 +252,12 @@ export async function transformImage(
 
   try {
     const bytes = await image.bytes()
-    if (bytes.byteLength > MAX_TRANSFORM_BYTES) {
+    if (bytes.byteLength > limits.maxOutputBytes) {
       return {
         ok: false,
         status: 413,
         error: 'ImageTooLarge',
-        message: 'The transformed image exceeds the 25MB transformation limit',
+        message: `The transformed image exceeds the transformation limit (${limits.maxOutputBytes} bytes)`,
       }
     }
     return { ok: true, bytes, contentType }
