@@ -1,0 +1,276 @@
+import { describe, expect, spyOn, test } from "bun:test";
+import {
+  constantTimeSecretMatches,
+  createScheduledWorkerHttpHandler,
+  createWorkerHttpHandler,
+} from "./index";
+
+const SECRET = "worker-secret-012345678901234567890123";
+
+function request(
+  body?: unknown,
+  init: RequestInit = {},
+): Request {
+  return new Request("https://edge/functions/v1/worker", {
+    method: "POST",
+    headers: { "x-supacloud-worker-secret": SECRET },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    ...init,
+  });
+}
+
+describe("worker HTTP adapter", () => {
+  test("hashes the configured secret once per worker or scheduled handler", async () => {
+    const hash = spyOn(Bun.CryptoHasher, "hash");
+    try {
+      const worker = createWorkerHttpHandler({
+        expectedSecret: SECRET,
+        defaultBatchSize: 1,
+        runBatch: () => null,
+      });
+      expect(hash).toHaveBeenCalledTimes(1);
+      expect((await worker(request())).status).toBe(200);
+      expect((await worker(request())).status).toBe(200);
+      expect(hash).toHaveBeenCalledTimes(3);
+
+      const scheduled = createScheduledWorkerHttpHandler({
+        expectedBearer: SECRET,
+        runBatch: () => null,
+      });
+      expect(hash).toHaveBeenCalledTimes(4);
+      for (let index = 0; index < 2; index += 1) {
+        const response = await scheduled(new Request("https://edge/scheduled", {
+          method: "POST",
+          headers: { authorization: `Bearer ${SECRET}` },
+        }));
+        expect(response.status).toBe(200);
+      }
+      expect(hash).toHaveBeenCalledTimes(6);
+    } finally {
+      hash.mockRestore();
+    }
+  });
+
+  test("native digests match Web Crypto UTF-8 encoding", async () => {
+    for (const value of ["", SECRET, "密钥-🔐", "a\u0000b", "密".repeat(1024)]) {
+      const expected = new Uint8Array(await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(value),
+      ));
+      expect(new Uint8Array(Bun.CryptoHasher.hash("sha256", value))).toEqual(expected);
+      expect(await constantTimeSecretMatches(value, value)).toBe(value.length > 0);
+      expect(await constantTimeSecretMatches(`${value}x`, value)).toBe(false);
+    }
+  });
+
+  test("compares secrets including empty and unequal-length inputs", async () => {
+    expect(await constantTimeSecretMatches(SECRET, SECRET)).toBe(true);
+    expect(await constantTimeSecretMatches("", "")).toBe(false);
+    expect(await constantTimeSecretMatches("wrong", SECRET)).toBe(false);
+    expect(await constantTimeSecretMatches("x".repeat(SECRET.length), SECRET)).toBe(false);
+  });
+
+  test("rejects invalid configuration and unconfigured secrets", async () => {
+    const options = { expectedSecret: SECRET, defaultBatchSize: 1, runBatch: () => null };
+    for (const defaultBatchSize of [0, 21, 1.5, NaN]) {
+      expect(() => createWorkerHttpHandler({ ...options, defaultBatchSize })).toThrow(RangeError);
+    }
+    expect(() => createWorkerHttpHandler({ ...options, maxBatchSize: Infinity })).toThrow(RangeError);
+    expect(() => createWorkerHttpHandler({ ...options, minimumSecretLength: 0 })).toThrow(RangeError);
+    for (const maxBodyBytes of [0, -1, 1.5, NaN, Infinity]) {
+      expect(() => createWorkerHttpHandler({ ...options, maxBodyBytes })).toThrow(RangeError);
+    }
+    for (const expectedSecret of ["", "short", undefined as never, null as never]) {
+      const response = await createWorkerHttpHandler({ ...options, expectedSecret })(request());
+      expect(response.status).toBe(503);
+    }
+  });
+
+  test("uses defaults and custom headers, codes and accepted status", async () => {
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      secretHeader: "x-app-worker",
+      defaultBatchSize: 2,
+      maxBatchSize: 3,
+      runBatch: ({ batchSize }) => batchSize,
+      successStatus: () => 202,
+      errorCodes: { unauthorized: "APP_UNAUTHORIZED" },
+    });
+    const unauthorized = await handler(request());
+    expect(await unauthorized.json()).toMatchObject({ error: { code: "APP_UNAUTHORIZED" } });
+    const response = await handler(request(undefined, { headers: { "x-app-worker": SECRET } }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: true, result: 2 });
+    expect(response.headers.get("content-type")).toContain("application/json");
+  });
+
+  test("rejects invalid bodies without executing work", async () => {
+    let calls = 0;
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 2,
+      runBatch: () => { calls += 1; },
+    });
+    for (const body of [null, [], "text", { batchSize: null }, { batchSize: 0 }, { batchSize: -1 }, { batchSize: 1.1 }, { batchSize: "2" }]) {
+      expect((await handler(request(body))).status).toBe(400);
+    }
+    expect(calls).toBe(0);
+    for (const body of [{}, { batchSize: 1 }, { batchSize: 20 }]) {
+      expect((await handler(request(body))).status).toBe(200);
+    }
+    expect(calls).toBe(3);
+  });
+
+  test("runs a bounded batch and returns a no-store JSON response", async () => {
+    const calls: number[] = [];
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 3,
+      runBatch: ({ batchSize }) => {
+        calls.push(batchSize);
+        return { processed: batchSize };
+      },
+    });
+
+    const response = await handler(request({ batchSize: 4 }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, result: { processed: 4 } });
+    expect(calls).toEqual([4]);
+  });
+
+  test("rejects method, authentication, malformed JSON, and invalid batches", async () => {
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 3,
+      runBatch: () => ({ processed: 0 }),
+    });
+
+    expect((await handler(request(undefined, { method: "GET" }))).status).toBe(405);
+    expect(
+      (await handler(new Request("https://edge/functions/v1/worker", { method: "POST" }))).status,
+    ).toBe(401);
+    expect(
+      (await handler(new Request("https://edge/functions/v1/worker", {
+        method: "POST",
+        headers: { "x-supacloud-worker-secret": SECRET },
+        body: "{",
+      }))).status,
+    ).toBe(400);
+    expect((await handler(request({ batchSize: 21 }))).status).toBe(400);
+  });
+
+  test("does not expose callback errors", async () => {
+    const logged: unknown[] = [];
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 1,
+      runBatch: () => {
+        throw new Error("private database detail");
+      },
+      logError: (error) => logged.push(error),
+    });
+
+    const response = await handler(request());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: {
+        code: "SUPACLOUD_WORKER_UNAVAILABLE",
+        message: "Worker execution failed.",
+      },
+    });
+    expect(logged).toHaveLength(1);
+  });
+
+  test("bounds body bytes even with an absent or understated content length", async () => {
+    let calls = 0;
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 1,
+      maxBodyBytes: 16,
+      runBatch: () => { calls += 1; },
+    });
+    for (const contentLength of [undefined, "1", "17"]) {
+      const headers = new Headers({ "x-supacloud-worker-secret": SECRET });
+      if (contentLength !== undefined) headers.set("content-length", contentLength);
+      const response = await handler(request(undefined, { headers, body: " ".repeat(17) }));
+      expect(response.status).toBe(400);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+    // This JSON fits the character limit but exceeds the UTF-8 byte limit.
+    expect((await handler(request({ text: "éééé" }))).status).toBe(400);
+    expect(calls).toBe(0);
+    expect((await handler(request(undefined, { body: " ".repeat(16) }))).status).toBe(200);
+    expect(calls).toBe(1);
+  });
+
+  test("stops an oversized streaming body without waiting for cancellation", async () => {
+    let cancelled = false;
+    let calls = 0;
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 1,
+      maxBodyBytes: 16,
+      runBatch: () => { calls += 1; },
+    });
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(" ".repeat(17)));
+      },
+      cancel() {
+        cancelled = true;
+        return new Promise<void>(() => {});
+      },
+    });
+    expect((await handler(request(undefined, { body }))).status).toBe(400);
+    expect(cancelled).toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  test("keeps body transport and authentication failures inside the error boundary", async () => {
+    let calls = 0;
+    const logged: unknown[] = [];
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 1,
+      runBatch: () => { calls += 1; },
+      logError: (error) => { logged.push(error); },
+    });
+    const failure = new Error("private transport details");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(failure); },
+    });
+    const transportResponse = await handler(request(undefined, { body }));
+    expect(transportResponse.status).toBe(503);
+    expect(await transportResponse.text()).not.toContain(failure.message);
+    const digest = spyOn(Bun.CryptoHasher, "hash").mockImplementation(() => { throw failure; });
+    try {
+      const authResponse = await handler(request());
+      expect(authResponse.status).toBe(503);
+      expect(await authResponse.text()).not.toContain(failure.message);
+    } finally {
+      digest.mockRestore();
+    }
+    expect(logged).toEqual([failure, failure]);
+    expect(calls).toBe(0);
+  });
+
+  test("contains rejected asynchronous error loggers", async () => {
+    let logged = false;
+    const handler = createWorkerHttpHandler({
+      expectedSecret: SECRET,
+      defaultBatchSize: 1,
+      runBatch: () => { throw new Error("private execution details"); },
+      logError: async () => {
+        await Promise.resolve();
+        logged = true;
+        throw new Error("private logging details");
+      },
+    });
+    const response = await handler(request());
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("private");
+    expect(logged).toBe(true);
+  });
+});

@@ -84,17 +84,44 @@ schemas and server-side user-code execution are not changed.
 Validated with Bun 1.4.3 on macOS arm64 and platform Elysia 2.0.0-beta.21:
 
 - Management and Edge plain/AOT bundles build with manifest-injection checks.
+- Management plain/AOT HTTP replay covers validation/coercion, malformed JSON,
+  storage parse envelopes, authentication, route-not-found, `AppError` status
+  mappings, multipart upload, streaming, OpenAPI JSON, and WebSocket echo
+  (`bun test packages/management-api/tests/unit/elysia-aot-http-parity.test.ts`,
+  25 scenarios).
 - Edge candidates pass HTTP health identity and internal metrics authorization
   with runtime-only configuration and initialized Workers.
 - A Function fixture retains 401 authorization, 422 body validation, runtime
   environment access, byte-exact prebundled upload, SHA and activation identity.
 - A Function AOT bundle passes Management's prebundled normalization unchanged.
 - Management capture warns that 23 coercion/codec validator slots may produce
-  coarser 422 error details. This is a compatibility risk requiring API replay.
+  coarser 422 error details. The sampled replay scenarios show no public contract
+  difference because the Management error hook intentionally returns the stable
+  `400 Validation failed` envelope. Keep the replay as a release gate.
 
 This is build/smoke evidence, not a production latency, memory, throughput, or
-full Management API parity result. Management requires a test database and
-authenticated API replay before promotion. No merge or deployment is implied.
+full Management API parity result. The replay is side-effect-free and does not
+replace database-backed, authenticated full API acceptance. No merge or
+deployment is implied.
+
+The parity fixtures are a typed route plugin mounted on the real Management app;
+they reuse its production error hooks without executing business writes.
+Management's package typecheck excludes tests, so check the new fixtures and
+test explicitly from `packages/management-api`:
+
+```sh
+./node_modules/.bin/tsc --ignoreConfig --noEmit --strict --skipLibCheck \
+  --moduleResolution bundler --module ESNext --target ES2022 \
+  src/types/sql.d.ts src/types/shell.d.ts src/types/jsonl.d.ts \
+  tests/fixtures/aot-http-parity-app.ts tests/fixtures/aot-http-parity-build.ts \
+  tests/fixtures/aot-http-parity-entry.ts tests/unit/elysia-aot-http-parity.test.ts
+```
+
+Before promotion, replay authenticated database-backed workflows against isolated
+test data in both candidates, compare their public contracts, and measure cold
+startup, warm latency, throughput, and memory under the same workload. Keep plain
+builds as the default until these gates pass; the probe replay alone is not
+production approval.
 
 ## Current-Main Review Evidence
 
@@ -114,9 +141,14 @@ Additional review on Linux x64, Bun 1.4.3 and Elysia 2.0.0-beta.32:
   entries and nine status/body responses: version, missing/invalid/master auth,
   provider data, invalid numeric coercion queries, metrics auth and missing paths.
   This is **not** a database-backed or comprehensive authenticated API replay.
+- The committed 25-scenario Management HTTP replay also passes on this version,
+  including malformed JSON, storage envelopes, runtime-only authentication,
+  AppError mappings, multipart upload, streaming, OpenAPI JSON and probe WebSocket
+  echo. These probes use real app hooks but do not exercise business writes.
 - Current Management capture warns about **24** coercion/codec validator slots.
   The sampled global validation responses match, but the warning is not waived.
-  Database-backed behavior, WebSockets and full API parity remain unverified.
+  Database-backed business behavior, real authenticated/business WebSocket flows
+  and full API parity remain unverified. Probe echo coverage does not waive them.
 
 The Edge suites can be replayed without changing the fixtures after building:
 

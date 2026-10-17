@@ -29,10 +29,15 @@ export function platformBuildEnvironment(scratch: string): NodeJS.ProcessEnv {
   };
 }
 
-async function buildCandidate(component: string, mode: string, outdir: string): Promise<void> {
+export async function buildCandidate(
+  component: "management-api" | "edge-runtime",
+  mode: "plain" | "aot",
+  outdir: string,
+  entries?: { appEntry: string; entry: string },
+): Promise<void> {
   const packageRoot = join(root, "packages", component);
-  const appEntry = join(packageRoot, component === "management-api" ? "src/index.ts" : "server.ts");
-  const entry = join(packageRoot, component === "management-api" ? "src/standalone.ts" : "cli.ts");
+  const appEntry = entries?.appEntry ?? join(packageRoot, component === "management-api" ? "src/index.ts" : "server.ts");
+  const entry = entries?.entry ?? join(packageRoot, component === "management-api" ? "src/standalone.ts" : "cli.ts");
   const plugins: Bun.BunPlugin[] = [];
   if (mode === "aot") {
     const moduleUrl = import.meta.resolve("elysia/plugin/aot/bun", pathToFileURL(appEntry).href);

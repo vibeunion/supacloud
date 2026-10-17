@@ -2,6 +2,69 @@
 
 Fetch-based adapters for SupaCloud Edge Functions.
 
+The package also provides generic HTTP invocation adapters for application
+workers. `createWorkerHttpHandler` handles POST validation, a shared-secret
+header, bounded `batchSize` input, stable error responses, and no-store
+responses. `createScheduledWorkerHttpHandler` handles POST validation and
+either a service-role bearer or an application-provided verifier.
+
+These adapters do not own queue claims, leases, retries, business
+authorization, or domain state. Applications inject those concerns through
+`runBatch`; FA can use them for its worker entry points while keeping FA task
+decoding, membership authorization, provider authorization, and command
+receipts in the application.
+
+```ts
+import {
+  createSupaCloudHandler,
+  createWorkerHttpHandler,
+} from "@supacloud/function-adapter";
+
+export default createSupaCloudHandler(createWorkerHttpHandler({
+  expectedSecret: process.env.WORKER_SECRET ?? "",
+  defaultBatchSize: 5,
+  maxBatchSize: 20,
+  runBatch: ({ batchSize }) => applicationWorker.runBatch(batchSize),
+}));
+```
+
+The worker accepts an empty body or a JSON object with an optional integer
+`batchSize`. Bodies are limited to 4096 bytes by default; `maxBodyBytes` can
+configure this limit. The limit is checked while reading the stream, regardless
+of `Content-Length`, and oversized bodies return HTTP 400 before executing work.
+The default header is `x-supacloud-worker-secret`; `secretHeader` and `errorCodes`
+can preserve an application's existing invocation contract. Batch bounds are
+validated when constructing the handler. Secrets must have at least 32
+characters. Missing or weak secrets fail closed with HTTP 503.
+
+Worker authentication targets the Bun runtime: it uses `Bun.CryptoHasher` SHA-256
+and Bun's native `node:crypto` `timingSafeEqual`. Each handler caches its expected
+digest at construction, avoiding repeated encoding, hashing of the configured
+secret, and Web Crypto Promise scheduling in the request path. Recreate the
+handler when rotating credentials or changing its authorization callback.
+`constantTimeSecretMatches` retains its Promise-based API for existing callers.
+`Response.json` remains the native Fetch response path; no JSON library is added.
+Run `bun bench/worker-auth.ts` from this package to compare authentication alone
+against the previous Web Crypto implementation, not end-to-end Function latency.
+
+For scheduled invocations, supply exactly one of `expectedBearer` (the full
+expected token, without the `Bearer ` prefix) or `authorize(request)`. A bearer
+is compared to the configured secret; this is not JWT claim verification.
+Use `authorize` for a platform JWT/signature verifier; only an explicit `true`
+result authorizes execution. The scheduled adapter does not parse the body:
+applications that consume it in `authorize` or `runBatch` must enforce their
+own input limits. Never authorize a token
+merely by decoding a `service_role` claim.
+
+Both adapters return `{ ok: true, result }` on success, with HTTP 200 by default.
+`successStatus` may select 202 for delegated execution. Errors use
+`{ ok: false, error: { code } }` (the worker also includes a generic message).
+They never include exception details. Optional `logError` receives the original
+exception for application-controlled reporting; redact credentials before
+logging it. These adapters do not register cron jobs, start polling loops, or
+replace `createWorker()` / `createSupAuthRequestContext()` in `@supacloud/elysia`.
+Publishing this package does not migrate existing application entry points.
+
 The adapter returns a default-exportable object with `fetch(request)` and
 explicit SupaCloud metadata. It never listens on a port, starts a process, or
 serves static assets.
