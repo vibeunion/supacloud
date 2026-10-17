@@ -14,6 +14,17 @@ import type { StorageDriver } from '../src/runtime/types.js'
 const sourcePng = await new Bun.Image(createBmp(4, 2)).png().bytes()
 
 describe('storage image transforms', () => {
+  test('omits absent optional values and preserves supplied values', () => {
+    expect(parseImageTransform(new URLSearchParams())).toEqual({
+      ok: true,
+      value: { resize: 'contain', format: 'origin' },
+    })
+    expect(parseImageTransform(new URLSearchParams('width=8&height=4&resize=fill&format=webp&quality=80'))).toEqual({
+      ok: true,
+      value: { width: 8, height: 4, resize: 'fill', format: 'webp', quality: 80 },
+    })
+  })
+
   test('rejects cover and invalid transform parameters', () => {
     const cover = parseImageTransform(new URLSearchParams('width=8&resize=cover'))
     expect(cover.ok).toBe(false)

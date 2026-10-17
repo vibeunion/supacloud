@@ -35,6 +35,7 @@ import {
 /** Per-function configuration (mirrors Supabase config.toml [functions.xxx]) */
 export interface EdgeFunctionConfig {
   verify_jwt: boolean;
+  bytecode?: "off" | "auto" | "required";
   /** Runtime adapter profile. `fetch` preserves legacy functions. */
   framework?: EdgeFunctionFramework;
   import_map?: string;
@@ -68,6 +69,12 @@ export const EDGE_FUNCTION_FRAMEWORKS = [
 ] as const;
 
 export type EdgeFunctionFramework = typeof EDGE_FUNCTION_FRAMEWORKS[number];
+
+function validatedFunctionBytecode(value: unknown): "off" | "auto" | "required" {
+  if (value === undefined) return "off";
+  if (value === "off" || value === "auto" || value === "required") return value;
+  throw new Error("Function config contains an unsupported bytecode mode");
+}
 
 export interface EdgeFunctionVersionRecord {
   version: string;
@@ -135,7 +142,7 @@ export interface EdgeFunctionActivationResult {
 
 export type EdgeFunctionDeploymentConfig = Pick<
   Partial<EdgeFunctionConfig>,
-  "verify_jwt" | "background_routes" | "framework" | "capabilities" | "limits"
+  "verify_jwt" | "bytecode" | "background_routes" | "framework" | "capabilities" | "limits"
 >;
 
 type EdgeFunctionReleaseBase = {
@@ -695,6 +702,7 @@ function validatedFunctionConfig(
     && !EDGE_FUNCTION_FRAMEWORKS.includes(functionConfig.framework)) {
     throw new Error("Function config contains an unsupported framework");
   }
+  validatedFunctionBytecode(functionConfig.bytecode);
   if (functionConfig.version !== undefined) {
     functionConfig.version = canonicalFunctionVersion(functionConfig.version);
   }
@@ -933,7 +941,10 @@ export function isCanonicalEdgeFunctionSha256(candidate: string): boolean {
 
 // Build and final artifact policy failures must escape before a version can be written or preheated.
 async function buildFunctionCode(request: BundleFunctionRequest): Promise<string> {
-  const buildOptions: Parameters<typeof Bun.build>[0] & { importMap?: string } = {
+  const buildOptions: Parameters<typeof Bun.build>[0] & { importMap?: string; macros: false } = {
+    // Tenant macros run with management-process privileges during bundling, before
+    // runtime capability checks. Disable them for the entire dependency graph.
+    macros: false,
     entrypoints: [request.entrypoint],
     outdir: request.outdir,
     naming: "index.[ext]",
@@ -1012,6 +1023,7 @@ type PreparedFunctionVersion = {
 type FunctionVersionMetadata = {
   version: string;
   verify_jwt: boolean;
+  bytecode?: "off" | "auto" | "required";
   artifact_sha256: string | null;
   background_routes: string[];
   import_map: string | null;
@@ -1204,6 +1216,11 @@ function validatedBundleEntrypoint(
   request: EdgeFunctionReleaseRequest & { files: Record<string, string> },
 ): string {
   const entrypoint = request.entrypoint ?? "index.ts";
+  // Check the same normalized target used by writeBundleSources, not the raw
+  // upload key: trailing slashes/dot segments and backslashes can hide a suffix.
+  if (Object.keys(request.files).some((filePath) => /\.jsc$/i.test(resolveInside("/", filePath)))) {
+    throw new Error("Tenant-uploaded Function bytecode sidecars are not supported");
+  }
   if (!request.files[entrypoint]) throw new Error(`Entrypoint '${entrypoint}' not found in file map`);
   if (Object.hasOwn(request.files, BUNDLED_SOURCE_RUNTIME_ENTRY)) {
     throw new Error(`Bundle path '${BUNDLED_SOURCE_RUNTIME_ENTRY}' is reserved by the runtime`);
@@ -1273,6 +1290,7 @@ function functionVersionMetadata(
   return {
     version,
     verify_jwt: functionConfig.verify_jwt,
+    bytecode: validatedFunctionBytecode(functionConfig.bytecode),
     artifact_sha256: artifactSha256,
     background_routes: backgroundRoutes,
     import_map: functionConfig.import_map ?? null,
@@ -1383,6 +1401,7 @@ async function readFunctionVersionMetadata(
   const metadata: FunctionVersionMetadata = {
     version,
     verify_jwt: metadataRecord["verify_jwt"],
+    bytecode: validatedFunctionBytecode(metadataRecord["bytecode"]),
     artifact_sha256: typeof metadataRecord["artifact_sha256"] === "string"
       ? metadataRecord["artifact_sha256"]
       : null,
@@ -2515,6 +2534,7 @@ function restoredFunctionConfig(
     background_routes: metadata.background_routes,
     version: metadata.version,
     framework: metadata.framework,
+    bytecode: validatedFunctionBytecode(metadata.bytecode),
   };
   if (metadata.capabilities) restored.capabilities = metadata.capabilities;
   if (metadata.limits) restored.limits = metadata.limits;

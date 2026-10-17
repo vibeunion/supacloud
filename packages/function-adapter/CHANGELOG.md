@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.5.2...function-adapter-v0.6.0) (2026-10-17)
+
+
+### Features
+
+* add reusable authenticated worker HTTP and scheduled invocation adapters ([#2029](https://github.com/vibeunion/supacloud/issues/2029)) ([f8d571c](https://github.com/vibeunion/supacloud/commit/f8d571c272aa8e8430e57777e60a404f5c3b7537))
+
+
+### Bug Fixes
+
+* bound worker batch inputs and preserve safe failure responses ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
 ## [0.5.2](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.5.1...function-adapter-v0.5.2) (2026-10-15)
 
 

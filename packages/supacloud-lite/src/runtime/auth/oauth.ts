@@ -10,11 +10,17 @@
  *           exchangeCodeForSession → POST /token?grant_type=pkce)
  *         - implicit: redirect to redirect_to#access_token=…&refresh_token=…
  */
-import type { Database } from '../db/database.js'
+import type { Database, Querier } from '../db/database.js'
 import { randomToken } from '../jwt.js'
 import { resolveRedirect } from './redirect.js'
 
 type OAuthRawProfile = Record<string, unknown>
+
+export class OAuthAccountIneligibleError extends Error {
+  constructor(public readonly code: 'user_banned' | 'user_not_found') {
+    super(code)
+  }
+}
 
 /** Operator-supplied config for one OAuth provider. Endpoint URLs are optional for presets (google, github). */
 export interface OAuthProviderConfig {
@@ -197,7 +203,15 @@ export class OAuthService {
       return redirect(`${flow.redirect_to}#error=server_error&error_description=${msg}`)
     }
 
-    const userId = await this.upsertUser(provider.name, profile)
+    let userId: string
+    try {
+      userId = await this.upsertUser(provider.name, profile)
+    } catch (e) {
+      if (e instanceof OAuthAccountIneligibleError) {
+        return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
+      }
+      throw e
+    }
 
     // PKCE: hand back an auth code the client exchanges for a session.
     if (flow.code_challenge) {
@@ -211,7 +225,15 @@ export class OAuthService {
     }
 
     // implicit: tokens in the URL fragment
-    const session = await createSession(userId)
+    let session: OAuthSession
+    try {
+      session = await createSession(userId)
+    } catch (e) {
+      if (e instanceof OAuthAccountIneligibleError) {
+        return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
+      }
+      throw e
+    }
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&provider_token=`
     return redirect(`${flow.redirect_to}${hash}`)
   }
@@ -264,18 +286,23 @@ export class OAuthService {
   }
 
   private async upsertUser(provider: string, profile: OAuthProfile): Promise<string> {
+    return this.db.transaction((query) => this.upsertUserInTransaction(query, provider, profile))
+  }
+
+  private async upsertUserInTransaction(query: Querier, provider: string, profile: OAuthProfile): Promise<string> {
     // existing identity?
-    const existing = await this.db.query<{ user_id: string }>(
+    const existing = await query<{ user_id: string }>(
       `select user_id from auth.identities where provider = $1 and provider_id = $2`,
       [provider, profile.id]
     )
     if (existing.rows[0]) {
-      await this.db.query(`update auth.identities set last_sign_in_at = now(), identity_data = $3 where provider = $1 and provider_id = $2`, [
+      await this.assertUserEligible(query, existing.rows[0].user_id)
+      await query(`update auth.identities set last_sign_in_at = now(), identity_data = $3 where provider = $1 and provider_id = $2`, [
         provider,
         profile.id,
         JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata }),
       ])
-      await this.db.query(`update auth.users set last_sign_in_at = now() where id = $1`, [existing.rows[0].user_id])
+      await query(`update auth.users set last_sign_in_at = now() where id = $1`, [existing.rows[0].user_id])
       return existing.rows[0].user_id
     }
 
@@ -287,8 +314,9 @@ export class OAuthService {
     const email = profile.email?.toLowerCase() ?? null
     const verified = !!profile.email && profile.emailVerified === true
     if (email && verified) {
-      const byEmail = await this.db.query<{ id: string }>(`select id from auth.users where email = $1`, [email])
+      const byEmail = await query<{ id: string }>(`select id from auth.users where email = $1`, [email])
       userId = byEmail.rows[0]?.id
+      if (userId) await this.assertUserEligible(query, userId)
     }
     if (!userId) {
       // Only claim the email on the new user when the provider verified it AND
@@ -296,10 +324,10 @@ export class OAuthService {
       // is left null so it can't collide with (or hijack) an existing user.
       let userEmail: string | null = verified ? email : null
       if (userEmail) {
-        const taken = await this.db.query(`select 1 from auth.users where email = $1`, [userEmail])
+        const taken = await query(`select 1 from auth.users where email = $1`, [userEmail])
         if (taken.rows.length > 0) userEmail = null
       }
-      const created = await this.db.query<{ id: string }>(
+      const created = await query<{ id: string }>(
         `insert into auth.users (aud, role, email, email_confirmed_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data)
          values ('authenticated','authenticated',$1, $2, now(),
                  $3::jsonb, $4::jsonb) returning id`,
@@ -314,13 +342,25 @@ export class OAuthService {
       if (!user) throw new Error('OAuth user creation returned no row')
       userId = user.id
     }
-    await this.db.query(
+    await query(
       `insert into auth.identities (user_id, provider, provider_id, identity_data)
        values ($1, $2, $3, $4::jsonb)`,
       [userId, provider, profile.id, JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })]
     )
     if (!userId) throw new Error('OAuth identity has no user ID')
     return userId
+  }
+
+  private async assertUserEligible(query: Querier, userId: string): Promise<void> {
+    const users = await query<{ is_deleted: boolean; is_banned: boolean }>(
+      `select deleted_at is not null as is_deleted,
+              coalesce(banned_until > now(), false) as is_banned
+       from auth.users where id = $1 for update`,
+      [userId],
+    )
+    const user = users.rows[0]
+    if (!user || user.is_deleted) throw new OAuthAccountIneligibleError('user_not_found')
+    if (user.is_banned) throw new OAuthAccountIneligibleError('user_banned')
   }
 }
 
