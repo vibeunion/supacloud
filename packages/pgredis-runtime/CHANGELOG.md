@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.3](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.12.2...pgredis-runtime-v0.12.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** bound starter attachment task versions ([#2013](https://github.com/vibeunion/supacloud/issues/2013)) ([85313a0](https://github.com/vibeunion/supacloud/commit/85313a059dc2ebfdcd043422c47b84a2c5fcecf1))
+* **cli:** derive feature writer inputs from request contracts ([#2015](https://github.com/vibeunion/supacloud/issues/2015)) ([befd7c9](https://github.com/vibeunion/supacloud/commit/befd7c99912c696955ec237403be7b185bbbd93a))
+* **contracts:** preserve installed command errors and align Lite publication ([#2023](https://github.com/vibeunion/supacloud/issues/2023)) ([eb7b750](https://github.com/vibeunion/supacloud/commit/eb7b75043512bf2026a2e8e125f7c3c4f93a2700))
+* **test:** accept canonical published package paths ([#2012](https://github.com/vibeunion/supacloud/issues/2012)) ([e5a356f](https://github.com/vibeunion/supacloud/commit/e5a356f4770dcd77e01a750db8a1bce4f198a9a6))
+
 ## [0.12.2](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.12.1...pgredis-runtime-v0.12.2) (2026-10-15)
 
 

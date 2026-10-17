@@ -14,6 +14,22 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.103.5](https://github.com/vibeunion/supacloud/compare/cli-v0.103.4...cli-v0.103.5) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** bound starter attachment task versions ([#2013](https://github.com/vibeunion/supacloud/issues/2013)) ([85313a0](https://github.com/vibeunion/supacloud/commit/85313a059dc2ebfdcd043422c47b84a2c5fcecf1))
+* **cli:** derive feature writer inputs from request contracts ([#2015](https://github.com/vibeunion/supacloud/issues/2015)) ([befd7c9](https://github.com/vibeunion/supacloud/commit/befd7c99912c696955ec237403be7b185bbbd93a))
+* **cli:** sync published compiler dependency ([#2036](https://github.com/vibeunion/supacloud/issues/2036)) ([cbf5895](https://github.com/vibeunion/supacloud/commit/cbf589573f4ee71ae176fe1b0321c33ca149aeec))
+* **contracts:** preserve installed command errors and align Lite publication ([#2023](https://github.com/vibeunion/supacloud/issues/2023)) ([eb7b750](https://github.com/vibeunion/supacloud/commit/eb7b75043512bf2026a2e8e125f7c3c4f93a2700))
+* **test:** accept canonical published package paths ([#2012](https://github.com/vibeunion/supacloud/issues/2012)) ([e5a356f](https://github.com/vibeunion/supacloud/commit/e5a356f4770dcd77e01a750db8a1bce4f198a9a6))
+
+
+### Miscellaneous Chores
+
+* release main ([#2033](https://github.com/vibeunion/supacloud/issues/2033)) ([f29ec54](https://github.com/vibeunion/supacloud/commit/f29ec540d47d9645877260cba50f1b1dbe53a8fc))
+
 ## [0.103.4](https://github.com/vibeunion/supacloud/compare/cli-v0.103.3...cli-v0.103.4) (2026-10-17)
 
 
