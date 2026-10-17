@@ -24,3 +24,14 @@ export function createSupaCloudHandler(
 }
 
 export { createSvelteKitHandler } from "./sveltekit";
+export {
+  constantTimeSecretMatches,
+  createWorkerHttpHandler,
+  type WorkerBatchRequest,
+  type WorkerHttpErrorCodes,
+  type WorkerHttpOptions,
+} from "./worker-http";
+export {
+  createScheduledWorkerHttpHandler,
+  type ScheduledWorkerHttpOptions,
+} from "./scheduled-worker";
