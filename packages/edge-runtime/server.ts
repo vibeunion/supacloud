@@ -39,6 +39,8 @@ import {
   activeFunctionPathCandidates,
   attestedFunctionArtifactPath,
 } from "./function-source";
+import { functionBytecodeMode } from "./function-bytecode-contract";
+import { functionBytecodeCache } from "./function-bytecode";
 import { readFunctionFile, type TrustedFunctionFile } from "./trusted-function-files";
 import {
   assertCanonicalConfiguredFunctionVersion,
@@ -72,6 +74,7 @@ import {
   resolveMemoryCgroups,
 } from "./memory-pressure";
 
+const AOT_CAPTURE = process.env.ELYSIA_AOT_BUILD === "1";
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
@@ -136,6 +139,7 @@ const PGREDIS_RUNTIME_ENDPOINT: PgredisRuntimeEndpointConfig | undefined = PGRED
 
 // Empty clusters and CI environments might not have created the function directory yet; create on startup to prevent crashing before health checks.
 async function ensureDir(dir: string): Promise<string> {
+  if (AOT_CAPTURE) return dir;
   try {
     return await fs.realpath(dir);
   } catch {
@@ -343,7 +347,7 @@ function requestRuntimeRecycle(): void {
 }
 
 const pool = new WorkerPool({
-  size: POOL_SIZE,
+  size: AOT_CAPTURE ? 0 : POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
@@ -352,7 +356,7 @@ const pool = new WorkerPool({
 });
 
 const backgroundPool = new WorkerPool({
-  size: BACKGROUND_POOL_SIZE,
+  size: AOT_CAPTURE ? 0 : BACKGROUND_POOL_SIZE,
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
@@ -384,6 +388,7 @@ type FunctionActivationSnapshot = {
   activeVersion: string | null;
   responseVersion: string | null;
   verifyJwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   capabilities: FunctionCapabilities;
   limits: FunctionLimits;
@@ -456,7 +461,8 @@ async function resolvedFunctionPath(
       || currentAuthority.target_state !== resolvedConfig.targetState
       || currentAuthority.artifact_sha256 !== resolvedConfig.artifactSha256
       || currentManifest.config.version !== resolvedConfig.version
-      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt) {
+      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt
+      || currentManifest.config.bytecode !== resolvedConfig.bytecode) {
       configCache.delete(`${request.projectRef}/${request.functionName}`);
       throw new Error("Runtime environment changed before artifact resolution");
     }
@@ -504,6 +510,7 @@ async function resolvedFunctionPath(
       activeVersion,
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
+      bytecode: resolvedConfig.bytecode,
       framework: resolvedConfig.framework,
       capabilities: resolvedConfig.capabilities,
       limits: resolvedConfig.limits,
@@ -636,6 +643,7 @@ async function dispatchFunction(
       projectRoot,
       projectRef,
       framework: activation.framework,
+      bytecode: activation.bytecode,
       capabilities: activation.capabilities,
       limits: activation.limits,
       functionVersion: responseVersion,
@@ -733,6 +741,7 @@ const CONFIG_CACHE_TTL = 10_000;
 
 type FunctionConfig = {
   verify_jwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
   activationId: string | null;
@@ -802,6 +811,7 @@ async function getFunctionConfig(
   if (cached && cached.expiresAt > Date.now()) {
     return {
       verify_jwt: cached.verify_jwt,
+      bytecode: cached.bytecode,
       framework: cached.framework,
       capabilities: cached.capabilities,
       limits: cached.limits,
@@ -821,6 +831,7 @@ async function getFunctionConfig(
   const config = manifest === null
     ? {
         verify_jwt: true,
+        bytecode: "off" as const,
         framework: "fetch" as const,
         version: null,
         activationId: null,
@@ -832,6 +843,7 @@ async function getFunctionConfig(
       }
     : {
         verify_jwt: manifest.config.verify_jwt,
+        bytecode: manifest.config.bytecode,
         framework: manifest.config.framework === "elysia"
           || manifest.config.framework === "hono"
           || manifest.config.framework === "sveltekit-function"
@@ -874,6 +886,7 @@ async function immutableVersionConfig(
   }
   return {
     verify_jwt: record.verify_jwt,
+    bytecode: functionBytecodeMode(record.bytecode),
     framework: record.framework === "elysia"
       || record.framework === "hono"
       || record.framework === "sveltekit-function"
@@ -906,6 +919,7 @@ async function assertDispatchAuthorityCurrent(
     || current.activationId !== activation.activationId
     || current.version !== activation.activeVersion
     || current.verify_jwt !== activation.verifyJwt
+    || current.bytecode !== activation.bytecode
     || current.framework !== activation.framework
     || JSON.stringify(current.capabilities) !== JSON.stringify(activation.capabilities)
     || JSON.stringify(current.limits) !== JSON.stringify(activation.limits)
@@ -927,6 +941,7 @@ async function activeFunctionConfig(
   const manifest = await activeActivationManifest(projectRoot, functionName);
   return {
     verify_jwt: manifest.config.verify_jwt,
+    bytecode: manifest.config.bytecode,
     framework: manifest.config.framework,
     version: manifest.config.version,
     activationId: activationAuthorityId(manifest),
@@ -1485,6 +1500,7 @@ const app = new Elysia()
             functionPath: activation.functionPath, projectRoot: activation.projectRoot,
             projectRef: ref, moduleVersion: activation.moduleVersion, env: tenantEnvLoad.env,
             envProof: proof, attestation,
+            bytecode: activation.bytecode,
             ...(profile === "background" ? { maxWorkers: resolveBackgroundPreheatWorkers() } : {}),
           };
         };
@@ -1514,7 +1530,9 @@ const app = new Elysia()
 
     const foreground = pool.snapshotMetrics("supacloud_edge");
     const background = backgroundPool.snapshotMetrics("supacloud_edge_background");
-    return Object.entries({ ...foreground, ...background })
+    const bytecode = Object.fromEntries(Object.entries(functionBytecodeCache.metrics)
+      .map(([name, value]) => [`supacloud_edge_bytecode_${name}`, value]));
+    return Object.entries({ ...foreground, ...background, ...bytecode })
       .map(([key, value]) => `${key} ${value}`)
       .join("\n");
   })
@@ -1751,6 +1769,7 @@ const app = new Elysia()
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
             }),
             backgroundPool.preheatVersionedIdleWorkers({
               functionId,
@@ -1761,6 +1780,7 @@ const app = new Elysia()
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ])
@@ -1770,12 +1790,14 @@ const app = new Elysia()
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
             }),
             backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ]);
@@ -1983,11 +2005,9 @@ const app = new Elysia()
       { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
     )
-  )
+  );
 
-  .listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
-
-console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
+export { app };
 
 const gracefulShutdown = async (signal: string, exitCode = 0) => {
   if (shuttingDown) return;
@@ -2012,6 +2032,7 @@ const gracefulShutdown = async (signal: string, exitCode = 0) => {
       ),
     ]);
 
+    await functionBytecodeCache.dispose();
     clearTimeout(drainTimeout);
   } catch {
     console.error("[EdgeRuntime] Drain timed out, forcing exit");
@@ -2023,46 +2044,51 @@ const gracefulShutdown = async (signal: string, exitCode = 0) => {
   process.exit(exitCode);
 };
 
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+if (!AOT_CAPTURE) {
+  app.listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
+  console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
 
-process.on("uncaughtException", (err) => {
-  console.error("[EdgeRuntime] FATAL uncaughtException:", err);
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[EdgeRuntime] unhandledRejection:", reason);
-});
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-const memoryCgroups = await resolveMemoryCgroups();
-if (memoryCgroups.length > 0) {
-  const monitor = createMemoryPressureMonitor({
-    sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
-    onAdmissionStateChange: ({ blocked, recovering, snapshot }) => {
-      pool.setAdmissionBlocked(blocked, recovering);
-      backgroundPool.setAdmissionBlocked(blocked, recovering);
-      if (snapshot) {
-        console.warn("[EdgeRuntime] Memory admission state changed", {
-          blocked,
-          recovering,
-          currentBytes: snapshot.currentBytes,
-          highBytes: snapshot.highBytes,
-        });
-      }
-    },
-    onPressure: (snapshot) => {
-      console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
-        ...snapshot,
-        ...pool.snapshotMetrics("supacloud_edge"),
-        ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
-      });
-      void gracefulShutdown("cgroup memory pressure", 1);
-    },
-    onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+  process.on("uncaughtException", (err) => {
+    console.error("[EdgeRuntime] FATAL uncaughtException:", err);
+    process.exit(1);
   });
-  setInterval(() => { void monitor.poll(); }, 1_000).unref();
-}
+  process.on("unhandledRejection", (reason) => {
+    console.error("[EdgeRuntime] unhandledRejection:", reason);
+  });
 
-// Keep the main runtime process alive so systemd can supervise the actual server
-// process instead of observing Bun's temporary bootstrap completion.
-await new Promise<void>(() => {});
+  const memoryCgroups = await resolveMemoryCgroups();
+  if (memoryCgroups.length > 0) {
+    const monitor = createMemoryPressureMonitor({
+      sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
+      onAdmissionStateChange: ({ blocked, recovering, snapshot }) => {
+        pool.setAdmissionBlocked(blocked, recovering);
+        backgroundPool.setAdmissionBlocked(blocked, recovering);
+        if (snapshot) {
+          console.warn("[EdgeRuntime] Memory admission state changed", {
+            blocked,
+            recovering,
+            currentBytes: snapshot.currentBytes,
+            highBytes: snapshot.highBytes,
+          });
+        }
+      },
+      onPressure: (snapshot) => {
+        console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
+          ...snapshot,
+          ...pool.snapshotMetrics("supacloud_edge"),
+          ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
+        });
+        void gracefulShutdown("cgroup memory pressure", 1);
+      },
+      onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+    });
+    setInterval(() => { void monitor.poll(); }, 1_000).unref();
+  }
+
+  // Keep the main runtime process alive so systemd can supervise the actual server
+  // process instead of observing Bun's temporary bootstrap completion.
+  await new Promise<void>(() => {});
+}

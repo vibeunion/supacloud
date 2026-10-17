@@ -139,9 +139,27 @@ async function openBoundFunctionFile(filePath: string): Promise<FileHandle> {
   }
 }
 
+async function readBoundedFile(file: FileHandle, metadata: Stats, maxBytes?: number): Promise<Buffer> {
+  if (maxBytes === undefined) return file.readFile();
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || metadata.size > maxBytes) {
+    throw new Error("Function runtime file exceeds its byte limit");
+  }
+  // Bound allocation and reads even when the file grows after fstat.
+  const bytes = Buffer.allocUnsafe(maxBytes + 1);
+  let length = 0;
+  while (length < bytes.length) {
+    const result = await file.read(bytes, length, bytes.length - length, length);
+    if (result.bytesRead === 0) break;
+    length += result.bytesRead;
+  }
+  if (length > maxBytes) throw new Error("Function runtime file exceeds its byte limit");
+  return bytes.subarray(0, length);
+}
+
 async function readHeldFunctionFile(
   filePath: string,
   heldDirectories: HeldDirectory[],
+  maxBytes?: number,
 ): Promise<TrustedFunctionFile> {
   const parent = heldDirectories.at(-1);
   if (!parent) throw new Error("Function runtime directory is unavailable");
@@ -159,7 +177,7 @@ async function readHeldFunctionFile(
     if (!sameIdentity(pathMetadata, before)) {
       throw new Error("Function runtime file identity changed before read");
     }
-    const bytes = await file.readFile();
+    const bytes = await readBoundedFile(file, before, maxBytes);
     const after = await file.stat();
     if (fileChanged(before, after)) throw new Error("Function runtime file changed while reading");
     await assertPathBinding(filePath, after);
@@ -175,19 +193,19 @@ async function readHeldFunctionFile(
   }
 }
 
-export async function readTrustedFunctionFile(filePath: string): Promise<TrustedFunctionFile> {
+export async function readTrustedFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
   const absolutePath = resolve(filePath);
   const heldDirectories = await heldTrustedDirectoryChain(dirname(absolutePath));
   try {
-    return await readHeldFunctionFile(absolutePath, heldDirectories);
+    return await readHeldFunctionFile(absolutePath, heldDirectories, maxBytes);
   } finally {
     await closeHeldDirectories(heldDirectories);
   }
 }
 
-export async function readFunctionFile(filePath: string): Promise<TrustedFunctionFile> {
+export async function readFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
   if (process.platform === "linux") {
-    return readTrustedFunctionFile(filePath);
+    return readTrustedFunctionFile(filePath, maxBytes);
   }
   const absolutePath = resolve(filePath);
   const pathMetadata = await lstat(absolutePath);
@@ -199,7 +217,7 @@ export async function readFunctionFile(filePath: string): Promise<TrustedFunctio
     if (!sameIdentity(pathMetadata, before)) {
       throw new Error("Function runtime file identity changed before read");
     }
-    const bytes = await file.readFile();
+    const bytes = await readBoundedFile(file, before, maxBytes);
     const after = await file.stat();
     if (fileChanged(before, after)) throw new Error("Function runtime file changed while reading");
     await assertPathBinding(absolutePath, after);

@@ -64,7 +64,8 @@ try {
     ].join("\n"),
   );
 
-  await $`bun build cli.ts --compile --target=${target} --outfile=${outfile}`.cwd(root);
+  // Precompile the fixed runtime bundle; tenant function modules remain runtime-loaded.
+  await $`bun build cli.ts --compile --bytecode --format=esm --target=${target} --outfile=${outfile}`.cwd(root);
 } finally {
   await writeFile(generatedPath, originalGenerated);
   rmSync(tmpDir, { recursive: true, force: true });

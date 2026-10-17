@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { resolveProjectWorkerCacheOptions, resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
 import { createMemoryPressureMonitor } from "./memory-pressure";
+import { functionBytecodeCache } from "./function-bytecode";
 import { benchmarkProjectWorkers } from "./worker-project-benchmark";
 import {
   EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
@@ -754,6 +755,110 @@ describe("WorkerPool subprocess guard", () => {
 
       expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
       expect(preheat.attestation).toEqual({ ...attestation, module_loaded: true });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  linuxDescriptorTest("preheats bytecode and dispatches the prepared pair", async () => {
+    const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-bytecode-"));
+    const functionPath = join(projectRoot, "bytecode.ts");
+    await Bun.write(functionPath, `export default () => new Response("bytecode-ready");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const attestation = preheatIdentity({
+      projectRef: "proj_preheat_bytecode",
+      functionSlug: "bytecode",
+      version: "1",
+      artifactSha256,
+    });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatIdleWorkers(
+        "proj_preheat_bytecode_bytecode_v1",
+        functionPath,
+        projectRoot,
+        {},
+        {
+          projectRef: "proj_preheat_bytecode",
+          moduleVersion: "v1",
+          attestation,
+          bytecode: "required",
+        },
+      );
+      expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+
+      const response = await pool.dispatch({
+        functionId: "proj_preheat_bytecode_bytecode_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_preheat_bytecode",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        bytecode: "required",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/bytecode"),
+      });
+      expect(await response.text()).toBe("bytecode-ready");
+
+      const artifact = functionBytecodeCache.lookup({ functionPath, projectRoot, artifactSha256, bytecode: "required" })!;
+      const originalSource = await readFile(functionPath);
+      const originalBytecode = await readFile(`${artifact.path}.jsc`);
+      const builds = functionBytecodeCache.metrics.builds;
+      const dispatch = () => pool.dispatch({
+        functionId: "proj_preheat_bytecode_bytecode_v1", functionPath, projectRoot,
+        projectRef: "proj_preheat_bytecode", moduleVersion: "v1", artifactSha256,
+        bytecode: "required", env: {}, request: new Request("http://edge.local/functions/v1/bytecode"),
+      });
+      // Even a cached handler must revalidate both the published authority and executable sidecar.
+      await writeFile(functionPath, 'export default () => new Response("changed");');
+      expect((await dispatch()).status).toBe(500);
+      await writeFile(functionPath, originalSource);
+      await chmod(`${artifact.path}.jsc`, 0o600);
+      await writeFile(`${artifact.path}.jsc`, "tampered bytecode");
+      expect((await dispatch()).status).toBe(500);
+      await writeFile(`${artifact.path}.jsc`, originalBytecode);
+      await chmod(`${artifact.path}.jsc`, 0o400);
+      await chmod(dirname(artifact.path), 0o700);
+      await rm(`${artifact.path}.jsc`);
+      const replacement = join(projectRoot, "untrusted.jsc");
+      await writeFile(replacement, originalBytecode);
+      await symlink(replacement, `${artifact.path}.jsc`);
+      expect((await dispatch()).status).toBe(500);
+      expect(functionBytecodeCache.metrics.builds).toBe(builds);
+    } finally {
+      await pool.shutdown();
+      const artifact = functionBytecodeCache.lookup({ functionPath, projectRoot, artifactSha256, bytecode: "auto" });
+      if (artifact) await chmod(dirname(artifact.path), 0o700);
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("required bytecode rejects dispatch before a prepared artifact exists", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-dispatch-bytecode-required-"));
+    const functionPath = join(projectRoot, "bytecode.ts");
+    await Bun.write(functionPath, `export default () => new Response("should-not-run");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_dispatch_bytecode_required_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_dispatch_bytecode_required",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        bytecode: "required",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/bytecode-required"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe("Internal Error");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
