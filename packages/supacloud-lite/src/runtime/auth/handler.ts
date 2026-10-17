@@ -6,7 +6,7 @@ import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
 import type { Mailer, RequestContext, SmsMessage, SmsSender } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
-import { OAuthService, type OAuthProviderConfig } from './oauth.js'
+import { OAuthAccountIneligibleError, OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { qrSvgDataUri } from './qr.js'
 import { DEFAULT_AUTH_SETTINGS, type AuthSettings } from './settings.js'
@@ -334,6 +334,7 @@ export class AuthHandler {
       if (path.startsWith('admin/')) return await this.admin(req, ctx, path, method)
       return authError(404, 'not_found', `unknown auth endpoint: ${path}`)
     } catch (e) {
+      if (e instanceof OAuthAccountIneligibleError) return authError(400, e.code, e.message)
       const msg = e instanceof Error ? e.message : String(e)
       return authError(500, 'unexpected_failure', msg)
     }
@@ -456,8 +457,7 @@ export class AuthHandler {
       if (!authCode || !verifier) return authError(400, 'validation_failed', 'auth_code and code_verifier required')
       const userId = await this.oauth.exchangePkce(authCode, verifier)
       if (!userId) return authError(403, 'flow_state_not_found', 'invalid or expired auth code')
-      const ures = await this.db.query(`select * from auth.users where id = $1`, [userId])
-      return json(200, await this.sessionForOAuth(ures.rows[0] as UserRow))
+      return json(200, await this.sessionForOAuth(userId))
     }
 
     return authError(400, 'invalid_grant', `unsupported grant_type: ${grantType}`)
@@ -827,13 +827,16 @@ export class AuthHandler {
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
   private static readonly MAX_OTP_ATTEMPTS = 5
 
-  private async redeem(token: string, types: string[], email?: string): Promise<UserRow | null> {
+  private async redeem(token: string, types: string[], email?: string): Promise<Record<string, unknown> | null> {
     const redemption: EmailTokenRedemption = {
       token,
       tokenTypes: `{${types.join(',')}}`,
       email: email?.toLowerCase().trim() ?? null,
     }
-    return this.db.transaction((query) => this.claimEmailToken(query, redemption))
+    return this.db.transaction(async (query) => {
+      const user = await this.claimEmailToken(query, redemption)
+      return user ? this.sessionFor(user, undefined, undefined, query) : null
+    })
   }
 
   private async claimEmailToken(query: Querier, redemption: EmailTokenRedemption): Promise<UserRow | null> {
@@ -854,7 +857,12 @@ export class AuthHandler {
   ): Promise<EmailTokenCandidate | null> {
     // Both alternatives share this row, so the lock serializes OTP/hash claims
     // before either transaction re-checks and removes its candidate token.
-    await query(`select id from auth.users where id = $1 for update`, [candidate.user_id])
+    const eligible = await query(
+      `select id from auth.users where id = $1 and deleted_at is null
+         and (banned_until is null or banned_until <= now()) for update`,
+      [candidate.user_id],
+    )
+    if (eligible.rows.length === 0) return null
     const claimedTokens = await query<EmailTokenCandidate>(
       `delete from auth.one_time_tokens
        where id = $1 and token = $2 and token_type = any($3::text[])
@@ -935,9 +943,9 @@ export class AuthHandler {
     // could mint a recovery session.
     const types =
       body.type === 'recovery' ? ['recovery'] : body.type === 'magiclink' ? ['magiclink'] : ['otp', 'magiclink']
-    const user = await this.redeem(token, types, body.email)
-    if (!user) return authError(403, 'otp_expired', 'Token has expired or is invalid')
-    return json(200, await this.sessionFor(user))
+    const session = await this.redeem(token, types, body.email)
+    if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+    return json(200, session)
   }
 
   private async redeemPhoneOtp(phone: string, code: string): Promise<Record<string, unknown> | null> {
@@ -1009,11 +1017,10 @@ export class AuthHandler {
       this.config.uriAllowList,
       this.config.enforceRedirectAllowList
     )
-    const user = await this.redeem(token, [type])
-    if (!user) {
+    const session = await this.redeem(token, [type])
+    if (!session) {
       return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
     }
-    const session = (await this.sessionFor(user)) as { access_token: string; refresh_token: string; expires_in: number }
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
   }
@@ -1423,6 +1430,13 @@ export class AuthHandler {
       return authError(422, 'mfa_verification_failed', 'Invalid TOTP code entered')
     }
     const session = await this.db.transaction(async (query) => {
+      const currentUsers = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const currentUser = currentUsers.rows[0]
+      if (!currentUser) return null
       const claimed = await query(
         `update auth.mfa_challenges set verified_at = now()
          where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
@@ -1433,7 +1447,7 @@ export class AuthHandler {
       if (factor.status !== 'verified') {
         await query(`update auth.mfa_factors set status = 'verified', updated_at = now() where id = $1`, [factorId])
       }
-      return this.sessionFor(user, undefined, {
+      return this.sessionFor(currentUser, undefined, {
         aal: 'aal2',
         amr: [
           { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
@@ -1528,14 +1542,28 @@ export class AuthHandler {
 
   private async rotateRefreshToken(token: string): Promise<Response> {
     return this.db.transaction(async (query) => {
+      const availableToken = await this.findAvailableRefreshToken(query, token)
+      if (!availableToken) return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
+      // Lock the user before the token, matching account deletion's cascade order.
+      const userResult = await query<UserRow & { is_banned: boolean }>(
+        `select *, coalesce(banned_until > now(), false) as is_banned
+         from auth.users where id = $1 for update`,
+        [availableToken.user_id],
+      )
+      const user = userResult.rows[0]
+      if (!user || user.deleted_at !== null) {
+        return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
+      }
+      if (user.is_banned) {
+        return authError(400, 'user_banned', 'Invalid Refresh Token: User Banned')
+      }
       const claimedToken = await this.claimRefreshToken(query, token)
       if (!claimedToken) return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
       const sessionStartedAt = await this.refreshSessionStartedAt(query, claimedToken)
       const expiryError = this.refreshExpiryError(claimedToken, sessionStartedAt)
       if (expiryError) return expiryError
-      const userResult = await query(`select * from auth.users where id = $1`, [claimedToken.user_id])
       const session = await this.sessionFor(
-        userResult.rows[0] as UserRow,
+        user,
         token,
         {
           sessionId: claimedToken.session_id ?? undefined,
@@ -1545,6 +1573,16 @@ export class AuthHandler {
       )
       return json(200, session)
     })
+  }
+
+  private async findAvailableRefreshToken(query: Querier, token: string): Promise<RefreshTokenRow | undefined> {
+    const available = await query<RefreshTokenRow>(
+      `select user_id, session_id, created_at
+       from auth.refresh_tokens
+       where token = $1 and revoked is not true`,
+      [token],
+    )
+    return available.rows[0]
   }
 
   private async claimRefreshToken(query: Querier, token: string): Promise<RefreshTokenRow | undefined> {
@@ -1589,8 +1627,12 @@ export class AuthHandler {
   private async userFromBearer(req: Request): Promise<UserRow | null> {
     const claims = await this.claimsFromBearer(req)
     if (!claims?.sub) return null
-    const res = await this.db.query(`select * from auth.users where id = $1`, [claims.sub])
-    return (res.rows[0] as UserRow) ?? null
+    const res = await this.db.query<UserRow>(
+      `select * from auth.users where id = $1 and deleted_at is null
+         and (banned_until is null or banned_until <= now())`,
+      [claims.sub],
+    )
+    return res.rows[0] ?? null
   }
 
   private async claimsFromBearer(req: Request): Promise<JwtClaims | null> {
@@ -1625,17 +1667,26 @@ export class AuthHandler {
     }
   }
 
-  private sessionForOAuth(user: UserRow): Promise<Record<string, unknown>> {
-    return this.sessionFor(user, undefined, {
-      amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+  private sessionForOAuth(userId: string): Promise<Record<string, unknown>> {
+    return this.db.transaction(async (query) => {
+      const res = await query<UserRow & { is_banned: boolean }>(
+        `select *, coalesce(banned_until > now(), false) as is_banned
+         from auth.users where id = $1 for update`,
+        [userId],
+      )
+      const user = res.rows[0]
+      if (!user || user.deleted_at !== null) throw new OAuthAccountIneligibleError('user_not_found')
+      if (user.is_banned) throw new OAuthAccountIneligibleError('user_banned')
+      return this.sessionFor(user, undefined, {
+        amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+      }, query)
     })
   }
 
   private async oauthSessionTokensFor(
     userId: string
   ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-    const res = await this.db.query(`select * from auth.users where id = $1`, [userId])
-    const session = (await this.sessionForOAuth(res.rows[0] as UserRow)) as {
+    const session = (await this.sessionForOAuth(userId)) as {
       access_token: string
       refresh_token: string
       expires_in: number

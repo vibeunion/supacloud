@@ -2,10 +2,11 @@ export const STARTER_REVIEW_JOB = `import { DB_CLIENT, Inject, Injectable, Job }
 import { ApplicationError } from "@supacloud/elysia";
 import { t } from "elysia";
 import type { Static } from "elysia/type";
+import { REVIEW_VERSION_MAX } from "./limits";
 
 export const AttachmentInput = t.Object({
   reviewId: t.String({ minLength: 1, maxLength: 100 }),
-  version: t.Integer({ minimum: 2 }),
+  version: t.Integer({ minimum: 2, maximum: REVIEW_VERSION_MAX }),
   artifactId: t.String({ format: "uuid" }),
 }, { additionalProperties: false });
 

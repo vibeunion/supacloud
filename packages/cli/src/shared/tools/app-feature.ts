@@ -40,6 +40,7 @@ import type { StaticDecode } from "typebox";
 
 export type ${className}ListInput = StaticDecode<typeof ${className}ListQuery>;
 export type ${className}ApproveInput = StaticDecode<typeof ${className}ApproveBody>;
+export type ${className}ApproveCommand = ${className}ApproveInput & { id: string };
 export type ${className}Result = StaticDecode<typeof ${className}Row>;
 
 export interface ${className}ReadPort {
@@ -48,11 +49,7 @@ export interface ${className}ReadPort {
 }
 
 export interface ${className}WritePort {
-    approve(input: {
-        id: string;
-        expectedVersion: number;
-        reason?: string;
-    }): Promise<${className}Result>;
+    approve(input: ${className}ApproveCommand): Promise<${className}Result>;
 }
 
 export const ${className}Reader = new InjectionToken<${className}ReadPort>(
@@ -260,6 +257,10 @@ The scaffold does not create migrations, infer permissions, or provide an in-mem
 production fallback. Database migrations remain the database source of truth.
 The HTTP schemas describe the boundary, not a second database model. Bind their
 fields to the existing database-source contract checker before delivery.
+The Writer input is derived from the approval body contract plus the route ID.
+Add request fields in the contract, not a second handwritten Writer interface.
+Typecheck application adapters after changing a field type; the derived Port
+must expose incompatible assumptions in business code.
 
 The named RPC adapter must invoke the continuation in the same database transaction
 used by the request-scoped Writer, or own the complete command instead; never execute

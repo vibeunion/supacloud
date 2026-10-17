@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { CommandError } from "@supacloud/contracts";
 import { createPostgresCommandStore, type CommandDatabase } from "./command-adapter";
 import { COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "./command-schema";
@@ -85,4 +86,20 @@ test("schema guards terminal writes, requires rejection audit and excludes rejec
   expect(COMMAND_PERSISTENCE_UPGRADE_SQL).toContain("DROP CONSTRAINT IF EXISTS execution_receipts_status_check");
   expect(COMMAND_PERSISTENCE_UPGRADE_SQL).toContain("DROP CONSTRAINT IF EXISTS execution_receipts_check1");
   expect(COMMAND_PERSISTENCE_UPGRADE_SQL).toContain("kind='external' AND status<>'rejected'");
+});
+
+test("transaction preserves protocol errors from a separately bundled contracts copy", async () => {
+  const build = await Bun.build({ entrypoints: [fileURLToPath(import.meta.resolve("@supacloud/contracts"))], target: "node" });
+  expect(build.success).toBe(true);
+  const output = build.outputs[0];
+  if (!output) throw new Error("Missing contracts bundle");
+  const copy: typeof import("@supacloud/contracts") = await import(`data:text/javascript;base64,${Buffer.from(await output.text()).toString("base64")}`);
+  expect(copy.CommandError).not.toBe(CommandError);
+  const store = createPostgresCommandStore(database([]));
+  for (const code of ["COMMAND_REJECTED", "COMMAND_IDEMPOTENCY_CONFLICT", "COMMAND_RECEIPT_INVALID"] as const) {
+    const error = new copy.CommandError(code);
+    await expect(store.transaction(async () => { throw error; })).rejects.toBe(error);
+  }
+  const lookalike = Object.assign(new Error("private adapter cause"), { name: "CommandError", code: "COMMAND_REJECTED" });
+  await expect(store.transaction(async () => { throw lookalike; })).rejects.toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
 });
