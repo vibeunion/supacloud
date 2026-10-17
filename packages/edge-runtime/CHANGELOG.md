@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.8...edge-runtime-v0.33.0) (2026-10-17)
+
+
+### Features
+
+* add bytecode-enabled release compilation and an opt-in Function bytecode cache with validated sidecar metadata ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* add isolated, opt-in Elysia AOT A/B evaluation builds; default platform AOT behavior remains unchanged ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+AOT remains experimental and opt-in. Database-backed business behavior, real authenticated/business WebSocket flows and full API parity remain unverified.
+
 ## [0.32.8](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.7...edge-runtime-v0.32.8) (2026-10-16)
 
 
