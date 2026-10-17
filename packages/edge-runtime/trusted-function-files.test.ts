@@ -6,11 +6,25 @@ import { join } from "node:path";
 import {
   assertTrustedFunctionArtifact,
   readTrustedFunctionFile,
+  readFunctionFile,
   withTrustedFunctionArtifact,
 } from "./trusted-function-files";
 
 describe("trusted Function runtime files", () => {
   const trustedTemporaryRoot = process.platform === "linux" ? homedir() : tmpdir();
+
+  test("bounded reads accept the exact limit and reject oversized files", async () => {
+    const root = await mkdtemp(join(trustedTemporaryRoot, ".supacloud-runtime-bounded-"));
+    const artifactPath = join(root, "index.js");
+    await writeFile(artifactPath, "bounded");
+    try {
+      expect((await readFunctionFile(artifactPath, 7)).bytes.toString()).toBe("bounded");
+      await expect(readFunctionFile(artifactPath, 6)).rejects.toThrow("byte limit");
+      await expect(readFunctionFile(artifactPath, -1)).rejects.toThrow("byte limit");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
   test("reads a regular artifact through a trusted directory chain", async () => {
     const root = await mkdtemp(join(trustedTemporaryRoot, ".supacloud-runtime-artifact-"));

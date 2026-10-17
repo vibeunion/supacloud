@@ -1,6 +1,7 @@
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { packConsumerArtifacts } from './package-artifacts.mjs'
 import packageJson from '../package.json' with { type: 'json' }
 
 const packageDir = resolve(import.meta.dir, '..')
@@ -17,18 +18,12 @@ try {
   await access(join(packageDir, 'dist', 'cli.js'))
   await access(join(packageDir, 'dist', 'launcher.mjs'))
 
-  const packOutput = await runCommand(npmPackCommand(packDir), packageDir)
-  const jsonStart = packOutput.lastIndexOf('[\n  {')
-  if (jsonStart === -1) throw new Error(`npm pack did not emit JSON:\n${packOutput}`)
-  const packed = JSON.parse(packOutput.slice(jsonStart)) as {
-    filename: string
-  }[]
-  const archive = join(packDir, packed[0]!.filename)
+  const archives = await packConsumerArtifacts(packageDir, packDir, runCommand, npmCommand)
   await writeFile(
     join(consumerDir, 'package.json'),
     JSON.stringify({ name: 'supacloud-lite-consumer', private: true, type: 'module' })
   )
-  await runCommand(npmCommand(['install', '--ignore-scripts', '--no-audit', '--no-fund', archive]), consumerDir)
+  await runCommand(npmCommand(['install', '--ignore-scripts', '--no-audit', '--no-fund', ...archives]), consumerDir)
   await runCommand(npmCommand([
     'install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', 'typescript@5.9.3', '@types/node@22',
     `@supabase/supabase-js@${packageJson.devDependencies['@supabase/supabase-js']}`,
@@ -200,10 +195,6 @@ console.log('package-auth-smoke-ok')
     rm(noBunPath, { recursive: true, force: true }),
     rm(authProjectDir, { recursive: true, force: true }),
   ])
-}
-
-function npmPackCommand(packDir: string): string[] {
-  return npmCommand(['pack', '--json', '--pack-destination', packDir])
 }
 
 function npmCommand(args: string[]): string[] {
