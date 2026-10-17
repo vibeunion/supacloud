@@ -97,6 +97,23 @@ test("separate command sources are included and uncovered directories remain exp
   expect(covered.limitations).toContain("Colocation selects candidates; it does not prove behavioral coverage");
 });
 
+test("feature specifications are included in the bounded verification files and coverage", async () => {
+  const { root, graph } = await fixture();
+  await mkdir(join(root, "src/health/state"));
+  await writeFile(join(root, "src/health/state/review.ts"), "");
+  await writeFile(join(root, "src/health/state/review.test.ts"), "");
+  graph.modules[0]!.featureSpec = {
+    name: "review", states: ["draft", "approved"], transitions: [], file: "src/health/state/review.ts", line: 1,
+  };
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.files).toContain("src/health/state/review.ts");
+  expect(plan.tests).toContain("src/health/state/review.test.ts");
+  expect(plan.coverage).toContainEqual({
+    directory: "src/health/state", tests: ["src/health/state/review.test.ts"], basis: "colocated-not-proven",
+  });
+  expect(plan.ready).toBe(true);
+});
+
 test("missing source directories produce a manual gap, not an unstructured failure", async () => {
   const { root, graph } = await fixture();
   graph.moduleHandlerFiles = { health: ["src/missing/command.ts"] };

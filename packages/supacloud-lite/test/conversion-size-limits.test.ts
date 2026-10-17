@@ -76,3 +76,20 @@ test("Storage Handler applies captured input and output limits separately", asyn
       : "transformed image exceeds the transformation limit (1 bytes)");
   }
 });
+
+test("Storage Handler rejects a declared oversized image before reading object bytes", async () => {
+  let reads = 0;
+  const handler = new StorageHandler(null as never, {
+    put: async () => {}, get: async () => { reads++; return new Uint8Array(); },
+    delete: async () => {}, deleteMany: async () => {},
+  }, { jwtSecret: "test", imageTransformLimits: { maxInputBytes: 1, maxOutputBytes: limit } });
+  const boundary = handler as unknown as {
+    transformImageResponse(row: unknown, url: URL, head: boolean): Promise<Response>;
+  };
+  const response = await boundary.transformImageResponse({
+    id: "id", bucket_id: "images", name: "large.png", owner: null, version: null,
+    metadata: { size: 2, mimetype: "image/png" },
+  }, new URL("https://image.test.invalid?format=png"), false);
+  expect(response.status).toBe(413);
+  expect(reads).toBe(0);
+});
