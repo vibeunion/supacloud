@@ -9,12 +9,14 @@ function inside(root: string, file: string): boolean {
 
 /** Read only the selected owner's immediate source directories, never the whole repository. */
 export async function createVerificationPlan(root: string, graph: ApplicationGraph, target: string, sourceRoot = root) {
-  const owners = graph.modules.filter(module => module.name === target || module.className === target
+  const exact = graph.modules.filter(module => module.name === target);
+  const owners = exact.length > 0 ? exact : graph.modules.filter(module => module.className === target
     || [...module.providers, ...module.controllers, ...module.commands, ...(module.jobs ?? []), ...(module.queries ?? [])]
       .some(item => ("className" in item && item.className === target)
         || ("name" in item && item.name === target)
         || ("token" in item && item.token === target)
-        || ("useClass" in item && item.useClass === target)));
+        || ("useClass" in item && item.useClass === target)
+        || ("serviceKey" in item && item.serviceKey === target)));
   if (owners.length !== 1) throw new Error("Select one unambiguous module or owned symbol for verification");
   const owner = owners[0]!;
   const project = await realpath(root);
