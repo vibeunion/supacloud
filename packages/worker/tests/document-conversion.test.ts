@@ -146,7 +146,7 @@ describe("optional document conversion", () => {
     }
     for (const options of [
       { projectRef: "" }, { renderProfile: "" }, { maxInputBytes: NaN },
-      { maxOutputBytes: 65 * 1024 * 1024 }, { timeoutMs: 120001 },
+      { maxOutputBytes: 501 * 1024 * 1024 }, { timeoutMs: 120001 },
       { maxConcurrent: 0 }, { maxConcurrent: 5 }, { bearerToken: "secret\nheader" },
       { baseUrl: "https://user:secret@engine/" }, { baseUrl: "file:///tmp/" },
       { baseUrl: "https://engine/path" }, { baseUrl: "https://engine/#token" },
@@ -412,7 +412,7 @@ describe("document conversion worker integration boundary", () => {
     const domain: DocumentConversionDomain = {
       async authorize() { events.push("authorize"); return true; },
       async read(_request, maxBytes) {
-        expect(maxBytes).toBe(25 * 1024 * 1024);
+        expect(maxBytes).toBe(500 * 1024 * 1024);
         events.push("read");
         return source;
       },

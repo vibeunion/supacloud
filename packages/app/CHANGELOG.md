@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/app-v0.27.2...app-v0.28.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+* **app:** add portable execution pipeline for Elysia 2 beta ([#1506](https://github.com/vibeunion/supacloud/issues/1506)) ([02486f4](https://github.com/vibeunion/supacloud/commit/02486f43a12d6260cbcabde305857fb92464529a))
+* **cli:** make supacloud the one-command deploy entrypoint ([#1817](https://github.com/vibeunion/supacloud/issues/1817)) ([4be5da5](https://github.com/vibeunion/supacloud/commit/4be5da5a9284220610474ca290c708ce982d51bf))
+* **compiler:** add validated application resource model ([#1512](https://github.com/vibeunion/supacloud/issues/1512)) ([c7ed93b](https://github.com/vibeunion/supacloud/commit/c7ed93b5cd50107ba0c61ac002e1c254907aa6a5))
+* complete Angular framework defaults integration ([#1587](https://github.com/vibeunion/supacloud/issues/1587)) ([0dec8ea](https://github.com/vibeunion/supacloud/commit/0dec8ea48f288da27824579038136dd33f8ccb20))
+* converge SDK-aware vibecoding defaults and local development ([#1607](https://github.com/vibeunion/supacloud/issues/1607)) ([cd66672](https://github.com/vibeunion/supacloud/commit/cd6667252a6a8fe0cc0539bc8610ebb8a818af51))
+* default RxJS support with compatible SupaCloud JS calls ([#1556](https://github.com/vibeunion/supacloud/issues/1556)) ([b3015cb](https://github.com/vibeunion/supacloud/commit/b3015cb161c0d87e6611f6c4fc60c120a8c9fffe))
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+* **stability:** add FA delivery and acceptance governance ([#1915](https://github.com/vibeunion/supacloud/issues/1915)) ([f70b607](https://github.com/vibeunion/supacloud/commit/f70b6079234d849d5059dd5a879d22b895022987))
+
+
+### Bug Fixes
+
+* **app:** harden lifecycle ordering and preserve cleanup failures ([#1555](https://github.com/vibeunion/supacloud/issues/1555)) ([8c96e0d](https://github.com/vibeunion/supacloud/commit/8c96e0d516bd655178ee26f05777787f4e511dab))
+* **app:** remove untyped form control writes ([#1758](https://github.com/vibeunion/supacloud/issues/1758)) ([ff8a277](https://github.com/vibeunion/supacloud/commit/ff8a277574d6271e85f87c33699ff19c0f827456))
+* **elysia:** return 503 when pending work admission is full ([#1594](https://github.com/vibeunion/supacloud/issues/1594)) ([a1e5d2e](https://github.com/vibeunion/supacloud/commit/a1e5d2e9e023a45f852ae7b278509913f0c50e1e))
+
+
+### Elegance & Refactoring
+
+* use ESM-only owned packages and Lite launcher ([#1582](https://github.com/vibeunion/supacloud/issues/1582)) ([ed5ac78](https://github.com/vibeunion/supacloud/commit/ed5ac78ee3ab22567268fa276e5b016ad1e8b575))
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+* release main ([#1484](https://github.com/vibeunion/supacloud/issues/1484)) ([41b3e72](https://github.com/vibeunion/supacloud/commit/41b3e72d25dd8b1ea1d3dea5b75c90bdea9be797))
+* release main ([#1507](https://github.com/vibeunion/supacloud/issues/1507)) ([b7f3a59](https://github.com/vibeunion/supacloud/commit/b7f3a59885596742a8b11fc808d898165a8989ec))
+* release main ([#1561](https://github.com/vibeunion/supacloud/issues/1561)) ([3ee71e3](https://github.com/vibeunion/supacloud/commit/3ee71e301e7a5499780b45ec6c64e53698000029))
+* release main ([#1586](https://github.com/vibeunion/supacloud/issues/1586)) ([21f22d8](https://github.com/vibeunion/supacloud/commit/21f22d8dba3a1e6e704865727ed5ff4095d28eac))
+* release main ([#1592](https://github.com/vibeunion/supacloud/issues/1592)) ([224f76d](https://github.com/vibeunion/supacloud/commit/224f76dfff188cf943152c3ee23cff2269d4d2b9))
+* release main ([#1609](https://github.com/vibeunion/supacloud/issues/1609)) ([b52c79c](https://github.com/vibeunion/supacloud/commit/b52c79ceda912786f1299ae2d618172f9252607a))
+* release main ([#1657](https://github.com/vibeunion/supacloud/issues/1657)) ([1a3f7ff](https://github.com/vibeunion/supacloud/commit/1a3f7ff901f05dda38ed4827d70a91a4acccd8b3))
+* release main ([#1743](https://github.com/vibeunion/supacloud/issues/1743)) ([dcbf82c](https://github.com/vibeunion/supacloud/commit/dcbf82c29fb6de94bd6be0c37df20662a6861b2e))
+* release main ([#1757](https://github.com/vibeunion/supacloud/issues/1757)) ([e65dad9](https://github.com/vibeunion/supacloud/commit/e65dad945f8be7e84a7031b2ebf754cc48ad0f1c))
+* release main ([#1767](https://github.com/vibeunion/supacloud/issues/1767)) ([d31bf06](https://github.com/vibeunion/supacloud/commit/d31bf06a2bfbdb353554a44576d0c54685f46193))
+* release main ([#1815](https://github.com/vibeunion/supacloud/issues/1815)) ([d1acf62](https://github.com/vibeunion/supacloud/commit/d1acf62f306e2c77ac7bf681c675cb47537f28c3))
+* release main ([#1825](https://github.com/vibeunion/supacloud/issues/1825)) ([4819f95](https://github.com/vibeunion/supacloud/commit/4819f95ae7ce722b58f4858261c100c448c9975e))
+* release main ([#1916](https://github.com/vibeunion/supacloud/issues/1916)) ([64838ca](https://github.com/vibeunion/supacloud/commit/64838ca0d3a75e2e5bab11fbbb5f5cca3b5f830f))
+* release main ([#1944](https://github.com/vibeunion/supacloud/issues/1944)) ([206d711](https://github.com/vibeunion/supacloud/commit/206d711a0012bad9465283f2f2bfc5f4eb80d269))
+* release main ([#2030](https://github.com/vibeunion/supacloud/issues/2030)) ([2f7cf91](https://github.com/vibeunion/supacloud/commit/2f7cf91d941ab583ebe21d901069a16e55efc48a))
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.27.2](https://github.com/vibeunion/supacloud/compare/app-v0.27.1...app-v0.27.2) (2026-10-17)
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2 for the shared command-error protocol.
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/app-v0.27.0...app-v0.27.1) (2026-10-15)
 
 

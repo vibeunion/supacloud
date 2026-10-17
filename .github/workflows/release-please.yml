@@ -122,7 +122,7 @@ jobs:
           if [[ "$RELEASE_ACTION_OUTCOME" == "failure" ]]; then
             git fetch origin --tags
           fi
-          node --test .github/scripts/resolve-release-outputs.test.mjs
+          node --test .github/scripts/resolve-release-outputs.test.mjs .github/scripts/validate-release-identity.test.mjs
           node .github/scripts/resolve-release-outputs.mjs
 
   publish-management-api-binaries:
@@ -466,6 +466,11 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Validate strict SupaCloud Lite release identity
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.supacloud_lite_tag_name }}
+        run: node .github/scripts/validate-release-identity.mjs
+
       # The standalone native smoke test imports the workspace SDK source, which
       # now depends on @supacloud/query. Build/link those local prerequisites the
       # same way the SupaCloud Lite package check does before installing the
@@ -519,7 +524,7 @@ jobs:
     needs: release-please
     # A previous release can leave a Git tag behind after npm publication
     # fails. Allow an explicit recovery run without creating another release.
-    if: ${{ always() && inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main') || (inputs.recover_query == true && github.ref == 'refs/heads/main')) }}
+    if: ${{ always() && needs.release-please.result == 'success' && inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main') || (inputs.recover_query == true && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
@@ -582,17 +587,6 @@ jobs:
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
-      - name: Publish SupaCloud Lite to NPM
-        if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
-        working-directory: packages/supacloud-lite
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: |
-          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
-          bun install --frozen-lockfile
-          bun run check
-          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
-
       - name: Publish function adapter to NPM
         if: ${{ always() && (needs.release-please.outputs.function_adapter_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/function-adapter
@@ -634,6 +628,24 @@ jobs:
           bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish SupaCloud Lite to NPM
+        if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/supacloud-lite
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          # Build-only workspace references must not observe sibling manifests
+          # already rewritten by earlier publication steps.
+          build_root="$(mktemp -d)"
+          trap 'rm -rf "$build_root"' EXIT
+          git -C "$GITHUB_WORKSPACE" archive HEAD | tar -x -C "$build_root"
+          cd "$build_root/packages/supacloud-lite"
+          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+          bun install --frozen-lockfile
+          bun run check
+          node ../../.github/scripts/prepare-command-package.mjs
+          node ../../.github/scripts/publish-npm-package.mjs
 
       - name: Publish app framework metadata to NPM
         if: ${{ always() && (needs.release-please.outputs.app_released == 'true' || inputs.recover_npm == true) }}
