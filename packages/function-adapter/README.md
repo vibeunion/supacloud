@@ -34,6 +34,16 @@ can preserve an application's existing invocation contract. Batch bounds are
 validated when constructing the handler. Secrets must have at least 32
 characters. Missing or weak secrets fail closed with HTTP 503.
 
+Worker authentication targets the Bun runtime: it uses `Bun.CryptoHasher` SHA-256
+and Bun's native `node:crypto` `timingSafeEqual`. Each handler caches its expected
+digest at construction, avoiding repeated encoding, hashing of the configured
+secret, and Web Crypto Promise scheduling in the request path. Recreate the
+handler when rotating credentials or changing its authorization callback.
+`constantTimeSecretMatches` retains its Promise-based API for existing callers.
+`Response.json` remains the native Fetch response path; no JSON library is added.
+Run `bun bench/worker-auth.ts` from this package to compare authentication alone
+against the previous Web Crypto implementation, not end-to-end Function latency.
+
 For scheduled invocations, supply exactly one of `expectedBearer` (the full
 expected token, without the `Bearer ` prefix) or `authorize(request)`. A bearer
 is compared to the configured secret; this is not JWT claim verification.

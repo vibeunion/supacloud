@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { constantTimeSecretMatches, createWorkerHttpHandler } from "./index";
+import { describe, expect, spyOn, test } from "bun:test";
+import {
+  constantTimeSecretMatches,
+  createScheduledWorkerHttpHandler,
+  createWorkerHttpHandler,
+} from "./index";
 
 const SECRET = "worker-secret-012345678901234567890123";
 
@@ -16,6 +20,49 @@ function request(
 }
 
 describe("worker HTTP adapter", () => {
+  test("hashes the configured secret once per worker or scheduled handler", async () => {
+    const hash = spyOn(Bun.CryptoHasher, "hash");
+    try {
+      const worker = createWorkerHttpHandler({
+        expectedSecret: SECRET,
+        defaultBatchSize: 1,
+        runBatch: () => null,
+      });
+      expect(hash).toHaveBeenCalledTimes(1);
+      expect((await worker(request())).status).toBe(200);
+      expect((await worker(request())).status).toBe(200);
+      expect(hash).toHaveBeenCalledTimes(3);
+
+      const scheduled = createScheduledWorkerHttpHandler({
+        expectedBearer: SECRET,
+        runBatch: () => null,
+      });
+      expect(hash).toHaveBeenCalledTimes(4);
+      for (let index = 0; index < 2; index += 1) {
+        const response = await scheduled(new Request("https://edge/scheduled", {
+          method: "POST",
+          headers: { authorization: `Bearer ${SECRET}` },
+        }));
+        expect(response.status).toBe(200);
+      }
+      expect(hash).toHaveBeenCalledTimes(6);
+    } finally {
+      hash.mockRestore();
+    }
+  });
+
+  test("native digests match Web Crypto UTF-8 encoding", async () => {
+    for (const value of ["", SECRET, "密钥-🔐", "a\u0000b", "密".repeat(1024)]) {
+      const expected = new Uint8Array(await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(value),
+      ));
+      expect(new Uint8Array(Bun.CryptoHasher.hash("sha256", value))).toEqual(expected);
+      expect(await constantTimeSecretMatches(value, value)).toBe(value.length > 0);
+      expect(await constantTimeSecretMatches(`${value}x`, value)).toBe(false);
+    }
+  });
+
   test("compares secrets including empty and unequal-length inputs", async () => {
     expect(await constantTimeSecretMatches(SECRET, SECRET)).toBe(true);
     expect(await constantTimeSecretMatches("", "")).toBe(false);

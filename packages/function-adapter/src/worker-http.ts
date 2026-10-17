@@ -1,3 +1,5 @@
+import { createSecretMatcher } from "./secret";
+
 export type WorkerBatchRequest = {
   batchSize: number;
 };
@@ -38,26 +40,12 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-async function digest(value: string): Promise<Uint8Array> {
-  return new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
-  );
-}
-
 /** Compare secrets without making the comparison dependent on their contents. */
 export async function constantTimeSecretMatches(
   provided: string,
   expected: string,
 ): Promise<boolean> {
-  const [providedDigest, expectedDigest] = await Promise.all([
-    digest(provided),
-    digest(expected),
-  ]);
-  let difference = 0;
-  for (let index = 0; index < expectedDigest.length; index += 1) {
-    difference |= providedDigest[index] ^ expectedDigest[index];
-  }
-  return difference === 0 && provided.length > 0 && expected.length > 0;
+  return createSecretMatcher(expected)(provided);
 }
 
 async function parseBatchRequest(
@@ -111,6 +99,8 @@ export function createWorkerHttpHandler<TResult>(
   }
   // Validate the configured header before accepting invocations.
   new Headers({ [secretHeader]: "" });
+  const { expectedSecret } = options;
+  const matchesSecret = createSecretMatcher(expectedSecret);
 
   return async (request) => {
     if (request.method !== "POST") {
@@ -119,18 +109,13 @@ export function createWorkerHttpHandler<TResult>(
         405,
       );
     }
-    if (options.expectedSecret.length < minimumSecretLength) {
+    if (expectedSecret.length < minimumSecretLength) {
       return jsonResponse(
         { ok: false, error: { code: errorCodes.notConfigured, message: "Worker is unavailable." } },
         503,
       );
     }
-    if (
-      !(await constantTimeSecretMatches(
-        request.headers.get(secretHeader) ?? "",
-        options.expectedSecret,
-      ))
-    ) {
+    if (!matchesSecret(request.headers.get(secretHeader) ?? "")) {
       return jsonResponse(
         { ok: false, error: { code: errorCodes.unauthorized, message: "Worker authentication failed." } },
         401,

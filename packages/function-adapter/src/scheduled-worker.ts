@@ -1,7 +1,5 @@
-import {
-  constantTimeSecretMatches,
-  type WorkerHttpErrorCodes,
-} from "./worker-http";
+import type { WorkerHttpErrorCodes } from "./worker-http";
+import { createSecretMatcher } from "./secret";
 
 export type ScheduledWorkerHttpOptions<TResult> = {
   expectedBearer?: string;
@@ -37,18 +35,6 @@ function bearerToken(request: Request): string {
     : "";
 }
 
-async function isAuthorized(
-  request: Request,
-  options: Pick<ScheduledWorkerHttpOptions<never>, "expectedBearer" | "authorize">,
-): Promise<boolean> {
-  if (options.authorize) return options.authorize(request);
-  if (options.expectedBearer === undefined) return false;
-  return constantTimeSecretMatches(
-    bearerToken(request),
-    options.expectedBearer,
-  );
-}
-
 /** Creates a POST-only scheduled invocation endpoint with injected trust. */
 export function createScheduledWorkerHttpHandler<TResult>(
   options: ScheduledWorkerHttpOptions<TResult>,
@@ -58,6 +44,11 @@ export function createScheduledWorkerHttpHandler<TResult>(
   if (!Number.isSafeInteger(minimumSecretLength) || minimumSecretLength < 32) {
     throw new RangeError("Minimum secret length must be at least 32");
   }
+  const { expectedBearer, authorize } = options;
+  const matchesSecret = createSecretMatcher(expectedBearer ?? "");
+  const configured = expectedBearer === undefined
+    ? authorize !== undefined
+    : authorize === undefined && expectedBearer.length >= minimumSecretLength;
 
   return async (request) => {
     if (request.method !== "POST") {
@@ -66,19 +57,14 @@ export function createScheduledWorkerHttpHandler<TResult>(
         405,
       );
     }
-    if (
-      (options.expectedBearer === undefined && !options.authorize) ||
-      (options.expectedBearer !== undefined && options.authorize !== undefined) ||
-      (options.expectedBearer !== undefined &&
-        options.expectedBearer.length < minimumSecretLength)
-    ) {
+    if (!configured) {
       return jsonResponse(
         { ok: false, error: { code: errorCodes.notConfigured } },
         503,
       );
     }
     try {
-      if (!(await isAuthorized(request, options))) {
+      if (!(authorize ? await authorize(request) : matchesSecret(bearerToken(request)))) {
         return jsonResponse(
           { ok: false, error: { code: errorCodes.unauthorized } },
           401,
