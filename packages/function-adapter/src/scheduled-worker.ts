@@ -45,10 +45,12 @@ export function createScheduledWorkerHttpHandler<TResult>(
     throw new RangeError("Minimum secret length must be at least 32");
   }
   const { expectedBearer, authorize } = options;
-  const matchesSecret = createSecretMatcher(expectedBearer ?? "");
   const configured = expectedBearer === undefined
-    ? authorize !== undefined
-    : authorize === undefined && expectedBearer.length >= minimumSecretLength;
+    ? typeof authorize === "function"
+    : authorize === undefined && typeof expectedBearer === "string" && expectedBearer.length >= minimumSecretLength;
+  const matchesSecret = configured && typeof expectedBearer === "string"
+    ? createSecretMatcher(expectedBearer)
+    : undefined;
 
   return async (request) => {
     if (request.method !== "POST") {
@@ -64,7 +66,7 @@ export function createScheduledWorkerHttpHandler<TResult>(
       );
     }
     try {
-      if (!(authorize ? await authorize(request) : matchesSecret(bearerToken(request)))) {
+      if (!(authorize ? (await authorize(request)) === true : matchesSecret?.(bearerToken(request)))) {
         return jsonResponse(
           { ok: false, error: { code: errorCodes.unauthorized } },
           401,
@@ -77,7 +79,7 @@ export function createScheduledWorkerHttpHandler<TResult>(
       );
     } catch (error) {
       try {
-        options.logError?.(error);
+        void Promise.resolve(options.logError?.(error)).catch(() => undefined);
       } catch {
         // Logging failures must not escape the HTTP error boundary.
       }
