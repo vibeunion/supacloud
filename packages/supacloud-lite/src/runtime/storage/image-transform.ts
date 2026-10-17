@@ -63,6 +63,15 @@ export function resolveImageTransformLimits(options: ImageTransformLimits = {}):
   return { maxInputBytes, maxOutputBytes }
 }
 
+export function imageTransformInputTooLarge(maxInputBytes: number): ImageTransformError {
+  return {
+    ok: false,
+    status: 413,
+    error: 'ImageTooLarge',
+    message: `The source image exceeds the transformation limit (${maxInputBytes} bytes)`,
+  }
+}
+
 function invalid(message: string): ImageTransformError {
   return { ok: false, status: 400, error: 'InvalidTransformation', message }
 }
@@ -212,12 +221,7 @@ export async function transformImage(
     : await Promise.resolve(source.size as number | Promise<number>)
   const sourceSize = Math.max(knownSourceSize ?? 0, actualSourceSize)
   if (sourceSize > limits.maxInputBytes) {
-    return {
-      ok: false,
-      status: 413,
-      error: 'ImageTooLarge',
-      message: `The source image exceeds the transformation limit (${limits.maxInputBytes} bytes)`,
-    }
+    return imageTransformInputTooLarge(limits.maxInputBytes)
   }
   const image = new Bun.Image(source, { maxPixels: MAX_TRANSFORM_PIXELS })
   let metadata: Bun.Image.Metadata
