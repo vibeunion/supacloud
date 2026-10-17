@@ -280,7 +280,7 @@ function startEdgeRuntime(managementPort: number): void {
     process.execPath,
     "--preload",
     join(import.meta.dir, "server-function-config-race.preload.ts"),
-    join(import.meta.dir, "server.ts"),
+    process.env.SUPACLOUD_EDGE_TEST_ENTRYPOINT || join(import.meta.dir, "server.ts"),
   ], {
     cwd: import.meta.dir,
     stdin: "ignore",
