@@ -2114,6 +2114,25 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await edgeFunctionService.readSource("proj_assets", "asset-reader")).toContain("/public/message.txt");
   });
 
+  test.each([
+    "index.js.jsc", "nested/index.js.jsc", "nested\\index.js.JSC",
+    "index.js.jsc/", "nested/index.js.jsc/.", "nested\\index.js.JSC\\.",
+  ])(
+    "rejects tenant-uploaded bytecode sidecar %s before publishing a version",
+    async (sidecar) => {
+      const result = await edgeFunctionService.deployBundleDetailed(
+        "proj_bytecode_upload",
+        "bytecode-upload",
+        { "index.ts": "export default () => new Response('ok');", [sidecar]: "untrusted bytecode" },
+      );
+      expect(result).toEqual({
+        success: false,
+        error: "Tenant-uploaded Function bytecode sidecars are not supported",
+      });
+      expect(await edgeFunctionService.readSource("proj_bytecode_upload", "bytecode-upload")).toBeNull();
+    },
+  );
+
   test("rejects a bundle upload that collides with the runtime entry", async () => {
     const deployResult = await edgeFunctionService.deployBundleDetailed(
       "proj_reserved",

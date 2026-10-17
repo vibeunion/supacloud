@@ -246,8 +246,9 @@ The derived cache is isolated by Function path, source digest, Bun version and
 revision, operating system, architecture, and build settings. A Bun/runtime
 upgrade or source change therefore generates a new pair. Modules that depend on
 path-sensitive `import.meta` values, top-level await, or external imports that
-are not already part of the server-side bundle may remain on ordinary
-JavaScript; use `required` only for Functions whose final artifact is known to
+are not already part of the server-side bundle stay on ordinary JavaScript in
+`auto` mode. Compiler macros are disabled during preheat so tenant code cannot
+execute in the host; use `required` only for Functions whose final artifact is known to
 be compatible with Bun bytecode.
 `background: false` rejects `EdgeRuntime.waitUntil()` for that Function;
 omitting it preserves legacy behavior. Limits are upper-bounded by the host

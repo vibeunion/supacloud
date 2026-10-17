@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { resolveProjectWorkerCacheOptions, resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
 import { createMemoryPressureMonitor } from "./memory-pressure";
+import { functionBytecodeCache } from "./function-bytecode";
 import { benchmarkProjectWorkers } from "./worker-project-benchmark";
 import {
   EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
@@ -801,7 +802,36 @@ describe("WorkerPool subprocess guard", () => {
         request: new Request("http://edge.local/functions/v1/bytecode"),
       });
       expect(await response.text()).toBe("bytecode-ready");
+
+      const artifact = functionBytecodeCache.lookup({ functionPath, projectRoot, artifactSha256, bytecode: "required" })!;
+      const originalSource = await readFile(functionPath);
+      const originalBytecode = await readFile(`${artifact.path}.jsc`);
+      const builds = functionBytecodeCache.metrics.builds;
+      const dispatch = () => pool.dispatch({
+        functionId: "proj_preheat_bytecode_bytecode_v1", functionPath, projectRoot,
+        projectRef: "proj_preheat_bytecode", moduleVersion: "v1", artifactSha256,
+        bytecode: "required", env: {}, request: new Request("http://edge.local/functions/v1/bytecode"),
+      });
+      // Even a cached handler must revalidate both the published authority and executable sidecar.
+      await writeFile(functionPath, 'export default () => new Response("changed");');
+      expect((await dispatch()).status).toBe(500);
+      await writeFile(functionPath, originalSource);
+      await chmod(`${artifact.path}.jsc`, 0o600);
+      await writeFile(`${artifact.path}.jsc`, "tampered bytecode");
+      expect((await dispatch()).status).toBe(500);
+      await writeFile(`${artifact.path}.jsc`, originalBytecode);
+      await chmod(`${artifact.path}.jsc`, 0o400);
+      await chmod(dirname(artifact.path), 0o700);
+      await rm(`${artifact.path}.jsc`);
+      const replacement = join(projectRoot, "untrusted.jsc");
+      await writeFile(replacement, originalBytecode);
+      await symlink(replacement, `${artifact.path}.jsc`);
+      expect((await dispatch()).status).toBe(500);
+      expect(functionBytecodeCache.metrics.builds).toBe(builds);
     } finally {
+      await pool.shutdown();
+      const artifact = functionBytecodeCache.lookup({ functionPath, projectRoot, artifactSha256, bytecode: "auto" });
+      if (artifact) await chmod(dirname(artifact.path), 0o700);
       await rm(projectRoot, { recursive: true, force: true });
     }
   });

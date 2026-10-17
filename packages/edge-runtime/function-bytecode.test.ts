@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, realpath, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { FunctionBytecodeCache } from "./function-bytecode";
@@ -98,6 +98,10 @@ test("auto falls back and required rejects unsupported top-level await and asset
   for (const source of [
     'await Promise.resolve(); export default () => new Response("ok");',
     'export default () => new Response(import.meta.dir);',
+    'export default () => new Response(import/* comment */.meta.dir);',
+    'export default () => new Response(import. /* comment */ meta.url);',
+    'export default () => new Response(__dir\\u006eame);',
+    'export default async () => { const name = "node:crypto"; return import(name); };',
     'import value from "./asset.json"; export default () => Response.json(value);',
   ]) {
     const { cache, request, root } = await fixture(source);
@@ -120,4 +124,64 @@ test("source digest and tenant path partition the cache; no client sidecar is re
   await chmod(a.request.functionPath, 0o600);
   await writeFile(a.request.functionPath, "changed");
   expect(await a.cache.prepare({ ...a.request, artifactSha256: "2".repeat(64) })).toBeUndefined();
+});
+
+
+test("preheat never executes builtin macros or legacy import assertions in the host", async () => {
+  for (const attribute of [
+    'with { type: "macro" }',
+    'assert { type: "macro" }',
+    'with { "type": "ma\\u0063ro" }',
+  ]) {
+    const { root, cache, request } = await fixture();
+    const marker = join(root, "host-marker");
+    await writeFile(marker, "untouched");
+    const source = `import { writeFileSync } from "node:fs" ${attribute};
+      writeFileSync(${JSON.stringify(marker)}, "host code executed");
+      export default () => new Response("ok");`;
+    await writeFile(request.functionPath, source);
+    const input = { ...request, artifactSha256: digest(source) };
+    expect(await cache.prepare(input)).toBeUndefined();
+    await expect(cache.prepare({ ...input, bytecode: "required" })).rejects.toThrow("preparation failed");
+    expect(await readFile(marker, "utf8")).toBe("untouched");
+    expect(cache.metrics.builds).toBe(0);
+  }
+});
+
+test("preheat rejects sources outside the project and symlinked sources before writing a cache", async () => {
+  const a = await fixture();
+  const b = await fixture();
+  expect(await a.cache.prepare({ ...a.request, functionPath: b.request.functionPath })).toBeUndefined();
+  const alias = join(a.root, "alias.js");
+  await symlink(b.request.functionPath, alias);
+  expect(await a.cache.prepare({ ...a.request, functionPath: alias })).toBeUndefined();
+  expect(a.cache.metrics.builds).toBe(0);
+  expect((await readdir(a.root)).sort()).toEqual(["alias.js", "index.js"]);
+});
+
+test("oversized sources are rejected before compilation and allocation of source contents", async () => {
+  const { cache, request, root } = await fixture();
+  await truncate(request.functionPath, 128 * 1024 * 1024);
+  expect(await cache.prepare(request)).toBeUndefined();
+  await expect(cache.prepare({ ...request, bytecode: "required" })).rejects.toThrow("preparation failed");
+  expect(cache.metrics.builds).toBe(0);
+  expect(await readdir(root)).toEqual(["index.js"]);
+});
+
+test("disposed caches cannot serve a required artifact", async () => {
+  const { cache, request } = await fixture();
+  expect(await cache.prepare(request)).toBeDefined();
+  await cache.dispose();
+  expect(cache.lookup(request)).toBeUndefined();
+  expect(() => cache.lookup({ ...request, bytecode: "required" })).toThrow("preheat");
+  await expect(cache.prepare({ ...request, bytecode: "required" })).rejects.toThrow("preparation failed");
+});
+
+
+test("safe builtin imports remain eligible without enabling compiler macros", async () => {
+  const { cache, request } = await fixture('import { basename } from "node:path"; export default () => new Response(basename("/one/two"));');
+  const artifact = await cache.prepare({ ...request, bytecode: "required" });
+  expect(artifact).toBeDefined();
+  const handler = (await import(artifact!.path)).default;
+  expect(await handler().text()).toBe("two");
 });

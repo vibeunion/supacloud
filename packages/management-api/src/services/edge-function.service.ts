@@ -1213,6 +1213,11 @@ function validatedBundleEntrypoint(
   request: EdgeFunctionReleaseRequest & { files: Record<string, string> },
 ): string {
   const entrypoint = request.entrypoint ?? "index.ts";
+  // Check the same normalized target used by writeBundleSources, not the raw
+  // upload key: trailing slashes/dot segments and backslashes can hide a suffix.
+  if (Object.keys(request.files).some((filePath) => /\.jsc$/i.test(resolveInside("/", filePath)))) {
+    throw new Error("Tenant-uploaded Function bytecode sidecars are not supported");
+  }
   if (!request.files[entrypoint]) throw new Error(`Entrypoint '${entrypoint}' not found in file map`);
   if (Object.hasOwn(request.files, BUNDLED_SOURCE_RUNTIME_ENTRY)) {
     throw new Error(`Bundle path '${BUNDLED_SOURCE_RUNTIME_ENTRY}' is reserved by the runtime`);
