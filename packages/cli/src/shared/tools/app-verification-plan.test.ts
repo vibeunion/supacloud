@@ -42,6 +42,22 @@ test("missing and ambiguous targets cannot silently select the whole repository"
   await expect(createVerificationPlan(root, graph, "health")).rejects.toThrow("unambiguous");
 });
 
+test("verification resolves job service keys and gives exact module names precedence", async () => {
+  const { root, graph } = await fixture();
+  graph.modules[0]!.jobs = [{
+    className: "VerifyJob", name: "review.verify", serviceKey: "review-verifier", scope: "job",
+  }];
+  expect((await createVerificationPlan(root, graph, "review-verifier")).target).toBe("health");
+  graph.modules.push({
+    ...graph.modules[0]!, name: "other", file: "src/other/other.ts",
+    jobs: [{ className: "OtherJob", name: "health", serviceKey: "review-verifier", scope: "job" }],
+  });
+  const exact = await createVerificationPlan(root, graph, "health");
+  expect(exact.target).toBe("health");
+  expect(exact.tests).toEqual(["src/health/health.test.ts"]);
+  await expect(createVerificationPlan(root, graph, "review-verifier")).rejects.toThrow("unambiguous");
+});
+
 test("compiler paths relative to a configured source root resolve inside the project", async () => {
   const { root, graph } = await fixture();
   graph.modules[0]!.file = "health/health.ts";

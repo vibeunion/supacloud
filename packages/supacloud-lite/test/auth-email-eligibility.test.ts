@@ -10,6 +10,7 @@ describe('Email token account eligibility and atomic sessions', () => {
   let userId: string
   const email = 'email-eligibility@example.test'
   const code = '123456'
+  const replacementCode = '654321'
   const secret = 'email-eligibility-secret'.repeat(3)
   const kinds = ['otp', 'magiclink', 'recovery'] as const
   type Kind = typeof kinds[number]
@@ -29,15 +30,15 @@ describe('Email token account eligibility and atomic sessions', () => {
   afterEach(async () => { await auth?.stop() })
   afterAll(async () => { await db?.close() })
 
-  async function issue(kind: Kind) {
+  async function issue(kind: Kind, tokenEmail = email, token = code) {
     await db!.query(
       `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
        values ($1, $2, $3, $4, now() + interval '1 hour')`,
-      [userId, email, kind, code],
+      [userId, tokenEmail, kind, token],
     )
   }
 
-  function verify(kind: Kind, method: 'GET' | 'POST', token = code) {
+  function verify(kind: Kind, method: 'GET' | 'POST', token = code, tokenEmail = email) {
     const url = new URL('http://lite.local/auth/v1/verify')
     if (method === 'GET') {
       url.search = new URLSearchParams({ token, type: kind }).toString()
@@ -46,7 +47,7 @@ describe('Email token account eligibility and atomic sessions', () => {
       method,
       ...(method === 'POST' ? {
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token, email, type: kind === 'otp' ? 'email' : kind }),
+        body: JSON.stringify({ token, email: tokenEmail, type: kind === 'otp' ? 'email' : kind }),
       } : {}),
     }), { role: 'anon', claims: null }, url)
   }
@@ -54,7 +55,7 @@ describe('Email token account eligibility and atomic sessions', () => {
   async function snapshot() {
     return {
       users: (await db!.query(
-        'select email_confirmed_at::text, last_sign_in_at::text from auth.users',
+        'select id, email, email_confirmed_at::text, last_sign_in_at::text from auth.users',
       )).rows,
       tokens: (await db!.query(
         'select id, token, attempts, expires_at::text from auth.one_time_tokens order by id',
@@ -77,7 +78,12 @@ describe('Email token account eligibility and atomic sessions', () => {
     }
   }
 
-  async function expectSession(response: Response, method: 'GET' | 'POST') {
+  async function expectSession(
+    response: Response,
+    method: 'GET' | 'POST',
+    expectedEmail = email,
+    remainingTokens: string[] = []
+  ) {
     let accessToken: unknown
     if (method === 'POST') {
       expect(response.status).toBe(200)
@@ -88,9 +94,11 @@ describe('Email token account eligibility and atomic sessions', () => {
       accessToken = new URLSearchParams(new URL(response.headers.get('location')!).hash.slice(1)).get('access_token')
     }
     if (typeof accessToken !== 'string') throw new Error('Expected email session')
-    expect(await verifyJwt(accessToken, secret)).toMatchObject({ sub: userId, email })
+    expect(await verifyJwt(accessToken, secret)).toMatchObject({ sub: userId, email: expectedEmail })
     expect((await db!.query('select user_id from auth.refresh_tokens')).rows).toEqual([{ user_id: userId }])
-    expect((await db!.query('select token from auth.one_time_tokens')).rows).toEqual([])
+    expect((await db!.query('select token from auth.one_time_tokens')).rows).toEqual(
+      remainingTokens.map((token) => ({ token }))
+    )
   }
 
   for (const method of ['GET', 'POST'] as const) {
@@ -113,6 +121,18 @@ describe('Email token account eligibility and atomic sessions', () => {
         await expectSession(await verify(kind, method), method)
         await expectRejected(await verify(kind, method), method)
         expect((await db!.query('select token from auth.refresh_tokens')).rows).toHaveLength(1)
+      })
+
+      test(`rejects a stale ${kind} token after the account email changes via ${method}`, async () => {
+        const replacement = 'replacement@example.test'
+        await issue(kind)
+        await db!.query('update auth.users set email = $1 where id = $2', [replacement, userId])
+        const before = await snapshot()
+        await expectRejected(await verify(kind, method), method)
+        expect(await snapshot()).toEqual(before)
+
+        await issue(kind, replacement, replacementCode)
+        await expectSession(await verify(kind, method, replacementCode, replacement), method, replacement, [code])
       })
     }
 
@@ -148,6 +168,34 @@ describe('Email token account eligibility and atomic sessions', () => {
       await expectSession(await verify('recovery', method), method)
     })
   }
+
+  for (const kind of kinds) {
+    test(`rejects a stale ${kind} token_hash after an admin email change without a request email`, async () => {
+      await issue(kind)
+      const updateUrl = new URL(`http://lite.local/auth/v1/admin/users/${userId}`)
+      const updated = await auth!.handle(new Request(updateUrl, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'replacement@example.test' }),
+      }), { role: 'service_role', claims: null }, updateUrl)
+      expect(updated.status).toBe(200)
+      const before = await snapshot()
+      const verifyUrl = new URL('http://lite.local/auth/v1/verify')
+      const response = await auth!.handle(new Request(verifyUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token_hash: code, type: kind === 'otp' ? 'email' : kind }),
+      }), { role: 'anon', claims: null }, verifyUrl)
+      await expectRejected(response, 'POST')
+      expect(await snapshot()).toEqual(before)
+    })
+  }
+
+  test('preserves case-insensitive binding for an existing mixed-case account email', async () => {
+    await issue('magiclink')
+    await db!.query('update auth.users set email = $1 where id = $2', [email.toUpperCase(), userId])
+    await expectSession(await verify('magiclink', 'POST'), 'POST', email.toUpperCase())
+  })
 
   test('does not redeem recovery tokens as ordinary email OTPs', async () => {
     await issue('recovery')
