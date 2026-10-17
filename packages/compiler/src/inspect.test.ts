@@ -111,6 +111,15 @@ export class FeatureModule {}`);
     }
   });
 
+  test("context files include the selected module feature specification source", () => {
+    const featureGraph = structuredClone(graph);
+    featureGraph.modules[0]!.featureSpec = {
+      name: "case", states: ["draft", "accepted"], transitions: [],
+      file: "case-feature.ts", line: 1,
+    };
+    expect(createContextPack(featureGraph, featureGraph.modules[0]!.name).files).toContain("case-feature.ts");
+  });
+
   test("context resolves job and query names, classes and job service keys", () => {
     const modules = graph.modules.map((module) => module.name === "case" ? {
       ...module,
