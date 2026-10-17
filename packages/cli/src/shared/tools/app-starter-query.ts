@@ -45,6 +45,12 @@ export async function listReviews(
   const { data, error, count } = await (signal ? query.abortSignal(signal) : query);
   if (error) throw error;
   if (data === null || count === null) throw new Error("Incomplete review page response");
+  if (!Array.isArray(data)
+    || !Number.isSafeInteger(count) || count < 0
+    || data.length > pageSize
+    || (data.length > 0 && start + data.length > count)) {
+    throw new Error("Invalid review page response");
+  }
   return { data, total: count, page, pageSize, hasNextPage: start + data.length < count };
 }
 `;
