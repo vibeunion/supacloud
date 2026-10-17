@@ -20,7 +20,7 @@ export async function createVerificationPlan(root: string, graph: ApplicationGra
   const project = await realpath(root);
   const requestedRoot = resolve(root);
   const sources = [
-    owner.file, ...owner.providers.map(item => item.file), ...owner.controllers.map(item => item.file),
+    owner.file, owner.featureSpec?.file, ...owner.providers.map(item => item.file), ...owner.controllers.map(item => item.file),
     ...(graph.moduleHandlerFiles?.[owner.name] ?? []),
     ...(owner.aspects ?? []).flatMap(item => item.file ? [item.file] : []),
     ...owner.commands.flatMap(item => (item.aspects ?? []).flatMap(aspect => aspect.file ? [aspect.file] : [])),
