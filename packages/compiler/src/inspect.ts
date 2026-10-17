@@ -138,6 +138,7 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
   } : undefined;
   const files = [...new Set(modules.flatMap((module) => [
     module.file,
+    ...(module.featureSpec?.file ? [module.featureSpec.file] : []),
     ...module.providers.map((provider) => provider.file),
     ...module.controllers.map((controller) => controller.file),
     ...(graph.moduleHandlerFiles?.[module.name] ?? []),
