@@ -8,10 +8,13 @@ is a separately authorized business command, never an assumed rollback.
 
 ## Compatibility and Acceptance Boundary
 
-The Elysia peer and development dependency are pinned to `2.0.0-beta.21`.
-`compatibility.json` records the acceptance target: Bun 1.4.2, Elysia
-2.0.0-beta.21, `typebox` 1.3.34, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2
-and the compiler's separate TypeScript 6 semantic API 6.0.2. The matrix is a
+The Elysia peer and development dependency are pinned to `2.0.0-beta.32`.
+The runtime adapter pins Effect `4.0.5` and consumes its `Exit`-based
+execution boundary.
+`compatibility.json` records the acceptance target: Bun 1.4.3, Elysia
+2.0.0-beta.32, Effect 4.0.5, `typebox` 1.3.37, `exact-mirror` 1.2.6,
+TypeScript CLI 7.0.2 and the compiler's separate TypeScript 6 semantic API 6.0.2.
+The matrix is a
 required target, not proof of an execution. See the dated, commit-specific
 [framework acceptance record](../../docs/framework-acceptance.md) for actual
 results. The contract-upgrade gate checks both TypeScript engines. These tests
@@ -190,6 +193,14 @@ concurrent request isolation. Run it with `bun run typecheck:test` as well as
 
 ## Persistent Command Adapters
 
+For a local compiled Command whose handler must run in a PostgreSQL transaction,
+use `createTransactionalCommandGovernance` with `createPostgresCommandStore`.
+It supplies the governance callbacks and a request-isolated `transaction()`
+accessor, delegating receipt, authorization-on-replay and audit to the existing
+durable executor. The approval starter uses this binding and derives decoders
+from its HTTP contracts. See [transactional defaults](../../docs/transactional-command-defaults.md)
+for ownership, migration and native acceptance boundaries.
+
 `createPersistentCommandAdapter(command, { identity, input })` binds a
 `createTransactionalCommand` or `createExternalCommand` from `@supacloud/commands`
 to `commandGovernance.rpc`.
@@ -316,7 +327,7 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 ## Installation
 
 ```bash
-bun add --exact @supacloud/elysia elysia@2.0.0-beta.21
+bun add --exact @supacloud/elysia elysia@2.0.0-beta.32
 ```
 
 ## Usage

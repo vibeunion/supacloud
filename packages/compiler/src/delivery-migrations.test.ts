@@ -41,8 +41,9 @@ test("immutable targets carry exact declared SQL and reject unsafe changes witho
       ...GOOD_PROJECT_FILES,
       "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
       "src/features/health/health.module.ts": `import { Module, Controller, Get } from "../../runtime";
+        export const HealthStatus = {type: "string"} as const;
         @Controller("/health") export class HealthController {
-          @Get("/", {response: {type: "string"}}) status(): string {return "ready";}
+          @Get("/", {response: HealthStatus}) status(): string {return "ready";}
         }
         @Module({name: "health", controllers: [HealthController]}) export class HealthModule {}`,
       "migrations/001-schema.sql": sql,

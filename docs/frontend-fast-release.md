@@ -1,0 +1,212 @@
+# Fast Frontend Release
+
+Scope: reduce deployment observation cost without changing activation, backup
+retention, authorization or database recovery semantics.
+
+The old deploy path requested 100 historical releases and integrity-checked
+each archive and extracted tree before deployment and again after activation.
+The active snapshot makes that work independent of retained history size.
+Current artifact verification, CAS and exact post-activation readback remain.
+
+`tree_sha256` binds all extracted files sorted with `path.localeCompare`.
+Each entry hashes a 12-byte frame (big-endian uint32 UTF-8 path length,
+big-endian uint64 byte size), UTF-8 path bytes and the 32 raw SHA-256 bytes.
+An application that validates a retained artifact through its public manifest
+must include the manifest's actual byte length and SHA-256 in that same tree;
+matching the file count alone is not evidence of a matching build.
+
+## Platform Ownership
+
+- SupaCloud stores and verifies immutable tar.zst archives and trees.
+  The v2 format is breaking; existing v1 inventory requires a coordinated cutover.
+  See [deployment experience](deploy-experience.md#frontend-archive-cutover).
+- SupaCloud owns the active release/activation authority and CAS mutation ledger.
+- SupaCloud selects the previous release from the verified activation journal,
+  not history ordering, and verifies both retained artifacts in one locked snapshot.
+- Callers retain release IDs and receipts, not a second copy of the old website.
+- Legacy deployments without immutable authority must first establish a real
+  rollback artifact. A missing artifact never means rollback-ready.
+- Database migrations and Storage changes need their own backup/recovery policy.
+  The frontend fast path does not waive these gates or restore data.
+
+## Acceptance
+
+```gherkin
+Scenario: Release history does not delay a routine publish
+  Given many retained immutable frontend releases
+  When the active release snapshot is requested
+  Then only the current artifact and activation identity are verified
+  And no historical archive is inspected
+
+Scenario: Preserve read-only and project boundaries
+  Given a read-only CLI context for one project
+  When get_active_release is requested
+  Then a secret-free exact project/deployment projection is returned
+  And no mutation or backup is created
+
+Scenario: A stored release is not sufficient for a no-op
+  Given an unresolved activation or a route pointing away from the verified active artifact
+  When deployment requests the active release snapshot
+  Then the platform refuses the snapshot without modifying authority, routing or the journal
+  And deployment does not report already up to date or publish a new activation
+
+Scenario: Older server compatibility
+  Given an older server whose active endpoint returns 404
+  When any CLI consumer requests get_active_release
+  Then the CLI automatically reads a single-record inventory
+  And reads the exact release named by the authoritative active release ID
+  And returns the same zero-or-one snapshot contract
+  And exact immutable artifact readback remains required after activation
+
+Scenario: Refuse unsafe downgrade
+  Given authentication failure or an invalid active snapshot
+  When deployment reads the authority
+  Then deployment stops without activation or history fallback
+
+Scenario: Rollback without reupload
+  Given a previous immutable release and the new CAS activation identity
+  When frontend rollback is requested with that release ID
+  Then the CLI obtains the current CAS identity and creates the mutation ID
+  And the platform reuses the retained artifact
+  And a concurrent deployment is rejected without retrying with its new identity
+  And database and Storage state are not restored
+
+Scenario: Platform selects the previous activation
+  Given a succeeded activation journal with a verified previous immutable release
+  When frontend rollback is requested without a release ID
+  Then the platform supplies the previous release and current CAS in one locked snapshot
+  And no history list, rebuild, download or upload is needed
+
+Scenario: Previous activation cannot be proven
+  Given a missing or invalid journal, an unresolved activation, or a corrupt previous artifact
+  When a default rollback is requested
+  Then no activation is sent
+  And the client never guesses from release timestamps or content-hash order
+
+Scenario: Older server cannot select the previous activation
+  Given a server whose rollback snapshot endpoint returns HTTP 404
+  When a default rollback is requested
+  Then the client reports PREVIOUS_RELEASE_UNSUPPORTED without writing
+  And an explicitly selected release still uses the existing compatibility reader
+```
+
+Test and production use the same identity/integrity gates. Full history audit
+is an explicit operation, not a routine publish prerequisite. No measured
+production latency improvement is claimed by the local tests.
+The active snapshot checks unresolved mutation state, current artifact integrity
+and the live static route in one deployment lock. A matching archive identity
+with a contradictory tree digest is an error, not a no-op.
+With `deploy --json`, build stdout and stderr are streamed to stderr; stdout
+contains only the final JSON result.
+
+## Developer Experience Contract
+
+Product target: simpler routine delivery than a manually assembled Supabase CLI
+pipeline, with Wrangler-like environment selection and short deploy/rollback
+commands. This is a target, not a measured claim of competitive superiority.
+
+An application must not choose API endpoints based on server version, implement
+HTTP 404 fallback, scan history for the current release or construct routine CAS
+rollback calls. CLI, Admin and deploy share one authority reader. Compatibility
+is automatic only when the native read returns HTTP 404; it never disables
+authorization, integrity validation, production confirmation or CAS.
+
+```bash
+supacloud --env staging deploy
+supacloud --env staging frontend get_active_release --ref abc123 --id web
+supacloud --env staging frontend rollback --ref abc123 --id web
+supacloud --env staging frontend rollback --ref abc123 --id web --release_id <retained-sha256>
+```
+
+Default rollback uses the platform's verified activation journal; an explicit
+target remains available for a deliberate operator choice. Release inventory is
+ordered by content hash, not deployment time; neither the client nor application
+may infer "previous" from its first record. The rollback snapshot already includes
+the verified previous artifact, so no extra target GET is needed before activation.
+Exact post-activation readback remains mandatory. An older rollback endpoint
+returning HTTP 404 yields `PREVIOUS_RELEASE_UNSUPPORTED` instead of a guessed target.
+On an uncertain rollback, report the mutation ID for read-only reconciliation;
+do not generate another activation or automatically restore a database.
+This command represents an explicit operator decision against the observed
+current deployment. Automated compensation owned by an earlier release receipt
+belongs in deployment orchestration, which must persist the original expected
+CAS identity and rollback mutation ID. The internal rollback primitive supports
+this binding, but automatic compensation orchestration is not implemented here.
+The interactive CLI rejects these binding fields; its normal rollback path
+observes current authority, generates an operation ID and retains CAS checks
+and final artifact readback.
+
+## Ownership And Follow-Up
+
+### Internal Receipt-Bound Compensation Acceptance
+
+These scenarios exercise the internal rollback primitive, not public CLI flags.
+
+```gherkin
+Scenario: A release receipt still owns the active deployment
+  Given an explicit retained target and the receipt's current release and activation
+  When rollback is requested with a persisted mutation UUID
+  Then activation uses exactly those identities and verifies the resulting artifact
+
+Scenario: A newer publisher has taken over
+  Given the receipt's release or activation no longer matches the active deployment
+  When receipt-bound rollback is requested
+  Then no mutation is sent and STALE_AUTHORITY is returned
+
+Scenario: A rollback completed but its response was lost
+  Given the target and original rollback mutation are now active
+  When the same bound request is repeated
+  Then its journal fingerprint and live artifact are verified without another POST
+  And missing or contradictory evidence remains OUTCOME_UNKNOWN
+
+Scenario: A partial binding is supplied
+  Given any missing or invalid target, expected identity or mutation UUID
+  When receipt-bound rollback is requested
+  Then input validation fails before HTTP
+```
+
+### Customer Stability Responsibilities
+
+SupaCloud owns reusable mechanisms; an application owns its domain assertions.
+The existing FA tuple, matrix and stability schemas in `packages/delivery` are
+consumer acceptance profiles, not evidence that a deployed combination passed.
+Do not add another FA-specific runtime orchestrator or move FA tables into the
+platform to finish customer acceptance.
+
+| Workstream | SupaCloud responsibility | FA / operator responsibility |
+| --- | --- | --- |
+| Version combination | Artifact identity, provenance and compatibility checks | Pin the consumed versions and supply deployed FA commit evidence |
+| Business acceptance | Isolated execution, retained receipts and integration hooks | Define roles, uploads, tasks and persisted business outcomes |
+| Upgrade matrix | Contract parsing, safe rejection, isolation and replay infrastructure | Declare supported combinations and exercise real FA behavior |
+| Verification gates | Focused command/transport tests and platform release gates | Business checks with real deployed dependencies, separate from unit tests |
+| Error policy | Mutation identity, CAS, bounded transport and outcome reconciliation | Domain idempotency, permissions and operation-specific recovery UX |
+| SLO evidence | Correlated observations, aggregation and alert delivery mechanisms | Approved owner, objectives, observation window and operational response |
+
+This change implements only receipt-bound frontend rollback. It does not
+approve SLOs, claim live acceptance, restore databases/runtime, reupload legacy
+archives, re-enable removed commands or include report export. FA adoption must
+retain historical receipt validation separately from executing a translated
+rollback; records without immutable target/CAS evidence must fail closed.
+
+| Concern | Owner | Delivery boundary |
+| --- | --- | --- |
+| Older active endpoint compatibility | SupaCloud CLI/Admin | This PR: transparent, strict snapshot normalization |
+| Immutable frontend artifact integrity and CAS | SupaCloud platform | Existing primitives plus active snapshot in this PR |
+| Rollback target selection/activation without CAS/UUID boilerplate | SupaCloud platform/CLI | One command defaults to the journal-verified previous release; explicit retained targets remain supported |
+| Current/previous activation authority | SupaCloud platform | Active and previous-release snapshots verified under the deployment lock |
+| Receipt-bound rollback CAS and mutation identity | Internal release-control primitive | Bind compensation to the original current release, activation and mutation IDs; no public CLI flags or automatic orchestration |
+| Full activation history, legacy artifact capture, protected retention/GC | SupaCloud platform | Follow-up; not achieved by CLI fallback |
+| Environment bindings, public config versus credentials, initialization/doctor | SupaCloud compiler/CLI | Consolidate existing context/compiler paths; do not require every app to invent profiles |
+| Build cache, content-addressed upload deduplication, skip unchanged resources | SupaCloud compiler/CLI/platform | Extend existing deploy identity support with measured cold/warm/no-op budgets |
+| Migration risk classification, required backup before risky writes, schema cache/readiness | SupaCloud release platform | Follow-up on release controls; code-only must not perform database work |
+| Backup job, integrity, retention and restore receipt | SupaCloud platform | Restore remains explicitly authorized; backup IDs are not sufficient proof |
+| Multi-Function rollout and recovery | SupaCloud release platform | Proposed batch contract in release-control-automation-spec.md, not atomic today |
+| Outcome-unknown reconciliation, progress, diagnostics, structured receipts | SupaCloud platform/CLI | Reuse mutation journal; do not blindly retry writes in application scripts |
+| Health/readiness and declared application smoke hooks | SupaCloud platform executes, application declares | Platform handles execution/evidence; the app defines business assertions |
+| FA business schema, RLS, domain states, OAuth claim expectations and business acceptance | FA | Not delegated to the platform or replaced by generic health checks |
+| Git review/merge and production authorization | Repository/operator | Deploy must not silently merge or cross environments |
+
+The next release milestone should test clean-workspace deploy, warm deploy,
+unchanged deploy, rollback, older-server compatibility, concurrent deployment,
+interrupted response and production mis-targeting. Record real end-to-end times
+and command/flag counts before declaring the product target achieved.

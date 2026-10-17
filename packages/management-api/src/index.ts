@@ -74,6 +74,7 @@ import {
   CONTROL_PLANE_DATABASE_GUARD_EXIT_CODE,
   ControlPlaneDatabaseGuardError,
 } from "./db/control-plane-database-identity";
+import { recordOrEmpty } from "./utils/record";
 
 function getWebConsoleDir(): string {
   return resolveWebConsoleDir();
@@ -122,7 +123,10 @@ function isStudioCompatibilityRequest(request: Request): boolean {
   return host.startsWith("studio.") || host.startsWith("studio-");
 }
 
-async function rejectStudioCompatibilityRequest(request: Request, set: any) {
+async function rejectStudioCompatibilityRequest(
+  request: Request,
+  set: Pick<import("elysia").Context["set"], "status" | "headers">,
+) {
   if (!isStudioCompatibilityRequest(request)) {
     set.status = 404;
     return STUDIO_COMPAT_NOT_FOUND;
@@ -149,44 +153,51 @@ async function rejectStudioCompatibilityRequest(request: Request, set: any) {
 
 async function listStudioCompatibilityProjects() {
   const { projectService } = await import("./services");
-  const projects = await projectService.listProjects();
+  const projects: unknown[] = await projectService.listProjects();
 
-  return projects.map((project: any) => ({
-    id: project.id,
-    ref: project.ref,
-    name: project.name,
-    status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
-    region: project.region || "local",
+  return projects.map((project) => {
+    const record = recordOrEmpty(project);
+    const database = recordOrEmpty(record["database"]);
+    const api = recordOrEmpty(record["api"]);
+    const studio = recordOrEmpty(record["studio"]);
+    return {
+    id: record["id"],
+    ref: record["ref"],
+    name: record["name"],
+    status: typeof record["status"] === "string" ? record["status"].toUpperCase() : "ACTIVE_HEALTHY",
+    region: record["region"] || "local",
     organization_id: "default",
-    cloud_provider: project.cloud_provider || "localhost",
-    inserted_at: project.created_at,
-    updated_at: project.updated_at ?? null,
+    cloud_provider: record["cloud_provider"] || "localhost",
+    inserted_at: record["created_at"],
+    updated_at: record["updated_at"] ?? null,
     database: {
-      host: project.database?.host || "localhost",
-      name: project.database?.name || `supa_${project.ref}`,
-      user: project.database?.user || `role_${project.ref}`,
-      port: project.database?.port || 5432,
-      pool_size: project.database?.pool_size || 20,
+      host: database["host"] || "localhost",
+      name: database["name"] || `supa_${String(record["ref"] ?? "")}`,
+      user: database["user"] || `role_${String(record["ref"] ?? "")}`,
+      port: database["port"] || 5432,
+      pool_size: database["pool_size"] || 20,
     },
     api: {
-      url: project.api?.url || "",
+      url: api["url"] || "",
     },
     studio: {
-      url: project.studio?.url || "",
+      url: studio["url"] || "",
     },
-    services: project.services || [],
-    rest: project.rest || {},
-    realtime: project.realtime || false,
-  }));
+    services: record["services"] || [],
+    rest: recordOrEmpty(record["rest"]),
+    realtime: record["realtime"] || false,
+    };
+  });
 }
 
 async function getStudioCompatibilityProject(ref: string) {
   const { projectService } = await import("./services");
-  let project: Record<string, any> | null = await projectService.getProject(ref) as Record<string, any> | null;
+  const candidate = await projectService.getProject(ref);
+  let project: Record<string, unknown> | null = candidate ? recordOrEmpty(candidate) : null;
 
   if (!project && ref === "default") {
-    const projects = await projectService.listProjects();
-    project = (projects[0] as Record<string, any> | undefined) ?? null;
+    const projects: unknown[] = await projectService.listProjects();
+    project = projects[0] ? recordOrEmpty(projects[0]) : null;
   }
 
   if (!project) return null;
@@ -195,30 +206,30 @@ async function getStudioCompatibilityProject(ref: string) {
     id: project.id,
     ref: project.ref,
     name: project.name,
-    status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
-    region: project.region || "local",
+    status: typeof project["status"] === "string" ? project["status"].toUpperCase() : "ACTIVE_HEALTHY",
+    region: project["region"] || "local",
     organization_id: "default",
-    cloud_provider: project.cloud_provider || "localhost",
-    inserted_at: project.created_at,
-    connectionString: project.connectionString || "",
-    created_at: project.created_at,
-    updated_at: project.updated_at ?? null,
+    cloud_provider: project["cloud_provider"] || "localhost",
+    inserted_at: project["created_at"],
+    connectionString: project["connectionString"] || "",
+    created_at: project["created_at"],
+    updated_at: project["updated_at"] ?? null,
     database: {
-      host: project.database?.host || "localhost",
-      name: project.database?.name || `supa_${project.ref}`,
-      user: project.database?.user || `role_${project.ref}`,
-      port: project.database?.port || 5432,
-      pool_size: project.database?.pool_size || 20,
+      host: recordOrEmpty(project["database"])["host"] || "localhost",
+      name: recordOrEmpty(project["database"])["name"] || `supa_${String(project["ref"] ?? "")}`,
+      user: recordOrEmpty(project["database"])["user"] || `role_${String(project["ref"] ?? "")}`,
+      port: recordOrEmpty(project["database"])["port"] || 5432,
+      pool_size: recordOrEmpty(project["database"])["pool_size"] || 20,
     },
     api: {
-      url: project.api?.url || "",
+      url: recordOrEmpty(project["api"])["url"] || "",
     },
     studio: {
-      url: project.studio?.url || "",
+      url: recordOrEmpty(project["studio"])["url"] || "",
     },
-    services: project.services || [],
-    rest: project.rest || {},
-    realtime: project.realtime || false,
+    services: project["services"] || [],
+    rest: recordOrEmpty(project["rest"]),
+    realtime: project["realtime"] || false,
   };
 }
 
@@ -308,12 +319,12 @@ let routeProjectionSource: Pick<AnyElysia, "routes"> | undefined;
 
 const app = new Elysia({ strictPath: false })
   .use(websocket())
-  .request(({ request, set }) => {
+  .onRequest(({ request, set }) => {
     const context = beginRequestObservability(request);
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, context);
   })
-  .error("global", ({ request, error, set }) => {
+  .onError("global", ({ request, error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
@@ -346,7 +357,7 @@ const app = new Elysia({ strictPath: false })
   })
   // Elysia's Swagger adapter omits cookie parameters. Project that field from
   // the same compiled route table before the adapter serializes its document.
-  .afterHandle(({ request, responseValue: response }) => {
+  .onAfterHandle(({ request, responseValue: response }) => {
     if (new URL(request.url).pathname !== "/swagger/json") return response;
     return routeProjectionSource === undefined
       ? response
@@ -430,7 +441,7 @@ const app = new Elysia({ strictPath: false })
   )
 
   // Rate limit headers + API version (Studio compatibility)
-  .afterHandle(({ request, set }) => {
+  .onAfterHandle(({ request, set }) => {
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
     set.headers["x-ratelimit-limit"] ??= "1000";
@@ -440,7 +451,7 @@ const app = new Elysia({ strictPath: false })
     );
     set.headers["x-supabase-api-version"] = "2024-01-01";
   })
-  .afterResponse("global", ({ request, responseValue: response, set }) => {
+  .onAfterResponse("global", ({ request, responseValue: response, set }) => {
     const observation = recordRequestObservation(
       request, response instanceof Response ? response.status : Number(set.status || 200),
     );
@@ -797,6 +808,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     authMfaRoutes,
     frontendRoutes,
     applicationRoutes,
+    projectDeploymentRoutes,
     webhookRoutes,
     deployRoutes,
     chatRoutes,
@@ -816,6 +828,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectRbacRoutes,
     projectWebhookRoutes,
     projectAuditRoutes,
+    projectEventRoutes,
+    projectCapacityRoutes,
     projectCapabilityRoutes,
     projectAuthHookRuntimeRoutes,
     projectOrganizationRoutes,
@@ -826,14 +840,14 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
 
   return (
     new Elysia({ name: "api-routes" })
-      .request(({ request }) => {
+      .onRequest(({ request }) => {
         if (isDisabledMutationReconciliation(request)) {
           return status(403, { error: "Mutation reconciliation is not permitted" });
         }
       })
       .use(bffProofBodyCapture)
       // Auth guard runs before every route in this group
-      .beforeHandle(async ({ request, set }) => {
+      .onBeforeHandle(async ({ request, set }) => {
         const rateLimit = checkRateLimit(request);
         for (const [key, value] of Object.entries(rateLimit.headers)) {
           set.headers[key] = value;
@@ -857,13 +871,13 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           }
         }
       })
-      .afterHandle(async ({ request, set }) => {
+      .onAfterHandle(async ({ request, set }) => {
         if (shouldAuditRequest(request)) {
           await logAuditEvent({ request, status: Number(set.status || 200) });
         }
       })
-      .error("global", async ({ request, error, set }) => {
-    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
+      .onError("global", async ({ request, error, set }) => {
+        const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
         if (code === "PARSE") {
           if (shouldAuditRequest(request)) {
             await logAuditEvent({ request, status: 400, action: "error:PARSE" });
@@ -929,6 +943,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(authMfaRoutes)
       .use(frontendRoutes)
       .use(applicationRoutes)
+      .use(projectDeploymentRoutes)
       .use(webhookRoutes)
       .use(deployRoutes)
       .use(chatRoutes)
@@ -950,6 +965,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectRbacRoutes)
       .use(projectWebhookRoutes)
       .use(projectAuditRoutes)
+      .use(projectEventRoutes)
+      .use(projectCapacityRoutes)
       .use(projectCapabilityRoutes)
       .use(projectAuthHookRuntimeRoutes)
       .use(projectOrganizationRoutes)
@@ -1302,7 +1319,10 @@ async function bootstrap() {
             return;
           }
           const { upstreamUrl, requestHeaders } = data;
-          const upstream = new (WebSocket as any)(upstreamUrl, {
+          const WebSocketWithHeaders = WebSocket as typeof WebSocket & {
+            new (url: string, options: Bun.WebSocketOptions): WebSocket;
+          };
+          const upstream = new WebSocketWithHeaders(upstreamUrl, {
             headers: requestHeaders,
           });
 
@@ -1318,7 +1338,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener("message", (event: any) => {
+          upstream.addEventListener("message", (event: MessageEvent) => {
             try {
               ws.send(event.data as string | ArrayBufferLike);
             } catch {
@@ -1326,7 +1346,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener("close", (event: any) => {
+          upstream.addEventListener("close", (event: CloseEvent) => {
             try {
               ws.close(event.code, event.reason);
             } catch {
@@ -1385,7 +1405,7 @@ async function bootstrap() {
           }
         },
       },
-      async fetch(request: Request, server: any) {
+      async fetch(request: Request, server: Bun.Server<unknown>) {
         recordRequestPeerAddress(request, server.requestIP(request)?.address);
         const url = new URL(request.url);
 
@@ -1475,6 +1495,8 @@ async function bootstrap() {
     });
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
+    const { applicationDeploymentWorker } = await import("./routes");
+    applicationDeploymentWorker.start();
     const { startPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
     startPgflowTaskWorker();
 
@@ -1495,6 +1517,11 @@ async function bootstrap() {
     const { startBranchReplacementRecoveryWorker } =
       await import("./workers/branch-replacement-recovery.worker");
     startBranchReplacementRecoveryWorker();
+
+    const { applicationPreviews } = await import("./routes");
+    const { startApplicationPreviewCleanupWorker } =
+      await import("./workers/application-preview-cleanup.worker");
+    startApplicationPreviewCleanupWorker(applicationPreviews);
 
     const { startFrontendReleaseRecoveryWorker } =
       await import("./workers/frontend-release-recovery.worker");
@@ -1564,6 +1591,8 @@ export function startManagementApi(): void {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
+      const { applicationDeploymentWorker } = await import("./routes");
+      await applicationDeploymentWorker.stop();
       const { stopPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
       await stopPgflowTaskWorker();
       if (config.edgeRuntimeMode === "embedded") {
@@ -1582,6 +1611,9 @@ export function startManagementApi(): void {
       const { stopBranchReplacementRecoveryWorker } =
         await import("./workers/branch-replacement-recovery.worker");
       stopBranchReplacementRecoveryWorker();
+      const { stopApplicationPreviewCleanupWorker } =
+        await import("./workers/application-preview-cleanup.worker");
+      await stopApplicationPreviewCleanupWorker();
       const { stopFrontendReleaseRecoveryWorker } =
         await import("./workers/frontend-release-recovery.worker");
       stopFrontendReleaseRecoveryWorker();

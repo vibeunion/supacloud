@@ -39,17 +39,17 @@ function queueTableName(queueName: string, archived: boolean): string {
 }
 
 function mapMessage(queueName: string, row: Record<string, unknown>, status: PgmqMessage["status"]): PgmqMessage {
-  const message = readPgmqJson(row.message);
-  const msgId = parsePgmqMessageId(row.msg_id);
-  if (typeof row.read_ct !== "number" || !Number.isSafeInteger(row.read_ct) || row.read_ct < 0) {
+  const message = readPgmqJson(row["message"]);
+  const msgId = parsePgmqMessageId(row["msg_id"]);
+  if (typeof row["read_ct"] !== "number" || !Number.isSafeInteger(row["read_ct"]) || row["read_ct"] < 0) {
     throw new Error("Invalid PGMQ message read count");
   }
   return {
     id: String(msgId),
     msg_id: msgId,
-    read_ct: row.read_ct,
-    enqueued_at: readPgmqTimestamp(row.enqueued_at),
-    vt: readPgmqTimestamp(row.vt),
+    read_ct: row["read_ct"],
+    enqueued_at: readPgmqTimestamp(row["enqueued_at"]),
+    vt: readPgmqTimestamp(row["vt"]),
     message,
     payload: message,
     status,
@@ -85,7 +85,7 @@ async function listMessages(
     [limit, archived],
   );
   return readPgmqMessageRows(rows, limit).map(row => {
-    const state = row.queue_status;
+    const state = row["queue_status"];
     if (state !== "pending" && state !== "leased" && state !== "archived") throw new Error("Invalid PGMQ queue status");
     if (archived !== (state === "archived")) throw new Error("Mismatched PGMQ archive status");
     return mapMessage(queueName, row, state);

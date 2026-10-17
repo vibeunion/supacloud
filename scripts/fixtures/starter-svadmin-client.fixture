@@ -1,0 +1,7 @@
+import { mount, unmount } from "svelte";
+import Review from "./starter-svadmin.svelte";
+
+const target = document.getElementById("svadmin");
+if (!target) throw new Error("Missing SVAdmin fixture target");
+const app = mount(Review, { target });
+window.addEventListener("pagehide", () => { void unmount(app); }, { once: true });

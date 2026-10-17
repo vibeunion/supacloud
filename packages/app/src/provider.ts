@@ -5,7 +5,7 @@ import type { Scope } from "./scope";
 
 /** A class usable as a DI token / provider implementation. */
 export interface Type<T> {
-  new (...args: any[]): T;
+  new (...args: never[]): T;
 }
 
 /** Anything that can identify a provider: an InjectionToken or a class. */
@@ -44,7 +44,7 @@ export interface ValueProvider<T = unknown> extends BaseProvider {
 
 export interface FactoryProvider<T = unknown> extends BaseProvider {
   provide: Token<T>;
-  useFactory: (...deps: any[]) => T;
+  useFactory: (...deps: never[]) => T;
   deps?: ProviderDep[];
 }
 

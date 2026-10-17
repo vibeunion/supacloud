@@ -439,7 +439,8 @@ export class RealtimeEngine {
     // presence leave
     const state = this.presence.get(topic)
     if (state?.has(channel.presenceKey)) {
-      const metas = state.get(channel.presenceKey)!
+      const metas = state.get(channel.presenceKey)
+      if (!metas) return
       state.delete(channel.presenceKey)
       if (state.size === 0) this.presence.delete(topic)
       this.broadcastToTopic(topic, {

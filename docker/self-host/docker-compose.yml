@@ -182,7 +182,7 @@ services:
       - edge-pgredis
 
   victorialogs:
-    image: victoriametrics/victoria-logs:v1.52.0
+    image: victoriametrics/victoria-logs:v1.53.0
     restart: unless-stopped
     command:
       - -storageDataPath=/victoria-logs-data
@@ -265,7 +265,7 @@ services:
   caddy:
     build:
       context: ./caddy
-    image: supacloud-caddy:2.11.4-ratelimit
+    image: supacloud-caddy:2.11.7-ratelimit
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/supacloud-caddy-entrypoint"]
     volumes:

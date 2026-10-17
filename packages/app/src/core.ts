@@ -10,7 +10,7 @@ export {
 } from "./decorators";
 export type {
   CanActivateFn, CommandOptions, ControllerOptions, InfraResourceOptions,
-  JobOptions, ModuleOptions, RouteOptions,
+  EffectErrorMapping, EffectRetryPolicy, EffectRouteOptions, JobOptions, ModuleOptions, RouteOptions,
 } from "./decorators";
 export { InjectionToken } from "./token";
 export type { InjectionTokenOptions } from "./token";

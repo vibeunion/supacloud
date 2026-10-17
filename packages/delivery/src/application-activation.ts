@@ -26,6 +26,21 @@ export const ApplicationActivationRetirementResultSchema = Type.Object({
   retired_at: Type.String(),
 }, { additionalProperties: false });
 
+const RollbackActivationSchema = Type.Object({
+  release_id: ApplicationReleaseIdSchema,
+  configuration_id: ApplicationConfigurationIdSchema,
+  activation_id: ApplicationActivationIdSchema,
+}, { additionalProperties: false });
+export const ApplicationRollbackSnapshotSchema = Type.Object({
+  schema: Type.Literal("supacloud.application-rollback-snapshot.v1"),
+  project_ref: Type.String({ pattern: "^[a-z0-9-]{1,20}$" }),
+  application_id: ApplicationIdSchema,
+  environment_id: ApplicationIdSchema,
+  active: Type.Union([RollbackActivationSchema, Type.Null()]),
+  previous: Type.Union([RollbackActivationSchema, Type.Null()]),
+}, { additionalProperties: false });
+
 export type ApplicationActivationWrite = Static<typeof ApplicationActivationWriteSchema>;
 export type ApplicationActivationResult = Static<typeof ApplicationActivationResultSchema>;
 export type ApplicationActivationRetirementResult = Static<typeof ApplicationActivationRetirementResultSchema>;
+export type ApplicationRollbackSnapshot = Static<typeof ApplicationRollbackSnapshotSchema>;

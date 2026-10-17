@@ -4,7 +4,7 @@
  * to {@link QueryBuilder}, and renders PostgREST-shaped responses (Content-Range
  * counts, singular-object media type, Prefer handling).
  */
-import { quoteIdent, quoteLiteral, type Database, type FunctionInfo } from '../db/database.js'
+import { quoteIdent, quoteLiteral, type Database, type FunctionInfo, type Querier } from '../db/database.js'
 import { ApiError, type RequestContext } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './build.js'
@@ -139,7 +139,7 @@ export class RestHandler {
       }
       return await this.handleTable(req, ctx, url, schema, decodeURIComponent(rest))
     } catch (e) {
-      return errorToResponse(e)
+      return errorToResponse(e, ctx.role !== 'anon')
     }
   }
 
@@ -178,9 +178,10 @@ export class RestHandler {
             ...explain.options.map((o) => o.toUpperCase()),
             `FORMAT ${explain.format}`,
           ].join(', ')
-          const res = await this.db.withContext(ctx, (query) =>
-            query(`explain (${explainOpts}) ${plan.sql}`, plan.params)
-          )
+          const res = await this.db.withContext(ctx, async (query) => {
+            await query('set transaction read only')
+            return query(`explain (${explainOpts}) ${plan.sql}`, plan.params)
+          })
           const cell = (res.rows[0] as Record<string, unknown>)['QUERY PLAN']
           if (explain.format === 'JSON') {
             const body = typeof cell === 'string' ? cell : JSON.stringify(cell)
@@ -197,6 +198,8 @@ export class RestHandler {
         }
         const built = builder.buildSelect(table, { count: prefer.count !== undefined })
         const { rows, count } = await this.db.withContext(ctx, async (query) => {
+          // Views and RLS predicates can call functions that write, even in SELECTs.
+          await query('set transaction read only')
           const res = await query(built.sql, built.params)
           let count: number | null = null
           if (built.countSql) {
@@ -279,7 +282,10 @@ export class RestHandler {
     const { rows, affected } = await this.db.withContext(ctx, async (query) => {
       const res = await query(built.sql, built.params)
       if (opts.queryReturning) {
-        return { rows: (res.rows[0] as { body: unknown[] }).body, affected: null }
+        const rows = (res.rows[0] as { body: unknown[] }).body
+        // Reject singular responses before committing writes or publishing CDC.
+        if (opts.wantsObject && !opts.wantsCsv) assertObjectCardinality(rows)
+        return { rows, affected: null }
       }
       return { rows: null, affected: res.affectedRows ?? 0 }
     })
@@ -297,9 +303,10 @@ export class RestHandler {
     if (!opts.returning) {
       return new Response(null, { status: opts.status === 201 ? 201 : 204, headers: countHeader })
     }
-    return this.dataResponse(rows!, {
+    const responseRows = rows ?? []
+    return this.dataResponse(responseRows, {
       status: opts.status,
-      count: opts.prefer.count !== undefined ? rows!.length : null,
+      count: opts.prefer.count !== undefined ? responseRows.length : null,
       offset: 0,
       wantsObject: opts.wantsObject,
       wantsCsv: opts.wantsCsv,
@@ -331,14 +338,7 @@ export class RestHandler {
     }
 
     if (opts.wantsObject) {
-      if (rows.length !== 1) {
-        return jsonResponse(406, {
-          code: 'PGRST116',
-          message: 'JSON object requested, multiple (or no) rows returned',
-          details: `The result contains ${rows.length} rows`,
-          hint: null,
-        })
-      }
+      assertObjectCardinality(rows)
       headers['content-type'] = `${OBJECT_MEDIA}; charset=utf-8`
       return new Response(opts.head ? null : JSON.stringify(rows[0]), {
         status: opts.status,
@@ -405,9 +405,10 @@ export class RestHandler {
       }
     }
 
-    const fn = pickOverload(fns, Object.keys(args))
+    const fn = pickOverload(schema, fnName, fns, Object.keys(args))
     const call = renderCall(schema, fn, args)
     const q = parseQuery(searchParams)
+    if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
 
     // A VOLATILE function may have run DDL (create/alter/drop), so drop the
     // schema/function caches afterwards - otherwise REST keeps serving a stale
@@ -431,15 +432,22 @@ export class RestHandler {
     schema: string,
     method: string
   ): Promise<Response> {
+    const withRpcContext = <T>(run: (query: Querier) => Promise<T>): Promise<T> =>
+      this.db.withContext(ctx, async (query) => {
+        // Only POST to VOLATILE functions may write, regardless of return type.
+        if (method !== 'POST' || fn.volatility !== 'v') await query('set transaction read only')
+        return run(query)
+      })
+
     // void
     if (fn.returnType === 'void' && !fn.returnsSet) {
-      await this.db.withContext(ctx, (query) => query(`select ${call}`, []))
+      await withRpcContext((query) => query(`select ${call}`, []))
       return new Response(null, { status: 204 })
     }
 
     // scalar (non-set base/domain/enum type)
     if (!fn.returnsSet && ['b', 'd', 'e'].includes(fn.returnTypType)) {
-      const res = await this.db.withContext(ctx, (query) =>
+      const res = await withRpcContext((query) =>
         query(`select to_json(${call}) as result`, [])
       )
       const value = (res.rows[0] as { result: unknown }).result
@@ -447,14 +455,18 @@ export class RestHandler {
     }
 
     // set-returning scalar
-    if (fn.returnsSet && ['b', 'd', 'e'].includes(fn.returnTypType)) {
-      const res = await this.db.withContext(ctx, (query) =>
+    if (fn.returnsSet && !fn.returnsTable && ['b', 'd', 'e'].includes(fn.returnTypType)) {
+      const res = await withRpcContext((query) =>
         query(`select coalesce(json_agg(_v), '[]'::json) as body from ${call} as _t(_v)`, [])
       )
       return jsonResponse(200, (res.rows[0] as { body: unknown }).body)
     }
 
     // table/composite results: apply select/filters/order/pagination
+    if (this.maxRows !== undefined) {
+      const requested = q.limits.get('')
+      q.limits.set('', requested === undefined ? this.maxRows : Math.min(requested, this.maxRows))
+    }
     const alias = '_f'
     const exprs: string[] = []
     for (const item of q.select) {
@@ -464,7 +476,7 @@ export class RestHandler {
       if (item.name === '*') {
         exprs.push(`${quoteIdent(alias)}.*`)
       } else {
-        const out = item.alias ?? item.name.split(/->>|->/).pop()!.trim()
+        const out = item.alias ?? (item.name.split(/->>|->/).pop() ?? item.name).trim()
         const cast = item.cast ? `::${sanitizeCast(item.cast)}` : ''
         exprs.push(`${renderColumnExpr(alias, item.name)}${cast} as ${quoteIdent(out)}`)
       }
@@ -477,21 +489,23 @@ export class RestHandler {
     const order = builder.renderOrder([], alias)
     const limitOffset = builder.renderLimitOffset('')
 
-    const core = `select ${exprs.join(', ')} from ${call} as ${quoteIdent(alias)}${where}${order}${limitOffset}`
-    const sql = `select coalesce(json_agg(row_to_json(_r)), '[]'::json) as body from (${core}) _r`
-    const countSql =
-      prefer.count !== undefined
-        ? `select count(*)::int as count from ${call} as ${quoteIdent(alias)}${where}`
-        : undefined
+    const wantsCount = prefer.count !== undefined
+    const resultSource = wantsCount ? quoteIdent('_rpc_result') : call
+    const core = `select ${exprs.join(', ')} from ${resultSource} as ${quoteIdent(alias)}${where}${order}${limitOffset}`
+    const bodySql = `select coalesce(json_agg(row_to_json(_r)), '[]'::json) as body from (${core}) _r`
+    // Both projections reference the same CTE. PostgreSQL evaluates it once,
+    // including VOLATILE functions; a separate count query would replay writes.
+    // Keep filters on both projections, but pagination only on the response.
+    const sql = wantsCount
+      ? `with ${quoteIdent('_rpc_result')} as (select * from ${call}) select (${bodySql}) as body, (select count(*)::int from ${resultSource} as ${quoteIdent(alias)}${where}) as count`
+      : bodySql
 
-    const { rows, count } = await this.db.withContext(ctx, async (query) => {
+    const { rows, count } = await withRpcContext(async (query) => {
       const res = await query(sql, [])
-      let count: number | null = null
-      if (countSql) {
-        const c = await query(countSql, [])
-        count = (c.rows[0] as { count: number }).count
-      }
-      return { rows: (res.rows[0] as { body: unknown[] }).body, count }
+      const rows = (res.rows[0] as { body: unknown[] }).body
+      if (wantsObject && !wantsCsv) assertObjectCardinality(rows)
+      const count = wantsCount ? (res.rows[0] as { count: number }).count : null
+      return { rows, count }
     })
 
     return this.dataResponse(rows, {
@@ -505,17 +519,46 @@ export class RestHandler {
   }
 }
 
-function pickOverload(fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
-  const provided = new Set(providedNames)
-  let best: FunctionInfo | null = null
-  for (const fn of fns) {
-    const names = new Set(fn.args.map((a) => a.name))
-    const allProvidedKnown = [...provided].every((p) => names.has(p))
-    if (!allProvidedKnown) continue
-    if (fn.args.length === provided.size) return fn
-    if (!best) best = fn
+function assertObjectCardinality(rows: unknown[]): void {
+  if (rows.length !== 1) {
+    throw new ApiError(406, {
+      code: 'PGRST116',
+      message: 'JSON object requested, multiple (or no) rows returned',
+      details: `The result contains ${rows.length} rows`,
+      hint: null,
+    })
   }
-  return best ?? fns[0]
+}
+
+function pickOverload(schema: string, name: string, fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
+  const provided = new Set(providedNames)
+  const matches = fns.filter((fn) => {
+    const names = new Set(fn.args.map((a) => a.name))
+    return [...provided].every((p) => names.has(p))
+      && fn.args.slice(0, fn.requiredArgCount).every((arg) => provided.has(arg.name))
+  })
+  // An exact signature does not take precedence over applicable defaulted ones.
+  if (matches.length > 1) {
+    const candidates = matches.map((fn) =>
+      `${fn.schema}.${fn.name}(${fn.args.map((arg) => `${arg.name} => ${arg.type}`).join(', ')})`
+    )
+    throw new ApiError(300, {
+      code: 'PGRST203',
+      message: `Could not choose the best candidate function between: ${candidates.join(', ')}`,
+      details: null,
+      hint: 'Try renaming the parameters or the function itself in the database so function overloading can be resolved',
+    })
+  }
+  const match = matches[0]
+  if (!match) {
+    throw new ApiError(404, {
+      code: 'PGRST202',
+      message: `Could not find the function ${schema}.${name}(${[...provided].sort().join(', ')}) in the schema cache`,
+      details: null,
+      hint: null,
+    })
+  }
+  return match
 }
 
 function renderCall(schema: string, fn: FunctionInfo, args: Record<string, unknown>): string {

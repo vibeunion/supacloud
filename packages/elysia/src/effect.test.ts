@@ -1,0 +1,182 @@
+import { expect, test } from "bun:test";
+import { Context, Effect, Layer } from "effect";
+import { Elysia } from "elysia";
+import { ApplicationError, createApplication, createModulePlugin } from "./index";
+import { createDefaultEffectRuntime, createEffectRuntimeFromLayer, runCompiledEffect } from "./effect";
+import type { CompiledModule } from "./index";
+
+test("runs successful Effect programs at the HTTP boundary", async () => {
+  await expect(runCompiledEffect(
+    Effect.succeed({ ok: true }),
+    { required: true, dependencies: [] },
+  )).resolves.toEqual({ ok: true });
+});
+
+test("maps tagged Effect failures to the declared public error", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail({ _tag: "OrderNotFound" }),
+    {
+      required: true,
+      errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+    },
+  )).rejects.toMatchObject({
+    status: 404,
+    code: "ORDER_NOT_FOUND",
+    expose: true,
+  });
+});
+
+test("maps defect failures from the Effect 4 exit cause", async () => {
+  const applicationError = new ApplicationError("Review state or version changed", {
+    status: 409,
+    code: "REVIEW_CONFLICT",
+  });
+  await expect(runCompiledEffect(
+    Effect.die(applicationError),
+    {
+      required: true,
+      errors: [{ tag: "REVIEW_CONFLICT", status: 409, code: "REVIEW_CONFLICT" }],
+    },
+  )).rejects.toMatchObject({
+    status: 409,
+    code: "REVIEW_CONFLICT",
+    expose: true,
+  });
+});
+
+test("enforces timeout and rejects non-Effect route results", async () => {
+  await expect(runCompiledEffect(
+    Effect.sleep("20 millis"),
+    { required: true, timeoutMs: 1 },
+  )).rejects.toMatchObject({ status: 504, code: "EFFECT_TIMEOUT" });
+  await expect(runCompiledEffect(
+    { ok: true },
+    { required: true },
+  )).rejects.toMatchObject({ code: "EFFECT_PROGRAM_REQUIRED" });
+});
+
+test("supports explicit bounded retries", async () => {
+  let attempts = 0;
+  const program = Effect.suspend(() => {
+    attempts += 1;
+    return attempts < 3 ? Effect.fail("temporary") : Effect.succeed("ok");
+  });
+  await expect(runCompiledEffect(
+    program,
+    { required: true, retry: "explicit", maxAttempts: 3 },
+    createDefaultEffectRuntime(),
+  )).resolves.toBe("ok");
+  expect(attempts).toBe(3);
+});
+
+test("reuses Layer services and disposes them explicitly", async () => {
+  const Counter = Context.Service<{ readonly value: number }>("Counter");
+  let builds = 0;
+  let releases = 0;
+  const layer = Layer.effect(
+    Counter,
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        builds += 1;
+        return { value: builds };
+      }),
+      () => Effect.sync(() => {
+        releases += 1;
+      }),
+    ),
+  );
+  const runtime = createEffectRuntimeFromLayer(layer);
+  const program = Effect.gen(function* () {
+    const counter = yield* Counter;
+    return counter.value;
+  });
+
+  await expect(runCompiledEffect(program, { required: true }, runtime)).resolves.toBe(1);
+  await expect(runCompiledEffect(program, { required: true }, runtime)).resolves.toBe(1);
+  expect(builds).toBe(1);
+  expect(releases).toBe(0);
+  await runtime.dispose?.();
+  expect(releases).toBe(1);
+});
+
+test("disposes the Effect runtime with the application lifecycle", async () => {
+  let disposed = 0;
+  const effectRuntime = createDefaultEffectRuntime();
+  effectRuntime.dispose = async () => {
+    disposed += 1;
+  };
+  const app = createApplication({
+    modules: [],
+    effectRuntime,
+  });
+
+  await app.destroy();
+  expect(disposed).toBe(1);
+});
+
+test("executes compiled Effect routes through the Elysia adapter", async () => {
+  const module: CompiledModule = {
+    name: "effect-route",
+    createServices: () => ({
+      controller: {
+        get: () => Effect.succeed({ ok: true }),
+        fail: () => Effect.fail({ _tag: "OrderNotFound" }),
+      },
+    }),
+    controllers: [{
+      path: "/orders",
+      serviceKey: "controller",
+      scope: "application",
+      routes: [
+        {
+          method: "GET",
+          path: "/",
+          handler: "get",
+          effect: { required: true, errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }] },
+        },
+        {
+          method: "GET",
+          path: "/missing",
+          handler: "fail",
+          effect: { required: true, errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }] },
+        },
+      ],
+    }],
+    commands: [],
+  };
+  const app = new Elysia().use(createModulePlugin(module, module.createServices({}, {}), undefined, {
+    effectRuntime: createDefaultEffectRuntime(),
+  }));
+  const success = await app.handle(new Request("http://localhost/orders/"));
+  expect({ status: success.status, body: await success.json() }).toEqual({
+    status: 200,
+    body: { ok: true },
+  });
+  const failure = await app.handle(new Request("http://localhost/orders/missing"));
+  expect({ status: failure.status, body: await failure.json() }).toEqual({
+    status: 404,
+    body: { ok: false, code: "ORDER_NOT_FOUND", message: "ORDER_NOT_FOUND" },
+  });
+});
+
+test("requires an explicit runtime when the compiled Effect needs services", () => {
+  const module: CompiledModule = {
+    name: "effect-dependency",
+    createServices: () => ({ controller: { get: () => Effect.succeed("ok") } }),
+    controllers: [{
+      path: "/orders",
+      serviceKey: "controller",
+      scope: "application",
+      routes: [{
+        method: "GET",
+        path: "/",
+        handler: "get",
+        effect: { required: true, dependencies: ["OrderApi"] },
+      }],
+    }],
+    commands: [],
+  };
+  expect(() => createModulePlugin(module, module.createServices({}, {}))).toThrow(
+    "declares Effect dependencies without an effectRuntime",
+  );
+});

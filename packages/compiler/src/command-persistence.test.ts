@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineSupacloudConfig } from "./config";
 import { compileProject, checkProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { validateGraph } from "./validate";
 import type { ApplicationGraph, CommandExecutionCapabilities } from "./types";
 
@@ -26,7 +27,7 @@ test("persistent command profile accepts database and external adapters with tru
   for (const boundary of ["database", "external"] as const) {
     const capabilities: CommandExecutionCapabilities = {
       requirePersistentAdapters: true, permission: true,
-      rpc: { update: { boundary, audit: true, idempotency: true, transaction: boundary === "database" } },
+      rpc: { update: { boundary, audit: true, idempotency: true, reconcile: boundary === "external", transaction: boundary === "database" } },
     };
     expect(validateGraph(graph(boundary === "database" ? "required" : "none"), { commandCapabilities: capabilities })
       .filter((item) => item.code.startsWith("command-"))).toEqual([]);
@@ -51,7 +52,7 @@ export class UnsafeModule {}
 
 test("external effects cannot acquire transaction guarantees from metadata", () => {
   const diagnostics = validateGraph(graph(), { commandCapabilities: {
-    rpc: { update: { boundary: "external", audit: true, idempotency: true, transaction: false } },
+    rpc: { update: { boundary: "external", audit: true, idempotency: true, reconcile: true, transaction: false } },
   } });
   expect(diagnostics.some((item) => item.code === "command-external-transaction"
     && item.errorCode === "SC4021" && item.severity === "error")).toBe(true);
@@ -76,11 +77,16 @@ test("untrusted configuration rejects mistyped persistence capabilities", () => 
 test("a complete decorated module retains the persistent binding and refuses an unsafe external migration", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-webhook-migration-"));
   try {
-    await writeFixtureProject(root, { "webhook.ts": `
-import { Module, Controller, Command, Post, Body } from "@supacloud/app";
-import { t } from "elysia";
-export const Input = t.Object({ id: t.String(), enabled: t.Boolean() });
-export const Receipt = t.Object({ status: t.Literal("confirmed"), result: Input });
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"),
+      process.platform === "win32" ? "junction" : "dir");
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "runtime.ts": RUNTIME_SOURCE,
+      "webhook.ts": `
+import { Module, Controller, Command, Post, Body } from "./runtime";
+import { Type } from "typebox";
+export const Input = Type.Object({ id: Type.String(), enabled: Type.Boolean() });
+export const Receipt = Type.Object({ status: Type.Literal("confirmed"), result: Input });
 @Command({ name: "webhook.update.v1", permission: "webhook.update", rpc: "webhookUpdate",
   transaction: "required", audit: "webhook.updated", idempotency: "required" })
 export class UpdateWebhook {}
@@ -96,7 +102,7 @@ export class WebhookModule {}
       rootDir: root, outDir: join(root, "generated"), requireRouteContracts: true,
       commandCapabilities: {
         requirePersistentAdapters: true, permission: true,
-        rpc: { webhookUpdate: { boundary: "database" as const, audit: true, transaction: true, idempotency: true } },
+        rpc: { webhookUpdate: { boundary: "database" as const, audit: true, transaction: true, idempotency: true, reconcile: false } },
       },
     };
     const compiled = await compileProject(options);
@@ -108,7 +114,7 @@ export class WebhookModule {}
     const failed = await compileProject({
       ...options, commandCapabilities: {
         ...options.commandCapabilities,
-        rpc: { webhookUpdate: { boundary: "external", audit: true, transaction: false, idempotency: true } },
+        rpc: { webhookUpdate: { boundary: "external", audit: true, transaction: false, idempotency: true, reconcile: false } },
       },
     });
     expect(failed.written).toEqual([]);

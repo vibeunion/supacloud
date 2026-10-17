@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.5.2...function-adapter-v0.6.0) (2026-10-17)
+
+
+### Features
+
+* add reusable authenticated worker HTTP and scheduled invocation adapters ([#2029](https://github.com/vibeunion/supacloud/issues/2029)) ([f8d571c](https://github.com/vibeunion/supacloud/commit/f8d571c272aa8e8430e57777e60a404f5c3b7537))
+
+
+### Bug Fixes
+
+* bound worker batch inputs and preserve safe failure responses ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+## [0.5.2](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.5.1...function-adapter-v0.5.2) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.5.1](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.5.0...function-adapter-v0.5.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.4.1...function-adapter-v0.5.0) (2026-10-09)
+
+
+### Features
+
+* **function-adapter:** migrate SvelteKit function adapter to v3 ([a2056f8](https://github.com/vibeunion/supacloud/commit/a2056f89aa8c1d4304b4ae0d8d8edad93371ac98))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @sveltejs/vite-plugin-svelte ([#1733](https://github.com/vibeunion/supacloud/issues/1733)) ([4bc1138](https://github.com/vibeunion/supacloud/commit/4bc11380c9df08c74b6cc180a0ec480f68537631))
+* **deps-dev:** bump svelte in /packages/function-adapter ([#1734](https://github.com/vibeunion/supacloud/issues/1734)) ([2ff19f1](https://github.com/vibeunion/supacloud/commit/2ff19f1897c8cfa7b473e44240da6adae67a1b3e))
+* **deps-dev:** bump vite in /packages/function-adapter ([#1732](https://github.com/vibeunion/supacloud/issues/1732)) ([0d51110](https://github.com/vibeunion/supacloud/commit/0d511100fba1156ecf26edb6ea6f55061dd92d93))
+
 ## [0.4.1](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.4.0...function-adapter-v0.4.1) (2026-10-06)
 
 

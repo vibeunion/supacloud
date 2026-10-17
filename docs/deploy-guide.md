@@ -12,7 +12,7 @@ SupaCloud 部署系统提供配置驱动的自动化部署能力，支持：
 
 如果你是通过命令行操作 SupaCloud，建议优先区分两个入口：
 
-- `@supacloud/cli` / `supacloud-cli`：项目使用者
+- `@supacloud/cli` / `supacloud`：项目使用者
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员
 
 本篇文档更偏部署流程本身；CLI 边界请参考 [CLI Guide](./cli-guide.md)。

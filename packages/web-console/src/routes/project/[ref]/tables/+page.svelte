@@ -98,29 +98,29 @@
   <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
     <div class="rounded-xl bg-background overflow-hidden relative min-h-[500px] border">
       {#key `${projectRef}-${tableListEpoch}`}
-        {#snippet tableNameRenderer({ value, record }: { value: any, record: any })}
+        {#snippet tableNameRenderer({ value, record }: { value: unknown, record: Record<string, unknown> })}
           <div class="flex items-center gap-2">
             <TableProperties size={14} class="text-brand" />
             <a href={resolve(
               "/project/[ref]/tables/[schema]/[table_name]",
               tableRowsRouteParams(projectRef, String(record.table_schema), String(value)),
             )} class="font-mono font-medium text-sm text-foreground hover:text-brand hover:underline transition-colors block py-1">
-              {value}
+              {String(value ?? "")}
             </a>
           </div>
         {/snippet}
 
-        {#snippet schemaRenderer({ value }: { value: any })}
+        {#snippet schemaRenderer({ value }: { value: unknown })}
           <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] rounded-full uppercase font-medium tracking-wider">
             <span title={String(value)}>{schemaLabel(value)}</span>
           </span>
         {/snippet}
 
-        {#snippet typeRenderer({ value }: { value: any })}
+        {#snippet typeRenderer({ value }: { value: unknown })}
           <span class="text-xs text-muted-foreground" title={String(value)}>{tableTypeLabel(value)}</span>
         {/snippet}
 
-        {#snippet rowsRenderer({ value }: { value: any })}
+        {#snippet rowsRenderer({ value }: { value: unknown })}
           {@const count = normalizeRowEstimate(value)}
           <span class="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
             {count === null ? "—" : $t("Tables.estimated_rows", { values: { count } })}

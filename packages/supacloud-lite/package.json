@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/lite",
-  "version": "0.21.1",
+  "version": "0.31.0",
   "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite or native PostgreSQL",
   "type": "module",
   "license": "Apache-2.0",
@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "build": "bun run build:js && bun run build:types",
-    "build:js": "bun run clean && bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external tar && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external tar && bun run scripts/build-launcher.ts",
+    "build:js": "bun run clean && bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external @electric-sql/pglite-pgvector --external @electric-sql/pglite-postgis --external @electric-sql/pglite-pg_textsearch --external @electric-sql/pglite-pgmq --external tar && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external @electric-sql/pglite-pgvector --external @electric-sql/pglite-postgis --external @electric-sql/pglite-pg_textsearch --external @electric-sql/pglite-pgmq --external tar && bun run scripts/build-launcher.ts",
     "build:standalone:host": "bun run scripts/build-standalone.ts host",
     "build:standalone:linux-x64": "bun run scripts/build-standalone.ts linux-x64",
     "build:standalone:linux": "bun run scripts/build-standalone.ts linux-x64 linux-arm64",
@@ -54,38 +54,40 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.8",
-    "@electric-sql/pglite-pg_textsearch": "0.0.10",
-    "@electric-sql/pglite-pgmq": "0.0.6",
-    "@electric-sql/pglite-pgvector": "0.0.9",
-    "@electric-sql/pglite-postgis": "0.2.8",
-    "@supacloud/db": "^0.6.0",
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-pg_textsearch": "0.0.12",
+    "@electric-sql/pglite-pgmq": "0.0.8",
+    "@electric-sql/pglite-pgvector": "0.0.11",
+    "@electric-sql/pglite-postgis": "0.2.10",
+    "@supacloud/db": "file:../db",
     "exact-mirror": "1.2.6",
     "tar": "^7.5.22",
-    "typebox": "1.3.34"
+    "typebox": "1.3.37"
   },
   "devDependencies": {
     "@supacloud/app": "file:../app",
+    "@supacloud/contracts": "file:../contracts",
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/elysia": "file:../elysia",
-    "@supabase/supabase-js": "^2.115.0",
-    "@types/bun": "^1.4.2",
-    "elysia": "2.0.0-beta.21",
-    "jose": "^6.2.11",
+    "@supabase/supabase-js": "^2.117.3",
+    "@types/bun": "^1.4.3",
+    "effect": "4.0.5",
+    "elysia": "2.0.0-beta.32",
+    "jose": "^6.2.12",
     "typescript": "^7.0.2"
   },
   "overrides": {
-    "@supacloud/db": "^0.6.0",
+    "@supacloud/db": "file:../db",
     "@supacloud/app": "file:../app",
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/elysia": "file:../elysia",
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/commands": "file:../commands",
     "@supacloud/delivery": "file:../delivery",
-    "@graphql-tools/utils": "^12.0.3"
+    "@graphql-tools/utils": "^12.0.4"
   },
   "engines": {
-    "bun": ">=1.4.2"
+    "bun": ">=1.4.3"
   },
   "publishConfig": {
     "access": "public",

@@ -72,7 +72,7 @@ export function toReadableStream<T>(
         return;
       }
       subscription = new Subscriber<T>({
-        next(value) {
+        next(value: T) {
           if (stopped) return;
           if ((controller.desiredSize ?? 0) <= 0) {
             fail(new ReactiveBufferOverflowError(capacity));

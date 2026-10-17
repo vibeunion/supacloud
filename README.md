@@ -67,7 +67,7 @@ Use a published CLI release containing `app init` and the framework versions it 
 
 ```bash
 npm install -g @supacloud/cli
-supacloud-cli app init --root ./my-app --name my-app
+supacloud app init --root ./my-app --name my-app
 cd my-app
 bun install
 bun run check
@@ -99,11 +99,13 @@ Use the anonymous key with `@supabase/supabase-js`; never place the service-role
 
 | Command | Owner and purpose |
 | --- | --- |
-| `supacloud-cli` | Project users: development, database, functions, storage, logs and frontend workflows. |
+| `supacloud` | Project users: development, database, functions, storage, logs and frontend workflows. |
 | `supacloud-admin` | Operators: installation, upgrades, SSH diagnostics and platform-wide project lifecycle. |
 | `supacloudctl` | Optional local dispatcher; not the server binary. |
 
-`supacloud` is reserved for the compiled server binary at `/usr/local/bin/supacloud`, not a project-CLI alias. See the [CLI guide](docs/cli-guide.md) and [operations guide](docs/platform-operations.md) for connection settings and explicit Bun invocation.
+`supacloud` is the project CLI on developer machines. The compiled server binary
+at `/usr/local/bin/supacloud` is a separate managed-host installation. See the
+[CLI guide](docs/cli-guide.md) and [operations guide](docs/platform-operations.md).
 
 <!-- section:architecture -->
 ## Architecture

@@ -152,7 +152,10 @@ async function grantReplicationAllowlist(
   tx: EngineTx,
   tables: readonly PublicationTableInspection[],
 ): Promise<void> {
-  const schemas = uniqueSorted(tables.map((table) => table.schema!))
+  const schemas = uniqueSorted(tables.map((table) => {
+    if (!table.schema) throw new Error(`publication table ${table.name} has no schema`)
+    return table.schema
+  }))
   for (const schema of schemas) {
     await tx.exec(`GRANT USAGE ON SCHEMA ${quoteIdentifier(schema)} TO ${POWERSYNC_REPLICATION_ROLE}`)
   }
@@ -279,7 +282,8 @@ function normalizeCidr(cidr: string): string {
   const normalized = cidr.trim()
   const match = /^(.+)\/(\d{1,3})$/.exec(normalized)
   if (!match) throw new Error(`invalid PowerSync client CIDR: ${cidr}`)
-  const address = match[1]!
+  const address = match[1]
+  if (!address) throw new Error(`invalid PowerSync client CIDR: ${cidr}`)
   const family = isIP(address)
   const prefix = Number(match[2])
   if (family === 0 || prefix < 0 || prefix > (family === 4 ? 32 : 128)) {

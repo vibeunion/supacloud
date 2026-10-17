@@ -66,9 +66,15 @@ describe("branchService", () => {
     const prepareRoleSpy = spyOn(service, "prepareMigrationDatabaseRole").mockResolvedValue(undefined);
 
     try {
-      await branchService.createBranch({ parentRef: "parent", branchRef: "branch", name: "feature-x" });
+      await branchService.createBranch({
+        parentRef: "parent", branchRef: "branch", name: "feature-x",
+        previewId: "01234567-89ab-4def-8123-456789abcdef",
+      });
 
       expect(createProjectSpy).toHaveBeenCalledTimes(1);
+      expect(createProjectSpy.mock.calls[0]?.[0].config).toMatchObject({
+        parent_ref: "parent", application_preview_id: "01234567-89ab-4def-8123-456789abcdef",
+      });
       expect(lockSpy).toHaveBeenCalledTimes(1);
       expect(lockSpy.mock.calls[0]?.[0]).toEqual({ parentRef: "parent", branchRef: "branch" });
       expect(createEmptySpy).toHaveBeenCalledTimes(1);

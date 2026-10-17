@@ -37,7 +37,7 @@ promise that synchronous `require()` works on every runtime. See the
 
 ## Zero-configuration start
 
-For a complete runnable project, use `supacloud-cli app init --root ./orders --name orders`,
+For a complete runnable project, use `supacloud app init --root ./orders --name orders`,
 then `bun install`, `bun run check` and `bun run dev` inside `orders`.
 The minimal template includes compiler, Elysia, environment isolation and a health test
 without combining the three packages into a runtime dependency.

@@ -18,8 +18,8 @@ interface DeliveryHttpHost {
 
 async function startDeliveryHttp(signal: AbortSignal, shutdownTimeout: number, startDeadline: () => void) {
   const identity = deliveryRuntimeIdentity("http");
-  const port = Number(deliveryProcess.env.PORT ?? "3000");
-  const hostname = deliveryProcess.env.HOST ?? "127.0.0.1";
+  const port = Number(deliveryProcess.env["PORT"] ?? "3000");
+  const hostname = deliveryProcess.env["HOST"] ?? "127.0.0.1";
   if (!Number.isInteger(port) || port < 0 || port > 65535 || hostname.length === 0) {
     throw new Error("Invalid delivery HTTP listener configuration.");
   }
@@ -87,7 +87,7 @@ async function startDeliveryHttp(signal: AbortSignal, shutdownTimeout: number, s
 
 {
   const lifecycle = new AbortController();
-  const shutdownTimeout = Number(deliveryProcess.env.SHUTDOWN_TIMEOUT_MS ?? "10000");
+  const shutdownTimeout = Number(deliveryProcess.env["SHUTDOWN_TIMEOUT_MS"] ?? "10000");
   let running: Awaited<ReturnType<typeof startDeliveryHttp>>;
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const finish = (failed: boolean) => {

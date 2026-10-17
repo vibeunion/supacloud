@@ -1,7 +1,8 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-import type { HttpTransport } from "../transports/http";
+import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
     PROJECT_READ_RESPONSE_MAX_BYTES,
     projectGetRead,
@@ -14,15 +15,6 @@ import {
     projectEndpointListRead,
     projectEndpointRead,
 } from "./project-endpoint-read";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: any) => Promise<any>,
-    ) => void;
-};
 
 function projectReadResponse(readResult: ProjectReadResult) {
     return {
@@ -40,12 +32,16 @@ const formatTasks = (data: unknown): string => {
         queued: "📥", processing: "🔄", completed: "✅",
     };
     let out = `📋 Tasks (${data.length}):\n\n`;
-    for (const t of data as any[]) {
-        const st = t.status || "?";
-        out += `  ${emoji[st] || "❓"} ${t.task_type || t.type || ""} — ${st}\n     ID: ${t.id}\n`;
-        if (t.retries > 0 || t.retry_count > 0) out += `     Retries: ${t.retries || t.retry_count}\n`;
-        if (t.error || t.error_message) out += `     Error: ${t.error || t.error_message}\n`;
-        if (t.created_at) out += `     Created: ${t.created_at}\n`;
+    const tasks: readonly unknown[] = data;
+    for (const task of tasks) {
+        if (task === null || typeof task !== "object" || Array.isArray(task)) throw new Error("Invalid task response");
+        const fields: Record<string, unknown> = Object.fromEntries(Object.entries(task));
+        const st = typeof fields["status"] === "string" ? fields["status"] : "?";
+        out += `  ${emoji[st] || "❓"} ${String(fields["task_type"] || fields["type"] || "")} — ${st}\n     ID: ${String(fields["id"] ?? "?")}\n`;
+        const retries = fields["retries"] || fields["retry_count"];
+        if (typeof retries === "number" && retries > 0) out += `     Retries: ${retries}\n`;
+        if (fields["error"] || fields["error_message"]) out += `     Error: ${String(fields["error"] || fields["error_message"])}\n`;
+        if (fields["created_at"]) out += `     Created: ${String(fields["created_at"])}\n`;
         out += "\n";
     }
     return out;
@@ -109,8 +105,8 @@ const formatTaskStats = (data: unknown): string => {
     ].join("\n");
 };
 
-const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
-const simple = (res: any, msg: string) => res.ok ? `✅ ${msg}` : `❌ Failed (${res.status})`;
+const ok = (res: HttpResult<unknown>) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
+const simple = (res: HttpResult<unknown>, msg: string) => res.ok ? `✅ ${msg}` : `❌ Failed (${res.status})`;
 
 function buildProjectLogsPath(ref: string, logType?: string): string {
     const params = new URLSearchParams({ limit: "200" });
@@ -139,7 +135,7 @@ export function registerUserProjectCliTools(
 ): void {
     const { projectRef } = options;
 
-    server.tool(
+    registerTool(server,
         "project",
         `Project-scoped inspection and developer operations.
 Actions: list (Admin guidance), get, endpoints, pause, restore, health, logs, api_keys, settings, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
@@ -277,7 +273,7 @@ Actions: list (Admin guidance), get, endpoints, pause, restore, health, logs, ap
 // --- Admin project tool ---
 
 export function registerAdminProjectCliTools(server: ToolServer, http: HttpTransport): void {
-    server.tool(
+    registerTool(server,
         "project",
         `Platform-level project lifecycle management.
 Actions: list, list_endpoints, create, get, endpoints, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,

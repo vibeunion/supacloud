@@ -45,15 +45,15 @@ function resolveApiKeyRow(
   secretHash: string,
   row: unknown,
 ): ResolvedProjectApiKey | null {
-  if (!isRecord(row) || typeof row.ref !== "string" || !row.ref || !key) return null;
+  if (!isRecord(row) || typeof row["ref"] !== "string" || !row["ref"] || !key) return null;
 
-  const ref = row.ref;
-  const anonKey = typeof row.anon_key === "string" ? row.anon_key : "";
-  const serviceRoleKey = typeof row.service_role_key === "string" ? row.service_role_key : "";
-  if (key === row.publishable_key && anonKey) {
+  const ref = row["ref"];
+  const anonKey = typeof row["anon_key"] === "string" ? row["anon_key"] : "";
+  const serviceRoleKey = typeof row["service_role_key"] === "string" ? row["service_role_key"] : "";
+  if (key === row["publishable_key"] && anonKey) {
     return { ref, kind: "publishable", role: "anon", upstreamKey: anonKey };
   }
-  if (secretHash && secretHash === row.secret_key_hash && serviceRoleKey) {
+  if (secretHash && secretHash === row["secret_key_hash"] && serviceRoleKey) {
     return { ref, kind: "secret", role: "service_role", upstreamKey: serviceRoleKey };
   }
   if (key === anonKey) {
@@ -133,11 +133,11 @@ export function extractProjectRefCandidates(
     refs.add(scopedRef);
   }
 
-  if (typeof payload.ref === "string" && payload.ref.trim()) {
-    refs.add(payload.ref.trim());
+  if (typeof payload["ref"] === "string" && payload["ref"].trim()) {
+    refs.add(payload["ref"].trim());
   }
 
-  const refFromIss = normalizeRefFromIssuer(payload.iss);
+  const refFromIss = normalizeRefFromIssuer(payload["iss"]);
   if (refFromIss) {
     refs.add(refFromIss);
   }

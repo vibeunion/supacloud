@@ -1,11 +1,12 @@
 {
   "name": "@supacloud/edge-runtime",
   "license": "Apache-2.0",
-  "version": "0.29.1",
+  "version": "0.34.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "bench:projects": "bun worker-project-benchmark.ts",
     "dev": "bun run --watch server.ts",
     "start": "bun run server.ts",
     "build:amd64": "bun run scripts/build-compiled.ts --target bun-linux-x64 --outfile supacloud-edge-runtime-linux-amd64",
@@ -14,20 +15,21 @@
     "build:macos-amd64": "bun run scripts/build-compiled.ts --target bun-macos-x64 --outfile supacloud-edge-runtime-macos-amd64",
     "build:macos-arm64": "bun run scripts/build-compiled.ts --target bun-macos-arm64 --outfile supacloud-edge-runtime-macos-arm64",
     "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64",
+    "build:aot:ab": "bun run ../../scripts/elysia-aot-ab.ts edge-runtime",
     "release:manifest": "bun run ../../scripts/generate_release_manifest.ts --component edge-runtime --package-json package.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.2",
-    "elysia": "2.0.0-beta.21",
-    "es-module-lexer": "3.0.2",
+    "@supabase/supabase-js": "^2.117.3",
+    "elysia": "2.0.0-beta.32",
+    "es-module-lexer": "3.0.4",
     "exact-mirror": "1.2.6",
     "jose": "^6.2.12",
-    "typebox": "1.3.34"
+    "typebox": "1.3.37"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
-    "@types/node": "^26.6.3",
+    "@types/bun": "^1.4.3",
+    "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
   }
 }

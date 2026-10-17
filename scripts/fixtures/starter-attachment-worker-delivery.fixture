@@ -39,9 +39,9 @@ export async function verifyAttachmentWorkerDelivery(options: {
     assert.equal(built.manifest.deploymentReady, false);
     const object = built.manifest.objects.find(item => item.name === "jobs");
     assert.ok(object);
-    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 4);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 5);
     assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/project-migration/")).length, 2);
-    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 2);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 3);
     assert.equal(object.entryKind, "bun-worker-application");
     const again = await buildDeliveryProject(compile, settings);
     assert.ok(again.ok, JSON.stringify(again.diagnostics));
@@ -110,7 +110,7 @@ export async function verifyAttachmentWorkerDelivery(options: {
       child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
         cwd: bundle, stdout: "pipe", stderr: "pipe",
         env: {
-          PATH: process.env.PATH, DATABASE_SOCKET_PATH: options.connection.socketPath,
+          PATH: process.env["PATH"], DATABASE_SOCKET_PATH: options.connection.socketPath,
           DATABASE_NAME: options.connection.database, DATABASE_USER: options.connection.username,
           SUPACLOUD_URL: options.database.storage.url, SUPACLOUD_SERVICE_ROLE_KEY: options.database.storage.serviceRoleKey,
           SUPACLOUD_PROJECT_ID: "starter-test", APP_TENANT_ID: "starter-test",

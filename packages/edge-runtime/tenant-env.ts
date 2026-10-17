@@ -58,6 +58,7 @@ const SHARED_FORBIDDEN_AUTH_ENV_KEYS = [
 const FILE_AUTH_VERIFIER_ENV_KEYS = [
   ...SHARED_FORBIDDEN_AUTH_ENV_KEYS,
   "JWT_JWKS",
+  "SUPACLOUD_SERVICE_JWT_VERIFIER",
 ] as const;
 const LEGACY_AUTH_ENV_KEYS = [
   ...FILE_AUTH_VERIFIER_ENV_KEYS,
@@ -79,10 +80,11 @@ function prepareFallbackFileEnv(
   fileEnv: Record<string, string>,
   hasCachedEnv: boolean,
 ): Record<string, string> {
-  if (hasCachedEnv) return stripEnvKeys(fileEnv, FILE_AUTH_VERIFIER_ENV_KEYS);
-  const mode = fileEnv.SUPACLOUD_AUTH_RUNTIME_MODE;
-  if (mode === "local" || mode === "owner") return { ...fileEnv };
-  return stripEnvKeys(fileEnv, FILE_AUTH_VERIFIER_ENV_KEYS);
+  const safeFileEnv = stripEnvKeys(fileEnv, ["SUPACLOUD_SERVICE_JWT_VERIFIER"]);
+  if (hasCachedEnv) return stripEnvKeys(safeFileEnv, FILE_AUTH_VERIFIER_ENV_KEYS);
+  const mode = safeFileEnv.SUPACLOUD_AUTH_RUNTIME_MODE;
+  if (mode === "local" || mode === "owner") return safeFileEnv;
+  return stripEnvKeys(safeFileEnv, FILE_AUTH_VERIFIER_ENV_KEYS);
 }
 
 export function buildFallbackTenantEnv(

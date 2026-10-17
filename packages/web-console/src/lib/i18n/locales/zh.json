@@ -13,7 +13,17 @@
     "development_unavailable": "该发布目标暂无开发数据。",
     "modules": "模块", "routes": "路由", "commands": "命令", "jobs": "任务",
     "resources": "资源", "diagnostics": "诊断", "no_diagnostics": "没有开发诊断",
-    "no_evidence": "尚未记录部署回执"
+    "relationships": "API 与资源关系", "no_relationships": "尚未声明 API、Command、Job 或 Resource 关系。",
+    "api": "API", "command": "Command", "job": "Job",
+    "no_evidence": "尚未记录部署回执",
+    "capacity": "容量与隔离", "capacity_unavailable": "容量数据暂不可用。",
+    "active_allocations": "活动分配", "project_allocations": "本项目分配",
+    "active_ports": "活动端口", "memory": "内存", "concurrency": "并发度",
+    "capacity_note": "此报告仅用于观测；运行时准入和队列归属仍由服务端强制执行。",
+    "capacity_history": "容量历史", "time": "时间",
+    "previews": "应用 Preview", "create_preview": "创建 Preview", "cleanup_preview": "清理 Preview",
+    "preview": "Preview", "branch": "数据库分支", "smoke_test": "Smoke Test",
+    "preview_unavailable": "Preview 数据暂不可用。", "no_previews": "尚未创建 Preview"
   },
   "GlobalDashboard": {
     "welcome": "欢迎回来，系统管理员",
@@ -112,6 +122,7 @@
   "Navigation": {
     "table_editor": "表编辑器",
     "sql_editor": "SQL 编辑器",
+    "graphql": "GraphQL 调试器",
     "auth": "认证",
     "storage": "存储",
     "edge_functions": "边缘函数",
@@ -133,6 +144,19 @@
     "home": "首页",
     "select_project": "选择项目",
     "new_project": "新建项目"
+  },
+  "Graphql": {
+    "eyebrow": "数据库 GraphQL",
+    "title": "GraphQL 调试器",
+    "description": "使用项目的 Supabase 兼容 pg_graphql 端点执行当前角色允许的查询。",
+    "request": "请求",
+    "response": "响应",
+    "run": "执行",
+    "reset": "重置",
+    "copy": "复制",
+    "empty_response": "执行查询后查看 GraphQL 响应。",
+    "api_unavailable": "项目 API 地址不可用",
+    "operation_name": "操作名称"
   },
   "SqlEditor": {
     "title": "SQL 编辑器",
@@ -1642,7 +1666,18 @@
     "applies": "适用",
     "not_applicable": "不适用",
     "using": "USING（可见行条件）",
-    "with_check": "WITH CHECK（写入校验条件）"
+    "with_check": "WITH CHECK（写入校验条件）",
+    "explanation": "访问解释",
+    "outcome_allowed": "允许访问",
+    "outcome_filtered": "被策略过滤",
+    "outcome_denied": "访问被拒绝",
+    "outcome_unknown": "需要复核",
+    "explanation_note": "这是诊断解释；PostgreSQL grants 与 RLS 仍然是最终权限事实源。",
+    "relation": "关系",
+    "rls": "RLS",
+    "applicable_policies": "适用策略",
+    "enabled": "已启用",
+    "disabled": "未启用"
   },
   "TemporaryAccess": {
     "page_title": "临时数据库访问 | SupaCloud",
@@ -1854,6 +1889,7 @@
     "download_logs": "下载日志",
     "open_functions": "打开函数列表",
     "attempt_records": "执行尝试（Attempt）记录",
+    "execution_timeline": "执行时间线",
     "all_logs": "全部日志",
     "stdout_only": "仅标准输出（stdout）",
     "stderr_only": "仅标准错误（stderr）",

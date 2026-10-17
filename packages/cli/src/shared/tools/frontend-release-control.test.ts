@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
+import { HttpTransport } from "../transports/http";
+import type { ToolInvocation } from "../tool-server";
+import { registerFrontendTools } from "./frontend-tools";
 import {
     activateFrontendRelease,
+    getActiveFrontendRelease,
     getFrontendRelease,
     listFrontendReleases,
+    readFrontendReleaseAuthority,
+    rollbackFrontendRelease,
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
@@ -15,10 +23,17 @@ const RELEASE_ID = "a".repeat(64);
 const TREE_SHA = "b".repeat(64);
 const MUTATION_ID = "00000000-0000-4000-8000-000000000001";
 const roots = new Set<string>();
+const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+const ROLLBACK_ID = "00000000-0000-4000-8000-000000000003";
+const TARGET_RELEASE_ID = "c".repeat(64);
+const boundRollbackArgs = {
+    releaseId: TARGET_RELEASE_ID, expectedActiveReleaseId: RELEASE_ID,
+    expectedActivationId: MUTATION_ID, mutationId: ROLLBACK_ID,
+};
 
 function release(releaseId = RELEASE_ID, treeSha = TREE_SHA) {
     return {
-        schema: "supacloud.frontend-release.v1",
+        schema: "supacloud.frontend-release.v2",
         project_ref: PROJECT_REF,
         deployment_id: DEPLOYMENT_ID,
         release_id: releaseId,
@@ -27,7 +42,7 @@ function release(releaseId = RELEASE_ID, treeSha = TREE_SHA) {
         size_bytes: 3,
         file_count: 1,
         created_at: "2026-08-12T00:00:00.000Z",
-        kind: "prebuilt_static",
+        archive_format: "tar.zst" as const, kind: "prebuilt_static",
     };
 }
 
@@ -35,12 +50,538 @@ function parsed(response: { content: Array<{ text: string }> }): Record<string, 
     return JSON.parse(response.content[0].text) as Record<string, unknown>;
 }
 
+function boundRollbackFixture() {
+    const base = `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}`;
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    const state = {
+        activeReleaseId: RELEASE_ID, activeActivationId: MUTATION_ID,
+        activeStatus: 200, postStatus: 200, commit: true, journalVisible: true,
+        fingerprint: createHash("sha256").update(JSON.stringify({
+            activation_id: ROLLBACK_ID, deployment_id: DEPLOYMENT_ID,
+            expected_activation_id: MUTATION_ID, expected_active_release_id: RELEASE_ID,
+            project_ref: PROJECT_REF, release_id: TARGET_RELEASE_ID,
+        })).digest("hex"),
+        artifactProject: PROJECT_REF,
+    };
+    const server = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        async fetch(request) {
+            const path = new URL(request.url).pathname;
+            const body: unknown = request.method === "POST" ? await request.json() : undefined;
+            calls.push({ method: request.method, path, ...(body === undefined ? {} : { body }) });
+            if (request.method === "GET" && path === `${base}/active-release`) {
+                return Response.json(state.activeStatus === 200 ? {
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: state.activeReleaseId, active_activation_id: state.activeActivationId,
+                    releases: [release(state.activeReleaseId)], next_cursor: null,
+                } : { token: "must-not-escape" }, { status: state.activeStatus });
+            }
+            if (request.method === "GET" && path === `${base}/releases/${TARGET_RELEASE_ID}`) {
+                return Response.json({
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    release: { ...release(TARGET_RELEASE_ID), project_ref: state.artifactProject },
+                });
+            }
+            if (request.method === "GET" && path === `/v1/projects/${PROJECT_REF}/mutations/${ROLLBACK_ID}`) {
+                if (!state.journalVisible) return Response.json({}, { status: 404 });
+                return Response.json({
+                    project_ref: PROJECT_REF,
+                    mutation: {
+                        project_ref: PROJECT_REF, mutation_id: ROLLBACK_ID,
+                        operation: "frontend.release.activate", resource_key: "v1/frontend_release/ZmEtd2Vi",
+                        request_fingerprint: state.fingerprint,
+                        principal: { type: "project", id: `project:${PROJECT_REF}` },
+                        status: "succeeded", checkpoint: {}, receipt: {},
+                        response_status: 200, failure_code: null,
+                        lease: { owner: null, expires_at: null, fencing_epoch: 1 },
+                        completed_at: "2026-08-12T00:00:00.000Z",
+                        created_at: "2026-08-12T00:00:00.000Z",
+                        updated_at: "2026-08-12T00:00:00.000Z",
+                    },
+                });
+            }
+            if (request.method === "POST" && path === `${base}/releases/${TARGET_RELEASE_ID}/activate`) {
+                if (state.commit) {
+                    state.activeReleaseId = TARGET_RELEASE_ID;
+                    state.activeActivationId = ROLLBACK_ID;
+                }
+                return Response.json(state.postStatus === 200 ? {
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: TARGET_RELEASE_ID, activation_id: ROLLBACK_ID,
+                    release: release(TARGET_RELEASE_ID),
+                    mutation: { mutation_id: ROLLBACK_ID, status: "succeeded", replayed: false },
+                } : { token: "must-not-escape" }, { status: state.postStatus });
+            }
+            return Response.json({}, { status: 404 });
+        },
+    });
+    servers.push(server);
+    const http = new HttpTransport({ baseUrl: server.url.toString(), token: "local-rollback-fixture" });
+    const invoke = (args: Partial<typeof boundRollbackArgs>) => rollbackFrontendRelease(
+        http, PROJECT_REF, DEPLOYMENT_ID, args.releaseId, {
+            expectedActiveReleaseId: args.expectedActiveReleaseId,
+            expectedActivationId: args.expectedActivationId,
+            mutationId: args.mutationId,
+        },
+    );
+    return { state, calls, invoke, http };
+}
+
 afterEach(async () => {
+    for (const server of servers.splice(0)) server.stop(true);
     await Promise.all([...roots].map((root) => rm(root, { recursive: true, force: true })));
     roots.clear();
 });
 
 describe("immutable frontend release control", () => {
+    test("reads only the active release authority without scanning release history", async () => {
+        const calls: string[] = [];
+        const response = await getActiveFrontendRelease({
+            get: async (path: string) => {
+                calls.push(path);
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        project_ref: PROJECT_REF,
+                        deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID,
+                        active_activation_id: MUTATION_ID,
+                        releases: [release()],
+                        next_cursor: null,
+                    },
+                };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+
+        expect(response.isError).not.toBe(true);
+        expect(calls).toEqual([
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+        ]);
+        expect(parsed(response)).toMatchObject({
+            active_release_id: RELEASE_ID,
+            active_activation_id: MUTATION_ID,
+        });
+    });
+
+    test("requires an upgrade without a history fallback for an unsupported active endpoint", async () => {
+        const calls: string[] = [];
+        const response = await readFrontendReleaseAuthority({
+            get: async (path: string) => {
+                calls.push(path);
+                if (path.endsWith("/active-release")) return { ok: false, status: 404, data: null };
+                if (path.endsWith(`/${RELEASE_ID}`)) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            release: release(),
+                        },
+                    };
+                }
+                return {
+                    ok: true, status: 200,
+                    data: {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                        releases: [release("c".repeat(64))], next_cursor: "c".repeat(64),
+                    },
+                };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toEndWith("/active-release");
+        expect(parsed(response)).toMatchObject({ error: { code: "DEPLOYMENT_UPGRADE_REQUIRED" } });
+    });
+
+    test.each([401, 403, 500])("never downgrades a failed active snapshot HTTP %s", async (status) => {
+        let reads = 0;
+        const response = await readFrontendReleaseAuthority({
+            get: async () => {
+                reads += 1;
+                return { ok: false, status, data: { token: "must-not-escape" } };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(reads).toBe(1);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test("rejects malformed or foreign native snapshots without downgrading to history", async () => {
+        const valid = {
+            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+            releases: [release()], next_cursor: null,
+        };
+        for (const data of [
+            { ...valid, project_ref: "other-project" },
+            { ...valid, releases: [] },
+            { ...valid, releases: [release("c".repeat(64))] },
+            { ...valid, next_cursor: RELEASE_ID },
+            { ...valid, token: "must-not-escape" },
+            { ...valid, active_release_id: null, active_activation_id: null },
+        ]) {
+            let reads = 0;
+            const response = await readFrontendReleaseAuthority({
+                get: async () => {
+                    reads++;
+                    return { ok: true, status: 200, data };
+                },
+            } as never, PROJECT_REF, DEPLOYMENT_ID);
+            expect(response.isError).toBe(true);
+            expect(reads).toBe(1);
+            expect(response.content[0].text).not.toContain("must-not-escape");
+        }
+    });
+
+    test.each([true, false])("rolls back with one high-level command (explicit target: %s)", async (explicit) => {
+        const calls: Array<{ path: string; body?: unknown }> = [];
+        const targetReleaseId = "c".repeat(64);
+        let activeReleaseId = RELEASE_ID;
+        let activationId = MUTATION_ID;
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                calls.push({ path });
+                if (path.endsWith("/rollback-release")) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            schema: "supacloud.frontend-rollback-snapshot.v1",
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                            previous_release: release(targetReleaseId),
+                            previous_activation_id: "00000000-0000-4000-8000-000000000002",
+                        },
+                    };
+                }
+                if (path.endsWith("/active-release")) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: activeReleaseId, active_activation_id: activationId,
+                            releases: [release(activeReleaseId)], next_cursor: null,
+                        },
+                    };
+                }
+                if (path.endsWith(`/${targetReleaseId}`)) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            release: release(targetReleaseId),
+                        },
+                    };
+                }
+                throw new Error(`unexpected GET ${path}`);
+            },
+            post: async (path: string, body: unknown) => {
+                calls.push({ path, body });
+                const input = body as Record<string, string>;
+                activationId = input.mutation_id!;
+                activeReleaseId = targetReleaseId;
+                return {
+                    ok: true, status: 200,
+                    data: {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: targetReleaseId, activation_id: activationId,
+                        release: release(targetReleaseId),
+                        mutation: {
+                            mutation_id: activationId,
+                            status: "succeeded", replayed: false,
+                        },
+                    },
+                };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID, explicit ? targetReleaseId : undefined);
+
+        expect(response.isError).not.toBe(true);
+        expect(parsed(response)).toMatchObject({
+            rollback: true,
+            previous_release_id: RELEASE_ID,
+            previous_activation_id: MUTATION_ID,
+            active_release_id: targetReleaseId,
+        });
+        expect(calls.find(({ body }) => body !== undefined)?.body).toMatchObject({
+            expected_active_release_id: RELEASE_ID,
+            expected_activation_id: MUTATION_ID,
+        });
+        expect(activationId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(calls.map(({ path }) => path)).toEqual([
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/${explicit ? "active-release" : "rollback-release"}`,
+            ...(explicit ? [`/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`] : []),
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}/activate`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`,
+        ]);
+    });
+
+    test.each([401, 403, 404, 409, 500])("default rollback never guesses from history after HTTP %s", async (status) => {
+        const calls: string[] = [];
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: false, status, data: { token: "must-not-escape" } };
+            },
+            post: async () => { throw new Error("Unexpected mutation"); },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            error: { code: status === 404 ? "PREVIOUS_RELEASE_UNSUPPORTED" : "HTTP_ERROR" },
+        });
+        expect(calls).toEqual([`/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/rollback-release`]);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([
+        { activeReleaseId: "d".repeat(64) },
+        { activeActivationId: "00000000-0000-4000-8000-000000000004" },
+        { activeReleaseId: TARGET_RELEASE_ID },
+    ])("bound rollback refuses changed authority without POST: %j", async change => {
+        const fixture = boundRollbackFixture();
+        Object.assign(fixture.state, change);
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback", mutation_id: ROLLBACK_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            error: { code: "STALE_AUTHORITY", http_status: 409 },
+        });
+        expect(fixture.calls.map(call => call.method)).toEqual(["GET"]);
+    });
+
+    test.each([200, 503])("bound rollback verifies commit with response HTTP %s and replays read-only", async status => {
+        const fixture = boundRollbackFixture();
+        fixture.state.postStatus = status;
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).not.toBe(true);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback", rollback: true, mutation_id: ROLLBACK_ID,
+            active_release_id: TARGET_RELEASE_ID, activation_id: ROLLBACK_ID,
+            previous_release_id: RELEASE_ID, previous_activation_id: MUTATION_ID,
+        });
+        const replay = await fixture.invoke(boundRollbackArgs);
+        expect(replay.isError).not.toBe(true);
+        expect(parsed(replay)).toEqual(parsed(response));
+        expect(fixture.calls.filter(call => call.method === "POST").map(call => call.body)).toEqual([{
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            mutation_id: ROLLBACK_ID,
+        }]);
+        expect(fixture.calls.some(call => call.path.endsWith(`/mutations/${ROLLBACK_ID}`))).toBe(true);
+        expect(response.content[0].text + replay.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each(["missing-journal", "wrong-fingerprint", "foreign-artifact"] as const)(
+        "bound replay cannot succeed with %s",
+        async fault => {
+            const fixture = boundRollbackFixture();
+            fixture.state.activeReleaseId = TARGET_RELEASE_ID;
+            fixture.state.activeActivationId = ROLLBACK_ID;
+            if (fault === "missing-journal") fixture.state.journalVisible = false;
+            if (fault === "wrong-fingerprint") fixture.state.fingerprint = "d".repeat(64);
+            if (fault === "foreign-artifact") fixture.state.artifactProject = "other";
+            const response = await fixture.invoke(boundRollbackArgs);
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({
+                mutation_id: ROLLBACK_ID, error: { code: "OUTCOME_UNKNOWN" },
+            });
+            expect(fixture.calls.every(call => call.method === "GET")).toBe(true);
+        },
+    );
+
+    test.each([409, 503])("bound rollback never refreshes CAS or auto-retries HTTP %s", async status => {
+        const fixture = boundRollbackFixture();
+        fixture.state.postStatus = status;
+        fixture.state.commit = false;
+        fixture.state.journalVisible = false;
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            mutation_id: ROLLBACK_ID, target_release_id: TARGET_RELEASE_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            error: { code: status === 409 ? "HTTP_ERROR" : "OUTCOME_UNKNOWN" },
+        });
+        expect(fixture.calls.filter(call => call.method === "POST")).toHaveLength(1);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([
+        "releaseId", "expectedActiveReleaseId", "expectedActivationId", "mutationId",
+    ] as const)("bound rollback rejects missing %s before HTTP", async field => {
+        const fixture = boundRollbackFixture();
+        await expect(fixture.invoke({ ...boundRollbackArgs, [field]: undefined })).rejects.toThrow("required together");
+        expect(fixture.calls).toEqual([]);
+    });
+
+    test.each([
+        { releaseId: "latest" }, { expectedActiveReleaseId: "absent" },
+        { expectedActivationId: "absent" }, { mutationId: "invalid" },
+        { releaseId: RELEASE_ID }, { mutationId: MUTATION_ID },
+    ])("bound rollback rejects invalid binding %j before HTTP", async override => {
+        const fixture = boundRollbackFixture();
+        await expect(fixture.invoke({ ...boundRollbackArgs, ...override })).rejects.toThrow();
+        expect(fixture.calls).toEqual([]);
+    });
+
+    test("bound rollback preserves identity on a denied authority read", async () => {
+        const fixture = boundRollbackFixture();
+        fixture.state.activeStatus = 403;
+        const response = await fixture.invoke(boundRollbackArgs);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback", mutation_id: ROLLBACK_ID,
+            error: { code: "HTTP_ERROR", http_status: 403 },
+        });
+        expect(fixture.calls.map(call => call.method)).toEqual(["GET"]);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each(["rollback", "get"])("frontend tool rejects internal binding fields for %s before HTTP", async action => {
+        const fixture = boundRollbackFixture();
+        let invoke: ToolInvocation | undefined;
+        registerFrontendTools({
+            tool(name, _description, _schema, handler) {
+                if (name === "frontend") invoke = handler;
+            },
+        }, fixture.http);
+        if (!invoke) throw new Error("Frontend tool not registered");
+        await expect(invoke({
+            action, ref: PROJECT_REF, id: DEPLOYMENT_ID, release_id: TARGET_RELEASE_ID,
+            expected_active_release_id: RELEASE_ID, expected_activation_id: MUTATION_ID,
+            mutation_id: ROLLBACK_ID,
+        })).rejects.toThrow("Invalid arguments");
+        expect(fixture.calls).toEqual([]);
+    });
+
+    test("default rollback requires a strict scoped previous-release snapshot before any mutation", async () => {
+        const valid = {
+            schema: "supacloud.frontend-rollback-snapshot.v1",
+            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+            previous_release: release("c".repeat(64)),
+            previous_activation_id: "00000000-0000-4000-8000-000000000002",
+        };
+        for (const data of [
+            { ...valid, project_ref: "other" },
+            { ...valid, schema: "unknown" },
+            { ...valid, previous_release: { ...valid.previous_release, deployment_id: "other" } },
+            { ...valid, previous_release: null },
+            { ...valid, active_release_id: null, active_activation_id: null },
+            { ...valid, previous_activation_id: null },
+            { ...valid, token: "must-not-escape" },
+        ]) {
+            let reads = 0;
+            const response = await rollbackFrontendRelease({
+                get: async () => { reads++; return { ok: true, status: 200, data }; },
+                post: async () => { throw new Error("Unexpected mutation"); },
+            } as never, PROJECT_REF, DEPLOYMENT_ID);
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({ error: { code: "INVALID_RESPONSE" } });
+            expect(reads).toBe(1);
+            expect(response.content[0].text).not.toContain("must-not-escape");
+        }
+    });
+
+    test("default rollback without a previous immutable release does not activate", async () => {
+        const response = await rollbackFrontendRelease({
+            get: async () => ({
+                ok: true, status: 200,
+                data: {
+                    schema: "supacloud.frontend-rollback-snapshot.v1",
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                    previous_release: null, previous_activation_id: null,
+                },
+            }),
+            post: async () => { throw new Error("Unexpected mutation"); },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({ error: { code: "NO_PREVIOUS_RELEASE" } });
+    });
+
+    test.each([
+        { status: 409, explicit: true }, { status: 500, explicit: true },
+        { status: 409, explicit: false }, { status: 500, explicit: false },
+    ])("rollback never retries a conflicting or uncertain mutation: %j", async ({ status, explicit }) => {
+        const targetReleaseId = "c".repeat(64);
+        let writes = 0;
+        let mutationId = "";
+        const reads: string[] = [];
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                reads.push(path);
+                if (path.includes("/mutations/")) return { ok: false, status: 404, data: null };
+                if (path.endsWith("/rollback-release")) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            schema: "supacloud.frontend-rollback-snapshot.v1",
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                            previous_release: release(targetReleaseId),
+                            previous_activation_id: "00000000-0000-4000-8000-000000000002",
+                        },
+                    };
+                }
+                return {
+                    ok: true, status: 200,
+                    data: path.endsWith("/active-release") ? {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                        releases: [release()], next_cursor: null,
+                    } : {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        release: release(targetReleaseId),
+                    },
+                };
+            },
+            post: async (_path: string, body: { mutation_id: string }) => {
+                writes++;
+                mutationId = body.mutation_id;
+                return { ok: false, status, data: { token: "must-not-escape" } };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID, explicit ? targetReleaseId : undefined);
+        expect(response.isError).toBe(true);
+        expect(writes).toBe(1);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback",
+            mutation_id: mutationId,
+            target_release_id: targetReleaseId,
+            expected_active_release_id: RELEASE_ID,
+            expected_activation_id: MUTATION_ID,
+            error: { code: status === 409 ? "HTTP_ERROR" : "OUTCOME_UNKNOWN" },
+        });
+        expect(reads.filter((path) => path.includes("/mutations/"))).toHaveLength(status === 409 ? 0 : 1);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([null, RELEASE_ID])("rollback does not mutate an absent or already selected release: %s", async (activeId) => {
+        const calls: string[] = [];
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                calls.push(path);
+                return {
+                    ok: true, status: 200,
+                    data: {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: activeId,
+                        active_activation_id: activeId ? MUTATION_ID : null,
+                        releases: activeId ? [release()] : [], next_cursor: null,
+                    },
+                };
+            },
+            post: async () => { throw new Error("unexpected mutation"); },
+        } as never, PROJECT_REF, DEPLOYMENT_ID, RELEASE_ID);
+        expect(calls).toHaveLength(1);
+        if (activeId) {
+            expect(parsed(response)).toMatchObject({ unchanged: true, active_release_id: RELEASE_ID });
+        } else {
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({ error: { code: "NO_ACTIVE_RELEASE" } });
+        }
+    });
+
     test("lists and gets only strict secret-free release projections", async () => {
         const inventory = {
             project_ref: PROJECT_REF,
@@ -74,10 +615,11 @@ describe("immutable frontend release control", () => {
     });
 
     test("uploads raw verified bytes and requires exact immutable readback", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-"));
         roots.add(root);
-        const path = join(root, "site.zip");
-        await writeFile(path, "zip");
+        const path = join(root, "site.tar.zst");
+        const archiveBytes = await createFrontendTarZstd(new Map([["index.html", Buffer.from("ok")]]));
+        await Bun.write(path, archiveBytes);
         const calls: Array<{ method: string; path: string; options?: Record<string, unknown> }> = [];
         const http = {
             postBinary: async (endpoint: string, body: {
@@ -85,7 +627,7 @@ describe("immutable frontend release control", () => {
             }, options: Record<string, unknown>) => {
                 calls.push({ method: "POST", path: endpoint, options });
                 const bytes = new Uint8Array(await new Response(body.stream).arrayBuffer());
-                expect(new TextDecoder().decode(bytes)).toBe("zip");
+                expect(bytes).toEqual(new Uint8Array(archiveBytes));
                 const digest = String(options.contentSha256);
                 return {
                     ok: true,
@@ -93,7 +635,7 @@ describe("immutable frontend release control", () => {
                     data: {
                         project_ref: PROJECT_REF,
                         deployment_id: DEPLOYMENT_ID,
-                        release: { ...release(), release_id: digest, sha256: digest },
+                        release: { ...release(), release_id: digest, sha256: digest, size_bytes: archiveBytes.byteLength },
                     },
                 };
             },
@@ -106,7 +648,7 @@ describe("immutable frontend release control", () => {
                     data: {
                         project_ref: PROJECT_REF,
                         deployment_id: DEPLOYMENT_ID,
-                        release: { ...release(), release_id: digest, sha256: digest },
+                        release: { ...release(), release_id: digest, sha256: digest, size_bytes: archiveBytes.byteLength },
                     },
                 };
             },
@@ -115,11 +657,13 @@ describe("immutable frontend release control", () => {
         const response = await uploadFrontendRelease(http as never, PROJECT_REF, DEPLOYMENT_ID, path);
         expect(response.isError).not.toBe(true);
         expect(calls.map((call) => call.method)).toEqual(["POST", "GET"]);
-        expect(calls[0].options).toMatchObject({ contentType: "application/zip", contentLength: 3 });
+        expect(calls[0].options).toMatchObject({
+            contentType: "application/vnd.supacloud.frontend.tar+zstd", contentLength: archiveBytes.byteLength,
+        });
     });
 
     test("streams archive bytes in bounded chunks without buffering the file", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-stream-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-stream-"));
         roots.add(root);
         const path = join(root, "site.zip");
         const archiveBytes = new Uint8Array(64 * 1024 * 2 + 17).fill(0x61);
@@ -169,7 +713,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("rejects upload readback envelopes and records for another deployment", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-identity-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-identity-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -209,7 +753,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("converges on the content-addressed release after the upload response body times out", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-readback-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-readback-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -243,7 +787,7 @@ describe("immutable frontend release control", () => {
     test.each([400, 401, 403, 409, 429])(
         "preserves deterministic HTTP %s upload failures without readback",
         async (status) => {
-            const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-4xx-"));
+            const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-4xx-"));
             roots.add(root);
             const path = join(root, "site.zip");
             await writeFile(path, "zip");
@@ -268,7 +812,7 @@ describe("immutable frontend release control", () => {
     );
 
     test("reads back an HTTP 408 upload outcome", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-408-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-408-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -298,7 +842,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("rejects a symlink archive before any HTTP request", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-link-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-link-"));
         roots.add(root);
         await writeFile(join(root, "site.zip"), "zip");
         await symlink(join(root, "site.zip"), join(root, "link.zip"));
@@ -597,8 +1141,8 @@ describe("immutable frontend release control", () => {
                         deployment_id: DEPLOYMENT_ID,
                         active_release_id: RELEASE_ID,
                         active_activation_id: MUTATION_ID,
-                        releases: olderReleases,
-                        next_cursor: olderReleases.at(-1)!.release_id,
+                        releases: path.endsWith("/active-release") ? [release()] : olderReleases.slice(0, 1),
+                        next_cursor: path.endsWith("/active-release") ? null : olderReleases[0]!.release_id,
                     },
                 };
             },

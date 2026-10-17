@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
-import { renderClient } from "./generate";
+import { renderClient, renderOpenApi } from "./generate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
@@ -128,7 +128,7 @@ test("generated client exposes query and mutation procedures with explicit idemp
   }
 });
 
-test("generated client requires request sections covered by route schemas", async () => {
+test("generated client and OpenAPI honor the enhanced strict baseline with schema-derived request sections", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-client-request-types-"));
   try {
     const schemaGraph: ApplicationGraph = {
@@ -154,6 +154,7 @@ test("generated client requires request sections covered by route schemas", asyn
     };
     await writeFixtureProject(root, {
       "client.ts": renderClient(schemaGraph),
+      "openapi.ts": renderOpenApi(schemaGraph),
       "schemas.ts": [
         'import { Type } from "typebox";',
         'export const Body = Type.Object({ name: Type.String() });',
@@ -174,8 +175,10 @@ test("generated client requires request sections covered by route schemas", asyn
         "void valid;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    const program = ts.createProgram([join(root, "consumer.ts"), join(root, "openapi.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noPropertyAccessFromIndexSignature: true, noImplicitOverride: true,
+      noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0",

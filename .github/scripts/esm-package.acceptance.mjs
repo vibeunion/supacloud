@@ -15,7 +15,7 @@ assert.ok(args.length === 0 || (args.length === 1 && args[0] === '--sdk-only'),
   'Usage: esm-package.acceptance.mjs [--sdk-only]');
 const sdkOnly = args[0] === '--sdk-only';
 const directories = sdkOnly ? ['contracts', 'query', 'supacloud-js']
-  : ['contracts', 'delivery', 'app', 'query', 'supacloud-js', 'compiler'];
+  : ['contracts', 'db', 'delivery', 'app', 'query', 'supacloud-js', 'compiler'];
 const publicConsumers = new Set(['@supacloud/app', '@supacloud/js', '@supacloud/compiler']);
 const scratch = await mkdtemp(join(tmpdir(), 'supacloud-esm-consumer-'));
 const env = { ...process.env };
@@ -85,7 +85,7 @@ try {
     name: 'supacloud-esm-installed-consumer', version: '0.0.0', private: true, type: 'module',
   }));
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund',
-    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.115.0'] : []), ...tarballs], consumer);
+    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.117.3'] : []), ...tarballs], consumer);
   if (sdkOnly) {
     for (const name of ['@angular/core', '@supacloud/app', '@supacloud/compiler', '@supacloud/delivery']) {
       await assert.rejects(lstat(join(consumer, 'node_modules', name)), { code: 'ENOENT' },

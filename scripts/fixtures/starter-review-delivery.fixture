@@ -64,7 +64,7 @@ export async function verifyReviewDelivery(options: {
       try { claims = decodeJwt(bearer); }
       catch { throw new Error("Invalid injected test token"); }
       assert.ok(claims.sub === subject && claims.iss === identity.issuer &&
-        (claims.client_id ?? claims.azp) === identity.clientId && claims.role === "authenticated",
+        (claims["client_id"] ?? claims["azp"]) === identity.clientId && claims["role"] === "authenticated",
       "Injected token identity does not match its test case");
       const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
       assert.ok(audiences.includes(identity.audience) === audienceMatches,
@@ -96,9 +96,9 @@ export async function verifyReviewDelivery(options: {
     assert.ok(built.ok, JSON.stringify(built.diagnostics));
     const object = built.manifest.objects.find(entry => entry.name === "api");
     assert.ok(object);
-    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 4);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 5);
     assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/project-migration/")).length, 2);
-    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 2);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 3);
     assert.equal(object.entryKind, "bun-http-application");
     assert.equal(built.manifest.deploymentReady, false);
     assert.equal(built.manifest.objects.find(entry => entry.name === "jobs")?.entryKind, "compiled-module-factory");
@@ -160,7 +160,7 @@ export async function verifyReviewDelivery(options: {
     const ownerSubject = options.identity?.ownerSubject ?? "owner";
     const ownerToken = options.identity?.tokens.owner ?? await token("owner");
     const env = {
-      PATH: process.env.PATH, ...options.runtimeEnv,
+      PATH: process.env["PATH"], ...options.runtimeEnv,
       PORT: "0", HOST: "127.0.0.1", ...(certificate ? { NODE_EXTRA_CA_CERTS: certificate } : {}),
       ...(options.connection ? {
         DATABASE_SOCKET_PATH: options.connection.socketPath, DATABASE_NAME: options.connection.database,

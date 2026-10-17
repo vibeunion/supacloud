@@ -89,7 +89,7 @@ try {
       url.includes("cursor=") ? null : a));
   });
   component = mount(Dashboard, { target });
-  await eventually(() => strictEqual(signals.length, 3));
+  await eventually(() => strictEqual(signals.length, 6));
   page.params.ref = "other";
   page.url = new URL("http://localhost/project/other/applications?application=next-app&environment=prod");
   await eventually(() => ok(text().includes(a)));
@@ -160,7 +160,7 @@ try {
   const unmountSignals: AbortSignal[] = [];
   network(async (_url, init) => { unmountSignals.push(init.signal!); return hanging.promise; });
   button("Refresh").click();
-  await eventually(() => strictEqual(unmountSignals.length, 3));
+  await eventually(() => strictEqual(unmountSignals.length, 6));
   await unmount(component);
   component = undefined;
   ok(unmountSignals.every(signal => signal.aborted));

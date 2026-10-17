@@ -108,7 +108,8 @@ export class ImageTransformCache {
     while (this.entries.size > this.maxEntries || this.cachedBytes > this.maxBytes) {
       const oldestKey = this.entries.keys().next().value as string | undefined
       if (oldestKey === undefined) break
-      const oldest = this.entries.get(oldestKey)!
+      const oldest = this.entries.get(oldestKey)
+      if (!oldest) break
       this.entries.delete(oldestKey)
       this.cachedBytes -= oldest.size
     }

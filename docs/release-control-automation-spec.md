@@ -65,7 +65,7 @@ Content-Type: application/json
 ### CLI Command
 
 ```bash
-supacloud-cli auth canary-probe \
+supacloud auth canary-probe \
   --ref "$PROJECT_REF" \
   --subject "$CANARY_SUBJECT" \
   --function "fa-access-context" \
@@ -102,7 +102,7 @@ atomicity with an untracked sequence of single-Function mutations.
 ### Proposed Batch Deployment Command
 
 ```bash
-supacloud-cli edge_functions deploy_manifest \
+supacloud edge_functions deploy_manifest \
   --ref "$PROJECT_REF" \
   --manifest deploy-manifest.json \
   --bundles-dir ./dist/functions \
@@ -117,7 +117,7 @@ supacloud-cli edge_functions deploy_manifest \
 ### Compare-And-Set (CAS) Function Deletion
 
 ```bash
-supacloud-cli edge_functions delete \
+supacloud edge_functions delete \
   --ref "$PROJECT_REF" \
   --slug "legacy-function" \
   --expected-activation-id "22222222-2222-4222-8222-222222222222"
@@ -134,7 +134,7 @@ Guarantees safe runtime environment variable updates with optimistic concurrency
 ### Upsert Command with Revision Checks
 
 ```bash
-supacloud-cli secrets upsert \
+supacloud secrets upsert \
   --ref "$PROJECT_REF" \
   --from-env "FA_ALLOWED_ORIGINS,FA_WORKER_SECRET" \
   --expected-digest "<sha256-of-current-secret-names>"
@@ -163,7 +163,7 @@ Eliminates manual PostgREST restarts and ad-hoc table probing by coordinating da
 
 ### Automatic Coordination Flow
 
-1. `supacloud-cli database push_migrations` executes migrations inside a transaction.
+1. `supacloud database push_migrations` executes migrations inside a transaction.
 2. Upon commit, the migration worker issues `NOTIFY pgrst, 'reload schema'` to the project's dedicated PostgREST instance.
 3. The platform control plane probes PostgREST internal readiness (`/`) until the schema cache generation matches the post-migration state.
 4. The migration receipt reports `schema_reloaded=true` and `postgrest_healthy=true`.
@@ -178,13 +178,13 @@ Provides immutable artifact retention and instant zero-reupload rollbacks for Su
 
 ```bash
 # Upload a prebuilt immutable release
-supacloud-cli frontend upload_release \
+supacloud frontend upload_release \
   --ref "$PROJECT_REF" \
   --id "$DEPLOYMENT_ID" \
-  --zip_path ./app/build.zip
+  --archive_path ./app/build.tar.zst
 
 # Activate a previously uploaded release with compare-and-swap protection
-supacloud-cli frontend activate_release \
+supacloud frontend activate_release \
   --ref "$PROJECT_REF" \
   --id "$DEPLOYMENT_ID" \
   --release_id "$RELEASE_SHA256" \

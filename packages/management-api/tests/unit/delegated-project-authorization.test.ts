@@ -38,6 +38,7 @@ const { buildBffProofHeaders } = await import("../../src/services/bff-proof.serv
 const {
   delegatedProjectCapability,
   requireProjectOrAdminAuth,
+  requireProjectOrAdminAuthWithTrustedPrincipal,
 } = await import("../../src/middleware/auth");
 
 const originalMasterToken = config.masterToken;
@@ -203,5 +204,57 @@ describe("delegated project authorization", () => {
       headers: { authorization: "Bearer master-token" },
     });
     await expect(requireProjectOrAdminAuth(request, "proj_1")).resolves.toBeUndefined();
+  });
+
+  test("reuses a verified principal for a rewritten source path without replaying its proof", async () => {
+    collaboratorRoles.set("owner-one", "owner");
+    const original = delegatedRequest(
+      "/v1/projects/proj_2/applications/reviews/release-transfers",
+      "POST",
+      "owner-one",
+    );
+    const principalRequest = new Request(original);
+    const { resolveTrustedPrincipal } = await import("../../src/services/bff-proof.service");
+    const principal = await resolveTrustedPrincipal(principalRequest, "proj_2");
+    const sourceRequest = new Request(
+      "http://localhost/v1/projects/proj_1/applications/reviews/releases/" + "a".repeat(64),
+      { method: "GET" },
+    );
+
+    await expect(requireProjectOrAdminAuthWithTrustedPrincipal(
+      sourceRequest,
+      "proj_1",
+      principal,
+    )).resolves.toBeUndefined();
+    expect(consumedNonces.size).toBe(1);
+  });
+
+  test("reuses a verified principal for a rewritten source runtime path and rejects proof replay", async () => {
+    collaboratorRoles.set("owner-one", "owner");
+    const original = delegatedRequest(
+      "/v1/projects/proj_2/applications/reviews/environments/prod/promotions",
+      "POST",
+      "owner-one",
+    );
+    const principalRequest = new Request(original);
+    const { resolveTrustedPrincipal } = await import("../../src/services/bff-proof.service");
+    const principal = await resolveTrustedPrincipal(principalRequest, "proj_2");
+    const runtimeRequest = new Request(
+      "http://localhost/v1/projects/proj_1/applications/reviews/environments/staging/runtime",
+      { method: "GET", headers: original.headers },
+    );
+
+    await expect(requireProjectOrAdminAuthWithTrustedPrincipal(
+      runtimeRequest,
+      "proj_1",
+      principal,
+    )).resolves.toBeUndefined();
+    expect(consumedNonces.size).toBe(1);
+
+    // The proof is bound to the original target path, so replaying it against the rewritten
+    // source runtime path fails: promotion source checks must reuse the trusted principal.
+    await expect(requireProjectOrAdminAuth(runtimeRequest, "proj_1"))
+      .resolves.toMatchObject({ status: 403 });
+    expect(consumedNonces.size).toBe(1);
   });
 });

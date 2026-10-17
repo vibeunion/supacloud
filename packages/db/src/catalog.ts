@@ -34,6 +34,8 @@ export interface CatalogPolicy {
 export interface CatalogFunction {
   schema: string;
   name: string;
+  /** Canonical input types from oidvectortypes(proargtypes), without argument names. */
+  identityArguments?: string;
   security: 'invoker' | 'definer';
   searchPath: string | null;
   language: string;
@@ -95,6 +97,7 @@ ORDER BY n.nspname, c.relname, p.polname
 const FUNCTIONS_SQL = `
 SELECT n.nspname AS schema,
        p.proname AS name,
+       pg_catalog.oidvectortypes(p.proargtypes) AS identity_arguments,
        p.prosecdef AS security_definer,
        p.proconfig AS config,
        l.lanname AS language
@@ -154,6 +157,7 @@ interface PolicyRow {
 interface FunctionRow {
   schema: string;
   name: string;
+  identity_arguments: string;
   security_definer: boolean;
   config: string[] | null;
   language: string;
@@ -216,12 +220,13 @@ export async function readCatalog(
       name: row.name,
       command: POLCMD_MAP[row.command] ?? 'all',
       roles: row.roles ?? [],
-      usingExpr: row.using_expr ?? undefined,
-      checkExpr: row.check_expr ?? undefined,
+      ...(row.using_expr == null ? {} : { usingExpr: row.using_expr }),
+      ...(row.check_expr == null ? {} : { checkExpr: row.check_expr }),
     })),
     functions: functionRows.map((row) => ({
       schema: row.schema,
       name: row.name,
+      identityArguments: row.identity_arguments,
       security: row.security_definer ? 'definer' : 'invoker',
       searchPath: extractSearchPath(row.config),
       language: row.language,

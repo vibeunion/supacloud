@@ -55,11 +55,11 @@ function keys(row: Record<string, unknown>, expected: string[]): void {
 function validTarget(value: unknown): MigrationBindingTarget {
   const target = record(value);
   keys(target, ['environment', 'projectRef']);
-  if (typeof target.environment !== 'string' || !/^[a-z][a-z0-9-]{0,62}$/.test(target.environment)
-    || typeof target.projectRef !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(target.projectRef)) {
+  if (typeof target["environment"] !== 'string' || !/^[a-z][a-z0-9-]{0,62}$/.test(target["environment"])
+    || typeof target["projectRef"] !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(target["projectRef"])) {
     throw new Error('Invalid migration binding target');
   }
-  return target as unknown as MigrationBindingTarget;
+  return { environment: target["environment"], projectRef: target["projectRef"] };
 }
 
 function validFile(file: unknown): file is string {
@@ -70,39 +70,42 @@ function validFile(file: unknown): file is string {
 export function parseMigrationBindingManifest(value: unknown): MigrationBindingManifest {
   const manifest = record(value);
   keys(manifest, ['schema', 'targets', 'templates']);
-  if (manifest.schema !== 'supacloud.migration-bindings.v1'
-    || !Array.isArray(manifest.targets) || !manifest.targets.length || !Array.isArray(manifest.templates)) {
+  if (manifest["schema"] !== 'supacloud.migration-bindings.v1'
+    || !Array.isArray(manifest["targets"]) || !manifest["targets"].length || !Array.isArray(manifest["templates"])) {
     throw new Error('Invalid migration binding manifest');
   }
-  const targets = manifest.targets.map(validTarget);
+  const targets = manifest["targets"].map(validTarget);
   if (new Set(targets.map((target) => target.environment)).size !== targets.length) {
     throw new Error('Duplicate migration binding environment');
   }
   const files = new Set<string>();
-  const templates = manifest.templates.map((value) => {
+  const templates = manifest["templates"].map((value: unknown) => {
     const template = record(value);
     keys(template, ['file', 'templateSha256', 'parameters']);
-    if (!validFile(template.file) || files.has(template.file)
-      || typeof template.templateSha256 !== 'string' || !HASH.test(template.templateSha256)
-      || !Array.isArray(template.parameters) || !template.parameters.length) {
+    if (!validFile(template["file"]) || files.has(template["file"])
+      || typeof template["templateSha256"] !== 'string' || !HASH.test(template["templateSha256"])
+      || !Array.isArray(template["parameters"]) || !template["parameters"].length) {
       throw new Error('Invalid or duplicate migration binding template');
     }
-    files.add(template.file);
+    files.add(template["file"]);
     const placeholders = new Set<string>();
-    const parameters = template.parameters.map((value) => {
+    const parameters = template["parameters"].map((value: unknown): MigrationBindingParameter => {
       const parameter = record(value);
       keys(parameter, ['placeholder', 'variable', 'type', 'occurrences']);
-      if (typeof parameter.placeholder !== 'string' || !/^__[A-Z][A-Z0-9_]*__$/.test(parameter.placeholder)
-        || placeholders.has(parameter.placeholder) || typeof parameter.variable !== 'string'
-        || !/^[A-Z][A-Z0-9_]*$/.test(parameter.variable)
-        || !['uuid', 'https-url', 'resource-name'].includes(String(parameter.type))
-        || !Number.isSafeInteger(parameter.occurrences) || Number(parameter.occurrences) < 1) {
+      if (typeof parameter["placeholder"] !== 'string' || !/^__[A-Z][A-Z0-9_]*__$/.test(parameter["placeholder"])
+        || placeholders.has(parameter["placeholder"]) || typeof parameter["variable"] !== 'string'
+        || !/^[A-Z][A-Z0-9_]*$/.test(parameter["variable"])
+        || (parameter["type"] !== "uuid" && parameter["type"] !== "https-url" && parameter["type"] !== "resource-name")
+        || typeof parameter["occurrences"] !== "number" || !Number.isSafeInteger(parameter["occurrences"]) || parameter["occurrences"] < 1) {
         throw new Error('Invalid or duplicate migration binding parameter');
       }
-      placeholders.add(parameter.placeholder);
-      return parameter as unknown as MigrationBindingParameter;
+      placeholders.add(parameter["placeholder"]);
+      return {
+        placeholder: parameter["placeholder"], variable: parameter["variable"],
+        type: parameter["type"], occurrences: parameter["occurrences"],
+      };
     });
-    return { file: template.file, templateSha256: template.templateSha256, parameters };
+    return { file: template["file"], templateSha256: template["templateSha256"], parameters };
   });
   return { schema: 'supacloud.migration-bindings.v1', targets, templates };
 }

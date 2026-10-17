@@ -18,6 +18,21 @@ import { ApplicationRuntimeAllocations } from "./application-runtime-allocation"
 import { ApplicationRuntimeFiles } from "./application-runtime-files";
 import { createApplicationCompatibilityVerifier } from "./application-compatibility";
 import { createApplicationWorkerRetirementChecks } from "./application-worker-retirement";
+import { ApplicationPreviewService } from "./application-preview.service";
+import { createApplicationPreviewCleanupChecks, previewBranches, previewSecrets } from "./application-preview-cleanup";
+import { withApplicationProjectLifecycle } from "./application-lifecycle-lock";
+import { StorageService } from "./storage.service";
+import { createApplicationPreviewReadiness } from "./application-preview-readiness";
+import { ApplicationPromotionExecutor } from "./application-promotion-executor";
+import { ApplicationPromotionReconciler } from "./application-promotion-reconciler";
+import { ApplicationPromotions } from "./application-promotion";
+import { applicationActivationMutations } from "./application-activation";
+import { ApplicationReleaseTransfers } from "./application-release-transfer";
+import { createApplicationSmokeVerifier } from "./application-smoke";
+import { ApplicationDeployPlans } from "./application-deploy-plan";
+import { ApplicationDeploymentOrchestrator } from "./application-deployment-orchestrator";
+import { frontendReleaseService } from "./frontend-release.service";
+import { tenantRuntimeService } from "./tenant-runtime.service";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -112,8 +127,17 @@ export function createDefaultApplicationRouteComposition(
   const evidenceObserver = new ApplicationDeploymentEvidenceObserver({
     active, readiness, migrations, releases: storage,
   });
+  const transfers = new ApplicationReleaseTransfers(storage);
+  const promotions = new ApplicationPromotions({
+    storage, transfers, active, configurations, migrations, readiness, evidence,
+    mutations: applicationActivationMutations,
+  });
+  const deployPlans = new ApplicationDeployPlans({
+    releases: storage, active, readiness, migrations,
+  });
 
   const dependencies: ApplicationDeploymentDependencies = {
+    withProjectLifecycle: withApplicationProjectLifecycle,
     verifyCompatibility: verifyCompatibility === undefined ? verifier : async input => {
       await verifyApplicationPlatformAvailability(input);
       await verifier(input);
@@ -136,6 +160,46 @@ export function createDefaultApplicationRouteComposition(
   };
 
   const deployment = new ApplicationDeploymentService(dependencies);
+  const promotionExecutor = new ApplicationPromotionExecutor({
+    promotions, transfers, migrations,
+    releases: storage, active, evidence,
+    deployment,
+    verifySmoke: createApplicationSmokeVerifier(configurations),
+  });
+  const promotionReconciler = new ApplicationPromotionReconciler({ promotions, active, deployment });
+  const deploymentOrchestrator = new ApplicationDeploymentOrchestrator({
+    storage,
+    configurations,
+    deployPlans,
+    migrations,
+    deployment,
+    frontends: frontendReleaseService,
+    postgrestStatus: ref => tenantRuntimeService.statusPostgrest(ref),
+  });
+  const previews = new ApplicationPreviewService({
+    releases: storage,
+    configurations,
+    smokeTest: createApplicationPreviewReadiness({ active, readiness }),
+    branches: previewBranches,
+    cleanupChecks: createApplicationPreviewCleanupChecks(active, deployment),
+    storage: {
+      createBucket: (ref) => StorageService.createBucket(ref),
+    },
+    secrets: previewSecrets,
+    activate: async input => {
+      const result = await deployment.activateConfigured({
+        runtime: {
+          release: await storage.readRelease(input.branchRef, input.applicationId, input.releaseId),
+          environmentId: input.environmentId,
+          activationId: input.activationId,
+        },
+        configurationId: input.configurationId,
+        expectedActivationId: null,
+        principal: { type: "master", id: "preview-provisioner" },
+      });
+      return { activation_id: result.activation_id };
+    },
+  });
   const routes = createApplicationRoutes({
     storage,
     configurations,
@@ -145,7 +209,13 @@ export function createDefaultApplicationRouteComposition(
     evidence,
     evidenceObserver,
     deployment,
+    promotions,
+    transfers,
+    promotionExecutor,
+    promotionReconciler,
+    deploymentOrchestrator,
+    previews,
     retirementVerifier: dependencies.retirementVerifier,
   });
-  return { deployment, routes };
+  return { deployment, routes, previews, deploymentOrchestrator };
 }

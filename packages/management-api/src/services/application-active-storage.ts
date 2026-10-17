@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { stableStringify } from "../utils/stable-json";
 import { applicationRuntimePlan, type ApplicationRuntimeInput } from "./application-runtime";
@@ -61,7 +61,7 @@ export class ApplicationActiveStorage {
     try { stat = await lstat(path); }
     catch (error) { if (missing(error)) return null; throw error; }
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65_536) throw new Error("APPLICATION_ACTIVE_INVALID");
-    return parseApplicationActiveRecord(JSON.parse(await readFile(path, "utf8")), {
+    return parseApplicationActiveRecord(JSON.parse(await Bun.file(path).text()), {
       release: { project_ref: projectRef, application_id: applicationId }, environmentId,
     });
   }
@@ -84,7 +84,7 @@ export class ApplicationActiveStorage {
     const temporary = join(directory, `.active-${randomUUID()}`);
     try {
       const handle = await open(temporary, "wx", 0o600);
-      try { await handle.writeFile(content); await handle.sync(); }
+      try { await Bun.write(Bun.file(handle.fd), content); await handle.sync(); }
       finally { await handle.close(); }
       await rename(temporary, join(directory, "active.json"));
       await syncAncestors(directory, this.operations.beforeDirectorySync);
@@ -102,5 +102,28 @@ export class ApplicationActiveStorage {
     await sync(join(directory, "active.json"));
     await syncAncestors(directory, this.operations.beforeDirectorySync);
     if (stableStringify(await read()) !== stableStringify(record)) throw new Error("APPLICATION_ACTIVATION_READBACK_MISMATCH");
+  }
+
+  async clear(runtime: ApplicationRuntimeInput, expectedActivationId: string): Promise<void> {
+    applicationRuntimePlan(runtime);
+    const current = await this.read(runtime);
+    if (!current) {
+      try {
+        await syncAncestors(await this.directory(
+          runtime.release.project_ref, runtime.release.application_id, runtime.environmentId,
+        ), this.operations.beforeDirectorySync);
+      } catch (error) { if (!missing(error)) throw error; }
+      return;
+    }
+    if (current.runtime.activationId !== expectedActivationId) {
+      throw new Error("APPLICATION_ACTIVATION_REVISION_CONFLICT");
+    }
+    const directory = await this.directory(
+      runtime.release.project_ref, runtime.release.application_id, runtime.environmentId,
+    );
+    // Preserve the former authority for recovery; only the serving pointer moves.
+    await rename(join(directory, "active.json"), join(directory, `deactivated-${expectedActivationId}.json`));
+    await syncAncestors(directory, this.operations.beforeDirectorySync);
+    if (await this.read(runtime)) throw new Error("APPLICATION_ACTIVATION_READBACK_MISMATCH");
   }
 }

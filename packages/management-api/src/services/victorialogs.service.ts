@@ -1,6 +1,11 @@
 export type ProjectLogQuery = {
   service?: string;
   search?: string;
+  applicationId?: string;
+  environmentId?: string;
+  releaseId?: string;
+  activationId?: string;
+  units?: readonly string[];
   start?: string;
   end?: string;
   limit?: number;
@@ -21,6 +26,10 @@ export type VictoriaLogWrite = {
   message: string;
   service: string;
   projectRef?: string;
+  applicationId?: string;
+  environmentId?: string;
+  releaseId?: string;
+  activationId?: string;
   severity?: "debug" | "info" | "warning" | "error";
   unit?: string;
 };
@@ -33,6 +42,7 @@ type VictoriaLogsServiceOptions = {
 
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const SERVICE_PATTERN = /^[A-Za-z0-9_.@-]{1,128}$/;
+const LABEL_PATTERN = /^[A-Za-z0-9_.@:-]{1,256}$/;
 
 async function boundedLogBody(response: Response): Promise<string> {
   const reader = response.body?.getReader();
@@ -82,11 +92,11 @@ function normalizeTimestamp(value: string | undefined, field: string): string | 
 }
 
 function severityFor(record: Record<string, unknown>, message: string): VictoriaProjectLog["severity"] {
-  const explicit = String(record.severity ?? record.level ?? "").toLowerCase();
+  const explicit = String(record["severity"] ?? record["level"] ?? "").toLowerCase();
   if (["fatal", "panic", "error", "err"].includes(explicit)) return "error";
   if (["warning", "warn"].includes(explicit)) return "warning";
   if (["debug", "trace"].includes(explicit)) return "debug";
-  const priority = Number(record.PRIORITY ?? record.priority);
+  const priority = Number(record["PRIORITY"] ?? record["priority"]);
   if (Number.isFinite(priority)) {
     if (priority <= 3) return "error";
     if (priority === 4) return "warning";
@@ -122,7 +132,7 @@ export class VictoriaLogsService {
   private readonly timeoutMs: number;
 
   constructor(options: VictoriaLogsServiceOptions = {}) {
-    this.baseUrl = (options.baseUrl || process.env.VICTORIALOGS_URL || "http://127.0.0.1:9428").replace(/\/+$/, "");
+    this.baseUrl = (options.baseUrl || process.env["VICTORIALOGS_URL"] || "http://127.0.0.1:9428").replace(/\/+$/, "");
     this.fetcher = options.fetcher || fetch;
     this.timeoutMs = options.timeoutMs ?? 5_000;
   }
@@ -132,6 +142,14 @@ export class VictoriaLogsService {
     if (input.service && input.service !== "all" && !SERVICE_PATTERN.test(input.service)) {
       throw new Error("Invalid log service filter");
     }
+    for (const [name, value] of [
+      ["application id", input.applicationId],
+      ["environment id", input.environmentId],
+      ["release id", input.releaseId],
+      ["activation id", input.activationId],
+    ] as const) {
+      if (value !== undefined && !LABEL_PATTERN.test(value)) throw new Error(`Invalid ${name} filter`);
+    }
     const limit = normalizeLimit(input.limit);
     const offset = normalizeOffset(input.offset);
     const start = normalizeTimestamp(input.start, "start");
@@ -140,6 +158,17 @@ export class VictoriaLogsService {
 
     const filters = [`project_ref:=${logsQlLiteral(ref)}`];
     if (input.service && input.service !== "all") filters.push(`service:=${logsQlLiteral(input.service)}`);
+    if (input.applicationId) filters.push(`application_id:=${logsQlLiteral(input.applicationId)}`);
+    if (input.environmentId) filters.push(`environment_id:=${logsQlLiteral(input.environmentId)}`);
+    if (input.releaseId) filters.push(`release_id:=${logsQlLiteral(input.releaseId)}`);
+    if (input.activationId) filters.push(`activation_id:=${logsQlLiteral(input.activationId)}`);
+    if (input.units && input.units.length > 0) {
+      const units = input.units.map(unit => {
+        if (!SERVICE_PATTERN.test(unit)) throw new Error("Invalid log unit filter");
+        return `_SYSTEMD_UNIT:=${logsQlLiteral(unit)}`;
+      });
+      filters.push(units.length === 1 ? units[0]! : `(${units.join(" OR ")})`);
+    }
     if (input.search?.trim()) filters.push(logsQlLiteral(input.search.trim()));
 
     const body = new URLSearchParams({
@@ -163,13 +192,13 @@ export class VictoriaLogsService {
     }
 
     return parseJsonLines(await boundedLogBody(response)).slice(0, limit).map((record, index) => {
-      if (record.project_ref !== ref) throw new Error("VictoriaLogs project scope mismatch");
-      const message = String(record._msg ?? record.message ?? record.MESSAGE ?? "");
-      const rawTimestamp = String(record._time ?? record.timestamp ?? new Date().toISOString());
+      if (record["project_ref"] !== ref) throw new Error("VictoriaLogs project scope mismatch");
+      const message = String(record["_msg"] ?? record["message"] ?? record["MESSAGE"] ?? "");
+      const rawTimestamp = String(record["_time"] ?? record["timestamp"] ?? new Date().toISOString());
       const timestamp = Number.isFinite(Date.parse(rawTimestamp)) ? new Date(rawTimestamp).toISOString() : new Date().toISOString();
-      const service = String(record.service ?? record.SYSLOG_IDENTIFIER ?? record._SYSTEMD_UNIT ?? "system");
+      const service = String(record["service"] ?? record["SYSLOG_IDENTIFIER"] ?? record["_SYSTEMD_UNIT"] ?? "system");
       return {
-        id: String(record.id ?? `${ref}-${timestamp}-${index}`),
+        id: String(record["id"] ?? `${ref}-${timestamp}-${index}`),
         timestamp,
         event_message: message,
         severity: severityFor(record, message),
@@ -186,6 +215,10 @@ export class VictoriaLogsService {
       _msg: event.message,
       service: event.service,
       project_ref: event.projectRef || "",
+      ...(event.applicationId ? { application_id: event.applicationId } : {}),
+      ...(event.environmentId ? { environment_id: event.environmentId } : {}),
+      ...(event.releaseId ? { release_id: event.releaseId } : {}),
+      ...(event.activationId ? { activation_id: event.activationId } : {}),
       severity: event.severity || "info",
       _SYSTEMD_UNIT: event.unit || "supacloud-edge-function",
     })).join("\n");

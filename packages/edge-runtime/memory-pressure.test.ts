@@ -125,6 +125,38 @@ describe("cgroup memory pressure recovery", () => {
     expect(events).toHaveLength(1);
   });
 
+  test("blocks admission near memory.high and resumes with hysteresis", async () => {
+    let sample = { ...pressure, currentBytes: pressure.highBytes * 0.86, highEvents: 10 };
+    const states: boolean[] = [];
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: () => {},
+      onAdmissionStateChange: ({ blocked }) => states.push(blocked),
+      onError: () => {},
+    });
+
+    await monitor.poll();
+    sample = { ...sample, highEvents: 11 };
+    await monitor.poll();
+    expect(states).toEqual([true]);
+
+    sample = { ...sample, currentBytes: pressure.highBytes * 0.8, highEvents: 12 };
+    await monitor.poll();
+    expect(states).toEqual([true]);
+
+    sample = { ...sample, highEvents: 12 };
+    await monitor.poll();
+    expect(states.at(-1)).toBe(false);
+
+    sample = { ...sample, currentBytes: pressure.highBytes * 0.86, highEvents: 13 };
+    await monitor.poll();
+    expect(states.at(-1)).toBe(true);
+
+    sample = { ...sample, currentBytes: pressure.highBytes * 0.74 };
+    await monitor.poll();
+    expect(states.at(-1)).toBe(false);
+  });
+
   test("stalled counters and cgroup changes do not accumulate near-limit pressure", async () => {
     let sample = { ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: 100 };
     const events: MemoryPressureSnapshot[] = [];
@@ -147,6 +179,86 @@ describe("cgroup memory pressure recovery", () => {
     await monitor.poll();
     expect(events).toEqual([]);
   });
+
+  test("recovers a blocked idle-cache plateau through limited admission", async () => {
+    let sample = { ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: 10 };
+    const states: Array<{ blocked: boolean; recovering: boolean }> = [];
+    let recycles = 0;
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: () => { recycles++; },
+      onAdmissionStateChange: ({ blocked, recovering }) => states.push({ blocked, recovering }),
+      onError: error => { throw error; },
+    });
+    await monitor.poll();
+    sample = { ...sample, highEvents: 11 };
+    await monitor.poll();
+    for (let i = 0; i < 2; i++) await monitor.poll();
+    expect(states).toEqual([{ blocked: true, recovering: false }]);
+    await monitor.poll();
+    expect(states.at(-1)).toEqual({ blocked: false, recovering: true });
+    for (let i = 0; i < 3; i++) await monitor.poll();
+    expect(states.at(-1)).toEqual({ blocked: false, recovering: false });
+    expect(states).toHaveLength(3);
+    expect(recycles).toBe(0);
+  });
+
+  test.each(["throttling", "growth"] as const)("reblocks a recovering pool on %s", async reason => {
+    let sample = { ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: 10 };
+    const states: Array<{ blocked: boolean; recovering: boolean }> = [];
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: () => {},
+      onAdmissionStateChange: ({ blocked, recovering }) => states.push({ blocked, recovering }),
+      onError: error => { throw error; },
+    });
+    await monitor.poll();
+    sample = { ...sample, highEvents: 11 };
+    await monitor.poll();
+    for (let i = 0; i < 3; i++) await monitor.poll();
+    expect(states.at(-1)).toEqual({ blocked: false, recovering: true });
+    sample = reason === "throttling"
+      ? { ...sample, highEvents: 12 }
+      : { ...sample, currentBytes: pressure.highBytes * 0.96 };
+    await monitor.poll();
+    expect(states.at(-1)).toEqual({ blocked: true, recovering: false });
+  });
+
+  test.each(["missing", "error", "cgroup", "limit", "counter"] as const)(
+    "does not count %s samples as recovery evidence",
+    async reset => {
+      let sample: MemoryPressureSnapshot | null = {
+        ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: 10,
+      };
+      let fail = false;
+      const states: boolean[] = [];
+      const monitor = createMemoryPressureMonitor({
+        sample: async () => {
+          if (fail) throw new Error("unavailable");
+          return sample;
+        },
+        onPressure: () => {},
+        onAdmissionStateChange: ({ blocked }) => states.push(blocked),
+        onError: () => {},
+      });
+      await monitor.poll();
+      sample = { ...sample, highEvents: 11 };
+      await monitor.poll();
+      await monitor.poll();
+      await monitor.poll();
+      const healthy = sample;
+      if (reset === "missing") sample = null;
+      if (reset === "error") fail = true;
+      if (reset === "cgroup") sample = { ...healthy, cgroup: "/other" };
+      if (reset === "limit") sample = { ...healthy, highBytes: healthy.highBytes + 1 };
+      if (reset === "counter") sample = { ...healthy, highEvents: 0 };
+      await monitor.poll();
+      fail = false;
+      sample = healthy;
+      await monitor.poll();
+      expect(states).toEqual([true]);
+    },
+  );
 
   test("transient peaks, historical high counts, and missing samples reset the streak", async () => {
     let sample: MemoryPressureSnapshot | null = pressure;

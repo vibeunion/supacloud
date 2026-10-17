@@ -8,6 +8,11 @@ export function renderStarterRuntimeRolesSchema(httpRole: string, workerRole: st
 CREATE ROLE ${httpRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 CREATE ROLE ${workerRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 GRANT USAGE ON SCHEMA public TO ${httpRole}, ${workerRole};
+ALTER TABLE public.starter_application ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.starter_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.starter_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.starter_attachments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.starter_attachment_results ENABLE ROW LEVEL SECURITY;
 GRANT SELECT ON public.starter_application, public.starter_members,
   public.starter_reviews, public.starter_attachments TO ${httpRole}, ${workerRole};
 
@@ -21,34 +26,49 @@ GRANT UPDATE(id) ON public.starter_reviews TO ${workerRole};
 GRANT INSERT ON public.starter_attachments TO ${httpRole};
 GRANT SELECT,INSERT ON public.starter_attachment_results TO ${workerRole};
 
+DROP POLICY IF EXISTS starter_backend_binding_read ON public.starter_application;
 CREATE POLICY starter_backend_binding_read ON public.starter_application FOR SELECT
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_binding_lock ON public.starter_application;
 CREATE POLICY starter_backend_binding_lock ON public.starter_application FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_binding_immutable ON public.starter_application;
 CREATE POLICY starter_backend_binding_immutable ON public.starter_application AS RESTRICTIVE FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true) WITH CHECK (false);
+DROP POLICY IF EXISTS starter_backend_member_read ON public.starter_members;
 CREATE POLICY starter_backend_member_read ON public.starter_members FOR SELECT
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_member_lock ON public.starter_members;
 CREATE POLICY starter_backend_member_lock ON public.starter_members FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_member_immutable ON public.starter_members;
 CREATE POLICY starter_backend_member_immutable ON public.starter_members AS RESTRICTIVE FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true) WITH CHECK (false);
+DROP POLICY IF EXISTS starter_backend_review_read ON public.starter_reviews;
 CREATE POLICY starter_backend_review_read ON public.starter_reviews FOR SELECT
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_review_update ON public.starter_reviews;
 CREATE POLICY starter_backend_review_update ON public.starter_reviews FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_worker_review_immutable ON public.starter_reviews;
 CREATE POLICY starter_worker_review_immutable ON public.starter_reviews AS RESTRICTIVE FOR UPDATE
   TO ${workerRole} USING (true) WITH CHECK (false);
+DROP POLICY IF EXISTS starter_backend_attachment_read ON public.starter_attachments;
 CREATE POLICY starter_backend_attachment_read ON public.starter_attachments FOR SELECT
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_attachment_lock ON public.starter_attachments;
 CREATE POLICY starter_backend_attachment_lock ON public.starter_attachments FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_backend_attachment_immutable ON public.starter_attachments;
 CREATE POLICY starter_backend_attachment_immutable ON public.starter_attachments AS RESTRICTIVE FOR UPDATE
   TO ${httpRole}, ${workerRole} USING (true) WITH CHECK (false);
+DROP POLICY IF EXISTS starter_http_attachment_insert ON public.starter_attachments;
 CREATE POLICY starter_http_attachment_insert ON public.starter_attachments FOR INSERT
   TO ${httpRole} WITH CHECK (true);
+DROP POLICY IF EXISTS starter_worker_result_read ON public.starter_attachment_results;
 CREATE POLICY starter_worker_result_read ON public.starter_attachment_results FOR SELECT
   TO ${workerRole} USING (true);
+DROP POLICY IF EXISTS starter_worker_result_insert ON public.starter_attachment_results;
 CREATE POLICY starter_worker_result_insert ON public.starter_attachment_results FOR INSERT
   TO ${workerRole} WITH CHECK (true);
 

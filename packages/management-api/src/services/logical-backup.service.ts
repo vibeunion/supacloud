@@ -122,6 +122,12 @@ function backupIdForProject(projectRef: string): string {
   return `logical-full_${projectRef}_${randomUUID().replaceAll("-", "")}`;
 }
 
+function assertBackupIdForProject(backupId: string, projectRef: string): void {
+  if (!belongsToProject(backupId, projectRef)) {
+    throw invalidRequest("Invalid logical backup id");
+  }
+}
+
 function belongsToProject(backupId: string, projectRef: string): boolean {
   const projectPrefix = `logical-full_${projectRef}_`;
   return BACKUP_ID_PATTERN.test(backupId)
@@ -176,42 +182,42 @@ function invalidReceiptIdentity(): never {
 }
 
 function assertReceiptProject(candidate: Record<string, unknown>): void {
-  if (candidate.schema !== LOGICAL_BACKUP_SCHEMA || candidate.kind !== LOGICAL_BACKUP_KIND) {
+  if (candidate["schema"] !== LOGICAL_BACKUP_SCHEMA || candidate["kind"] !== LOGICAL_BACKUP_KIND) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.backup_id !== "string" || !BACKUP_ID_PATTERN.test(candidate.backup_id)) {
+  if (typeof candidate["backup_id"] !== "string" || !BACKUP_ID_PATTERN.test(candidate["backup_id"])) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.project_ref !== "string"
-    || !belongsToProject(candidate.backup_id, candidate.project_ref)) {
+  if (typeof candidate["project_ref"] !== "string"
+    || !belongsToProject(candidate["backup_id"], candidate["project_ref"])) {
     invalidReceiptIdentity();
   }
 }
 
 function assertReceiptDatabase(candidate: Record<string, unknown>): void {
-  if (typeof candidate.database !== "string" || !DATABASE_PATTERN.test(candidate.database)) {
+  if (typeof candidate["database"] !== "string" || !DATABASE_PATTERN.test(candidate["database"])) {
     invalidReceiptIdentity();
   }
 }
 
 function assertReceiptTimestamps(candidate: Record<string, unknown>): void {
-  if (!isCanonicalTimestamp(candidate.created_at) || !isCanonicalTimestamp(candidate.completed_at)) {
+  if (!isCanonicalTimestamp(candidate["created_at"]) || !isCanonicalTimestamp(candidate["completed_at"])) {
     invalidReceiptIdentity();
   }
-  if (new Date(candidate.completed_at).valueOf() < new Date(candidate.created_at).valueOf()) {
+  if (new Date(candidate["completed_at"]).valueOf() < new Date(candidate["created_at"]).valueOf()) {
     invalidReceiptIdentity();
   }
 }
 
 function assertReceiptEvidence(candidate: Record<string, unknown>): void {
-  if (!Number.isSafeInteger(candidate.bytes) || Number(candidate.bytes) <= 0) {
+  if (!Number.isSafeInteger(candidate["bytes"]) || Number(candidate["bytes"]) <= 0) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.sha256 !== "string" || !SHA256_PATTERN.test(candidate.sha256)) {
+  if (typeof candidate["sha256"] !== "string" || !SHA256_PATTERN.test(candidate["sha256"])) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.receipt_hmac_sha256 !== "string"
-    || !SHA256_PATTERN.test(candidate.receipt_hmac_sha256)) {
+  if (typeof candidate["receipt_hmac_sha256"] !== "string"
+    || !SHA256_PATTERN.test(candidate["receipt_hmac_sha256"])) {
     invalidReceiptIdentity();
   }
 }
@@ -339,15 +345,23 @@ async function openOrCreateTrustedDirectory(directoryPath: string): Promise<File
   return openTrustedDirectory(directoryPath);
 }
 
-async function openTrustedDirectoryChain(directoryPath: string): Promise<FileHandle> {
+async function openTrustedDirectoryChain(directoryPath: string, create: boolean): Promise<FileHandle> {
   const [filesystemRoot, ...pathEntries] = canonicalDirectoryChain(directoryPath);
   let trustedDirectory = await openTrustedDirectory(filesystemRoot!);
   let trustedPath = filesystemRoot!;
   try {
     for (const pathEntry of pathEntries) {
       const childPath = trustedChildPath(trustedDirectory, trustedPath, basename(pathEntry));
-      const nextDirectory = await openOrCreateTrustedDirectory(childPath);
-      await trustedDirectory.close();
+      const nextDirectory = create
+        ? await openOrCreateTrustedDirectory(childPath)
+        : await openTrustedDirectory(childPath);
+      try {
+        if (create) await trustedDirectory.sync();
+        await trustedDirectory.close();
+      } catch (error: unknown) {
+        await nextDirectory.close();
+        throw error;
+      }
       trustedDirectory = nextDirectory;
       trustedPath = pathEntry;
     }
@@ -358,9 +372,9 @@ async function openTrustedDirectoryChain(directoryPath: string): Promise<FileHan
   }
 }
 
-async function logicalBackupRoot(): Promise<FileHandle> {
+async function logicalBackupRoot(create = true): Promise<FileHandle> {
   const rootPath = logicalBackupRootPath();
-  const root = await openTrustedDirectoryChain(rootPath);
+  const root = await openTrustedDirectoryChain(rootPath, create);
   try {
     const metadata = await root.stat();
     if ((metadata.mode & 0o777) === 0o700) return root;
@@ -373,7 +387,7 @@ async function logicalBackupRoot(): Promise<FileHandle> {
 
 function logicalBackupRootPath(): string {
   return resolve(
-    process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/var/lib/supacloud/backups/logical-full",
+    process.env["SUPACLOUD_LOGICAL_BACKUP_DIR"] || "/var/lib/supacloud/backups/logical-full",
   );
 }
 
@@ -390,27 +404,27 @@ function openedDirectoryPath(directory: FileHandle): string {
     : logicalBackupRootPath();
 }
 
-function assertPrivateRegularFile(metadata: Stats, expectedBytes?: number): void {
+function assertPrivateRegularFile(metadata: Stats, expectedBytes?: number, expectedLinks = 1): void {
   const effectiveUid = process.geteuid?.();
   const trustedOwner = effectiveUid !== undefined
     && (metadata.uid === 0 || metadata.uid === effectiveUid);
   if (!metadata.isFile()
     || !trustedOwner
-    || metadata.nlink !== 1
+    || metadata.nlink !== expectedLinks
     || (metadata.mode & 0o777) !== 0o600
     || (expectedBytes !== undefined && metadata.size !== expectedBytes)) {
     throw new Error("Logical backup file identity is invalid");
   }
 }
 
-async function openPrivateFile(root: FileHandle, filename: string): Promise<OpenArchive> {
+async function openPrivateFile(root: FileHandle, filename: string, expectedLinks = 1): Promise<OpenArchive> {
   const path = directoryEntryPath(root, filename);
   const pathMetadata = await lstat(path);
-  assertPrivateRegularFile(pathMetadata);
+  assertPrivateRegularFile(pathMetadata, undefined, expectedLinks);
   const file = await open(path, ARCHIVE_OPEN_FLAGS);
   try {
     const metadata = await file.stat();
-    assertPrivateRegularFile(metadata);
+    assertPrivateRegularFile(metadata, undefined, expectedLinks);
     if (sameFileVersion(pathMetadata, metadata)) return { file, path, metadata };
     throw new Error("Logical backup file identity changed");
   } catch (error: unknown) {
@@ -472,8 +486,8 @@ async function archiveEvidence(root: FileHandle, backupId: string): Promise<Arch
   }
 }
 
-async function readPrivateTextFile(root: FileHandle, filename: string): Promise<string> {
-  const openedReceipt = await openPrivateFile(root, filename);
+async function readPrivateTextFile(root: FileHandle, filename: string, expectedLinks = 1): Promise<string> {
+  const openedReceipt = await openPrivateFile(root, filename, expectedLinks);
   try {
     if (openedReceipt.metadata.size <= 0 || openedReceipt.metadata.size > MAX_RECEIPT_BYTES) {
       throw new Error("Logical backup receipt size is invalid");
@@ -577,7 +591,7 @@ async function writePendingReceipt(
     await receiptFile.chmod(0o600);
     await receiptFile.sync();
   } catch (error: unknown) {
-    await rm(pendingPath, { force: true });
+    if (receiptFile) await rm(pendingPath, { force: true });
     throw error;
   } finally {
     await receiptFile?.close();
@@ -587,16 +601,10 @@ async function writePendingReceipt(
 async function publishReceipt(root: FileHandle, backupId: string): Promise<void> {
   const pendingPath = directoryEntryPath(root, pendingReceiptFilename(backupId));
   const publishedPath = directoryEntryPath(root, receiptFilename(backupId));
-  let linked = false;
-  try {
-    await link(pendingPath, publishedPath);
-    linked = true;
-    await rm(pendingPath);
-    await root.sync();
-  } catch (error: unknown) {
-    if (linked) await rm(publishedPath, { force: true });
-    throw error;
-  }
+  // 发布失败可能已留下可验证的收据，保留它供同一 ID 的显式恢复。
+  await link(pendingPath, publishedPath);
+  await rm(pendingPath);
+  await root.sync();
 }
 
 async function removeOwnedBackupFiles(root: FileHandle, backupId: string): Promise<void> {
@@ -648,12 +656,81 @@ async function publishBackupReceipt(
   await publishReceipt(root, backupId);
 }
 
+async function recoverStoredBackup(
+  root: FileHandle,
+  backupId: string,
+  projectRef: string,
+  database: string,
+): Promise<LogicalBackupIdentity | null> {
+  const receiptPath = directoryEntryPath(root, receiptFilename(backupId));
+  const pendingPath = directoryEntryPath(root, pendingReceiptFilename(backupId));
+  const archivePath = directoryEntryPath(root, archiveFilename(backupId));
+  const receiptMetadata = await optionalFileMetadata(receiptPath);
+  const pendingMetadata = await optionalFileMetadata(pendingPath);
+  const archiveMetadata = await optionalFileMetadata(archivePath);
+  if (!receiptMetadata && !pendingMetadata && !archiveMetadata) return null;
+  if (receiptMetadata && !pendingMetadata) {
+    const verified = await verifiedBackup(root, backupId, projectRef, database);
+    await root.sync();
+    return verified;
+  }
+  if (!pendingMetadata) {
+    throw conflict("Logical backup archive exists without a verified receipt");
+  }
+
+  const linkedReceipt = receiptMetadata !== null;
+  if (linkedReceipt) {
+    assertPrivateRegularFile(receiptMetadata, undefined, 2);
+    assertPrivateRegularFile(pendingMetadata, undefined, 2);
+    if (!sameInode(receiptMetadata, pendingMetadata)) {
+      throw conflict("Logical backup publication has conflicting receipt files");
+    }
+  }
+  const pending = parseLogicalBackupReceipt(await readPrivateTextFile(
+    root, pendingReceiptFilename(backupId), linkedReceipt ? 2 : 1,
+  ));
+  if (pending.backup_id !== backupId || pending.project_ref !== projectRef || pending.database !== database) {
+    throw conflict("Logical backup pending receipt does not match the requested project");
+  }
+  const evidence = await archiveEvidence(root, backupId);
+  if (pending.bytes !== evidence.bytes || pending.sha256 !== evidence.sha256) {
+    throw conflict("Logical backup pending receipt does not match its archive");
+  }
+  if (!sameFileVersion(pendingMetadata, await lstat(pendingPath))) {
+    throw conflict("Logical backup pending receipt changed during recovery");
+  }
+  if (linkedReceipt) {
+    if (!sameFileVersion(receiptMetadata, await lstat(receiptPath))) {
+      throw conflict("Logical backup published receipt changed during recovery");
+    }
+    await rm(pendingPath);
+    await root.sync();
+  } else {
+    await publishReceipt(root, backupId);
+  }
+  return await verifiedBackup(root, backupId, projectRef, database);
+}
+
+async function optionalFileMetadata(path: string): Promise<Stats | null> {
+  try { return await lstat(path); }
+  catch (error: unknown) {
+    if (isMissingPathError(error)) return null;
+    throw error;
+  }
+}
+
 async function createStoredBackup(
   root: FileHandle,
   projectRef: string,
   database: string,
+  requestedBackupId?: string,
 ): Promise<LogicalBackupIdentity> {
-  const backupId = backupIdForProject(projectRef);
+  const backupId = requestedBackupId ?? backupIdForProject(projectRef);
+  if (requestedBackupId !== undefined) {
+    assertBackupIdForProject(requestedBackupId, projectRef);
+    const recovered = await recoverStoredBackup(root, backupId, projectRef, database);
+    if (recovered) return recovered;
+  }
   const createdAt = new Date().toISOString();
   const evidence = await createVerifiedArchive(root, backupId, database);
   const receipt = receiptFor({
@@ -664,13 +741,8 @@ async function createStoredBackup(
     completedAt: new Date().toISOString(),
     evidence,
   });
-  try {
-    await publishBackupReceipt(root, backupId, receipt);
-    return await verifiedBackup(root, backupId, projectRef, database);
-  } catch (error: unknown) {
-    await removeOwnedBackupFiles(root, backupId);
-    throw error;
-  }
+  await publishBackupReceipt(root, backupId, receipt);
+  return await verifiedBackup(root, backupId, projectRef, database);
 }
 
 function receiptBackupId(filename: string, projectRef: string): string | null {
@@ -695,7 +767,7 @@ export async function listLogicalBackups(projectRef: string): Promise<LogicalBac
   const project = await requiredProject(projectRef);
   let root: FileHandle | null = null;
   try {
-    root = await logicalBackupRoot();
+    root = await logicalBackupRoot(false);
     const backupIds = await projectBackupIds(root, projectRef);
     const backups = await Promise.all(backupIds.map((backupId) => (
       verifiedBackup(root!, backupId, projectRef, project.db_name)
@@ -706,21 +778,57 @@ export async function listLogicalBackups(projectRef: string): Promise<LogicalBac
     ));
   } catch (error: unknown) {
     if (error instanceof LogicalBackupContractError) throw error;
+    if (isMissingPathError(error) && root === null) return [];
     throw unavailable("inventory", error);
   } finally {
     await root?.close();
   }
 }
 
-export async function createLogicalBackup(projectRef: string): Promise<LogicalBackupIdentity> {
+export async function createLogicalBackup(
+  projectRef: string,
+  backupId?: string,
+): Promise<LogicalBackupIdentity> {
+  assertProjectRef(projectRef);
+  if (backupId !== undefined) assertBackupIdForProject(backupId, projectRef);
+  try {
+    return await withProjectMigrationLocks({ projectRefs: [projectRef] }, async () => {
+      const project = await requiredProject(projectRef);
+      const root = await logicalBackupRoot();
+      try { return await createStoredBackup(root, projectRef, project.db_name, backupId); }
+      finally { await root.close(); }
+    });
+  } catch (error: unknown) {
+    if (error instanceof LogicalBackupContractError) throw error;
+    if (error instanceof ProjectMigrationLockError) {
+      throw conflict("Another database operation is already in progress for this project");
+    }
+    if (isExistingPathError(error)) throw conflict("Logical backup id is already reserved");
+    throw unavailable("creation", error);
+  }
+}
+
+export async function readLogicalBackup(projectRef: string, backupId: string): Promise<LogicalBackupIdentity> {
+  assertProjectRef(projectRef);
+  assertBackupIdForProject(backupId, projectRef);
   const project = await requiredProject(projectRef);
   let root: FileHandle | null = null;
   try {
-    root = await logicalBackupRoot();
-    return await createStoredBackup(root, projectRef, project.db_name);
+    root = await logicalBackupRoot(false);
+    if (!await optionalFileMetadata(directoryEntryPath(root, receiptFilename(backupId)))) {
+      if (await optionalFileMetadata(directoryEntryPath(root, pendingReceiptFilename(backupId)))
+        || await optionalFileMetadata(directoryEntryPath(root, archiveFilename(backupId)))) {
+        throw conflict("Logical backup publication is incomplete");
+      }
+      throw notFound("Logical backup not found");
+    }
+    const metadata = await optionalFileMetadata(directoryEntryPath(root, pendingReceiptFilename(backupId)));
+    if (metadata) throw conflict("Logical backup publication is incomplete");
+    return await verifiedBackup(root, backupId, projectRef, project.db_name);
   } catch (error: unknown) {
     if (error instanceof LogicalBackupContractError) throw error;
-    throw unavailable("creation", error);
+    if (isMissingPathError(error) && root === null) throw notFound("Logical backup not found");
+    throw unavailable("observation", error);
   } finally {
     await root?.close();
   }

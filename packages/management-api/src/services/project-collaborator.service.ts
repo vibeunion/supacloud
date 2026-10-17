@@ -114,7 +114,7 @@ function invitationToken(): string {
 }
 
 function publicCollaborator(row: Record<string, unknown>) {
-  const role = row.role as CollaboratorRole;
+  const role = row["role"] as CollaboratorRole;
   return {
     ...row,
     scope: "project",
@@ -167,11 +167,11 @@ function assertInvitationCanBeAccepted(
   input: AcceptCollaboratorInvitationInput,
 ): asserts invitation is Record<string, unknown> {
   if (!invitation) throw new NotFoundError("Collaborator invitation", input.invitationId);
-  if (invitation.status !== "pending" || new Date(String(invitation.expires_at)).getTime() <= Date.now()) {
+  if (invitation["status"] !== "pending" || new Date(String(invitation["expires_at"])).getTime() <= Date.now()) {
     throw new ConflictError("Invitation is no longer active");
   }
-  if (invitation.token_hash !== tokenHash(input.token)) throw new ValidationError("Invalid invitation token");
-  if (String(invitation.email).toLowerCase() !== input.principal.email) {
+  if (invitation["token_hash"] !== tokenHash(input.token)) throw new ValidationError("Invalid invitation token");
+  if (String(invitation["email"]).toLowerCase() !== input.principal.email) {
     throw new ForbiddenError("Invitation email does not match the authenticated GoTrue user");
   }
 }
@@ -199,7 +199,7 @@ async function createInvitedCollaborator(
 ): Promise<Record<string, unknown>> {
   const [collaborator] = await tx`
     INSERT INTO project_collaborators (project_ref, principal_id, email, role, created_by)
-    VALUES (${input.ref}, ${input.principal.id}, ${invitation.email}, ${invitation.role}, ${invitation.invited_by})
+    VALUES (${input.ref}, ${input.principal.id}, ${invitation["email"]}, ${invitation["role"]}, ${invitation["invited_by"]})
     RETURNING *
   `;
   return collaborator;
@@ -272,10 +272,10 @@ export const projectCollaboratorService = {
     }
     return sql.begin(async (tx) => {
       const current = await lockedCollaborator(tx, ref, collaboratorId);
-      if (current.role === "owner" || role === "owner") {
+      if (current["role"] === "owner" || role === "owner") {
         assertCapabilityPresent(capabilities, "tenant.owner.transfer");
       }
-      const removesOwner = current.role === "owner"
+      const removesOwner = current["role"] === "owner"
         && ((role !== null && role !== "owner") || nextStatus === "suspended");
       if (removesOwner) {
         await assertActiveOwnerRemains(tx, ref, "A project must retain at least one active owner");
@@ -298,8 +298,8 @@ export const projectCollaboratorService = {
     assertCapabilityPresent(capabilities, "tenant.members.manage");
     return sql.begin(async (tx) => {
       const current = await lockedCollaborator(tx, ref, collaboratorId);
-      if (current.role === "owner") assertCapabilityPresent(capabilities, "tenant.owner.transfer");
-      if (current.role === "owner" && current.status === "active") {
+      if (current["role"] === "owner") assertCapabilityPresent(capabilities, "tenant.owner.transfer");
+      if (current["role"] === "owner" && current["status"] === "active") {
         await assertActiveOwnerRemains(tx, ref, "The last active owner cannot be removed");
       }
       const [row] = await tx`

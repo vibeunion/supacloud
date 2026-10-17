@@ -3,22 +3,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executionMode } from "../execution-policy";
-import { registerAppTools, type AppToolArguments } from "./app-tools";
-
-type AppCallback = (args: Partial<AppToolArguments>) => Promise<{
-    isError: boolean;
-    content: Array<{ type: "text"; text: string }>;
-}>;
+import { registerAppTools } from "./app-tools";
+import type { ToolInvocation } from "../tool-server";
 
 const abort = new AbortController();
 abort.abort();
 
-function captureAppCallback(): AppCallback {
-    let callback: AppCallback | undefined;
+function captureAppCallback(): ToolInvocation {
+    let callback: ToolInvocation | undefined;
     registerAppTools(
         {
             tool(_name, _description, _schema, registered) {
-                callback = registered as AppCallback;
+                callback = registered;
             },
         },
         { signal: abort.signal },
@@ -122,8 +118,8 @@ describe("app dev", () => {
     });
 
     test("an unknown profile is rejected", async () => {
-        await expect(app({ action: "dev", root, profile: "staging" as never, once: true }))
-            .rejects.toMatchObject({ code: "SCAFFOLD_OPTION_INVALID" });
+        await expect(app({ action: "dev", root, profile: "staging", once: true }))
+            .rejects.toThrow("- profile:");
     });
 
     test("app dev is classified as a local execution", () => {

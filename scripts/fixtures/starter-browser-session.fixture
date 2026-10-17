@@ -1,0 +1,49 @@
+import { createClient } from "@supabase/supabase-js";
+import { createAuthenticatedFetch } from "@supacloud/js/contracts";
+import { createReviewClient, createReviewPendingStore } from "../src/client/reviews";
+import { createReviewTransport } from "../src/client/review-transport";
+
+export const fixture = (path: string, method = "GET") => fetch("/fixture/" + path, {
+  method, headers: { "x-starter-fixture": "browser" }, cache: "no-store",
+});
+export function fixtureSubject(): "owner" | "other" {
+  return sessionStorage.getItem("fixture-subject") === "other" ? "other" : "owner";
+}
+
+/** Synthetic session transport shared by the DOM and Svelte acceptance views. */
+export async function createFixtureClient(subject: "owner" | "other",
+  faults: { loseResponse(): boolean; failList(): boolean }) {
+  const response = await fixture("session?subject=" + subject);
+  const session: unknown = await response.json();
+  if (!session || typeof session !== "object" || !("token" in session) || typeof session.token !== "string"
+    || !("anonKey" in session) || typeof session.anonKey !== "string"
+    || !("reviewId" in session) || typeof session.reviewId !== "string") throw new Error("Invalid fixture session");
+  const bearer = session.token, reviewId = session.reviewId;
+  const supabase = createClient(location.origin, session.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: {
+      headers: { Authorization: "Bearer " + bearer },
+      fetch: new Proxy(fetch, {
+        apply(send, _receiver: unknown, [input, init]: Parameters<typeof fetch>) {
+          const headers = new Headers(init?.headers);
+          if (faults.failList()) headers.set("x-fixture-fail-list", "true");
+          return send(input, { ...init, headers });
+        },
+      }),
+    },
+  });
+  const authenticatedFetch = createAuthenticatedFetch({
+    getAccessToken: async () => bearer,
+    fetch: (input, init) => {
+      const request = new Request(input, init);
+      const headers = new Headers(request.headers);
+      if (faults.loseResponse()) headers.set("x-fixture-lose-response", "true");
+      return fetch(new Request(request, { headers }));
+    },
+  });
+  const transport = createReviewTransport({ supabase, authenticatedFetch, apiOrigin: location.origin });
+  const client = createReviewClient(transport, createReviewPendingStore(localStorage, {
+    projectId: "starter-test", tenantId: "starter-test", applicationId: "reviews", subject,
+  }));
+  return { client, transport, reviewId };
+}

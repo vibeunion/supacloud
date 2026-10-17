@@ -25,27 +25,27 @@ export function assertGraphqlOptions(value: unknown): asserts value is GraphqlOp
   if (unsupported.length) {
     fail(`Unsupported options: ${unsupported.join(", ")}. Configure only schema, documents, scalars and typedDocuments; server schema authoring modes are not supported.`);
   }
-  const schema = options.schema;
+  const schema = options["schema"];
   if (typeof schema !== "string" || !schema.trim() || schema !== schema.trim() || /[\r\n\0]/.test(schema)
     || (/^[a-z][a-z0-9+.-]*:/i.test(schema) && !/^[a-z]:[\\/]/i.test(schema))
     || ![".graphql", ".gql", ".json"].includes(extname(schema))) {
     fail("graphql.schema must be a local .graphql, .gql or .json database snapshot. Export it with graphql-schema; URLs, inline SDL and executable schema sources are not supported.");
   }
-  if (options.documents !== undefined && (!Array.isArray(options.documents)
-    || options.documents.some((pattern) => typeof pattern !== "string" || !pattern.trim()))) {
+  if (options["documents"] !== undefined && (!Array.isArray(options["documents"])
+    || options["documents"].some((pattern) => typeof pattern !== "string" || !pattern.trim()))) {
     fail("graphql.documents must contain local query/fragment glob strings.");
   }
-  if (options.typedDocuments !== undefined && typeof options.typedDocuments !== "boolean") {
+  if (options["typedDocuments"] !== undefined && typeof options["typedDocuments"] !== "boolean") {
     fail("graphql.typedDocuments must be a boolean output option.");
   }
-  if (options.mutations !== undefined && typeof options.mutations !== "boolean") {
+  if (options["mutations"] !== undefined && typeof options["mutations"] !== "boolean") {
     fail("graphql.mutations must be a boolean opt-in for database-backed mutation documents.");
   }
-  if (options.scalars !== undefined) {
-    if (!options.scalars || typeof options.scalars !== "object" || Array.isArray(options.scalars)) {
+  if (options["scalars"] !== undefined) {
+    if (!options["scalars"] || typeof options["scalars"] !== "object" || Array.isArray(options["scalars"])) {
       fail("graphql.scalars must be a map of explicit wire types.");
     }
-    for (const mapping of Object.values(options.scalars)) {
+    for (const mapping of Object.values(options["scalars"])) {
       if (typeof mapping === "string" && mapping.trim()) continue;
       if (mapping && typeof mapping === "object" && !Array.isArray(mapping)
         && "input" in mapping && typeof mapping.input === "string" && mapping.input.trim()

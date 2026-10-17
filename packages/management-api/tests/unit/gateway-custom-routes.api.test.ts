@@ -115,8 +115,8 @@ describe("controlled custom gateway routes API", () => {
   test("POST and PUT persist the managed Edge Functions symbol without resolving a port", async () => {
     const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
       gateway_routes: [],
-    } as any);
-    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({} as any);
+    });
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({});
     const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes").mockResolvedValue({ success: true });
 
     try {
@@ -140,11 +140,13 @@ describe("controlled custom gateway routes API", () => {
         }),
       });
       expect(configureRoutes).toHaveBeenCalledWith("proj123", [
-        expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined }),
+        expect.objectContaining({ managed_upstream: "edge-functions" }),
       ]);
+      expect(configureRoutes.mock.calls[0]?.[1][0]).not.toHaveProperty("upstream");
       expect(updateSettings).toHaveBeenCalledWith("proj123", {
-        gateway_routes: [expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined })],
+        gateway_routes: [expect.objectContaining({ managed_upstream: "edge-functions" })],
       });
+      expect(updateSettings.mock.calls[0]?.[1]).not.toHaveProperty("gateway_routes.0.upstream");
 
       getSettings.mockResolvedValue({
         gateway_routes: [{
@@ -153,7 +155,7 @@ describe("controlled custom gateway routes API", () => {
           path: "/invoke/*",
           managed_upstream: "edge-functions",
         }],
-      } as any);
+      });
       updateSettings.mockClear();
       configureRoutes.mockClear();
 
@@ -176,11 +178,13 @@ describe("controlled custom gateway routes API", () => {
         }),
       });
       expect(configureRoutes).toHaveBeenCalledWith("proj123", [
-        expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined }),
+        expect.objectContaining({ managed_upstream: "edge-functions" }),
       ]);
+      expect(configureRoutes.mock.calls[0]?.[1][0]).not.toHaveProperty("upstream");
       expect(updateSettings).toHaveBeenCalledWith("proj123", {
-        gateway_routes: [expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined })],
+        gateway_routes: [expect.objectContaining({ managed_upstream: "edge-functions" })],
       });
+      expect(updateSettings.mock.calls[0]?.[1]).not.toHaveProperty("gateway_routes.0.upstream");
     } finally {
       getSettings.mockRestore();
       updateSettings.mockRestore();

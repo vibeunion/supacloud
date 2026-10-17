@@ -25,8 +25,8 @@ export class DefaultTitleStrategy extends TitleStrategy {
       if (!ctx.data) ctx.data = {};
       ctx.data.title = title;
     }
-    if (typeof globalThis !== "undefined" && (globalThis as any).document) {
-      (globalThis as any).document.title = title;
+    if (typeof globalThis !== "undefined" && globalThis.document) {
+      globalThis.document.title = title;
     }
   }
 }

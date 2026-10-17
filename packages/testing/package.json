@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/testing",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Testing utilities for SupaCloud applications: provider-override test modules, HTTP test helpers and SQL/RLS test runners",
   "type": "module",
   "main": "./dist/index.js",
@@ -43,7 +43,7 @@
     "directory": "packages/testing"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "typescript": "^7.0.2"
   }
 }

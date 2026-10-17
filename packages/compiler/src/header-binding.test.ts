@@ -4,12 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 
 test("named headers compile to lower-case selection while unnamed headers preserve the map", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-headers-"));
   try {
-    await writeFixtureProject(root, { "webhook.ts": `
-import { Module, Controller, Get, Headers } from "@supacloud/app";
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "runtime.ts": RUNTIME_SOURCE,
+      "webhook.ts": `
+import { Module, Controller, Get, Headers } from "./runtime";
 @Controller("/headers")
 export class HeaderController {
   @Get("/")
@@ -18,7 +22,7 @@ export class HeaderController {
 @Module({ name: "headers", controllers: [HeaderController] })
 export class HeaderModule {}
 ` });
-    const result = await compileProject({ rootDir: root, outDir: join(root, "generated") });
+    const result = await compileProject({ rootDir: root, outDir: join(root, "generated"), requireRouteContracts: false });
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(result.graph.modules[0]?.controllers[0]?.routes[0]?.handlerParams).toMatchObject([
       { kind: "headers", bindingName: "Idempotency-Key" }, { kind: "headers" },

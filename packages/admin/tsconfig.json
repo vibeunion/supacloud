@@ -11,7 +11,9 @@
     "rootDir": "..",
     "paths": {
       "@supacloud/cli": ["../cli/src/index.ts"],
-      "@supacloud/cli/*": ["../cli/src/shared/tools/*.ts"]
+      "@supacloud/cli/frontend-release-control": ["../cli/src/shared/tools/frontend-release-control.ts"],
+      "@supacloud/cli/project-endpoint-read": ["../cli/src/shared/tools/project-endpoint-read.ts"],
+      "@supacloud/cli/project-read-projection": ["../cli/src/shared/tools/project-read-projection.ts"]
     },
     "declaration": true,
     "types": [

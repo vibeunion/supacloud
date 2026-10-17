@@ -80,7 +80,7 @@ const REALTIME_API_SECRET = config.jwtSecret;
 if (!REALTIME_API_SECRET) {
     logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
 }
-const PG_HOST = (process.env.CI || process.env.GITHUB_ACTIONS) ? "postgres" : config.pgHost;
+const PG_HOST = (process.env["CI"] || process.env["GITHUB_ACTIONS"]) ? "postgres" : config.pgHost;
 const PG_PORT = String(config.pgPort);
 
 interface RealtimeTenantConfig {
@@ -177,8 +177,8 @@ export class RealtimeService {
     async registerTenant(config: RealtimeTenantConfig, options: { signal?: AbortSignal } = {}): Promise<boolean> {
         const tenantPayload = await this.authoritativeTenantPayload(config);
         // CI cold start Realtime containers often require ~20-40s before accepting connections; provide sufficient retry window.
-        const MAX_ATTEMPTS = Number(process.env.REALTIME_REGISTER_MAX_ATTEMPTS || 12);
-        const BACKOFF_MS = Number(process.env.REALTIME_REGISTER_BACKOFF_MS || 3000);
+        const MAX_ATTEMPTS = Number(process.env["REALTIME_REGISTER_MAX_ATTEMPTS"] || 12);
+        const BACKOFF_MS = Number(process.env["REALTIME_REGISTER_BACKOFF_MS"] || 3000);
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             if (options.signal?.aborted) return false;
             try {
@@ -186,7 +186,7 @@ export class RealtimeService {
                     method: "POST",
                     headers: await this.authHeaders(),
                     body: JSON.stringify(tenantPayload),
-                    signal: options.signal,
+                    ...(options.signal === undefined ? {} : { signal: options.signal }),
                 });
 
                 if (res.ok || res.status === 409) {
@@ -266,7 +266,7 @@ export class RealtimeService {
                 method: "PUT",
                 headers: await this.authHeaders(),
                 body: JSON.stringify(tenantPayload),
-                signal: options.signal,
+                ...(options.signal === undefined ? {} : { signal: options.signal }),
             });
 
             if (res.ok) {

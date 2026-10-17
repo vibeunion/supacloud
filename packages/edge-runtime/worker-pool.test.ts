@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
+import { resolveProjectWorkerCacheOptions, resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
+import { createMemoryPressureMonitor } from "./memory-pressure";
+import { functionBytecodeCache } from "./function-bytecode";
+import { benchmarkProjectWorkers } from "./worker-project-benchmark";
 import {
   EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
   type EdgeRuntimePreheatIdentity,
@@ -752,6 +755,110 @@ describe("WorkerPool subprocess guard", () => {
 
       expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
       expect(preheat.attestation).toEqual({ ...attestation, module_loaded: true });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  linuxDescriptorTest("preheats bytecode and dispatches the prepared pair", async () => {
+    const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-bytecode-"));
+    const functionPath = join(projectRoot, "bytecode.ts");
+    await Bun.write(functionPath, `export default () => new Response("bytecode-ready");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const attestation = preheatIdentity({
+      projectRef: "proj_preheat_bytecode",
+      functionSlug: "bytecode",
+      version: "1",
+      artifactSha256,
+    });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatIdleWorkers(
+        "proj_preheat_bytecode_bytecode_v1",
+        functionPath,
+        projectRoot,
+        {},
+        {
+          projectRef: "proj_preheat_bytecode",
+          moduleVersion: "v1",
+          attestation,
+          bytecode: "required",
+        },
+      );
+      expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+
+      const response = await pool.dispatch({
+        functionId: "proj_preheat_bytecode_bytecode_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_preheat_bytecode",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        bytecode: "required",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/bytecode"),
+      });
+      expect(await response.text()).toBe("bytecode-ready");
+
+      const artifact = functionBytecodeCache.lookup({ functionPath, projectRoot, artifactSha256, bytecode: "required" })!;
+      const originalSource = await readFile(functionPath);
+      const originalBytecode = await readFile(`${artifact.path}.jsc`);
+      const builds = functionBytecodeCache.metrics.builds;
+      const dispatch = () => pool.dispatch({
+        functionId: "proj_preheat_bytecode_bytecode_v1", functionPath, projectRoot,
+        projectRef: "proj_preheat_bytecode", moduleVersion: "v1", artifactSha256,
+        bytecode: "required", env: {}, request: new Request("http://edge.local/functions/v1/bytecode"),
+      });
+      // Even a cached handler must revalidate both the published authority and executable sidecar.
+      await writeFile(functionPath, 'export default () => new Response("changed");');
+      expect((await dispatch()).status).toBe(500);
+      await writeFile(functionPath, originalSource);
+      await chmod(`${artifact.path}.jsc`, 0o600);
+      await writeFile(`${artifact.path}.jsc`, "tampered bytecode");
+      expect((await dispatch()).status).toBe(500);
+      await writeFile(`${artifact.path}.jsc`, originalBytecode);
+      await chmod(`${artifact.path}.jsc`, 0o400);
+      await chmod(dirname(artifact.path), 0o700);
+      await rm(`${artifact.path}.jsc`);
+      const replacement = join(projectRoot, "untrusted.jsc");
+      await writeFile(replacement, originalBytecode);
+      await symlink(replacement, `${artifact.path}.jsc`);
+      expect((await dispatch()).status).toBe(500);
+      expect(functionBytecodeCache.metrics.builds).toBe(builds);
+    } finally {
+      await pool.shutdown();
+      const artifact = functionBytecodeCache.lookup({ functionPath, projectRoot, artifactSha256, bytecode: "auto" });
+      if (artifact) await chmod(dirname(artifact.path), 0o700);
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("required bytecode rejects dispatch before a prepared artifact exists", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-dispatch-bytecode-required-"));
+    const functionPath = join(projectRoot, "bytecode.ts");
+    await Bun.write(functionPath, `export default () => new Response("should-not-run");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_dispatch_bytecode_required_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_dispatch_bytecode_required",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        bytecode: "required",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/bytecode-required"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe("Internal Error");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -2509,8 +2616,16 @@ describe("WorkerPool metrics NaN fix", () => {
     const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
     pools.push(pool);
 
+    let clockMs = 0;
+    // Immediate dispatch must not count scheduling overhead as queue wait.
+    const clock = spyOn(performance, "now").mockImplementation(() => {
+      const now = clockMs;
+      clockMs += 10;
+      return now;
+    });
+
     try {
-      const res = await pool.dispatch({
+      const response = pool.dispatch({
         functionId: "test_nan",
         projectRef: "test-project",
         functionPath,
@@ -2518,6 +2633,8 @@ describe("WorkerPool metrics NaN fix", () => {
         env: {},
         request: new Request("http://edge.local/functions/v1/test"),
       });
+      clock.mockRestore();
+      const res = await response;
       expect(res.status).toBe(200);
 
       const metrics = pool.snapshotMetrics("test");
@@ -2525,7 +2642,10 @@ describe("WorkerPool metrics NaN fix", () => {
         expect(Number.isNaN(value)).toBe(false);
       }
       expect(metrics["test_avg_queue_wait_ms"]).toBe(0);
+      expect(metrics["test_total_queue_wait_ms"]).toBe(0);
+      expect(metrics["test_total_queued_requests"]).toBe(0);
     } finally {
+      clock.mockRestore();
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
@@ -2574,7 +2694,53 @@ describe("WorkerPool metrics NaN fix", () => {
       }
       // At least one request was queued, so total_queue_wait_ms > 0
       expect(metrics["testq_total_queue_wait_ms"]).toBeGreaterThan(0);
+      expect(metrics["testq_avg_queue_wait_ms"]).toBeGreaterThan(0);
+      expect(metrics["testq_total_queued_requests"]).toBe(1);
     } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("memory admission blocks new and queued dispatches", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-admission-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          await Bun.sleep(100);
+          return new Response("ok", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+
+    const dispatch = () => pool.dispatch({
+      functionId: "test_admission",
+      projectRef: "test-project",
+      functionPath,
+      projectRoot,
+      env: {},
+      request: new Request("http://edge.local/functions/v1/test"),
+    });
+
+    try {
+      const active = dispatch();
+      await Bun.sleep(10);
+      const queued = dispatch();
+      pool.setAdmissionBlocked(true);
+
+      expect((await queued).status).toBe(503);
+      expect((await dispatch()).status).toBe(503);
+      expect((await active).status).toBe(200);
+      expect(pool.snapshotMetrics("admission")["admission_admission_blocked"]).toBe(1);
+      expect(pool.snapshotMetrics("admission")["admission_total_admission_rejected"]).toBe(2);
+
+      pool.setAdmissionBlocked(false);
+      expect((await dispatch()).status).toBe(200);
+    } finally {
+      await pool.drain();
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
@@ -2664,6 +2830,247 @@ describe("WorkerPool project scheduling", () => {
   });
 });
 
+describe("WorkerPool parked project slots", () => {
+  function setup(overrides: Partial<ConstructorParameters<typeof WorkerPool>[0]> = {}) {
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2000, ...overrides });
+    pools.push(pool);
+    const projectRoot = join(import.meta.dir, "fixtures");
+    const dispatch = (projectRef: string, delay = 1) => pool.dispatch({
+      projectRef, projectRoot,
+      functionId: `${projectRef}_fn`,
+      functionPath: join(projectRoot, "project-affinity.ts"),
+      env: { PROJECT_OWNER: projectRef },
+      request: new Request(`http://edge.local/fn?delay=${delay}`),
+    });
+    return { pool, dispatch };
+  }
+
+  test("validates cache options and preserves explicit zero overrides", () => {
+    expect(resolveProjectWorkerCacheOptions({})).toEqual({
+      maxExtraProjectWorkers: undefined, parkedWorkerIdleMs: undefined,
+    });
+    expect(resolveProjectWorkerCacheOptions({
+      EDGE_MAX_EXTRA_PROJECT_WORKERS: "0", EDGE_PARKED_WORKER_IDLE_MS: "30000",
+    })).toEqual({ maxExtraProjectWorkers: 0, parkedWorkerIdleMs: 30000 });
+    for (const key of ["EDGE_MAX_EXTRA_PROJECT_WORKERS", "EDGE_PARKED_WORKER_IDLE_MS"]) {
+      for (const value of ["-1", "1.5", "NaN", "Infinity", "1e3", "9007199254740992"]) {
+        expect(() => resolveProjectWorkerCacheOptions({ [key]: value })).toThrow(key);
+      }
+    }
+  });
+
+  test("rotates three queued projects without starving the last project", async () => {
+    const { dispatch } = setup();
+    const order: string[] = [];
+    const first = dispatch("a", 50);
+    const queued = ["a", "a", "a", "b", "b", "b", "c"].map(project =>
+      dispatch(project).then(response => {
+        expect(response.status).toBe(200);
+        order.push(project);
+      }),
+    );
+    await first;
+    await Promise.all(queued);
+    expect(order.slice(0, 3)).toEqual(["b", "a", "c"]);
+  });
+
+  test.each([{ maxExtraProjectWorkers: 0 }, { parkedWorkerIdleMs: 0 }])(
+    "can disable retained workers with %j",
+    async options => {
+      const { pool, dispatch } = setup(options);
+      const first: unknown = await (await dispatch("a")).json();
+      await dispatch("b");
+      expect(await (await dispatch("a")).json()).not.toEqual(first);
+      expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+      expect(pool.snapshotMetrics("test").test_total_worker_replacements).toBe(2);
+    },
+  );
+
+  test.each([1, 2])("bounds cold starts with %i slots and two busy projects", async size => {
+    const result = await benchmarkProjectWorkers({ size, projects: 2, requests: 80 });
+    expect(result.successful).toBe(80);
+    expect(result.metrics.benchmark_total_worker_replacements).toBeLessThanOrEqual(1);
+    // Once one project's queue drains, its slot can help the other project's
+    // backlog, creating at most one more project-bound worker.
+    const maxColdStarts = size === 1 ? 2 : 3;
+    const misses = result.metrics.benchmark_total_module_cache_misses;
+    const hits = result.metrics.benchmark_total_module_cache_hits;
+    expect(misses).toBeLessThanOrEqual(maxColdStarts);
+    expect(hits).toBeGreaterThanOrEqual(80 - maxColdStarts);
+    expect(hits + misses).toBe(80);
+    expect(result.metrics.benchmark_total_worker_retirements).toBe(0);
+    expect(result.metrics.benchmark_queue_length).toBe(0);
+    console.log("project-affinity-benchmark", JSON.stringify(result));
+  });
+
+  test("borrows a drained project's slot for another project's backlog", async () => {
+    const { pool, dispatch } = setup({ size: 2 });
+    const projectRoot = join(import.meta.dir, "fixtures");
+    let releaseBody = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        releaseBody = () => controller.close();
+      },
+    });
+    const first = dispatch("a");
+    // Hold B's original slot before execution, independently of worker speed.
+    const held = pool.dispatch({
+      projectRef: "b", projectRoot, functionId: "b_fn",
+      functionPath: join(projectRoot, "project-affinity.ts"),
+      env: { PROJECT_OWNER: "b" },
+      request: new Request("http://edge.local/fn", { method: "POST", body }),
+    });
+    const queued = dispatch("b");
+    try {
+      expect((await first).status).toBe(200);
+      expect(await (await queued).json()).toMatchObject({ owner: "b" });
+      expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+      expect((await dispatch("b")).status).toBe(200);
+    } finally {
+      releaseBody();
+      await held;
+    }
+    const metrics = pool.snapshotMetrics("test");
+    expect(metrics.test_total_worker_replacements).toBe(1);
+    expect(metrics.test_total_module_cache_misses).toBe(3);
+    expect(metrics.test_total_module_cache_hits).toBe(1);
+    expect(metrics.test_total_worker_retirements).toBe(0);
+    expect(metrics.test_queue_length).toBe(0);
+  });
+
+  test("keeps parked workers out of the execution concurrency budget", async () => {
+    const { pool, dispatch } = setup();
+    const a = dispatch("a", 100);
+    const b = dispatch("b", 100);
+    const c = dispatch("c", 100);
+    expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+    expect(pool.snapshotMetrics("test").test_queue_length).toBe(2);
+    expect((await a).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+    expect((await b).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
+    expect((await c).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(2);
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(3);
+  });
+
+  test("reuses project module state without exposing another project's env", async () => {
+    const { pool, dispatch } = setup();
+    const first: unknown = await (await dispatch("a")).json();
+    const other: unknown = await (await dispatch("b")).json();
+    const again: unknown = await (await dispatch("a")).json();
+    expect(first).toMatchObject({ owner: "a" });
+    expect(other).toMatchObject({ owner: "b" });
+    expect(again).toEqual(first);
+    expect(pool.snapshotMetrics("test").test_total_parked_worker_reuses).toBe(1);
+  });
+
+  test("evicts the least recently parked project at the resident worker limit", async () => {
+    const { pool, dispatch } = setup({ maxExtraProjectWorkers: 1 });
+    const first: unknown = await (await dispatch("a")).json();
+    await dispatch("b");
+    await dispatch("c");
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(2);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(1);
+    expect(pool.snapshotMetrics("test").test_total_project_worker_evictions).toBe(1);
+    const reloaded: unknown = await (await dispatch("a")).json();
+    expect(reloaded).toMatchObject({ owner: "a" });
+    expect(reloaded).not.toEqual(first);
+  });
+
+  test("retires expired parked workers without allocating replacements", async () => {
+    const { pool, dispatch } = setup({ parkedWorkerIdleMs: 30 });
+    await dispatch("a");
+    await dispatch("b");
+    await waitForMetric(pool, "parked_workers", 0);
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(1);
+    expect(pool.snapshotMetrics("test").test_total_project_worker_evictions).toBe(1);
+    expect(pool.snapshotMetrics("test").test_total_worker_replacements).toBe(1);
+  });
+
+  test("clears parked generations before versioned preheat", async () => {
+    const { pool, dispatch } = setup();
+    const first: unknown = await (await dispatch("a")).json();
+    await dispatch("b");
+    const projectRoot = join(import.meta.dir, "fixtures");
+    const preheat = await pool.preheatVersionedIdleWorkers({
+      projectRef: "b", projectRoot, functionId: "b_fn",
+      functionPath: join(projectRoot, "project-affinity.ts"),
+      env: { PROJECT_OWNER: "b" }, moduleVersion: "v2",
+    });
+    expect(preheat.rotation.attempted).toBe(2);
+    expect(preheat.rotation.idleRetired).toBe(1);
+    expect(preheat.rotation.parkedRetired).toBe(1);
+    expect(preheat.rotation.immediateReplacements).toBe(1);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    expect(await (await dispatch("a")).json()).not.toEqual(first);
+  });
+
+  test("invalidates modules in parked workers", async () => {
+    const { pool, dispatch } = setup();
+    await dispatch("a");
+    await dispatch("b");
+    const result = await pool.invalidateModule("a_fn");
+    expect(result.attempted).toBe(2);
+    expect(result.invalidated).toBe(1);
+    const missesBefore = pool.snapshotMetrics("test").test_total_module_cache_misses;
+    expect(await (await dispatch("a")).json()).toMatchObject({ owner: "a" });
+    expect(pool.snapshotMetrics("test").test_total_module_cache_misses).toBe(missesBefore + 1);
+  });
+
+  test("wires monitor recovery to one request per pool and releases parked caches", async () => {
+    const { pool, dispatch } = setup({ size: 2 });
+    const active = [dispatch("a", 50), dispatch("b", 50)];
+    await Promise.all(active);
+    await dispatch("c");
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(1);
+    let sample = { cgroup: "/test", highBytes: 100, currentBytes: 95, highEvents: 1 };
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: () => {},
+      onAdmissionStateChange: ({ blocked, recovering }) => pool.setAdmissionBlocked(blocked, recovering),
+      onError: error => { throw error; },
+    });
+    await monitor.poll();
+    sample = { ...sample, highEvents: 2 };
+    await monitor.poll();
+    expect((await dispatch("a")).status).toBe(503);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    for (let i = 0; i < 3; i++) await monitor.poll();
+    const probe = dispatch("c", 50);
+    expect((await dispatch("c")).status).toBe(503);
+    expect((await probe).status).toBe(200);
+    expect((await dispatch("a")).status).toBe(200);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    for (let i = 0; i < 3; i++) await monitor.poll();
+    expect((await Promise.all([dispatch("c"), dispatch("b")])).map(r => r.status)).toEqual([200, 200]);
+    expect(pool.snapshotMetrics("test").test_admission_recovering).toBe(0);
+    monitor.stop();
+  });
+
+  test("does not allow preheat to bypass memory admission", async () => {
+    const { pool } = setup();
+    pool.setAdmissionBlocked(true);
+    const projectRoot = join(import.meta.dir, "fixtures");
+    const functionPath = join(projectRoot, "project-affinity.ts");
+    expect(await pool.preheat("a_fn", functionPath, projectRoot, {}, { projectRef: "a" })).toBe(false);
+    await expect(pool.preheatVersionedIdleWorkers({
+      projectRef: "a", projectRoot, functionPath, functionId: "a_fn", env: {}, moduleVersion: "v1",
+    })).rejects.toThrow("Runtime admission does not allow preheat");
+    expect(pool.generation).toBe(0);
+  });
+
+  test("retires both execution slots and parked workers on shutdown", async () => {
+    const { pool, dispatch } = setup();
+    await dispatch("a");
+    await dispatch("b");
+    await pool.shutdown();
+    expect(pool.snapshotMetrics("test").test_total_workers).toBe(0);
+    expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
+    expect((await dispatch("a")).status).toBe(503);
+  });
+});
+
 describe("WorkerPool Bun plugin project isolation", () => {
   test.each([
     ["global", "Bun.plugin"],
@@ -2737,7 +3144,8 @@ describe("WorkerPool Bun plugin project isolation", () => {
       expect(await (await dispatch("project-b", clearGlobalPath)).text()).toBe("cleared-global");
       expect(await (await dispatch("project-b", clearImportPath)).text()).toBe("cleared-import");
       expect(await (await dispatch("project-a", registerPath)).text()).toBe("project-a");
-      expect(pool.snapshotMetrics("plugin")["plugin_total_worker_replacements"]).toBe(2);
+      expect(pool.snapshotMetrics("plugin")["plugin_total_worker_replacements"]).toBe(1);
+      expect(pool.snapshotMetrics("plugin")["plugin_total_parked_worker_reuses"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -2831,6 +3239,7 @@ describe("WorkerPool Bun plugin project isolation", () => {
     const pool = new WorkerPool({
       size: 1,
       requestTimeout: 2_000,
+      maxExtraProjectWorkers: 0,
       maxWorkerReplacementsBeforeRecycle: 2,
       onWorkerRecycleRequired: (event) => recycleEvents.push(event),
     });
@@ -3074,6 +3483,7 @@ describe("WorkerPool module cache", () => {
         generation: 1,
         attempted: 1,
         idleRetired: 1,
+        parkedRetired: 0,
         busyTainted: 0,
         alreadyTainted: 0,
         immediateReplacements: 1,
@@ -3139,6 +3549,7 @@ describe("WorkerPool module cache", () => {
         generation: 1,
         attempted: 2,
         idleRetired: 1,
+        parkedRetired: 0,
         busyTainted: 1,
         alreadyTainted: 0,
         immediateReplacements: 1,
@@ -3195,6 +3606,7 @@ describe("WorkerPool module cache", () => {
         generation: 1,
         attempted: 1,
         idleRetired: 1,
+        parkedRetired: 0,
         busyTainted: 0,
         alreadyTainted: 0,
         immediateReplacements: 1,
@@ -3462,9 +3874,9 @@ describe("WorkerPool module cache", () => {
       expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
 
       const result = await pool.invalidateProject("proj_env_a");
-      expect(result.attempted).toBe(0);
-      expect(result.succeeded).toBe(0);
-      expect(result.invalidated).toBe(0);
+      expect(result.attempted).toBe(1);
+      expect(result.succeeded).toBe(1);
+      expect(result.invalidated).toBe(1);
 
       expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
       expect(await Bun.file(counterBPath).text()).toBe("1");
@@ -3723,6 +4135,104 @@ describe("WorkerPool module cache", () => {
         request: new Request("http://edge.local/functions/v1/fn"),
       });
       expect(await response.text()).toBe("project-b");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WorkerPool binary transfers", () => {
+  test("transfers the consumed request buffer without changing binary response bytes", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-transfer-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async (request: Request) => new Response(await request.arrayBuffer(), {
+        headers: { "content-type": "application/octet-stream" },
+      });
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000, smol: true });
+    pools.push(pool);
+    try {
+      const expected = Uint8Array.from({ length: 2 * 1024 * 1024 }, (_, i) => i % 251);
+      const consumed = expected.slice().buffer;
+      const request = new Request("http://edge.local/fn", { method: "POST", body: expected });
+      request.arrayBuffer = async () => consumed;
+      const response = await pool.dispatch({
+        functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {}, request,
+      });
+      expect(response.status).toBe(200);
+      expect(consumed.byteLength).toBe(0);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(expected);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("transfers response buffers while preserving tenant-owned response data", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-response-transfer-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      const source = new Uint8Array([0, 1, 127, 128, 255]);
+      let consumed: ArrayBuffer | undefined;
+      const read = Response.prototype.arrayBuffer;
+      Response.prototype.arrayBuffer = async function () {
+        consumed = await read.call(this);
+        return consumed;
+      };
+      export default (request: Request) => {
+        if (new URL(request.url).pathname.endsWith("/state")) {
+          return Response.json({ transferredBytes: consumed?.byteLength, source: Array.from(source) });
+        }
+        return new Response(source);
+      };
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (suffix: string) => pool.dispatch({
+      functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {},
+      request: new Request(`http://edge.local/fn${suffix}`, {
+        headers: { traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-00` },
+      }),
+    });
+    try {
+      for (let i = 0; i < 2; i++) {
+        const response = await dispatch("");
+        expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([0, 1, 127, 128, 255]);
+        expect(await (await dispatch("/state")).json()).toEqual({
+          transferredBytes: 0, source: [0, 1, 127, 128, 255],
+        });
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("transfers exact SSE subviews without detaching reusable Buffer storage", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-stream-transfer-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      const source = Buffer.from("prefixdata: ok\\n\\nsuffix");
+      export default () => {
+        let sent = 0;
+        return new Response(new ReadableStream({
+          async pull(controller) {
+            if (sent++ === 2) { controller.close(); return; }
+            await Bun.sleep(5);
+            controller.enqueue(source.subarray(6, source.length - 6));
+          },
+        }), { headers: { "content-type": "text/event-stream" } });
+      };
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    try {
+      for (let i = 0; i < 2; i++) {
+        const response = await pool.dispatch({
+          functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {},
+          request: new Request("http://edge.local/fn"),
+        });
+        expect(await response.text()).toBe("data: ok\n\ndata: ok\n\n");
+      }
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

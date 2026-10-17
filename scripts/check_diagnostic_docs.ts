@@ -59,6 +59,19 @@ class Service { repository = inject(Repository); }`,
 const count = sql<number>\`count(*)\`;`,
   SC6008: `import { sql } from "drizzle-orm";
 const statement = sql.raw(request.body);`,
+  SC6009: `declare const input: any;
+export const value: string = input;`,
+  SC6010: `async function work(): Promise<void> {}
+work();`,
+  SC6011: `type State = "draft" | "approved";
+function render(state: State): number {
+  switch (state) {
+    case "draft": return 0;
+    default: return 1;
+  }
+}`,
+  SC6012: `import { createClient } from "@apollo/client";
+export { createClient };`,
   SC3001: `@Get("/:id") findById() {}
 @Get("/health") health() {}`,
   SC3002: `const routes = [{ path: "/old", redirectTo: "/missing" }];`,
@@ -160,6 +173,15 @@ class Issue {}`,
   SC4026: `defineSupacloudConfig({ commandCapabilities: { transaction: false } });
 @Command({ name: "billing.issue", permission: "billing.issue", transaction: "required" })
 class Issue {}`,
+  SC4027: `@Job({ name: "billing.rebuild", maxAttempts: 3, idempotency: "none" })
+class RebuildJob {}`,
+  SC4028: `defineSupacloudConfig({
+  commandCapabilities: {
+    rpc: { billing: { boundary: "external", audit: true, idempotency: true, reconcile: false } },
+  },
+});
+@Command({ name: "billing.issue", permission: "billing.issue", rpc: "billing", transaction: "none" })
+class Issue {}`,
   SC3021: `@Post("/items")
 create(@Body() input: unknown) {}`,
   SC3022: `const ItemResponse = Type.Any();
@@ -177,6 +199,65 @@ list() {}`,
 list() {}`,
   SC3026: `@Get("/items", { response: ItemResponse, responses: { 200: ItemResponse } })
 list() {}`,
+  SC3030: `@Post("/cases", { effect: makeEffect() })
+accept() {}`,
+  SC3031: `@Post("/cases", { effect: { required: true, retry: "sometimes" } })
+accept() {}`,
+  SC3032: `@Post("/cases", { effect: { required: true, timeoutMs: 0 } })
+accept() {}`,
+  SC3033: `@Post("/cases", { effect: { required: true, dependencies: "CaseRepository" } })
+accept() {}`,
+  SC3034: `@Post("/cases", { effect: { required: true, errors: [{ tag: "NotFound", code: "not_found" }] } })
+accept() {}`,
+  SC3035: `@Post("/cases", { effect: { required: true, dependencies: [], errors: [] } })
+accept(): { ok: boolean } {
+  return { ok: true };
+}`,
+  SC3036: `// requireRouteEffects is enabled in the compiler config.
+@Post("/cases")
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3037: `// requireErrorMappings is enabled in the compiler config.
+@Post("/cases", { effect: { required: true, dependencies: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3038: `// requireDependencies is enabled in the compiler config.
+@Post("/cases", { effect: { required: true, errors: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3039: `@Command({ name: "case.accept", permission: "case.accept", idempotency: "none" })
+class AcceptCaseCommand {}
+@Post("/cases/:id/accept", {
+  command: AcceptCaseCommand,
+  effect: { required: true, errors: [], dependencies: [], retry: "explicit", maxAttempts: 3 },
+})
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3040: `@Post("/cases", { effect: { required: true, errors: [], dependencies: ["CaseRepository"] } })
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3041: `@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Effect<{ ok: boolean }, unknown, never> {}`,
+  SC3042: `@Post("/cases", {
+  effect: { required: true, errors: [{ tag: "NotFound", status: 404, code: "NOT_FOUND" }], dependencies: [] },
+})
+accept(): Effect<{ ok: boolean }, { _tag: "Conflict" }, never> {}`,
+  SC3043: `@Post("/cases", {
+  effect: { required: true, errors: [], dependencies: ["CaseRepository"], timeoutMs: 1000 },
+})
+accept(): Effect<{ ok: boolean }, never, OtherRepository> {}`,
+  SC3044: `@Post("/cases", {
+  effect: { required: true, errors: [], dependencies: ["CaseRepository"] },
+})
+accept(): Effect<{ ok: boolean }, never, CaseRepository> {}`,
+  SC3045: `import { Effect } from "effect";
+@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {
+  Effect.runPromise(program);
+}`,
+  SC3046: `@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {
+  throw new Error("unexpected");
+}`,
+  SC3047: `@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Promise<{ ok: boolean }> {
+  return Promise.resolve({ ok: true });
+}`,
   SC3027: `@Get("/items", { responses: { "4XX": ItemResponse, "4xx": ItemResponse } })
 list() {}`,
   SC5001: `@Injectable({ providedIn: "root" })
@@ -322,6 +403,7 @@ function fix(entry: DiagnosticEntry): string {
   if (entry.code === "SC2012") return "Use typed constructor parameters and compiler-generated scope factories instead of runtime inject() or injection contexts.";
   if (entry.code === "SC6007") return "Keep raw SQL results unknown and validate them with an explicit result decoder.";
   if (entry.code === "SC6008") return "Use parameterized SQL templates for values; raw SQL must be a static literal.";
+  if (entry.code === "SC6012") return "Use the governed Supabase client/PostgREST transport, RxJS for the existing reactive boundary, and Workflow/Command for durable execution. If an alternative is required, list its package explicitly in `typeSafety.allowAlternativeLibraries` and cover the boundary with focused governance tests.";
   if (entry.code.startsWith("SC81")) return "Correct the `@InfraResource` declaration or the module/command/job resource use. Declare each logical resource once, reference only declared resources, and keep operations within `read | write | publish | consume`.";
   if (entry.registry === "type-safety") return `Replace the unsafe type escape reported by \`${names}\` with an explicit type, \`unknown\` plus narrowing, or a constrained generic.`;
   if (entry.code.startsWith("SC1")) return `Inspect the module graph and change the dependency or scope declaration that triggered \`${names}\`. Keep dependencies one-way and make the smallest shared contract explicit.`;

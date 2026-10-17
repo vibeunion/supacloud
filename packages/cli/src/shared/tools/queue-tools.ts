@@ -4,6 +4,7 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 
 export interface QueueToolsConfig {
     projectRef?: string;
@@ -46,12 +47,15 @@ function formatMessages(data: unknown, label = "Messages"): string {
         succeeded: "✅", failed: "❌", dead_lettered: "💀",
     };
     let out = `${label} (${data.length}):\n\n`;
-    for (const m of data as any[]) {
-        const st = m.status || "?";
-        out += `  ${emoji[st] || "❓"} ${st} — id: ${m.id}\n`;
-        if (m.attempt != null) out += `     Attempt: ${m.attempt}/${m.max_attempts ?? "?"}\n`;
-        if (m.error) out += `     Error: ${typeof m.error === "string" ? m.error : JSON.stringify(m.error)}\n`;
-        if (m.created_at) out += `     Created: ${m.created_at}\n`;
+    const messages: readonly unknown[] = data;
+    for (const message of messages) {
+        if (message === null || typeof message !== "object" || Array.isArray(message)) throw new Error("Invalid message response");
+        const fields: Record<string, unknown> = Object.fromEntries(Object.entries(message));
+        const st = typeof fields["status"] === "string" ? fields["status"] : "?";
+        out += `  ${emoji[st] || "❓"} ${st} — id: ${String(fields["id"] ?? "?")}\n`;
+        if (fields["attempt"] != null) out += `     Attempt: ${String(fields["attempt"])}/${String(fields["max_attempts"] ?? "?")}\n`;
+        if (fields["error"]) out += `     Error: ${typeof fields["error"] === "string" ? fields["error"] : JSON.stringify(fields["error"])}\n`;
+        if (fields["created_at"]) out += `     Created: ${String(fields["created_at"])}\n`;
         out += "\n";
     }
     return out;
@@ -64,13 +68,13 @@ function resolveRef(refFromArgs: string | undefined, defaultRef?: string): strin
 }
 
 export function registerQueueTools(
-    server: { tool: (...args: any[]) => void },
+    server: ToolServer,
     http: HttpTransport,
     options: QueueToolsConfig = {},
 ): void {
     const { projectRef } = options;
 
-    server.tool(
+    registerTool(server,
         "queue",
         `Message queue operations for task-based messaging.
 Actions: list, stats, list_messages, dlq, get_message, send, receive, ack, release, fail, retry, delete_message, get_settings, update_settings`,
@@ -106,10 +110,10 @@ Actions: list, stats, list_messages, dlq, get_message, send, receive, ack, relea
             max_attempts_setting: optional(Type.Number(), "[update_settings] Max delivery attempts"),
             rate_limit: optional(Type.Number(), "[update_settings] Rate limit per minute"),
         },
-        async (args: any) => {
+        async (args) => {
             const resolvedRef = resolveRef(args.ref, projectRef);
             const q = args.queue;
-            const need = (fields: string[]) => {
+            const need = (fields: Array<keyof typeof args>) => {
                 for (const f of fields) {
                     if (!args[f]) throw new Error(`'${f}' is required for '${args.action}'`);
                 }

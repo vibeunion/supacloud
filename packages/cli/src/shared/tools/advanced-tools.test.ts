@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerAdvancedTools } from "./advanced-tools";
+import { buildFunctionAot, validateFunctionAot } from "./function-aot";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
 
@@ -89,6 +90,167 @@ function captureTaskEventsTool(http: Record<string, unknown>) {
 }
 
 describe("edge_functions CLI tool", () => {
+    test.each([false, true])("builds and uploads exact AOT bytes while preserving runtime auth, validation and environment (minify=%j)", async (minify) => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-aot-cli-"));
+        const appEntry = join(directory, "app.ts");
+        const handler = join(directory, "index.ts");
+        const built = join(directory, "index.js");
+        const activationId = "b2222222-2222-4222-8222-222222222222";
+        const previous = process.env.SUPACLOUD_AOT_PARENT_SECRET;
+        process.env.SUPACLOUD_AOT_PARENT_SECRET = "must-not-be-inherited";
+        try {
+            symlinkSync(join(import.meta.dir, "../../../node_modules"), join(directory, "node_modules"));
+            writeFileSync(join(directory, "package.json"), '{"type":"module"}');
+            writeFileSync(join(directory, ".env"), "SUPACLOUD_AOT_PARENT_SECRET=must-not-load\n");
+            writeFileSync(appEntry, `
+                import { Elysia, t } from "elysia";
+                if (process.env.ELYSIA_AOT_BUILD === "1" && process.env.SUPACLOUD_AOT_PARENT_SECRET) {
+                    throw new Error("inherited secret");
+                }
+                const startupValue = process.env.FUNCTION_RUNTIME_VALUE;
+                export const app = new Elysia()
+                    .onBeforeHandle(({ request, status }) =>
+                        request.headers.get("authorization") === "Bearer test" ? undefined : status(401))
+                    .post("/hello/:name", { body: t.Object({ count: t.Number() }) }, ({ params, body }) => ({
+                        name: params.name, count: body.count, value: process.env.FUNCTION_RUNTIME_VALUE, startupValue,
+                        capture: process.env.ELYSIA_AOT_BUILD === "1"
+                    }));
+            `);
+            writeFileSync(handler, 'import { app } from "./app"; export default { fetch: (request: Request) => app.handle(request) };');
+            const prepared = await buildFunctionAot(handler, built, { appEntry, minify });
+            expect(prepared.prebundled).toBe(true);
+            expect(prepared.expectedSha256).toBe(createHash("sha256").update(prepared.code).digest("hex"));
+            expect(prepared.code).not.toContain("must-not-be-inherited");
+            expect(prepared.code).not.toContain('from "elysia"');
+            const runtime = Bun.spawn(["bun", "--no-env-file", "--eval", `
+                const { default: handler } = await import(${JSON.stringify(built)});
+                const call = (authorization, body) => handler.fetch(new Request("http://localhost/hello/test", {
+                    method: "POST", headers: { "content-type": "application/json", authorization },
+                    body: JSON.stringify(body)
+                }));
+                const unauthorized = await call("", { count: 1 });
+                const invalid = await call("Bearer test", { count: "wrong" });
+                const response = await call("Bearer test", { count: 2 });
+                console.log(JSON.stringify({
+                    unauthorized: unauthorized.status, invalid: invalid.status,
+                    status: response.status, body: await response.json()
+                }));
+            `], {
+                env: { PATH: process.env.PATH, FUNCTION_RUNTIME_VALUE: "runtime-not-build" },
+                stdout: "pipe", stderr: "pipe",
+            });
+            const [stdout, stderr, exitCode] = await Promise.all([
+                new Response(runtime.stdout).text(), new Response(runtime.stderr).text(), runtime.exited,
+            ]);
+            expect(stderr).toBe("");
+            expect(exitCode).toBe(0);
+            expect(JSON.parse(stdout)).toEqual({
+                unauthorized: 401, invalid: 422, status: 200,
+                body: { name: "test", count: 2, value: "runtime-not-build", startupValue: "runtime-not-build", capture: false },
+            });
+            let uploaded: Record<string, unknown> | undefined;
+            const { callback } = captureEdgeFunctionsTool({
+                post: async (_path: string, payload: Record<string, unknown>) => {
+                    uploaded = payload;
+                    return {
+                        ok: true, status: 200, data: {
+                            success: true, project_ref: "proj", slug: "hello", previous_active_version: "absent",
+                            expected_activation_id: "legacy", activation_id: activationId,
+                            active_version: "1", version: "1",
+                            config: { version: "1", verify_jwt: false, framework: "elysia", activation_id: activationId },
+                        },
+                    };
+                },
+            });
+            const response = await callback({
+                action: "deploy", ref: "proj", slug: "hello", path: handler, aot: true,
+                "aot-entry": appEntry, framework: "elysia", minify,
+                "expected-active-version": "absent", "expected-activation-id": "legacy",
+            });
+            expect(response.isError, JSON.stringify(response)).not.toBe(true);
+            expect(uploaded?.prebundled).toBe(true);
+            expect(uploaded?.minify).toBeUndefined();
+            expect(uploaded?.expected_sha256).toBe(createHash("sha256").update(String(uploaded?.code)).digest("hex"));
+            expect(uploaded?.expected_active_version).toBe("absent");
+        } finally {
+            if (previous === undefined) delete process.env.SUPACLOUD_AOT_PARENT_SECRET;
+            else process.env.SUPACLOUD_AOT_PARENT_SECRET = previous;
+            rmSync(directory, { recursive: true, force: true });
+        }
+    }, 30_000);
+
+    test("blocks AOT in read-only mode before local source execution or HTTP dispatch", async () => {
+        let calls = 0;
+        const { callback } = captureEdgeFunctionsTool({ post: async () => { calls++; } }, { readOnly: true });
+        const result = await callback({
+            action: "deploy", ref: "proj", slug: "hello", framework: "elysia", aot: true,
+            path: "/source-must-not-be-read/index.ts",
+            "expected-active-version": "absent", "expected-activation-id": "legacy",
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toContain("read-only mode");
+        expect(calls).toBe(0);
+    });
+
+    test("rejects a disconnected AOT app entry instead of uploading a plain bundle", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-disconnected-aot-"));
+        try {
+            symlinkSync(join(import.meta.dir, "../../../node_modules"), join(directory, "node_modules"));
+            writeFileSync(join(directory, "package.json"), '{"type":"module"}');
+            writeFileSync(join(directory, "app.ts"), 'import { Elysia } from "elysia"; export const app = new Elysia().get("/", () => "ok");');
+            writeFileSync(join(directory, "index.ts"), 'export default { fetch: () => new Response("not the app") };');
+            await expect(buildFunctionAot(join(directory, "index.ts"), join(directory, "index.js"), {
+                appEntry: join(directory, "app.ts"),
+            })).rejects.toThrow("compiled manifest was not injected");
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    }, 30_000);
+
+    test.each([
+        { action: "deploy", "aot-entry": "app.ts" },
+        { action: "deploy", aot: true, framework: "elysia", "prebundled-path": "out.js" },
+        { action: "scaffold", aot: true, path: "app", framework: "elysia" },
+        { action: "deploy_bundle", aot: true, framework: "elysia" },
+    ])("rejects invalid AOT configuration before HTTP: %j", async (args) => {
+        let calls = 0;
+        const { callback } = captureEdgeFunctionsTool({ post: async () => { calls++; } });
+        await expect(callback(args)).rejects.toThrow();
+        expect(calls).toBe(0);
+    });
+
+    test("accepts AOT only for an Elysia deploy from a local path", () => {
+        expect(() => validateFunctionAot({
+            action: "deploy",
+            framework: "elysia",
+            path: "./index.ts",
+            aot: true,
+        })).not.toThrow();
+    });
+
+    test("rejects AOT for non-Elysia or inline Function sources", () => {
+        expect(() => validateFunctionAot({
+            action: "deploy",
+            framework: "hono",
+            path: "./index.ts",
+            aot: true,
+        })).toThrow("'--aot' requires 'framework=elysia'");
+        expect(() => validateFunctionAot({
+            action: "deploy",
+            framework: "elysia",
+            code: "export default () => new Response('ok')",
+            aot: true,
+        })).toThrow("'--aot' requires '--path'");
+    });
+
+    test("rejects AOT flags outside deploy without touching HTTP", () => {
+        expect(() => validateFunctionAot({
+            action: "activate",
+            framework: "elysia",
+            aot: true,
+        })).toThrow("'--aot' is only supported for 'deploy'");
+    });
+
     test("scaffolds an API-only SvelteKit Function without HTTP access", async () => {
         const root = mkdtempSync(join(tmpdir(), "supacloud-sveltekit-scaffold-"));
         const target = join(root, "api");
@@ -112,7 +274,7 @@ describe("edge_functions CLI tool", () => {
                 framework: "sveltekit-function",
                 path: target,
             });
-            expect(await Bun.file(join(target, "svelte.config.js")).text())
+            expect(await Bun.file(join(target, "vite.config.ts")).text())
                 .toContain("sveltekit-adapter");
             expect(await Bun.file(join(target, "src/routes/+server.ts")).text())
                 .toContain("export function GET");
@@ -122,7 +284,7 @@ describe("edge_functions CLI tool", () => {
     });
 
     test.each([
-        ["elysia", "elysia", "2.0.0-beta.21"],
+        ["elysia", "elysia", "2.0.0-beta.32"],
         ["hono", "hono", "^4.13.5"],
     ] as const)("scaffolds installable %s functions", async (framework, dependency, version) => {
         const root = mkdtempSync(join(tmpdir(), `supacloud-${framework}-scaffold-`));
@@ -637,7 +799,7 @@ describe("edge_functions CLI tool", () => {
                 ref: "proj",
                 slug: "fa-api",
                 version,
-            })).rejects.toThrow("canonical positive safe integer");
+            })).rejects.toThrow(/- version:|Function version must be a canonical positive safe integer/);
             expect(requestCount).toBe(0);
         },
     );
@@ -813,7 +975,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "hook",
                 files: { "index.ts": "export default {}" },
                 "expected-active-version": expectedActiveVersion,
-            })).rejects.toThrow("canonical non-negative safe integer");
+            })).rejects.toThrow(/expected-active-version:|Expected active version must be a canonical non-negative safe integer/);
             expect(requestCount).toBe(0);
         },
     );
@@ -1511,7 +1673,7 @@ describe("edge_functions CLI tool", () => {
             slug: "public-hook",
             version: 0,
             "expected-active-version": 2,
-        })).rejects.toThrow("canonical positive safe integer");
+        })).rejects.toThrow("- version:");
         expect(requestCount).toBe(0);
     });
 
@@ -1696,7 +1858,7 @@ describe("edge_functions CLI tool", () => {
         expect(requestCount).toBe(0);
     });
 
-    test("blocks activate in read-only mode before validation or HTTP dispatch", async () => {
+    test("blocks activate in read-only mode before handler validation or HTTP dispatch", async () => {
         let requestCount = 0;
         const { callback } = captureEdgeFunctionsTool({
             post: async () => {
@@ -1709,7 +1871,7 @@ describe("edge_functions CLI tool", () => {
             action: "activate",
             ref: "../unsafe-ref",
             slug: "../unsafe-slug",
-            version: "invalid",
+            version: 1,
             path: "/definitely/not/exist/private-source.ts",
         });
 
@@ -1864,7 +2026,7 @@ describe("secrets CLI tool", () => {
         const response = await callback({
             action: "upsert",
             ref: "proj",
-            "from-env": ["API_KEY", "WEBHOOK_SECRET"],
+            "from-env": "API_KEY,WEBHOOK_SECRET",
         });
 
         expect(requests).toEqual([{
@@ -1877,6 +2039,29 @@ describe("secrets CLI tool", () => {
         expect(response.content[0].text).toBe("✅ Updated 2 secrets");
         expect(response.content[0].text).not.toContain(primarySecret);
         expect(response.content[0].text).not.toContain(secondarySecret);
+    });
+
+    test("rejects decoded environment-name arrays at the external invocation boundary", async () => {
+        let requests = 0;
+        let reads = 0;
+        const environment = new Proxy<Record<string, string>>({ API_KEY: "boundary-secret-sentinel" }, {
+            get(target, name) {
+                reads++;
+                return typeof name === "string" ? target[name] : undefined;
+            },
+        });
+        const { callback } = captureSecretsTool({
+            post: async () => {
+                requests++;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, environment);
+
+        await expect(callback({
+            action: "upsert", ref: "proj", "from-env": ["API_KEY"],
+        })).rejects.toThrow("- from-env:");
+        expect(requests).toBe(0);
+        expect(reads).toBe(0);
     });
 
     test.each([
@@ -1894,7 +2079,7 @@ describe("secrets CLI tool", () => {
         await expect(callback({
             action: "upsert",
             ref: "proj",
-            "from-env": ["API_KEY"],
+            "from-env": "API_KEY",
         })).rejects.toThrow("Environment secret values are missing or exceed safe limits");
         expect(requestCount).toBe(0);
     });
@@ -1914,7 +2099,7 @@ describe("secrets CLI tool", () => {
         await callback({
             action: "upsert",
             ref: "proj",
-            "from-env": ["API_KEY", "WEBHOOK_SECRET"],
+            "from-env": "API_KEY,WEBHOOK_SECRET",
         });
 
         expect(Object.fromEntries(reads)).toEqual({ API_KEY: 1, WEBHOOK_SECRET: 1 });
@@ -1930,7 +2115,7 @@ describe("secrets CLI tool", () => {
             },
         }, { API_KEY: boundarySecret });
 
-        await callback({ action: "upsert", ref: "proj", "from-env": ["API_KEY"] });
+        await callback({ action: "upsert", ref: "proj", "from-env": "API_KEY" });
 
         expect(Buffer.byteLength(boundarySecret)).toBe(24 * 1024);
         expect(requestBody).toEqual([{ name: "API_KEY", value: boundarySecret }]);
@@ -1950,7 +2135,7 @@ describe("secrets CLI tool", () => {
             },
         }, environment);
 
-        await expect(callback({ action: "upsert", ref: "proj", "from-env": names }))
+        await expect(callback({ action: "upsert", ref: "proj", "from-env": names.join(",") }))
             .rejects.toThrow("Environment secret values are missing or exceed safe limits");
         expect(requestCount).toBe(0);
     });
@@ -1969,7 +2154,7 @@ describe("secrets CLI tool", () => {
             action: "upsert",
             ref: "proj",
             secrets: [{ name: "INLINE_KEY", value: inlineSecret }],
-            "from-env": ["API_KEY"],
+            "from-env": "API_KEY",
         })).rejects.toThrow("'--from-env' cannot be combined with '--secrets'");
         expect(requestCount).toBe(0);
     });

@@ -12,14 +12,18 @@ import {
 } from "node:fs";
 import {
   chmod,
+  link,
   mkdtemp,
   mkdir,
+  open,
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   writeFile,
+  type FileHandle,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +71,7 @@ const configMock = {
   legacySecretsEncryptionKey: legacySigningKey,
 };
 let migrationLocked = false;
+let migrationLockHeld = false;
 class ProjectMigrationLockError extends Error {
   constructor(readonly projectRef: string) {
     super(`migration locked: ${projectRef}`);
@@ -77,10 +82,12 @@ const withProjectMigrationLocks = mock(async (
   _input: { projectRefs: readonly string[] },
   operation: () => Promise<unknown>,
 ) => {
-  if (migrationLocked) {
+  if (migrationLocked || migrationLockHeld) {
     throw new ProjectMigrationLockError("project-a");
   }
-  return operation();
+  migrationLockHeld = true;
+  try { return await operation(); }
+  finally { migrationLockHeld = false; }
 });
 
 mock.module("../../src/repositories/project.repository", () => ({
@@ -104,6 +111,7 @@ mock.module("../../src/utils/logger", () => ({
 const {
   createLogicalBackup,
   listLogicalBackups,
+  readLogicalBackup,
   restoreLogicalBackup,
 } = await import(
   new URL("../../src/services/logical-backup.service.ts?logical-backup-service-test", import.meta.url).href,
@@ -113,6 +121,8 @@ const spawnInvocations: SpawnInvocation[] = [];
 const restoredPayloads: string[] = [];
 const commandExitCodes: number[] = [];
 const dumpPayloads: string[] = [];
+let dumpCompletion: Promise<number> | null = null;
+let dumpStarted: (() => void) | null = null;
 let archiveReplacementDuringRestore: { path: string; replacement: string } | null = null;
 
 const spawnSpy = spyOn(Bun, "spawn").mockImplementation(((options: SpawnInvocation) => {
@@ -121,6 +131,7 @@ const spawnSpy = spyOn(Bun, "spawn").mockImplementation(((options: SpawnInvocati
   const command = options.cmd[0];
   if (command === "pg_dump" && exitCode === 0 && typeof options.stdout === "number") {
     writeSync(options.stdout, dumpPayloads.shift() ?? "project logical archive");
+    dumpStarted?.();
   }
   if (command === "pg_restore"
     && options.cmd.includes("--single-transaction")
@@ -135,8 +146,8 @@ const spawnSpy = spyOn(Bun, "spawn").mockImplementation(((options: SpawnInvocati
       archiveReplacementDuringRestore = null;
     }
   }
-  return { exited: Promise.resolve(exitCode) } as never;
-}) as typeof Bun.spawn);
+  return { exited: command === "pg_dump" && dumpCompletion ? dumpCompletion : Promise.resolve(exitCode) } as never;
+}) as unknown as typeof Bun.spawn);
 
 function project(projectRef: string, database: string, status = "paused"): TestProject {
   return { ref: projectRef, db_name: database, status };
@@ -192,6 +203,9 @@ describe("verified logical-full backup service", () => {
     spawnInvocations.length = 0;
     archiveReplacementDuringRestore = null;
     migrationLocked = false;
+    migrationLockHeld = false;
+    dumpCompletion = null;
+    dumpStarted = null;
     configMock.secretsEncryptionKey = currentSigningKey;
     configMock.legacySecretsEncryptionKey = legacySigningKey;
     findByRef.mockClear();
@@ -251,6 +265,174 @@ describe("verified logical-full backup service", () => {
     expect(JSON.stringify(spawnInvocations.map(({ cmd }) => cmd))).not.toContain(logicalBackupDirectory);
     expect(spawnInvocations[0]?.env?.PGPASSWORD).toBe("admin-secret");
     expect(JSON.stringify(spawnInvocations.map(({ cmd }) => cmd))).not.toContain("admin-secret");
+  });
+
+  test("reuses a requested backup id after an idempotent retry", async () => {
+    const backupId = `logical-full_project-a_${"c".repeat(32)}`;
+    dumpPayloads.push("stable archive");
+
+    const first = await createLogicalBackup("project-a", backupId);
+    const second = await createLogicalBackup("project-a", backupId);
+
+    expect(second).toEqual(first);
+    expect(spawnInvocations.filter(({ cmd }) => cmd[0] === "pg_dump")).toHaveLength(1);
+  });
+
+  test("publishes a verified pending receipt left by an interrupted request", async () => {
+    const backupId = `logical-full_project-a_${"d".repeat(32)}`;
+    dumpPayloads.push("pending archive");
+    const first = await createLogicalBackup("project-a", backupId);
+    const pendingPath = join(logicalBackupDirectory, `.${backupId}.receipt.pending`);
+    await rename(receiptPath(backupId), pendingPath);
+    spawnInvocations.length = 0;
+
+    await expect(readLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("conflict"));
+    expect(await readdir(logicalBackupDirectory)).toEqual(expect.arrayContaining([
+      `.${backupId}.dump`, `.${backupId}.receipt.pending`,
+    ]));
+    expect(spawnInvocations).toEqual([]);
+
+    const second = await createLogicalBackup("project-a", backupId);
+
+    expect(second).toEqual(first);
+    expect(await readFile(receiptPath(backupId), "utf8")).toContain(backupId);
+    expect(spawnInvocations.filter(({ cmd }) => cmd[0] === "pg_dump")).toHaveLength(0);
+    expect(await readdir(logicalBackupDirectory)).not.toContain(`.${backupId}.receipt.pending`);
+  });
+
+  test("recovers a receipt interrupted between link and unlink without accepting arbitrary hardlinks", async () => {
+    const backupId = `logical-full_project-a_${"e".repeat(32)}`;
+    const first = await createLogicalBackup("project-a", backupId);
+    const pendingPath = join(logicalBackupDirectory, `.${backupId}.receipt.pending`);
+    await link(receiptPath(backupId), pendingPath);
+    spawnInvocations.length = 0;
+
+    await expect(readLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("conflict"));
+    expect((await stat(receiptPath(backupId))).nlink).toBe(2);
+    expect(await createLogicalBackup("project-a", backupId)).toEqual(first);
+    expect((await stat(receiptPath(backupId))).nlink).toBe(1);
+    expect(spawnInvocations.filter(({ cmd }) => cmd[0] === "pg_dump")).toHaveLength(0);
+
+    await link(receiptPath(backupId), join(logicalBackupDirectory, ".unrelated-hardlink"));
+    await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("unavailable"));
+  });
+
+  test("never replaces an archive without a receipt or a tampered pending receipt", async () => {
+    const backupId = `logical-full_project-a_${"f".repeat(32)}`;
+    const first = await createLogicalBackup("project-a", backupId);
+    const receiptBytes = await Bun.file(receiptPath(backupId)).text();
+    await rm(receiptPath(backupId));
+    spawnInvocations.length = 0;
+    await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("conflict"));
+    await expect(readLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("conflict"));
+    expect(spawnInvocations).toEqual([]);
+    expect(await Bun.file(archivePath(backupId)).text()).toBe("project logical archive");
+
+    const receipt = JSON.parse(receiptBytes) as Record<string, unknown>;
+    receipt.bytes = first.bytes + 1;
+    receipt.receipt_hmac_sha256 = receiptSignature(receipt, currentSigningKey);
+    const pendingPath = join(logicalBackupDirectory, `.${backupId}.receipt.pending`);
+    await writeFile(pendingPath, JSON.stringify(receipt), { mode: 0o600 });
+    await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("conflict"));
+    expect(spawnInvocations.filter(({ cmd }) => cmd[0] === "pg_dump")).toHaveLength(0);
+    expect(await readdir(logicalBackupDirectory)).not.toContain(`${backupId}.json`);
+  });
+
+  test("reads one exact backup without depending on unrelated inventory", async () => {
+    const selected = await createLogicalBackup("project-a");
+    const unrelated = await createLogicalBackup("project-a");
+    await Bun.write(receiptPath(unrelated.backup_id), "corrupt unrelated receipt");
+    spawnInvocations.length = 0;
+
+    expect(await readLogicalBackup("project-a", selected.backup_id)).toEqual(selected);
+    expect(spawnInvocations.map(({ cmd }) => cmd)).toEqual([["pg_restore", "--list"]]);
+    await expect(listLogicalBackups("project-a")).rejects.toEqual(expectContractError("unavailable"));
+  });
+
+  test("does not create directories or files while observing missing backup identities", async () => {
+    const backupId = `logical-full_project-a_${"1".repeat(32)}`;
+    await rm(join(logicalBackupTestRoot, "nested"), { recursive: true, force: true });
+
+    expect(await listLogicalBackups("project-a")).toEqual([]);
+    await expect(readLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("not_found"));
+    expect(await readdir(logicalBackupTestRoot)).not.toContain("nested");
+    expect(spawnInvocations).toEqual([]);
+    expect(withProjectMigrationLocks).not.toHaveBeenCalled();
+  });
+
+  test("rejects invalid and cross-project IDs before filesystem or subprocess effects", async () => {
+    const invalidIds = [
+      `logical-full_project-b_${"1".repeat(32)}`, `logical-full_project-a_${"A".repeat(32)}`,
+      "../backup", `logical-full_project-a-extra_${"1".repeat(32)}`,
+    ];
+    for (const backupId of invalidIds) {
+      await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("invalid_request"));
+      await expect(readLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("invalid_request"));
+    }
+    expect(withProjectMigrationLocks).not.toHaveBeenCalled();
+    expect(findByRef).not.toHaveBeenCalled();
+    expect(spawnInvocations).toEqual([]);
+  });
+
+  test("serializes concurrent creation and rejects migration lock contention without writes", async () => {
+    const backupId = `logical-full_project-a_${"2".repeat(32)}`;
+    let finishDump: (value: number) => void = () => undefined;
+    const started = new Promise<void>(resolve => { dumpStarted = resolve; });
+    dumpCompletion = new Promise<number>(resolve => { finishDump = resolve; });
+    const first = createLogicalBackup("project-a", backupId);
+    await started;
+    try {
+      await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("conflict"));
+      expect(spawnInvocations.filter(({ cmd }) => cmd[0] === "pg_dump")).toHaveLength(1);
+    } finally {
+      finishDump(0);
+      await first;
+    }
+    dumpCompletion = null;
+    migrationLocked = true;
+    spawnInvocations.length = 0;
+    await expect(createLogicalBackup("project-a")).rejects.toEqual(expectContractError("conflict"));
+    expect(spawnInvocations).toEqual([]);
+  });
+
+  test("preserves publication on directory sync failure and revalidates the same ID without another dump", async () => {
+    const backupId = `logical-full_project-a_${"3".repeat(32)}`;
+    const root = await open(logicalBackupDirectory, "r");
+    const rootMetadata = await root.stat();
+    const prototype: Pick<FileHandle, "sync"> = Object.getPrototypeOf(root);
+    const originalSync = prototype.sync;
+    await root.close();
+    let failOnce = true;
+    const syncSpy = spyOn(prototype, "sync").mockImplementation(async function(this: FileHandle) {
+      const metadata = await this.stat();
+      if (failOnce && metadata.dev === rootMetadata.dev && metadata.ino === rootMetadata.ino) {
+        failOnce = false;
+        throw new Error("directory sync unavailable");
+      }
+      await originalSync.call(this);
+    });
+    try {
+      await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("unavailable"));
+      expect(await readdir(logicalBackupDirectory)).toEqual(expect.arrayContaining([
+        `.${backupId}.dump`, `${backupId}.json`,
+      ]));
+      const recovered = await createLogicalBackup("project-a", backupId);
+      expect(recovered.backup_id).toBe(backupId);
+      expect(spawnInvocations.filter(({ cmd }) => cmd[0] === "pg_dump")).toHaveLength(1);
+    } finally {
+      syncSpy.mockRestore();
+    }
+  });
+
+  test("rejects completed backup reuse when the selected project's database identity changes", async () => {
+    const backupId = `logical-full_project-a_${"4".repeat(32)}`;
+    await createLogicalBackup("project-a", backupId);
+    projects.set("project-a", project("project-a", "a_different_database"));
+    spawnInvocations.length = 0;
+    await expect(readLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("unavailable"));
+    await expect(createLogicalBackup("project-a", backupId)).rejects.toEqual(expectContractError("unavailable"));
+    expect(spawnInvocations).toEqual([]);
+    expect(await Bun.file(archivePath(backupId)).text()).toBe("project logical archive");
   });
 
   test("independently reads inventory and revalidates archive bytes, digest, and catalog", async () => {
@@ -378,6 +560,7 @@ describe("verified logical-full backup service", () => {
   test("rejects a backup id whose longer project ref only shares the requested prefix", async () => {
     projects.set("project", project("project", "tenant_database_prefix"));
     const longerProjectBackup = await createLogicalBackup("project-a");
+    withProjectMigrationLocks.mockClear();
     const request = {
       project_ref: "project",
       backup_id: longerProjectBackup.backup_id,

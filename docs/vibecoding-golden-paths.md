@@ -19,10 +19,15 @@ platform capabilities stay SupaCloud-native.
 > not a requirement to adopt its frontend framework. The goal is a constrained, diagnosable and
 > deliverable pipeline.
 
+See [Vibecoding Default Policy](vibecoding-default-policy.md) for the
+selection rule: when no special requirement exists, generators and AI use the
+validated best path; alternatives must be explicit and carry their own governance
+and verification obligations.
+
 ## Quick start
 
 ```bash
-supacloud-cli app init --root ./orders-api --name orders-api   # minimal; explicit recipes
+supacloud app init --root ./orders-api --name orders-api   # minimal; explicit recipes
 cd orders-api && bun install && bun run check
 
 supacloud context --format json > context.json   # AI reads the compiled project graph
@@ -36,10 +41,10 @@ Developers and AI use one CLI surface and do not need to remember the underlying
 packages:
 
 ```bash
-supacloud-cli app init        # minimal project; src/features/<feature>
-supacloud-cli app dev         # run the project's existing local dev script
-supacloud-cli app watch       # compiler-only watch
-supacloud-cli app verify-plan --target health  # focused tests, never a full-suite fallback
+supacloud app init        # minimal project; src/features/<feature>
+supacloud app dev         # run the project's existing local dev script
+supacloud app watch       # compiler-only watch
+supacloud app verify-plan --target health  # focused tests, never a full-suite fallback
 supacloud generate ...        # generators
 supacloud check               # compiler governance checks
 supacloud context --format json
@@ -52,7 +57,7 @@ The `app` namespace remains as the low-level form (`supacloud app <verb>`); the
 top-level verbs are aliases with the same implementation and execution policy.
 
 > `app dev` delegates to `bun run dev` (watch, compile, restart).
-> `supacloud-cli dev ...` is the separate remote project
+> `supacloud dev ...` is the separate remote project
 > sync/watch/migrate module; they are different commands.
 
 ## Conventional project structure
@@ -111,6 +116,18 @@ an explicit module target. Existing module queries keep the same version-1 shape
 Agents read
 structured context instead of scanning the repository, and never receive
 credentials or live user data.
+
+Database changes use the same bounded-context rule:
+
+```bash
+supacloud db context --root . --module_file db/modules.ts --module cases
+supacloud db context --root . --module_file db/modules.ts --target public.case_create
+```
+
+The result identifies the Drizzle structure source, SQL behavior source,
+object-specific tests and focused verification commands. Agents should edit
+maintained sources and add forward migrations; they should not scan full schema
+dumps, edit generated files, or rewrite applied migrations.
 
 ## Three golden paths
 

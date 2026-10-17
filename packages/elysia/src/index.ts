@@ -8,7 +8,7 @@ import type {
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
-import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
+import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { compileHttpPolicies, type HttpPolicyRegistry } from "./http-policy";
 import { httpRequestId } from "./http-telemetry";
@@ -34,6 +34,12 @@ import {
   createDocumentationPlugin,
   type ApplicationDocumentationOptions,
 } from "./documentation";
+import {
+  createDefaultEffectRuntime,
+  runCompiledEffect,
+  type CompiledEffectDescriptor,
+  type SupaCloudEffectRuntime,
+} from "./effect";
 
 // Compiled route schemas may not retain a `t` import after bundling.
 setupTypebox();
@@ -58,6 +64,13 @@ export {
   SchemaContractError,
   toElysiaRouteSchema,
 } from "./schema_contract";
+export {
+  createDefaultEffectRuntime,
+  createEffectRuntimeFromLayer,
+  EffectApplicationError,
+  runCompiledEffect,
+} from "./effect";
+export type { CompiledEffectDescriptor, SupaCloudEffectRuntime } from "./effect";
 export type {
   ElysiaRouteContext,
   ElysiaRouteDefinition,
@@ -69,6 +82,8 @@ export type {
   SchemaNormalizeMode,
 } from "./schema_contract";
 export { createPersistentCommandAdapter, type PersistentCommandHandler } from "./persistent-command";
+export { createTransactionalCommandGovernance } from "./transactional-command";
+export type { TransactionalCommandGovernanceOptions } from "./transactional-command";
 export { createDocumentationPlugin } from "./documentation";
 export type {
   ApplicationDocumentationOptions,
@@ -103,6 +118,7 @@ export interface CompiledRoute {
   /** @deprecated Use `responses` with an explicit HTTP status map. */
   response?: unknown;
   responses?: Record<string | number, unknown>;
+  effect?: CompiledEffectDescriptor;
   /** Compile-time ownership and transport classification for the route boundary. */
   contract?: {
     body?: "framework" | "domain";
@@ -434,6 +450,7 @@ export interface ApplicationErrorOptions {
   status?: number;
   code?: string;
   details?: unknown;
+  metadata?: ErrorMetadata;
 }
 
 export interface PublicApplicationError extends Error {
@@ -441,6 +458,7 @@ export interface PublicApplicationError extends Error {
   readonly status: number;
   readonly code: string;
   readonly details?: unknown;
+  readonly metadata?: ErrorMetadata;
 }
 
 export class ApplicationError extends Error implements PublicApplicationError {
@@ -448,6 +466,7 @@ export class ApplicationError extends Error implements PublicApplicationError {
   readonly status: number;
   readonly code: string;
   readonly details?: unknown;
+  readonly metadata?: ErrorMetadata;
 
   constructor(message: string, options: ApplicationErrorOptions = {}) {
     super(message);
@@ -455,6 +474,7 @@ export class ApplicationError extends Error implements PublicApplicationError {
     this.status = options.status ?? 500;
     this.code = options.code ?? "INTERNAL_ERROR";
     this.details = options.details;
+    this.metadata = options.metadata;
   }
 }
 
@@ -503,7 +523,7 @@ export interface ErrorContext {
  *
  * Declaring the runtime classes here lets Elysia's type system (and therefore
  * Eden Treaty / generated clients) know these errors are *handled*: the generic
- * `.error(handler)` catch-all no longer widens every route's response schema
+ * `.onError(handler)` catch-all no longer widens every route's response schema
  * with an untyped fallback. Each entry also documents the public `code` served
  * by {@link defaultErrorResponse} when a caller does not install an
  * `errorMapper`.
@@ -586,6 +606,8 @@ export interface ApplicationOptions<Http extends AnyElysia = Elysia, RequestCont
   commandExecutor?: CommandExecutor;
   /** Maps framework or application failures to the public HTTP contract. */
   errorMapper?: ErrorMapper;
+  /** Runs Effect route programs and provides their environment at the HTTP boundary. */
+  effectRuntime?: SupaCloudEffectRuntime;
   /** Best-effort execution metadata only; durable audit belongs to governance. */
   onExecution?: ExecutionObserver;
   /** Optional read-only OpenAPI and GraphQL documentation endpoints. */
@@ -1070,7 +1092,7 @@ export function createModulePlugin<
   compiled: CompiledModule,
   services: Services,
   ctxFactory: HttpRequestContextFactory<Http> = defaultRequestContext,
-  options: Pick<ApplicationOptions<Http>, "http" | "httpPolicies" | "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize"> = {},
+  options: Pick<ApplicationOptions<Http>, "http" | "httpPolicies" | "commandGovernance" | "commandExecutor" | "errorMapper" | "effectRuntime" | "onExecution" | "normalize"> = {},
   imported: Record<string, Record<string, unknown>> = {},
   pendingWork?: PendingWorkRegistry,
 ) {
@@ -1080,6 +1102,7 @@ export function createModulePlugin<
   const supportedFields = new Set([
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
+    "effect",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
@@ -1126,6 +1149,21 @@ export function createModulePlugin<
           code: "COMMAND_NOT_REGISTERED",
         });
       }
+      if (route.effect?.retry === "explicit" && route.command) {
+        const command = commandsByClassName.get(route.command);
+        if (command && command.idempotency !== "required") {
+          throw new ApplicationError(
+            `Effect retry is not allowed for non-idempotent command "${command.name}"`,
+            { code: "EFFECT_RETRY_IDEMPOTENCY_REQUIRED" },
+          );
+        }
+      }
+      if (route.effect?.dependencies && route.effect.dependencies.length > 0 && !options.effectRuntime) {
+        throw new ApplicationError(
+          `Route ${route.method} ${controller.path}${route.path} declares Effect dependencies without an effectRuntime`,
+          { code: "EFFECT_RUNTIME_UNCONFIGURED" },
+        );
+      }
     }
   }
   const requestContexts = new WeakMap<Request, unknown>();
@@ -1159,7 +1197,7 @@ export function createModulePlugin<
 
   const createRequestScope = compiled.createRequestScope;
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
-  plugin.afterResponse(async ({ request }) => {
+  plugin.onAfterResponse(async ({ request }) => {
     const scope = requestScopes.get(request);
     requestScopes.delete(request);
     try {
@@ -1190,11 +1228,11 @@ export function createModulePlugin<
   // the catch-all below still handles ParseError/ValidationError and unknown
   // failures. Both lanes share `mapError`, so `errorMapper` observes every
   // error exactly once regardless of which entry served it.
-  plugin.error(ApplicationError, ({ error, request }) =>
+  plugin.onError(ApplicationError, ({ error, request }) =>
     mapError(error, frameworkErrorCode(error), request));
-  plugin.error(SchemaContractError, ({ error, request }) =>
+  plugin.onError(SchemaContractError, ({ error, request }) =>
     mapError(error, frameworkErrorCode(error), request));
-  plugin.error(({ error, request }) => mapError(error, frameworkErrorCode(error), request));
+  plugin.onError(({ error, request }) => mapError(error, frameworkErrorCode(error), request));
 
   // Compiled descriptors carry runtime schemas, not native literal route types.
   // Widen only registration; keep the public plugin's context/service inference.
@@ -1247,7 +1285,7 @@ export function createModulePlugin<
               const result = await policy.mapResponse!({
                 http: context, requestContext: requestContexts.get(context.request), response,
                 encodeResponse: async (value) => {
-                  const validator = responseValidators?.[responseStatusOf(value, context.set.status)];
+                  const validator = responseValidators?.get(responseStatusOf(value, context.set.status));
                   if (!validator) return value;
                   if (!("EncodeFrom" in validator) || typeof validator.EncodeFrom !== "function") {
                     throw new ApplicationError("Response validation failed", { code: "RESPONSE_VALIDATION_FAILED" });
@@ -1314,13 +1352,15 @@ export function createModulePlugin<
           const handlerCall = () => route.invoker
             ? route.invoker(instance, input)
             : Reflect.apply(method, instance, [input]);
-          const invoke = once(() => route.command && options.commandGovernance ? handlerCall()
+          const invokeHandler = async () =>
+            runCompiledEffect(await handlerCall(), route.effect, options.effectRuntime);
+          const invoke = once(() => route.command && options.commandGovernance ? invokeHandler()
             : observeExecution(options.onExecution, {
               kind: route.command ? "command" : "route",
               operation: route.command ?? `${route.method} ${path}`,
               stage: "handler",
               ...executionTrace(requestContext),
-            }, handlerCall));
+            }, invokeHandler));
           const routeContext: ApplicationAspectContext = {
             kind: "route",
             name: `${route.method} ${path}`,
@@ -1494,7 +1534,12 @@ export function defaultErrorResponse(
 ): Response {
   const protocolCode = commandErrorCode(error);
   if (protocolCode) {
-    return Response.json({ ok: false, code: protocolCode, message: protocolCode }, {
+    return Response.json({
+      ok: false,
+      code: protocolCode,
+      message: protocolCode,
+      metadata: commandFailureMetadata(protocolCode),
+    }, {
       status: commandErrorStatus(protocolCode),
     });
   }
@@ -1504,6 +1549,7 @@ export function defaultErrorResponse(
       code: error.code,
       message: error.message,
       ...(error.details === undefined ? {} : { details: error.details }),
+      ...(error.metadata === undefined ? {} : { metadata: error.metadata }),
     }, { status: error.status });
   }
   if (frameworkCode === "PARSE") {
@@ -1627,6 +1673,11 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
           } catch (error) {
             errors.push(error);
           }
+        }
+        try {
+          await options.effectRuntime?.dispose?.();
+        } catch (error) {
+          errors.push(error);
         }
         if (errors.length > 0) {
           throw new AggregateError(errors, "Application destruction failed");

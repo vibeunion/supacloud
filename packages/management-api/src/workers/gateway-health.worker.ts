@@ -13,6 +13,7 @@ const INITIAL_DELAY_MS = Number(process.env.GATEWAY_HEALTH_CHECK_INITIAL_DELAY_M
 const ROUTE_RECONCILE_INTERVAL_MS = Number(process.env.GATEWAY_ROUTE_RECONCILE_INTERVAL_MS || 5 * 60 * 1000);
 
 let healthTimer: Timer | null = null;
+let initialDelayTimer: Timer | null = null;
 
 // Internal reachability state: detects "unreachable -> reachable" edge transitions. Exported only for test resets.
 let lastSeenReachable = false;
@@ -87,7 +88,8 @@ export function startGatewayHealthWorker(): void {
 
     logger.info(`[GatewayHealth] Worker started (interval: ${HEALTH_CHECK_INTERVAL_MS}ms)`);
 
-    const initialDelay = setTimeout(() => {
+    initialDelayTimer = setTimeout(() => {
+        initialDelayTimer = null;
         void runGatewayHealthCheck();
     }, INITIAL_DELAY_MS);
 
@@ -95,15 +97,14 @@ export function startGatewayHealthWorker(): void {
         void runGatewayHealthCheck();
     }, HEALTH_CHECK_INTERVAL_MS);
 
-    (healthTimer as any).__initialDelay = initialDelay;
 }
 
 export function stopGatewayHealthWorker(): void {
     if (!healthTimer) return;
 
     clearInterval(healthTimer);
-    const initialDelay = (healthTimer as any).__initialDelay;
-    if (initialDelay) clearTimeout(initialDelay);
+    if (initialDelayTimer) clearTimeout(initialDelayTimer);
+    initialDelayTimer = null;
     healthTimer = null;
     logger.info("[GatewayHealth] Worker stopped");
 }

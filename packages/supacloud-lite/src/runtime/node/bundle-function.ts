@@ -39,7 +39,7 @@ async function fetchModule(url: string): Promise<string> {
 function remotePlugin(): Bun.BunPlugin {
   return {
     name: 'supacloud-lite-remote',
-    setup(build: any) {
+    setup(build: Bun.PluginBuilder) {
       build.onResolve({ filter: /^(npm:|jsr:|https?:\/\/)/ }, (args: { path: string }) => ({
         path: rewriteRemoteSpecifier(args.path),
         namespace: 'http-url',
@@ -91,7 +91,9 @@ export async function bundleFunction(entryPath: string, name: string): Promise<s
     if (!buildOutput.success || buildOutput.outputs.length === 0) {
       throw new Error(buildOutput.logs.map((item) => item.message).join('\n') || `failed to bundle ${entryPath}`)
     }
-    return buildOutput.outputs[0]!.path
+    const output = buildOutput.outputs[0]
+    if (!output) throw new Error(`bundle produced no output for ${entryPath}`)
+    return output.path
   } catch (buildError) {
     try {
       await rm(outDir, { recursive: true, force: true })

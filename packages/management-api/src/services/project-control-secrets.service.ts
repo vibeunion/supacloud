@@ -56,7 +56,7 @@ function statusFromRow(scope: ControlSecretScope, name: string, row?: Record<str
     name,
     configured: Boolean(row),
     value: MASKED_VALUE,
-    updated_at: row?.updated_at ? new Date(String(row.updated_at)).toISOString() : null,
+    updated_at: row?.["updated_at"] ? new Date(String(row["updated_at"])).toISOString() : null,
   };
 }
 
@@ -98,8 +98,8 @@ export async function readManagedControlSecret(database: SQL, input: ManagedSecr
     WHERE project_ref = ${input.projectRef} AND scope = ${input.scope} AND name = ${input.name}
     LIMIT 1
   ` as Array<Record<string, unknown>>;
-  return typeof secretRow?.value_encrypted === "string"
-    ? decryptSecretIfNeeded(secretRow.value_encrypted)
+  return typeof secretRow?.["value_encrypted"] === "string"
+    ? decryptSecretIfNeeded(secretRow["value_encrypted"])
     : null;
 }
 
@@ -126,7 +126,7 @@ export const projectControlSecretsService = {
       WHERE project_ref = ${projectRef} AND scope = ${scope}
       ORDER BY name
     ` as Array<Record<string, unknown>>;
-    return rows.map((row) => statusFromRow(scope, String(row.name), row));
+    return rows.map((row) => statusFromRow(scope, String(row["name"]), row));
   },
 
   async upsert(projectRef: string, scope: string, name: string, value: string): Promise<ControlSecretStatus> {

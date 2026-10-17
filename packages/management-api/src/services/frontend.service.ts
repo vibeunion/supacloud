@@ -12,7 +12,7 @@
  *   SSR: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
-import { chmod, mkdtemp, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
@@ -125,7 +125,7 @@ function assertBuildCommandPolicy(command: string): void {
   if (command.length > MAX_BUILD_COMMAND_LENGTH) {
     throw new Error(`Build command exceeds ${MAX_BUILD_COMMAND_LENGTH} characters`);
   }
-  if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS === "true" && RESTRICTED_BUILD_SHELL_PATTERN.test(command)) {
+  if (process.env["SUPACLOUD_RESTRICT_BUILD_COMMANDS"] === "true" && RESTRICTED_BUILD_SHELL_PATTERN.test(command)) {
     throw new Error("Build command contains unsupported shell syntax");
   }
 }
@@ -140,7 +140,7 @@ function buildCommandEnvironment(
     if (value !== undefined) env[key] = value;
   }
   Object.assign(env, normalizeFrontendEnvVars(deploymentEnv));
-  env.NODE_VERSION = nodeVersion;
+  env["NODE_VERSION"] = nodeVersion;
   return env;
 }
 
@@ -1250,10 +1250,9 @@ WantedBy=multi-user.target
 
   private async precompressStaticAssets(root: string): Promise<void> {
     const availableCommands = new Map<string, string | null>();
-    const resolveCommand = async (command: string): Promise<string | null> => {
+    const resolveCommand = (command: string): string | null => {
       if (availableCommands.has(command)) return availableCommands.get(command) || null;
-      const result = await $`which ${command}`.nothrow().quiet();
-      const resolved = result.exitCode === 0 ? result.stdout.toString().trim().split("\n")[0] || null : null;
+      const resolved = Bun.which(command, { PATH: process.env["PATH"] ?? "" });
       availableCommands.set(command, resolved);
       return resolved;
     };
@@ -1262,28 +1261,22 @@ WantedBy=multi-user.target
       const fileStat = await stat(filePath);
       if (!fileStat.isFile() || !this.shouldPrecompressStaticFile(filePath, fileStat.size)) return;
 
-      const input = await readFile(filePath);
-      await writeFile(`${filePath}.gz`, gzipSync(input, { level: 9 }));
-      await writeFile(`${filePath}.br`, brotliCompressSync(input, {
+      const input = await Bun.file(filePath).bytes();
+      await Bun.write(`${filePath}.gz`, gzipSync(input, { level: 9 }));
+      await Bun.write(`${filePath}.br`, brotliCompressSync(input, {
         params: {
           [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
         },
       }));
 
-      const zstdPath = await resolveCommand("zstd");
-      if (zstdPath) {
-        const result = await $`${zstdPath} -q -f -19 -o ${filePath}.zst -- ${filePath}`.nothrow().quiet();
-        if (result.exitCode !== 0) {
-          logger.warn("[FrontendService] Failed to generate zstd sidecar", { path: filePath, stderr: result.stderr.toString() });
-        }
-      }
+      await Bun.write(`${filePath}.zst`, await Bun.zstdCompress(input, { level: 3 }));
     };
 
     const optimizeImage = async (filePath: string) => {
       const fileStat = await stat(filePath);
       if (!fileStat.isFile() || !this.shouldOptimizeStaticImage(filePath, fileStat.size)) return;
 
-      const cwebpPath = await resolveCommand("cwebp");
+      const cwebpPath = resolveCommand("cwebp");
       if (cwebpPath) {
         const result = await $`${cwebpPath} -quiet -q 82 ${filePath} -o ${filePath}.webp`.nothrow().quiet();
         if (result.exitCode !== 0) {
@@ -1291,7 +1284,7 @@ WantedBy=multi-user.target
         }
       }
 
-      const avifencPath = await resolveCommand("avifenc");
+      const avifencPath = resolveCommand("avifenc");
       if (avifencPath) {
         const result = await $`${avifencPath} --quiet --min 28 --max 38 --speed 6 ${filePath} ${filePath}.avif`.nothrow().quiet();
         if (result.exitCode !== 0) {

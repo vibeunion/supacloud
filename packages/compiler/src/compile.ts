@@ -8,17 +8,23 @@ import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
 import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
+import { validateEffectPolicies, validateJobPolicies } from "./effect-governance";
+import { checkDatabaseGovernance } from "./database-governance";
 
 function withDefaultGovernance(options: CompileOptions): CompileOptions {
-  return options.commandCapabilities === undefined
-    ? { ...options, commandCapabilities: {
+  return {
+    ...options,
+    requireRouteContracts: options.requireRouteContracts ?? true,
+    disallowControllerDirectDb: options.disallowControllerDirectDb ?? true,
+    detectOrphanModules: options.detectOrphanModules ?? true,
+    ...(options.commandCapabilities === undefined ? { commandCapabilities: {
       requirePersistentAdapters: true,
       permission: true,
       audit: true,
       idempotency: true,
       transaction: true,
-    } }
-    : options;
+    } } : {}),
+  };
 }
 
 async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlArtifacts> {
@@ -33,12 +39,17 @@ async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlAr
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
   options = withDefaultGovernance(options);
-  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths, options.effect);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
     ...validateClientSchemaBoundaries(graph, options),
+    ...validateEffectPolicies(graph, options.effect),
+    ...validateJobPolicies(graph),
   ];
+  const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
+  diagnostics.push(...databaseDiagnostics);
+  if (databaseDiagnostics.length) return { diagnostics, graph, written: [] };
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, written: [] };
   }
@@ -71,11 +82,13 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     }, options.strict ?? false));
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  const hasTypeErrors = diagnostics.some(({ severity, code }) =>
+    severity === "error" && (code.startsWith("source-") || code === "generated-any"));
   const generatedOptions = {
     ...options,
     ...(options.cache ? { artifactHashes: options.cache.generatedHashes } : {}),
   };
-  const written = !hasErrors || options.writeOnError === true
+  const written = !hasErrors || (options.writeOnError === true && !hasTypeErrors)
     ? await writeRenderedApplication(rendered, generatedOptions)
     : [];
   if (!hasErrors) {
@@ -103,12 +116,19 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
   options = withDefaultGovernance(options);
-  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths, options.effect);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
     ...validateClientSchemaBoundaries(graph, options),
+    ...validateEffectPolicies(graph, options.effect),
+    ...validateJobPolicies(graph),
   ];
+  const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
+  diagnostics.push(...databaseDiagnostics);
+  if (databaseDiagnostics.length) {
+    return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };
+  }
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI must be migrated to constructor injection."] };
   }
@@ -186,8 +206,11 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
 
 function resolveTypeSafety(options: CompileOptions): NonNullable<CompileOptions["typeSafety"]> {
   return {
-    noAnyInGenerated: options.typeSafety?.noAnyInGenerated ?? options.strict ?? false,
-    scanProductionSource: options.typeSafety?.scanProductionSource ?? options.strict ?? false,
+    noAnyInGenerated: true,
+    scanProductionSource: true,
     ...(options.typeSafety?.exclude ? { exclude: options.typeSafety.exclude } : {}),
+    ...(options.typeSafety?.allowAlternativeLibraries
+      ? { allowAlternativeLibraries: options.typeSafety.allowAlternativeLibraries }
+      : {}),
   };
 }

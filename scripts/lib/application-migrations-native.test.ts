@@ -4,7 +4,7 @@ import { startStarterPostgres } from "./starter-postgres";
 import { readApplicationMigrationInventory } from "../../packages/management-api/src/services/application-migrations";
 import { calculateMigrationChecksum } from "../../packages/management-api/src/services/migration-promotion";
 
-const bin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const bin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 
 (bin ? test : test.skip)("application inventory reads missing, old and divergent ledgers without initializing or repairing them", async () => {
   const controller = new AbortController();

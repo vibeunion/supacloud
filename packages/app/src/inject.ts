@@ -210,7 +210,7 @@ export function createEnvironmentInjector(
   };
   const instantiate = (type: Type<unknown>, explicitDeps?: unknown[]): unknown => {
     const dependencies = explicitDeps ?? resolveClassDependencies(type);
-    return track(new type(...dependencies));
+    return track(Reflect.construct(type, dependencies));
   };
   const normalizedProviders: AngularProvider[] = flattenProviders(providers).map((provider) => {
     if (typeof provider === "function") {
@@ -242,13 +242,13 @@ export function createEnvironmentInjector(
         return {
           provide: provider.provide,
           useFactory: () => track(provider.useFactory(
-            ...dependencies.map((dependency) => resolveProviderDependency(dependency)),
+            ...(dependencies.map((dependency) => resolveProviderDependency(dependency)) as never[]),
           )),
         };
       }
       return {
         ...provider,
-        useFactory: (...deps: unknown[]) => track(provider.useFactory(...deps)),
+          useFactory: (...deps: unknown[]) => track(provider.useFactory(...(deps as never[]))),
       } as AngularProvider;
     }
     return provider as AngularProvider;

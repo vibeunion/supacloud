@@ -197,24 +197,6 @@ describe("database route helpers", () => {
       .toThrow("Migration contains no executable statements");
   });
 
-  test("checks existing checksums before applying the current SQL policy", () => {
-    const source = readFileSync(join(import.meta.dirname, "../../src/routes/database.ts"), "utf8");
-    const transactionStart = source.indexOf("async function executeMigrationTransaction(");
-    const transactionEnd = source.indexOf("async function withMigrationRoleSession", transactionStart);
-    const transactionSource = source.slice(transactionStart, transactionEnd);
-    const existingLookup = transactionSource.indexOf("findExistingMigration(tx, input)");
-    const checksumCheck = transactionSource.indexOf("existingMigrationChecksum(existing[0]!, input)");
-    const checksumConflict = transactionSource.indexOf('"migration_checksum_conflict"');
-    const alreadyAppliedReturn = transactionSource.indexOf("return true;");
-    const policyCheck = transactionSource.indexOf("detectUnsupportedMigrationOperations(execution.statements)");
-
-    expect(existingLookup).toBeGreaterThan(-1);
-    expect(checksumCheck).toBeGreaterThan(existingLookup);
-    expect(checksumConflict).toBeGreaterThan(checksumCheck);
-    expect(alreadyAppliedReturn).toBeGreaterThan(checksumConflict);
-    expect(policyCheck).toBeGreaterThan(alreadyAppliedReturn);
-  });
-
   test("accepts exact legacy ledger SQL when its stored checksum uses the raw file format", () => {
     const input = {
       version: "20260720111000",

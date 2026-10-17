@@ -54,7 +54,7 @@ export class RateLimiter {
     const cutoff = now - rule.windowMs
     const recent = (this.hits.get(bucketKey) ?? []).filter((t) => t > cutoff)
     if (recent.length >= rule.limit) {
-      const retryMs = recent[0] + rule.windowMs - now
+      const retryMs = (recent[0] ?? now) + rule.windowMs - now
       return Math.max(1, Math.ceil(retryMs / 1000))
     }
     recent.push(now)

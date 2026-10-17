@@ -6,6 +6,18 @@ import { resolveDbName, getProjectDb } from "../../db";
 import { hashPayload, statusForHash } from "../hash";
 import { registerCheck } from "../../services/diagnostics.registry";
 import type { DiagnosticCheckResult, DiagnosticRepairResult } from "../../services/diagnostics.types";
+import { isRecord } from "../../utils/record";
+
+function sqlRows(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value) || !value.every(isRecord)) throw new TypeError("Invalid diagnostic SQL rows");
+  return value;
+}
+
+function sqlString(row: Record<string, unknown>, key: string): string {
+  const value = row[key];
+  if (typeof value !== "string") throw new TypeError(`Invalid diagnostic SQL field: ${key}`);
+  return value;
+}
 
 function quotedStringList(values: string[]): string {
   return values.map((value) => `'${value.replace(/'/g, "''")}'`).join(", ");
@@ -31,7 +43,7 @@ registerCheck({
         SELECT schema_name FROM information_schema.schemata
         WHERE schema_name IN (${quotedStringList(requiredSchemas)})
       `);
-      const found = new Set((rows as any[]).map((r) => r.schema_name));
+      const found = new Set(sqlRows(rows).map((r) => sqlString(r, "schema_name")));
       const missing = requiredSchemas.filter((s) => !found.has(s));
 
       if (missing.length > 0) {
@@ -102,7 +114,7 @@ registerCheck({
         ORDER BY tablename
       `;
 
-      const unprotected = (rows as any[]).map((r) => r.tablename);
+      const unprotected = sqlRows(rows).map((r) => sqlString(r, "tablename"));
       const userTables = unprotected.filter(
         (t) => !t.startsWith("pg_") && !t.startsWith("sql_") && t !== "schema_migrations",
       );
@@ -148,8 +160,8 @@ registerCheck({
       `;
 
       let enabled = 0;
-      for (const r of rows as any[]) {
-        const t = r.tablename;
+      for (const r of sqlRows(rows)) {
+        const t = sqlString(r, "tablename");
         if (t.startsWith("pg_") || t.startsWith("sql_") || t === "schema_migrations") continue;
         await db.unsafe(`ALTER TABLE public."${t}" ENABLE ROW LEVEL SECURITY`);
         enabled++;
@@ -190,7 +202,7 @@ registerCheck({
         ORDER BY t.table_name
       `;
 
-      const withoutPK = (rows as any[]).map((r) => r.table_name);
+      const withoutPK = sqlRows(rows).map((r) => sqlString(r, "table_name"));
 
       if (withoutPK.length > 0) {
         return {
@@ -237,7 +249,7 @@ registerCheck({
         SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'auth' AND table_name IN (${quotedStringList(requiredTables)})
       `);
-      const found = new Set((rows as any[]).map((r) => r.table_name));
+      const found = new Set(sqlRows(rows).map((r) => sqlString(r, "table_name")));
       const missing = requiredTables.filter((t) => !found.has(t));
 
       if (missing.length > 0) {
@@ -299,7 +311,7 @@ registerCheck({
         SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'storage' AND table_name IN ('buckets', 'objects')
       `;
-      const found = new Set((rows as any[]).map((r) => r.table_name));
+      const found = new Set(sqlRows(rows).map((r) => sqlString(r, "table_name")));
       const missing: string[] = [];
       if (!found.has("buckets")) missing.push("storage.buckets");
       if (!found.has("objects")) missing.push("storage.objects");
@@ -387,7 +399,7 @@ registerCheck({
         ORDER BY tc.table_name, kcu.column_name
       `;
 
-      const missing = (rows as any[]).map((r) => `${r.table_name}.${r.column_name}`);
+      const missing = sqlRows(rows).map((r) => `${sqlString(r, "table_name")}.${sqlString(r, "column_name")}`);
 
       if (missing.length > 0) {
         return {

@@ -159,7 +159,7 @@ async function goTrueError(response: Response, fallbackMessage: string) {
 }
 
 export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
-  .beforeHandle(requireAuthRuntimeManagement("mfa"))
+  .onBeforeHandle(requireAuthRuntimeManagement("mfa"))
   .get(
     "/:ref/auth/factors",
     {

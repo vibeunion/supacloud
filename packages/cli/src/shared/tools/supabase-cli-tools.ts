@@ -3,15 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: any) => Promise<any>,
-    ) => void;
-};
+import { registerTool, type ToolInvocation, type ToolServer } from "../tool-server";
 
 export type SupabaseCliAction =
     | "version"
@@ -66,7 +58,7 @@ export interface OfficialCliExecutionResult {
     stderr: string;
 }
 
-type MigrationPushCallback = (requestArguments: Record<string, unknown>) => Promise<any>;
+type MigrationPushCallback = ToolInvocation;
 type OfficialCliExecutor = (request: SupabaseCliArgs) => Promise<OfficialCliExecutionResult>;
 
 export interface SupabaseCliToolOptions {
@@ -186,6 +178,7 @@ function declarativeGenerateArguments(request: SupabaseCliArgs): string[] {
         ...target,
         ...(request.experimental === false ? [] : ["--experimental"]),
         ...(request.overwrite ? ["--overwrite"] : []),
+        ...(request.strict_coverage ? ["--strict-coverage"] : []),
         ...schemaArguments(request.schema),
     ];
 }
@@ -355,7 +348,7 @@ export function resolveOfficialSupabaseCommand(
 
     const version = environment.SUPABASE_CLI_VERSION?.trim();
     if (version) {
-        if (!VALID_VERSION.test(version)) throw new Error("Invalid SUPABASE_CLI_VERSION; use an exact version such as 2.110.0");
+        if (!VALID_VERSION.test(version)) throw new Error("Invalid SUPABASE_CLI_VERSION; use an exact version such as 2.120.0");
         if (process.versions.bun) return [process.execPath, "x", `supabase@${version}`];
         if (process.platform === "win32") {
             throw new Error("SUPABASE_CLI_VERSION bootstrap is unavailable under Node on Windows; install the official CLI or set SUPACLOUD_SUPABASE_CLI_BIN");
@@ -495,7 +488,7 @@ async function executeMigrationPush(request: SupabaseCliArgs, runtime: SupabaseC
         action: "push_migrations",
         ref: projectRef,
         dir: migrationDirectory,
-        dry_run: request.dry_run,
+        ...(request.dry_run === undefined ? {} : { dry_run: request.dry_run }),
     });
     const failureText = migrationResponse?.content?.some(
         (content: { type?: string; text?: string }) => content.type === "text" && content.text?.trimStart().startsWith("❌"),
@@ -566,7 +559,7 @@ export function registerSupabaseCliTools(
         executeOfficialCli: options.executeOfficialCli || ((request) => executeOfficialSupabaseCli(request, environment)),
     };
 
-    server.tool(
+    registerTool(server,
         "supabase",
         "Controlled adapter for the official open-source Supabase CLI. Remote push stays on the SupaCloud Management API and requires explicit Management credentials.",
         {
@@ -587,7 +580,7 @@ export function registerSupabaseCliTools(
             declarative: optional(Type.Boolean(), "[db_pull] Pull declarative schemas with pg-delta"),
             apply: optional(Type.Boolean(), "[db_schema_declarative_sync] Apply the generated migration locally"),
             experimental: optional(Type.Boolean(), "[db_schema_declarative_*] Enable the experimental pg-delta workflow"),
-            strict_coverage: optional(Type.Boolean(), "[db_schema_declarative_sync] Fail on unmanaged schema objects"),
+            strict_coverage: optional(Type.Boolean(), "[db_schema_declarative_*] Fail on unmanaged schema objects"),
             overwrite: optional(Type.Boolean(), "[db_schema_declarative_generate] Replace existing schema files"),
             runtime: optional(stringEnum(["docker", "podman", "native"]), "[stack_*] Local stack runtime"),
             eager: optional(Type.Boolean(), "[stack_start] Start all services before returning"),
@@ -600,6 +593,6 @@ export function registerSupabaseCliTools(
             dump_mode: optional(stringEnum(["schema", "data", "roles"]), "[db_dump] Dump schema (default), data, or roles"),
             language: optional(stringEnum(["typescript", "go", "swift", "python"]), "[gen_types] Output language (default: typescript)"),
         },
-        (request: SupabaseCliArgs) => executeSupabaseAction(request, runtime),
+        (request) => executeSupabaseAction(request, runtime),
     );
 }

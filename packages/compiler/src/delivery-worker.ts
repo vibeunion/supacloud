@@ -20,7 +20,7 @@ interface DeliveryWorkerHost {
 
 {
   const lifecycle = new AbortController();
-  const shutdownTimeout = Number(deliveryProcess.env.SHUTDOWN_TIMEOUT_MS ?? "10000");
+  const shutdownTimeout = Number(deliveryProcess.env["SHUTDOWN_TIMEOUT_MS"] ?? "10000");
   let host: DeliveryWorkerHost | undefined;
   let running = false;
   let runtimeFailed = false;
@@ -88,7 +88,7 @@ interface DeliveryWorkerHost {
     const candidate = await createHost(createCompiledModules(), { signal: lifecycle.signal });
     if (!candidate || typeof candidate.close !== "function") throw new Error("Invalid delivery worker host.");
     host = candidate;
-    const execution = deliveryProcess.env.SUPACLOUD_WORKER_EXECUTION;
+    const execution = deliveryProcess.env["SUPACLOUD_WORKER_EXECUTION"];
     if (execution) {
       const expected: unknown = JSON.parse(Buffer.from(execution, "base64").toString("utf8"));
       if (!deliveryPolicyEqual(host.execution, expected) || typeof host.health !== "function" || !host.failure) {

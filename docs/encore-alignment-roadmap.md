@@ -107,11 +107,11 @@ SupaCloud 的目标链路是：
 同步的清晰边界。建议命令形态（非现有命令声明）：
 
 ```sh
-supacloud-cli app dev --profile fast
-supacloud-cli app dev --profile integration
+supacloud app dev --profile fast
+supacloud app dev --profile integration
 ```
 
-> **第一切片已实现（2026-09-29）**：`supacloud-cli app dev` 已提供 profile 感知的
+> **第一切片已实现（2026-09-29）**：`supacloud app dev` 已提供 profile 感知的
 > 统一入口：编译、诊断、watch，并明确报告当前 profile、数据库模式（凭据脱敏）与
 > “未验证项”；`fast` 无需外部数据库，`integration` 必须显式提供数据库 URL，否则拒绝。
 > “解析资源绑定 → 连接依赖 → 迁移/seed → 启动应用与任务”仍待后续切片。

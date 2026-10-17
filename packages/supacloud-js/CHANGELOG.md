@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.43.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.43.0...supacloud-js-v0.43.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* validate starter query page envelopes ([#2009](https://github.com/vibeunion/supacloud/issues/2009)) ([e8d392b](https://github.com/vibeunion/supacloud/commit/e8d392bb8ad05ca164bbb3b5e383a95b09aba80a))
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2; retain @supacloud/query 0.3.1.
+
+## [0.43.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.42.1...supacloud-js-v0.43.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** generate typed paginated review queries ([#1951](https://github.com/vibeunion/supacloud/issues/1951)) ([50e841e](https://github.com/vibeunion/supacloud/commit/50e841ee06e0ea54a52632bd570c2c51fd5cb381))
+
+## [0.42.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.42.0...supacloud-js-v0.42.1) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.42.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.41.2...supacloud-js-v0.42.0) (2026-10-14)
+
+
+### Features
+
+* **workflows:** add host-neutral workflow dispatcher ([#1889](https://github.com/vibeunion/supacloud/issues/1889)) ([9fd3184](https://github.com/vibeunion/supacloud/commit/9fd31849cd3dceacb9a4cbc8fa82866512a12ccb))
+
+## [0.41.2](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.41.1...supacloud-js-v0.41.2) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.41.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.41.0...supacloud-js-v0.41.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
+## [0.41.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.40.0...supacloud-js-v0.41.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
+
+### Bug Fixes
+
+* **worker:** ship reviewed PGMQ job controls and concurrency repairs ([#1689](https://github.com/vibeunion/supacloud/issues/1689)) ([e283915](https://github.com/vibeunion/supacloud/commit/e283915e66e119b75ad1b909e18816270b5d01e3))
+
 ## [0.40.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.39.1...supacloud-js-v0.40.0) (2026-10-05)
 
 

@@ -45,7 +45,7 @@ The supported command remains `supacloud-lite`; use the installed executable
 rather than hard-coding a `dist` path. Custom scripts using `dist/launcher.cjs`
 must switch to `dist/launcher.mjs` or the package executable.
 
-`supacloud-cli lite` now resolves `bin["supacloud-lite"]` from the locally
+`supacloud lite` now resolves `bin["supacloud-lite"]` from the locally
 installed `@supacloud/lite/package.json`, not a hard-coded extension. Explicit
 `SUPACLOUD_LITE_CLI_BIN` still has priority. When no local package is installed,
 resolution falls back to PATH.

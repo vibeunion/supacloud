@@ -1,6 +1,10 @@
 // @supacloud-test-isolate — mocks project database sessions and migration leases.
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Elysia } from "elysia";
+import { createHash } from "node:crypto";
+import { runtimeInput } from "../helpers/application-runtime";
+import { stableSha256 } from "../../src/utils/stable-json";
+import type { readMigrationInventory } from "../../src/services/migration-ledger";
 
 interface QueryCall {
   text: string;
@@ -13,6 +17,7 @@ let transactionFailure: Error | null = null;
 let inventoryRows: Array<Record<string, unknown>> = [];
 let legacyInventoryRows: Array<Record<string, unknown>> = [];
 let inventoryFailure: Error | null = null;
+let onLedgerInsert: ((values: unknown[]) => void) | undefined;
 
 const transaction = Object.assign(
   mock((strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -24,16 +29,17 @@ const transaction = Object.assign(
     if (text.includes("record_schema_migration") && transactionFailure) {
       return Promise.reject(transactionFailure);
     }
+    if (text.includes("record_schema_migration")) onLedgerInsert?.(values);
     return Promise.resolve([]);
   }),
   {
     array: (values: unknown[]) => values,
-    unsafe: mock(async () => []),
+    unsafe: mock(async (_statement: string) => []),
   },
 );
 const connection = {
   begin: mock(async (operation: (sql: typeof transaction) => Promise<unknown>) => operation(transaction)),
-  unsafe: mock(async () => []),
+  unsafe: mock(async (_statement: string) => []),
   release: mock(() => undefined),
 };
 const roleDb = { reserve: mock(async () => connection) };
@@ -45,7 +51,8 @@ const adminDb = Object.assign(mock(async () => []), { unsafe: mock(async (query:
   return [];
 }) });
 const managementDb = mock((strings: TemplateStringsArray) => {
-  if (strings.join("?").includes("SELECT db_name, db_user, db_password")) {
+  if (strings.join("?").includes("SELECT db_name, db_user, db_password")
+    || strings.join("?").includes("SELECT * FROM projects")) {
     return Promise.resolve([{
       db_name: "tenant_db",
       db_user: "tenant_user",
@@ -150,6 +157,7 @@ describe("database migration baseline route", () => {
     inventoryRows = [];
     legacyInventoryRows = [];
     inventoryFailure = null;
+    onLedgerInsert = undefined;
     adminDb.unsafe.mockClear();
     transaction.mockClear();
     transaction.unsafe.mockClear();
@@ -252,6 +260,57 @@ describe("database migration baseline route", () => {
     expect(transaction.mock.invocationCallOrder.at(-1)).toBeGreaterThan(transaction.mock.invocationCallOrder[0]!);
   });
 
+  test("application migration composition uses the shared default role transaction and real receipt checksum", async () => {
+    const { ApplicationMigrations } = await import("../../src/services/application-migrations");
+    const record = runtimeInput().release;
+    const statement = "BEGIN; CREATE TABLE public.default_adapter_probe(id integer); COMMIT;\r\n";
+    const rows: Awaited<ReturnType<typeof readMigrationInventory>> = [];
+    const backupId = `logical-full_demo_${"a".repeat(32)}`;
+    const stamp = new Date().toISOString();
+    const backup = {
+      backup_id: backupId, project_ref: "demo", database: "tenant_db", kind: "logical-full" as const,
+      created_at: stamp, completed_at: stamp, bytes: 100, sha256: "e".repeat(64),
+    };
+    onLedgerInsert = values => {
+      expect(values[0]).toBe("1");
+      expect(values[1]).toEqual([statement]);
+      expect(values[2]).toBe("default_adapter_probe");
+      expect(typeof values[3]).toBe("string");
+      rows.push({
+        version: "1", name: "default_adapter_probe", statements: [statement], statement_count: 1,
+        checksum: String(values[3]), applied_at: null,
+      });
+    };
+    const service = new ApplicationMigrations({
+      storage: { readMigrations: async () => ({
+        record, archives: [{
+          target: "api", objectId: record.targets[0]!.object_id, artifactVerified: true,
+          migrations: [{
+            version: "1", name: "default_adapter_probe", sql: statement,
+            path: "migrations/project-migration/1_default_adapter_probe.sql",
+            executor: "project-migration", bytes: Buffer.byteLength(statement),
+            sha256: createHash("sha256").update(statement).digest("hex"),
+          }],
+        }],
+      }) },
+      inventory: async () => structuredClone(rows),
+      backups: { create: async () => backup, read: async () => backup },
+    });
+    const result = await service.apply({
+      projectRef: "demo", applicationId: "reviews", releaseId: record.release_id,
+      expectedLedgerDigest: stableSha256([]), backupId,
+    });
+    expect(result.after.project_migrations_applied).toBe(true);
+    expect(result.applied[0]?.strippedTransactionWrappers).toBe(2);
+    expect(transaction.unsafe.mock.calls).toEqual([["CREATE TABLE public.default_adapter_probe(id integer)"]]);
+    expect(prepareProjectMigrationRole).toHaveBeenCalledTimes(1);
+    expect(issueMigrationLedgerLease).toHaveBeenCalledTimes(1);
+    expect(releaseMigrationLedgerLease).toHaveBeenCalledTimes(1);
+    expect(connection.begin).toHaveBeenCalledTimes(1);
+    expect(transactionCalls.some(({ text }) => text.includes("pg_notify"))).toBe(true);
+    expect(connection.unsafe.mock.calls).toEqual([["RESET ALL; DISCARD TEMP; DISCARD PLANS"]]);
+  });
+
   test("rejects ABORT transaction control before executing or recording a migration", async () => {
     const response = await migrationRequest({
       version: "20260819090001",
@@ -287,6 +346,34 @@ describe("database migration baseline route", () => {
     });
     expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
     expect(transactionCalls.some(({ text }) => text.includes("pg_notify"))).toBe(true);
+  });
+
+  test("exact legacy ledger SQL is observed before the current SQL policy without re-execution", async () => {
+    const migration = {
+      version: "20260819090000", name: "legacy_policy", sql: "ALTER ROLE postgres SUPERUSER;",
+    };
+    existingMigrationRows = [{
+      ...migration, statements: [migration.sql], checksum: "legacy-raw-file-checksum",
+    }];
+    const response = await migrationRequest(migration);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ message: "Migration already applied", code: "409" });
+    expect(transaction.unsafe).not.toHaveBeenCalled();
+    expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
+    expect(transactionCalls.some(({ text }) => text.includes("pg_notify"))).toBe(true);
+  });
+
+  test("a conflicting historical checksum is reported before the current SQL policy", async () => {
+    existingMigrationRows = [{
+      version: "20260819090000", name: "legacy_policy", statements: ["SELECT 1;"], checksum: "d".repeat(64),
+    }];
+    const response = await migrationRequest({
+      version: "20260819090000", name: "legacy_policy", sql: "ALTER ROLE postgres SUPERUSER;",
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "migration_checksum_conflict" });
+    expect(transaction.unsafe).not.toHaveBeenCalled();
+    expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
   });
 
   test("is idempotent for an identical baseline marker", async () => {

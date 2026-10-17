@@ -1,9 +1,11 @@
 import "./url-import-plugin";
 import { projectReleaseFunctionManifest } from "./project-release";
+import { createProjectReleasePreheatRoutes, PROJECT_PREHEAT_SCHEMA } from "./project-release-preheat";
 import { Elysia } from "elysia";
 import {
   WorkerPool,
   resolveMaxHttpBodySizeBytes,
+  resolveProjectWorkerCacheOptions,
   resolveWorkerReplacementBudget,
   type WorkerPoolPreheatResult,
   type WorkerPoolVersionPreheatResult,
@@ -27,7 +29,7 @@ import {
   readEdgeRuntimeProjectSecrets,
   verifyEdgeRuntimeJwtContext,
   withVerifiedJwtContext,
-  type EdgeRuntimeAuthRuntimeMode,
+  type EdgeRuntimeProjectSecrets,
   type EdgeRuntimeJwtVerificationResult,
 } from "./jwt-verifier";
 import {
@@ -37,6 +39,8 @@ import {
   activeFunctionPathCandidates,
   attestedFunctionArtifactPath,
 } from "./function-source";
+import { functionBytecodeMode } from "./function-bytecode-contract";
+import { functionBytecodeCache } from "./function-bytecode";
 import { readFunctionFile, type TrustedFunctionFile } from "./trusted-function-files";
 import {
   assertCanonicalConfiguredFunctionVersion,
@@ -70,6 +74,7 @@ import {
   resolveMemoryCgroups,
 } from "./memory-pressure";
 
+const AOT_CAPTURE = process.env.ELYSIA_AOT_BUILD === "1";
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
@@ -77,7 +82,7 @@ const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || 
 const BACKGROUND_PREHEAT_MODE = process.env.EDGE_BACKGROUND_PREHEAT_MODE || "one";
 const FOREGROUND_WORKER_SMOL = resolveBooleanEnv(
   process.env.EDGE_FOREGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL,
-  false,
+  true,
 );
 const BACKGROUND_WORKER_SMOL = resolveBooleanEnv(
   process.env.EDGE_BACKGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL,
@@ -88,6 +93,18 @@ const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || F
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
+const FUNCTION_CORS_MODE = process.env.EDGE_FUNCTIONS_CORS_MODE?.trim() || "auto";
+if (FUNCTION_CORS_MODE !== "function" && FUNCTION_CORS_MODE !== "auto" && FUNCTION_CORS_MODE !== "permissive") {
+  throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function, auto, or permissive");
+}
+const FUNCTION_CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+  "Access-Control-Allow-Headers":
+    "authorization, apikey, content-type, prefer, accept, accept-profile, content-profile, range, x-upsert, x-client-info, cache-control, idempotency-key, x-request-id, traceparent, tracestate, baggage",
+  "Access-Control-Expose-Headers": "content-range, range-unit, content-profile, content-disposition, x-request-id, x-supacloud-trace-id, x-supacloud-correlation-id, traceparent",
+  "Access-Control-Max-Age": "86400",
+} as const;
 const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
 const WORKER_REPLACEMENT_BUDGET = resolveWorkerReplacementBudget(
   process.env.EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE,
@@ -95,6 +112,7 @@ const WORKER_REPLACEMENT_BUDGET = resolveWorkerReplacementBudget(
 const WORKER_REPLACEMENT_BUDGET_OPTIONS = WORKER_REPLACEMENT_BUDGET === undefined
   ? {}
   : { maxWorkerReplacementsBeforeRecycle: WORKER_REPLACEMENT_BUDGET };
+const PROJECT_WORKER_CACHE_OPTIONS = resolveProjectWorkerCacheOptions(process.env);
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const RUNTIME_INSTANCE_ID = process.env.EDGE_RUNTIME_INSTANCE_ID?.trim() || crypto.randomUUID();
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -121,6 +139,7 @@ const PGREDIS_RUNTIME_ENDPOINT: PgredisRuntimeEndpointConfig | undefined = PGRED
 
 // Empty clusters and CI environments might not have created the function directory yet; create on startup to prevent crashing before health checks.
 async function ensureDir(dir: string): Promise<string> {
+  if (AOT_CAPTURE) return dir;
   try {
     return await fs.realpath(dir);
   } catch {
@@ -328,18 +347,20 @@ function requestRuntimeRecycle(): void {
 }
 
 const pool = new WorkerPool({
-  size: POOL_SIZE,
+  size: AOT_CAPTURE ? 0 : POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
+  ...PROJECT_WORKER_CACHE_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
 const backgroundPool = new WorkerPool({
-  size: BACKGROUND_POOL_SIZE,
+  size: AOT_CAPTURE ? 0 : BACKGROUND_POOL_SIZE,
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
+  ...PROJECT_WORKER_CACHE_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
@@ -367,6 +388,7 @@ type FunctionActivationSnapshot = {
   activeVersion: string | null;
   responseVersion: string | null;
   verifyJwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   capabilities: FunctionCapabilities;
   limits: FunctionLimits;
@@ -439,7 +461,8 @@ async function resolvedFunctionPath(
       || currentAuthority.target_state !== resolvedConfig.targetState
       || currentAuthority.artifact_sha256 !== resolvedConfig.artifactSha256
       || currentManifest.config.version !== resolvedConfig.version
-      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt) {
+      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt
+      || currentManifest.config.bytecode !== resolvedConfig.bytecode) {
       configCache.delete(`${request.projectRef}/${request.functionName}`);
       throw new Error("Runtime environment changed before artifact resolution");
     }
@@ -487,6 +510,7 @@ async function resolvedFunctionPath(
       activeVersion,
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
+      bytecode: resolvedConfig.bytecode,
       framework: resolvedConfig.framework,
       capabilities: resolvedConfig.capabilities,
       limits: resolvedConfig.limits,
@@ -619,6 +643,7 @@ async function dispatchFunction(
       projectRoot,
       projectRef,
       framework: activation.framework,
+      bytecode: activation.bytecode,
       capabilities: activation.capabilities,
       limits: activation.limits,
       functionVersion: responseVersion,
@@ -716,6 +741,7 @@ const CONFIG_CACHE_TTL = 10_000;
 
 type FunctionConfig = {
   verify_jwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
   activationId: string | null;
@@ -785,6 +811,7 @@ async function getFunctionConfig(
   if (cached && cached.expiresAt > Date.now()) {
     return {
       verify_jwt: cached.verify_jwt,
+      bytecode: cached.bytecode,
       framework: cached.framework,
       capabilities: cached.capabilities,
       limits: cached.limits,
@@ -804,6 +831,7 @@ async function getFunctionConfig(
   const config = manifest === null
     ? {
         verify_jwt: true,
+        bytecode: "off" as const,
         framework: "fetch" as const,
         version: null,
         activationId: null,
@@ -815,6 +843,7 @@ async function getFunctionConfig(
       }
     : {
         verify_jwt: manifest.config.verify_jwt,
+        bytecode: manifest.config.bytecode,
         framework: manifest.config.framework === "elysia"
           || manifest.config.framework === "hono"
           || manifest.config.framework === "sveltekit-function"
@@ -857,6 +886,7 @@ async function immutableVersionConfig(
   }
   return {
     verify_jwt: record.verify_jwt,
+    bytecode: functionBytecodeMode(record.bytecode),
     framework: record.framework === "elysia"
       || record.framework === "hono"
       || record.framework === "sveltekit-function"
@@ -889,6 +919,7 @@ async function assertDispatchAuthorityCurrent(
     || current.activationId !== activation.activationId
     || current.version !== activation.activeVersion
     || current.verify_jwt !== activation.verifyJwt
+    || current.bytecode !== activation.bytecode
     || current.framework !== activation.framework
     || JSON.stringify(current.capabilities) !== JSON.stringify(activation.capabilities)
     || JSON.stringify(current.limits) !== JSON.stringify(activation.limits)
@@ -910,6 +941,7 @@ async function activeFunctionConfig(
   const manifest = await activeActivationManifest(projectRoot, functionName);
   return {
     verify_jwt: manifest.config.verify_jwt,
+    bytecode: manifest.config.bytecode,
     framework: manifest.config.framework,
     version: manifest.config.version,
     activationId: activationAuthorityId(manifest),
@@ -1039,32 +1071,14 @@ async function preheatActivationSnapshot(
   });
 }
 
-interface ProjectSecrets {
-  anonKey: string;
-  serviceRoleKey: string;
-  jwtSecret: string;
-  jwtJwks: ReturnType<typeof normalizeJwtJwks>;
-  thirdParty: ReturnType<typeof normalizeThirdPartyJwtPolicy>;
-  authRuntimeMode: EdgeRuntimeAuthRuntimeMode;
-  authIssuer: string;
-}
-
 async function getProjectSecrets(
   projectRef: string,
-): Promise<ProjectSecrets | null> {
+): Promise<EdgeRuntimeProjectSecrets | null> {
   try {
     const runtimeEnv = await loadTenantEnv(projectRef);
     const runtimeSecrets = readEdgeRuntimeProjectSecrets(runtimeEnv);
     if (runtimeSecrets) {
-      return {
-        anonKey: runtimeSecrets.anonKey || "",
-        serviceRoleKey: runtimeSecrets.serviceRoleKey || "",
-        jwtSecret: runtimeSecrets.jwtSecret || "",
-        jwtJwks: runtimeSecrets.jwtJwks || null,
-        thirdParty: runtimeSecrets.thirdParty || null,
-        authRuntimeMode: runtimeSecrets.authRuntimeMode || "unknown",
-        authIssuer: runtimeSecrets.authIssuer || "",
-      };
+      return runtimeSecrets;
     }
 
     const [keysRes, detailRes, authRuntimeRes] = await Promise.all([
@@ -1348,7 +1362,7 @@ async function abortFunctionActivationFence(
   return state;
 }
 
-async function handleFunctionRequest(
+async function dispatchFunctionRequest(
   c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string | number | string[]> } },
   functionName: string,
 ) {
@@ -1365,6 +1379,14 @@ async function handleFunctionRequest(
   }
   const fencedResponse = activationFenceResponse(projectRef, functionName);
   if (fencedResponse) return fencedResponse;
+  if (FUNCTION_CORS_MODE === "permissive" && c.request.method === "OPTIONS") {
+    try {
+      await resolveFunctionPath(projectRef, functionName);
+    } catch (error) {
+      return functionDispatchError(error, c.set.headers as Record<string, string>);
+    }
+    return new Response(null, { status: 204 });
+  }
   const blockedResponse = await authFailureBlockResponse(projectRef, functionName, authHeader, apikeyHeader);
   if (blockedResponse) {
     return blockedResponse;
@@ -1424,9 +1446,78 @@ async function handleFunctionRequest(
   return response;
 }
 
+async function handleFunctionRequest(
+  c: Parameters<typeof dispatchFunctionRequest>[0],
+  functionName: string,
+): Promise<Response> {
+  const response = await dispatchFunctionRequest(c, functionName);
+  if (FUNCTION_CORS_MODE === "function" || FUNCTION_CORS_MODE === "auto") return response;
+  // 显式启用时由平台接管跨域；实际请求仍经过原有 JWT 和函数授权。
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(FUNCTION_CORS_HEADERS)) {
+    if (name !== "Access-Control-Expose-Headers") headers.set(name, value);
+  }
+  const exposed = [headers.get("Access-Control-Expose-Headers"), FUNCTION_CORS_HEADERS["Access-Control-Expose-Headers"]]
+    .filter(Boolean).join(", ");
+  headers.set("Access-Control-Expose-Headers", exposed);
+  headers.delete("Access-Control-Allow-Credentials");
+  if (c.request.method === "OPTIONS") {
+    const requestedHeaders = c.request.headers.get("Access-Control-Request-Headers");
+    if (requestedHeaders) headers.set("Access-Control-Allow-Headers", requestedHeaders);
+    headers.append("Vary", "Access-Control-Request-Headers");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 const app = new Elysia()
-  // Functions own CORS, including OPTIONS. The platform must not add headers
-  // that grant an origin or credentials rejected by the function.
+  .use(createProjectReleasePreheatRoutes({
+    authorize: requireInternalAuth,
+    epoch: () => ({
+      runtime_instance_id: RUNTIME_INSTANCE_ID,
+      foreground_generation: pool.generation, background_generation: backgroundPool.generation,
+    }),
+    assertAvailable() {
+      if (activeActivationLease()) throw new Error("A Function activation lease is active");
+    },
+    async prepare(ref, functions) {
+      const tenantEnvLoad = await loadTenantRuntimeEnv(ref);
+      const moduleEpoch = getProjectModuleEpoch(ref);
+      const requests = await Promise.all(functions.map(async entry => {
+        const activation = await preheatActivationSnapshot(ref, entry.slug, entry.version, null);
+        const requestFor = (profile: TenantEnvExecutionProfile) => {
+          const proof = tenantEnvModuleProof(ref, tenantEnvLoad.env, tenantEnvLoad, profile);
+          const attestation = runtimePreheatIdentity({
+            projectRef: ref, functionSlug: entry.slug, requestedVersion: entry.version,
+            activation, tenantEnvLoad, executionProfile: profile, moduleEnvProof: proof,
+          });
+          if (!activation.attested || !attestation || !proof) throw new Error("Unattested release member");
+          return {
+            functionId: `${ref}_${entry.slug}_v${entry.version}`,
+            functionPath: activation.functionPath, projectRoot: activation.projectRoot,
+            projectRef: ref, moduleVersion: activation.moduleVersion, env: tenantEnvLoad.env,
+            envProof: proof, attestation,
+            bytecode: activation.bytecode,
+            ...(profile === "background" ? { maxWorkers: resolveBackgroundPreheatWorkers() } : {}),
+          };
+        };
+        return { foreground: requestFor("foreground"), background: requestFor("background") };
+      }));
+      return {
+        foreground: requests.map(entry => entry.foreground),
+        background: requests.map(entry => entry.background),
+        assertCurrent() {
+          if (!isTenantEnvLoadCurrent(ref, tenantEnvLoad) || tenantEnvLoad.loadState !== "loaded"
+            || getProjectModuleEpoch(ref) !== moduleEpoch) throw new Error("Runtime environment changed");
+        },
+      };
+    },
+    foreground: pool, background: backgroundPool,
+  }))
+  // 默认保留函数自有 CORS；只有显式启用 permissive 才由平台接管。
   .get("/health", () => ({
     status: "ok",
     instanceId: RUNTIME_INSTANCE_ID,
@@ -1439,7 +1530,9 @@ const app = new Elysia()
 
     const foreground = pool.snapshotMetrics("supacloud_edge");
     const background = backgroundPool.snapshotMetrics("supacloud_edge_background");
-    return Object.entries({ ...foreground, ...background })
+    const bytecode = Object.fromEntries(Object.entries(functionBytecodeCache.metrics)
+      .map(([name, value]) => [`supacloud_edge_bytecode_${name}`, value]));
+    return Object.entries({ ...foreground, ...background, ...bytecode })
       .map(([key, value]) => `${key} ${value}`)
       .join("\n");
   })
@@ -1588,6 +1681,7 @@ const app = new Elysia()
     if (authError) return authError;
     return {
       project_release_schema: "supacloud.project-function-release.v1",
+      project_preheat_schema: PROJECT_PREHEAT_SCHEMA,
       runtime_instance_id: RUNTIME_INSTANCE_ID,
       foreground_generation: pool.generation,
       background_generation: backgroundPool.generation,
@@ -1675,6 +1769,7 @@ const app = new Elysia()
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
             }),
             backgroundPool.preheatVersionedIdleWorkers({
               functionId,
@@ -1685,6 +1780,7 @@ const app = new Elysia()
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ])
@@ -1694,12 +1790,14 @@ const app = new Elysia()
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
             }),
             backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ]);
@@ -1907,11 +2005,9 @@ const app = new Elysia()
       { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
     )
-  )
+  );
 
-  .listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
-
-console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
+export { app };
 
 const gracefulShutdown = async (signal: string, exitCode = 0) => {
   if (shuttingDown) return;
@@ -1936,6 +2032,7 @@ const gracefulShutdown = async (signal: string, exitCode = 0) => {
       ),
     ]);
 
+    await functionBytecodeCache.dispose();
     clearTimeout(drainTimeout);
   } catch {
     console.error("[EdgeRuntime] Drain timed out, forcing exit");
@@ -1947,34 +2044,51 @@ const gracefulShutdown = async (signal: string, exitCode = 0) => {
   process.exit(exitCode);
 };
 
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+if (!AOT_CAPTURE) {
+  app.listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
+  console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
 
-process.on("uncaughtException", (err) => {
-  console.error("[EdgeRuntime] FATAL uncaughtException:", err);
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[EdgeRuntime] unhandledRejection:", reason);
-});
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-const memoryCgroups = await resolveMemoryCgroups();
-if (memoryCgroups.length > 0) {
-  const monitor = createMemoryPressureMonitor({
-    sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
-    onPressure: (snapshot) => {
-      console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
-        ...snapshot,
-        ...pool.snapshotMetrics("supacloud_edge"),
-        ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
-      });
-      void gracefulShutdown("cgroup memory pressure", 1);
-    },
-    onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+  process.on("uncaughtException", (err) => {
+    console.error("[EdgeRuntime] FATAL uncaughtException:", err);
+    process.exit(1);
   });
-  setInterval(() => { void monitor.poll(); }, 1_000).unref();
-}
+  process.on("unhandledRejection", (reason) => {
+    console.error("[EdgeRuntime] unhandledRejection:", reason);
+  });
 
-// Keep the main runtime process alive so systemd can supervise the actual server
-// process instead of observing Bun's temporary bootstrap completion.
-await new Promise<void>(() => {});
+  const memoryCgroups = await resolveMemoryCgroups();
+  if (memoryCgroups.length > 0) {
+    const monitor = createMemoryPressureMonitor({
+      sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
+      onAdmissionStateChange: ({ blocked, recovering, snapshot }) => {
+        pool.setAdmissionBlocked(blocked, recovering);
+        backgroundPool.setAdmissionBlocked(blocked, recovering);
+        if (snapshot) {
+          console.warn("[EdgeRuntime] Memory admission state changed", {
+            blocked,
+            recovering,
+            currentBytes: snapshot.currentBytes,
+            highBytes: snapshot.highBytes,
+          });
+        }
+      },
+      onPressure: (snapshot) => {
+        console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
+          ...snapshot,
+          ...pool.snapshotMetrics("supacloud_edge"),
+          ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
+        });
+        void gracefulShutdown("cgroup memory pressure", 1);
+      },
+      onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+    });
+    setInterval(() => { void monitor.poll(); }, 1_000).unref();
+  }
+
+  // Keep the main runtime process alive so systemd can supervise the actual server
+  // process instead of observing Bun's temporary bootstrap completion.
+  await new Promise<void>(() => {});
+}

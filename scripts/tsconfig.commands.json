@@ -25,6 +25,8 @@
     "../.github/scripts/package-validation.mjs",
     "../.github/scripts/npm-registry-visibility.mjs",
     "../.github/scripts/publish-npm-package.mjs",
-    "../.github/scripts/publish-npm-package.test.mjs"
+    "../.github/scripts/publish-npm-package.test.mjs",
+    "../.github/scripts/resolve-release-outputs.mjs",
+    "../.github/scripts/validate-release-identity.mjs"
   ]
 }

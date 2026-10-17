@@ -18,6 +18,7 @@ import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 import { beginRequestObservability } from "../utils/observability";
+import { governGraphqlProjectRequest } from "../services/graphql-request-governance";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 const MAX_TASK_LINK_ID_BYTES = 255;
@@ -162,6 +163,15 @@ function hostNameFromHeaderValue(rawHost: string): string {
     } catch {
         return host.replace(/^\[|\]$/g, "").split(":")[0].toLowerCase();
     }
+}
+
+// A gateway may emit the same header twice (for example Caddy joins a route
+// that defines both the canonical "X-Project-Ref" and lower-case
+// "x-project-ref" into "ref,ref"). Tenant refs never contain a comma, so keep
+// the first token and ignore the duplicated remainder.
+function firstHeaderToken(rawValue: string): string {
+    const [first] = rawValue.split(",");
+    return (first || "").trim();
 }
 
 function requestHostCandidates(request: Request): string[] {
@@ -492,10 +502,15 @@ function adminUserDeletionId(request: Request): string | null {
     }
 }
 
-async function getProjectRef(request: Request): Promise<string> {
+async function getProjectRef(
+    request: Request,
+    options: { allowHostFallback?: boolean } = {},
+): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
-    const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
+    const refHeader = firstHeaderToken(
+        request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "",
+    );
     const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key, { includeProvisioning: true }) || '';
 
     if (apiKeyRef) {
@@ -545,6 +560,11 @@ async function getProjectRef(request: Request): Promise<string> {
         if (trustedRef) return trustedRef;
     }
 
+    if (options.allowHostFallback && request.method === "OPTIONS") {
+        const hostRef = await resolveProjectRefFromHost(request);
+        if (hostRef) return hostRef;
+    }
+
     if (isTestTenantAuthAllowed(request)) {
         if (key === 'test-token' || auth.includes('test-token')) {
              return 'test_mock';
@@ -552,6 +572,34 @@ async function getProjectRef(request: Request): Promise<string> {
     }
     
     return '';
+}
+
+async function resolveProjectRefFromHost(request: Request): Promise<string> {
+    const rawHosts = requestHostCandidates(request);
+    if (rawHosts.length === 0) return "";
+
+    try {
+        const rows = await sdkProxySql`
+            SELECT ref, config
+            FROM projects
+            WHERE deleted_at IS NULL
+              AND lower(status) IN ('active', 'creating')
+        `;
+        for (const rawHost of rawHosts) {
+            const host = hostNameFromHeaderValue(rawHost);
+            if (!host) continue;
+            const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
+                typeof row.ref === "string" && matchProjectRefFromHost(host, row.ref, row.config),
+            );
+            if (matchedProject && typeof matchedProject.ref === "string") return matchedProject.ref;
+        }
+    } catch (error: unknown) {
+        logger.warn("[SDK Proxy] Failed to resolve tenant from request host", {
+            hosts: rawHosts,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+    return "";
 }
 
 async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request): Promise<string> {
@@ -620,6 +668,21 @@ type ProxyInterceptors = {
     authAuthorityRef?: string;
     timeoutMs?: number;
 };
+
+function isUpstreamConnectionRefused(error: unknown): boolean {
+    const seen = new Set<unknown>();
+    let current: unknown = error;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const message = current instanceof Error ? current.message : String(current);
+        if ((typeof current === "object" && "code" in current && current.code === "ECONNREFUSED")
+            || /\bECONNREFUSED\b/.test(message)) {
+            return true;
+        }
+        current = typeof current === "object" && "cause" in current ? current.cause : undefined;
+    }
+    return false;
+}
 
 async function executeProxy(request: Request, targetUrl: string, interceptors: ProxyInterceptors) {
     try {
@@ -717,7 +780,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
             headers: proxyHeaders
         });
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         const name = err instanceof Error ? err.name : "";
         if (name === "TimeoutError" || name === "AbortError" || /abort|timeout/i.test(message)) {
@@ -725,6 +788,14 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
             return new Response(JSON.stringify({ message: 'Upstream Proxy Timeout' }), {
                 status: 504,
                 headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (isUpstreamConnectionRefused(err)) {
+            logger.warn(`[SDK Proxy] Upstream temporarily unavailable: ${targetUrl}`, { error: message });
+            return new Response(JSON.stringify({ message: 'Upstream Temporarily Unavailable' }), {
+                status: 503,
+                headers: { 'Content-Type': 'application/json', 'Retry-After': '2' }
             });
         }
 
@@ -738,7 +809,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
 
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     .group("/auth/v1", (app) => {
-        const handler = async ({ request }: any) => {
+        const handler = async ({ request }: { request: Request }) => {
             const ref = await getProjectRef(request);
             if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
             const authAuthorityRef = getAuthRuntimeDescriptor(ref).authority_project_ref;
@@ -781,7 +852,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
                   .get("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).post("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).put("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).patch("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).delete("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).options("", handler);
     })
     .group("/rest/v1", (app) => {
-        const handler = async ({ request }: any) => {
+        const handler = async ({ request }: { request: Request }) => {
             const ref = await getProjectRef(request);
             if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
             if (isOpenApiSchemaRequest(request) && !(await hasProjectServiceRoleCredential(request, ref))) {
@@ -801,9 +872,19 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
                   .get("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).post("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).put("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).patch("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).delete("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).options("", handler);
     });
 
-const graphqlHandler = async ({ request }: any) => {
+const graphqlHandler = async ({ request }: { request: Request }) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    const governance = await governGraphqlProjectRequest(request, async () => {
+        const rows = await sdkProxySql`
+            SELECT config FROM projects WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
+        `;
+        if (rows.length !== 1 || !Object.hasOwn(rows[0]!, "config")) {
+            throw new Error("GRAPHQL_POLICY_UNAVAILABLE");
+        }
+        return rows[0]!.config;
+    });
+    if (governance instanceof Response) return governance;
     const ports = await getTenantPorts(ref);
     if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     
@@ -821,7 +902,7 @@ const graphqlHandler = async ({ request }: any) => {
     });
 };
 
-const realtimeHandler = async ({ request }: any) => {
+const realtimeHandler = async ({ request }: { request: Request }) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     
@@ -830,8 +911,8 @@ const realtimeHandler = async ({ request }: any) => {
     return executeProxy(request, targetUrl, { ref });
 };
 
-const functionsHandler = async ({ request }: any) => {
-    const ref = await getProjectRef(request);
+const functionsHandler = async ({ request }: { request: Request }) => {
+    const ref = await getProjectRef(request, { allowHostFallback: true });
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
     const asyncResponse = await maybeEnqueueAsyncFunction(request, ref);

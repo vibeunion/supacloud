@@ -91,8 +91,12 @@ export async function snapshotSchema(db: Pick<DbEngine, 'query'>, schema = 'publ
   const constraints = new Map<string, Map<string, string>>()
   const constraintIndexOids = new Set<number>()
   for (const c of cons.rows) {
-    if (!constraints.has(c.table)) constraints.set(c.table, new Map())
-    constraints.get(c.table)!.set(c.name, c.def)
+    let tableConstraints = constraints.get(c.table)
+    if (!tableConstraints) {
+      tableConstraints = new Map()
+      constraints.set(c.table, tableConstraints)
+    }
+    tableConstraints.set(c.name, c.def)
     if (c.conindid) constraintIndexOids.add(c.conindid)
   }
 
@@ -109,8 +113,12 @@ export async function snapshotSchema(db: Pick<DbEngine, 'query'>, schema = 'publ
   const indexes = new Map<string, Map<string, string>>()
   for (const r of idx.rows) {
     if (constraintIndexOids.has(r.indexrelid)) continue
-    if (!indexes.has(r.table)) indexes.set(r.table, new Map())
-    indexes.get(r.table)!.set(r.name, r.def)
+    let tableIndexes = indexes.get(r.table)
+    if (!tableIndexes) {
+      tableIndexes = new Map()
+      indexes.set(r.table, tableIndexes)
+    }
+    tableIndexes.set(r.name, r.def)
   }
 
   const en = await db.query<{ name: string; labels: string[] }>(
@@ -234,11 +242,12 @@ export async function snapshotSchema(db: Pick<DbEngine, 'query'>, schema = 'publ
 
 export function schemasEqual(left: SchemaSnapshot, right: SchemaSnapshot): boolean {
   const canonical = (value: unknown): unknown => {
-    if (value instanceof Map) return [...value].sort(([a], [b]) => String(a).localeCompare(String(b)))
-      .map(([key, entry]) => [key, canonical(entry)])
-    if (Array.isArray(value)) return value.map(canonical)
+    if (value instanceof Map) return [...value].sort(([a]: [unknown, unknown], [b]: [unknown, unknown]) => String(a).localeCompare(String(b)))
+      .map(([key, entry]: [unknown, unknown]) => [key, canonical(entry)])
+    if (Array.isArray(value)) return value.map((entry: unknown) => canonical(entry))
     if (value !== null && typeof value === 'object') return Object.fromEntries(
-      Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, canonical(entry)]),
+      Object.entries(value).sort(([a]: [string, unknown], [b]: [string, unknown]) => a.localeCompare(b))
+        .map(([key, entry]: [string, unknown]) => [key, canonical(entry)]),
     )
     return value
   }

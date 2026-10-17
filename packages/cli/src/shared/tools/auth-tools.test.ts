@@ -327,7 +327,7 @@ describe("auth CLI mutation contract", () => {
             ref: "project-a",
             type: "signup",
             email: "user@example.test",
-        })).rejects.toThrow("magiclink, recovery, or invite");
+        })).rejects.toThrow("- type:");
         expect(requests).toHaveLength(1);
     });
 

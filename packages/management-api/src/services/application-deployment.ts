@@ -1,7 +1,9 @@
+import type { SQL } from "bun";
+import { sql } from "../db";
 import { parseApplicationReadinessReport } from "@supacloud/delivery";
 import type { WorkerExecutionGroup } from "@supacloud/delivery";
 import {
-  ApplicationActivationService, type ActivateApplicationInput, type ApplicationActivationMutations,
+  ApplicationActivationService, createApplicationActivationMutations, type ActivateApplicationInput, type ApplicationActivationMutations,
   type ApplicationActiveRecord, type ReconcileApplicationActivationInput,
 } from "./application-activation";
 import { ApplicationActiveStorage } from "./application-active-storage";
@@ -12,15 +14,20 @@ import { ApplicationReleaseStorage } from "./application-release-storage";
 import { applicationRuntimePlan, ApplicationSystemdRuntime, type ApplicationRuntimeInput } from "./application-runtime";
 import { ApplicationRuntimeFiles, type ApplicationTargetEnvironment } from "./application-runtime-files";
 import { gatewayService, type GatewayProvider } from "./gateway.service";
-import { stableStringify } from "../utils/stable-json";
+import { stableSha256, stableStringify } from "../utils/stable-json";
 import { ApplicationConfigurations } from "./application-configuration";
 import { ApplicationRuntimeAllocations, type ApplicationRuntimeAllocation } from "./application-runtime-allocation";
+import { isProjectMutationId } from "./project-mutation.service";
+import type { ApplicationPromotionOwner } from "./application-promotion-ownership";
+import { parseApplicationPromotionCheckpoint } from "./application-promotion-operation";
+import { readProjectMutation, withProjectMutationLease, type ProjectMutationState } from "./project-mutation.service";
 
 export interface DeployApplicationInput extends ActivateApplicationInput {
   hosts: ApplicationGatewayInput["hosts"];
 }
 
 export interface ApplicationDeploymentDependencies {
+  withProjectLifecycle?<T>(projectRef: string, operation: () => Promise<T>): Promise<T>;
   verifyCompatibility(input: {
     runtime: ApplicationRuntimeInput;
     previous: ApplicationActiveRecord | null;
@@ -36,14 +43,16 @@ export interface ApplicationDeploymentDependencies {
     runtime: ApplicationRuntimeInput; groups: readonly WorkerExecutionGroup[];
   }): Promise<void>;
   mutations?: ApplicationActivationMutations;
+  promotionDatabase?: SQL;
   storage?: ApplicationReleaseStorage;
   files?: Pick<ApplicationRuntimeFiles, "prepare">;
   runtime?: Pick<ApplicationSystemdRuntime, "install" | "start" | "stop" | "requireStopped">;
   active?: Pick<ApplicationActiveStorage, "read" | "write" | "confirm">
-    & Partial<Pick<ApplicationActiveStorage, "readForApplication">>;
+    & Partial<Pick<ApplicationActiveStorage, "readForApplication" | "clear">>;
   readiness?: Pick<ApplicationReadiness, "requireReady">;
   migrations?: Pick<ApplicationMigrations, "inspect">;
-  gateway?: Pick<GatewayProvider, "configureApplicationRoute" | "verifyApplicationRoute">;
+  gateway?: Pick<GatewayProvider, "configureApplicationRoute" | "verifyApplicationRoute">
+    & Partial<Pick<GatewayProvider, "removeApplicationRoute" | "verifyApplicationRouteAbsent">>;
   configurations?: Pick<ApplicationConfigurations, "resolve">;
   allocations?: Pick<ApplicationRuntimeAllocations, "allocate">
     & Partial<Pick<ApplicationRuntimeAllocations, "read" | "retire">>;
@@ -69,26 +78,36 @@ export class ApplicationDeploymentService {
     & Partial<Pick<ApplicationRuntimeAllocations, "read" | "retire">>;
   private readonly retirementVerifier?: ApplicationDeploymentDependencies["retirementVerifier"];
   private readonly verifyWorkerAllocationRetirement?: ApplicationDeploymentDependencies["verifyWorkerAllocationRetirement"];
-  private readonly active: Partial<Pick<ApplicationActiveStorage, "readForApplication">>;
+  private readonly active: Partial<Pick<ApplicationActiveStorage, "readForApplication" | "clear">>;
   private readonly storage: ApplicationReleaseStorage;
+  private readonly withProjectLifecycle: NonNullable<ApplicationDeploymentDependencies["withProjectLifecycle"]>;
+  private readonly runtime: NonNullable<ApplicationDeploymentDependencies["runtime"]>;
+  private readonly gateway: NonNullable<ApplicationDeploymentDependencies["gateway"]>;
+  private readonly mutations: ApplicationActivationMutations;
+  private readonly promotionDatabase: SQL;
 
   constructor(dependencies: ApplicationDeploymentDependencies) {
     if (typeof dependencies.verifyCompatibility !== "function") throw new Error("APPLICATION_COMPATIBILITY_VERIFIER_REQUIRED");
     this.configurations = dependencies.configurations ?? new ApplicationConfigurations();
+    this.promotionDatabase = dependencies.promotionDatabase ?? sql;
     this.allocations = dependencies.allocations ?? new ApplicationRuntimeAllocations();
     this.retirementVerifier = dependencies.retirementVerifier;
     this.verifyWorkerAllocationRetirement = dependencies.verifyWorkerAllocationRetirement;
+    this.withProjectLifecycle = dependencies.withProjectLifecycle ?? (async (_ref, operation) => operation());
     const storage = dependencies.storage ?? new ApplicationReleaseStorage();
     this.storage = storage;
     const files = dependencies.files ?? new ApplicationRuntimeFiles(storage);
     const runtime = dependencies.runtime ?? new ApplicationSystemdRuntime();
+    this.runtime = runtime;
     const active = dependencies.active ?? new ApplicationActiveStorage();
     this.active = active;
     const readiness = dependencies.readiness ?? new ApplicationReadiness();
     const migrations = dependencies.migrations ?? new ApplicationMigrations({ storage });
     const gateway = dependencies.gateway ?? gatewayService;
+    this.gateway = gateway;
+    this.mutations = dependencies.mutations ?? createApplicationActivationMutations();
     this.activation = new ApplicationActivationService({
-      mutations: dependencies.mutations,
+      mutations: this.mutations,
       readActive: input => active.read(input),
       writeActive: (record, expected) => active.write(record, expected),
       confirmActive: record => active.confirm(record),
@@ -154,11 +173,91 @@ export class ApplicationDeploymentService {
   activate(input: DeployApplicationInput) {
     if (input.hosts === undefined) throw new Error("APPLICATION_DEPLOYMENT_HOSTS_REQUIRED");
     applicationGatewayRoute({ runtime: input.runtime, hosts: input.hosts });
-    return this.activation.activate(input);
+    return this.withProjectLifecycle(input.runtime.release.project_ref, () => this.activation.activate(input));
+  }
+
+  async activatePromotionConfigured(input: {
+    runtime: Omit<ApplicationRuntimeInput, "bunVersion" | "ports">;
+    configurationId: string;
+    expectedActivationId: string | null;
+    principal: ActivateApplicationInput["principal"];
+    owner: ApplicationPromotionOwner;
+  }) {
+    const request = structuredClone(input);
+    // 分配也是副作用，必须先验证父租约、持久请求和独立子身份。
+    const replayed = await this.promotionDatabase.begin(transaction => withProjectMutationLease(transaction, request.owner.lease, async () => {
+      const state = await readProjectMutation(request.owner.lease, transaction);
+      if (!state || state.status !== "running" || state.fencingEpoch !== request.owner.lease.fencingEpoch
+        || state.requestFingerprint !== request.owner.requestFingerprint
+        || stableStringify(state.principal) !== stableStringify(request.principal)
+        || stableStringify(state.principal) !== stableStringify(request.owner.principal)) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+      }
+      const parent = parseApplicationPromotionCheckpoint(state);
+      if (parent.activation_id !== request.runtime.activationId
+        || parent.plan.target.candidate_release_id !== request.runtime.release.release_id
+        || parent.plan.target.configuration_id !== request.configurationId
+        || parent.plan.environment_id !== request.runtime.environmentId
+        || parent.plan.target.activation_id !== request.expectedActivationId
+        || !["activating", "verifying"].includes(parent.phase)) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_PLAN_MISMATCH");
+      }
+      const attempt = parent["activation"];
+      if (attempt !== undefined && (!attempt || typeof attempt !== "object" || Array.isArray(attempt)
+        || !("outcome" in attempt) || attempt.outcome !== "succeeded")) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_RECONCILIATION_REQUIRED");
+      }
+      return attempt !== undefined;
+    })).then(execution => {
+      if (execution.kind !== "executed") throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+      return execution.value;
+    });
+    const release = await this.storage.readRelease(
+      request.runtime.release.project_ref, request.runtime.release.application_id, request.runtime.release.release_id,
+    );
+    if (stableStringify(release) !== stableStringify(request.runtime.release)) {
+      throw new Error("APPLICATION_RUNTIME_RELEASE_MISMATCH");
+    }
+    const configuration = await this.configurations.resolve({
+      projectRef: request.runtime.release.project_ref, applicationId: request.runtime.release.application_id,
+      environmentId: request.runtime.environmentId,
+    }, request.configurationId, request.runtime.release);
+    const desired = {
+      release, activationId: request.runtime.activationId, environmentId: request.runtime.environmentId,
+      bunVersion: configuration.bunVersion,
+    };
+    const allocation = await this.promotionDatabase.begin(transaction => withProjectMutationLease(
+      transaction, request.owner.lease, async () => {
+        if (replayed) {
+          if (!this.allocations.read) throw new Error("APPLICATION_PORT_ALLOCATION_MISSING");
+          const existing = await this.allocations.read(release.project_ref, desired.activationId);
+          if (!existing || existing.retiredAt) throw new Error("APPLICATION_PORT_ALLOCATION_MISSING");
+          return existing;
+        }
+        return this.allocations.allocate({ runtime: desired, configurationId: request.configurationId });
+      },
+    )).then(execution => {
+      if (execution.kind !== "executed") throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+      return execution.value;
+    });
+    const { ports: _ports, ...assigned } = allocation.runtime;
+    if (allocation.configurationId !== request.configurationId || stableStringify(assigned) !== stableStringify(desired)) {
+      throw new Error("APPLICATION_PORT_ALLOCATION_MISMATCH");
+    }
+    return this.activation.activatePromotion({
+      runtime: allocation.runtime,
+      environment: configuration.environment, hosts: configuration.hosts,
+      expectedActivationId: request.expectedActivationId, principal: request.principal,
+      configurationId: request.configurationId,
+    }, request.owner, this.promotionDatabase);
+  }
+
+  observePromotion(state: ProjectMutationState, desired: ApplicationActiveRecord) {
+    return this.activation.observePromotion(state, desired);
   }
 
   reconcile(input: ReconcileApplicationActivationInput) {
-    return this.activation.reconcile(input);
+    return this.withProjectLifecycle(input.projectRef, () => this.activation.reconcile(input));
   }
 
   async retireConfigured(input: {
@@ -216,6 +315,155 @@ export class ApplicationDeploymentService {
     expectedActivationId: string | null;
     principal: ActivateApplicationInput["principal"];
   }) {
+    return this.withProjectLifecycle(input.runtime.release.project_ref,
+      () => this.activateConfiguredUnderLock(input));
+  }
+
+  async deactivateConfigured(input: {
+    projectRef: string;
+    applicationId: string;
+    environmentId: string;
+    activationId: string;
+    mutationId: string;
+    principal: ActivateApplicationInput["principal"];
+  }) {
+    const request = structuredClone(input);
+    if (!isProjectMutationId(request.mutationId) || !isProjectMutationId(request.activationId)
+      || request.mutationId === request.activationId) throw new Error("APPLICATION_DEACTIVATION_IDENTITY_INVALID");
+    return this.withProjectLifecycle(request.projectRef, async () => {
+      if (!this.allocations.read || !this.allocations.retire || !this.active.readForApplication || !this.active.clear
+        || !this.gateway.removeApplicationRoute || !this.gateway.verifyApplicationRouteAbsent) {
+        throw new Error("APPLICATION_DEACTIVATION_COMPOSITION_REQUIRED");
+      }
+      let allocation = await this.allocations.read(request.projectRef, request.activationId);
+      if (!allocation) throw new Error("APPLICATION_PORT_ALLOCATION_MISSING");
+      const runtime = allocation.runtime;
+      if (runtime.release.project_ref !== request.projectRef || runtime.release.application_id !== request.applicationId
+        || runtime.environmentId !== request.environmentId || runtime.activationId !== request.activationId) {
+        throw new Error("APPLICATION_PORT_ALLOCATION_IDENTITY_INVALID");
+      }
+      const configuration = await this.configurations.resolve({
+        projectRef: request.projectRef, applicationId: request.applicationId, environmentId: request.environmentId,
+      }, allocation.configurationId, runtime.release);
+      const route = { runtime, hosts: configuration.hosts };
+      applicationGatewayRoute(route);
+      const fingerprint = stableSha256({ schema: "supacloud.application-deactivation.v1", request, runtime,
+        configurationId: allocation.configurationId });
+      const receipt = {
+        project_ref: request.projectRef, application_id: request.applicationId, environment_id: request.environmentId,
+        activation_id: request.activationId, mutation_id: request.mutationId, deactivated: true,
+      };
+      const verify = async () => {
+        if (await this.active.readForApplication!(request.projectRef, request.applicationId, request.environmentId)) {
+          throw new Error("APPLICATION_DEACTIVATION_AUTHORITY_PRESENT");
+        }
+        await this.runtime.requireStopped(runtime);
+        await this.gateway.verifyApplicationRouteAbsent!(route);
+        allocation = await this.allocations.read!(request.projectRef, request.activationId);
+        if (!allocation?.retiredAt) throw new Error("APPLICATION_PORT_RETIREMENT_UNCONFIRMED");
+        await this.active.clear!(runtime, request.activationId);
+      };
+      const begun = await this.mutations.begin({
+        projectRef: request.projectRef, mutationId: request.mutationId,
+        operation: "application.release.deactivate", principal: request.principal, requestFingerprint: fingerprint,
+        resource: { type: "application_release", id: stableSha256({
+          applicationId: request.applicationId, environmentId: request.environmentId,
+        }) },
+      });
+      if (!begun.lease) {
+        if (begun.state.checkpoint["schema"] !== "supacloud.application-deactivation.v1"
+          || begun.state.checkpoint["fingerprint"] !== fingerprint
+          || begun.state.checkpoint["activation_id"] !== request.activationId
+          || !["unrouted", "retired"].includes(String(begun.state.checkpoint["phase"]))) {
+          throw new Error("APPLICATION_DEACTIVATION_RECONCILIATION_REQUIRED");
+        }
+        await verify();
+        if (begun.state.status === "outcome_unknown") await this.mutations.recover(begun.state, fingerprint);
+        else if (begun.state.status !== "succeeded") throw new Error("APPLICATION_DEACTIVATION_RECONCILIATION_REQUIRED");
+        const stored = await this.mutations.read(request.projectRef, request.mutationId);
+        if (!stored || stored.status !== "succeeded" || stored.requestFingerprint !== fingerprint
+          || stored.operation !== "application.release.deactivate") {
+          throw new Error("APPLICATION_DEACTIVATION_RECEIPT_INVALID");
+        }
+        if (stableStringify(stored.receipt) !== stableStringify(receipt)) {
+          const recovery = stored.receipt?.["reconciliation"];
+          if (!recovery || typeof recovery !== "object" || !("evidence_fingerprint" in recovery)
+            || recovery.evidence_fingerprint !== fingerprint) throw new Error("APPLICATION_DEACTIVATION_RECEIPT_INVALID");
+        }
+        await verify();
+        return receipt;
+      }
+      const lease = begun.lease;
+      let effects = false;
+      let completed = false;
+      try {
+        if (Object.keys(begun.state.checkpoint).length) {
+          effects = true;
+          throw new Error("APPLICATION_DEACTIVATION_RECONCILIATION_REQUIRED");
+        }
+        const current = await this.active.readForApplication(request.projectRef, request.applicationId, request.environmentId);
+        if (!current || current.runtime.activationId !== request.activationId
+          || stableStringify(current.runtime) !== stableStringify(runtime)
+          || current.configurationId !== allocation.configurationId
+          || stableStringify(current.hosts) !== stableStringify(configuration.hosts)) {
+          throw new Error("APPLICATION_ACTIVATION_REVISION_CONFLICT");
+        }
+        const groups = runtime.release.targets.flatMap(target => target.execution ? [target.execution] : []);
+        if (groups.length) {
+          if (!this.verifyWorkerAllocationRetirement) throw new Error("WORKER_RETIREMENT_VERIFIER_REQUIRED");
+          await this.verifyWorkerAllocationRetirement({ runtime: structuredClone(runtime), groups });
+        }
+        await this.mutations.checkpoint(lease, { schema: "supacloud.application-deactivation.v1",
+          fingerprint, activation_id: request.activationId, phase: "prepared" });
+        effects = true;
+        await this.mutations.protect(lease, async () => {
+          await this.runtime.stop(runtime);
+          await this.runtime.requireStopped(runtime);
+        });
+        await this.mutations.checkpoint(lease, { schema: "supacloud.application-deactivation.v1",
+          fingerprint, activation_id: request.activationId, phase: "stopped" });
+        await this.mutations.protect(lease, async () => {
+          await this.gateway.removeApplicationRoute!(route);
+          await this.gateway.verifyApplicationRouteAbsent!(route);
+          await this.active.clear!(runtime, request.activationId);
+        });
+        await this.mutations.checkpoint(lease, { schema: "supacloud.application-deactivation.v1",
+          fingerprint, activation_id: request.activationId, phase: "unrouted" });
+        await this.mutations.protect(lease, async () => {
+          allocation = await this.allocations.retire!(request.projectRef, request.activationId, async candidate => {
+            if (stableStringify(candidate.runtime) !== stableStringify(runtime)) {
+              throw new Error("APPLICATION_PORT_ALLOCATION_CHANGED");
+            }
+            await this.runtime.requireStopped(runtime);
+            await this.gateway.verifyApplicationRouteAbsent!(route);
+            if (await this.active.readForApplication!(request.projectRef, request.applicationId, request.environmentId)) {
+              throw new Error("APPLICATION_DEACTIVATION_AUTHORITY_PRESENT");
+            }
+          });
+          await verify();
+        });
+        await this.mutations.checkpoint(lease, { schema: "supacloud.application-deactivation.v1",
+          fingerprint, activation_id: request.activationId, phase: "retired" });
+        await this.mutations.success(lease, receipt);
+        completed = true;
+        const stored = await this.mutations.read(request.projectRef, request.mutationId);
+        if (stored?.status !== "succeeded" || stableStringify(stored.receipt) !== stableStringify(receipt)) {
+          throw new Error("APPLICATION_DEACTIVATION_RECEIPT_INVALID");
+        }
+        return receipt;
+      } catch (error) {
+        if (!completed) await this.mutations.failure(lease, effects, !effects);
+        throw error;
+      }
+    });
+  }
+
+  private async activateConfiguredUnderLock(input: {
+    runtime: Omit<ApplicationRuntimeInput, "bunVersion" | "ports">;
+    configurationId: string;
+    expectedActivationId: string | null;
+    principal: ActivateApplicationInput["principal"];
+  }) {
     const request = structuredClone(input);
     const release = await this.storage.readRelease(
       request.runtime.release.project_ref, request.runtime.release.application_id, request.runtime.release.release_id,
@@ -234,7 +482,7 @@ export class ApplicationDeploymentService {
     if (allocation.configurationId !== request.configurationId || stableStringify(assigned) !== stableStringify(desired)) {
       throw new Error("APPLICATION_PORT_ALLOCATION_MISMATCH");
     }
-    return this.activate({
+    return this.activation.activate({
       runtime: allocation.runtime,
       environment: configuration.environment, hosts: configuration.hosts,
       expectedActivationId: request.expectedActivationId, principal: request.principal,

@@ -178,6 +178,16 @@ the bytes to the image service, so private buckets need no anonymous or
 presigned source URL and the service's remote-URL flag is not required. Sources
 larger than 64 MiB are rejected with `413`; upstream image errors do not expose
 storage coordinates to callers or logs.
+
+For objects owned by an application but not registered in SupaCloud Storage,
+an authenticated service may use `POST /v1/storage/:ref/transform/bytes`. The
+request body is the image bytes and the normal image transformation query
+parameters are used (`width`, `height`, `resize`, `format`, and `quality`).
+The caller remains responsible for authorizing and reading the foreign S3 or
+QNAP object. SupaCloud accepts no source URL, S3 credential, or redirect target;
+it only transforms the supplied bytes, with the same 64 MiB source limit and
+private response caching. This endpoint is a conversion primitive, not a
+foreign-object proxy or a replacement for the project's Storage binding.
 Project capability/environment responses report the resolved backend rather than
 only the instance default. The instance-level storage status remains an instance
 probe; use the project config probe for a project's external S3.

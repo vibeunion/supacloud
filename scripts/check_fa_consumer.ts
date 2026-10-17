@@ -47,7 +47,7 @@ try {
     await writeFile(join(project, path), bytes);
     count++;
   }
-  evidence.snapshot = { files: count, sha256: fingerprint.digest("hex") };
+  evidence["snapshot"] = { files: count, sha256: fingerprint.digest("hex") };
   const manifestPath = join(project, "package.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const packages: Record<string, string> = {};
@@ -62,7 +62,7 @@ try {
     const deps = name === "compiler" ? manifest.devDependencies : manifest.dependencies;
     deps[`@supacloud/${name}`] = `file:${artifact}`;
   }
-  evidence.packages = packages;
+  evidence["packages"] = packages;
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   await run(bun("install", "--ignore-scripts"));
   // Source migration, never generated-code rewriting. A stale migration fails closed.
@@ -82,7 +82,7 @@ try {
   console.log(testOutput.split("\n").slice(-6).join("\n"));
   console.log(await run(bun("build", "node_modules/@supacloud/app/dist/contract_client.js",
     "--target", "browser", "--outfile", join(root, "browser-contract.js"))));
-  evidence.compatibility = "passed";
+  evidence["compatibility"] = "passed";
   console.log(JSON.stringify(evidence, null, 2));
 } finally {
   await rm(root, { recursive: true, force: true });

@@ -5,6 +5,8 @@
  * Includes request timeout, retry with exponential backoff, and proper error handling.
  */
 
+import { FRONTEND_ARCHIVE_CONTENT_TYPE } from "@supacloud/delivery/frontend-archive";
+
 export interface HttpConfig {
     baseUrl: string;
     token: string;
@@ -21,6 +23,10 @@ export interface HttpResult<T = unknown> {
 }
 
 export interface HttpGetOptions {
+    timeoutMs?: number;
+    retry?: boolean;
+    /** Complete header/body budget for a bounded JSON GET with retries disabled. */
+    totalTimeoutMs?: number;
     maxResponseBytes?: number;
     maxJsonBytes?: number;
     responseTimeoutMs?: number;
@@ -364,11 +370,12 @@ export class HttpTransport {
         timeoutMs = DEFAULT_TIMEOUT,
     ): Promise<HttpResult<T>> {
         try {
-            const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const request: RequestInit = {
                 method,
                 headers: this.headers(),
-                body: serializedBody,
-            }, timeoutMs, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             const responseBody = await responseReader(response);
             return responseBody.ok
                 ? { ok: response.ok, status: response.status, data: responseBody.parsedJson }
@@ -379,19 +386,33 @@ export class HttpTransport {
     }
 
     async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
         const maxResponseBytes = validatedGetResponseLimit(options);
         const maxJsonBytes = validatedJsonResponseLimit(options.maxJsonBytes);
         const responseTimeoutMs = validatedResponseTimeout(options.responseTimeoutMs);
+        const totalTimeoutMs = validatedResponseTimeout(options.totalTimeoutMs);
         if (maxResponseBytes !== undefined && maxJsonBytes !== undefined) {
             throw new RangeError("HTTP response limit options are mutually exclusive");
         }
+        if (totalTimeoutMs !== undefined && (options.retry !== false || maxJsonBytes === undefined)) {
+            throw new RangeError("HTTP total timeout requires bounded JSON and retry: false");
+        }
+        const deadline = totalTimeoutMs === undefined ? undefined : performance.now() + totalTimeoutMs;
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const request = options.retry === false ? fetchWithTimeout : fetchWithRetry;
+            const res = await request(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+            }, totalTimeoutMs === undefined ? timeoutMs : Math.min(timeoutMs, totalTimeoutMs), this.insecureTls);
             if (maxJsonBytes !== undefined) {
-                const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
+                const remaining = deadline === undefined ? undefined : Math.floor(deadline - performance.now());
+                if (remaining !== undefined && remaining <= 0) {
+                    void res.body?.cancel().catch(() => undefined);
+                    return responseReadFailure<T>(res.status);
+                }
+                const bodyTimeout = remaining === undefined ? responseTimeoutMs
+                    : Math.min(responseTimeoutMs ?? remaining, remaining);
+                const data = await boundedResponseJson(res, maxJsonBytes, bodyTimeout);
                 return data === null
                     ? responseReadFailure<T>(res.status)
                     : { ok: res.ok, status: res.status, data: data as T };
@@ -419,11 +440,13 @@ export class HttpTransport {
                     timeoutMs,
                 );
             }
-            const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = serializedRequestBody(body);
+            const request: RequestInit = {
                 method: "POST",
                 headers: this.headers(),
-                body: serializedRequestBody(body),
-            }, timeoutMs, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             const data = await boundedResponseJson(response, maxJsonBytes, responseTimeoutMs);
             return data === null
                 ? responseReadFailure<T>(response.status)
@@ -453,7 +476,7 @@ export class HttpTransport {
         body: HttpBinaryBody,
         options: HttpBinaryPostOptions,
     ): Promise<HttpResult<T>> {
-        if (options.contentType !== "application/zip") {
+        if (options.contentType !== FRONTEND_ARCHIVE_CONTENT_TYPE) {
             throw new Error("Binary HTTP content type is invalid");
         }
         if (!Number.isSafeInteger(options.contentLength) || options.contentLength < 1
@@ -537,11 +560,13 @@ export class HttpTransport {
 
     async patch<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = body ? JSON.stringify(body) : undefined;
+            const request: RequestInit = {
                 method: "PATCH",
                 headers: this.headers(),
-                body: body ? JSON.stringify(body) : undefined,
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
@@ -554,11 +579,13 @@ export class HttpTransport {
         const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
         const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = body ? JSON.stringify(body) : undefined;
+            const request: RequestInit = {
                 method: "PUT",
                 headers: this.headers(),
-                body: body ? JSON.stringify(body) : undefined,
-            }, timeoutMs, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             if (maxJsonBytes !== undefined) {
                 const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
                 return data === null
@@ -572,13 +599,24 @@ export class HttpTransport {
         }
     }
 
-    async delete<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+    async delete<T = unknown>(path: string, body?: unknown, options?: HttpPostOptions): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
+        const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
+        const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = serializedRequestBody(body);
+            const request: RequestInit = {
                 method: "DELETE",
                 headers: this.headers(),
-                body: serializedRequestBody(body),
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
+            if (maxJsonBytes !== undefined) {
+                const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
+                return data === null
+                    ? responseReadFailure<T>(res.status)
+                    : { ok: res.ok, status: res.status, data: data as T };
+            }
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {

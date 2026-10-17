@@ -115,6 +115,8 @@ export interface BackendConfig {
   maxRows?: number
   /** Default per-bucket file size limit in bytes (config.toml storage.file_size_limit). */
   storageFileSizeLimit?: number
+  /** Operator-owned image conversion input/output limits; default and maximum 500 MiB each. */
+  storageImageTransformLimits?: import('./storage/image-transform.js').ImageTransformLimits
   /** Buckets to create at boot if absent (config.toml storage.buckets.*). */
   buckets?: BucketSeed[]
   /** Force sign-out after this many seconds regardless of activity (config.toml auth.sessions.timebox). */
@@ -199,6 +201,6 @@ export class ApiError extends Error {
     public status: number,
     public body: Record<string, unknown>
   ) {
-    super(typeof body.message === 'string' ? body.message : JSON.stringify(body))
+    super(typeof body["message"] === 'string' ? body["message"] : JSON.stringify(body))
   }
 }

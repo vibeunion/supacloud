@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 
-export const RELEASE_CONTROL_CONTRACT_VERSION = "supacloud.release-control.v1";
+export const RELEASE_CONTROL_CONTRACT_VERSION = "supacloud.release-control.v2";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 const PROJECT_REF = /^[a-z0-9]{20}$/;
+const ENVIRONMENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const FUNCTION_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const MIGRATION_NAME = /^\d{14}_[a-z0-9_]+$/;
 
@@ -18,6 +19,7 @@ export interface ReleaseScope {
   releaseId: string;
   sourceCommit: string;
   targetProjectRef: string;
+  targetEnvironmentId: string;
   components: ReleaseComponent[];
 }
 
@@ -86,7 +88,9 @@ function parseComponent(value: unknown, index: number): ReleaseComponent {
 
 export function parseReleaseScope(value: unknown): ReleaseScope {
   const candidate = record(value, "Release scope");
-  exactKeys(candidate, ["components", "releaseId", "schema", "sourceCommit", "targetProjectRef"], "Release scope");
+  exactKeys(candidate, [
+    "components", "releaseId", "schema", "sourceCommit", "targetEnvironmentId", "targetProjectRef",
+  ], "Release scope");
   if (candidate.schema !== RELEASE_CONTROL_CONTRACT_VERSION) {
     throw new Error("Release scope schema is invalid");
   }
@@ -105,6 +109,7 @@ export function parseReleaseScope(value: unknown): ReleaseScope {
     schema: RELEASE_CONTROL_CONTRACT_VERSION,
     releaseId: nonEmptyString(candidate.releaseId, "Release scope releaseId"),
     sourceCommit: nonEmptyString(candidate.sourceCommit, "Release scope sourceCommit", COMMIT),
+    targetEnvironmentId: nonEmptyString(candidate.targetEnvironmentId, "Release scope targetEnvironmentId", ENVIRONMENT_ID),
     targetProjectRef: nonEmptyString(candidate.targetProjectRef, "Release scope targetProjectRef", PROJECT_REF),
     components,
   };

@@ -45,10 +45,10 @@ export function normalizedProviderLinkingDomains(experimentalValue: unknown): Re
     throw new ProviderLinkingDomainsValidationError("experimental must be an object");
   }
   const domains = new Map<string, string>();
-  for (const provider of legacyProviders(experimental.providers_with_own_linking_domain)) {
+  for (const provider of legacyProviders(experimental["providers_with_own_linking_domain"])) {
     domains.set(provider, provider);
   }
-  const configured = experimental.provider_linking_domains;
+  const configured = experimental["provider_linking_domains"];
   if (configured !== undefined) {
     const configuredRecord = recordValue(configured);
     if (!configuredRecord) {
@@ -72,24 +72,24 @@ export function normalizedProviderLinkingDomains(experimentalValue: unknown): Re
 export function canonicalAuthProviderLinkingConfig(
   authConfig: Record<string, unknown>,
 ): Record<string, unknown> {
-  const experimental = recordValue(authConfig.experimental);
+  const experimental = recordValue(authConfig["experimental"]);
   if (!experimental) {
-    if (authConfig.experimental === undefined || authConfig.experimental === null) return authConfig;
+    if (authConfig["experimental"] === undefined || authConfig["experimental"] === null) return authConfig;
     throw new ProviderLinkingDomainsValidationError("experimental must be an object");
   }
   const hasCanonical = "provider_linking_domains" in experimental;
   const hasLegacy = "providers_with_own_linking_domain" in experimental;
   if (!hasCanonical && !hasLegacy) return authConfig;
   const canonicalExperimental = { ...experimental };
-  canonicalExperimental.provider_linking_domains = normalizedProviderLinkingDomains(experimental);
-  delete canonicalExperimental.providers_with_own_linking_domain;
+  canonicalExperimental["provider_linking_domains"] = normalizedProviderLinkingDomains(experimental);
+  delete canonicalExperimental["providers_with_own_linking_domain"];
   return { ...authConfig, experimental: canonicalExperimental };
 }
 
 export function serializedProviderLinkingDomains(authConfig: Record<string, unknown>): string {
-  const experimental = recordValue(authConfig.experimental);
+  const experimental = recordValue(authConfig["experimental"]);
   if (!experimental) {
-    if (authConfig.experimental === undefined || authConfig.experimental === null) return "";
+    if (authConfig["experimental"] === undefined || authConfig["experimental"] === null) return "";
     throw new ProviderLinkingDomainsValidationError("experimental must be an object");
   }
   if ("providers_with_own_linking_domain" in experimental) {
@@ -98,7 +98,7 @@ export function serializedProviderLinkingDomains(authConfig: Record<string, unkn
     );
   }
   const domains = normalizedProviderLinkingDomains({
-    provider_linking_domains: experimental.provider_linking_domains,
+    provider_linking_domains: experimental["provider_linking_domains"],
   });
   return Object.entries(domains).map(([provider, domain]) => `${provider}=${domain}`).join(",");
 }

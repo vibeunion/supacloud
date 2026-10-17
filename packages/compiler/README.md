@@ -1,5 +1,64 @@
 # @supacloud/compiler
 
+## Enforced Database Governance
+
+Existing compiler callers retain `off` as a compatibility migration exception.
+Newly generated `command` starters set
+`databaseGovernance: { mode: "enforce", moduleFile: "db/modules.ts" }`:
+compile/check/build run the existing `@supacloud/db` source-boundary and
+contract-freshness gate, SQL lint and live Catalog reconciliation, including
+incremental cache hits. Missing adoption files, stale contracts, SQL findings or
+Catalog drift block generation even with `writeOnError`; checks never generate
+contracts or migrations.
+The minimal/http/edge starters remain database-free.
+
+For an existing database project, adopt the governed path by declaring the real
+database modules and explicitly setting the following in `supacloud.config.ts`:
+
+```ts
+export default {
+  databaseGovernance: {
+    mode: "enforce",
+    projectRoot: ".",
+    moduleFile: "db/modules.ts",
+    databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
+    schemas: ["public"],
+  },
+};
+```
+
+`projectRoot` is relative to the configuration directory (or `rootDir` when
+calling `compileProject` / `checkProject` directly). Use a read-only PostgreSQL
+credential in the named environment variable, targeting an explicitly selected
+local or test database. The compiler does not load `.env` files for this worker,
+generate migrations, repair contracts, or apply SQL. Setting `mode: "off"` is
+reserved for an explicit migration exception and should not be used in a new
+database starter.
+
+In `enforce` mode, compile/check/dev must pass the existing
+`@supacloud/db` source-boundary and contract-freshness check, SQL lint and live
+Catalog reconciliation for nonempty declared database modules. The module file
+must export `default` or `modules` containing `defineDatabaseModule` results.
+Its SQL and declared test paths must resolve within `projectRoot`.
+All lint/reconciliation findings, including warnings, block generation regardless
+of `strict` or `writeOnError`. Existing generated artifacts are retained.
+
+Each check runs in a fresh Bun process with a 30-second deadline, including
+incremental cache hits. Bun must be installed on PATH when the compiler runs on
+Node. Module imports are trusted executable project configuration, not sandboxed
+inputs. Module/SQL edits are reread; changing the compiler configuration requires
+restarting dev. Watch observes SQL/JSON/JS/TS inputs under the governance root,
+excluding generated output, dependencies and standard artifact directories.
+Remote database changes alone do not trigger watch; the next compile checks them.
+
+This gate enforces the adopted database-source contract and declared object
+checks, not complete database coverage, ORM usage, runtime authorization, or SQL
+test behavior. Passing it is not deployment acceptance. Keep one existing
+append-only migration ledger, maintain Drizzle structure and SQL sources
+separately, and explicitly generate/review RPC contracts before compiling.
+See `docs/database-governance.md` and `docs/database-source-contracts.md` for
+the database checks and their limitations.
+
 Generated HTTP clients export `ApiClientError` with `code`, `method`, route
 `path`, `status` and a bounded `requestId`. Undeclared HTTP errors no longer
 embed raw response bodies in their message; explicit inspection remains
@@ -7,6 +66,13 @@ available through the non-enumerable `response` property. Declared non-2xx
 response unions, caller decoders, binary/stream routes and GraphQL stay intact.
 These errors do not prove write rollback and do not add automatic retries.
 See [typed clients and recovery](../../docs/framework-composition.md).
+
+For Elysia routes, the compiler governs Effect contracts by default:
+`effect.dependencies` documents the runtime environment, `effect.errors`
+documents safe HTTP mappings, and `effect.retry` requires explicit bounded
+attempts. The default policy requires `requireRouteEffects`,
+`requireErrorMappings` and `requireDependencies`. See
+[Effect governance](../../docs/effect-governance.md).
 
 ## Unified Database Contracts
 
@@ -296,7 +362,7 @@ bun add @supacloud/compiler
 
 ## 零配置项目
 
-需要完整运行入口时，使用 `supacloud-cli app init --root ./orders --name orders`。
+需要完整运行入口时，使用 `supacloud app init --root ./orders --name orders`。
 模板将本包放在 `devDependencies`，预置状态规格、治理能力、类型检查和本地测试。
 编译产物的 HTTP method / scope 保留字面量联合类型，可直接传给 Elysia 适配器；
 跨运行时依赖字典使用构造器/工厂参数类型连接，局部依赖保留类型推断和错误检查。
@@ -320,6 +386,7 @@ bunx supacloud-compiler dev
 | OpenAPI 3.1 module | 开启 |
 | permissions manifest | 开启 |
 | module boundary preset | `modular-monolith` |
+| Effect route governance | 三项严格检查均开启 |
 | provider tree-shaking | 开启 |
 
 需要覆盖默认值时，在项目根目录添加 `supacloud.config.ts`：
@@ -600,8 +667,8 @@ export default defineSupacloudConfig({
 | `invalid-aspect-reference` | error | aspect 不是可静态解析的函数声明、箭头函数或函数表达式 |
 | `invalid-command-mode` | error | transaction/idempotency 必须显式为 `"required"` 或 `"none"`，不允许拼写错误或动态值悄悄关闭治理（SC4012） |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
-| `generated-any` | warn（strict 时 error） | 生成的 TypeScript 产物包含 `any` |
-| `source-any` | warn（strict 时 error） | 未被排除的生产源码包含显式 `any` |
+| `generated-any` | error | 生成的 TypeScript 产物包含 `any` |
+| `source-any` | error | 未被排除的生产源码包含显式或推断出的 `any` |
 | `source-type-assertion` | warn（strict 时 error） | 生产源码使用 `as T` 或 `<T>value` 类型断言 |
 | `source-non-null-assertion` | warn（strict 时 error） | 生产源码使用非空断言 `value!` |
 | `source-implicit-widening` | warn（strict 时 error） | 可静态判定的字面量类型隐式宽化 |
@@ -611,7 +678,11 @@ export default defineSupacloudConfig({
 
 ## 类型安全扫描
 
-`strict: true` 默认开启两道类型安全门；也可以单独配置 `typeSafety`。生产源码扫描默认排除测试、fixture、声明文件、`generated` 和 `dist`，并支持 `typeSafety.exclude` 增加项目自定义排除规则。
+生产源码与生成产物的类型安全门始终开启，不能通过 `strict: false`、`--no-strict` 或 `typeSafety.scanProductionSource/noAnyInGenerated: false` 关闭。`strict` 仍控制其他 warning 是否升级为 error。
+
+生产源码检查强制启用 TypeScript `strict` 及其子选项，以及 `noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature` 和 `noFallthroughCasesInSwitch`。项目关闭这些选项不会降低编译检查强度。类型错误及 `any` 错误不会被 `writeOnError` 绕过，增量编译也会重新执行类型安全门。
+
+生产源码扫描默认排除测试、fixture、声明文件、`generated` 和 `dist`，并支持 `typeSafety.exclude` 增加项目自定义排除规则。这些排除项属于检查范围边界，不代表被排除文件已经通过类型检查。第三方声明的完整安全性仍不在保证范围内。
 
 ```bash
 supacloud-compiler check --root ./app --out ./app/generated --strict

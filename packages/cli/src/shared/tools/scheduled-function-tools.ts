@@ -7,21 +7,13 @@ import { projectRefPathSegment } from "../project-ref";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
     releaseControlFailure,
     releaseControlMutationFailure,
     releaseControlSuccess,
     type ReleaseControlToolResponse,
 } from "./release-control-response";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: Record<string, unknown>) => Promise<ReleaseControlToolResponse>,
-    ) => void;
-};
 
 type ScheduledFunctionAction = "list" | "get" | "create" | "update" | "delete";
 
@@ -546,12 +538,12 @@ export function registerScheduledFunctionTools(
     environment: NodeJS.ProcessEnv = process.env,
     options: ScheduledFunctionToolsOptions = {},
 ): void {
-    server.tool("scheduled_functions", SCHEDULE_TOOL_DESCRIPTION, SCHEDULE_TOOL_SCHEMA,
+    registerTool(server, "scheduled_functions", SCHEDULE_TOOL_DESCRIPTION, SCHEDULE_TOOL_SCHEMA,
         (args) => executeScheduleAction(http, environment, args, options.readOnly));
 }
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled Edge Function lifecycle. Actions: list, get, create, update, delete";
-const SCHEDULE_TOOL_SCHEMA: ToolSchema = {
+const SCHEDULE_TOOL_SCHEMA = {
     action: withDescription(stringEnum(["list", "get", "create", "update", "delete"]), "Action"),
     ref: withDescription(Type.String(), "Project ref"),
     schedule_id: optional(Type.String(), "[get/update/delete] Schedule ID"),

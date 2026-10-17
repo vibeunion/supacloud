@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/admin",
-  "version": "0.24.2",
+  "version": "0.28.1",
   "description": "Platform administration CLI for SupaCloud operators",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,8 +15,11 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target node --external cpu-features",
+    "prepare:tool-runtime": "bun run --cwd ../cli build:tool-runtime && bun install --force --ignore-scripts --frozen-lockfile",
+    "prebuild": "bun run prepare:tool-runtime",
+    "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source --external cpu-features",
     "prepublishOnly": "bun run build",
+    "pretypecheck": "bun run prepare:tool-runtime",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -32,16 +35,20 @@
     "directory": "packages/admin"
   },
   "dependencies": {
-    "typebox": "1.3.34",
+    "@supacloud/delivery": "file:../delivery",
+    "typebox": "1.3.37",
     "@supacloud/cli": "file:../cli",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "@types/ssh2": "^1.15.6",
     "typescript": "^7.0.2"
   },
   "overrides": {
-    "@graphql-tools/utils": "^12.0.3"
+    "@supacloud/contracts": "file:../contracts",
+    "@supacloud/db": "file:../db",
+    "@supacloud/delivery": "file:../delivery",
+    "@graphql-tools/utils": "^12.0.4"
   }
 }

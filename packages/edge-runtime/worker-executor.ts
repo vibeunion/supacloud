@@ -40,6 +40,7 @@ import {
   assertTrustedFunctionArtifact,
   withTrustedFunctionArtifact,
 } from "./trusted-function-files";
+import { isFunctionBytecodeArtifact, type FunctionBytecodeArtifact } from "./function-bytecode-contract";
 
 const runtimeBunFile = Bun.file.bind(Bun);
 const setProjectRoot = initializeProjectRootControl();
@@ -83,6 +84,8 @@ type PreheatMessage = {
   moduleVersion?: string;
   envProof?: string;
   artifactSha256?: string;
+  bytecode?: "off" | "auto" | "required";
+  bytecodeArtifact?: FunctionBytecodeArtifact;
   attestation?: EdgeRuntimePreheatIdentity;
   env: Record<string, string>;
   tlsPolicy?: EdgeFetchTlsPolicy;
@@ -399,8 +402,12 @@ const originalConsole = {
   debug: console.debug,
 };
 
+const edgeRuntimeGlobal = globalThis as typeof globalThis & {
+  EdgeRuntime?: { waitUntil(promise: unknown): void };
+};
+
 function setupConsoleCapture(functionId: string) {
-  const sendLog = (stream: "stdout" | "stderr", level: string, ...args: any[]) => {
+  const sendLog = (stream: "stdout" | "stderr", level: string, ...args: unknown[]) => {
     try {
       postToParent({
         type: "log",
@@ -413,11 +420,11 @@ function setupConsoleCapture(functionId: string) {
     } catch {}
   };
 
-  console.log = (...args: any[]) => { originalConsole.log(...args); sendLog("stdout", "info", ...args); };
-  console.warn = (...args: any[]) => { originalConsole.warn(...args); sendLog("stderr", "warn", ...args); };
-  console.error = (...args: any[]) => { originalConsole.error(...args); sendLog("stderr", "error", ...args); };
-  console.info = (...args: any[]) => { originalConsole.info(...args); sendLog("stdout", "info", ...args); };
-  console.debug = (...args: any[]) => { originalConsole.debug(...args); sendLog("stdout", "debug", ...args); };
+  console.log = (...args: unknown[]) => { originalConsole.log(...args); sendLog("stdout", "info", ...args); };
+  console.warn = (...args: unknown[]) => { originalConsole.warn(...args); sendLog("stderr", "warn", ...args); };
+  console.error = (...args: unknown[]) => { originalConsole.error(...args); sendLog("stderr", "error", ...args); };
+  console.info = (...args: unknown[]) => { originalConsole.info(...args); sendLog("stdout", "info", ...args); };
+  console.debug = (...args: unknown[]) => { originalConsole.debug(...args); sendLog("stdout", "debug", ...args); };
 }
 
 function restoreConsole() {
@@ -437,7 +444,7 @@ function runCleanup(cleanup: () => void): void {
 
 function setupEdgeRuntimeCompat(backgroundAllowed = true) {
   currentWaitUntilTasks = [];
-  (globalThis as any).EdgeRuntime = {
+  edgeRuntimeGlobal.EdgeRuntime = {
     waitUntil(promise: PromiseLike<unknown> | unknown) {
       if (!backgroundAllowed) {
         throw new Error("EdgeRuntime.waitUntil is not enabled by the Function capability policy");
@@ -464,7 +471,7 @@ async function flushWaitUntilTasks(functionId: string) {
 
 function clearEdgeRuntimeCompat() {
   currentWaitUntilTasks = [];
-  delete (globalThis as any).EdgeRuntime;
+  delete edgeRuntimeGlobal.EdgeRuntime;
 }
 
 async function loadModule(input: {
@@ -475,7 +482,20 @@ async function loadModule(input: {
   projectRef: string;
   envProof?: string;
   artifactSha256?: string;
+  bytecodeArtifact?: FunctionBytecodeArtifact;
+  bytecode?: "off" | "auto" | "required";
 }): Promise<LoadModuleResult> {
+  const derived = input.bytecodeArtifact;
+  if (input.bytecode === "required" && !derived) {
+    throw new Error("Required Function bytecode is not prepared");
+  }
+  if (derived) {
+    if (!input.artifactSha256 || derived.sourceSha256 !== input.artifactSha256
+      || input.bytecode === "off") throw new Error("Function bytecode source identity mismatch");
+    assertPathInProject(derived.path);
+    await assertExpectedArtifact(derived.path, derived.sha256);
+    await assertExpectedArtifact(`${derived.path}.jsc`, derived.bytecodeSha256);
+  }
   const identity: ModuleIdentity = {
     functionId: input.functionId,
     functionPath: input.functionPath,
@@ -483,7 +503,7 @@ async function loadModule(input: {
     envProof: input.envProof || "unverified-env",
     artifactSha256: input.artifactSha256 || "unverified-artifact",
   };
-  const cacheKey = buildModuleCacheKey(identity);
+  const cacheKey = `${buildModuleCacheKey(identity)}\n${derived?.path ?? ""}\n${derived?.sha256 ?? ""}`;
   const cached = moduleCache.get(cacheKey);
   if (cached) {
     try {
@@ -503,15 +523,21 @@ async function loadModule(input: {
     new Set<string>(),
     input.artifactSha256 !== undefined,
   );
+  if (derived) await assertTenantModuleGraphSafe(derived.path, new Set<string>(), true);
+  const importDerived = () => withTrustedFunctionArtifact(
+    derived!.path, derived!.sha256,
+    (jsPath) => withTrustedFunctionArtifact(
+      `${derived!.path}.jsc`, derived!.bytecodeSha256,
+      () => importModuleHandler(buildModuleImportUrl({ ...identity, functionPath: jsPath })),
+    ),
+  );
   const handler = input.artifactSha256 === undefined
     ? await importModuleHandler(buildModuleImportUrl(identity))
     : await withTrustedFunctionArtifact(
         input.functionPath,
         input.artifactSha256,
-        (descriptorPath) => importModuleHandler(buildModuleImportUrl({
-          ...identity,
-          functionPath: descriptorPath,
-        })),
+        (descriptorPath) => derived ? importDerived()
+          : importModuleHandler(buildModuleImportUrl({ ...identity, functionPath: descriptorPath })),
       );
   moduleCache.set(cacheKey, {
     handler,
@@ -594,6 +620,9 @@ function hasPreheatFields(candidate: Record<string, unknown>): boolean {
     && typeof candidate.projectRef === "string"
     && (candidate.moduleVersion === undefined || typeof candidate.moduleVersion === "string")
     && (candidate.envProof === undefined || typeof candidate.envProof === "string")
+    && (candidate.bytecode === undefined || candidate.bytecode === "off"
+      || candidate.bytecode === "auto" || candidate.bytecode === "required")
+    && (candidate.bytecodeArtifact === undefined || isFunctionBytecodeArtifact(candidate.bytecodeArtifact))
     && hasPreheatArtifactFields(candidate)
     && isStringRecord(candidate.env)
     && (candidate.tlsPolicy === undefined || isTlsPolicy(candidate.tlsPolicy));
@@ -627,9 +656,9 @@ function isParentMessage(message: unknown): message is ParentMessage {
   return isExecuteMessage(candidate);
 }
 
-function postToParent(message: unknown) {
+function postToParent(message: unknown, transferList: ArrayBuffer[] = []) {
   if (retiring) return;
-  parentPort!.postMessage(message);
+  parentPort!.postMessage(message, transferList);
 }
 
 function installOutboundHostPolicy(allowedHosts: string[] | undefined): () => void {
@@ -713,6 +742,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
           projectRef: msg.projectRef,
           envProof: msg.envProof,
           artifactSha256: msg.artifactSha256,
+          bytecodeArtifact: msg.bytecodeArtifact,
+          bytecode: msg.bytecode,
         });
         await assertAttestedArtifact(msg.functionPath, msg.attestation);
         postToParent({
@@ -727,11 +758,11 @@ async function onParentMessage(msg: unknown): Promise<void> {
       } finally {
         restoreFetchTlsPolicy();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       postToParent({
         type: "preheat_error",
         functionId: msg.functionId,
-        error: err.message,
+        error: err instanceof Error ? err.message : String(err),
       });
     } finally {
       restoreEnv();
@@ -773,6 +804,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
       projectRef,
       envProof: msg.envProof,
       artifactSha256: msg.artifactSha256,
+      bytecodeArtifact: msg.bytecodeArtifact,
+      bytecode: msg.bytecode,
     });
     // Retirement may arrive while module loading is suspended. Do not enter
     // tenant code after the worker has already closed its parent port.
@@ -784,6 +817,10 @@ async function onParentMessage(msg: unknown): Promise<void> {
     }
     try {
       await assertExpectedArtifact(functionPath, msg.artifactSha256);
+      if (msg.bytecodeArtifact) {
+        await assertExpectedArtifact(msg.bytecodeArtifact.path, msg.bytecodeArtifact.sha256);
+        await assertExpectedArtifact(`${msg.bytecodeArtifact.path}.jsc`, msg.bytecodeArtifact.bytecodeSha256);
+      }
     } catch (error: unknown) {
       invalidateCachedModules((entry) => entry.functionId === functionId);
       throw error;
@@ -845,20 +882,22 @@ async function onParentMessage(msg: unknown): Promise<void> {
                 await reader.cancel();
                 throw new FunctionResponseLimitError(maxResponseBody);
               }
+              // Buffer.slice() shares storage; never detach a producer-owned chunk.
+              const chunk = new Uint8Array(value).buffer;
               postToParent({
                 type: "stream_chunk",
                 streamId,
-                chunk: Buffer.from(value).buffer,
+                chunk,
                 done: false,
-              });
+              }, [chunk]);
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
             traceStatus = 500;
             postToParent({
               type: "stream_chunk",
               streamId,
               done: true,
-              error: err.message,
+              error: err instanceof Error ? err.message : String(err),
             });
           }
 
@@ -866,9 +905,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
           return;
         }
 
-        const resBody = response.body
-          ? Buffer.from(await response.arrayBuffer()).buffer
-          : null;
+        const resBody = response.body ? await response.arrayBuffer() : null;
         if (maxResponseBody !== undefined && resBody && resBody.byteLength > maxResponseBody) {
           throw new FunctionResponseLimitError(maxResponseBody);
         }
@@ -876,7 +913,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         const resHeaders: Record<string, string | string[]> = {};
         response.headers.forEach((v, k) => {
           if (k.toLowerCase() === "set-cookie") {
-            const cookies = (response.headers as any).getSetCookie?.();
+            const cookies = response.headers.getSetCookie();
             if (cookies && cookies.length > 1) {
               resHeaders[k] = cookies;
               return;
@@ -892,19 +929,21 @@ async function onParentMessage(msg: unknown): Promise<void> {
           waitUntilPending: currentWaitUntilTasks.length > 0,
           moduleCacheHit: moduleLoad.cacheHit,
           moduleCacheSize: moduleLoad.moduleCacheSize,
-        });
+        }, resBody ? [resBody] : []);
         await flushWaitUntilTasks(functionId);
       }), () => traceStatus);
-  } catch (err: any) {
-    const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
+  } catch (err: unknown) {
+    const aborted = currentAbortController?.signal.aborted || (err instanceof Error && err.name === "AbortError");
     const message = err instanceof Error ? err.message : String(err);
+    const errorBody = new TextEncoder().encode(JSON.stringify({
+      error: message,
+      name: err instanceof Error ? err.name : "Error",
+    })).buffer;
     postToParent({
       status: aborted ? 499 : err instanceof FunctionResponseLimitError ? 502 : 500,
       headers: { "Content-Type": "application/json" },
-      body: Buffer.from(
-        JSON.stringify({ error: message, name: err.name }),
-      ).buffer,
-    });
+      body: errorBody,
+    }, [errorBody]);
   } finally {
     runCleanup(restoreOutboundHostPolicy);
     runCleanup(restoreFetchTlsPolicy);

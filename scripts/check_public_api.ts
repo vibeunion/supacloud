@@ -57,20 +57,20 @@ function isExportKind(value: unknown): value is ExportKind {
 }
 
 function parseSnapshot(value: unknown, path: string): PublicApiSnapshot {
-  if (!isRecord(value) || value.format !== 2 || typeof value.package !== "string" ||
-    value.entrypoint !== "." || !Array.isArray(value.exports)) {
+  if (!isRecord(value) || value["format"] !== 2 || typeof value["package"] !== "string" ||
+    value["entrypoint"] !== "." || !Array.isArray(value["exports"])) {
     throw new Error(`Invalid public API snapshot format: ${path}`);
   }
 
   const exports: PublicApiExport[] = [];
-  for (const item of value.exports) {
-    if (!isRecord(item) || typeof item.name !== "string" || !isExportKind(item.kind) ||
-      typeof item.signature !== "string") {
+  for (const item of value["exports"]) {
+    if (!isRecord(item) || typeof item["name"] !== "string" || !isExportKind(item["kind"]) ||
+      typeof item["signature"] !== "string") {
       throw new Error(`Invalid public API export entry in snapshot: ${path}`);
     }
-    exports.push({ name: item.name, kind: item.kind, signature: item.signature });
+    exports.push({ name: item["name"], kind: item["kind"], signature: item["signature"] });
   }
-  return { format: 2, package: value.package, entrypoint: ".", exports };
+  return { format: 2, package: value["package"], entrypoint: ".", exports };
 }
 
 function packageProgram(target: ApiTarget): ts.Program {

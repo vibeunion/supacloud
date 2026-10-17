@@ -57,7 +57,7 @@ Usa una versión publicada de la CLI que incluya `app init` y las versiones del 
 
 ```bash
 npm install -g @supacloud/cli
-supacloud-cli app init --root ./my-app --name my-app
+supacloud app init --root ./my-app --name my-app
 cd my-app
 bun install
 bun run check
@@ -89,7 +89,7 @@ Usa la clave anónima con `@supabase/supabase-js`; nunca pongas la clave service
 
 | Comando | Propietario y propósito |
 | --- | --- |
-| `supacloud-cli` | Usuarios de proyectos: desarrollo, base de datos, funciones, almacenamiento, logs y flujos de frontend. |
+| `supacloud` | Usuarios de proyectos: desarrollo, base de datos, funciones, almacenamiento, logs y flujos de frontend. |
 | `supacloud-admin` | Operadores: instalación, actualizaciones, diagnósticos SSH y ciclo de vida de proyectos de toda la plataforma. |
 | `supacloudctl` | Dispatcher local opcional; no es el binario del servidor. |
 

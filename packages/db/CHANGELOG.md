@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.18.1](https://github.com/vibeunion/supacloud/compare/db-v0.18.0...db-v0.18.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* preserve known transaction failures across duplicate contracts package copies ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2.
+
+## [0.18.0](https://github.com/vibeunion/supacloud/compare/db-v0.17.1...db-v0.18.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** complete review task status and recovery lifecycle ([#1970](https://github.com/vibeunion/supacloud/issues/1970)) ([4ed6b7b](https://github.com/vibeunion/supacloud/commit/4ed6b7b8a9baced763de5602b67e1bb62d0479e2))
+* connect scoped AI workflows, reference clients and deployment evidence ([#1950](https://github.com/vibeunion/supacloud/issues/1950)) ([aa1737a](https://github.com/vibeunion/supacloud/commit/aa1737a68ce7c4429e432c9526be579f6888a9dd))
+
+## [0.17.1](https://github.com/vibeunion/supacloud/compare/db-v0.17.0...db-v0.17.1) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/db-v0.16.2...db-v0.17.0) (2026-10-14)
+
+
+### Features
+
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+
+## [0.16.2](https://github.com/vibeunion/supacloud/compare/db-v0.16.1...db-v0.16.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **db:** detect catalog contract drift and function overloads ([#1867](https://github.com/vibeunion/supacloud/issues/1867)) ([b44bfee](https://github.com/vibeunion/supacloud/commit/b44bfee59579a949c86ffaf2920adbd564f87401))
+
+## [0.16.1](https://github.com/vibeunion/supacloud/compare/db-v0.16.0...db-v0.16.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/db-v0.15.0...db-v0.16.0) (2026-10-10)
+
+
+### Features
+
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/db-v0.14.0...db-v0.15.0) (2026-10-10)
+
+
+### Features
+
+* **db:** add controlled declarative adoption workflow ([#1756](https://github.com/vibeunion/supacloud/issues/1756)) ([873c781](https://github.com/vibeunion/supacloud/commit/873c781827508a23cff6868d15728d40826c78be))
+
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/db-v0.13.2...db-v0.14.0) (2026-10-08)
+
+
+### Features
+
+* **db:** add migration history rebase workflow ([#1705](https://github.com/vibeunion/supacloud/issues/1705)) ([de0587b](https://github.com/vibeunion/supacloud/commit/de0587b3297ba01b068b280111b69966f0459c23))
+
+## [0.13.2](https://github.com/vibeunion/supacloud/compare/db-v0.13.1...db-v0.13.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **db:** align Drizzle dependencies with rc5 ([#1696](https://github.com/vibeunion/supacloud/issues/1696)) ([a95da17](https://github.com/vibeunion/supacloud/commit/a95da17b58cdadc8a8148a2002a39e33cee56f3c))
+
 ## [0.13.1](https://github.com/vibeunion/supacloud/compare/db-v0.13.0...db-v0.13.1) (2026-10-05)
 
 

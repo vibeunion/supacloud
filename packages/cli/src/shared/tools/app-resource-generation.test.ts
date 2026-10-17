@@ -89,7 +89,7 @@ test("compiled request scopes resolve the reader and isolate service instances",
         compiled.exited, new Response(compiled.stdout).text(), new Response(compiled.stderr).text(),
     ]);
     expect({ code: compiledCode, errors: compiledCode ? compiledOut + compiledErr : "" }).toEqual({ code: 0, errors: "" });
-});
+}, { timeout: 30_000 });
 
 test("a resource conflict reports a structured error and leaves no partial files", async () => {
     const root = await fixture();

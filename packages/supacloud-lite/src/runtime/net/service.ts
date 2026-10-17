@@ -206,7 +206,7 @@ export class NetService {
       const res = await guardedFetch(this.fetchImpl, row.url, {
         method: row.method,
         headers,
-        body: hasBody ? row.body ?? undefined : undefined,
+        ...(hasBody && row.body !== null ? { body: row.body } : {}),
         signal: controller.signal,
       })
       status = res.status
@@ -225,9 +225,9 @@ export class NetService {
       id: row.id,
       method: row.method,
       url: row.url,
-      status: status ?? undefined,
+      ...(status === null ? {} : { status }),
       timedOut,
-      error: errorMsg ?? undefined,
+      ...(errorMsg === null ? {} : { error: errorMsg }),
     })
   }
 

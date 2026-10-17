@@ -26,7 +26,7 @@ describe("supacloud dispatcher", () => {
     test("exposes cli and admin subcommands", () => {
         expect(Object.keys(SUBCOMMANDS).sort()).toEqual(["admin", "cli"]);
         expect(SUBCOMMANDS.cli.pkg).toBe("@supacloud/cli");
-        expect(SUBCOMMANDS.cli.bin).toBe("supacloud-cli");
+        expect(SUBCOMMANDS.cli.bin).toBe("supacloud");
         expect(SUBCOMMANDS.admin.pkg).toBe("@supacloud/admin");
         expect(SUBCOMMANDS.admin.bin).toBe("supacloud-admin");
     });
@@ -247,3 +247,71 @@ describe("supacloud dispatcher", () => {
         expect(fetchCalls).toBe(0);
     });
 });
+
+// Exercise the executable boundary, not just the launch-plan helpers under Bun.
+test("installed supacloudctl selects Bun for both child CLIs and preserves argv and exit codes", async () => {
+    const { chmodSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+    const { spawnSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const root = mkdtempSync(join(tmpdir(), "supacloud-installed-bin-"));
+    try {
+        writeFileSync(join(root, "package.json"), JSON.stringify({ type: "module" }));
+        const dist = join(root, "dist");
+        const build = await Bun.build({
+            entrypoints: [fileURLToPath(new URL("./index.ts", import.meta.url))],
+            outdir: dist,
+            target: "node",
+        });
+        expect(build.success).toBe(true);
+        const entry = join(dist, "index.js");
+        expect(readFileSync(entry, "utf8").split("\n", 1)[0]).toBe("#!/usr/bin/env bun");
+        chmodSync(entry, 0o755);
+
+        // Local leaf-package fixtures prove which runtime and argv the dispatcher
+        // actually forwards without installing or contacting a registry.
+        for (const subcommand of ["cli", "admin"]) {
+            const packageRoot = join(root, "node_modules", "@supacloud", subcommand);
+            mkdirSync(packageRoot, { recursive: true });
+            writeFileSync(join(packageRoot, "package.json"), JSON.stringify({
+                name: `@supacloud/${subcommand}`, version: "1.0.0", type: "module", main: "index.js",
+            }));
+            writeFileSync(join(packageRoot, "index.js"), `
+                const args = process.argv.slice(2);
+                console.log(JSON.stringify({
+                    subcommand: ${JSON.stringify(subcommand)},
+                    bun: typeof Bun !== "undefined",
+                    args,
+                }));
+                process.exitCode = args.includes("--fail") ? 23 : 0;
+            `);
+        }
+
+        const bin = join(root, "bin");
+        mkdirSync(bin);
+        symlinkSync(process.execPath, join(bin, "bun"));
+        const linkedEntry = join(bin, "supacloudctl");
+        symlinkSync(entry, linkedEntry);
+        const env = { PATH: bin, HOME: root, SUPACLOUD_NO_AUTO_UPDATE: "1" };
+        const invoke = (args: string[]) => spawnSync(linkedEntry, args, {
+            cwd: root, env, encoding: "utf8", timeout: 5_000,
+        });
+
+        const help = invoke(["--help"]);
+        expect(help.error).toBeUndefined();
+        expect(help.status).toBe(0);
+        expect(help.stderr).toContain("supacloudctl");
+        for (const subcommand of ["cli", "admin"]) {
+            for (const fail of [false, true]) {
+                const args = ["status", "--label=a b;not-a-shell", ...(fail ? ["--fail"] : [])];
+                const result = invoke([subcommand, ...args]);
+                expect(result.error).toBeUndefined();
+                expect(result.status).toBe(fail ? 23 : 0);
+                expect(result.stderr).toBe("");
+                const payload: unknown = JSON.parse(result.stdout);
+                expect(payload).toEqual({ subcommand, bun: true, args });
+            }
+        }
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+}, 30_000);

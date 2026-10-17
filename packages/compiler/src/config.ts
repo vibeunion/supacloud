@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertGraphqlOptions } from "./graphql-options";
+import { assertDatabaseGovernance } from "./database-governance";
 import { parseDeliveryOptions, type DeliveryOptions } from "./delivery-schema";
 import type {
   CommandExecutionCapabilities,
@@ -27,9 +28,11 @@ export interface SupaCloudConfig {
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
   typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
+  databaseGovernance?: NonNullable<CompileOptions["databaseGovernance"]>;
   allowRouteCommandBindings?: boolean;
   disallowControllerDirectDb?: boolean;
   detectOrphanModules?: boolean;
+  effect?: NonNullable<CompileOptions["effect"]>;
   commandCapabilities?: CommandExecutionCapabilities;
   treeShakeUnusedProviders?: boolean;
 }
@@ -37,21 +40,25 @@ export interface SupaCloudConfig {
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
   "include" | "moduleBoundaryPreset" | "moduleBoundaries" | "typeSafety" | "delivery"
-  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules" | "openApi"
+  | "allowRouteCommandBindings" | "openApi" | "effect"
 >> & {
   include: string[];
   moduleBoundaryPreset: ModuleBoundaryPresetName;
+  effect: NonNullable<CompileOptions["effect"]>;
 } = {
+  databaseGovernance: { mode: "off" },
   graphql: false,
   root: "src",
   outDir: "generated",
   include: ["**/*.module.ts", "**/*.ts"],
   strict: true,
-  requireRouteContracts: false,
+  requireRouteContracts: true,
   generateClient: true,
   generateOpenApi: true,
   generatePermissions: true,
   treeShakeUnusedProviders: true,
+  disallowControllerDirectDb: true,
+  detectOrphanModules: true,
   commandCapabilities: {
     requirePersistentAdapters: true,
     permission: true,
@@ -60,9 +67,20 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
     transaction: true,
   },
   moduleBoundaryPreset: "modular-monolith",
+  effect: {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+    requireTaggedErrorTypes: true,
+    requireExactDependencyTypes: true,
+    requireTimeoutForDependencies: true,
+    forbidDirectRuntimeExecution: true,
+    forbidDirectThrows: true,
+  },
 };
 
 export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudConfig {
+  if (config.databaseGovernance !== undefined) assertDatabaseGovernance(config.databaseGovernance);
   if (config.delivery !== undefined) parseDeliveryOptions(config.delivery);
   if (config.graphql !== undefined && config.graphql !== false) assertGraphqlOptions(config.graphql);
   validateGovernanceConfig(config);
@@ -71,6 +89,9 @@ export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudCo
     ...config,
     include: config.include ?? [...DEFAULT_SUPACLOUD_CONFIG.include],
     graphql: config.graphql ?? DEFAULT_SUPACLOUD_CONFIG.graphql,
+    effect: config.effect === undefined
+      ? { ...DEFAULT_SUPACLOUD_CONFIG.effect }
+      : { ...DEFAULT_SUPACLOUD_CONFIG.effect, ...config.effect },
   };
 }
 
@@ -82,6 +103,7 @@ function validateGovernanceConfig(config: {
   allowRouteCommandBindings?: unknown;
   disallowControllerDirectDb?: unknown;
   detectOrphanModules?: unknown;
+  effect?: unknown;
 }): void {
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === "object" && !Array.isArray(value);
@@ -103,8 +125,8 @@ function validateGovernanceConfig(config: {
       if (!isRecord(adapters)) throw new Error("commandCapabilities.rpc must contain named adapters.");
       for (const [name, adapter] of Object.entries(adapters)) {
         if (!name.trim() || !isRecord(adapter) || Object.keys(adapter).some((key) =>
-          !["audit", "idempotency", "transaction", "boundary"].includes(key))) throw new Error("Invalid command adapter.");
-        for (const key of ["audit", "idempotency", "transaction"]) {
+          !["audit", "idempotency", "reconcile", "transaction", "boundary"].includes(key))) throw new Error("Invalid command adapter.");
+        for (const key of ["audit", "idempotency", "reconcile", "transaction"]) {
           if (adapter[key] !== undefined && typeof adapter[key] !== "boolean") throw new Error("Invalid command adapter capability.");
         }
         if (adapter["boundary"] !== undefined && adapter["boundary"] !== "database" && adapter["boundary"] !== "external") {
@@ -131,15 +153,45 @@ function validateGovernanceConfig(config: {
   if (config.typeSafety !== undefined) {
     const rules = config.typeSafety;
     if (!isRecord(rules)
-      || Object.keys(rules).some((key) => !["scanProductionSource", "noAnyInGenerated", "exclude"].includes(key))
+      || Object.keys(rules).some((key) => !["scanProductionSource", "noAnyInGenerated", "exclude", "allowAlternativeLibraries"].includes(key))
       || (rules["scanProductionSource"] !== undefined && typeof rules["scanProductionSource"] !== "boolean")
       || (rules["noAnyInGenerated"] !== undefined && typeof rules["noAnyInGenerated"] !== "boolean")
-      || (rules["exclude"] !== undefined && !isStrings(rules["exclude"]))) {
-      throw new Error("typeSafety accepts boolean scanProductionSource/noAnyInGenerated and a string array exclude.");
+      || (rules["exclude"] !== undefined && !isStrings(rules["exclude"]))
+      || (rules["allowAlternativeLibraries"] !== undefined && !isStrings(rules["allowAlternativeLibraries"]))) {
+      throw new Error("typeSafety accepts boolean scanProductionSource/noAnyInGenerated and string arrays exclude/allowAlternativeLibraries.");
     }
   }
   for (const key of ["allowRouteCommandBindings", "disallowControllerDirectDb", "detectOrphanModules"] as const) {
     if (config[key] !== undefined && typeof config[key] !== "boolean") throw new Error(`${key} must be a boolean.`);
+  }
+  if (config.effect !== undefined) {
+    if (!isRecord(config.effect) || Object.keys(config.effect).some((key) =>
+      ![
+        "requireRouteEffects",
+        "requireErrorMappings",
+        "requireDependencies",
+        "requireTaggedErrorTypes",
+        "requireExactDependencyTypes",
+        "requireTimeoutForDependencies",
+        "forbidDirectRuntimeExecution",
+        "forbidDirectThrows",
+      ].includes(key))) {
+      throw new Error("effect contains an unsupported governance option.");
+    }
+    for (const key of [
+      "requireRouteEffects",
+      "requireErrorMappings",
+      "requireDependencies",
+      "requireTaggedErrorTypes",
+      "requireExactDependencyTypes",
+      "requireTimeoutForDependencies",
+      "forbidDirectRuntimeExecution",
+      "forbidDirectThrows",
+    ]) {
+      if (config.effect[key] !== undefined && typeof config.effect[key] !== "boolean") {
+        throw new Error(`effect.${key} must be boolean.`);
+      }
+    }
   }
 }
 
@@ -160,9 +212,11 @@ export function resolveSupacloudConfig(
   commandCapabilities?: CommandExecutionCapabilities;
   moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
   typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
+  databaseGovernance?: NonNullable<CompileOptions["databaseGovernance"]>;
   allowRouteCommandBindings?: boolean;
-  disallowControllerDirectDb?: boolean;
-  detectOrphanModules?: boolean;
+  disallowControllerDirectDb: boolean;
+  detectOrphanModules: boolean;
+  effect?: NonNullable<CompileOptions["effect"]>;
   treeShakeUnusedProviders: boolean;
   graphql?: GraphqlOptions;
 } {
@@ -181,14 +235,23 @@ export function resolveSupacloudConfig(
     commandCapabilities: resolved.commandCapabilities ?? DEFAULT_SUPACLOUD_CONFIG.commandCapabilities,
     ...(resolved.moduleBoundaries ? { moduleBoundaries: resolved.moduleBoundaries } : {}),
     ...(resolved.typeSafety ? { typeSafety: resolved.typeSafety } : {}),
+    ...(resolved.databaseGovernance === undefined ? {} : {
+      databaseGovernance: {
+        ...resolved.databaseGovernance,
+        projectRoot: resolve(cwd, resolved.databaseGovernance.projectRoot ?? "."),
+      },
+    }),
     ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),
-    ...(resolved.disallowControllerDirectDb === undefined ? {} : { disallowControllerDirectDb: resolved.disallowControllerDirectDb }),
-    ...(resolved.detectOrphanModules === undefined ? {} : { detectOrphanModules: resolved.detectOrphanModules }),
+    disallowControllerDirectDb: resolved.disallowControllerDirectDb ?? DEFAULT_SUPACLOUD_CONFIG.disallowControllerDirectDb,
+    detectOrphanModules: resolved.detectOrphanModules ?? DEFAULT_SUPACLOUD_CONFIG.detectOrphanModules,
+    effect: resolved.effect === undefined
+      ? { ...DEFAULT_SUPACLOUD_CONFIG.effect }
+      : { ...DEFAULT_SUPACLOUD_CONFIG.effect, ...resolved.effect },
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders ?? DEFAULT_SUPACLOUD_CONFIG.treeShakeUnusedProviders,
-    graphql: resolved.graphql ? {
+    ...(resolved.graphql === undefined || resolved.graphql === false ? {} : { graphql: {
       ...resolved.graphql,
       schema: resolve(cwd, resolved.graphql.schema),
-    } : undefined,
+    } }),
   };
 }
 

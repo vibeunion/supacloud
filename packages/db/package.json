@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/db",
-  "version": "0.13.1",
+  "version": "0.18.1",
   "description": "Database governance layer for SupaCloud: RLS policies, RPC functions and grants as first-class resources, with manifest/catalog reconciliation",
   "type": "module",
   "main": "./dist/index.js",
@@ -70,20 +70,20 @@
     "directory": "packages/db"
   },
   "devDependencies": {
-    "typebox": "1.3.34",
+    "typebox": "1.3.37",
     "@sinclair/typebox": "0.34.52",
-    "drizzle-orm": "1.0.0-rc.4",
-    "drizzle-kit": "1.0.0-rc.4",
-    "@types/bun": "^1.4.2",
+    "drizzle-orm": "1.0.0-rc.5-5935859",
+    "drizzle-kit": "1.0.0-rc.5-5935859",
+    "@types/bun": "^1.4.3",
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "@typescript/typescript6": "^6.0.2",
-    "libpg-query": "18.1.4",
+    "libpg-query": "18.1.5",
     "@supacloud/contracts": "file:../contracts"
   },
   "peerDependencies": {
-    "drizzle-orm": "1.0.0-rc.4"
+    "drizzle-orm": "1.0.0-rc.5-5935859"
   },
   "peerDependenciesMeta": {
     "drizzle-orm": {

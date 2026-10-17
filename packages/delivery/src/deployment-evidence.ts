@@ -164,13 +164,84 @@ export function parseDeploymentEvidence(value: unknown): DeploymentEvidence {
 }
 
 export function formatDeploymentEvidence(evidence: DeploymentEvidence): string {
+  const report = summarizeDeploymentEvidence(evidence);
   return [
     `DEPLOYMENT ${evidence.scope.project_ref}/${evidence.scope.application_id}/${evidence.scope.environment_id}`,
-    `  status:     ${evidence.status}`,
+    `  status:     ${report.status}`,
+    ...(report.status !== evidence.status ? [`  recorded status: ${evidence.status} (customer assessment differs)`] : []),
     `  manifest:   ${evidence.source.manifest_sha256.slice(0, 12)}`,
     `  database:   ${evidence.database.provider} ${evidence.database.version} (${evidence.database.topology})`,
     `  activation: ${evidence.activation.activation_id}`,
     `  rollback:   ${evidence.rollback.status}`,
     `  health:     ${evidence.health.status}; smoke=${evidence.health.authenticated_smoke}`,
+    `  release:    ${evidence.activation.release_id}`,
+    `  recorded:   ${evidence.recorded_at} (snapshot, not a live probe)`,
+    ...report.issues.map(issue => `  ${issue.status} ${issue.component}: ${issue.nextAction}`),
+    "  recovery:   code rollback does not restore database or object storage",
+    "  retries:    do not replay mutations with unknown outcomes; read back the original identity",
   ].join("\n");
+}
+
+export interface DeploymentEvidenceIssue {
+  component: string;
+  status: "failed" | "unknown" | "incomplete";
+  nextAction: string;
+}
+
+/** Guidance is derived from validated evidence, never from free-form receipt notes. */
+export function summarizeDeploymentEvidence(value: unknown) {
+  const evidence = parseDeploymentEvidence(value);
+  const issues: DeploymentEvidenceIssue[] = [];
+  const observe = (component: string, state: string, complete: boolean, nextAction: string) => {
+    if (state !== "confirmed" || !complete) issues.push({
+      component, status: state === "failed" ? "failed" : state === "unknown" ? "unknown" : "incomplete",
+      nextAction,
+    });
+  };
+  for (const component of evidence.components) {
+    observe(component.name, component.status, component.checked_at !== null && component.health_check !== null,
+      "Inspect this component's health and logs for the recorded activation before changing or restarting it.");
+  }
+  observe("database.migration", evidence.database.migration.compatibility === "failed" ? "failed" : evidence.database.migration.status,
+    evidence.database.migration.compatibility === "verified" && evidence.database.migration.inventory_sha256 !== null,
+    "Read the migration inventory and compare its digest; do not reapply an unconfirmed migration.");
+  observe("database.backup", evidence.database.backup.status,
+    evidence.database.backup.latest_success_at !== null && evidence.database.backup.freshness_seconds !== null,
+    "Read backup inventory and freshness for this project; a successful deployment is not a backup.");
+  observe("database.recovery", evidence.database.recovery.status,
+    evidence.database.recovery.drill_id !== null && evidence.database.recovery.rpo_seconds !== null
+      && evidence.database.recovery.rto_seconds !== null,
+    "Obtain a separate approved restore drill and verify data, permissions and storage; never restore automatically.");
+  observe("health", evidence.health.status, evidence.health.checked_at !== null,
+    "Read back this activation's readiness; process health alone does not prove a business operation.");
+  observe("authenticated-smoke", evidence.health.authenticated_smoke, true,
+    "Run the selected business smoke with a real authorized session and verify forbidden access remains denied.");
+  observe("code-rollback", evidence.rollback.status === "ready" ? "confirmed" : evidence.rollback.status,
+    evidence.rollback.release_id !== null && evidence.rollback.configuration_id !== null,
+    "Inspect the explicit rollback release and configuration; data recovery requires a separate plan.");
+  if (evidence.rollback.result !== null) {
+    observe("code-rollback.result", evidence.rollback.result, true,
+      "Read back the rollback activation and authenticated smoke before another mutation.");
+  }
+  const assessment: DeploymentEvidenceStatus = issues.some(issue => issue.status === "failed") || evidence.status === "failed"
+    ? "failed"
+    : issues.some(issue => issue.status === "unknown") || evidence.status === "unknown"
+      ? "unknown"
+      : issues.length > 0 || evidence.status === "incomplete" ? "incomplete" : "confirmed";
+  return {
+    version: 1,
+    status: assessment,
+    recordedStatus: evidence.status,
+    scope: evidence.scope,
+    recordedAt: evidence.recorded_at,
+    correlation: {
+      releaseId: evidence.activation.release_id,
+      activationId: evidence.activation.activation_id,
+      manifestSha256: evidence.source.manifest_sha256,
+    },
+    issues,
+    automaticMutationRetry: false,
+    codeRollbackRestoresData: false,
+    liveObservationPerformed: false,
+  };
 }

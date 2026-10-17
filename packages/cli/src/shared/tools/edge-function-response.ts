@@ -29,6 +29,7 @@ const LIST_BOOLEAN_FIELDS = ["verify_jwt", "import_map"] as const;
 
 export type FunctionConfigInput = {
     verify_jwt?: boolean;
+    bytecode?: "off" | "auto" | "required";
     background_routes?: string[];
     framework?: FunctionFramework;
     capabilities?: FunctionCapabilities;
@@ -41,6 +42,7 @@ export type FunctionIdentityResponse = {
     active_version: string;
     activation_id: string;
     verify_jwt: boolean;
+    bytecode?: FunctionConfigInput["bytecode"];
     background_routes: string[];
     framework?: FunctionFramework;
     version?: string;
@@ -216,6 +218,8 @@ export function projectedFunctionIdentity(
         || !validObservedFunctionActivationId(response.activation_id)
         || typeof response.verify_jwt !== "boolean"
         || !stringRoutes(response.background_routes)) return null;
+    if (response.bytecode !== undefined
+        && !["off", "auto", "required"].includes(response.bytecode as string)) return null;
     const optionalFields = optionalConfigFields(response);
     if (!optionalFields
         || !coherentFunctionVersion(response.active_version as string, optionalFields.version)) return null;
@@ -233,6 +237,7 @@ export function projectedFunctionIdentity(
         slug: expectedSlug,
         active_version: response.active_version as string,
         verify_jwt: response.verify_jwt,
+        ...(response.bytecode === undefined ? {} : { bytecode: response.bytecode as "off" | "auto" | "required" }),
         background_routes: response.background_routes,
         ...(framework === undefined ? {} : { framework: framework as FunctionFramework }),
         ...optionalFields,
@@ -262,6 +267,8 @@ function configMatchesExpectation(
         return false;
     }
     if (response.framework !== undefined && !FUNCTION_FRAMEWORKS.includes(response.framework as FunctionFramework)) return false;
+    if (response.bytecode !== undefined && !["off", "auto", "required"].includes(response.bytecode as string)) return false;
+    if (expected.bytecode !== undefined && response.bytecode !== expected.bytecode) return false;
     if (expected.verify_jwt !== undefined && response.verify_jwt !== expected.verify_jwt) return false;
     if (expected.framework !== undefined && response.framework !== expected.framework) return false;
     if (expected.capabilities !== undefined && JSON.stringify(response.capabilities) !== JSON.stringify(expected.capabilities)) return false;
@@ -295,6 +302,7 @@ export function confirmedFunctionConfigMutation(
         verify_jwt: response.verify_jwt,
         background_routes: response.background_routes,
         ...(response.framework === undefined ? {} : { framework: response.framework as FunctionFramework }),
+        ...(response.bytecode === undefined ? {} : { bytecode: response.bytecode }),
         ...optionalFields,
         ...(capabilities === undefined ? {} : { capabilities }),
         ...(limits === undefined ? {} : { limits }),

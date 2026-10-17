@@ -1,5 +1,7 @@
 import type { ApplicationActivationMutations } from "../../src/services/application-activation";
-import { assertPublicMutationPayload, type ProjectMutationState } from "../../src/services/project-mutation.service";
+import {
+  assertPublicMutationPayload, projectMutationResourceKey, type ProjectMutationState,
+} from "../../src/services/project-mutation.service";
 
 /** In-memory journal for controller fault injection, not PostgreSQL acceptance. */
 export function activationJournal() {
@@ -18,7 +20,8 @@ export function activationJournal() {
         const now = new Date().toISOString();
         state = {
           projectRef: input.projectRef, mutationId: input.mutationId, operation: input.operation,
-          resourceKey: input.resource?.id ?? null, requestFingerprint: input.requestFingerprint,
+          resourceKey: input.resource ? projectMutationResourceKey(input.resource) : null,
+          requestFingerprint: input.requestFingerprint,
           principal: input.principal, status: "running", checkpoint: {}, receipt: null,
           responseStatus: null, failureCode: null, leaseOwner: "test", leaseExpiresAt: null,
           fencingEpoch: 1, completedAt: null, createdAt: now, updatedAt: now,

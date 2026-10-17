@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.52.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.52.1...web-console-v0.52.2) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.52.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.52.0...web-console-v0.52.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.52.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.51.0...web-console-v0.52.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771))
+
+### Features
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771)) ([819fd3d](https://github.com/vibeunion/supacloud/commit/819fd3d5497a0ce86c9ee3cf1ed4ef4ae4db8637))
+
+## [0.51.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.50.1...web-console-v0.51.0) (2026-10-10)
+
+
+### Features
+
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
+## [0.50.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.50.0...web-console-v0.50.1) (2026-10-09)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @sveltejs/kit in /packages/web-console ([#1727](https://github.com/vibeunion/supacloud/issues/1727)) ([94fa750](https://github.com/vibeunion/supacloud/commit/94fa750fb992bbff8575da3a1270bcf146cfcb9e))
+* **deps-dev:** bump @types/node in /packages/web-console ([#1729](https://github.com/vibeunion/supacloud/issues/1729)) ([ae0c6e0](https://github.com/vibeunion/supacloud/commit/ae0c6e0c2d2ea342b0625f27bc9cc36f35510d54))
+* **deps-dev:** bump bits-ui in /packages/web-console ([#1714](https://github.com/vibeunion/supacloud/issues/1714)) ([eaf159e](https://github.com/vibeunion/supacloud/commit/eaf159eb0fc927159b8ed33be6954b5f5a44d628))
+* **deps-dev:** bump vite from 8.3.0 to 8.3.3 in /packages/web-console ([#1726](https://github.com/vibeunion/supacloud/issues/1726)) ([4e84237](https://github.com/vibeunion/supacloud/commit/4e84237551236aee0a0f77561ec833c3f85bbf6f))
+* **deps:** bump isomorphic-dompurify in /packages/web-console ([#1720](https://github.com/vibeunion/supacloud/issues/1720)) ([2ee4dad](https://github.com/vibeunion/supacloud/commit/2ee4dadd80028a29a7f992e310c5268258ca6dd7))
+
+## [0.50.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.2...web-console-v0.50.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.49.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.1...web-console-v0.49.2) (2026-10-06)
 
 

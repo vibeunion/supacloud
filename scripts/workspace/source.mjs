@@ -57,6 +57,54 @@ export function importSites(ts, source) {
   return sites;
 }
 
+const EFFECT_RUNTIME_METHODS = new Set(['runPromise', 'runPromiseExit', 'runSync', 'runFork']);
+const EFFECT_MODULES = new Set(['effect', 'effect/Effect', 'effect/Runtime']);
+
+/** Finds direct Effect interpretation calls without evaluating application code. */
+export function effectRuntimeExecutionSites(ts, source) {
+  const namespaceBindings = new Set();
+  const runtimeBindings = new Map();
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (!EFFECT_MODULES.has(statement.moduleSpecifier.text)) continue;
+    const clause = statement.importClause;
+    if (!clause) continue;
+    if (clause.name) namespaceBindings.add(clause.name.text);
+    if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+      namespaceBindings.add(clause.namedBindings.name.text);
+    } else if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+      for (const element of clause.namedBindings.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        if (statement.moduleSpecifier.text === 'effect' && (imported === 'Effect' || imported === 'Runtime')) {
+          namespaceBindings.add(element.name.text);
+        }
+        if (EFFECT_RUNTIME_METHODS.has(imported)) runtimeBindings.set(element.name.text, imported);
+      }
+    }
+  }
+  if (namespaceBindings.size === 0 && runtimeBindings.size === 0) return [];
+  const sites = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      let method;
+      if (ts.isPropertyAccessExpression(node.expression)
+        && namespaceBindings.has(node.expression.expression.getText(source))
+        && EFFECT_RUNTIME_METHODS.has(node.expression.name.text)) {
+        method = node.expression.name.text;
+      } else if (ts.isIdentifier(node.expression) && runtimeBindings.has(node.expression.text)) {
+        method = runtimeBindings.get(node.expression.text);
+      }
+      if (method) {
+        const position = source.getLineAndCharacterOfPosition(node.getStart(source));
+        sites.push({ method, line: position.line + 1, column: position.character + 1 });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return sites;
+}
+
 function enabledExport(value) {
   if (typeof value === 'string') return true;
   if (!value || typeof value !== 'object') return false;
@@ -114,6 +162,15 @@ export function checkSourceBoundaries(workspace, ts, rules) {
         const position = source.getLineAndCharacterOfPosition(error.start ?? 0);
         diagnostics.push({ code: 'WS_SOURCE_PARSE', file, line: position.line + 1, column: position.character + 1,
           message: ts.flattenDiagnosticMessageText(error.messageText, '\n') });
+      }
+      for (const site of effectRuntimeExecutionSites(ts, source)) {
+        if (file === 'packages/elysia/src/effect.ts') continue;
+        diagnostics.push({
+          code: 'WS_EFFECT_RUNTIME_ESCAPE',
+          file,
+          ...site,
+          message: `Direct Effect.${site.method} execution escapes the framework adapter boundary.`,
+        });
       }
       for (const site of importSites(ts, source)) {
         const detail = { file, ...site };

@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const bin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const bin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 const nativeTest = bin ? test : test.skip;
 const helper = new URL("./starter-postgres.ts", import.meta.url).href;
 
@@ -44,7 +44,7 @@ for (const phase of ["startup", "query"] as const) {
           await db?.close();
         }
       `], {
-        env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TMPDIR: root },
+        env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", TMPDIR: root },
         stdout: "pipe", stderr: "pipe",
       });
       const output = new Response(child.stderr).text();

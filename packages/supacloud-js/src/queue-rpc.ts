@@ -20,7 +20,11 @@ export type SupaCloudQueueSendResult = {
   queue_name: string;
   status: "pending";
   payload: SupaCloudQueueJson;
-  deduplicated?: boolean;
+};
+/** Deduplication confirms the original enqueue, not current pending/execution state. */
+export type SupaCloudQueueIdempotentSendResult = Omit<SupaCloudQueueSendResult, "status"> & {
+  status: "pending" | "deduplicated";
+  deduplicated: boolean;
 };
 export type SupaCloudQueueMutationResult = {
   id: string;

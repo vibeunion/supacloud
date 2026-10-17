@@ -11,6 +11,7 @@ import {
 import {
     createLogicalBackup,
     listLogicalBackups,
+    readLogicalBackup,
     LogicalBackupContractError,
     restoreLogicalBackup,
 } from "../services/logical-backup.service";
@@ -88,14 +89,30 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         }
     })
     .post('/logical', {
+        body: t.Optional(t.Object({
+            backup_id: t.Optional(t.String({ maxLength: 110 })),
+        }, { additionalProperties: false })),
         response: { 200: jsonResponseSchema, 400: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "Create a verified logical-full backup" },
-    }, async ({ params: { ref }, request, set }) => {
+    }, async ({ params: { ref }, body, request, set }) => {
         const authError = await requireAdminAuth(request);
         if (authError) { set.status = authError.status; return authError.body; }
         disableLogicalBackupMutationIdleTimeout(request);
         try {
-            return { backup: await createLogicalBackup(ref) };
+            return { backup: await createLogicalBackup(ref, body?.backup_id) };
+        } catch (error: unknown) {
+            return logicalBackupErrorResponse(error);
+        }
+    })
+    .get('/logical/:backupId', {
+        params: t.Object({ ref: t.String({ maxLength: 64 }), backupId: t.String({ maxLength: 110 }) }),
+        response: { 200: jsonResponseSchema, 400: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "Verify one exact logical-full backup without mutations" },
+    }, async ({ params: { ref, backupId }, request, set }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) { set.status = authError.status; return authError.body; }
+        try {
+            return { backup: await readLogicalBackup(ref, backupId) };
         } catch (error: unknown) {
             return logicalBackupErrorResponse(error);
         }

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * supacloudctl — Unified entry point (umbrella dispatcher).
  *
@@ -22,7 +22,7 @@ interface Subcommand {
 }
 
 export const SUBCOMMANDS: Record<string, Subcommand> = {
-    cli: { pkg: "@supacloud/cli", bin: "supacloud-cli", desc: "@supacloud/cli 项目级开发工具" },
+    cli: { pkg: "@supacloud/cli", bin: "supacloud", desc: "@supacloud/cli 项目级开发工具" },
     admin: { pkg: "@supacloud/admin", bin: "supacloud-admin", desc: "@supacloud/admin 平台运维工具" },
 };
 
@@ -351,8 +351,8 @@ async function dispatchSubcommand(target: Subcommand, forwardedArgs: string[]): 
         });
         const exitCode = await childProcess.exited;
         process.exit(exitCode ?? 1);
-    } catch (error: any) {
-        console.error(`❌ 启动 ${target.pkg} 失败: ${error.message || String(error)}`);
+    } catch (error: unknown) {
+        console.error(`❌ 启动 ${target.pkg} 失败: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }

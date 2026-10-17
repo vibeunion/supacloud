@@ -602,7 +602,7 @@ describe("admin project create", () => {
                 },
             });
 
-            const response = await projectCallback({
+            const invocation = projectCallback({
                 action: "create",
                 name: "environment-binding-required",
                 api_domain: "api.example.test",
@@ -610,6 +610,13 @@ describe("admin project create", () => {
                 environment,
             });
 
+            if (environment !== undefined) {
+                await expect(invocation).rejects.toThrow("Invalid arguments");
+                expect(postCalls).toBe(0);
+                return;
+            }
+
+            const response = await invocation;
             expect(postCalls).toBe(0);
             expect(response.isError).toBe(true);
             expect(JSON.parse(response.content[0].text).error).toEqual({
