@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+/**
+ * @param {string} path
+ * @param {unknown} version
+ * @param {{ packages?: Record<string, { component?: unknown }> }} config
+ * @param {unknown} packageVersion
+ * @param {unknown} tag
+ */
 export function validateReleaseIdentity(path, version, config, packageVersion, tag) {
   const component = config.packages?.[path]?.component;
   if (!/^packages\/[a-z0-9-]+$/.test(path) || typeof component !== 'string'
@@ -15,7 +22,8 @@ export function validateReleaseIdentity(path, version, config, packageVersion, t
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const path = 'packages/supacloud-lite';
+  /** @param {string} file */
   const read = file => JSON.parse(readFileSync(file, 'utf8'));
   validateReleaseIdentity(path, read('.release-please-manifest.json')[path],
-    read('release-please-config.json'), read(`${path}/package.json`).version, process.env.RELEASE_TAG);
+    read('release-please-config.json'), read(`${path}/package.json`).version, process.env['RELEASE_TAG']);
 }

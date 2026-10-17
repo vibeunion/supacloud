@@ -15,16 +15,17 @@ const execute = (command, args) => execFileSync(command, args, { encoding: 'utf8
 export function resolveReleaseOutputs(input, run = execute) {
   if (input.outcome === 'success') {
     if (!/^[a-f0-9]{40}$/.test(input.sha)) throw new Error('Invalid release source commit');
+    /** @param {string} file */
     const read = file => JSON.parse(run('git', ['show', `${input.sha}:${file}`]));
     const current = read('.release-please-manifest.json');
     const config = read('release-please-config.json');
     const released = Object.entries(input.outputs)
       .filter(([key, value]) => key.endsWith('--release_created') && value === 'true')
       .map(([key]) => key.slice(0, -'--release_created'.length));
-    const declared = JSON.parse(input.outputs.paths_released || '[]');
+    const declared = JSON.parse(input.outputs['paths_released'] || '[]');
     if (!Array.isArray(declared) || new Set(declared).size !== declared.length
       || declared.length !== released.length || declared.some(path => !released.includes(path))
-      || (input.outputs.releases_created === 'true') !== (released.length > 0)) {
+      || (input.outputs['releases_created'] === 'true') !== (released.length > 0)) {
       throw new Error('Inconsistent release output inventory');
     }
     for (const path of released) {
@@ -59,17 +60,23 @@ export function resolveReleaseOutputs(input, run = execute) {
     || !/^[a-f0-9]{40}$/.test(input.sha)) {
     throw new Error('Release Please failed outside an eligible release push');
   }
+  /** @param {string} command @param {string[]} args */
   const json = (command, args) => JSON.parse(run(command, args));
+  /** @type {Array<{ number: number, merged_at?: string, merge_commit_sha?: string,
+   * base?: { ref?: string, repo?: { full_name?: string } },
+   * head?: { ref?: string, repo?: { full_name?: string } } }>} */
   const prs = json('gh', ['api', `repos/${input.repository}/commits/${input.sha}/pulls`]);
   const releasePrs = prs.filter(pr => pr.merged_at && pr.merge_commit_sha === input.sha
     && pr.base?.ref === 'main' && pr.base?.repo?.full_name === input.repository
     && pr.head?.repo?.full_name === input.repository
     && pr.head?.ref === 'release-please--branches--main');
   if (releasePrs.length !== 1) throw new Error('Expected one merged Release Please PR for the exact commit');
+  /** @param {string} revision @param {string} file */
   const read = (revision, file) => json('git', ['show', `${revision}:${file}`]);
   const current = read(input.sha, '.release-please-manifest.json');
   const previous = read(`${input.sha}^`, '.release-please-manifest.json');
   const config = read(input.sha, 'release-please-config.json');
+  /** @type {Record<string, string>} */
   const outputs = {};
   const paths = [];
   // Recover only when every changed release is present and still unpublished downstream.
@@ -99,22 +106,22 @@ export function resolveReleaseOutputs(input, run = execute) {
   }
   if (paths.length === 0) throw new Error('No changed releases to recover');
   // Repair only the lifecycle labels after all identities have been validated.
-  run('gh', ['issue', 'edit', String(releasePrs[0].number), '--repo', input.repository,
+  run('gh', ['issue', 'edit', String(releasePrs[0]?.number), '--repo', input.repository,
     '--add-label', 'autorelease: tagged', '--remove-label', 'autorelease: pending']);
   return { ...outputs, releases_created: 'true', paths_released: JSON.stringify(paths) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const outputs = resolveReleaseOutputs({
-    outcome: process.env.RELEASE_ACTION_OUTCOME ?? '',
-    outputs: JSON.parse(process.env.RELEASE_ACTION_OUTPUTS ?? '{}'),
-    repository: process.env.GITHUB_REPOSITORY ?? '',
-    event: process.env.GITHUB_EVENT_NAME ?? '',
-    ref: process.env.GITHUB_REF ?? '',
-    sha: process.env.GITHUB_SHA ?? '',
+    outcome: process.env['RELEASE_ACTION_OUTCOME'] ?? '',
+    outputs: JSON.parse(process.env['RELEASE_ACTION_OUTPUTS'] ?? '{}'),
+    repository: process.env['GITHUB_REPOSITORY'] ?? '',
+    event: process.env['GITHUB_EVENT_NAME'] ?? '',
+    ref: process.env['GITHUB_REF'] ?? '',
+    sha: process.env['GITHUB_SHA'] ?? '',
   });
   for (const [key, value] of Object.entries(outputs)) {
     const delimiter = `output_${crypto.randomUUID()}`;
-    appendFileSync(process.env.GITHUB_OUTPUT ?? '', `${key}<<${delimiter}\n${value}\n${delimiter}\n`);
+    appendFileSync(process.env['GITHUB_OUTPUT'] ?? '', `${key}<<${delimiter}\n${value}\n${delimiter}\n`);
   }
 }
