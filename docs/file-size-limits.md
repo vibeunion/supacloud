@@ -29,8 +29,18 @@ changing configuration. URL parameters cannot override these operator limits.
 
 These are processing limits, not a universal Storage quota. Storage buckets
 still use their configured `file_size_limit`; when omitted, the Lite runtime
-default is 50 MiB. A bucket or upload gateway may therefore reject a file
+default is 500 MiB. A bucket or upload gateway may therefore reject a file
 before a conversion or image transformation begins.
+
+Configure the Lite project-wide upload default with `[storage].file_size_limit`
+(for example, `"500MiB"`) or the programmatic `storageFileSizeLimit` byte count.
+A bucket's explicit `file_size_limit` takes precedence over this default.
+The default applies to ordinary and resumable uploads and destination copy checks.
+
+On upgrade, existing explicit project and bucket limits are preserved; no database
+migration rewrites bucket limits. Buckets without either setting use 500 MiB after
+the runtime restarts. To retain the previous implicit limit, configure
+`[storage].file_size_limit = "50MiB"` before upgrading.
 
 The larger processing limit increases peak memory and temporary I/O risk.
 Operators should size worker memory, concurrency and admission controls for

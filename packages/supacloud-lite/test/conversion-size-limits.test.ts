@@ -50,6 +50,23 @@ test("Lite config exposes separate operator-owned image limits", async () => {
   }
 });
 
+test("Lite Storage defaults an unset bucket limit to 500 MiB", () => {
+  const handler = new StorageHandler(null as never, {
+    put: async () => {}, get: async () => null, delete: async () => {}, deleteMany: async () => {},
+  }, { jwtSecret: "test" });
+  const boundary = handler as unknown as {
+    effectiveFileSizeLimit(bucket: { file_size_limit: number | string | null }): number;
+  };
+  expect(boundary.effectiveFileSizeLimit({ file_size_limit: null })).toBe(limit);
+  expect(boundary.effectiveFileSizeLimit({ file_size_limit: 1024 })).toBe(1024);
+  expect(boundary.effectiveFileSizeLimit({ file_size_limit: "2048" })).toBe(2048);
+  const configured = new StorageHandler(null as never, {
+    put: async () => {}, get: async () => null, delete: async () => {}, deleteMany: async () => {},
+  }, { jwtSecret: "test", defaultFileSizeLimit: 4096 }) as unknown as typeof boundary;
+  expect(configured.effectiveFileSizeLimit({ file_size_limit: null })).toBe(4096);
+  expect(configured.effectiveFileSizeLimit({ file_size_limit: 1024 })).toBe(1024);
+});
+
 test("Storage Handler applies captured input and output limits separately", async () => {
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGZkAAAAASUVORK5CYII=", "base64",
