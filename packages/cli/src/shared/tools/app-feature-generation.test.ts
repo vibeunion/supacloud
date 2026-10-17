@@ -157,3 +157,40 @@ test("the generated approval passes strict TypeScript checking", async () => {
     expect({ code: typeCode, errors: typeCode ? typeOut + typeErr : "" }).toEqual({ code: 0, errors: "" });
 // A cold tsc pass over the generated project can exceed 30s on CI.
 }, { timeout: 120_000 });
+
+test("request contract changes flow into the write port and diagnose stale adapters", async () => {
+    const root = await generatedFixture();
+    const directory = join(root, "src/features/case-approval");
+    const contractPath = join(directory, "case-approval.contracts.ts");
+    const original = await readFile(contractPath, "utf8");
+    const changed = original.replace(
+        "reason: t.Optional(t.String({ maxLength: 2000 })),",
+        "reason: t.Optional(t.String({ maxLength: 2000 })),\n    reference: t.Optional(t.String()),",
+    );
+    expect(changed).not.toBe(original);
+    await writeFile(contractPath, changed);
+    await writeFile(join(directory, "business-adapter.ts"), `import type { CaseApprovalWritePort } from "./case-approval.model";
+export const writer: CaseApprovalWritePort = {
+    async approve(input) {
+        const reference: string | undefined = input.reference;
+        void reference;
+        return { id: input.id, state: "approved", version: input.expectedVersion + 1 };
+    },
+};
+`);
+    async function check() {
+        const child = Bun.spawn([
+            process.execPath, join(root, "node_modules/typescript/bin/tsc"), "--project", join(root, "tsconfig.json"),
+        ], { cwd: root, stdout: "pipe", stderr: "pipe" });
+        const [code, stdout, stderr] = await Promise.all([
+            child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+        ]);
+        return { code, output: stdout + stderr };
+    }
+    expect(await check()).toEqual({ code: 0, output: "" });
+    await writeFile(contractPath, changed.replace("reference: t.Optional(t.String())", "reference: t.Optional(t.Integer())"));
+    const stale = await check();
+    expect(stale.code).not.toBe(0);
+    expect(stale.output).toContain("business-adapter.ts");
+    expect(stale.output).toContain("number");
+}, { timeout: 120_000 });

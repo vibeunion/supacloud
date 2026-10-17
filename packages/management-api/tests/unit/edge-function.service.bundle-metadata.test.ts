@@ -1404,6 +1404,46 @@ describe("edgeFunctionService bundle metadata", () => {
       .toEqual(["1"]);
   });
 
+  for (const mode of ["single-file", "multi-file"] as const) {
+    test(`rejects ${mode} build-time macros before host execution or deployment`, async () => {
+      const ref = `proj_macro_${mode}`;
+      const slug = "macro-rejected";
+      const marker = join(functionsRoot, `macro-host-write-${mode}`);
+      let runtimeCalls = 0;
+      globalThis.fetch = (async () => {
+        runtimeCalls += 1;
+        return Response.json({ success: true, version: "1" });
+      }) as typeof fetch;
+      // A built-in macro avoids package resolution and would write in the privileged
+      // build process, before the final bundle's tenant capability checks.
+      const macroCode = `
+        import { writeFileSync } from "node:fs" with { type: "macro" };
+        writeFileSync(${JSON.stringify(marker)}, "unexpected build-time execution");
+      `;
+      const handler = 'export default { fetch: () => new Response("unreachable") };';
+      try {
+        const rejected = mode === "single-file"
+          ? await edgeFunctionService.deployDetailed(ref, slug, macroCode + handler)
+          : await edgeFunctionService.deployBundleDetailed(ref, slug, {
+              "index.ts": 'import "./nested/helper.ts"; ' + handler,
+              "nested/helper.ts": macroCode,
+            });
+
+        expect(existsSync(marker)).toBe(false);
+        expect(rejected).toMatchObject({ success: false });
+        expect(runtimeCalls).toBe(0);
+        expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+        expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({
+          verify_jwt: true,
+          activation_id: "legacy",
+        });
+        expect(existsSync(join(functionsRoot, ref, ".versions", slug, "1"))).toBe(false);
+      } finally {
+        await rm(marker, { force: true });
+      }
+    });
+  }
+
   test("does not write or preheat a single-file version when Bun.build fails", async () => {
     const ref = "proj_single_build_failure";
     const slug = "single-build-failure";

@@ -18,11 +18,15 @@ the existing database type, not an automatic database migration.
   then no pending marker or write is created.
 - Given an old out-of-range persisted marker, when loaded, then the client stays
   blocked and preserves the original evidence rather than deleting or replacing it.
+- Given an attachment task input or result outside the database version range,
+  when decoded using the generated contract, then it is rejected.
+- Given an approved review at the maximum version with a bound attachment, when
+  its worker runs, then the durable result and task status still complete normally.
 
 ## Adoption
 
 Adopt the new limits source together with the updated contracts, review handler,
-task contracts, upload host and browser client; include it in isolated browser test fixtures.
+task contracts, attachment job, upload host and browser client; include it in isolated browser test fixtures.
 Regenerate the compiled client and OpenAPI normally. No historical SQL migration
 is edited, and no data or idempotency keys are rewritten.
 
@@ -33,6 +37,9 @@ only a new approval increment at that version is disallowed.
 The upload host casts the expected version to `bigint` for its `+ 1` comparison
 so a maximum-version receipt lookup cannot overflow. This widens only the
 comparison arithmetic, not the stored column or accepted version range.
+The attachment input and result schemas share this maximum as well. This guards
+the worker boundary; it does not prevent privileged callers from inserting
+invalid Workflow messages. Those messages fail validation rather than execute.
 
 To support more versions, use a separately reviewed database/type migration and
 precision policy. Raising the JavaScript constant alone is not sufficient.
