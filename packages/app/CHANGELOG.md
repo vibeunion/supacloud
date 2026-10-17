@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.2](https://github.com/vibeunion/supacloud/compare/app-v0.28.1...app-v0.28.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2041](https://github.com/vibeunion/supacloud/issues/2041)) ([be44641](https://github.com/vibeunion/supacloud/commit/be446416b87bf009eec892bc20368e3595d7326a))
+
 ## [0.28.1](https://github.com/vibeunion/supacloud/compare/app-v0.28.0...app-v0.28.1) (2026-10-17)
 
 

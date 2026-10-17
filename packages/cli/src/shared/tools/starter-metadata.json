@@ -3,25 +3,25 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.47.1"
+      "version": "0.47.2"
     },
     "app": {
-      "version": "0.28.1",
+      "version": "0.28.2",
       "dependencies": {
         "rxjs": "7.8.2"
       }
     },
     "elysia": {
-      "version": "0.33.3"
+      "version": "0.33.4"
     },
     "commands": {
-      "version": "0.9.5"
+      "version": "0.9.6"
     },
     "contracts": {
-      "version": "0.11.3"
+      "version": "0.11.4"
     },
     "db": {
-      "version": "0.18.2",
+      "version": "0.18.3",
       "peerDependencies": {
         "drizzle-orm": "1.0.0-rc.5-5935859"
       },
@@ -30,7 +30,7 @@
       }
     },
     "sdk": {
-      "version": "0.43.2",
+      "version": "0.43.3",
       "peerDependencies": {
         "@supabase/supabase-js": "^2.117.3"
       }

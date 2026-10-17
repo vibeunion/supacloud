@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.120.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.120.1...management-api-v0.120.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2041](https://github.com/vibeunion/supacloud/issues/2041)) ([be44641](https://github.com/vibeunion/supacloud/commit/be446416b87bf009eec892bc20368e3595d7326a))
+
 ## [0.120.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.120.0...management-api-v0.120.1) (2026-10-17)
 
 

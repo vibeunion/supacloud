@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.31.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.31.1...supacloud-lite-v0.31.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2041](https://github.com/vibeunion/supacloud/issues/2041)) ([be44641](https://github.com/vibeunion/supacloud/commit/be446416b87bf009eec892bc20368e3595d7326a))
+* **lite:** preflight image transformation size ([#2037](https://github.com/vibeunion/supacloud/issues/2037)) ([fd0e790](https://github.com/vibeunion/supacloud/commit/fd0e790a18513dfd7fa1682b7e72c0a147f392cc))
+* recheck password issuance and align published tool dependencies ([#2039](https://github.com/vibeunion/supacloud/issues/2039)) ([250b1af](https://github.com/vibeunion/supacloud/commit/250b1afef3f78d6dd4ab34e94147f65beb8a8677))
+
 ## [0.31.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.31.0...supacloud-lite-v0.31.1) (2026-10-17)
 
 
