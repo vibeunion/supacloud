@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* **delivery:** preserve failure severity in customer summaries ([#2016](https://github.com/vibeunion/supacloud/issues/2016)) ([acfe760](https://github.com/vibeunion/supacloud/commit/acfe760d04173e95c0f24d056e464334b59e942a))
+* preserve failure severity in customer summaries ([#2016](https://github.com/vibeunion/supacloud/issues/2016)) ([acfe760](https://github.com/vibeunion/supacloud/commit/acfe760d04173e95c0f24d056e464334b59e942a))
 
 ## [0.19.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.18.1...delivery-v0.19.0) (2026-10-16)
 

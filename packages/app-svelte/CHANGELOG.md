@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.5.1...app-svelte-v0.5.2) (2026-10-17)
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2 for the shared command-error protocol.
+
 ## [0.5.1](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.5.0...app-svelte-v0.5.1) (2026-10-11)
 
 

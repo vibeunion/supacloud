@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* preserve branded CommandError identity across package copies while rejecting lookalikes and hostile proxies ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
 
 ## [0.11.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.11.0...contracts-v0.11.1) (2026-10-16)
 

@@ -5,7 +5,12 @@
 
 ### Bug Fixes
 
-* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* cover bounded starter task version and failure handling ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Dependencies
+
+* align the published @supacloud/app, @supacloud/commands and @supacloud/contracts dependencies to 0.27.2, 0.9.4 and 0.11.2.
 
 ## [0.33.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.33.0...elysia-v0.33.1) (2026-10-16)
 

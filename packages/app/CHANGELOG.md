@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.2](https://github.com/vibeunion/supacloud/compare/app-v0.27.1...app-v0.27.2) (2026-10-17)
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2 for the shared command-error protocol.
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/app-v0.27.0...app-v0.27.1) (2026-10-15)
 
 

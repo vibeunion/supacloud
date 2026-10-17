@@ -14,15 +14,6 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
-## [0.103.4](https://github.com/vibeunion/supacloud/compare/cli-v0.103.3...cli-v0.103.4) (2026-10-17)
-
-
-### Bug Fixes
-
-* **cli:** preserve starter recovery on malformed outcomes ([#2011](https://github.com/vibeunion/supacloud/issues/2011)) ([5b32129](https://github.com/vibeunion/supacloud/commit/5b321290b0099bf7cab9f02fcdff801a4c9eb4de))
-* **cli:** validate starter query page envelopes ([#2009](https://github.com/vibeunion/supacloud/issues/2009)) ([e8d392b](https://github.com/vibeunion/supacloud/commit/e8d392bb8ad05ca164bbb3b5e383a95b09aba80a))
-* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
-
 ## [0.103.3](https://github.com/vibeunion/supacloud/compare/cli-v0.103.2...cli-v0.103.3) (2026-10-16)
 
 

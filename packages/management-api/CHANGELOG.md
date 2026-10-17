@@ -1,11 +1,18 @@
 # Changelog
 
-## [0.118.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.5...management-api-v0.118.6) (2026-10-17)
+## [0.119.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.5...management-api-v0.119.0) (2026-10-17)
+
+
+### Features
+
+* add opt-in Elysia AOT A/B evaluation builds; default release builds remain unchanged ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
 
 
 ### Bug Fixes
 
-* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* disable macros while bundling tenant Functions ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+AOT remains experimental and opt-in. Database-backed business behavior, real authenticated/business WebSocket flows and full API parity remain unverified.
 
 ## [0.118.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.118.4...management-api-v0.118.5) (2026-10-16)
 

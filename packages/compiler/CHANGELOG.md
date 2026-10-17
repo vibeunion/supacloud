@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.7](https://github.com/vibeunion/supacloud/compare/compiler-v0.46.6...compiler-v0.46.7) (2026-10-17)
+
+
+### Dependencies
+
+* align the published @supacloud/db and @supacloud/delivery dependencies to 0.18.1 and 0.19.1.
+* update migration package pins to @supacloud/app 0.27.2 and @supacloud/elysia 0.33.2.
+
 ## [0.46.6](https://github.com/vibeunion/supacloud/compare/compiler-v0.46.5...compiler-v0.46.6) (2026-10-16)
 
 

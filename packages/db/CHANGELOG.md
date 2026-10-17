@@ -5,7 +5,12 @@
 
 ### Bug Fixes
 
-* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* preserve known transaction failures across duplicate contracts package copies ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2.
 
 ## [0.18.0](https://github.com/vibeunion/supacloud/compare/db-v0.17.1...db-v0.18.0) (2026-10-16)
 
