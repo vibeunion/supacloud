@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { runStarterCommand, starterInstallArgs } from "./check_app_starter";
 import { startStarterLite, type StarterLite } from "./lib/starter-lite";
@@ -28,16 +28,25 @@ export function assertRegistryManifest(value: unknown): void {
     }
   }
 }
+export function assertPublishedPackageManifest(value: unknown, expectedName: string, expectedVersion?: string): string {
+  const manifest = record(value);
+  assert.equal(manifest["name"], expectedName, `Installed package name must be ${expectedName}`);
+  const version = manifest["version"];
+  assert.ok(typeof version === "string" && exactPublishedVersion(version), `Installed ${expectedName} version must be exact`);
+  if (expectedVersion !== undefined) assert.equal(version, expectedVersion, `${expectedName} version must match the requested version`);
+  return version;
+}
 
 // Preserve transport settings required by proxied registries without inheriting
 // application credentials, package overrides, or insecure TLS bypass flags.
-export function publishedConsumerEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries([
-    "PATH", "HOME", "TMPDIR", "SYSTEMROOT",
+export function publishedConsumerEnvironment(source: NodeJS.ProcessEnv, home: string): Record<string, string> {
+  const transport = Object.fromEntries([
+    "PATH", "TMPDIR", "SYSTEMROOT",
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
     "http_proxy", "https_proxy", "no_proxy", "all_proxy",
     "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
   ].flatMap(key => source[key] === undefined ? [] : [[key, source[key]!]]));
+  return { ...transport, HOME: home, USERPROFILE: home };
 }
 
 /** Replace old reports without retaining permissive modes or following a destination symlink. */
@@ -51,6 +60,15 @@ export async function writePrivateAcceptanceFile(file: string, content: string):
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+/** Normalize filesystem aliases without allowing package symlinks to escape the consumer install. */
+export async function assertInstalledPackagePath(path: string, nodeModules: string, label: string): Promise<void> {
+  const [resolvedPath, resolvedNodeModules] = await Promise.all([realpath(path), realpath(nodeModules)]);
+  const installedPath = relative(resolvedNodeModules, resolvedPath);
+  assert.ok(installedPath !== "" && !isAbsolute(installedPath)
+    && installedPath !== ".." && !installedPath.startsWith(".." + sep),
+    `${label} must be an installed package`);
 }
 
 /** Runs against the supplied consumer only; no templates or runtime modules are substituted. */
@@ -173,11 +191,12 @@ async function main(args: string[]) {
   const reportFile = resolve(values.report);
   const root = await mkdtemp(join(tmpdir(), "supacloud-published-customer-"));
   const tools = join(root, "tools"), project = join(root, "application");
+  const isolatedHome = join(root, "home");
   const signal = new AbortController();
   const interrupt = () => signal.abort(new Error("Published customer acceptance interrupted"));
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
-  const env = publishedConsumerEnvironment(process.env);
+  const env = publishedConsumerEnvironment(process.env, isolatedHome);
   const report: {
     schema: string; status: "incomplete" | "failed" | "passed"; stage: string;
     versions: Record<string, string>; checks: string[];
@@ -193,12 +212,13 @@ async function main(args: string[]) {
   const run = (args: string[], cwd = project) => runStarterCommand(args, { cwd, env, signal: signal.signal });
   try {
     await mkdir(tools);
+    await mkdir(isolatedHome);
     await writeFile(join(tools, "package.json"), JSON.stringify({
       private: true, type: "module", dependencies: { "@supacloud/cli": cliVersion },
     }));
     await run(starterInstallArgs("consumer"), tools);
     const cliManifest = record(JSON.parse(await readFile(join(tools, "node_modules/@supacloud/cli/package.json"), "utf8")));
-    assert.equal(cliManifest["version"], cliVersion);
+    assertPublishedPackageManifest(cliManifest, "@supacloud/cli", cliVersion);
     const bin = record(cliManifest["bin"]);
     const entry = bin["supacloud"];
     assert.ok(typeof entry === "string" && /^dist\/[A-Za-z0-9._/-]+$/.test(entry) && !entry.includes(".."));
@@ -217,9 +237,9 @@ async function main(args: string[]) {
     await run(starterInstallArgs("consumer"));
     await run(starterInstallArgs("locked-consumer"));
     for (const name of ["app", "compiler", "elysia", "commands", "contracts", "db", "js", "lite"]) {
-      const installed = record(JSON.parse(await readFile(join(project, `node_modules/@supacloud/${name}/package.json`), "utf8")));
-      assert.ok(typeof installed["version"] === "string");
-      report.versions[`@supacloud/${name}`] = installed["version"];
+      const installed: unknown = JSON.parse(await readFile(join(project, `node_modules/@supacloud/${name}/package.json`), "utf8"));
+      report.versions[`@supacloud/${name}`] = assertPublishedPackageManifest(
+        installed, `@supacloud/${name}`, name === "lite" ? liteVersion : undefined);
     }
     report.checks.push("registry-install", "frozen-offline-install");
     report.stage = "compile";
@@ -230,11 +250,9 @@ async function main(args: string[]) {
     report.checks.push("generated-contracts", "consumer-types");
     report.stage = "execution-context";
     const cliCompiler = Bun.resolveSync("@supacloud/compiler", join(tools, "node_modules/@supacloud/cli"));
-    assert.ok(cliCompiler.startsWith(join(tools, "node_modules") + "/"), "CLI compiler must be an installed package");
+    await assertInstalledPackagePath(cliCompiler, join(tools, "node_modules"), "CLI compiler");
     const cliCompilerManifest = record(JSON.parse(await readFile(join(dirname(cliCompiler), "../package.json"), "utf8")));
-    assert.equal(cliCompilerManifest["name"], "@supacloud/compiler");
-    assert.ok(typeof cliCompilerManifest["version"] === "string");
-    report.versions["cli:@supacloud/compiler"] = cliCompilerManifest["version"];
+    report.versions["cli:@supacloud/compiler"] = assertPublishedPackageManifest(cliCompilerManifest, "@supacloud/compiler");
     await verifyPublishedExecutionContext(project, join(tools, "node_modules/@supacloud/cli", entry),
       (args, success = true) => runStarterCommand(args, { cwd: project, env, signal: signal.signal, success }));
     report.checks.push("published-execution-observer", "published-app-context", "published-context-alias",
@@ -255,7 +273,7 @@ async function main(args: string[]) {
       verifyPersistentStarter(database: StarterLite, options: { signal: AbortSignal; verifyReceipts: boolean }): Promise<unknown>;
     } = await import(join(project, "tests/persistence.ts"));
     const publicLite = Bun.resolveSync("@supacloud/lite", project);
-    assert.ok(publicLite.startsWith(join(project, "node_modules") + "/"), "Runtime must be an installed package");
+    await assertInstalledPackagePath(publicLite, join(project, "node_modules"), "Runtime");
     backend = await startStarterLite(join(root, "database"), signal.signal, values["postgres-bin"], publicLite);
     report.databaseEvidence = await fixture.verifyPersistentStarter(backend, { signal: signal.signal, verifyReceipts: true });
     report.checks.push("durable-approval", "restart-and-replay", "permissions", "attachments-and-worker", "read-only-receipt-recovery");
