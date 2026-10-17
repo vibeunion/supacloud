@@ -982,14 +982,13 @@ export class AuthHandler {
       `${phone}\0${code}`
     )}`
     return this.db.transaction(async (query) => {
-      const claimed = await query<{ user_id: string }>(
-        `delete from auth.one_time_tokens
+      const candidate = await query<{ user_id: string }>(
+        `select user_id from auth.one_time_tokens
          where phone = $1 and token_type = 'sms' and token = $2
-           and expires_at > now() and attempts < $3
-         returning user_id`,
+           and expires_at > now() and attempts < $3`,
         [phone, tokenDigest, AuthHandler.MAX_OTP_ATTEMPTS]
       )
-      const userId = claimed.rows[0]?.user_id
+      const userId = candidate.rows[0]?.user_id
       if (!userId) {
         const attempt = await query<{ id: string; attempts: number }>(
           `update auth.one_time_tokens set attempts = attempts + 1
@@ -1005,6 +1004,27 @@ export class AuthHandler {
         return null
       }
 
+      const currentUser = await query<{ phone: string | null; auth_eligible: boolean }>(
+        `select phone,
+           deleted_at is null and (banned_until is null or banned_until <= now()) as auth_eligible
+         from auth.users where id = $1 for update`,
+        [userId],
+      )
+      const current = currentUser.rows[0]
+      if (!current || current.phone !== phone) return null
+      if (!current.auth_eligible) {
+        await query(`delete from auth.one_time_tokens where phone = $1`, [phone])
+        return null
+      }
+
+      const claimed = await query<{ user_id: string }>(
+        `delete from auth.one_time_tokens
+         where phone = $1 and token_type = 'sms' and token = $2
+           and expires_at > now() and attempts < $3 and user_id = $4
+         returning user_id`,
+        [phone, tokenDigest, AuthHandler.MAX_OTP_ATTEMPTS, userId]
+      )
+      if (claimed.rows.length === 0) return null
       await query(`delete from auth.one_time_tokens where phone = $1`, [phone])
       const users = await query<UserRow>(
         `update auth.users
