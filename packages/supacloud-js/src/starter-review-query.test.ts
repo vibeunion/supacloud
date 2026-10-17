@@ -84,14 +84,41 @@ test("empty and partial pages retain exact totals; cancellation reaches fetch", 
     headers: { "content-range": "0-0/2" },
   }));
   expect((await listReviews(partial, { pageSize: 1 })).hasNextPage).toBe(true);
+  expect(await listReviews(client(async () => Response.json([], {
+    headers: { "content-range": "*/2" },
+  })), { page: 3 })).toEqual({
+    data: [], total: 2, page: 3, pageSize: 25, hasNextPage: false,
+  });
+  expect((await listReviews(partial, { pageSize: 25 })).hasNextPage).toBe(true);
 });
 
-test("database errors and missing totals never become empty successful pages", async () => {
+test("database errors and malformed page envelopes never become successful pages", async () => {
   const db = client(async () => Response.json({
     code: "42501", message: "permission denied", details: null, hint: null,
   }, { status: 403 }));
   await expect(listReviews(db)).rejects.toMatchObject({ code: "42501", message: "permission denied" });
   await expect(listReviews(client(async () => Response.json([])))).rejects.toThrow("Incomplete");
+  await expect(listReviews(client(async () => Response.json(null, {
+    headers: { "content-range": "*/0" },
+  })))).rejects.toThrow("Incomplete");
+  for (const response of [
+    Response.json({}, { headers: { "content-range": "*/0" } }),
+    Response.json("not an array", { headers: { "content-range": "*/0" } }),
+    Response.json([], { headers: { "content-range": "*/not-a-count" } }),
+    Response.json([], { headers: { "content-range": "*/-1" } }),
+    Response.json([], { headers: { "content-range": "*/9007199254740992" } }),
+    Response.json([{ id: "a" }], { headers: { "content-range": "0-0/0" } }),
+    Response.json(Array.from({ length: 26 }, () => ({ id: "a" })), {
+      headers: { "content-range": "0-25/26" },
+    }),
+  ]) {
+    await expect(listReviews(client(async () => response))).rejects.toThrow("Invalid review page response");
+  }
+  await expect(listReviews(client(async () => Response.json([
+    { id: "a", state: "draft", version: 1 },
+    { id: "b", state: "draft", version: 1 },
+  ], { headers: { "content-range": "25-26/26" } })), { page: 2 }))
+    .rejects.toThrow("Invalid review page response");
 });
 
 test("generated response types follow the database source and flag stale business consumers", async () => {
