@@ -1441,6 +1441,9 @@ export class AuthHandler {
   private async verifyFactor(req: Request, factorId: string): Promise<Response> {
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.totpVerifyEnabled) {
+      return authError(422, 'mfa_totp_verify_disabled', 'TOTP verification is disabled')
+    }
     const body = (await req.json().catch(() => ({}))) as { challenge_id?: string; code?: string }
     const fr = await this.db.query(
       `select id, secret, status from auth.mfa_factors where id = $1 and user_id = $2`,
