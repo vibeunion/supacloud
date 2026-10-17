@@ -583,6 +583,13 @@ artifact for CLI, Web Console, and direct API deployments alike. For
 `--files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'`.
 Release automation that already has a final runtime artifact can use
 `edge_functions deploy --prebundled-path <file> --expected-sha256 <sha256>`.
+Use `--bytecode off|auto|required` on `deploy`, `deploy_bundle`, or `config` to
+control the host-generated Bun bytecode cache for the Function. The setting
+defaults to `off`, is applied during Edge Runtime preheat, and is returned in
+the Function configuration. `auto` falls back to JavaScript when the final
+artifact is not bytecode-compatible; `required` makes preheat fail instead.
+The CLI does not upload `.jsc` files and bytecode is never compiled per
+request.
 The lowercase SHA-256 binds the caller-approved bytes before any request. The
 CLI reads through a held regular-file descriptor and rejects file drift or
 non-round-trippable UTF-8; the server independently validates the digest and

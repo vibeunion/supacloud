@@ -208,12 +208,14 @@ edge_functions scaffold --slug api --framework sveltekit-function --path ./api
 ### Function Manifest v2
 
 Each Function may declare a runtime profile alongside `verify_jwt` and
-`framework`. The profile is persisted with the activation and is rechecked by
-the runtime before dispatch:
+`framework`. It may also opt into a host-generated Bun bytecode cache with
+`bytecode: "off" | "auto" | "required"`. The profile is persisted with the
+activation and is rechecked by the runtime before dispatch:
 
 ```json
 {
   "framework": "hono",
+  "bytecode": "auto",
   "capabilities": {
     "secrets": ["STRIPE_SECRET_KEY"],
     "outbound_hosts": ["api.stripe.com"],
@@ -233,6 +235,20 @@ the runtime before dispatch:
 legacy injection behavior is retained; when present, only named secrets are
 injected. `outbound_hosts` restricts HTTPS and HTTP `fetch()` destinations by
 hostname. `bindings` controls optional host bindings such as `pgredis`.
+`bytecode` is `off` by default. In `auto` mode, the Edge Runtime generates a
+paired `index.js`/`index.js.jsc` artifact during preheat and falls back to the
+published JavaScript when Bun bytecode generation is unsupported. In
+`required` mode, preheat fails unless the pair can be generated and dispatch
+never compiles on the request path. The original Function artifact remains the
+release authority; tenants cannot upload or select a `.jsc` sidecar.
+
+The derived cache is isolated by Function path, source digest, Bun version and
+revision, operating system, architecture, and build settings. A Bun/runtime
+upgrade or source change therefore generates a new pair. Modules that depend on
+path-sensitive `import.meta` values, top-level await, or external imports that
+are not already part of the server-side bundle may remain on ordinary
+JavaScript; use `required` only for Functions whose final artifact is known to
+be compatible with Bun bytecode.
 `background: false` rejects `EdgeRuntime.waitUntil()` for that Function;
 omitting it preserves legacy behavior. Limits are upper-bounded by the host
 policy, so a Function cannot raise the runtime-wide maximum. A timed-out

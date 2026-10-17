@@ -35,6 +35,7 @@ import {
 /** Per-function configuration (mirrors Supabase config.toml [functions.xxx]) */
 export interface EdgeFunctionConfig {
   verify_jwt: boolean;
+  bytecode?: "off" | "auto" | "required";
   /** Runtime adapter profile. `fetch` preserves legacy functions. */
   framework?: EdgeFunctionFramework;
   import_map?: string;
@@ -68,6 +69,12 @@ export const EDGE_FUNCTION_FRAMEWORKS = [
 ] as const;
 
 export type EdgeFunctionFramework = typeof EDGE_FUNCTION_FRAMEWORKS[number];
+
+function validatedFunctionBytecode(value: unknown): "off" | "auto" | "required" {
+  if (value === undefined) return "off";
+  if (value === "off" || value === "auto" || value === "required") return value;
+  throw new Error("Function config contains an unsupported bytecode mode");
+}
 
 export interface EdgeFunctionVersionRecord {
   version: string;
@@ -135,7 +142,7 @@ export interface EdgeFunctionActivationResult {
 
 export type EdgeFunctionDeploymentConfig = Pick<
   Partial<EdgeFunctionConfig>,
-  "verify_jwt" | "background_routes" | "framework" | "capabilities" | "limits"
+  "verify_jwt" | "bytecode" | "background_routes" | "framework" | "capabilities" | "limits"
 >;
 
 type EdgeFunctionReleaseBase = {
@@ -695,6 +702,7 @@ function validatedFunctionConfig(
     && !EDGE_FUNCTION_FRAMEWORKS.includes(functionConfig.framework)) {
     throw new Error("Function config contains an unsupported framework");
   }
+  validatedFunctionBytecode(functionConfig.bytecode);
   if (functionConfig.version !== undefined) {
     functionConfig.version = canonicalFunctionVersion(functionConfig.version);
   }
@@ -1012,6 +1020,7 @@ type PreparedFunctionVersion = {
 type FunctionVersionMetadata = {
   version: string;
   verify_jwt: boolean;
+  bytecode?: "off" | "auto" | "required";
   artifact_sha256: string | null;
   background_routes: string[];
   import_map: string | null;
@@ -1273,6 +1282,7 @@ function functionVersionMetadata(
   return {
     version,
     verify_jwt: functionConfig.verify_jwt,
+    bytecode: validatedFunctionBytecode(functionConfig.bytecode),
     artifact_sha256: artifactSha256,
     background_routes: backgroundRoutes,
     import_map: functionConfig.import_map ?? null,
@@ -1383,6 +1393,7 @@ async function readFunctionVersionMetadata(
   const metadata: FunctionVersionMetadata = {
     version,
     verify_jwt: metadataRecord["verify_jwt"],
+    bytecode: validatedFunctionBytecode(metadataRecord["bytecode"]),
     artifact_sha256: typeof metadataRecord["artifact_sha256"] === "string"
       ? metadataRecord["artifact_sha256"]
       : null,
@@ -2515,6 +2526,7 @@ function restoredFunctionConfig(
     background_routes: metadata.background_routes,
     version: metadata.version,
     framework: metadata.framework,
+    bytecode: validatedFunctionBytecode(metadata.bytecode),
   };
   if (metadata.capabilities) restored.capabilities = metadata.capabilities;
   if (metadata.limits) restored.limits = metadata.limits;

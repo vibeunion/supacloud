@@ -645,6 +645,9 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
     if (!response) return false;
     if (expected.verify_jwt !== undefined && response.verify_jwt !== expected.verify_jwt) return false;
     if (expected.framework !== undefined && response.framework !== expected.framework) return false;
+    if (response.bytecode !== undefined && response.bytecode !== "off"
+        && response.bytecode !== "auto" && response.bytecode !== "required") return false;
+    if (expected.bytecode !== undefined && response.bytecode !== expected.bytecode) return false;
     if (expected.background_routes !== undefined) {
         if (!Array.isArray(response.background_routes)) return false;
         if (JSON.stringify(response.background_routes) !== JSON.stringify(expected.background_routes)) return false;
@@ -744,6 +747,7 @@ interface ConfirmedFunctionMutation {
     activeVersion: string;
     activationId: string;
     verifyJwt: boolean;
+    bytecode?: EdgeFunctionConfigInput["bytecode"];
     framework?: EdgeFunctionConfigInput["framework"];
     capabilities?: EdgeFunctionConfigInput["capabilities"];
     limits?: EdgeFunctionConfigInput["limits"];
@@ -855,6 +859,7 @@ function confirmedFunctionMutation(
         activeVersion,
         activationId,
         verifyJwt: config.verify_jwt,
+        ...(config.bytecode === undefined ? {} : { bytecode: config.bytecode as EdgeFunctionConfigInput["bytecode"] }),
         ...(framework === undefined ? {} : { framework: framework as FunctionFramework }),
         ...(config.capabilities === undefined ? {} : { capabilities: config.capabilities as EdgeFunctionConfigInput["capabilities"] }),
         ...(config.limits === undefined ? {} : { limits: config.limits as EdgeFunctionConfigInput["limits"] }),
@@ -879,6 +884,7 @@ function functionMutationResponse(
         active_version: confirmed.activeVersion,
         version: confirmed.activeVersion,
         verify_jwt: confirmed.verifyJwt,
+        ...(confirmed.bytecode === undefined ? {} : { bytecode: confirmed.bytecode }),
         ...(confirmed.framework === undefined ? {} : { framework: confirmed.framework }),
         ...(confirmed.capabilities === undefined ? {} : { capabilities: confirmed.capabilities }),
         ...(confirmed.limits === undefined ? {} : { limits: confirmed.limits }),
@@ -989,6 +995,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
+            bytecode: optional(withDescription(stringEnum(["off", "auto", "required"]), "[deploy/deploy_bundle/config] Generate Bun bytecode during Edge Runtime preheat")),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
             framework: optional(withDescription(stringEnum(["fetch", "elysia", "hono", "sveltekit-function"]), "[deploy/deploy_bundle/config/scaffold] Fetch framework adapter profile")),
             capabilities: optional(functionCapabilitiesSchema, "[deploy/deploy_bundle/config] Host capabilities: secrets, outbound_hosts, bindings, background"),
@@ -1017,7 +1024,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             }
             const {
                 action, ref, slug, path: pathArg, output, entrypoint, minify,
-                verify_jwt, background_routes, framework, capabilities, limits,
+                verify_jwt, bytecode, background_routes, framework, capabilities, limits,
                 max_request_body_bytes, max_body_size_mb,
             } = args;
             rejectActionSpecificFlags(action, args);
@@ -1046,6 +1053,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
 
             const functionConfig = (): EdgeFunctionConfigInput => ({
                 ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
+                ...(bytecode === undefined ? {} : { bytecode }),
                 ...(Array.isArray(background_routes) ? { background_routes } : {}),
                 ...(framework === undefined ? {} : { framework }),
                 ...(capabilities === undefined ? {} : { capabilities }),

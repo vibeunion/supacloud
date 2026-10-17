@@ -39,6 +39,8 @@ import {
   activeFunctionPathCandidates,
   attestedFunctionArtifactPath,
 } from "./function-source";
+import { functionBytecodeMode } from "./function-bytecode-contract";
+import { functionBytecodeCache } from "./function-bytecode";
 import { readFunctionFile, type TrustedFunctionFile } from "./trusted-function-files";
 import {
   assertCanonicalConfiguredFunctionVersion,
@@ -384,6 +386,7 @@ type FunctionActivationSnapshot = {
   activeVersion: string | null;
   responseVersion: string | null;
   verifyJwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   capabilities: FunctionCapabilities;
   limits: FunctionLimits;
@@ -456,7 +459,8 @@ async function resolvedFunctionPath(
       || currentAuthority.target_state !== resolvedConfig.targetState
       || currentAuthority.artifact_sha256 !== resolvedConfig.artifactSha256
       || currentManifest.config.version !== resolvedConfig.version
-      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt) {
+      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt
+      || currentManifest.config.bytecode !== resolvedConfig.bytecode) {
       configCache.delete(`${request.projectRef}/${request.functionName}`);
       throw new Error("Runtime environment changed before artifact resolution");
     }
@@ -504,6 +508,7 @@ async function resolvedFunctionPath(
       activeVersion,
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
+      bytecode: resolvedConfig.bytecode,
       framework: resolvedConfig.framework,
       capabilities: resolvedConfig.capabilities,
       limits: resolvedConfig.limits,
@@ -636,6 +641,7 @@ async function dispatchFunction(
       projectRoot,
       projectRef,
       framework: activation.framework,
+      bytecode: activation.bytecode,
       capabilities: activation.capabilities,
       limits: activation.limits,
       functionVersion: responseVersion,
@@ -733,6 +739,7 @@ const CONFIG_CACHE_TTL = 10_000;
 
 type FunctionConfig = {
   verify_jwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
   activationId: string | null;
@@ -802,6 +809,7 @@ async function getFunctionConfig(
   if (cached && cached.expiresAt > Date.now()) {
     return {
       verify_jwt: cached.verify_jwt,
+      bytecode: cached.bytecode,
       framework: cached.framework,
       capabilities: cached.capabilities,
       limits: cached.limits,
@@ -821,6 +829,7 @@ async function getFunctionConfig(
   const config = manifest === null
     ? {
         verify_jwt: true,
+        bytecode: "off" as const,
         framework: "fetch" as const,
         version: null,
         activationId: null,
@@ -832,6 +841,7 @@ async function getFunctionConfig(
       }
     : {
         verify_jwt: manifest.config.verify_jwt,
+        bytecode: manifest.config.bytecode,
         framework: manifest.config.framework === "elysia"
           || manifest.config.framework === "hono"
           || manifest.config.framework === "sveltekit-function"
@@ -874,6 +884,7 @@ async function immutableVersionConfig(
   }
   return {
     verify_jwt: record.verify_jwt,
+    bytecode: functionBytecodeMode(record.bytecode),
     framework: record.framework === "elysia"
       || record.framework === "hono"
       || record.framework === "sveltekit-function"
@@ -906,6 +917,7 @@ async function assertDispatchAuthorityCurrent(
     || current.activationId !== activation.activationId
     || current.version !== activation.activeVersion
     || current.verify_jwt !== activation.verifyJwt
+    || current.bytecode !== activation.bytecode
     || current.framework !== activation.framework
     || JSON.stringify(current.capabilities) !== JSON.stringify(activation.capabilities)
     || JSON.stringify(current.limits) !== JSON.stringify(activation.limits)
@@ -927,6 +939,7 @@ async function activeFunctionConfig(
   const manifest = await activeActivationManifest(projectRoot, functionName);
   return {
     verify_jwt: manifest.config.verify_jwt,
+    bytecode: manifest.config.bytecode,
     framework: manifest.config.framework,
     version: manifest.config.version,
     activationId: activationAuthorityId(manifest),
@@ -1485,6 +1498,7 @@ const app = new Elysia()
             functionPath: activation.functionPath, projectRoot: activation.projectRoot,
             projectRef: ref, moduleVersion: activation.moduleVersion, env: tenantEnvLoad.env,
             envProof: proof, attestation,
+            bytecode: activation.bytecode,
             ...(profile === "background" ? { maxWorkers: resolveBackgroundPreheatWorkers() } : {}),
           };
         };
@@ -1514,7 +1528,9 @@ const app = new Elysia()
 
     const foreground = pool.snapshotMetrics("supacloud_edge");
     const background = backgroundPool.snapshotMetrics("supacloud_edge_background");
-    return Object.entries({ ...foreground, ...background })
+    const bytecode = Object.fromEntries(Object.entries(functionBytecodeCache.metrics)
+      .map(([name, value]) => [`supacloud_edge_bytecode_${name}`, value]));
+    return Object.entries({ ...foreground, ...background, ...bytecode })
       .map(([key, value]) => `${key} ${value}`)
       .join("\n");
   })
@@ -1751,6 +1767,7 @@ const app = new Elysia()
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
             }),
             backgroundPool.preheatVersionedIdleWorkers({
               functionId,
@@ -1761,6 +1778,7 @@ const app = new Elysia()
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ])
@@ -1770,12 +1788,14 @@ const app = new Elysia()
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
             }),
             backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
+              bytecode: activation.bytecode,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ]);
@@ -2012,6 +2032,7 @@ const gracefulShutdown = async (signal: string, exitCode = 0) => {
       ),
     ]);
 
+    await functionBytecodeCache.dispose();
     clearTimeout(drainTimeout);
   } catch {
     console.error("[EdgeRuntime] Drain timed out, forcing exit");

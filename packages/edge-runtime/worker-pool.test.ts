@@ -759,6 +759,81 @@ describe("WorkerPool subprocess guard", () => {
     }
   });
 
+  linuxDescriptorTest("preheats bytecode and dispatches the prepared pair", async () => {
+    const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-bytecode-"));
+    const functionPath = join(projectRoot, "bytecode.ts");
+    await Bun.write(functionPath, `export default () => new Response("bytecode-ready");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const attestation = preheatIdentity({
+      projectRef: "proj_preheat_bytecode",
+      functionSlug: "bytecode",
+      version: "1",
+      artifactSha256,
+    });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatIdleWorkers(
+        "proj_preheat_bytecode_bytecode_v1",
+        functionPath,
+        projectRoot,
+        {},
+        {
+          projectRef: "proj_preheat_bytecode",
+          moduleVersion: "v1",
+          attestation,
+          bytecode: "required",
+        },
+      );
+      expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+
+      const response = await pool.dispatch({
+        functionId: "proj_preheat_bytecode_bytecode_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_preheat_bytecode",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        bytecode: "required",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/bytecode"),
+      });
+      expect(await response.text()).toBe("bytecode-ready");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("required bytecode rejects dispatch before a prepared artifact exists", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-dispatch-bytecode-required-"));
+    const functionPath = join(projectRoot, "bytecode.ts");
+    await Bun.write(functionPath, `export default () => new Response("should-not-run");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_dispatch_bytecode_required_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_dispatch_bytecode_required",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        bytecode: "required",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/bytecode-required"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe("Internal Error");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   linuxDescriptorTest("preheats a legacy version-zero artifact with a matching attestation", async () => {
     const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-legacy-zero-"));
     const functionPath = join(projectRoot, "legacy-zero.ts");
