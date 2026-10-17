@@ -582,17 +582,6 @@ jobs:
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
-      - name: Publish SupaCloud Lite to NPM
-        if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
-        working-directory: packages/supacloud-lite
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: |
-          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
-          bun install --frozen-lockfile
-          bun run check
-          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
-
       - name: Publish function adapter to NPM
         if: ${{ always() && (needs.release-please.outputs.function_adapter_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/function-adapter
@@ -634,6 +623,24 @@ jobs:
           bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish SupaCloud Lite to NPM
+        if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/supacloud-lite
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          # Build-only workspace references must not observe sibling manifests
+          # already rewritten by earlier publication steps.
+          build_root="$(mktemp -d)"
+          trap 'rm -rf "$build_root"' EXIT
+          git -C "$GITHUB_WORKSPACE" archive HEAD | tar -x -C "$build_root"
+          cd "$build_root/packages/supacloud-lite"
+          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+          bun install --frozen-lockfile
+          bun run check
+          node ../../.github/scripts/prepare-command-package.mjs
+          node ../../.github/scripts/publish-npm-package.mjs
 
       - name: Publish app framework metadata to NPM
         if: ${{ always() && (needs.release-please.outputs.app_released == 'true' || inputs.recover_npm == true) }}

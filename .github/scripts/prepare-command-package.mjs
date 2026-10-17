@@ -10,9 +10,9 @@ export { isNpmNotFoundError } from './npm-registry-visibility.mjs';
 
 const root = fileURLToPath(new URL('../../packages/', import.meta.url));
 const run = promisify(execFile);
-const directories = ['cli', 'admin', 'contracts', 'commands', 'db', 'app', 'app-svelte', 'delivery', 'compiler', 'elysia', 'query', 'supacloud-js'];
+const directories = ['cli', 'admin', 'contracts', 'commands', 'db', 'app', 'app-svelte', 'delivery', 'compiler', 'elysia', 'query', 'supacloud-js', 'supacloud-lite'];
 /** @param {string} directory */
-const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js' : `@supacloud/${directory}`;
+const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js' : directory === 'supacloud-lite' ? '@supacloud/lite' : `@supacloud/${directory}`;
 
 /**
  * Resolve development-only sibling references before packing. Exact versions
@@ -20,6 +20,7 @@ const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js
  * not become runtime dependencies or block on registry availability.
  * @param {unknown} candidate
  * @param {ReadonlyMap<string, unknown>} siblings
+ * @returns {{ package: Record<string, unknown>; required: string[] }}
  */
 export function prepareCommandPackage(candidate, siblings) {
   if (!isRecord(candidate) || typeof candidate['name'] !== 'string') throw new Error('Invalid package manifest');

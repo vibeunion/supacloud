@@ -335,6 +335,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
       dbSchemas: config.api.schemas,
       maxRows: config.api.maxRows,
       storageFileSizeLimit: config.storage.fileSizeLimit,
+      storageImageTransformLimits: config.storage.imageTransformLimits,
       buckets: config.storage.buckets,
       migrations: options.applyMigrations === false ? [] : project.migrations,
       seedSql: options.applyMigrations === false || options.includeSeed === false ? undefined : project.seedSql,
