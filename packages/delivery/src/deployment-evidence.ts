@@ -168,7 +168,7 @@ export function formatDeploymentEvidence(evidence: DeploymentEvidence): string {
   return [
     `DEPLOYMENT ${evidence.scope.project_ref}/${evidence.scope.application_id}/${evidence.scope.environment_id}`,
     `  status:     ${report.status}`,
-    ...(report.status !== evidence.status ? [`  recorded status: ${evidence.status} (additional proof missing)`] : []),
+    ...(report.status !== evidence.status ? [`  recorded status: ${evidence.status} (customer assessment differs)`] : []),
     `  manifest:   ${evidence.source.manifest_sha256.slice(0, 12)}`,
     `  database:   ${evidence.database.provider} ${evidence.database.version} (${evidence.database.topology})`,
     `  activation: ${evidence.activation.activation_id}`,
@@ -202,7 +202,7 @@ export function summarizeDeploymentEvidence(value: unknown) {
     observe(component.name, component.status, component.checked_at !== null && component.health_check !== null,
       "Inspect this component's health and logs for the recorded activation before changing or restarting it.");
   }
-  observe("database.migration", evidence.database.migration.status,
+  observe("database.migration", evidence.database.migration.compatibility === "failed" ? "failed" : evidence.database.migration.status,
     evidence.database.migration.compatibility === "verified" && evidence.database.migration.inventory_sha256 !== null,
     "Read the migration inventory and compare its digest; do not reapply an unconfirmed migration.");
   observe("database.backup", evidence.database.backup.status,
@@ -223,9 +223,14 @@ export function summarizeDeploymentEvidence(value: unknown) {
     observe("code-rollback.result", evidence.rollback.result, true,
       "Read back the rollback activation and authenticated smoke before another mutation.");
   }
+  const assessment: DeploymentEvidenceStatus = issues.some(issue => issue.status === "failed") || evidence.status === "failed"
+    ? "failed"
+    : issues.some(issue => issue.status === "unknown") || evidence.status === "unknown"
+      ? "unknown"
+      : issues.length > 0 || evidence.status === "incomplete" ? "incomplete" : "confirmed";
   return {
     version: 1,
-    status: evidence.status === "confirmed" && issues.length > 0 ? "incomplete" as const : evidence.status,
+    status: assessment,
     recordedStatus: evidence.status,
     scope: evidence.scope,
     recordedAt: evidence.recorded_at,
