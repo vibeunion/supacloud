@@ -30,6 +30,15 @@ bun run build:standalone:host
 bun run test:standalone
 ```
 
+针对本地 Auth 的聚焦回归，只构建 host 产物并运行单个脚本的 Auth 入口：
+
+```bash
+bun run build:standalone:host
+bun run scripts/standalone-smoke.ts --auth-only
+```
+
+该入口在不含 Bun/Node/npm 的子进程 `PATH` 下启动二进制，通过真实 HTTP 和 `supabase-js` 验证注册、密码登录、刷新轮换、退出撤销，以及进程重启后的会话恢复、刷新与撤销保留。成功标记为 `standalone-auth-smoke-ok`。可用 `SUPACLOUD_LITE_STANDALONE_BINARY` 指定待验收产物。它不执行 Functions、扩展、升级、快照或恢复，不能替代完整发布验收；默认完整 smoke 也会在升级和快照恢复阶段验证同一 Auth 状态。
+
 Release workflow 为 Linux x64 baseline/arm64、macOS x64/arm64 和 Windows x64 baseline 构建独立产物。Linux x64 产物必须在发布 runner 上完成真实黑盒测试；其他交叉编译产物在具备对应原生 runner 前只视为已构建，不能替代平台验收。
 
 Lite release 会同时上传 `SHA256SUMS`、项目自身的 `SUPACLOUD-LITE-APACHE-2.0.txt`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `LICENSES/*.txt`，并为发布资产生成 provenance。正式对外分发 macOS 或 Windows 产物前，还应按项目发布策略完成代码签名；构建成功不代表已经签名或公证。

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { CommandError } from "@supacloud/contracts";
+import { CommandError, commandFailureMetadata } from "@supacloud/contracts";
 import { createPersistentCommandAdapter } from "./persistent-command";
-import { executeCompiledCommand, type CompiledModule } from "./index";
+import { defaultErrorResponse, executeCompiledCommand, type CompiledModule } from "./index";
 
 const identity = { tenantId: "tenant", actorId: "actor" };
 const module: Pick<CompiledModule, "name" | "commands"> = {
@@ -46,6 +46,18 @@ test("persistence failures have stable sanitized HTTP semantics", async () => {
       request: new Request("https://example.test", { headers: { "idempotency-key": "operation" } }),
       governance: { authorize: () => {}, rpc: { update: adapter } },
       handler: (): unknown => { throw new Error("Duplicate handler"); }, decode: (value) => value,
-    })).rejects.toMatchObject({ code, status, message: code });
+    })).rejects.toMatchObject({ code, status, message: code, metadata: commandFailureMetadata(code) });
   }
+});
+
+test("HTTP protocol failures carry conservative metadata without private causes", async () => {
+  const error = Object.assign(new Error("private data"), { name: "CommandError", code: "COMMAND_UNAVAILABLE" });
+  const response = defaultErrorResponse(error);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({
+    ok: false, code: "COMMAND_UNAVAILABLE", message: "COMMAND_UNAVAILABLE",
+    metadata: {
+      retryability: "read-only", idempotency: "required", deadlineAt: null, outcome: "unknown",
+    },
+  });
 });

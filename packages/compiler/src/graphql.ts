@@ -12,6 +12,8 @@ import {
   printSchema,
   separateOperations,
   Source,
+  specifiedRules,
+  NoUnusedFragmentsRule,
   validate,
   validateSchema,
   type DocumentNode,
@@ -35,6 +37,10 @@ export interface GraphqlArtifacts {
 
 function persistedOperationHash(document: DocumentNode): string {
   return createHash("sha256").update(print(document)).digest("hex");
+}
+
+function sdkMethodName(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
 }
 
 /** Offline only: schema authority and role selection belong to the explicit snapshot workflow. */
@@ -70,8 +76,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
       severity: "error",
       code,
       message: error instanceof Error ? error.message : String(error),
-      file: source ? localPath(source) : undefined,
-      line: gql?.locations?.[0]?.line,
+      ...(source === undefined ? {} : { file: localPath(source) }),
+      ...(gql?.locations?.[0]?.line === undefined ? {} : { line: gql.locations[0].line }),
       suggestion: "Update the role-scoped local schema snapshot or correct the query, then recompile.",
     });
   };
@@ -117,8 +123,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
         severity: "error",
         code: "graphql-query-only",
         message: "GraphQL subscriptions are not supported by the HTTP contract compiler. Use the governed Realtime transport for subscriptions.",
-        file: definition.loc ? localPath(definition.loc.source.name) : undefined,
-        line: definition.loc?.startToken.line,
+        ...(definition.loc ? { file: localPath(definition.loc.source.name) } : {}),
+        ...(definition.loc?.startToken.line === undefined ? {} : { line: definition.loc.startToken.line }),
         suggestion: "Remove this subscription from the GraphQL documents and use the supported Realtime contract.",
       });
     } else if (definition.operation === "mutation" && !options.graphql.mutations) {
@@ -126,8 +132,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
         severity: "error",
         code: "graphql-query-only",
         message: "GraphQL mutations are disabled by default. Set graphql.mutations to true only after reviewing database grants, RLS, audit and idempotency behavior.",
-        file: definition.loc ? localPath(definition.loc.source.name) : undefined,
-        line: definition.loc?.startToken.line,
+        ...(definition.loc ? { file: localPath(definition.loc.source.name) } : {}),
+        ...(definition.loc?.startToken.line === undefined ? {} : { line: definition.loc.startToken.line }),
         suggestion: "Keep business writes in the governed Command API, or explicitly opt in with graphql.mutations: true.",
       });
     }
@@ -144,7 +150,14 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
       });
     }
   }
-  for (const error of validate(schema, combined)) diagnostic("graphql-validation", error);
+  // Fragment-only files are valid inputs for incremental authoring. A fragment
+  // can be temporarily unused while an operation is being edited; schema and
+  // operation validation must still remain strict.
+  for (const error of validate(
+    schema,
+    combined,
+    specifiedRules.filter(rule => rule !== NoUnusedFragmentsRule),
+  )) diagnostic("graphql-validation", error);
   if (result.diagnostics.length) return result;
   try {
     const config = {
@@ -174,12 +187,16 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
       const suffix = operation.operation === "mutation" ? "Mutation" : "Query";
       const required = operation.variableDefinitions?.some((variable) =>
         variable.type.kind === Kind.NON_NULL_TYPE && !variable.defaultValue);
-      return `    async ${JSON.stringify(name)}(variables${required ? "" : "?"}: ${name}${suffix}Variables, options?: C): Promise<${name}${suffix}> {
-      return parse${name}${suffix}(await requester(${JSON.stringify(print(document))}, variables, options));
+    return `    async ${sdkMethodName(name)}(variables${required ? "" : "?"}: ${name}${suffix}Variables, options?: C): Promise<${name}${suffix}> {
+      return parse${name}${suffix}(await requester(${JSON.stringify(print(document))}, variables, options, {
+        name: ${JSON.stringify(name)}, sha256: ${JSON.stringify(persistedOperationHash(document))},
+      }));
     }`;
     });
     const facade = `
-export type Requester<C> = (query: string, variables?: unknown, options?: C) => Promise<unknown>;
+export type Requester<C> = (
+  query: string, variables?: unknown, options?: C, operation?: GraphqlOperationMetadata,
+) => Promise<unknown>;
 export function getSdk<C>(requester: Requester<C>) {
   return {
 ${methods.join(",\n")}

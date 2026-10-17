@@ -70,14 +70,14 @@ export function createQueueHandler<T>(
     if (
       !object(payload) ||
       (definitionVersion !== undefined && Buffer.byteLength(JSON.stringify(payload)) > 65536) ||
-      payload.schemaVersion !== (definitionVersion === undefined ? 1 : 2) ||
-      (definitionVersion !== undefined && payload.definitionVersion !== definitionVersion) ||
-      payload.projectRef !== projectRef ||
-      payload.taskKey !== taskKey ||
-      typeof payload.idempotencyKey !== "string" ||
-      !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload.idempotencyKey) ||
+      payload["schemaVersion"] !== (definitionVersion === undefined ? 1 : 2) ||
+      (definitionVersion !== undefined && payload["definitionVersion"] !== definitionVersion) ||
+      payload["projectRef"] !== projectRef ||
+      payload["taskKey"] !== taskKey ||
+      typeof payload["idempotencyKey"] !== "string" ||
+      !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload["idempotencyKey"]) ||
       (Object.hasOwn(payload, "jobKey") && (() => {
-        try { validateJobKey(payload.jobKey); return false; } catch { return true; }
+        try { validateJobKey(payload["jobKey"]); return false; } catch { return true; }
       })()) ||
       !Object.hasOwn(payload, "input") ||
       Object.keys(payload).some(
@@ -102,8 +102,8 @@ export function createQueueHandler<T>(
       projectRef,
       queueName,
       taskKey,
-      idempotencyKey: payload.idempotencyKey,
-      ...(Object.hasOwn(payload, "jobKey") ? { jobKey: validateJobKey(payload.jobKey) } : {}),
+      idempotencyKey: payload["idempotencyKey"],
+      ...(Object.hasOwn(payload, "jobKey") ? { jobKey: validateJobKey(payload["jobKey"]) } : {}),
       priority: policy.priority,
       messageId,
       attempt,
@@ -112,7 +112,7 @@ export function createQueueHandler<T>(
     });
     let input: T;
     try {
-      input = decode(payload.input);
+      input = decode(payload["input"]);
     } catch {
       throw new WorkerTaskError("WORKER_TASK_INVALID");
     }

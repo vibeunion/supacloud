@@ -15,17 +15,9 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { optional, stringEnum } from "../schema";
 import type { ToolSchema } from "../schema";
+import { registerTool, type ToolServer } from "../tool-server";
 
-const SKILL_NAME = "supacloud-cli";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: AiToolArguments) => Promise<unknown>,
-    ) => void;
-};
+const SKILL_NAME = "supacloud";
 
 type InstallMode = "dry-run" | "write";
 type ConflictPolicy = "reject" | "replace";
@@ -95,7 +87,7 @@ function availableBackupDirectory(destinationDirectory: string, now: Date): stri
 
 function stagedSkill(sourceDirectory: string, targetRoot: string): { root: string; skill: string } {
     mkdirSync(targetRoot, { recursive: true });
-    const stagingRoot = mkdtempSync(join(targetRoot, ".supacloud-cli-install-"));
+    const stagingRoot = mkdtempSync(join(targetRoot, ".supacloud-install-"));
     const stagingSkill = join(stagingRoot, SKILL_NAME);
     try {
         cpSync(sourceDirectory, stagingSkill, { recursive: true, errorOnExist: true });
@@ -218,7 +210,7 @@ function textResponse(payload: unknown) {
 }
 
 export function registerAiTools(server: ToolServer): void {
-    server.tool(
+    registerTool(server,
         "ai",
         "Install or inspect the bundled SupaCloud CLI AI skill. Actions: show_skill, install_skill",
         {

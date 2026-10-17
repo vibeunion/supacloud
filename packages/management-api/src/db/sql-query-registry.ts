@@ -6,7 +6,7 @@ interface ActiveSqlQuery {
   query: ExecutableSqlQuery<unknown>;
   cancel: () => Promise<boolean>;
   startedAt: number;
-  cancellationRequest?: Promise<boolean>;
+  cancellationRequest: Promise<boolean> | undefined;
 }
 
 export interface RegisteredSqlQuery<T> {
@@ -54,7 +54,7 @@ function registerActiveSqlQuery(registration: RegisteredSqlQuery<unknown>): void
   const { projectRef, queryId, query, cancel, startedAt } = registration;
   const key = activeQueryKey(projectRef, queryId);
   if (activeSqlQueries.has(key)) throw new SqlQueryAlreadyRunningError();
-  activeSqlQueries.set(key, { query, cancel, startedAt });
+  activeSqlQueries.set(key, { query, cancel, startedAt, cancellationRequest: undefined });
 }
 
 function unregisterActiveSqlQuery(projectRef: string, queryId: string, query: ExecutableSqlQuery<unknown>): void {

@@ -20,8 +20,7 @@ describe("SvelteKit Function adapter", () => {
     const adapterUrl = pathToFileURL(join(import.meta.dir, "sveltekit-adapter.ts")).href;
     await Promise.all([
       writeFile(join(project, "package.json"), JSON.stringify({ private: true, type: "module" })),
-      writeFile(join(project, "svelte.config.js"), `import adapter from ${JSON.stringify(adapterUrl)};\nexport default { kit: { adapter: adapter() } };\n`),
-      writeFile(join(project, "vite.config.js"), 'import { sveltekit } from "@sveltejs/kit/vite";\nexport default { plugins: [sveltekit()] };\n'),
+      writeFile(join(project, "vite.config.js"), `import { sveltekit } from "@sveltejs/kit/vite";\nimport adapter from ${JSON.stringify(adapterUrl)};\nexport default { plugins: [sveltekit({ adapter: adapter() })] };\n`),
       writeFile(join(project, "src/app.html"), '<!doctype html><html><head>%sveltekit.head%</head><body>%sveltekit.body%</body></html>\n'),
       writeFile(join(project, "src/routes/+server.js"), 'export function GET() { return Response.json({ ok: true }); }\n'),
       writeFile(join(project, "src/hooks.server.js"), 'export async function handle({ event, resolve }) { const response = await resolve(event); response.headers.set("x-hook", "active"); return response; }\n'),
@@ -78,7 +77,7 @@ describe("SvelteKit Function adapter", () => {
     expect(() => adapter().adapt({
       routes: [],
       prerendered: { paths: [] },
-      config: { kit: { files: { assets } } },
+      config: { files: { assets } },
     } as never)).toThrow("does not serve static assets");
   });
 
@@ -86,7 +85,7 @@ describe("SvelteKit Function adapter", () => {
     expect(() => adapter().adapt({
       routes: [],
       prerendered: { paths: [] },
-      config: { kit: { files: { assets: join(tmpdir(), "supacloud-missing-assets") } } },
+      config: { files: { assets: join(tmpdir(), "supacloud-missing-assets") } },
       findServerAssets: () => ["private/model.bin"],
     } as never)).toThrow("does not support server asset reads");
   });

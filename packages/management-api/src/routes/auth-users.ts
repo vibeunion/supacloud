@@ -422,7 +422,7 @@ async function searchGoTrueUsers(ref: string, search: string, page: number, limi
  * User Management routes — Admin API proxy to GoTrue
  */
 export const userManagementRoutes = new Elysia({ prefix: authUserRoutePrefix })
-  .beforeHandle(requireAuthRuntimeManagement("users"))
+  .onBeforeHandle(requireAuthRuntimeManagement("users"))
   .get(
     "/users",
     {

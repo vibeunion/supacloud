@@ -278,7 +278,7 @@ async function runtimePreheatSuccess(
     resolvedVersion,
     artifactSha256,
     verifyJwt: targetConfig.verifyJwt,
-    activationId: requestedActivationId,
+    activationId: targetConfig.activationId,
   };
   const foregroundAttestation = testPreheatAttestation(identity, "foreground");
   const backgroundAttestation = testPreheatAttestation(identity, "background");
@@ -439,6 +439,68 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
+  test.each(["active", "missing", "stale"] as const)(
+    "active readiness omits candidate headers and validates %s activation identity",
+    async (identityCase) => {
+      const ref = `proj_active_readiness_${identityCase}`;
+      const slug = "hello";
+      const candidateHeaders: Headers[] = [];
+      globalThis.fetch = runtimeSuccessFetch(async (url, init) => {
+        candidateHeaders.push(new Headers(init?.headers));
+        return runtimePreheatSuccess(url, init);
+      });
+      const deployed = await deployConditionalRelease({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('hello') };",
+      });
+      expect(deployed.success).toBe(true);
+      const active = await edgeFunctionService.getConfig(ref, slug);
+      expect(candidateHeaders.length).toBeGreaterThan(0);
+      for (const headers of candidateHeaders) {
+        expect(headers.get("x-supacloud-function-version")).toBe(deployed.version!);
+        expect(headers.get("x-supacloud-activation-id")).toBe(active.activation_id);
+      }
+
+      let readinessRequests = 0;
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (new URL(url).pathname === "/health") return new Response("ok");
+        readinessRequests++;
+        const headers = new Headers(init?.headers);
+        expect(headers.has("x-supacloud-function-version")).toBe(false);
+        expect(headers.has("x-supacloud-activation-id")).toBe(false);
+        const response = await runtimePreheatSuccess(url, init);
+        const body = await response.json() as {
+          attestation: { activation_id: string | null };
+          foreground: { attestation: { activation_id: string | null } };
+          background: { attestation: { activation_id: string | null } };
+        };
+        expect(body.attestation.activation_id).toBe(active.activation_id);
+        if (identityCase !== "active") {
+          const activationId = identityCase === "missing" ? null : crypto.randomUUID();
+          body.attestation.activation_id = activationId;
+          body.foreground.attestation.activation_id = activationId;
+          body.background.attestation.activation_id = activationId;
+        }
+        return Response.json(body);
+      }) as typeof fetch;
+
+      const readiness = await edgeFunctionService.runtimeCheck(ref, slug);
+      expect(readinessRequests).toBe(1);
+      expect(readiness.runtime_healthy).toBe(true);
+      expect(readiness.artifact_exists).toBe(true);
+      expect(readiness.active_version).toBe(deployed.version!);
+      expect(readiness.preheat_status).toBe(200);
+      expect(readiness.preheat_ok).toBe(identityCase === "active");
+      if (identityCase === "active") {
+        expect(readiness.error).toBeUndefined();
+      } else {
+        expect(readiness.error).toContain("invalid preheat attestation");
+      }
+    },
+  );
+
   test("rejects an unattested Edge Runtime preheat failure", async () => {
     const ref = "proj_preheat_diagnostic";
     const slug = "computed-import";
@@ -1342,6 +1404,46 @@ describe("edgeFunctionService bundle metadata", () => {
       .toEqual(["1"]);
   });
 
+  for (const mode of ["single-file", "multi-file"] as const) {
+    test(`rejects ${mode} build-time macros before host execution or deployment`, async () => {
+      const ref = `proj_macro_${mode}`;
+      const slug = "macro-rejected";
+      const marker = join(functionsRoot, `macro-host-write-${mode}`);
+      let runtimeCalls = 0;
+      globalThis.fetch = (async () => {
+        runtimeCalls += 1;
+        return Response.json({ success: true, version: "1" });
+      }) as typeof fetch;
+      // A built-in macro avoids package resolution and would write in the privileged
+      // build process, before the final bundle's tenant capability checks.
+      const macroCode = `
+        import { writeFileSync } from "node:fs" with { type: "macro" };
+        writeFileSync(${JSON.stringify(marker)}, "unexpected build-time execution");
+      `;
+      const handler = 'export default { fetch: () => new Response("unreachable") };';
+      try {
+        const rejected = mode === "single-file"
+          ? await edgeFunctionService.deployDetailed(ref, slug, macroCode + handler)
+          : await edgeFunctionService.deployBundleDetailed(ref, slug, {
+              "index.ts": 'import "./nested/helper.ts"; ' + handler,
+              "nested/helper.ts": macroCode,
+            });
+
+        expect(existsSync(marker)).toBe(false);
+        expect(rejected).toMatchObject({ success: false });
+        expect(runtimeCalls).toBe(0);
+        expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+        expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({
+          verify_jwt: true,
+          activation_id: "legacy",
+        });
+        expect(existsSync(join(functionsRoot, ref, ".versions", slug, "1"))).toBe(false);
+      } finally {
+        await rm(marker, { force: true });
+      }
+    });
+  }
+
   test("does not write or preheat a single-file version when Bun.build fails", async () => {
     const ref = "proj_single_build_failure";
     const slug = "single-build-failure";
@@ -2051,6 +2153,25 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await runtimeResponse.text()).toBe("asset-from-source-dir");
     expect(await edgeFunctionService.readSource("proj_assets", "asset-reader")).toContain("/public/message.txt");
   });
+
+  test.each([
+    "index.js.jsc", "nested/index.js.jsc", "nested\\index.js.JSC",
+    "index.js.jsc/", "nested/index.js.jsc/.", "nested\\index.js.JSC\\.",
+  ])(
+    "rejects tenant-uploaded bytecode sidecar %s before publishing a version",
+    async (sidecar) => {
+      const result = await edgeFunctionService.deployBundleDetailed(
+        "proj_bytecode_upload",
+        "bytecode-upload",
+        { "index.ts": "export default () => new Response('ok');", [sidecar]: "untrusted bytecode" },
+      );
+      expect(result).toEqual({
+        success: false,
+        error: "Tenant-uploaded Function bytecode sidecars are not supported",
+      });
+      expect(await edgeFunctionService.readSource("proj_bytecode_upload", "bytecode-upload")).toBeNull();
+    },
+  );
 
   test("rejects a bundle upload that collides with the runtime entry", async () => {
     const deployResult = await edgeFunctionService.deployBundleDetailed(

@@ -71,11 +71,11 @@ export function parseFrontendBuildConfiguration(value: unknown) {
     return result;
   };
   return {
-    build_command: field(data.build_command, true),
-    output_dir: field(data.output_dir),
-    install_command: field(data.install_command, true),
-    node_version: field(data.node_version),
-    health_check_path: field(data.health_check_path),
+    build_command: field(data["build_command"], true),
+    output_dir: field(data["output_dir"]),
+    install_command: field(data["install_command"], true),
+    node_version: field(data["node_version"]),
+    health_check_path: field(data["health_check_path"]),
   };
 }
 
@@ -100,10 +100,10 @@ function token(value: unknown): DeployToken {
   const data = record(value);
   if (Object.keys(data).some(key => !["id", "name", "created_at", "last_used_at", "token", "token_encrypted"].includes(key))) return invalid();
   return {
-    id: text(data.id), name: text(data.name), created_at: timestamp(data.created_at),
-    ...(data.last_used_at === undefined ? {} : { last_used_at: timestamp(data.last_used_at) }),
-    ...(data.token === undefined ? {} : { token: text(data.token) }),
-    ...(data.token_encrypted === undefined ? {} : { token_encrypted: text(data.token_encrypted) }),
+    id: text(data["id"]), name: text(data["name"]), created_at: timestamp(data["created_at"]),
+    ...(data["last_used_at"] === undefined ? {} : { last_used_at: timestamp(data["last_used_at"]) }),
+    ...(data["token"] === undefined ? {} : { token: text(data["token"]) }),
+    ...(data["token_encrypted"] === undefined ? {} : { token_encrypted: text(data["token_encrypted"]) }),
   };
 }
 
@@ -115,20 +115,20 @@ export function parseFrontendDeploymentUpdate(value: unknown): Partial<FrontendD
       "install_command", "node_version", "health_check_path", "env_vars",
     ];
     if (Object.keys(data).some(key => !allowed.includes(key))) return invalid();
-    const framework = FRONTEND_FRAMEWORKS.find(candidate => candidate === data.framework);
-    if (data.framework !== undefined && framework === undefined) return invalid();
+    const framework = FRONTEND_FRAMEWORKS.find(candidate => candidate === data["framework"]);
+    if (data["framework"] !== undefined && framework === undefined) return invalid();
     return {
-      ...(data.name === undefined ? {} : { name: text(data.name) }),
+      ...(data["name"] === undefined ? {} : { name: text(data["name"]) }),
       ...(framework === undefined ? {} : { framework }),
-      ...(data.domain === undefined ? {} : { domain: text(data.domain) }),
-      ...(data.custom_domains === undefined ? {} : { custom_domains: array(data.custom_domains, text) }),
-      ...(data.build_command === undefined ? {} : { build_command: text(data.build_command) }),
-      ...(data.output_dir === undefined ? {} : { output_dir: text(data.output_dir) }),
-      ...(data.install_command === undefined ? {} : { install_command: text(data.install_command) }),
-      ...(data.node_version === undefined ? {} : { node_version: text(data.node_version) }),
-      ...(data.health_check_path === undefined ? {} : { health_check_path: text(data.health_check_path) }),
-      ...(data.env_vars === undefined ? {} : {
-        env_vars: Object.fromEntries(Object.entries(record(data.env_vars)).map(([key, value]) => [key, text(value)])),
+      ...(data["domain"] === undefined ? {} : { domain: text(data["domain"]) }),
+      ...(data["custom_domains"] === undefined ? {} : { custom_domains: array(data["custom_domains"], text) }),
+      ...(data["build_command"] === undefined ? {} : { build_command: text(data["build_command"]) }),
+      ...(data["output_dir"] === undefined ? {} : { output_dir: text(data["output_dir"]) }),
+      ...(data["install_command"] === undefined ? {} : { install_command: text(data["install_command"]) }),
+      ...(data["node_version"] === undefined ? {} : { node_version: text(data["node_version"]) }),
+      ...(data["health_check_path"] === undefined ? {} : { health_check_path: text(data["health_check_path"]) }),
+      ...(data["env_vars"] === undefined ? {} : {
+        env_vars: Object.fromEntries(Object.entries(record(data["env_vars"])).map(([key, value]) => [key, text(value)])),
       }),
     };
   } catch {
@@ -158,25 +158,25 @@ export function parseFrontendDeployment(
       "last_deployed_at", "build_log", "git_url", "git_branch", "deploy_tokens",
     ];
     if (Object.keys(data).some(key => !allowed.includes(key))) return invalid();
-    if (data.project_ref !== projectRef || data.id !== deploymentId) return invalid();
-    const framework = FRONTEND_FRAMEWORKS.find(candidate => candidate === data.framework);
-    const status = (["pending", "building", "success", "failed"] as const).find(candidate => candidate === data.status);
+    if (data["project_ref"] !== projectRef || data["id"] !== deploymentId) return invalid();
+    const framework = FRONTEND_FRAMEWORKS.find(candidate => candidate === data["framework"]);
+    const status = (["pending", "building", "success", "failed"] as const).find(candidate => candidate === data["status"]);
     if (!framework || !status) return invalid();
-    const environment = record(data.env_vars);
+    const environment = record(data["env_vars"]);
     return {
-      id: text(data.id), project_ref: text(data.project_ref), name: text(data.name), framework, status,
-      domain: text(data.domain), custom_domains: array(data.custom_domains, text),
-      build_command: text(data.build_command), output_dir: text(data.output_dir),
-      install_command: text(data.install_command), node_version: text(data.node_version),
+      id: text(data["id"]), project_ref: text(data["project_ref"]), name: text(data["name"]), framework, status,
+      domain: text(data["domain"]), custom_domains: array(data["custom_domains"], text),
+      build_command: text(data["build_command"]), output_dir: text(data["output_dir"]),
+      install_command: text(data["install_command"]), node_version: text(data["node_version"]),
       env_vars: Object.fromEntries(Object.entries(environment).map(([key, value]) => [key, text(value)])),
-      created_at: timestamp(data.created_at), updated_at: timestamp(data.updated_at),
-      deployment_url: text(data.deployment_url),
-      ...(data.health_check_path === undefined ? {} : { health_check_path: text(data.health_check_path) }),
-      ...(data.last_deployed_at === undefined ? {} : { last_deployed_at: timestamp(data.last_deployed_at) }),
-      ...(data.build_log === undefined ? {} : { build_log: text(data.build_log) }),
-      ...(data.git_url === undefined ? {} : { git_url: text(data.git_url) }),
-      ...(data.git_branch === undefined ? {} : { git_branch: text(data.git_branch) }),
-      ...(data.deploy_tokens === undefined ? {} : { deploy_tokens: array(data.deploy_tokens, token) }),
+      created_at: timestamp(data["created_at"]), updated_at: timestamp(data["updated_at"]),
+      deployment_url: text(data["deployment_url"]),
+      ...(data["health_check_path"] === undefined ? {} : { health_check_path: text(data["health_check_path"]) }),
+      ...(data["last_deployed_at"] === undefined ? {} : { last_deployed_at: timestamp(data["last_deployed_at"]) }),
+      ...(data["build_log"] === undefined ? {} : { build_log: text(data["build_log"]) }),
+      ...(data["git_url"] === undefined ? {} : { git_url: text(data["git_url"]) }),
+      ...(data["git_branch"] === undefined ? {} : { git_branch: text(data["git_branch"]) }),
+      ...(data["deploy_tokens"] === undefined ? {} : { deploy_tokens: array(data["deploy_tokens"], token) }),
     };
   } catch {
     return invalid();

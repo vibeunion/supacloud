@@ -38,7 +38,7 @@ machine. The destination below is `/tmp/<bundle-directory-name>`.
 Inside the dedicated machine, install a Linux Bun 1.4.2 binary at
 `/opt/supacloud/bun/1.4.2/bun` and Caddy at `/usr/local/bin/supacloud-caddy`.
 The September 26 run used binaries from the already cached arm64
-`oven/bun:1.4.2` and `caddy:2.11.4-alpine` images, not a platform image.
+`oven/bun:1.4.2` and `caddy:2.11.7-alpine` images, not a platform image.
 
 With `BUNDLE` set to the transferred Linux directory:
 

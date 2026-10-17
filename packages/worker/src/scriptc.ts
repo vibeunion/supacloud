@@ -16,7 +16,7 @@ function executable(value: string): string {
 export function resolveScriptcPath(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): string | null {
-  const configured = environment.SUPACLOUD_SCRIPTC_PATH;
+  const configured = environment["SUPACLOUD_SCRIPTC_PATH"];
   if (configured !== undefined) return executable(configured);
   return Bun.which("scriptc");
 }

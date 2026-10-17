@@ -26,7 +26,7 @@ export async function acquireDataDirLock(dataDir?: string, engineName = 'databas
     await handle.close()
     const owner = await readDataDirLockOwner(lockPath)
     if (owner?.nonce !== nonce) return
-    await unlink(lockPath).catch((error) => {
+    await unlink(lockPath).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     })
   }

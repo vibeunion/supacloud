@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { readWorkspace } from './model.mjs';
-import { checkSourceBoundaries, importSites } from './source.mjs';
+import { checkSourceBoundaries, effectRuntimeExecutionSites, importSites } from './source.mjs';
 
 const ts = createRequire(new URL('../../packages/compiler/package.json', import.meta.url))('@typescript/typescript6');
 function fixture(t, source) {
@@ -76,4 +76,25 @@ test('installed dependency copies are not mistaken for the importing project', (
   put('packages/client/node_modules/@test/secret/package.json', { name: '@test/secret', exports: { '.': './index.js' } });
   put('packages/client/node_modules/@test/secret/index.js', 'export const value = 1;');
   assert.ok(check().diagnostics.some((entry) => entry.code === 'WS_BOUNDARY_VIOLATION'));
+});
+
+test('direct Effect runtime execution is a production source boundary violation', (t) => {
+  const { check } = fixture(t, `import { Effect } from 'effect';\nEffect.runPromise(Effect.succeed(1));`);
+  const report = check();
+  assert.ok(report.diagnostics.some((entry) =>
+    entry.code === 'WS_EFFECT_RUNTIME_ESCAPE' && entry.file === 'packages/client/src/index.ts'));
+});
+
+test('the Elysia adapter is the only allowlisted production Effect interpreter', (t) => {
+  const { check, put } = fixture(t, 'export {};');
+  put('packages/elysia/package.json', { name: '@test/elysia', exports: { '.': './src/index.ts' } });
+  put('packages/elysia/project.json', { name: '@test/elysia', tags: ['scope:test', 'type:framework'] });
+  put('packages/elysia/src/effect.ts', `import { Effect } from 'effect';\nexport const run = Effect.runPromise;`);
+  assert.equal(check().diagnostics.some((entry) => entry.code === 'WS_EFFECT_RUNTIME_ESCAPE'), false);
+});
+
+test('Effect runtime aliases are detected without matching unrelated methods', () => {
+  const source = ts.createSourceFile('x.ts', `import { Effect as Fx, runSync as execute } from 'effect';
+    Fx.runPromise(Fx.succeed(1)); execute(Fx.succeed(1)); Fx.map(Fx.succeed(1), value => value);`, ts.ScriptTarget.Latest, true);
+  assert.deepEqual(effectRuntimeExecutionSites(ts, source).map((site) => site.method), ['runPromise', 'runSync']);
 });

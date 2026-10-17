@@ -150,23 +150,23 @@ function firstDefinedString(...values: unknown[]): string | undefined {
 }
 
 export function resolveTenantAuthUrlSettings(ref: string, projectConfig: Record<string, unknown>) {
-    const authConfig = recordValue(projectConfig.auth);
-    const legacyRedirectUrls = Array.isArray(projectConfig.additional_redirect_urls)
-        ? projectConfig.additional_redirect_urls.join(",")
-        : (Array.isArray(projectConfig.additionalRedirectUrls)
-            ? projectConfig.additionalRedirectUrls.join(",")
+    const authConfig = recordValue(projectConfig["auth"]);
+    const legacyRedirectUrls = Array.isArray(projectConfig["additional_redirect_urls"])
+        ? projectConfig["additional_redirect_urls"].join(",")
+        : (Array.isArray(projectConfig["additionalRedirectUrls"])
+            ? projectConfig["additionalRedirectUrls"].join(",")
             : "");
     return {
         authConfig,
         siteUrl: firstNonEmptyString(
-            authConfig.site_url,
-            authConfig.SITE_URL,
-            projectConfig.site_url,
-            projectConfig.siteUrl,
+            authConfig["site_url"],
+            authConfig["SITE_URL"],
+            projectConfig["site_url"],
+            projectConfig["siteUrl"],
         ) || resolveProjectStudioUrl(ref, projectConfig),
         uriAllowList: firstDefinedString(
-            authConfig.uri_allow_list,
-            authConfig.URI_ALLOW_LIST,
+            authConfig["uri_allow_list"],
+            authConfig["URI_ALLOW_LIST"],
         ) ?? legacyRedirectUrls,
     };
 }
@@ -176,11 +176,11 @@ async function renderConnectorSecretEnv(
     authConfig: Record<string, unknown>,
 ): Promise<string[]> {
     const lines: string[] = [];
-    const external = recordValue(authConfig.external);
+    const external = recordValue(authConfig["external"]);
     for (const [providerName, rawConfig] of Object.entries(external)) {
         const providerConfig = recordValue(rawConfig);
         const mapping = OAUTH_ENV_MAPPINGS[providerName as OAuthProvider];
-        const clientId = typeof providerConfig.client_id === "string" ? providerConfig.client_id : "";
+        const clientId = typeof providerConfig["client_id"] === "string" ? providerConfig["client_id"] : "";
         if (!mapping || !clientId) continue;
         const clientSecret = await projectControlSecretsService.readRequiredValue(
             ref,
@@ -193,11 +193,11 @@ async function renderConnectorSecretEnv(
             renderSystemdEnvLine(mapping.clientId, clientId),
             renderSystemdEnvLine(mapping.clientSecret, clientSecret),
         );
-        if (mapping.redirectUri && typeof providerConfig.redirect_uri === "string") {
-            lines.push(renderSystemdEnvLine(mapping.redirectUri, providerConfig.redirect_uri));
+        if (mapping.redirectUri && typeof providerConfig["redirect_uri"] === "string") {
+            lines.push(renderSystemdEnvLine(mapping.redirectUri, providerConfig["redirect_uri"]));
         }
-        if (mapping.url && typeof providerConfig.url === "string") {
-            lines.push(renderSystemdEnvLine(mapping.url, providerConfig.url));
+        if (mapping.url && typeof providerConfig["url"] === "string") {
+            lines.push(renderSystemdEnvLine(mapping.url, providerConfig["url"]));
         }
     }
 
@@ -208,11 +208,11 @@ async function renderCaptchaSecretEnv(
     ref: string,
     authConfig: Record<string, unknown>,
 ): Promise<string[]> {
-    const captchaEnabled = authConfig.security_captcha_enabled === true;
+    const captchaEnabled = authConfig["security_captcha_enabled"] === true;
     if (!captchaEnabled) return [];
 
-    const captchaProvider = typeof authConfig.security_captcha_provider === "string"
-        ? authConfig.security_captcha_provider.toLowerCase()
+    const captchaProvider = typeof authConfig["security_captcha_provider"] === "string"
+        ? authConfig["security_captcha_provider"].toLowerCase()
         : "default";
     const captchaSecret = await projectControlSecretsService.readRequiredValue(
         ref,
@@ -239,14 +239,14 @@ async function renderHookSecretEnv(
         send_email_hook: "SEND_EMAIL",
         before_user_created_hook: "BEFORE_USER_CREATED",
     };
-    const hooks = recordValue(authConfig.hooks);
+    const hooks = recordValue(authConfig["hooks"]);
     for (const [hookName, prefix] of Object.entries(hookPrefixes)) {
         const hook = recordValue(hooks[hookName]);
-        if (hook.enabled !== true || typeof hook.uri !== "string" || !hook.uri) continue;
+        if (hook["enabled"] !== true || typeof hook["uri"] !== "string" || !hook["uri"]) continue;
         const secret = await projectControlSecretsService.readRequiredValue(ref, "auth-hook", hookName);
         lines.push(
             `GOTRUE_HOOK_${prefix}_ENABLED=true`,
-            renderSystemdEnvLine(`GOTRUE_HOOK_${prefix}_URI`, hook.uri),
+            renderSystemdEnvLine(`GOTRUE_HOOK_${prefix}_URI`, hook["uri"]),
             renderSystemdEnvLine(`GOTRUE_HOOK_${prefix}_SECRETS`, secret),
         );
     }
@@ -349,7 +349,7 @@ export function projectAuthServiceEntry(
         service_host_ids: [`${authRuntime.authority_project_ref}-${rawAuth.id}`],
         unit: `supacloud-gotrue@${authRuntime.authority_project_ref}`,
         runtime_mode: externalAuth ? "external" : authRuntime.mode,
-        managed_by_ref: authRuntime.mode === "local" ? undefined : authRuntime.authority_project_ref,
+        ...(authRuntime.mode === "local" ? {} : { managed_by_ref: authRuntime.authority_project_ref }),
         local_runtime_enabled: externalAuth ? false : authRuntime.local_gotrue_enabled,
     };
 }
@@ -994,7 +994,7 @@ class TenantRuntimeService {
           WHERE ref=${config.authRuntimeOwnerRef} AND deleted_at IS NULL
         `;
         const ownerConfig = normalizeProjectConfig(owner?.config);
-        const ownerPort = pickPositivePort(ownerConfig.gotrue_port);
+        const ownerPort = pickPositivePort(ownerConfig["gotrue_port"]);
         if (!owner || owner.status !== "active" || !ownerPort) {
             throw new Error(`shared auth runtime owner ${config.authRuntimeOwnerRef} is unavailable`);
         }
@@ -1005,9 +1005,12 @@ class TenantRuntimeService {
     private readonly PORT_RANGE = (() => {
         const parts = config.portRange.split('-');
         if (parts.length === 2) {
-            return parseInt(parts[1]) - parseInt(parts[0]);
+            const start = parts[0];
+            const end = parts[1];
+            if (start === undefined || end === undefined) return 0;
+            return parseInt(end, 10) - parseInt(start, 10);
         }
-        return parseInt(config.portRange); // fallback if it's just a number
+        return parseInt(config.portRange, 10); // fallback if it's just a number
     })();
 
     private deriveApiUrl(ref: string, projectConfig: Record<string, unknown> | null | undefined): string {
@@ -1031,10 +1034,10 @@ class TenantRuntimeService {
         `;
         if (!owner) throw new Error(`Cannot find active SupAuth owner project ${runtime.authority_project_ref}`);
         const ownerConfig = normalizeProjectConfig(owner.config);
-        const ownerAuth = (ownerConfig.auth as Record<string, unknown>) || {};
-        const oauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
-        return typeof oauthServer.issuer === "string" && oauthServer.issuer.trim()
-            ? oauthServer.issuer.trim().replace(/\/+$/, "")
+        const ownerAuth = (ownerConfig["auth"] as Record<string, unknown>) || {};
+        const oauthServer = normalizeOAuthServerConfig(ownerAuth["oauth_server"]);
+        return typeof oauthServer["issuer"] === "string" && oauthServer["issuer"].trim()
+            ? oauthServer["issuer"].trim().replace(/\/+$/, "")
             : `${this.deriveAuthUrl(runtime.authority_project_ref, ownerConfig)}/auth/v1`;
     }
 
@@ -1092,7 +1095,7 @@ class TenantRuntimeService {
         if (!project) return;
 
         const current = normalizeProjectConfig(project.config);
-        if (current.postgrest_port === pgrstPort && current.gotrue_port === gotruePort) return;
+        if (current["postgrest_port"] === pgrstPort && current["gotrue_port"] === gotruePort) return;
 
         const next = {
             ...current,
@@ -1156,11 +1159,11 @@ class TenantRuntimeService {
 
         const projectConfig = normalizeProjectConfig(project.config);
         const { authConfig, siteUrl, uriAllowList } = resolveTenantAuthUrlSettings(ref, projectConfig);
-        const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
-        const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
+        const oauthServerConfig = normalizeOAuthServerConfig(authConfig["oauth_server"]);
+        const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig["jwt_keys"]));
         let jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
-        let localJwtIssuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer.trim()
-            ? oauthServerConfig.issuer.trim().replace(/\/+$/, "")
+        let localJwtIssuer = typeof oauthServerConfig["issuer"] === "string" && oauthServerConfig["issuer"].trim()
+            ? oauthServerConfig["issuer"].trim().replace(/\/+$/, "")
             : null;
         const authRuntime = getAuthRuntimeDescriptor(ref);
         if (authRuntime.mode === "shared") {
@@ -1181,10 +1184,10 @@ class TenantRuntimeService {
                 projectConfig: project.config,
                 ownerConfig: owner.config,
             });
-            const ownerAuth = (ownerConfig.auth as Record<string, unknown>) || {};
-            const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
-            localJwtIssuer = typeof ownerOauthServer.issuer === "string" && ownerOauthServer.issuer.trim()
-                ? ownerOauthServer.issuer.trim().replace(/\/+$/, "")
+            const ownerAuth = (ownerConfig["auth"] as Record<string, unknown>) || {};
+            const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth["oauth_server"]);
+            localJwtIssuer = typeof ownerOauthServer["issuer"] === "string" && ownerOauthServer["issuer"].trim()
+                ? ownerOauthServer["issuer"].trim().replace(/\/+$/, "")
                 : `${this.deriveAuthUrl(authRuntime.authority_project_ref, ownerConfig)}/auth/v1`;
         }
         const jwtJwks = stringifyJsonConfig(jwtMaterial.jwtJwks);
@@ -1204,7 +1207,7 @@ class TenantRuntimeService {
             secretKey: project.secret_key_encrypted
                 ? decryptSecretIfNeeded(String(project.secret_key_encrypted))
                 : "",
-            postgrestPort: pickPositivePort(projectConfig.postgrest_port),
+            postgrestPort: pickPositivePort(projectConfig["postgrest_port"]),
             projectStatus: String(project.status || ""),
             postgrestDesired: project.postgrest_desired,
             siteUrl,
@@ -1329,7 +1332,8 @@ class TenantRuntimeService {
             tenantDirectory: this.TENANT_CONFIG_DIR,
             projectRef: request.ref,
             content: request.content,
-            expectedPreviousPointerTarget: request.expectedPreviousPointerTarget,
+            ...(request.expectedPreviousPointerTarget === undefined
+                ? {} : { expectedPreviousPointerTarget: request.expectedPreviousPointerTarget }),
             controlOwnerUid: 0,
             runtimeGroupGid: request.runtimeGroupGid,
             setControlOwnership: (targetPath) =>
@@ -1726,18 +1730,18 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
             renderSystemdEnvLine("GOTRUE_OPERATOR_TOKEN", String(config.masterToken || creds.serviceRoleKey || "")),
         ];
 
-        const oauthServerConfig = normalizeOAuthServerConfig(creds.authConfig.oauth_server);
-        if (oauthServerConfig.enabled === true) {
-            const authorizationPath = typeof oauthServerConfig.authorization_path === "string"
-                ? oauthServerConfig.authorization_path
+        const oauthServerConfig = normalizeOAuthServerConfig(creds.authConfig["oauth_server"]);
+        if (oauthServerConfig["enabled"] === true) {
+            const authorizationPath = typeof oauthServerConfig["authorization_path"] === "string"
+                ? oauthServerConfig["authorization_path"]
                 : "";
-            const issuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer
-                ? oauthServerConfig.issuer
+            const issuer = typeof oauthServerConfig["issuer"] === "string" && oauthServerConfig["issuer"]
+                ? oauthServerConfig["issuer"]
                 : `${apiExternalUrl}/auth/v1`;
             gotrueEnvLines.push(
                 "# OAuth 2.1 / OIDC Provider Configuration",
                 "GOTRUE_OAUTH_SERVER_ENABLED=true",
-                `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION=${oauthServerConfig.allow_dynamic_registration === true ? "true" : "false"}`,
+                `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION=${oauthServerConfig["allow_dynamic_registration"] === true ? "true" : "false"}`,
                 renderSystemdEnvLine("GOTRUE_JWT_ISSUER", issuer),
             );
             if (authorizationPath) {
@@ -1761,7 +1765,7 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
                 renderSystemdEnvLine("GOTRUE_SMTP_PASS", config.gotrueSmtpPass),
                 renderSystemdEnvLine("GOTRUE_SMTP_SENDER_NAME", "SupaCloud"),
             );
-            if (creds.authConfig.mailer_autoconfirm) {
+            if (creds.authConfig["mailer_autoconfirm"]) {
                 gotrueEnvLines.push("GOTRUE_MAILER_AUTOCONFIRM=true");
             }
         } else {
@@ -2347,6 +2351,8 @@ ${SQL_MODULES["pgmq-public"]}
         const dbName = await resolveDbName(ref);
         const connection = this.adminPsqlConnection(dbName);
         const supauthIssuer = await this.sharedAuthIssuer(ref);
+        const thirdPartyAudience = thirdPartyPolicy?.audience[0];
+        if (thirdPartyPolicy && !thirdPartyAudience) throw new Error("Third-party JWT audience is required");
         const issuerLiteral = supauthIssuer ? quoteSqlLiteral(supauthIssuer) : "NULL";
         const thirdPartyIssuerBranch = thirdPartyPolicy
             ? `ELSIF claims ->> 'iss' = ${quoteSqlLiteral(thirdPartyPolicy.issuer)} THEN\n    NULL;`
@@ -2374,9 +2380,9 @@ ${SQL_MODULES["pgmq-public"]}
   client_id_claim := claims ->> 'client_id';
   audience_matches := CASE
     WHEN jsonb_typeof(claims -> 'aud') = 'string'
-      THEN claims ->> 'aud' = ${quoteSqlLiteral(thirdPartyPolicy.audience[0])}
+      THEN claims ->> 'aud' = ${quoteSqlLiteral(thirdPartyAudience ?? "")}
     WHEN jsonb_typeof(claims -> 'aud') = 'array'
-      THEN (claims -> 'aud') ? ${quoteSqlLiteral(thirdPartyPolicy.audience[0])}
+      THEN (claims -> 'aud') ? ${quoteSqlLiteral(thirdPartyAudience ?? "")}
     ELSE false
   END;
 
@@ -2536,7 +2542,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
     }
 
     private getPostgrestDesiredState(project: { status?: unknown; postgrest_desired?: unknown }): RuntimeDesiredState {
-        const desired = (project as Record<string, unknown>).postgrest_desired;
+        const desired = (project as Record<string, unknown>)["postgrest_desired"];
         if (desired === "running" || desired === "stopped") {
             return desired;
         }
@@ -2979,12 +2985,16 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             const db = this.systemServiceEntry(ref, "db", "db", dbStatus);
             const storage = this.systemServiceEntry(ref, "storage", "storage", storageStatus);
             const [realtime] = remainingEntries;
+            if (realtime === undefined) throw new Error("Realtime service status is missing");
             return [db, postgrestEntry, authEntry, realtime, storage];
         }
 
         const postgresql = this.systemServiceEntry(ref, "postgresql", "PostgreSQL", dbStatus);
         const storage = this.systemServiceEntry(ref, "storage", "Storage", storageStatus);
         const [realtime, gateway] = remainingEntries;
+        if (realtime === undefined || gateway === undefined) {
+            throw new Error("Runtime service status is missing");
+        }
         return [postgresql, postgrestEntry, authEntry, realtime, storage, gateway];
     }
 
@@ -3144,7 +3154,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 AND lower(status) IN ('active', 'creating')
             `;
             return dependents
-                .map((dependent: Record<string, unknown>) => String(dependent.ref || ""))
+                .map((dependent: Record<string, unknown>) => String(dependent["ref"] || ""))
                 .filter(Boolean);
         } catch (error) {
             throw new SupAuthDependentRefreshError([], { cause: error });
@@ -3209,14 +3219,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         `;
         const projectByRef = new Map<string, Record<string, unknown>>(
             projects.map((project: Record<string, unknown>) => [
-                String(project.ref),
+                String(project["ref"]),
                 project,
             ]),
         );
         const projectStatus = new Map<string, string>(
             projects.map((project: Record<string, unknown>) => [
-                String(project.ref),
-                String(project.status || ""),
+                String(project["ref"]),
+                String(project["status"] || ""),
             ]),
         );
 
@@ -3229,10 +3239,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         let match: RegExpExecArray | null;
 
         while ((match = serviceRegex.exec(unitOutput)) !== null) {
-            refs.add(match[1]);
+            const ref = match[1];
+            if (ref !== undefined) refs.add(ref);
         }
         for (const project of projects as Record<string, unknown>[]) {
-            refs.add(String(project.ref));
+            refs.add(String(project["ref"]));
         }
 
         let stopped = 0;

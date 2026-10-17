@@ -39,6 +39,33 @@ Important:
 - `external` should only be enabled if you intentionally run a dedicated `supacloud-edge-runtime.service`.
 - Do **not** run both modes at once; they will compete for `EDGE_RUNTIME_PORT` (default: `9005`).
 
+### Function CORS
+
+`EDGE_FUNCTIONS_CORS_MODE` selects who owns CORS for all public Function routes:
+
+- `auto` (default): Management API/Caddy handles Function preflight and response
+  CORS with `Access-Control-Allow-Origin: *`, matching Supabase's browser-facing
+  Function default. It does not grant credentialed cross-origin requests, and it
+  does not change JWT or application authorization.
+- `function`: forward `OPTIONS` and preserve Function responses without adding
+  CORS headers. Existing Function allow-lists remain unchanged.
+- `permissive`: handle `OPTIONS` for existing Functions with `204`, allow any
+  origin (`Access-Control-Allow-Origin: *`), and allow the preflight's requested
+  headers. Actual responses, including JWT failures, receive the same policy.
+  Function-specific origin/method/header restrictions are overridden; custom
+  exposed headers are retained.
+
+For embedded mode, set `EDGE_FUNCTIONS_CORS_MODE=permissive` in the Management
+API service environment. For external mode, set it in the Edge Runtime service
+environment. Restart the owning service after changing it. The setting applies
+only to public Function routes, not internal control, REST, Auth, or Storage.
+Use `auto` to restore the default platform-managed wildcard behavior, or
+`function` to restore Function-owned CORS.
+
+Permissive mode does not skip JWT verification or application authorization.
+It does not support cross-origin cookie credentials and removes
+`Access-Control-Allow-Credentials` to keep the wildcard response valid.
+
 ## Performance
 
 | Metric | Value |
@@ -140,7 +167,7 @@ import { Hono } from "hono";
 export default new Hono().get("/", (c) => c.text("hello"));
 
 // Option D: SvelteKit API-only
-// Configure @supacloud/function-adapter/sveltekit-adapter in svelte.config.js.
+// Configure @supacloud/function-adapter/sveltekit-adapter in the Vite sveltekit plugin.
 // It emits a Fetch handler for +server.ts routes and hooks.server.
 ```
 
@@ -181,12 +208,14 @@ edge_functions scaffold --slug api --framework sveltekit-function --path ./api
 ### Function Manifest v2
 
 Each Function may declare a runtime profile alongside `verify_jwt` and
-`framework`. The profile is persisted with the activation and is rechecked by
-the runtime before dispatch:
+`framework`. It may also opt into a host-generated Bun bytecode cache with
+`bytecode: "off" | "auto" | "required"`. The profile is persisted with the
+activation and is rechecked by the runtime before dispatch:
 
 ```json
 {
   "framework": "hono",
+  "bytecode": "auto",
   "capabilities": {
     "secrets": ["STRIPE_SECRET_KEY"],
     "outbound_hosts": ["api.stripe.com"],
@@ -206,6 +235,21 @@ the runtime before dispatch:
 legacy injection behavior is retained; when present, only named secrets are
 injected. `outbound_hosts` restricts HTTPS and HTTP `fetch()` destinations by
 hostname. `bindings` controls optional host bindings such as `pgredis`.
+`bytecode` is `off` by default. In `auto` mode, the Edge Runtime generates a
+paired `index.js`/`index.js.jsc` artifact during preheat and falls back to the
+published JavaScript when Bun bytecode generation is unsupported. In
+`required` mode, preheat fails unless the pair can be generated and dispatch
+never compiles on the request path. The original Function artifact remains the
+release authority; tenants cannot upload or select a `.jsc` sidecar.
+
+The derived cache is isolated by Function path, source digest, Bun version and
+revision, operating system, architecture, and build settings. A Bun/runtime
+upgrade or source change therefore generates a new pair. Modules that depend on
+path-sensitive `import.meta` values, top-level await, or external imports that
+are not already part of the server-side bundle stay on ordinary JavaScript in
+`auto` mode. Compiler macros are disabled during preheat so tenant code cannot
+execute in the host; use `required` only for Functions whose final artifact is known to
+be compatible with Bun bytecode.
 `background: false` rejects `EdgeRuntime.waitUntil()` for that Function;
 omitting it preserves legacy behavior. Limits are upper-bounded by the host
 policy, so a Function cannot raise the runtime-wide maximum. A timed-out
@@ -217,6 +261,21 @@ Pool. Use separate runtime processes or systemd/cgroup boundaries when hard
 memory or CPU isolation is required.
 
 ### Memory Pressure Recovery
+
+Foreground and background workers default to `smol` mode. Override each pool
+with `EDGE_FOREGROUND_WORKER_SMOL` or `EDGE_BACKGROUND_WORKER_SMOL`; the legacy
+`WORKER_SMOL` setting is the fallback for both. This is a memory/GC policy, not
+a hard heap limit or a guarantee of lower peak RSS for every workload.
+
+External-runtime upgrades size the default foreground pool by the lower of
+twice the CPU count, 20 workers, and `floor(memoryHighMb * 0.75 / 512)`, with a
+minimum of one. The 512 MiB estimate is a sizing heuristic, leaving 25% of the
+high limit for the parent process and background pool; it does not enforce
+per-worker memory limits. Explicit `SUPACLOUD_EDGE_WORKER_POOL_SIZE` or
+`WORKER_POOL_SIZE` settings still override this estimate. Later systemd
+drop-ins and environment-file overrides must be reconciled by the operator.
+Validate capacity using the actual function workload, including module
+preheating and long-running requests, before increasing worker counts.
 
 On cgroup v2 hosts, the runtime resolves its membership from `/proc/self/cgroup`
 and `/proc/self/mountinfo`. It samples `memory.current`, `memory.high`, and

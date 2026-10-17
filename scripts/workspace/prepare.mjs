@@ -11,7 +11,10 @@ export function prepareVerification(root, alias) {
   const install = spawnSync('bun', ['install', '--ignore-scripts', '--frozen-lockfile'], { cwd: root, stdio: 'inherit' });
   if (install.error) throw install.error;
   if (install.status !== 0) throw new Error('Frozen repository tooling installation failed.');
-  runNx(['run', `${project.name}:repo-verify-prepare`, '--outputStyle=static'], root);
+  runNx(['run', `${project.name}:repo-verify-prepare`, '--outputStyle=static',
+    // Windows file locking makes concurrent `bun install --force` runs race while
+    // populating the shared extraction cache; serialize them there.
+    ...(process.platform === 'win32' ? ['--parallel=1'] : [])], root);
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {

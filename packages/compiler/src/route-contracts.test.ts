@@ -115,11 +115,11 @@ test("config policy reaches compile/check and invalidates a prior incremental re
   }
 });
 
-test("incremental type gates recheck enclosing configuration even with empty source change hints", async () => {
+test("incremental type gates remain mandatory with empty source change hints and disabled project options", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "supacloud-type-config-"));
   try {
     await writeFixtureProject(rootDir, {
-      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, noUncheckedIndexedAccess: false } }),
       "src/value.ts": "export const values: string[] = [];\nexport const first: string = values[0];",
     });
     const compiler = createIncrementalCompiler();
@@ -127,7 +127,9 @@ test("incremental type gates recheck enclosing configuration even with empty sou
       rootDir: join(rootDir, "src"), outDir: join(rootDir, "generated"),
       typeSafety: { scanProductionSource: true },
     };
-    expect((await compiler.compile(options)).diagnostics).toEqual([]);
+    expect((await compiler.compile(options)).diagnostics).toContainEqual(
+      expect.objectContaining({ code: "source-typescript", errorCode: "TS2322" }),
+    );
     await writeFixtureProject(rootDir, {
       "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, noUncheckedIndexedAccess: true } }),
     });

@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.28.1](https://github.com/vibeunion/supacloud/compare/admin-v0.28.0...admin-v0.28.1) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/admin-v0.27.1...admin-v0.28.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deploy:** require unified application deployment and reject legacy flows ([#1870](https://github.com/vibeunion/supacloud/issues/1870))
+
+### Features
+
+* **deploy:** require unified application deployment and reject legacy flows ([#1870](https://github.com/vibeunion/supacloud/issues/1870)) ([ac3562d](https://github.com/vibeunion/supacloud/commit/ac3562dc65d5bd8de63d779f062d2f11c901af69))
+
+## [0.27.1](https://github.com/vibeunion/supacloud/compare/admin-v0.27.0...admin-v0.27.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/admin-v0.26.0...admin-v0.27.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771))
+
+### Features
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771)) ([819fd3d](https://github.com/vibeunion/supacloud/commit/819fd3d5497a0ce86c9ee3cf1ed4ef4ae4db8637))
+
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/admin-v0.25.0...admin-v0.26.0) (2026-10-10)
+
+
+### Features
+
+* **frontend:** select journal verified rollback target ([#1768](https://github.com/vibeunion/supacloud/issues/1768)) ([28d8a08](https://github.com/vibeunion/supacloud/commit/28d8a08d0e235d4fda04489d7f1760778fc54a10))
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/admin-v0.24.2...admin-v0.25.0) (2026-10-10)
+
+
+### Features
+
+* **frontend:** avoid history scans during deploy and retain rollback authority ([#1763](https://github.com/vibeunion/supacloud/issues/1763)) ([772d687](https://github.com/vibeunion/supacloud/commit/772d687e885d912a37d3a03f67fd0b52cb306869))
+
 ## [0.24.2](https://github.com/vibeunion/supacloud/compare/admin-v0.24.1...admin-v0.24.2) (2026-10-06)
 
 

@@ -83,7 +83,7 @@ export function createExecutionGroupWorker<T>(options: {
       if (started || closing) throw new Error("WORKER_RESTART_REQUIRES_NEW_PROCESS");
       started = true;
       await domain.preflight(execution, options.projectRef);
-      process.env.WORKER_NAME = execution.name;
+      process.env["WORKER_NAME"] = execution.name;
       await worker.start();
       metrics.ready = true;
     },

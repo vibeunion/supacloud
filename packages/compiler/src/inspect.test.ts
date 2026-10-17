@@ -187,6 +187,33 @@ export class FeatureModule {}`);
     expect(pack.files).toContain("src/features/case/case.module.ts");
     expect(pack.externalTokens).toContain("DB_CLIENT");
     expect(pack.relatedModules.imports).toEqual(["audit"]);
+    expect(pack.conventions).toMatchObject({
+      readTransport: "postgrest-supabase-js",
+      writeTransport: "command-rpc",
+      writeRetry: "disabled",
+      externalOutcome: "receipt-reconcile",
+      databaseSource: "drizzle-append-only",
+    });
+  });
+
+  test("context packs omit provider values and source expressions", () => {
+    const sourceModule = graph.modules.find((module) => module.name === "case")!;
+    const module = {
+      ...sourceModule,
+      providers: [{
+        ...sourceModule.providers[0]!,
+        useValueExpr: "process.env.SUPABASE_SERVICE_ROLE_KEY",
+        useFactoryName: "createSecretBackedAdapter",
+      }],
+      aspects: [{ name: "secretAspect", expression: "readSecret(process.env.KEY)", file: "src/secret.ts" }],
+    };
+    const pack = createContextPack({ ...graph, modules: graph.modules.map((item) => item.name === "case" ? module : item) }, "case");
+    expect(pack.modules.find((item) => item.name === "case")?.providers[0]).toMatchObject({
+      useValueExpr: "[omitted]",
+      useFactoryName: "[omitted]",
+    });
+    expect(pack.modules.find((item) => item.name === "case")?.aspects?.[0]?.expression).toBe("[omitted]");
+    expect(JSON.stringify(pack)).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
   });
 
   test("doctorProject 汇总生成物、模块和诊断状态", async () => {

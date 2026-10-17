@@ -25,9 +25,9 @@ export function addStarterTestDependencies(manifest: {
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
 }): void {
-  manifest.devDependencies.jose = "^6.2.11";
+  manifest.devDependencies["jose"] = "^6.2.11";
   // The generated command starter already declares this runtime dependency.
-  manifest.dependencies["@supabase/supabase-js"] = "^2.115.0";
+  manifest.dependencies["@supabase/supabase-js"] = "^2.117.3";
   delete manifest.devDependencies["@supabase/supabase-js"];
 }
 
@@ -164,6 +164,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
 
   // Import the installed starter and exercise its compiled handler against the
   // actual Lite database bootstrap, not a memory implementation of PostgreSQL.
+  await run(starterInstallArgs("workspace"), join(repo, "packages/supacloud-lite"));
   const persistence: {
     verifyPersistentStarter(
       database: CommandDatabase & { exec(sql: string): Promise<void>; restart(): Promise<void> },
@@ -266,27 +267,15 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
   const context = JSON.parse(await run([compiler, "context", "review", "--json"]));
   assert.ok(context.executionPlans.some((plan: { stages: string[] }) => plan.stages.includes("authorize")));
   assert.ok(context.files.some((file: string) => file.endsWith("review.ts")));
-  assert.ok(context.graphql.operations.some((operation: { name: string }) => operation.name === "ReviewList"));
-  assert.ok(context.files.some((file: string) => file.endsWith("reviews.graphql")));
+  assert.equal(context.graphql, undefined);
+  assert.ok(!context.files.some((file: string) => file.endsWith(".graphql")));
   for (const target of ["ApproveReview", "ReviewController"]) {
     const ownedContext = JSON.parse(await run([compiler, "context", target, "--json"]));
     assert.equal(ownedContext.subject, context.subject);
     assert.deepEqual(ownedContext, context, `Owned target ${target} must preserve module context`);
   }
 
-  const query = join(project, "src/review/reviews.graphql");
-  const validQuery = await readFile(query, "utf8");
-  const queryArtifact = join(project, "generated/graphql.ts");
-  const originalQueryArtifact = await readFile(queryArtifact, "utf8");
-  await writeFile(query, validQuery.replace("id state version", "id missingField version"));
-  const queryFailure = JSON.parse(await run([compiler, "compile", "--json"], project, false));
-  assert.ok(queryFailure.diagnostics.some((item: { code: string }) => item.code === "graphql-validation"));
-  assert.equal(await readFile(queryArtifact, "utf8"), originalQueryArtifact);
-  await writeFile(query, validQuery.replace("id state version", "id version"));
-  await run(["run", "check:generated"], project, false);
-  await writeFile(query, validQuery);
-  await run(["run", "check:generated"]);
-  console.log("Starter: default GraphQL contracts, AI query context and artifact preservation passed");
+  console.log("Starter: default PostgREST reads and AI query context passed");
 
   // Exercise the actual JSON diagnosis -> reviewed fix -> compile loop with a
   // configured src root, not only the programmatic repair API.
@@ -376,7 +365,9 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
 
   // Prove the non-default golden-path templates with the same packed artifacts
   // in one packing pass, so every supported path stays smoke-covered.
-  for (const template of ["minimal", "http", "edge"] as const) {
+  // Each template owns a separate project directory and only reads the shared
+  // packed tarballs, so their acceptance checks can use the runner in parallel.
+  const templateResults = await Promise.allSettled((["minimal", "http", "edge"] as const).map(async template => {
     const templateProject = join(root, `${template}-project`);
     await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
     const templateManifestPath = join(templateProject, "package.json");
@@ -411,6 +402,9 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
       await copyFile(join(repo, "scripts/fixtures/starter-worker-delivery.fixture"), join(templateProject, "scripts/verify-worker-delivery.ts"));
       console.log(await run(["scripts/verify-worker-delivery.ts"], templateProject));
     }
+  }));
+  for (const result of templateResults) {
+    if (result.status === "rejected") throw result.reason;
   }
 } finally {
   try {

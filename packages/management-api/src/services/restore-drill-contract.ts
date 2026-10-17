@@ -54,7 +54,7 @@ export function signDrillDocument(value: Record<string, unknown>, key: string): 
 }
 
 export function verifyDrillDocument(value: Record<string, unknown>, key: string): void {
-  const signature = value.signature;
+  const signature = value["signature"];
   if (typeof signature !== "string" || !/^[a-f0-9]{64}$/.test(signature)
     || !timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(signDrillDocument(value, key), "hex"))) {
     throw new Error("Invalid drill document signature");

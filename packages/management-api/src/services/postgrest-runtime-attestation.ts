@@ -296,8 +296,9 @@ function legacyCommandLine(request: PostgrestAttestationRequest, commandLine: st
 
 function managedConfigArgument(commandLine: string[]): string | null {
   const configArguments = commandLine.filter((argument) => argument.endsWith(".conf"));
-  return configArguments.length === 1 && commandLine[1] === configArguments[0]
-    ? configArguments[0]
+  const configArgument = configArguments[0];
+  return configArguments.length === 1 && configArgument !== undefined && commandLine[1] === configArgument
+    ? configArgument
     : null;
 }
 

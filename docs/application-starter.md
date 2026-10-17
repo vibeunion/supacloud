@@ -23,7 +23,7 @@ Existing applications and explicit recipe layouts are not reorganized.
 After the CLI release containing this command is published:
 
 ```sh
-supacloud-cli app init --root ./orders --name orders
+supacloud app init --root ./orders --name orders
 cd orders
 bun install
 bun run check
@@ -38,12 +38,12 @@ The published CLI also exposes the same local loop through an application-level
 entry, without reaching for a remote test server:
 
 ```sh
-supacloud-cli app dev --profile fast          # local/ephemeral, safe defaults
+supacloud app dev --profile fast          # local/ephemeral, safe defaults
 # In the explicit command recipe, after database setup:
-supacloud-cli app dev --profile integration   # requires an explicit loopback database URL
+supacloud app dev --profile integration   # requires an explicit loopback database URL
 ```
 
-The project CLI binary also supports `supacloud-cli app init`. Initialization is
+The project CLI binary also supports `supacloud app init`. Initialization is
 local, needs no account or API token, never installs dependencies automatically,
 and refuses non-empty or symlink targets. A `.git` directory is allowed. `--force`
 does not bypass overwrite protection.
@@ -51,11 +51,12 @@ does not bypass overwrite protection.
 The explicit `--template command` reference contains:
 
 - Drizzle table declarations and inferred row types, separate migration/introspection
-  candidate outputs, and an offline database-source contract gate in default check/build;
+  candidate outputs, a database-source contract gate and live Catalog reconciliation
+  in default check/build;
 - three separated framework packages, TypeScript configuration and strict compiler capabilities;
 - a typed review feature with a state specification, route schemas and static AOP;
-- Database First GraphQL query contracts as the recommended read path, a synthetic offline schema fixture, generated typed
-  client and a deterministic client test (see [GraphQL Query Contracts](./graphql-query-contracts.md));
+- PostgREST / `@supabase/supabase-js` as the default read path; GraphQL query
+  contracts remain an explicit opt-in (see [GraphQL Query Contracts](./graphql-query-contracts.md));
 - a loopback-only memory demo and regression tests for permissions, idempotency,
   transaction rollback, state/version conflicts and absent runtime adapters;
 - semantic watch/recompile/restart, with the last good artifacts preserved on errors;
@@ -72,24 +73,32 @@ The default command template includes database tooling. HTTP/Edge templates do n
 install Drizzle or require `db:generate`. For the command template, `db:generate`
 is an explicit first-use setup step after installation; commit `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
+New command projects generate `db/modules.ts` and register it as the compiler
+`databaseGovernance.moduleFile`; the default `mode` stays `check`, so
+compile/check/build run the offline source-contract gate without a database.
+`dev:integration` requires the CLI's explicit loopback database URL and runs SQL
+lint plus live Catalog reconciliation; selecting `enforce` explicitly does the
+same for compile/check/build against an explicitly supplied `DATABASE_URL`.
+Neither path silently falls back from enforce to check.
 `supacloud app check`, `doctor` and `build` also invoke the project's installed database
 checker when `database.sources.json` is present. See
 [Database Source Contracts](./database-source-contracts.md) for existing-project
 assessment, source boundaries, precision and migration adoption.
 
-Database First is the only GraphQL server-schema model. The fixture is not an
-application-owned server SDL: change Drizzle/SQL declarations, migrate, then
-replace it with an intended-role database export before integration. Do not
-hand-edit exported schemas or add GraphQL resolver classes. After database/grant
-changes and before promotion, use `graphql-schema --check` against the selected
-database, then refresh intentionally and run generated-artifact, type and RLS
-checks. Offline compilation does not attest database provenance or freshness.
+Database First is the only GraphQL server-schema model when GraphQL is explicitly
+selected. The command starter does not generate a GraphQL schema or query. Change
+Drizzle/SQL declarations, migrate, then export an intended-role database snapshot
+before adding a Query Contract. Do not hand-edit exported schemas or add GraphQL
+resolver classes. After database/grant changes and before promotion, use
+`graphql-schema --check` against the selected database, then refresh intentionally
+and run generated-artifact, type and RLS checks. Offline compilation does not
+attest database provenance or freshness.
 
 ## Local Development Entry
 
-`supacloud-cli app dev` runs the project's `dev` script, so it and `bun run dev`
+`supacloud app dev` runs the project's `dev` script, so it and `bun run dev`
 share the same watch/recompile/restart loop. It does not add a second watcher.
-`supacloud-cli app watch` is the compile-only inspection command.
+`supacloud app watch` is the compile-only inspection command.
 For compatibility, `app dev --once` / `--watch=false` remain compile-only.
 Remote test-server sync, migration generation and remote reload remain
 `supacloud dev sync`, `supacloud dev migrate` and `supacloud dev watch`.
@@ -210,7 +219,7 @@ remain projections; see [Business State Machines](./business-state-machines.md).
 ## Acceptance Scenarios
 
 For the minimal path, run its colocated health test. For other business changes,
-`supacloud-cli app verify-plan --target <module>` reports individual nearby test
+`supacloud app verify-plan --target <module>` reports individual nearby test
 commands and manual gaps without running them or scanning the repository.
 The scenarios below concern the explicit command reference, not features
 implicitly installed into the minimal application.

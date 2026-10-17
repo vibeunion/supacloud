@@ -11,6 +11,9 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 
 > Angular 参考的是工程体验，不是技术实现；目标是让 Vibecoding 变成一条有约束、可诊断、可交付的开发流水线。
 
+默认策略见[《Vibecoding 默认策略》](vibecoding-default-policy.zh-CN.md)：没有特殊需求时，
+生成器和 AI 使用经过验证的最佳路径；替代方案必须显式选择并承担额外治理责任。
+
 ## 快速开始
 
 ```bash
@@ -68,7 +71,14 @@ supacloud generate --kind command  --module orders --name accept
 supacloud generate --kind query    --module orders --name list
 supacloud generate --kind job      --module orders --name sync-orders
 supacloud generate --kind contract --module orders --name accept
+supacloud generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase
 ```
+
+`feature` 生成器提供审批业务切片骨架：它同时生成 HTTP 契约、
+Query、受治理 Command、状态声明、异步任务边界、HTTP 路由、失败关闭测试和
+交付检查清单。权限名和持久化 RPC 必须显式提供，框架不会猜测业务授权。
+它不生成第二套数据库模型，也不伪造数据库、身份或生产回执。
+数据库版本校验、授权、事务和任务宿主仍须接入；生成测试不代表真实数据库或 E2E 验收。
 
 ## 编译器替开发者做更多判断
 
@@ -77,6 +87,16 @@ supacloud generate --kind contract --module orders --name accept
 ## AI 专用上下文
 
 `supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。
+
+数据库任务使用同样的边界化上下文：
+
+```bash
+supacloud db context --root . --module_file db/modules.ts --module cases
+supacloud db context --root . --module_file db/modules.ts --target public.case_create
+```
+
+输出会指出 Drizzle 结构源、SQL 行为源、对象对应的测试和允许的验证命令。AI
+应修改维护源并新增前向 migration，不应扫描完整 schema dump、手改生成物或改写已应用 migration。
 
 ## 三条黄金路径
 
@@ -114,6 +134,21 @@ supacloud fix --fix fix.json --write  # 应用
 同一操作不要同时使用路由 Command 绑定和内部直接绑定调用，避免重复治理。长生命周期绑定不要捕获请求级服务；输入校验、Worker 宿主身份验证仍须显式完成。内存适配器测试不证明真实数据库原子性。
 
 ## 兼容与发布
+
+### 查询消费者的默认安全入口
+
+对于需要 Promise 的页面 loader，使用 `@supacloud/query` 的 `fetchQueryResult`，
+传入生成的 `queryOptions`、既有领域 decoder 和页面/对象生命周期 signal。
+框架复用 QueryClient 的原始响应缓存，每个调用者在缓存命中时仍独立解码；
+取消一个调用者不取消其他观察者，显式刷新阻止旧响应覆盖新缓存，
+敏感结果可用 `cache: "none"` 绕过缓存。详见
+[查询消费者契约与验收](../packages/query/README.md#imperative-reads-with-domain-contracts)。
+
+这是一项查询执行层的减负能力，不是全链路黄金路径已经完成。业务仍定义领域 Schema、
+租户/主体身份键和组件目标生命周期；不把任意 SQL 结果自动推断为可靠契约。
+该入口不处理写命令、事务、后台任务终态，也不自动迁移 FA 或发布 npm 包。
+消费者采用后可移除对应的请求计数、取消和逐调用者解码包装，但需保留尚未迁移的
+传输、身份切换、业务解码器及写后失效策略。
 
 上下文与修复计划增量不改变现有运行时 DI、权限、事务、队列、前端传输或部署拓扑。Command 绑定是额外的便捷入口，原有 API 保留。
 

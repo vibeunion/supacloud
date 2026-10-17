@@ -5,20 +5,13 @@ import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import { releaseControlFailure, releaseControlSuccess, type ReleaseControlToolResponse } from "./release-control-response";
 import { PROJECT_ENDPOINT_RESPONSE_MAX_BYTES, projectApiOrigins } from "./project-endpoint-read";
 
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: Record<string, unknown>) => Promise<ReleaseControlToolResponse>,
-    ) => void;
-};
-
 type ReleaseOperation =
     | "release.logical_backup.list"
+    | "release.logical_backup.status"
     | "release.logical_backup.create"
     | "release.logical_backup.restore"
     | "release.postgrest.status"
@@ -60,6 +53,7 @@ type ReleasePostgrestStatus = {
 };
 
 const SAFE_PROJECT_REF = /^[A-Za-z0-9_-]{1,64}$/;
+const SAFE_ENVIRONMENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const BACKUP_ID = /^logical-full_[A-Za-z0-9_-]{1,64}_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SAFE_DATABASE = /^[^\u0000-\u001f\u007f]{1,128}$/;
@@ -90,7 +84,9 @@ function validProjectRef(ref: string): boolean {
 }
 
 function backupBelongsToProject(backupId: string, projectRef: string): boolean {
-    return BACKUP_ID.test(backupId) && backupId.startsWith(`logical-full_${projectRef}_`);
+    const prefix = `logical-full_${projectRef}_`;
+    return BACKUP_ID.test(backupId) && backupId.startsWith(prefix)
+        && /^[a-f0-9]{32}$/.test(backupId.slice(prefix.length));
 }
 
 function verifiedBackup(value: unknown, projectRef: string): VerifiedLogicalBackup | null {
@@ -154,18 +150,11 @@ function equalBackup(left: VerifiedLogicalBackup, right: VerifiedLogicalBackup):
         && left.sha256 === right.sha256;
 }
 
-function newlyCreatedBackup(
-    before: readonly VerifiedLogicalBackup[],
-    after: readonly VerifiedLogicalBackup[],
-): VerifiedLogicalBackup | null {
-    const afterById = new Map(after.map((backup) => [backup.backup_id, backup]));
-    for (const previous of before) {
-        const current = afterById.get(previous.backup_id);
-        if (!current || !equalBackup(previous, current)) return null;
+function requiredBackupId(value: unknown, projectRef: string): string {
+    if (typeof value !== "string" || !backupBelongsToProject(value, projectRef)) {
+        throw new Error("'backup_id' must identify a logical-full backup for 'ref'");
     }
-    const known = new Set(before.map((backup) => backup.backup_id));
-    const additions = after.filter((backup) => !known.has(backup.backup_id));
-    return additions.length === 1 ? additions[0]! : null;
+    return value;
 }
 
 function restoreRequest(
@@ -199,11 +188,34 @@ function httpFailure(operation: ReleaseOperation, response: HttpResult<unknown>)
     return releaseControlFailure(operation, "HTTP_ERROR", response.transportError ? null : response.status);
 }
 
-function mutationFailure(operation: ReleaseOperation, response: HttpResult<unknown>): ReleaseControlToolResponse {
-    if (response.responseReadError || response.transportError || response.status === 408 || response.status >= 500) {
-        return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.transportError ? null : response.status);
+function mutationOutcomeUnknown(response: HttpResult<unknown>): boolean {
+    // These synchronous release controls require HTTP 200 and a verified receipt.
+    // Other 2xx responses cannot prove either completion or a definite failure.
+    return Boolean(response.responseReadError || response.transportError || response.status === 408
+        || response.status >= 500 || (response.status >= 200 && response.status < 300 && response.status !== 200));
+}
+
+function mutationFailure(
+    operation: ReleaseOperation, response: HttpResult<unknown>, safeState: Record<string, unknown> = {},
+): ReleaseControlToolResponse {
+    if (mutationOutcomeUnknown(response)) {
+        return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.transportError ? null : response.status, safeState);
     }
-    return releaseControlFailure(operation, "HTTP_ERROR", response.status);
+    return releaseControlFailure(operation, "HTTP_ERROR", response.status, safeState);
+}
+
+async function readBackup(http: HttpTransport, projectRef: string, backupId: string) {
+    let response: HttpResult<unknown>;
+    try {
+        response = await http.get(`${endpoint(projectRef)}/database/backups/logical/${backupId}`, {
+            maxJsonBytes: MUTATION_MAX_BYTES, responseTimeoutMs: RELEASE_READ_RESPONSE_TIMEOUT_MS,
+        });
+    } catch {
+        response = { ok: false, status: 0, data: null, transportError: true };
+    }
+    const candidate = response.ok && response.status === 200 && isRecord(response.data)
+        ? verifiedBackup(response.data.backup, projectRef) : null;
+    return { response, backup: candidate?.backup_id === backupId ? candidate : null };
 }
 
 async function readInventory(
@@ -390,6 +402,36 @@ function genericScopedReleaseScopeSha256(scope: unknown): string {
     return createHash("sha256").update(genericScopedReleaseScopeJson(scope)).digest("hex");
 }
 
+function scopeEnvironmentId(scope: unknown, action: string): string {
+    const environmentId = isRecord(scope) ? scope.targetEnvironmentId : undefined;
+    if (typeof environmentId !== "string" || !SAFE_ENVIRONMENT_ID.test(environmentId)) {
+        throw new Error(`Scope for ${action} must be regenerated with a concrete targetEnvironmentId`);
+    }
+    return environmentId;
+}
+
+function requestedScopeEnvironment(args: Record<string, unknown>, action: string): string {
+    const environmentId = args.environment_id;
+    if (typeof environmentId !== "string" || !SAFE_ENVIRONMENT_ID.test(environmentId)) {
+        throw new Error(`'environment_id' is required for ${action} and must identify one deployment environment`);
+    }
+    return environmentId;
+}
+
+function assertScopeEnvironment(
+    scope: unknown,
+    requestedEnvironmentId: string,
+    action: string,
+): string {
+    const targetEnvironmentId = scopeEnvironmentId(scope, action);
+    if (targetEnvironmentId !== requestedEnvironmentId) {
+        throw new Error(
+            `Scope target environment '${targetEnvironmentId}' does not match requested environment '${requestedEnvironmentId}'`,
+        );
+    }
+    return targetEnvironmentId;
+}
+
 function runGitRevParse(cwd: string, args: string[]): string {
     const res = Bun.spawnSync(["git", ...args], { cwd });
     if (res.exitCode !== 0 || !res.stdout) throw new Error("git failed");
@@ -525,6 +567,7 @@ interface ScopeRebindItem {
     file: string;
     task_id: string;
     target_project_ref: string;
+    target_environment_id: string;
     previous_base_commit: string;
     new_base_commit: string;
     scope_sha256: string;
@@ -534,11 +577,11 @@ interface ScopeRebindItem {
 function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolResponse {
     const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
     const targetBaseCommit = resolveGitBaseCommit(cwd, args.base_commit);
+    const requestedEnvironmentId = requestedScopeEnvironment(args, "scope_rebind");
     const scopeFiles = collectScopeFiles(cwd, args.file, args.files, args.dir, args.task);
     const dryRun = args.dry_run === true;
 
-    const scopes: ScopeRebindItem[] = [];
-    for (const filePath of scopeFiles) {
+    const parsedScopes = scopeFiles.map((filePath) => {
         let content: string;
         try {
             content = readFileSync(filePath, "utf8");
@@ -551,15 +594,21 @@ function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolRes
         } catch {
             throw new Error(`Scope file '${filePath}' is not valid JSON`);
         }
-        if (!isRecord(parsed) || typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
+        const targetEnvironmentId = assertScopeEnvironment(parsed, requestedEnvironmentId, "scope_rebind");
+        const previousBaseCommit = parsed.baseCommit;
+        if (typeof previousBaseCommit !== "string" || !/^[0-9a-f]{40}$/.test(previousBaseCommit)) {
             throw new Error(`Scope file '${filePath}' has missing or invalid baseCommit`);
         }
-        const previousBaseCommit = parsed.baseCommit;
+        return { filePath, parsed, targetEnvironmentId };
+    });
+
+    const scopes: ScopeRebindItem[] = [];
+    for (const { filePath, parsed, targetEnvironmentId } of parsedScopes) {
+        const previousBaseCommit = parsed.baseCommit as string;
         const updated = previousBaseCommit !== targetBaseCommit;
         if (updated) {
             parsed.baseCommit = targetBaseCommit;
         }
-        const canonicalJson = genericScopedReleaseScopeJson(parsed);
         const scopeSha256 = genericScopedReleaseScopeSha256(parsed);
         if (updated && !dryRun) {
             const formatted = JSON.stringify(canonicalValue(parsed), null, 2) + "\n";
@@ -571,6 +620,7 @@ function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolRes
             target_project_ref: typeof parsed.targetProjectRef === "string" ? parsed.targetProjectRef : "",
             previous_base_commit: previousBaseCommit,
             new_base_commit: targetBaseCommit,
+            target_environment_id: targetEnvironmentId,
             scope_sha256: scopeSha256,
             updated,
         });
@@ -587,6 +637,7 @@ function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolRes
 
 function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolResponse {
     const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
+    const requestedEnvironmentId = requestedScopeEnvironment(args, "scope_inspect");
     if (typeof args.file !== "string" || !args.file.trim()) {
         throw new Error("'file' is required for scope_inspect");
     }
@@ -614,7 +665,11 @@ function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolRe
     } catch {
         throw new Error(`Scope file '${args.file}' is not valid JSON`);
     }
-    if (!isRecord(parsed) || typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
+    if (!isRecord(parsed)) {
+        throw new Error(`Scope file '${args.file}' must be an object and must be regenerated`);
+    }
+    const targetEnvironmentId = assertScopeEnvironment(parsed, requestedEnvironmentId, "scope_inspect");
+    if (typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
         throw new Error(`Scope file '${args.file}' has missing or invalid baseCommit`);
     }
     const scopeSha256 = genericScopedReleaseScopeSha256(parsed);
@@ -625,6 +680,7 @@ function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolRe
         scope: {
             task_id: parsed.taskId,
             target_project_ref: parsed.targetProjectRef,
+            target_environment_id: targetEnvironmentId,
             base_commit: parsed.baseCommit,
             functions: parsed.functions,
             excluded_functions: parsed.excludedFunctions,
@@ -663,6 +719,7 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
     if (typeof args.task !== "string" || !args.task.trim()) {
         throw new Error("'task' is required for scope_create");
     }
+    const targetEnvironmentId = requestedScopeEnvironment(args, "scope_create");
     const projectRef = (typeof args.ref === "string" && args.ref.trim()) || fallbackRef;
     if (!projectRef) {
         throw new Error("'ref' is required for scope_create");
@@ -680,6 +737,7 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
         functions: parseCommaList(args.functions),
         migrations: parseCommaList(args.migrations),
         targetProjectRef: projectRef,
+        targetEnvironmentId,
         taskId: String(args.task).trim(),
         web: Boolean(args.web),
     };
@@ -693,6 +751,7 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
         file: relative(cwd, filePath),
         task_id: scope.taskId,
         target_project_ref: projectRef,
+        target_environment_id: targetEnvironmentId,
         base_commit: targetBaseCommit,
         scope_sha256: scopeSha256,
         scope,
@@ -711,30 +770,31 @@ export function registerReleaseTools(
 ): void {
     const localActions = ["scope_inspect", "scope_rebind", "scope_create"] as const;
     const remoteActions = [
-        "logical_backup_list", "logical_backup_create", "logical_backup_restore",
+        "logical_backup_list", "logical_backup_status", "logical_backup_create", "logical_backup_restore",
         "postgrest_status", "postgrest_restart",
         "release_canary_fixture_stage_replay", "release_canary_fixture_disable_replay",
     ] as const;
     const allActions = [...remoteActions, ...localActions] as const;
 
-    server.tool(
+    registerTool(server,
         "release",
         "Verified release controls. Scope management actions operate locally; management actions use the Management API; release canary stage/disable replay additionally require the selected project's SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         {
-            action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Release control action"),
+            action: withDescription(stringEnum(allActions), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
             file: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Path to release scope JSON file"),
             files: optional(Type.String(), "[scope_rebind] Comma-separated list of release scope JSON files"),
             dir: optional(Type.String(), "[scope_rebind] Directory containing release scope JSON files (defaults to supacloud/fa/release-scopes, release-scopes, or scopes)"),
             task: optional(Type.String(), "[scope_rebind/scope_create] Task ID or prefix filter for scope files"),
             base_commit: optional(Type.String(), "[scope_rebind/scope_create] Target 40-character base commit SHA or git ref (defaults to origin/main -> main -> HEAD^ -> HEAD)"),
+            environment_id: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Exact target deployment environment"),
             functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to deploy"),
             excluded_functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to exclude"),
             migrations: optional(Type.String(), "[scope_create] Comma-separated list of migrations to apply"),
             web: optional(Type.Boolean(), "[scope_create] Whether web assets are included in release scope"),
             dry_run: optional(Type.Boolean(), "[scope_rebind] Perform calculation and validation without writing files"),
             cwd: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Base directory for relative file and git resolution"),
-            backup_id: optional(Type.String(), "[logical_backup_restore] Exact verified logical-full backup ID from the selected project inventory"),
+            backup_id: optional(Type.String(), "[logical_backup_create/status/restore] Stable project-bound backup ID; create generates one when omitted"),
             expected_sha256: optional(Type.String(), "[logical_backup_restore] Exact lowercase SHA-256 from the selected project inventory"),
             restore_confirmation: optional(Type.String(), "[logical_backup_restore] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
             subject: optional(Type.String(), "[release_canary_fixture_stage_replay/disable_replay] Exact central subject UUID"),
@@ -743,7 +803,7 @@ export function registerReleaseTools(
             disable_request_id: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact idempotent disable request UUID"),
             issuer: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact HTTP(S) issuer"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action } = args;
             if (action === "scope_rebind") {
                 return handleScopeRebind(args);
@@ -761,7 +821,7 @@ export function registerReleaseTools(
                     content: [
                         {
                             type: "text" as const,
-                            text: "⚠️ This command requires Management API context. Run `supacloud-cli status` to inspect current detection.",
+                            text: "⚠️ This command requires Management API context. Run `supacloud status` to inspect current detection.",
                         },
                     ],
                 };
@@ -781,26 +841,54 @@ export function registerReleaseTools(
                 });
             }
             if (action === "logical_backup_create") {
-                const before = await readInventory(http, projectRef);
-                const beforeFailure = readInventoryFailure("release.logical_backup.create", before);
-                if (beforeFailure) return beforeFailure;
-                const mutation = await http.postReleaseMutation(`${endpoint(projectRef)}/database/backups/logical`, {}, {
-                    timeoutMs: BACKUP_TIMEOUT_MS,
-                });
-                const after = await readInventory(http, projectRef);
+                const backupId = requiredBackupId(
+                    backup_id ?? `logical-full_${projectRef}_${crypto.randomUUID().replaceAll("-", "")}`, projectRef,
+                );
+                const state = { project_ref: projectRef, backup_id: backupId };
+                let mutation: HttpResult<unknown>;
+                try {
+                    mutation = await http.postReleaseMutation(
+                        `${endpoint(projectRef)}/database/backups/logical`, { backup_id: backupId },
+                        { timeoutMs: BACKUP_TIMEOUT_MS },
+                    );
+                } catch {
+                    mutation = { ok: false, status: 0, data: null, transportError: true };
+                }
                 if (!mutation.ok || mutation.status !== 200) {
-                    return mutationFailure("release.logical_backup.create", mutation);
+                    if (mutationOutcomeUnknown(mutation)) {
+                        const observed = await readBackup(http, projectRef, backupId);
+                        // 文件读回不证明创建请求的目录同步已完成，保留未确认状态。
+                        if (observed.backup) return releaseControlFailure("release.logical_backup.create",
+                            "OUTCOME_UNKNOWN", mutation.transportError ? null : mutation.status, {
+                                ...state, backup: publicBackup(observed.backup), backup_verified: true,
+                                creation_confirmed: false,
+                            });
+                    }
+                    return mutationFailure("release.logical_backup.create", mutation, state);
                 }
                 const responseBackup = isRecord(mutation.data) ? verifiedBackup(mutation.data.backup, projectRef) : null;
-                const afterFailure = readInventoryFailure("release.logical_backup.create", after);
-                const addedBackup = after.inventory && newlyCreatedBackup(before.inventory!, after.inventory);
-                if (!responseBackup || afterFailure || !addedBackup || !equalBackup(responseBackup, addedBackup)) {
-                    return releaseControlFailure("release.logical_backup.create", "OUTCOME_UNKNOWN", mutation.status);
+                const after = await readBackup(http, projectRef, backupId);
+                if (!responseBackup || responseBackup.backup_id !== backupId || !after.backup
+                    || !equalBackup(responseBackup, after.backup)) {
+                    return releaseControlFailure("release.logical_backup.create", "OUTCOME_UNKNOWN", mutation.status, state);
                 }
                 return releaseControlSuccess("release.logical_backup.create", {
-                    project_ref: projectRef,
-                    backup: publicBackup(addedBackup),
+                    ...state, backup: publicBackup(after.backup),
                 });
+            }
+            if (action === "logical_backup_status") {
+                const backupId = requiredBackupId(backup_id, projectRef);
+                const read = await readBackup(http, projectRef, backupId);
+                const state = { project_ref: projectRef, backup_id: backupId };
+                if (!read.response.ok || read.response.status !== 200) {
+                    const code = read.response.responseReadError
+                        || (read.response.status >= 200 && read.response.status < 300) ? "INVALID_RESPONSE" : "HTTP_ERROR";
+                    return releaseControlFailure("release.logical_backup.status", code,
+                        read.response.transportError ? null : read.response.status, state);
+                }
+                return read.backup
+                    ? releaseControlSuccess("release.logical_backup.status", { ...state, backup: publicBackup(read.backup) })
+                    : releaseControlFailure("release.logical_backup.status", "INVALID_RESPONSE", read.response.status, state);
             }
             if (action === "logical_backup_restore") {
                 const request = restoreRequest(projectRef, backup_id, expected_sha256, restore_confirmation);

@@ -64,18 +64,23 @@ npx @supacloud/admin --env production ssh upgrade \
   --confirm-production host:production.example.com:2201
 ```
 
-Immutable prebuilt frontend releases use a content-addressed ZIP and an explicit
+Immutable prebuilt frontend releases use a content-addressed tar.zst archive and an explicit
 compare-and-swap activation. Upload and activation are separate writes, and
 production requires the exact project ref confirmation:
 
 ```bash
 supacloud-admin frontend list_releases --ref abc123 --id web
+supacloud-admin frontend get_active_release --ref abc123 --id web
 supacloud-admin frontend get_release --ref abc123 --id web --release_id <sha256>
 supacloud-admin frontend upload_release --ref abc123 --id web \
-  --zip_path /secure/site.zip --confirm-production abc123
+  --archive_path /secure/site.tar.zst --confirm-production abc123
 supacloud-admin frontend activate_release --ref abc123 --id web \
   --release_id <sha256> --expected_active_release_id absent \
   --expected_activation_id absent --mutation_id <uuid-v4> \
+  --confirm-production abc123
+supacloud-admin frontend rollback --ref abc123 --id web \
+  --release_id <retained-sha256> --confirm-production abc123
+supacloud-admin frontend rollback --ref abc123 --id web \
   --confirm-production abc123
 ```
 
@@ -87,6 +92,14 @@ Listing and release readback work on every Management API platform. Upload and
 activation mutations require the Linux held-directory-FD implementation; on
 other platforms, Management API returns HTTP 503 before it reads the upload
 body, creates release directories, or writes a mutation journal.
+
+The active snapshot automatically supports older HTTP 404 endpoints through
+bounded history and exact artifact readback, never authorization or integrity
+failures. `rollback` handles current CAS and mutation IDs automatically, defaulting
+to a journal-verified previous retained target. An explicit target is still
+supported for deliberate rollback. It never retries a concurrent conflict,
+restores a database or infers a target from sorted history.
+Unknown results include the mutation ID for read-only reconciliation.
 
 SSH host keys are fail-closed: setting `SUPACLOUD_HOST` and credentials is not
 enough to enable SSH actions. Obtain the fingerprint through a trusted channel,

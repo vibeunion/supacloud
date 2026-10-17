@@ -16,6 +16,32 @@ afterEach(async () => {
     for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
+test("official starters emit the enhanced strict TypeScript baseline", () => {
+    const starters = [
+        appStarterFiles("strict-command"),
+        ...(["minimal", "http", "edge"] as const)
+            .map((template) => appTemplateFiles("strict-app", template, {
+                "@supacloud/js": "^0.0.0",
+                "@supabase/supabase-js": "^0.0.0",
+            })),
+    ];
+    for (const files of starters) {
+        const config: unknown = JSON.parse(requireValue(files["tsconfig.json"]));
+        expect(config).toMatchObject({
+            compilerOptions: {
+                strict: true,
+                noUncheckedIndexedAccess: true,
+                exactOptionalPropertyTypes: true,
+                noImplicitOverride: true,
+                noPropertyAccessFromIndexSignature: true,
+                noFallthroughCasesInSwitch: true,
+                forceConsistentCasingInFileNames: true,
+                useUnknownInCatchVariables: true,
+            },
+        });
+    }
+});
+
 test("initialization does not touch an existing project or its secrets", async () => {
     const root = await directory();
     await writeFile(join(root, ".env"), "SENTINEL=synthetic\n");
@@ -49,6 +75,7 @@ test("compiler dependencies and demo adapters stay outside the production entry"
     const manifest = JSON.parse(requireValue(files["package.json"]));
     expect(manifest.dependencies["@supacloud/compiler"]).toBeUndefined();
     expect(manifest.devDependencies["@supacloud/compiler"]).toMatch(/^\^\d+\.\d+\.\d+/);
+    expect(manifest.dependencies.effect).toBe("4.0.5");
     expect(files["src/application.ts"]).not.toContain("@supacloud/compiler");
     expect(files["src/application.ts"]).not.toContain("createMemorySandbox");
     expect(files["generated/application.ts"]).toContain("Run bun run compile");
@@ -56,13 +83,28 @@ test("compiler dependencies and demo adapters stay outside the production entry"
     expect(files[".gitignore"]).not.toContain("generated");
 });
 
-test("framework starters include default query contracts and an offline client test", () => {
+test("command starter defaults to PostgREST and does not silently enable GraphQL", () => {
     const files = appStarterFiles("example");
-    expect(files["supacloud.config.ts"]).toContain('graphql: { schema: "graphql/schema.graphql" }');
-    expect(files["graphql/schema.graphql"]).toContain("not a deployed database schema");
-    expect(files["src/review/reviews.graphql"]).toContain("query ReviewList");
-    expect(files["tests/graphql.test.ts"]).toContain('from "../generated/graphql"');
-    expect(files["tests/graphql.test.ts"]).toContain("ReviewListQuery");
+    expect(files["supacloud.config.ts"]).not.toContain("graphql:");
+    expect(files["graphql/schema.graphql"]).toBeUndefined();
+    expect(files["src/review/reviews.graphql"]).toBeUndefined();
+    expect(files["tests/graphql.test.ts"]).toBeUndefined();
+    expect(files["README.md"]).toContain('client.from("starter_reviews").select("id,state,version")');
+});
+
+test("the database starter registers live Catalog governance while default check stays offline", () => {
+    expect(appStarterFiles("governed")["supacloud.config.ts"])
+        .toContain('databaseGovernance: { mode: "check", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" }');
+    expect(appStarterFiles("governed")["db/modules.ts"]).toContain('name: "starter"');
+    expect(appStarterFiles("governed")["scripts/dev.ts"])
+        .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');
+    for (const template of ["minimal", "http", "edge"] as const) {
+        const files = appTemplateFiles("plain", template, {
+            "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",
+        });
+        expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
+        expect(files["database.sources.json"]).toBeUndefined();
+    }
 });
 
 test("starter routes use explicit status response maps", () => {
@@ -86,7 +128,7 @@ test("starter route schemas live in contract-only files", () => {
     expect(http["src/orders/contracts.ts"]).toContain("export const OrderResult");
 
     const minimal = appTemplateFiles("example", "minimal", {
-        "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",
+        "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.3",
     });
     expect(minimal["src/features/health/health.ts"]).toContain('from "./contracts"');
     expect(minimal["src/features/health/contracts.ts"]).toContain("export const HealthResult");
@@ -141,10 +183,27 @@ test("the reference PostgreSQL host is shipped separately from synthetic test id
     }
 });
 
+test("receipt recovery preserves shared command governance and the independent paginated read helper", () => {
+    const files = appStarterFiles("example");
+    const adapter = requireValue(files["src/host/review-postgres.ts"]);
+    expect(adapter).toContain("createTransactionalCommandGovernance({");
+    expect(adapter).toContain("const transaction = () => commandBinding.transaction()");
+    expect(adapter).toContain("actor(invocation.requestContext)");
+    expect(adapter.match(/authorize: authorizeApproval/g)).toHaveLength(2);
+    expect(adapter).toContain("command.lookup({ actorId: subject, tenantId }, operation.operationId");
+    expect(adapter).not.toContain("AsyncLocalStorage");
+    expect(files["src/review/list-reviews.ts"]).toContain(".range(start, start + pageSize - 1)");
+    expect(files["src/review/review.ts"]).toContain("ReviewReceiptsController");
+    expect(files["src/review/review.ts"]).toContain("ReviewTasksController");
+    expect(adapter).toContain("...options.tasks");
+    expect(files["src/client/reviews.ts"]).toContain("createReviewClient");
+    expect(files["tests/review-client.test.ts"]).toBeDefined();
+});
+
 test("starter distinguishes bounded execution context from unredacted source inspection", () => {
     const readme = appStarterFiles("example")["README.md"];
     expect(readme).toContain("--events execution-events.json --request-id request-123 --json");
-    expect(readme).toContain("Ordinary context can include declared source expressions");
+    expect(readme).toContain("without provider values or source expressions");
     expect(readme).toContain("input/output size limits");
     expect(readme).toContain("Never put credentials or business data in");
 });
@@ -179,9 +238,17 @@ test("attachment worker uses explicit queue ownership and a fatal delivery signa
     expect(worker).toContain('queueOwnership !== "exclusive-review-attachments"');
     expect(worker).toContain('claim.workflowVersion !== "1"');
     expect(worker).toContain('claim.stepKey !== "verify"');
-    expect(worker).toContain("AND run_id=$3");
+    expect(worker).toContain("public.starter_attachment_retries");
+    expect(worker).toContain("Attachment workflow ownership mismatch");
     expect(worker).toContain("failure: failure.promise");
     expect(worker).toContain("halted = true");
+    expect(worker).toContain("createSupaCloudWorkflowTransport");
+    expect(worker).toContain("acceptClaim: ownedClaim");
+    expect(worker).toContain("workflowTransport.ack(claim, output)");
+    expect(worker).toContain('workflowTransport.fail(claim, "Attachment verification failed")');
+    expect(worker).not.toContain("Parameters<typeof workflows.fail>");
+    expect(worker).not.toContain("workflows.retry(");
+    expect(worker).not.toContain("workflows.complete(");
     expect(host).toContain("failure: worker.failure");
     expect(host).toContain('required("REVIEW_QUEUE_OWNERSHIP")');
     for (const source of [worker, host]) {
@@ -199,7 +266,8 @@ test("uploads are compiled routes with identity-derived paths and a separate mig
     expect(feature).toContain('"/:id/attachment-upload"');
     expect(feature).toContain('"/:id/attachment-registration"');
     expect(feature).toContain("@Inject(REQUEST_CONTEXT)");
-    expect(feature).toContain("UPLOADS_UNAVAILABLE");
+    expect(feature).toContain('{ tag: "UPLOADS_UNAVAILABLE", status: 501, code: "UPLOADS_UNAVAILABLE" }');
+    expect(feature).toContain('{ tag: "UPLOAD_OUTCOME_UNKNOWN", status: 503, code: "UPLOAD_OUTCOME_UNKNOWN" }');
     expect(adapter).toContain("requireTrustedIdentity");
     expect(adapter).toContain('name: "review.attach"');
     expect(adapter).toContain("review.attachment-bound");
@@ -212,8 +280,9 @@ test("uploads are compiled routes with identity-derived paths and a separate mig
     expect(schema).toContain("AS RESTRICTIVE FOR UPDATE TO authenticated");
     expect(schema).toContain("AS RESTRICTIVE FOR DELETE TO authenticated");
     expect(schema).toContain("1048576");
-    expect(files["src/delivery-host.ts"]).toContain('process.env.REVIEW_ATTACHMENTS');
-    expect(files["src/delivery-host.ts"]).toContain("afterApproved: durable?.enqueue");
+    expect(files["src/delivery-host.ts"]).toContain('process.env["REVIEW_ATTACHMENTS"]');
+    expect(files["src/delivery-host.ts"]).toContain("...(durable ? { afterApproved: durable.enqueue } : {})");
+    expect(files["src/delivery-host.ts"]).toContain("...(uploads ? { uploads } : {})");
 });
 
 test("runtime roles separate HTTP writes from worker results without granting schema ownership", () => {
@@ -235,13 +304,11 @@ test("runtime roles separate HTTP writes from worker results without granting sc
     expect(files["supacloud.config.ts"]).toContain('name: "review_uploads", executor: "operator-provisioning"');
 });
 
-test("starter documents Database First without representing its synthetic fixture as a deployed schema", () => {
+test("starter keeps GraphQL as an explicit contract rather than a generated default", () => {
     const files = appStarterFiles("example");
-    expect(files["graphql/schema.graphql"]).toContain("SYNTHETIC TEST FIXTURE ONLY");
-    expect(files["README.md"]).toContain("Database First as its only GraphQL server-schema model");
-    expect(files["README.md"]).toContain("Do not hand-edit graphql/schema.graphql");
-    expect(files["README.md"]).toContain("--check --json");
-    expect(files["README.md"]).toContain("role/RLS tests");
+    expect(files["graphql/schema.graphql"]).toBeUndefined();
+    expect(files["README.md"]).toContain("GraphQL is not generated or enabled by this starter");
+    expect(files["README.md"]).toContain("explicitly configure graphql.schema");
     expect(files["supacloud.config.ts"]).not.toContain("autoSchemaFile");
     expect(files["supacloud.config.ts"]).not.toContain("typePaths");
 });
@@ -276,4 +343,33 @@ test("starter documents external unified identity without adding an identity run
     expect(readme).toContain("tests do not require SupAuth credentials");
     const manifest = JSON.parse(requireValue(files["package.json"]));
     expect(Object.keys(manifest.dependencies).some((name) => name.startsWith("@supauth/"))).toBe(false);
+});
+
+test("official starters emit the enhanced strict TypeScript baseline", () => {
+    const starters = [
+        appStarterFiles("strict-app"),
+        ...(["minimal", "http", "edge"] as const)
+            .map((template) => appTemplateFiles("strict-app", template, {
+                "@supacloud/js": "^0.0.0",
+                "@supabase/supabase-js": "^0.0.0",
+            })),
+        appStarterFiles("strict-command"),
+    ];
+    for (const files of starters) {
+        const source = files["tsconfig.json"];
+        if (!source) throw new Error("Starter is missing tsconfig.json");
+        const config: unknown = JSON.parse(source);
+        expect(config).toMatchObject({
+            compilerOptions: {
+                strict: true,
+                noUncheckedIndexedAccess: true,
+                exactOptionalPropertyTypes: true,
+                noImplicitOverride: true,
+                noPropertyAccessFromIndexSignature: true,
+                noFallthroughCasesInSwitch: true,
+                forceConsistentCasingInFileNames: true,
+                useUnknownInCatchVariables: true,
+            },
+        });
+    }
 });

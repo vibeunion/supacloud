@@ -22,6 +22,12 @@
     truncated: boolean;
     policies: Policy[];
     relations: Array<{ schema: string; table: string }>;
+    relationSecurity?: Array<{ schema: string; table: string; rls_enabled: boolean | null; rls_forced: boolean | null }>;
+    explanation?: {
+      outcome: "allowed" | "filtered" | "denied" | "unknown";
+      reasons: string[];
+      relations: Array<{ schema: string; table: string; rls_enabled: boolean | null; applicable_policies: string[] }>;
+    };
   };
 
   const projectRef = $derived(page.params.ref);
@@ -102,6 +108,47 @@
   </section>
 
   {#if result}
+    {#if result.explanation}
+      {@const explanationTone = result.explanation.outcome === "allowed"
+        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700"
+        : result.explanation.outcome === "denied"
+          ? "border-red-500/30 bg-red-500/5 text-red-700"
+          : result.explanation.outcome === "filtered"
+            ? "border-amber-500/30 bg-amber-500/5 text-amber-700"
+            : "border-muted bg-muted/30 text-muted-foreground"}
+      <section class={`space-y-3 rounded-xl border p-5 ${explanationTone}`} aria-label={$t("RlsTester.explanation")}>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="font-semibold">{$t("RlsTester.explanation")}</h2>
+          <span class="rounded px-2 py-0.5 text-xs font-bold uppercase">{ $t(`RlsTester.outcome_${result.explanation.outcome}`) }</span>
+        </div>
+        <ul class="list-disc space-y-1 pl-5 text-sm">
+          {#each result.explanation.reasons as reason (reason)}<li>{reason}</li>{/each}
+        </ul>
+        <p class="text-xs opacity-80">{$t("RlsTester.explanation_note")}</p>
+        {#if result.explanation.relations.length > 0}
+          <div class="overflow-x-auto rounded-md border border-current/15">
+            <table class="min-w-full text-left text-xs">
+              <thead class="bg-current/5">
+                <tr>
+                  <th class="px-3 py-2 font-medium">{$t("RlsTester.relation")}</th>
+                  <th class="px-3 py-2 font-medium">{$t("RlsTester.rls")}</th>
+                  <th class="px-3 py-2 font-medium">{$t("RlsTester.applicable_policies")}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-current/10">
+                {#each result.explanation.relations as relation (`${relation.schema}.${relation.table}`)}
+                  <tr>
+                    <td class="px-3 py-2 font-mono">{relation.schema}.{relation.table}</td>
+                    <td class="px-3 py-2">{relation.rls_enabled === null ? "—" : relation.rls_enabled ? $t("RlsTester.enabled") : $t("RlsTester.disabled")}</td>
+                    <td class="px-3 py-2">{relation.applicable_policies.join(", ") || "—"}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </section>
+    {/if}
     <section class="space-y-3 rounded-xl border bg-card p-5">
       <div class="flex items-center justify-between">
         <h2 class="font-semibold">{$t("RlsTester.query_result")}</h2>

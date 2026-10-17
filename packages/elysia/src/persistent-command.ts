@@ -1,5 +1,5 @@
 import {
-  CommandError, decodeCommandIdentity, type CommandIdentity, type DurableCommandReceipt,
+  CommandError, commandFailureMetadata, decodeCommandIdentity, type CommandIdentity, type DurableCommandReceipt,
 } from "@supacloud/contracts";
 import { ApplicationError, requireIdempotencyKey, type CommandInvocation } from "./index";
 import { commandErrorStatus } from "./command-errors";
@@ -30,7 +30,7 @@ export function createPersistentCommandAdapter<Result>(
       } catch (error) {
         if (!(error instanceof CommandError)) throw error;
         const status = commandErrorStatus(error.code);
-        throw new ApplicationError(error.code, { code: error.code, status });
+        throw new ApplicationError(error.code, { code: error.code, status, metadata: commandFailureMetadata(error.code) });
       }
     },
   };

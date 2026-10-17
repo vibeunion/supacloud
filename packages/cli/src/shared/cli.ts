@@ -1,13 +1,15 @@
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import {
-    parseToolArguments,
+    validateToolArguments,
     schemaDescription,
     schemaEnumValues,
     schemaProperties,
 } from "./schema";
 import type { ToolSchema } from "./schema";
+import type { ToolInvocation } from "./tool-server";
 import { outcomeUnknownGuidance } from "./outcome-guidance";
+import { assertCurrentDeploymentInput } from "./deployment-upgrade";
 
 interface CliRunOptions {
     commandName?: string;
@@ -75,7 +77,7 @@ function parseCliFlags(args: string[], startIndex: number, schema: ToolSchema): 
 }
 
 export async function runCli(
-    cliTools: Record<string, { schema: ToolSchema; callback: (args: any) => Promise<any> }>,
+    cliTools: Record<string, { schema: ToolSchema; callback: ToolInvocation }>,
     args: string[],
     options: CliRunOptions = {}
 ) {
@@ -86,8 +88,8 @@ export async function runCli(
             .join("\n  ");
 
     const getSchemaShape = (schema: ToolSchema) => schemaProperties(schema);
-    const getEnumOptions = (field: TSchema) => schemaEnumValues(field);
-    const getDescription = (field: TSchema) => schemaDescription(field);
+    const getEnumOptions = (field: TSchema | undefined) => schemaEnumValues(field);
+    const getDescription = (field: TSchema | undefined) => field ? schemaDescription(field) : "";
 
     const formatToolHelp = (toolName: string, tool: { schema: ToolSchema }) => {
         const shape = getSchemaShape(tool.schema);
@@ -182,9 +184,10 @@ export async function runCli(
     try {
         const parsedArgs = parseCliFlags(args, startIdx, tool.schema);
         if (startIdx === 2) parsedArgs.action = args[1];
-        const validatedArgs = parseToolArguments(tool.schema, parsedArgs);
+        assertCurrentDeploymentInput(args[0], parsedArgs);
+        validateToolArguments(tool.schema, parsedArgs);
 
-        const result = await tool.callback(validatedArgs) as CliToolResult;
+        const result = await tool.callback(parsedArgs);
         if (result && result.content && Array.isArray(result.content)) {
             for (const c of result.content) {
                 if (c.type === "text") {

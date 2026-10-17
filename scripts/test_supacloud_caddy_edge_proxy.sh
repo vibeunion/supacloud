@@ -123,7 +123,6 @@ cat >"$work_dir/caddy.json" <<EOF
                     "set": {
                       "Host": ["{http.request.host}"],
                       "X-Project-Ref": ["$PROJECT_REF"],
-                      "x-project-ref": ["$PROJECT_REF"],
                       "X-Forwarded-Host": ["{http.request.host}"],
                       "X-Forwarded-Proto": ["{http.request.scheme}"]
                     }

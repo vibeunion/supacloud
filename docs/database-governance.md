@@ -85,6 +85,34 @@ const report = reconcileModule(caseDb, catalog);
 | warn | `security-mismatch` | 声明 invoker/definer 与实际不符 |
 | warn | `grant-drift` | 声明的授权在数据库中不存在 |
 
+### Catalog contract checks
+
+Declared tables that are absent fail with `missing-table`. Policy operations and
+role sets must match (`policy-command-mismatch`, `policy-roles-mismatch`);
+role order is ignored, but identifier case is preserved.
+Optional `usingExpr` / `checkExpr` declarations compare exact `pg_get_expr`
+output, including parentheses, casts and literal whitespace. Omit a field to skip
+it; set it to `null` to require no expression. This is a catalog text contract,
+not a proof of SQL semantic equivalence.
+
+Functions may declare `signature`, for example
+`public.case_create(uuid, text)`: use schema/name plus the exact
+`pg_catalog.oidvectortypes(proargtypes)` output, without parameter names.
+A name-only declaration remains supported for one candidate; multiple candidates
+fail with `ambiguous-function-overload`. A missing explicit signature fails with
+`missing-function` and never falls back to another overload. Custom catalog
+adapters must populate `identityArguments` to check explicit signatures.
+
+Declared triggers default to enabled. Disabled triggers fail with
+`disabled-trigger`; `enabled: false` explicitly requires disabled state and fails
+with `trigger-enabled-mismatch` if enabled. This does not compare trigger bodies,
+events, or execution modes beyond the existing enabled/disabled catalog field.
+
+Explicit empty `search_path` values are accepted; unset paths and dynamic
+`$user` paths are rejected. This check does not prove that schemas in a nonempty
+path are protected from untrusted writes. Grant coverage and warning severities
+are unchanged.
+
 ## SQL 静态检查（无需数据库连接）
 
 ```ts

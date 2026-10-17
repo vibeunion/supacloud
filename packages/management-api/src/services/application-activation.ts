@@ -7,10 +7,15 @@ import { applicationRuntimePlan, type ApplicationRuntimeInput } from "./applicat
 import type { ApplicationTargetEnvironment } from "./application-runtime-files";
 import { applicationGatewayRoute, type ApplicationGatewayInput } from "./application-gateway";
 import {
-  checkpointProjectMutation, isProjectMutationId,
+  checkpointProjectMutation, isProjectMutationId, projectMutationResourceKey,
   type MutationLeaseInput, type MutationPrincipal, type ProjectMutationState,
 } from "./project-mutation.service";
 import { createProjectReleaseMutations, type ReleaseMutationStore } from "./project-release-mutation";
+import { ApplicationPromotionActivationJournal } from "./application-promotion-activation";
+import type { ApplicationPromotionOwner } from "./application-promotion-ownership";
+import {
+  parseApplicationPromotionCheckpoint, applicationPromotionReceipt, hasApplicationPromotionRecoveryReceipt,
+} from "./application-promotion-operation";
 
 type Phase = "prepared" | "transitioning" | "started" | "healthy" | "routed" | "committed";
 const PHASES: readonly Phase[] = ["prepared", "transitioning", "started", "healthy", "routed", "committed"];
@@ -20,6 +25,7 @@ export interface ApplicationActiveRecord {
   runtime: ApplicationRuntimeInput;
   configurationDigest: string;
   configurationId?: string;
+  promotionMutationId?: string;
   hosts?: ApplicationGatewayInput["hosts"];
 }
 
@@ -93,7 +99,7 @@ export interface ApplicationActivationResult {
 
 function activeRecord(
   runtime: ApplicationRuntimeInput, environment: ApplicationTargetEnvironment, hosts?: ApplicationGatewayInput["hosts"],
-  configurationId?: string,
+  configurationId?: string, promotionMutationId?: string,
 ): ApplicationActiveRecord {
   const plan = applicationRuntimePlan(runtime);
   if (hosts !== undefined) applicationGatewayRoute({ runtime, hosts });
@@ -104,6 +110,7 @@ function activeRecord(
     schema: "supacloud.application-active.v1", runtime: { ...structuredClone(runtime), bunVersion: plan.bunVersion },
     configurationDigest: stableSha256(environment),
     ...(configurationId === undefined ? {} : { configurationId }),
+    ...(promotionMutationId === undefined ? {} : { promotionMutationId }),
     ...(hosts === undefined ? {} : { hosts: structuredClone(hosts) }),
   };
 }
@@ -121,6 +128,9 @@ export function parseApplicationActiveRecord(candidate: unknown, desired: {
   if (value.configurationId !== undefined && !Value.Check(ApplicationConfigurationIdSchema, value.configurationId)) {
     throw new Error("APPLICATION_ACTIVE_INVALID");
   }
+  if (value.promotionMutationId !== undefined && !isProjectMutationId(value.promotionMutationId)) {
+    throw new Error("APPLICATION_ACTIVE_INVALID");
+  }
   applicationRuntimePlan(value.runtime);
   if (value.hosts !== undefined) applicationGatewayRoute({ runtime: value.runtime, hosts: value.hosts });
   if (value.runtime.release.project_ref !== desired.release.project_ref
@@ -130,14 +140,14 @@ export function parseApplicationActiveRecord(candidate: unknown, desired: {
 }
 
 function parseCheckpoint(value: Record<string, unknown>, desired: ApplicationActiveRecord): ActivationCheckpoint {
-  if (value.schema !== "supacloud.application-activation.v1"
-    || !PHASES.includes(value.phase as Phase)
-    || stableStringify(decodeRecord(value.desired, desired.runtime)) !== stableStringify(desired)) {
+  if (value["schema"] !== "supacloud.application-activation.v1"
+    || !PHASES.includes(value["phase"] as Phase)
+    || stableStringify(decodeRecord(value["desired"], desired.runtime)) !== stableStringify(desired)) {
     throw new Error("APPLICATION_ACTIVATION_CHECKPOINT_INVALID");
   }
   return {
-    schema: "supacloud.application-activation.v1", phase: value.phase as Phase, desired,
-    previous: value.previous === null ? null : decodeRecord(value.previous, desired.runtime),
+    schema: "supacloud.application-activation.v1", phase: value["phase"] as Phase, desired,
+    previous: value["previous"] === null ? null : decodeRecord(value["previous"], desired.runtime),
   };
 }
 
@@ -146,6 +156,7 @@ function encodeRecord(record: ApplicationActiveRecord) {
   return {
     schema: record.schema, configurationDigest: record.configurationDigest,
     ...(record.configurationId === undefined ? {} : { configurationId: record.configurationId }),
+    ...(record.promotionMutationId === undefined ? {} : { promotionMutationId: record.promotionMutationId }),
     ...(record.hosts === undefined ? {} : {
       hosts: Object.entries(record.hosts).sort(([a], [b]) => a.localeCompare(b))
         .map(([target, hosts]) => ({ target, hosts })),
@@ -207,10 +218,18 @@ function recoveryFingerprint(desired: ApplicationActiveRecord): string {
   return stableSha256({ schema: "supacloud.application-activation-recovery.v1", desired });
 }
 
-function hasSuccessReceipt(state: ProjectMutationState, desired: ApplicationActiveRecord): boolean {
+export function hasApplicationActivationSuccessReceipt(state: ProjectMutationState, desired: ApplicationActiveRecord): boolean {
+  if (state.projectRef !== desired.runtime.release.project_ref || state.mutationId !== desired.runtime.activationId
+    || state.operation !== "application.release.activate"
+    || state.resourceKey !== projectMutationResourceKey({
+      type: "application_release",
+      id: stableSha256({
+        applicationId: desired.runtime.release.application_id, environmentId: desired.runtime.environmentId,
+      }),
+    })) return false;
   if (state.status !== "succeeded" || state.responseStatus !== 200) return false;
   if (stableStringify(state.receipt) === stableStringify(result(desired.runtime, false))) return true;
-  const reconciliation = state.receipt?.reconciliation;
+  const reconciliation = state.receipt?.["reconciliation"];
   if (!reconciliation || typeof reconciliation !== "object" || Array.isArray(reconciliation)
     || !("observed_at" in reconciliation) || typeof reconciliation.observed_at !== "string") return false;
   const observedAt = new Date(reconciliation.observed_at);
@@ -220,6 +239,98 @@ function hasSuccessReceipt(state: ProjectMutationState, desired: ApplicationActi
     evidence_code: "RELEASE_AUTHORITY_CONFIRMED", evidence_fingerprint: recoveryFingerprint(desired),
     target_status: "succeeded",
   } });
+}
+
+export function hasCanonicalApplicationActivationJournal(
+  state: ProjectMutationState, desired: ApplicationActiveRecord,
+): boolean {
+  if (!hasApplicationActivationSuccessReceipt(state, desired)) return false;
+  try {
+    const checkpoint = parseCheckpoint(state.checkpoint, desired);
+    return ["routed", "committed"].includes(checkpoint.phase)
+      && state.requestFingerprint === stableSha256({
+        desired, expectedActivationId: checkpoint.previous?.runtime.activationId ?? null,
+      });
+  } catch {
+    return false;
+  }
+}
+
+export function parseSuccessfulApplicationActivation(
+  state: ProjectMutationState | null,
+  scope: { projectRef: string; applicationId: string; environmentId: string },
+): { desired: ApplicationActiveRecord; previous: ApplicationActiveRecord | null } {
+  const resourceKey = projectMutationResourceKey({
+    type: "application_release",
+    id: stableSha256({ applicationId: scope.applicationId, environmentId: scope.environmentId }),
+  });
+  if (!state || state.projectRef !== scope.projectRef || state.operation !== "application.release.activate"
+    || state.resourceKey !== resourceKey || !isProjectMutationId(state.mutationId)) {
+    throw new Error("APPLICATION_ACTIVATION_CHECKPOINT_INVALID");
+  }
+  const desired = decodeRecord(state.checkpoint["desired"], {
+    release: { project_ref: scope.projectRef, application_id: scope.applicationId },
+    environmentId: scope.environmentId,
+  });
+  const checkpoint = parseCheckpoint(state.checkpoint, desired);
+  if (desired.runtime.activationId !== state.mutationId
+    || checkpoint.previous?.runtime.activationId === state.mutationId
+    || !["routed", "committed"].includes(checkpoint.phase)
+    || state.requestFingerprint !== stableSha256({
+      desired, expectedActivationId: checkpoint.previous?.runtime.activationId ?? null,
+    }) || !hasApplicationActivationSuccessReceipt(state, desired)) {
+    throw new Error("APPLICATION_ACTIVATION_CHECKPOINT_INVALID");
+  }
+  return { desired, previous: checkpoint.previous };
+}
+
+/** 只校验委托 journal 与完整 authority 的绑定，不把未知父操作当作成功回执。 */
+export function hasApplicationPromotionActivationCheckpoint(
+  state: ProjectMutationState, desired: ApplicationActiveRecord,
+): boolean {
+  try {
+    const parent = parseApplicationPromotionCheckpoint(state);
+    if (state.mutationId !== desired.promotionMutationId || parent.activation_id !== desired.runtime.activationId
+      || parent.phase !== "verifying") return false;
+    const attempt = parent["activation"];
+    if (!attempt || typeof attempt !== "object" || Array.isArray(attempt)) return false;
+    const value = attempt as Record<string, unknown>;
+    if (value["schema"] !== "supacloud.application-promotion-activation.v1"
+      || value["outcome"] !== "succeeded"
+      || value["request_fingerprint"] !== stableSha256({ desired, expectedActivationId: parent.plan.target.activation_id })
+      || stableStringify(value["receipt"]) !== stableStringify(result(desired.runtime, false))) return false;
+    const raw = value["checkpoint"];
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const checkpoint = parseCheckpoint(raw as Record<string, unknown>, desired);
+    if (checkpoint.phase !== "committed"
+      || (checkpoint.previous?.runtime.activationId ?? null) !== parent.plan.target.activation_id
+      || desired.runtime.release.release_id !== parent.plan.target.candidate_release_id
+      || desired.runtime.release.manifest_sha256 !== parent.plan.manifest_sha256
+      || desired.runtime.environmentId !== parent.plan.environment_id
+      || desired.configurationId !== parent.plan.target.configuration_id) return false;
+    return true;
+  } catch { return false; }
+}
+
+/** 运行中的回执仅供父执行器验收；未知操作只能走独立的只读恢复观察路径。 */
+export function hasApplicationPromotionActivationReceipt(
+  state: ProjectMutationState, desired: ApplicationActiveRecord, allowRunning = false,
+): boolean {
+  try {
+    if (!hasApplicationPromotionActivationCheckpoint(state, desired)) return false;
+    if (allowRunning && state.status === "running") return true;
+    if (state.status !== "succeeded" || state.responseStatus !== 200) return false;
+    if (hasApplicationPromotionRecoveryReceipt(state)) return true;
+    const parent = parseApplicationPromotionCheckpoint(state);
+    const verification = parent["verification"];
+    if (!verification || typeof verification !== "object" || Array.isArray(verification)) return false;
+    const observed = verification as Record<string, unknown>;
+    return observed["target_activation_id"] === desired.runtime.activationId
+      && observed["target_ready"] === true && observed["target_smoke_verified"] === true
+      && typeof observed["evidence_sha256"] === "string" && /^[a-f0-9]{64}$/.test(observed["evidence_sha256"])
+      && typeof observed["migration_ledger_digest"] === "string" && /^[a-f0-9]{64}$/.test(observed["migration_ledger_digest"])
+      && stableStringify(state.receipt) === stableStringify(applicationPromotionReceipt(parent));
+  } catch { return false; }
 }
 
 /**
@@ -251,69 +362,20 @@ export class ApplicationActivationService {
     });
     if (!begun.lease) {
       if (begun.state.status !== "succeeded") throw new Error("APPLICATION_ACTIVATION_OUTCOME_UNRESOLVED");
-      if (!hasSuccessReceipt(begun.state, desired)) {
+      if (!hasApplicationActivationSuccessReceipt(begun.state, desired)) {
         throw new Error("APPLICATION_ACTIVATION_RECEIPT_INVALID");
       }
       await this.verifyDesired(desired);
       return result(runtime, true);
     }
     const lease = begun.lease;
-    let sideEffects = false;
+    const transition = { checkpoint: begun.state.checkpoint, sideEffects: false };
     let completed = false;
     try {
-      let checkpoint: ActivationCheckpoint;
-      if (Object.keys(begun.state.checkpoint).length) {
-        checkpoint = parseCheckpoint(begun.state.checkpoint, desired);
-        // An interrupted process transition requires explicit observation and
-        // reconciliation, not blindly replaying worker start or traffic writes.
-        if (checkpoint.phase !== "prepared") {
-          sideEffects = true;
-          throw new Error("APPLICATION_ACTIVATION_RECONCILIATION_REQUIRED");
-        }
-      } else {
-        const active = await this.ports.readActive(runtime);
-        const previous = active === null ? null : parseApplicationActiveRecord(active, runtime);
-        if ((previous?.runtime.activationId ?? null) !== input.expectedActivationId) {
-          throw new Error("APPLICATION_ACTIVATION_REVISION_CONFLICT");
-        }
-        checkpoint = { schema: "supacloud.application-activation.v1", phase: "prepared", desired, previous };
-        await this.save(lease, checkpoint);
-      }
-      if ((checkpoint.previous?.runtime.activationId ?? null) !== input.expectedActivationId) {
-        throw new Error("APPLICATION_ACTIVATION_CHECKPOINT_INVALID");
-      }
-      await this.mutations.protect(lease, async () => {
-        const active = await this.ports.readActive(runtime);
-        if (stableStringify(active) !== stableStringify(checkpoint.previous)) {
-          throw new Error("APPLICATION_ACTIVATION_REVISION_CONFLICT");
-        }
-        await this.ports.checkCompatibility(runtime, checkpoint.previous, environment);
-        await this.ports.prepare(runtime, environment);
+      await this.runTransition({ ...input, environment }, desired, transition, {
+        save: checkpoint => this.save(lease, checkpoint),
+        protect: action => this.mutations.protect(lease, action),
       });
-      checkpoint = { ...checkpoint, phase: "transitioning" };
-      await this.save(lease, checkpoint);
-      sideEffects = true;
-      await this.mutations.protect(lease, async () => {
-        if (checkpoint.previous) await this.ports.stop(checkpoint.previous.runtime);
-        await this.ports.start(runtime);
-      });
-      checkpoint = { ...checkpoint, phase: "started" };
-      await this.save(lease, checkpoint);
-      await this.mutations.protect(lease, () => this.ports.requireReady(runtime));
-      checkpoint = { ...checkpoint, phase: "healthy" };
-      await this.save(lease, checkpoint);
-      await this.mutations.protect(lease, async () => {
-        await this.ports.route(desired, checkpoint.previous);
-        await this.ports.verifyRoute(desired);
-      });
-      checkpoint = { ...checkpoint, phase: "routed" };
-      await this.save(lease, checkpoint);
-      await this.mutations.protect(lease, async () => {
-        await this.ports.writeActive(desired, input.expectedActivationId);
-        await this.verifyDesired(desired);
-      });
-      checkpoint = { ...checkpoint, phase: "committed" };
-      await this.save(lease, checkpoint);
       await this.mutations.success(lease, result(runtime, false) as unknown as Record<string, unknown>);
       completed = true;
       const stored = await this.mutations.read(runtime.release.project_ref, runtime.activationId);
@@ -325,9 +387,127 @@ export class ApplicationActivationService {
     } catch (error) {
       // No compensating database migration or automatic re-execution of unknown
       // effects. Keep the checkpoint and block this resource until reconciled.
-      if (!completed) await this.mutations.failure(lease, sideEffects, !sideEffects);
+      if (!completed) await this.mutations.failure(lease, transition.sideEffects, !transition.sideEffects);
       throw error;
     }
+  }
+
+  /** 服务端提升入口共用父租约；激活完成后父操作仍需验证 smoke 并自行写最终回执。 */
+  async activatePromotion(
+    request: ActivateApplicationInput, owner: ApplicationPromotionOwner, database: SQL = sql,
+  ): Promise<ApplicationActivationResult> {
+    const input = structuredClone(request);
+    if (stableStringify(input.principal) !== stableStringify(owner.principal)) {
+      throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+    }
+    const desired = activeRecord(
+      input.runtime, input.environment, input.hosts, input.configurationId, owner.lease.mutationId,
+    );
+    const journal = new ApplicationPromotionActivationJournal(owner, {
+      desired, expectedActivationId: input.expectedActivationId,
+    }, database);
+    const begun = await journal.begin();
+    if (begun.completed) {
+      const checkpoint = parseCheckpoint(begun.checkpoint!, desired);
+      if (checkpoint.phase !== "committed"
+        || (checkpoint.previous?.runtime.activationId ?? null) !== input.expectedActivationId) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_CHECKPOINT_INVALID");
+      }
+      await this.verifyDesired(desired);
+      return result(desired.runtime, true);
+    }
+    const transition = { checkpoint: begun.checkpoint ?? {}, sideEffects: false };
+    let completed = false;
+    try {
+      await this.runTransition(input, desired, transition, {
+        save: checkpoint => journal.checkpoint(this.serializeCheckpoint(checkpoint)),
+        protect: action => journal.protect(action),
+      });
+      await journal.success();
+      completed = true;
+      const observed = await journal.begin();
+      if (!observed.completed || parseCheckpoint(observed.checkpoint!, desired).phase !== "committed") {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_RECEIPT_INVALID");
+      }
+      return result(desired.runtime, false);
+    } catch (error) {
+      if (!completed) await journal.failure(transition.sideEffects);
+      throw error;
+    }
+  }
+
+  async observePromotion(
+    state: ProjectMutationState, desired: ApplicationActiveRecord,
+  ): Promise<void> {
+    if (!hasApplicationPromotionActivationReceipt(state, desired, true)
+      && !(state.status === "outcome_unknown" && hasApplicationPromotionActivationCheckpoint(state, desired))) {
+      throw new Error("APPLICATION_PROMOTION_ACTIVATION_RECEIPT_INVALID");
+    }
+    await this.verifyDesired(desired);
+  }
+
+  private async runTransition(
+    input: ActivateApplicationInput,
+    desired: ApplicationActiveRecord,
+    transition: { checkpoint: Record<string, unknown>; sideEffects: boolean },
+    persistence: {
+      save(checkpoint: ActivationCheckpoint): Promise<void>;
+      protect(action: () => Promise<void>): Promise<void>;
+    },
+  ): Promise<void> {
+    const runtime = desired.runtime;
+    let checkpoint: ActivationCheckpoint;
+    if (Object.keys(transition.checkpoint).length) {
+      checkpoint = parseCheckpoint(transition.checkpoint, desired);
+      // 未知进程或流量变更必须通过观察恢复，不能重复执行。
+      if (checkpoint.phase !== "prepared") {
+        transition.sideEffects = true;
+        throw new Error("APPLICATION_ACTIVATION_RECONCILIATION_REQUIRED");
+      }
+    } else {
+      const active = await this.ports.readActive(runtime);
+      const previous = active === null ? null : parseApplicationActiveRecord(active, runtime);
+      if ((previous?.runtime.activationId ?? null) !== input.expectedActivationId) {
+        throw new Error("APPLICATION_ACTIVATION_REVISION_CONFLICT");
+      }
+      checkpoint = { schema: "supacloud.application-activation.v1", phase: "prepared", desired, previous };
+      await persistence.save(checkpoint);
+    }
+    if ((checkpoint.previous?.runtime.activationId ?? null) !== input.expectedActivationId) {
+      throw new Error("APPLICATION_ACTIVATION_CHECKPOINT_INVALID");
+    }
+    await persistence.protect(async () => {
+      const active = await this.ports.readActive(runtime);
+      if (stableStringify(active) !== stableStringify(checkpoint.previous)) {
+        throw new Error("APPLICATION_ACTIVATION_REVISION_CONFLICT");
+      }
+      await this.ports.checkCompatibility(runtime, checkpoint.previous, input.environment);
+      await this.ports.prepare(runtime, input.environment);
+    });
+    checkpoint = { ...checkpoint, phase: "transitioning" };
+    await persistence.save(checkpoint);
+    transition.sideEffects = true;
+    await persistence.protect(async () => {
+      if (checkpoint.previous) await this.ports.stop(checkpoint.previous.runtime);
+      await this.ports.start(runtime);
+    });
+    checkpoint = { ...checkpoint, phase: "started" };
+    await persistence.save(checkpoint);
+    await persistence.protect(() => this.ports.requireReady(runtime));
+    checkpoint = { ...checkpoint, phase: "healthy" };
+    await persistence.save(checkpoint);
+    await persistence.protect(async () => {
+      await this.ports.route(desired, checkpoint.previous);
+      await this.ports.verifyRoute(desired);
+    });
+    checkpoint = { ...checkpoint, phase: "routed" };
+    await persistence.save(checkpoint);
+    await persistence.protect(async () => {
+      await this.ports.writeActive(desired, input.expectedActivationId);
+      await this.verifyDesired(desired);
+    });
+    checkpoint = { ...checkpoint, phase: "committed" };
+    await persistence.save(checkpoint);
   }
 
   /** Confirm an already committed activation; never replay process or gateway effects. */
@@ -342,7 +522,7 @@ export class ApplicationActivationService {
       || state.mutationId !== input.activationId || stableStringify(state.principal) !== stableStringify(input.principal)) {
       throw new Error("APPLICATION_ACTIVATION_RECOVERY_IDENTITY_MISMATCH");
     }
-    const desired = decodeRecord(state.checkpoint.desired, {
+    const desired = decodeRecord(state.checkpoint["desired"], {
       release: { project_ref: input.projectRef, application_id: input.applicationId }, environmentId: input.environmentId,
     });
     const checkpoint = parseCheckpoint(state.checkpoint, desired);
@@ -372,7 +552,7 @@ export class ApplicationActivationService {
       state = current;
     }
     if (state.status === "succeeded") {
-      if (!hasSuccessReceipt(state, desired)) throw new Error("APPLICATION_ACTIVATION_RECEIPT_INVALID");
+      if (!hasApplicationActivationSuccessReceipt(state, desired)) throw new Error("APPLICATION_ACTIVATION_RECEIPT_INVALID");
     } else if (state.status !== "outcome_unknown") {
       throw new Error("APPLICATION_ACTIVATION_NOT_RECOVERABLE");
     }
@@ -382,17 +562,21 @@ export class ApplicationActivationService {
     if (checkpoint.previous) await this.ports.requireStopped(checkpoint.previous.runtime);
     if (state.status !== "succeeded") await this.mutations.recover(state, recoveryFingerprint(desired));
     const recovered = await this.mutations.read(input.projectRef, input.activationId);
-    if (!recovered || !hasSuccessReceipt(recovered, desired)) throw new Error("APPLICATION_ACTIVATION_RECEIPT_INVALID");
+    if (!recovered || !hasApplicationActivationSuccessReceipt(recovered, desired)) throw new Error("APPLICATION_ACTIVATION_RECEIPT_INVALID");
     await this.verifyDesired(desired);
     return result(desired.runtime, true);
   }
 
-  private save(lease: MutationLeaseInput, checkpoint: ActivationCheckpoint): Promise<void> {
-    return this.mutations.checkpoint(lease, {
+  private serializeCheckpoint(checkpoint: ActivationCheckpoint): Record<string, unknown> {
+    return {
       ...checkpoint,
       desired: encodeRecord(checkpoint.desired),
       previous: checkpoint.previous === null ? null : encodeRecord(checkpoint.previous),
-    });
+    };
+  }
+
+  private save(lease: MutationLeaseInput, checkpoint: ActivationCheckpoint): Promise<void> {
+    return this.mutations.checkpoint(lease, this.serializeCheckpoint(checkpoint));
   }
 
   private async verifyDesired(desired: ApplicationActiveRecord): Promise<void> {

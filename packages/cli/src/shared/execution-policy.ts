@@ -12,16 +12,16 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     deploy: { write: ["deploy"] },
-    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration"],
-        write: ["upload_release", "put_configuration", "activate_release", "reconcile_activation", "retire_activation"] },
+    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_promotion_status", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan", "list_previews", "get_preview"],
+        write: ["upload_release", "put_configuration", "deploy_application", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
         local: ["list"],
     },
     database: {
-        read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "extension_catalog", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "migration_inventory", "delivery_migration_plan", "project_url", "generate_types", "database_lint", "db_lint", "rpc_catalog", "list_rpcs"],
-        local: ["lint_migrations", "lint"],
+        read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "extension_catalog", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "migration_inventory", "migration_import", "delivery_migration_plan", "project_url", "generate_types", "database_lint", "db_lint", "rpc_catalog", "list_rpcs"],
+        local: ["lint_migrations", "lint", "rebase_migrations"],
         write: ["query", "execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"],
     },
     supabase: {
@@ -60,14 +60,14 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     scheduled_functions: { read: ["list", "get"], write: ["create", "update", "delete"] },
     mutations: { read: ["status"] },
     release: {
-        read: ["logical_backup_list", "postgrest_status"],
+        read: ["logical_backup_list", "logical_backup_status", "postgrest_status"],
         local: ["scope_inspect", "scope_rebind", "scope_create"],
         write: ["logical_backup_create", "logical_backup_restore", "postgrest_restart", "release_canary_fixture_stage_replay", "release_canary_fixture_disable_replay"],
     },
     secrets: { read: ["list"], write: ["upsert", "delete"] },
     frontend: {
-        read: ["list", "get", "build_logs", "list_frameworks", "list_records", "list_releases", "get_release"],
-        write: ["create", "update", "delete", "deploy_git", "deploy_upload", "redeploy", "add_domain", "remove_domain", "set_env", "upload_release", "activate_release"],
+        read: ["list", "get", "build_logs", "list_frameworks", "list_records", "list_releases", "get_active_release", "get_release"],
+        write: ["create", "update", "delete", "deploy_git", "deploy_upload", "redeploy", "add_domain", "remove_domain", "set_env", "upload_release", "activate_release", "rollback"],
     },
     task_events: { read: ["inspect_webhook"], write: ["register_webhook", "unregister_webhook"] },
     diagnostics: { read: ["list_checks", "get_run"], write: ["run_checks", "repair"] },
@@ -81,12 +81,18 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["send", "receive", "ack", "release", "fail", "retry", "delete_message", "update_settings"],
     },
     ai: { local: ["show_skill", "install_skill"] },
+    init: { local: ["init"] },
+    env: { local: ["list", "check"] },
     app: {
         local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
-        read: ["status"],
-        write: ["upload", "configure", "deploy", "rollback", "reconcile", "retire"],
+        read: ["status", "evidence", "logs", "transfer-plan", "promote-plan", "rollback-plan", "history", "deploy-plan", "diff", "promote-status", "preview-plan", "previews", "preview-list", "preview-status"],
+        write: ["release", "upload", "configure", "transfer", "promote", "promote-reconcile", "deploy", "rollback", "reconcile", "retire", "preview", "preview-create", "preview-reconcile", "preview-cleanup"],
     },
-    db: { local: ["lint", "explain"], read: ["module_check"] },
+    db: {
+        local: ["context", "lint", "explain", "diff", "role_sql"],
+        read: ["module_check", "reverse", "plan", "role_check"],
+        write: ["apply"],
+    },
     dev: { read: ["status"], write: ["sync", "watch", "migrate"] },
 };
 
@@ -109,7 +115,8 @@ function declaredMode(moduleName: string, action: string): ExecutionMode | undef
 }
 
 export function executionMode(moduleName: string, action: string, args: Record<string, unknown>): ExecutionMode | undefined {
-    if (moduleName === "deploy" && args.dry_run === true) return "read";
+    if (moduleName === "deploy" && typeof args.status === "string") return "read";
+    if (moduleName === "deploy" && (args.dry_run === true || args.plan === true || args.diff === true)) return "read";
     if (moduleName === "database"
         && ["push_migrations", "baseline_migrations"].includes(action)
         && args.dry_run === true) return "read";

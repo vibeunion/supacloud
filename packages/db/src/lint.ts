@@ -111,7 +111,8 @@ export async function lintModule(
   }
 
   // missing-rls-enable: Policies declared but no source file enables RLS
-  if (module.policies.length > 0) {
+  const firstPolicy = module.policies[0];
+  if (firstPolicy) {
     const anyEnable = module.policies.some((policy) =>
       ENABLE_RLS_RE.test(contents.get(policy.source) ?? ''),
     );
@@ -120,7 +121,7 @@ export async function lintModule(
         severity: 'warn',
         code: 'missing-rls-enable',
         message: `模块 ${module.name} 声明了 ${module.policies.length} 条策略，但所有策略源文件都没有 enable row level security`,
-        file: module.policies[0].source,
+        file: firstPolicy.source,
       });
     }
   }

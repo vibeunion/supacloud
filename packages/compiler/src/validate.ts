@@ -80,6 +80,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "invalid-job-timeout": { code: "SC4015", docsUrl: "https://supacloud.dev/errors/SC4015" },
   "invalid-job-attempts": { code: "SC4016", docsUrl: "https://supacloud.dev/errors/SC4016" },
   "invalid-job-idempotency": { code: "SC4017", docsUrl: "https://supacloud.dev/errors/SC4017" },
+  "job-retry-idempotency-required": { code: "SC4027", docsUrl: "https://supacloud.dev/errors/SC4027" },
   "invalid-job-mode": { code: "SC4018", docsUrl: "https://supacloud.dev/errors/SC4018" },
   "invalid-job-schema": { code: "SC4019", docsUrl: "https://supacloud.dev/errors/SC4019" },
   "command-persistence-required": { code: "SC4020", docsUrl: "https://supacloud.dev/errors/SC4020" },
@@ -89,10 +90,29 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "command-idempotency-unsupported": { code: "SC4024", docsUrl: "https://supacloud.dev/errors/SC4024" },
   "command-transaction-rpc-only": { code: "SC4025", docsUrl: "https://supacloud.dev/errors/SC4025" },
   "command-transaction-unsupported": { code: "SC4026", docsUrl: "https://supacloud.dev/errors/SC4026" },
+  "command-reconcile-required": { code: "SC4028", docsUrl: "https://supacloud.dev/errors/SC4028" },
   "invalid-route-contract": { code: "SC3020", docsUrl: "https://supacloud.dev/errors/SC3020" },
   "route-contract-required": { code: "SC3021", docsUrl: "https://supacloud.dev/errors/SC3021" },
   "route-contract-unverified": { code: "SC3022", docsUrl: "https://supacloud.dev/errors/SC3022" },
   "route-contract-evidence-required": { code: "SC3023", docsUrl: "https://supacloud.dev/errors/SC3023" },
+  "invalid-effect-contract": { code: "SC3030", docsUrl: "https://supacloud.dev/errors/SC3030" },
+  "invalid-effect-retry": { code: "SC3031", docsUrl: "https://supacloud.dev/errors/SC3031" },
+  "invalid-effect-timeout": { code: "SC3032", docsUrl: "https://supacloud.dev/errors/SC3032" },
+  "invalid-effect-dependencies": { code: "SC3033", docsUrl: "https://supacloud.dev/errors/SC3033" },
+  "invalid-effect-errors": { code: "SC3034", docsUrl: "https://supacloud.dev/errors/SC3034" },
+  "effect-return-type": { code: "SC3035", docsUrl: "https://supacloud.dev/errors/SC3035" },
+  "effect-contract-required": { code: "SC3036", docsUrl: "https://supacloud.dev/errors/SC3036" },
+  "effect-error-mapping-required": { code: "SC3037", docsUrl: "https://supacloud.dev/errors/SC3037" },
+  "effect-dependencies-required": { code: "SC3038", docsUrl: "https://supacloud.dev/errors/SC3038" },
+  "effect-command-retry-forbidden": { code: "SC3039", docsUrl: "https://supacloud.dev/errors/SC3039" },
+  "effect-dependency-type": { code: "SC3040", docsUrl: "https://supacloud.dev/errors/SC3040" },
+  "effect-error-type": { code: "SC3041", docsUrl: "https://supacloud.dev/errors/SC3041" },
+  "effect-error-mapping-type": { code: "SC3042", docsUrl: "https://supacloud.dev/errors/SC3042" },
+  "effect-dependency-mismatch": { code: "SC3043", docsUrl: "https://supacloud.dev/errors/SC3043" },
+  "effect-timeout-required": { code: "SC3044", docsUrl: "https://supacloud.dev/errors/SC3044" },
+  "effect-direct-runtime-execution": { code: "SC3045", docsUrl: "https://supacloud.dev/errors/SC3045" },
+  "effect-direct-throw": { code: "SC3046", docsUrl: "https://supacloud.dev/errors/SC3046" },
+  "effect-promise-return": { code: "SC3047", docsUrl: "https://supacloud.dev/errors/SC3047" },
   "invalid-route-response-map": { code: "SC3024", docsUrl: "https://supacloud.dev/errors/SC3024" },
   "invalid-route-response-selector": { code: "SC3025", docsUrl: "https://supacloud.dev/errors/SC3025" },
   "conflicting-route-response-schema": { code: "SC3026", docsUrl: "https://supacloud.dev/errors/SC3026" },
@@ -899,6 +919,7 @@ export function validateGraph(
           || (command.rpc !== undefined && rpcCaps?.boundary === "database" && (rpcCaps.transaction !== true || command.transaction !== "required"))
           || (command.rpc === undefined && (hostCaps.audit !== true || hostCaps.idempotency !== true
             || hostCaps.transaction !== true || command.transaction !== "required"))
+          || (command.rpc !== undefined && rpcCaps?.boundary === "external" && rpcCaps.reconcile !== true)
         )) {
           error("command-persistence-required",
             `Command ${command.name} requires an explicit persistent adapter, permission, audit and idempotency policy.`,
@@ -910,6 +931,15 @@ export function validateGraph(
             `Command ${command.name} calls an external service; use durable intent and reconciliation, not transaction: 'required'.`,
             module.file, module.line,
             "Use transaction: 'none' with createExternalCommand; recover with read-only reconciliation. Do not claim a database transaction covers a remote request.");
+        }
+        if (rpcCaps?.boundary === "external" && rpcCaps.reconcile !== true) {
+          error(
+            "command-reconcile-required",
+            `Command ${command.name} uses an external adapter without a receipt reconciliation capability.`,
+            module.file,
+            module.line,
+            "Declare reconcile: true only when the adapter can look up the same idempotency key and resolve unknown outcomes without redispatching.",
+          );
         }
         const caps = command.rpc
           ? { permission: hostCaps.permission, audit: rpcCaps?.audit === true,

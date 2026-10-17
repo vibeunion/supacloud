@@ -42,7 +42,7 @@ export async function buildReferenceDeliveryArchive(directory: string, signal: A
       migrations: [
         ...(config.delivery?.build?.migrations ?? []),
         ...(revision === 2 ? [{
-          source: "migrations/005-reference-compatibility.sql", version: "5",
+          source: "migrations/006-reference-compatibility.sql", version: "6",
           name: "reference_compatibility", executor: "project-migration" as const,
         }] : []),
       ],
@@ -61,9 +61,9 @@ export async function buildReferenceDeliveryArchive(directory: string, signal: A
   const manifestPath = join(directory, "delivery.manifest.json");
   const select = async (target: "api" | "jobs"): Promise<ArchivedDelivery> => {
     const archive = await readDeliveryMigrationArchive(manifestPath, target);
-    assert.equal(archive.migrations.length, revision === 2 ? 5 : 4);
+    assert.equal(archive.migrations.length, revision === 2 ? 6 : 5);
     assert.equal(archive.migrations.filter(item => item.executor === "project-migration").length, revision === 2 ? 3 : 2);
-    assert.equal(archive.migrations.filter(item => item.executor === "operator-provisioning").length, 2);
+    assert.equal(archive.migrations.filter(item => item.executor === "operator-provisioning").length, 3);
     return { manifestPath, objectId: archive.objectId };
   };
   return { api: await select("api"), jobs: await select("jobs") };

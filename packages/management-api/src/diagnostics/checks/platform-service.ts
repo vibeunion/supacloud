@@ -6,6 +6,7 @@ import { $ } from "bun";
 import { hashPayload, statusForHash } from "../hash";
 import { registerCheck } from "../../services/diagnostics.registry";
 import type { DiagnosticCheckResult, DiagnosticRepairResult } from "../../services/diagnostics.types";
+import { isRecord } from "../../utils/record";
 
 async function isSystemdUnitInstalled(unit: string): Promise<boolean> {
   try {
@@ -269,7 +270,7 @@ registerCheck({
         WHERE table_schema = 'public'
           AND table_name IN ('organizations', 'projects', 'project_tasks', 'audit_logs', 'platform_settings')
       `;
-      const count = Number((result as any)?.cnt ?? 0);
+      const count = Number(isRecord(result) ? result["cnt"] ?? 0 : 0);
 
       if (count < 5) {
         return {
@@ -314,11 +315,12 @@ registerCheck({
       `;
 
       const inconsistent: string[] = [];
-      for (const p of projects as any[]) {
-        const desired = p.postgrest_desired ?? "running";
-        if (desired !== "running" || p.postgrest_actual !== "running" || p.postgrest_health !== "healthy") {
+      for (const p of projects as unknown[]) {
+        if (!isRecord(p)) throw new TypeError("Invalid project diagnostic SQL row");
+        const desired = p["postgrest_desired"] ?? "running";
+        if (desired !== "running" || p["postgrest_actual"] !== "running" || p["postgrest_health"] !== "healthy") {
           inconsistent.push(
-            `${p.ref}: desired=${p.postgrest_desired ?? "?"} actual=${p.postgrest_actual ?? "?"} health=${p.postgrest_health ?? "?"} err=${p.postgrest_last_error ?? "none"}`,
+            `${p["ref"]}: desired=${p["postgrest_desired"] ?? "?"} actual=${p["postgrest_actual"] ?? "?"} health=${p["postgrest_health"] ?? "?"} err=${p["postgrest_last_error"] ?? "none"}`,
           );
         }
       }
@@ -363,9 +365,10 @@ registerCheck({
 
       const { tenantRuntimeService } = await import("../../services/tenant-runtime.service");
       let repaired = 0;
-      for (const p of projects as any[]) {
+      for (const p of projects as unknown[]) {
+        if (!isRecord(p) || typeof p["ref"] !== "string") throw new TypeError("Invalid project diagnostic SQL row");
         try {
-          await tenantRuntimeService.restartPostgrest(p.ref);
+          await tenantRuntimeService.restartPostgrest(p["ref"]);
           repaired++;
         } catch {
           // best effort

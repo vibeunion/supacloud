@@ -1,5 +1,9 @@
-export const STARTER_ATTACHMENT_WORKER = `import { createWorker, type CompiledModule } from "@supacloud/elysia";
-import type { SupaCloudWorkflowClaim, SupaCloudWorkflowsClient } from "@supacloud/js";
+export const STARTER_ATTACHMENT_WORKER = `import { createWorker, type CompiledModule, type ExecutionObserver } from "@supacloud/elysia";
+import {
+  createSupaCloudWorkflowTransport,
+  type SupaCloudWorkflowClaim,
+  type SupaCloudWorkflowsClient,
+} from "@supacloud/js";
 import { createReviewAttachmentAdapters, type ReviewAttachmentOptions } from "./review-attachments";
 
 export interface ReviewAttachmentWorkerOptions extends ReviewAttachmentOptions {
@@ -8,6 +12,7 @@ export interface ReviewAttachmentWorkerOptions extends ReviewAttachmentOptions {
   workerId: string;
   queueOwnership: "exclusive-review-attachments";
   pollIntervalMs?: number;
+  onExecution?: ExecutionObserver;
 }
 
 export async function createReviewAttachmentWorker(options: ReviewAttachmentWorkerOptions) {
@@ -24,9 +29,6 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
     halted = true;
     failure.reject(new Error("Attachment worker requires recovery"));
   };
-  const attempt = (claim: SupaCloudWorkflowClaim) => ({
-    stepId: claim.stepId, messageId: claim.messageId, attempt: claim.attempt, workerId: claim.workerId,
-  });
   async function ownedClaim(claim: SupaCloudWorkflowClaim) {
     if (claim.workflowName !== "review.verify-attachment" || claim.workflowVersion !== "1"
       || claim.stepKey !== "verify" || claim.maxAttempts !== 3 || claim.workerId !== workerId) {
@@ -37,24 +39,26 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
       throw new Error("Invalid attachment workflow input");
     }
     const bound = await options.database.transaction(tx => tx.query(
-      "SELECT run_id FROM public.starter_attachments WHERE review_id=$1 AND artifact_id=$2 AND run_id=$3",
+      "SELECT a.run_id FROM public.starter_attachments a WHERE a.review_id=$1 AND a.artifact_id=$2 " +
+      "AND COALESCE((SELECT r.run_id FROM public.starter_attachment_retries r " +
+      "WHERE r.review_id=a.review_id ORDER BY r.generation DESC LIMIT 1),a.run_id)=$3",
       [reviewId, artifactId, claim.runId],
     ));
     if (!Array.isArray(bound) || bound.length !== 1) throw new Error("Attachment workflow ownership mismatch");
   }
+  const workflowTransport = createSupaCloudWorkflowTransport({
+    workflows, workerId, visibilityTimeoutSeconds: 120, retryDelaySeconds: 5, acceptClaim: ownedClaim,
+  });
   const worker = createWorker({
     modules: options.modules, deps: { dbClient: store }, workerId, concurrency: 1,
     pollIntervalMs: options.pollIntervalMs ?? 1000,
     onError: fatal,
+    ...(options.onExecution === undefined ? {} : { onExecution: options.onExecution }),
     transport: {
       async claim(signal): Promise<SupaCloudWorkflowClaim | null> {
         if (halted || signal.aborted) return null;
         try {
-          const claim = await workflows.claim({ workerId, visibilityTimeoutSeconds: 120 });
-          if (signal.aborted || halted) return null;
-          if (!claim || claim.status !== "claimed") return null;
-          await ownedClaim(claim);
-          return claim;
+          return await workflowTransport.claim(signal);
         } catch {
           if (!signal.aborted) fatal();
           throw new Error("Attachment workflow claim failed");
@@ -62,9 +66,7 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
       },
       async ack(claim, output) {
         try {
-          if (!output || typeof output !== "object" || Array.isArray(output)) throw new Error("Invalid Job output");
-          // The compiled Job validates output; Workflow SDK validates the receipt.
-          await workflows.complete({ ...attempt(claim), runOutput: { ...output } });
+          await workflowTransport.ack(claim, output);
         } catch {
           fatal();
           throw new Error("Attachment workflow completion is unconfirmed");
@@ -72,16 +74,14 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
       },
       async fail(claim) {
         try {
-          const request: Parameters<typeof workflows.fail>[0] = { ...attempt(claim), errorMessage: "Attachment verification failed" };
-          if (claim.attempt < claim.maxAttempts) await workflows.retry({ ...request, delaySeconds: 5 });
-          else await workflows.fail(request);
+          await workflowTransport.fail(claim, "Attachment verification failed");
         } catch {
           fatal();
           throw new Error("Attachment workflow failure receipt is unconfirmed");
         }
       },
     },
-    mapClaim: claim => ({
+    mapClaim: (claim: SupaCloudWorkflowClaim) => ({
       id: claim.stepId, jobName: claim.workflowName, input: claim.input, attempt: claim.attempt,
       requestContext: { workerId, jobId: claim.stepId, requestId: claim.runId },
     }),
@@ -110,6 +110,7 @@ import { SupaCloudWorkflowsClient } from "@supacloud/js";
 import { createBunCommandDatabase } from "@supacloud/db/bun";
 import type { CompiledModule } from "@supacloud/elysia";
 import { createReviewAttachmentWorker } from "./host/review-attachment-worker";
+import { createReviewWorkerObserver } from "./host/review-worker-observability";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -118,8 +119,8 @@ function required(name: string): string {
 }
 
 function databaseConnection(): SQL.Options {
-  const socket = process.env.DATABASE_SOCKET_PATH;
-  if (socket && process.env.DATABASE_URL) throw new Error("Conflicting database connection settings");
+  const socket = process.env["DATABASE_SOCKET_PATH"];
+  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
   if (socket) {
     return { adapter: "postgres", path: socket, database: required("DATABASE_NAME"), username: required("DATABASE_USER") };
   }
@@ -153,6 +154,7 @@ export async function createDeliveryWorker(modules: CompiledModule[], lifecycle:
       database: createBunCommandDatabase(pool), service, projectId: settings.projectId,
       tenantId: settings.tenantId, modules, workerId: settings.workerId,
       workflows: new SupaCloudWorkflowsClient(service), queueOwnership: "exclusive-review-attachments",
+      onExecution: createReviewWorkerObserver(settings.workerId),
     });
     lifecycle.signal.throwIfAborted();
     return {

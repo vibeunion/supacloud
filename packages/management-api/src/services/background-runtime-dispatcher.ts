@@ -29,7 +29,7 @@ function headersToObject(headers: Headers): Record<string, string | string[]> {
     if (lower === "set-cookie") return;
     out[key] = value;
   });
-  const cookies = (headers as any).getSetCookie?.();
+  const cookies = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
   if (cookies && cookies.length > 0) out["set-cookie"] = cookies;
   return out;
 }

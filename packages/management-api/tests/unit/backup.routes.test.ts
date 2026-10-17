@@ -1,14 +1,16 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { withLogicalBackupMutationTimeoutController } from "../../src/utils/logical-backup-request-timeout";
+import type { BackupInfo } from "../../src/types/backup";
 
-const requireAdminAuth = mock(() => Promise.resolve(null));
-const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
+type AuthResult = { status: number; body: { error: string } } | undefined;
+const requireAdminAuth = mock((): Promise<AuthResult> => Promise.resolve(undefined));
+const requireProjectOrAdminAuth = mock((): Promise<AuthResult> => Promise.resolve(undefined));
 type BackupProject = { ref: string; db_name: string };
 const findByRef = mock((ref: string): Promise<BackupProject | null> => (
   Promise.resolve({ ref, db_name: "canonical_project_database" })
 ));
-const listBackups = mock(() => Promise.resolve([]));
+const listBackups = mock((): Promise<BackupInfo[]> => Promise.resolve([]));
 const createBackup = mock(() => Promise.resolve({ message: "full backup completed" }));
 const logicalBackupIdentity = {
   backup_id: "logical-full_project_a_0123456789abcdef0123456789abcdef",
@@ -21,6 +23,7 @@ const logicalBackupIdentity = {
   sha256: "a".repeat(64),
 };
 const listLogicalBackups = mock(() => Promise.resolve([logicalBackupIdentity]));
+const readLogicalBackup = mock(() => Promise.resolve(logicalBackupIdentity));
 const createLogicalBackup = mock(() => Promise.resolve(logicalBackupIdentity));
 const restoreLogicalBackup = mock(() => Promise.resolve(logicalBackupIdentity));
 const restore = mock(() => Promise.resolve({ message: "PITR restore completed" }));
@@ -51,6 +54,9 @@ const listLogicalBackupsSpy = spyOn(logicalBackupModule, "listLogicalBackups").m
 const createLogicalBackupV2Spy = spyOn(logicalBackupModule, "createLogicalBackup").mockImplementation(
   createLogicalBackup as typeof logicalBackupModule.createLogicalBackup,
 );
+const readLogicalBackupSpy = spyOn(logicalBackupModule, "readLogicalBackup").mockImplementation(
+  readLogicalBackup as typeof logicalBackupModule.readLogicalBackup,
+);
 const restoreLogicalBackupSpy = spyOn(logicalBackupModule, "restoreLogicalBackup").mockImplementation(
   restoreLogicalBackup as typeof logicalBackupModule.restoreLogicalBackup,
 );
@@ -80,9 +86,9 @@ function request(path: string, init: RequestInit = {}) {
 describe("physical backup routes", () => {
   beforeEach(() => {
     requireAdminAuth.mockReset();
-    requireAdminAuth.mockResolvedValue(null);
+    requireAdminAuth.mockResolvedValue(undefined);
     requireProjectOrAdminAuth.mockReset();
-    requireProjectOrAdminAuth.mockResolvedValue(null);
+    requireProjectOrAdminAuth.mockResolvedValue(undefined);
     findByRef.mockReset();
     findByRef.mockImplementation((ref: string) => Promise.resolve({
       ref,
@@ -96,6 +102,8 @@ describe("physical backup routes", () => {
     createLogicalBackup.mockResolvedValue(logicalBackupIdentity);
     listLogicalBackups.mockReset();
     listLogicalBackups.mockResolvedValue([logicalBackupIdentity]);
+    readLogicalBackup.mockReset();
+    readLogicalBackup.mockResolvedValue(logicalBackupIdentity);
     restoreLogicalBackup.mockReset();
     restoreLogicalBackup.mockResolvedValue(logicalBackupIdentity);
     restore.mockReset();
@@ -112,6 +120,7 @@ describe("physical backup routes", () => {
     createBackupSpy.mockRestore();
     listLogicalBackupsSpy.mockRestore();
     createLogicalBackupV2Spy.mockRestore();
+    readLogicalBackupSpy.mockRestore();
     restoreLogicalBackupSpy.mockRestore();
     restoreSpy.mockRestore();
   });
@@ -287,8 +296,56 @@ describe("physical backup routes", () => {
     expect(listLogicalBackups).toHaveBeenCalledTimes(1);
   });
 
+  test("dispatches an explicit stable creation ID and reads only that exact ID", async () => {
+    const backupId = logicalBackupIdentity.backup_id;
+    const creation = await request("/v1/projects/project_a/database/backups/logical", {
+      method: "POST", body: JSON.stringify({ backup_id: backupId }),
+    });
+    expect(creation.status).toBe(200);
+    expect(createLogicalBackup).toHaveBeenCalledWith("project_a", backupId);
+    const observation = await request(`/v1/projects/project_a/database/backups/logical/${backupId}`);
+    expect(observation.status).toBe(200);
+    expect(await observation.json()).toEqual({ backup: logicalBackupIdentity });
+    expect(readLogicalBackup).toHaveBeenCalledWith("project_a", backupId);
+    expect(listLogicalBackups).not.toHaveBeenCalled();
+    expect(restoreLogicalBackup).not.toHaveBeenCalled();
+  });
+
+  test("accepts an omitted creation ID and rejects an invalid ID field before dispatch", async () => {
+    const empty = await request("/v1/projects/project_a/database/backups/logical", {
+      method: "POST", body: JSON.stringify({}),
+    });
+    expect(empty.status).toBe(200);
+    expect(createLogicalBackup).toHaveBeenCalledWith("project_a", undefined);
+    createLogicalBackup.mockClear();
+    const invalid = await request("/v1/projects/project_a/database/backups/logical", {
+      method: "POST", body: JSON.stringify({ backup_id: 42 }),
+    });
+    expect(invalid.status).toBe(422);
+    expect(createLogicalBackup).not.toHaveBeenCalled();
+  });
+
+  test("denies exact backup observation before consulting the backup service", async () => {
+    requireAdminAuth.mockResolvedValueOnce({ status: 403, body: { error: "Forbidden" } } as never);
+    const response = await request(`/v1/projects/project_a/database/backups/logical/${logicalBackupIdentity.backup_id}`);
+    expect(response.status).toBe(403);
+    expect(readLogicalBackup).not.toHaveBeenCalled();
+    expect(createLogicalBackup).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["not_found", 404], ["conflict", 409], ["unavailable", 503],
+  ] as const)("maps exact observation %s without exposing provider details", async (kind, status) => {
+    readLogicalBackup.mockRejectedValueOnce(new logicalBackupModule.LogicalBackupContractError(
+      kind, "Logical backup observation is unavailable", { cause: new Error("password=private") },
+    ));
+    const response = await request(`/v1/projects/project_a/database/backups/logical/${logicalBackupIdentity.backup_id}`);
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ message: "Logical backup observation is unavailable" });
+  });
+
   test("disables the idle timeout for authorized logical mutations", async () => {
-    const timeout = mock(() => undefined);
+    const timeout = mock((_request: Request, _seconds: number) => undefined);
     const createRequest = adminRequest("/v1/projects/project%5Fa/database/backups/logical", {
       method: "POST",
       body: "{}",
@@ -323,7 +380,7 @@ describe("physical backup routes", () => {
   });
 
   test("keeps the idle timeout for unauthorized or unconfirmed logical mutations", async () => {
-    const timeout = mock(() => undefined);
+    const timeout = mock((_request: Request, _seconds: number) => undefined);
     requireAdminAuth.mockResolvedValueOnce({ status: 401, body: { error: "Unauthorized" } } as never);
     const createRequest = adminRequest("/v1/projects/project_a/database/backups/logical", {
       method: "POST",

@@ -25,7 +25,7 @@ export async function resolveInvitationPrincipal(
 ): Promise<InvitationPrincipal> {
   const verification = await verifyProjectJwtPayload(projectRef, bearerToken(request));
   const subject = verification?.payload.sub;
-  if (verification?.payload.role !== "authenticated" || typeof subject !== "string") {
+  if (verification?.payload["role"] !== "authenticated" || typeof subject !== "string") {
     throw new ForbiddenError("Only an authenticated GoTrue user can accept an invitation");
   }
 

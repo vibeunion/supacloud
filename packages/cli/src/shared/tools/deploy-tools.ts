@@ -1,29 +1,38 @@
 import { access, lstat, mkdtemp, opendir, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
-import { zipSync, type Zippable } from "fflate";
+import { Value } from "typebox/value";
+import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
+import { ApplicationIdSchema } from "@supacloud/delivery";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
-import {
-    activateFrontendRelease,
-    listFrontendReleases,
-    uploadFrontendRelease,
-} from "./frontend-release-control";
-import { projectedFunctionList } from "./edge-function-response";
+import { registerTool, type ToolServer } from "../tool-server";
+import { publishFrontendRelease } from "./frontend-release-control";
+import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
+import { readProjectDeploymentStatus, requireProjectDeploymentProtocol } from "./project-deployment";
 
-const FIXED_ZIP_MTIME = new Date("1980-01-01T00:00:00.000Z");
 const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 
 interface DeployConfig {
     defaultTarget?: string;
+    application?: {
+        id: string;
+        environmentId?: string;
+        configurationPath?: string;
+        configurationId?: string;
+        manifestPath?: string;
+    };
     targets?: Record<string, DeployTargetConfig>;
     frontend?: {
         id?: string;
+        name?: string;
         root?: string;
         buildCommand?: string;
         outputDirectory?: string;
+        buildEnv?: string[];
     };
 }
 
@@ -31,9 +40,11 @@ interface DeployTargetConfig {
     type: "frontend" | "edge_function";
     root?: string;
     id?: string;
+    name?: string;
     slug?: string;
     buildCommand?: string;
     outputDirectory?: string;
+    buildEnv?: string[];
     bundleDirectory?: string;
     entrypoint?: string;
     verifyJwt?: boolean;
@@ -52,8 +63,17 @@ interface FrontendDeployment {
 
 interface DeployToolOptions {
     projectRef?: string;
+    environment?: string | null;
     cwd?: string;
-    edgeFunctionDeploy?: (args: Record<string, unknown>) => Promise<ToolResponse>;
+    environmentVariables?: Readonly<Record<string, string>>;
+    application?: {
+        id: string;
+        environmentId: string;
+        configurationPath?: string;
+        configurationId?: string;
+        manifestPath?: string;
+    };
+    applicationRelease?: (args: Record<string, unknown>) => Promise<ToolResponse>;
 }
 
 interface ToolResponse {
@@ -61,15 +81,28 @@ interface ToolResponse {
     isError?: boolean;
 }
 
+const PUBLIC_BUILD_ENV_PREFIXES = ["PUBLIC_", "VITE_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "ASTRO_PUBLIC_"];
+const SENSITIVE_BUILD_ENV = /(?:^|_)(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|AUTHORIZATION|COOKIE|SESSION)(?:_|$)|(?:DATABASE_URL|DATABASE_URI|CONNECTION_STRING|DSN|PRIVATE_KEY)/i;
+
+function isPublicBuildEnv(name: string): boolean {
+    return PUBLIC_BUILD_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+function isProtectedBuildEnv(name: string): boolean {
+    return name.startsWith("SUPACLOUD_")
+        || name === "SUPABASE_SERVICE_ROLE_KEY"
+        || name === "SUPABASE_ACCESS_TOKEN"
+        || name === "MANAGEMENT_API_URL"
+        || name === "MANAGEMENT_API_TOKEN";
+}
+
 export const deployToolSchema = {
     ref: optional(Type.String(), "Project ref (defaults to the linked project)"),
-    target: optional(Type.String(), "Named deploy target from supacloud.json"),
-    id: optional(Type.String(), "Frontend deployment ID (auto-selected when unambiguous)"),
     cwd: optional(Type.String(), "Project directory (default: current directory)"),
-    build_command: optional(Type.String(), "Build command override"),
-    output_dir: optional(Type.String(), "Build output directory override"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
-    dry_run: optional(Type.Boolean(), "Resolve and validate the deployment without building or publishing"),
+    assets_only: optional(Type.Boolean(), "Publish only configured static assets; leave backend Functions, schedules and migrations unchanged"),
+    backend: optional(Type.Boolean(), "Publish the application backend independently; do not build or activate frontend assets"),
+    status: optional(Type.String({ format: "uuid" }), "Read a backend deployment status without publishing"),
     json: optional(Type.Boolean(), "Print only the final JSON result"),
 };
 
@@ -103,17 +136,22 @@ function frontendDeployment(candidate: unknown): FrontendDeployment {
 
 async function readJson(path: string): Promise<unknown> {
     try {
-        return JSON.parse(await readFile(path, "utf8"));
+        return JSON.parse(await readFile(path, "utf8")) as unknown;
     } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
         throw new Error(`Invalid JSON file ${path}: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-export async function findDeployConfigRoot(startDirectory: string): Promise<string> {
+export async function findDeployConfigRoot(startDirectory: string, environmentName?: string): Promise<string> {
     let directory = resolve(startDirectory);
     while (true) {
-        if (await pathExists(join(directory, "supacloud.json"))) return directory;
+        const environmentFile = environmentName ? `.env.supacloud.${environmentName}` : null;
+        if (await pathExists(join(directory, "supacloud.json"))
+            || await pathExists(join(directory, "supacloud.config.ts"))
+            || (environmentFile !== null && await pathExists(join(directory, environmentFile)))) {
+            return directory;
+        }
         const parent = dirname(directory);
         if (parent === directory) return resolve(startDirectory);
         directory = parent;
@@ -134,6 +172,26 @@ function optionalBoolean(value: unknown, field: string): boolean | undefined {
     return value;
 }
 
+function optionalStringArray(value: unknown, field: string): string[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+        throw new Error(`supacloud.json ${field} must be an array of non-empty strings`);
+    }
+    return value.map((item) => item.trim()).map((name) => {
+        if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) {
+            throw new Error(`supacloud.json ${field} must contain uppercase environment variable names`);
+        }
+        const isPublic = isPublicBuildEnv(name);
+        if (SENSITIVE_BUILD_ENV.test(name) && !isPublic) {
+            throw new Error(`supacloud.json ${field} cannot include sensitive variable '${name}'; use runtime secrets instead`);
+        }
+        if (isProtectedBuildEnv(name)) {
+            throw new Error(`supacloud.json ${field} cannot include platform credential '${name}'`);
+        }
+        return name;
+    });
+}
+
 function deployTargetConfig(candidate: unknown, name: string): DeployTargetConfig {
     const value = record(candidate);
     if (!value || (value.type !== "frontend" && value.type !== "edge_function")) {
@@ -147,9 +205,11 @@ function deployTargetConfig(candidate: unknown, name: string): DeployTargetConfi
         type: value.type,
         root: optionalText(value.root, `targets.${name}.root`),
         id: optionalText(value.id, `targets.${name}.id`),
+        name: optionalText(value.name, `targets.${name}.name`),
         slug: optionalText(value.slug, `targets.${name}.slug`),
         buildCommand: optionalText(value.buildCommand, `targets.${name}.buildCommand`),
         outputDirectory: optionalText(value.outputDirectory, `targets.${name}.outputDirectory`),
+        buildEnv: optionalStringArray(value.buildEnv, `targets.${name}.buildEnv`),
         bundleDirectory: optionalText(value.bundleDirectory, `targets.${name}.bundleDirectory`),
         entrypoint: optionalText(value.entrypoint, `targets.${name}.entrypoint`),
         verifyJwt: optionalBoolean(value.verifyJwt, `targets.${name}.verifyJwt`),
@@ -164,13 +224,38 @@ async function readDeployConfig(configRoot: string): Promise<DeployConfig> {
     if (candidate === null) return {};
     const config = record(candidate);
     const frontend = record(config?.frontend);
+    const application = record(config?.application);
     const targetValues = record(config?.targets);
     if (!config || (config.frontend !== undefined && !frontend)
+        || (config.application !== undefined && !application)
         || (config.targets !== undefined && !targetValues)) {
-        throw new Error("supacloud.json must contain object-valued 'frontend' or 'targets' configuration");
+        throw new Error("supacloud.json must contain object-valued 'application', 'frontend' or 'targets' configuration");
+    }
+    let parsedApplication: DeployConfig["application"];
+    if (application) {
+        const id = optionalText(application.id, "application.id");
+        const environmentId = optionalText(application.environmentId, "application.environmentId");
+        if (!id || !Value.Check(ApplicationIdSchema, id)
+            || (environmentId !== undefined && !Value.Check(ApplicationIdSchema, environmentId))) {
+            throw new Error("supacloud.json requires a valid application.id and optional application.environmentId");
+        }
+        const configurationPath = optionalText(application.configurationPath, "application.configurationPath");
+        const configurationId = optionalText(application.configurationId, "application.configurationId");
+        if (configurationPath && configurationId) {
+            throw new Error("supacloud.json application must set only one of application.configurationPath or application.configurationId");
+        }
+        const manifestPath = optionalText(application.manifestPath, "application.manifestPath");
+        parsedApplication = {
+            id,
+            ...(environmentId ? { environmentId } : {}),
+            ...(configurationPath ? { configurationPath } : {}),
+            ...(configurationId ? { configurationId } : {}),
+            ...(manifestPath ? { manifestPath } : {}),
+        };
     }
     return {
         defaultTarget: optionalText(config.defaultTarget, "defaultTarget"),
+        ...(parsedApplication === undefined ? {} : { application: parsedApplication }),
         targets: targetValues
             ? Object.fromEntries(Object.entries(targetValues).map(([name, value]) => (
                 [name, deployTargetConfig(value, name)]
@@ -178,9 +263,11 @@ async function readDeployConfig(configRoot: string): Promise<DeployConfig> {
             : undefined,
         frontend: frontend ? {
             id: optionalText(frontend.id, "frontend.id"),
+            name: optionalText(frontend.name, "frontend.name"),
             root: optionalText(frontend.root, "frontend.root"),
             buildCommand: optionalText(frontend.buildCommand, "frontend.buildCommand"),
             outputDirectory: optionalText(frontend.outputDirectory, "frontend.outputDirectory"),
+            buildEnv: optionalStringArray(frontend.buildEnv, "frontend.buildEnv"),
         } : undefined,
     };
 }
@@ -192,6 +279,22 @@ async function packageName(projectDirectory: string): Promise<string | null> {
 
 async function pathExists(path: string): Promise<boolean> {
     return access(path).then(() => true, () => false);
+}
+
+async function hasProjectReleaseManifest(root: string): Promise<boolean> {
+    if (await pathExists(join(root, "deploy-manifest.json"))) return true;
+    const directory = await opendir(join(root, "supacloud")).catch((error: unknown) => {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+        throw error;
+    });
+    if (!directory) return false;
+    let entries = 0;
+    for await (const entry of directory) {
+        if (++entries > 128) throw new Error("Too many SupaCloud project roots to resolve a deployment");
+        if ((entry.isDirectory() || entry.isSymbolicLink())
+            && await pathExists(join(root, "supacloud", entry.name, "deploy-manifest.json"))) return true;
+    }
+    return false;
 }
 
 async function defaultBuildCommand(projectDirectory: string, configRoot: string): Promise<string> {
@@ -226,11 +329,20 @@ function selectDeployment(
     deployments: FrontendDeployment[],
     requestedId: string | undefined,
     projectName: string | null,
+    requestedName?: string,
 ): FrontendDeployment {
     if (requestedId) {
         const selected = deployments.find((deployment) => deployment.id === requestedId);
         if (!selected) throw new Error(`Frontend deployment '${requestedId}' was not found`);
+        if (requestedName && selected.name !== requestedName) {
+            throw new Error(`Frontend deployment '${requestedId}' does not match name '${requestedName}'`);
+        }
         return selected;
+    }
+    if (requestedName) {
+        const matches = deployments.filter(deployment => deployment.name === requestedName);
+        if (matches.length !== 1) throw new Error(`Expected exactly one frontend deployment named '${requestedName}'`);
+        return matches[0]!;
     }
     if (deployments.length === 1) return deployments[0];
     if (projectName) {
@@ -251,6 +363,33 @@ interface SelectedTarget {
     root: string;
 }
 
+function selectFrontendTarget(configRoot: string, config: DeployConfig): SelectedTarget | null {
+    if (config.targets === undefined && config.frontend === undefined) return null;
+    const targets: Array<[string, DeployTargetConfig]> = config.targets
+        ? Object.entries(config.targets).filter(([, target]) => target.type === "frontend")
+        : [["frontend", {
+            type: "frontend" as const,
+            root: config.frontend?.root,
+            id: config.frontend?.id,
+            name: config.frontend?.name,
+            buildCommand: config.frontend?.buildCommand,
+            outputDirectory: config.frontend?.outputDirectory,
+            buildEnv: config.frontend?.buildEnv,
+        }]];
+    if (targets.length === 0) return null;
+    if (config.defaultTarget) {
+        const selected = targets.find(([name]) => name === config.defaultTarget);
+        if (selected) return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
+    }
+    const namedWeb = targets.find(([name]) => name === "web");
+    if (namedWeb) return { name: namedWeb[0], config: namedWeb[1], root: targetRoot(configRoot, namedWeb[1], namedWeb[0]) };
+    if (targets.length === 1) {
+        const selected = targets[0]!;
+        return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
+    }
+    throw new Error(`Multiple frontend deploy targets found (${targets.map(([name]) => name).sort().join(", ")}). Set defaultTarget to the Web target`);
+}
+
 function targetRoot(configRoot: string, target: DeployTargetConfig, name: string): string {
     const root = resolve(configRoot, target.root || (name === "frontend" ? "." : name));
     const prefix = `${resolve(configRoot)}${sep}`;
@@ -258,49 +397,6 @@ function targetRoot(configRoot: string, target: DeployTargetConfig, name: string
         throw new Error(`Deploy target '${name}' root must stay inside the repository root`);
     }
     return root;
-}
-
-function selectTarget(
-    configRoot: string,
-    invocationDirectory: string,
-    config: DeployConfig,
-    requestedName?: string,
-): SelectedTarget {
-    const targets = config.targets
-        ? Object.entries(config.targets)
-        : [["frontend", {
-            type: "frontend" as const,
-            root: config.frontend?.root,
-            id: config.frontend?.id,
-            buildCommand: config.frontend?.buildCommand,
-            outputDirectory: config.frontend?.outputDirectory,
-        }]] as Array<[string, DeployTargetConfig]>;
-    if (targets.length === 0) throw new Error("supacloud.json defines no deploy targets");
-
-    if (requestedName) {
-        const selected = targets.find(([name]) => name === requestedName);
-        if (!selected) throw new Error(`Deploy target '${requestedName}' was not found in supacloud.json`);
-        return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
-    }
-    const containing = targets
-        .map(([name, target]) => ({ name, target, root: targetRoot(configRoot, target, name) }))
-        .filter((candidate) => invocationDirectory === candidate.root
-            || invocationDirectory.startsWith(`${candidate.root}${sep}`))
-        .sort((left, right) => right.root.length - left.root.length);
-    if (containing.length === 1 || (containing.length > 1 && containing[0].root !== containing[1].root)) {
-        const selected = containing[0];
-        return { name: selected.name, config: selected.target, root: selected.root };
-    }
-    if (config.defaultTarget) {
-        const selected = targets.find(([name]) => name === config.defaultTarget);
-        if (!selected) throw new Error(`supacloud.json defaultTarget '${config.defaultTarget}' was not found`);
-        return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
-    }
-    if (targets.length === 1) {
-        const selected = targets[0];
-        return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
-    }
-    throw new Error(`Multiple deploy targets found (${targets.map(([name]) => name).sort().join(", ")}). Pass --target`);
 }
 
 function defaultOutputDirectory(framework: string): string {
@@ -323,19 +419,59 @@ function resolveInsideProject(projectDirectory: string, candidate: string, allow
     return resolved;
 }
 
-async function runBuild(command: string, cwd: string): Promise<void> {
-    const child = Bun.spawn(["sh", "-c", command], {
-        cwd,
-        env: process.env,
-        stdio: ["inherit", "inherit", "inherit"],
-    });
-    const exitCode = await child.exited;
-    if (exitCode !== 0) {
-        throw new Error(`Build command failed (exit ${exitCode ?? "unknown"}): ${command}`);
+export function createBuildEnvironment(
+    names: string[] | undefined,
+    environmentVariables: Readonly<Record<string, string>> | undefined,
+): { env: NodeJS.ProcessEnv; names: string[]; missing: string[] } {
+    const values = environmentVariables ?? process.env;
+    const selectedNames = [...new Set(names ?? Object.keys(values).filter(isPublicBuildEnv))].sort();
+    const selectedNameSet = new Set(selectedNames);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => (
+        !isProtectedBuildEnv(name)
+        && (!isPublicBuildEnv(name) || selectedNameSet.has(name))
+        && (!SENSITIVE_BUILD_ENV.test(name) || isPublicBuildEnv(name))
+    ))) as NodeJS.ProcessEnv;
+    const missing = selectedNames.filter((name) => !values[name]?.trim());
+    for (const name of selectedNames) {
+        const value = values[name];
+        if (value !== undefined) env[name] = value;
+    }
+    return { env, names: selectedNames, missing };
+}
+
+function assertBuildEnvironment(
+    build: ReturnType<typeof createBuildEnvironment>,
+    skipBuild: boolean,
+): void {
+    if (!skipBuild && build.missing.length > 0) {
+        throw new Error(`Missing build environment variables: ${build.missing.join(", ")}`);
     }
 }
 
-async function collectArchiveFiles(root: string): Promise<{ files: Zippable; bytes: number; count: number }> {
+async function runBuild(
+    command: string,
+    cwd: string,
+    environment: NodeJS.ProcessEnv,
+    json: boolean,
+): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn("sh", ["-c", command], {
+            cwd,
+            env: environment,
+            stdio: ["inherit", json ? 2 : "inherit", "inherit"],
+        });
+        child.once("error", reject);
+        child.once("close", (exitCode) => {
+            if (exitCode === 0) {
+                resolve();
+            } else {
+                reject(new Error(`Build command failed (exit ${exitCode ?? "unknown"}): ${command}`));
+            }
+        });
+    });
+}
+
+async function collectArchiveFiles(root: string): Promise<{ files: Map<string, Uint8Array>; bytes: number; count: number; treeSha256: string }> {
     const rootStat = await lstat(root).catch(() => null);
     if (!rootStat?.isDirectory() || rootStat.isSymbolicLink()) {
         throw new Error(`Frontend output directory does not exist or is not a regular directory: ${root}`);
@@ -358,34 +494,55 @@ async function collectArchiveFiles(root: string): Promise<{ files: Zippable; byt
     if (paths.length === 0) throw new Error(`Frontend output directory is empty: ${root}`);
 
     let bytes: number = 0;
-    const files: Zippable = {};
+    const files = new Map<string, Uint8Array>();
+    const digests: Array<{ path: string; size: number; sha256: string }> = [];
     for (const path of paths) {
         const data = new Uint8Array(await readFile(path));
         bytes += data.byteLength;
         if (bytes > MAX_SOURCE_BYTES) throw new Error(`Frontend output exceeds ${MAX_SOURCE_BYTES} bytes`);
         const archivePath = relative(root, path).split(sep).join("/");
-        files[archivePath] = [data, { mtime: FIXED_ZIP_MTIME }];
+        files.set(archivePath, data);
+        digests.push({ path: archivePath, size: data.byteLength, sha256: createHash("sha256").update(data).digest("hex") });
     }
-    return { files, bytes, count: paths.length };
+    const tree = createHash("sha256");
+    for (const file of digests.sort((left, right) => left.path.localeCompare(right.path))) {
+        const pathBytes = Buffer.from(file.path, "utf8");
+        const frame = Buffer.alloc(12);
+        frame.writeUInt32BE(pathBytes.byteLength, 0);
+        frame.writeBigUInt64BE(BigInt(file.size), 4);
+        tree.update(frame).update(pathBytes).update(Buffer.from(file.sha256, "hex"));
+    }
+    return { files, bytes, count: paths.length, treeSha256: tree.digest("hex") };
 }
 
 export async function createFrontendArchive(outputDirectory: string): Promise<{
     archivePath: string;
     sha256: string;
+    treeSha256: string;
+    archiveBytes: number;
     sourceBytes: number;
     fileCount: number;
     cleanup(): Promise<void>;
 }> {
     const collected = await collectArchiveFiles(outputDirectory);
+    return createCollectedFrontendArchive(outputDirectory, collected);
+}
+
+async function createCollectedFrontendArchive(
+    outputDirectory: string,
+    collected: Awaited<ReturnType<typeof collectArchiveFiles>>,
+) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "supacloud-deploy-"));
-    const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.zip`);
+    const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.tar.zst`);
     try {
-        const archiveBytes = zipSync(collected.files, { level: 6, mtime: FIXED_ZIP_MTIME });
+        const archiveBytes = await createFrontendTarZstd(collected.files);
         await writeFile(archivePath, archiveBytes);
         const sha256 = createHash("sha256").update(archiveBytes).digest("hex");
         return {
             archivePath,
             sha256,
+            treeSha256: collected.treeSha256,
+            archiveBytes: archiveBytes.byteLength,
             sourceBytes: collected.bytes,
             fileCount: collected.count,
             cleanup: () => rm(temporaryDirectory, { recursive: true, force: true }),
@@ -396,224 +553,132 @@ export async function createFrontendArchive(outputDirectory: string): Promise<{
     }
 }
 
-function payload(response: ToolResponse): Record<string, unknown> {
-    if (response.isError) throw new Error(response.content[0]?.text || "Deployment operation failed");
-    const text = response.content.find((chunk) => chunk.type === "text")?.text;
-    const parsed = text ? record(JSON.parse(text)) : null;
-    if (!parsed) throw new Error("Deployment operation returned an invalid response");
-    return parsed;
-}
+async function publishConfiguredFrontend(
+    http: HttpTransport,
+    projectRef: string,
+    configRoot: string,
+    skipBuild: boolean,
+    json: boolean,
+    environmentVariables?: Readonly<Record<string, string>>,
+): Promise<ToolResponse | null> {
+    const target = selectFrontendTarget(configRoot, await readDeployConfig(configRoot));
+    if (!target) return null;
+    const projectDirectory = target.root;
+    const targetState = await lstat(projectDirectory).catch(() => null);
+    if (!targetState?.isDirectory() || targetState.isSymbolicLink()) {
+        throw new Error(`Deploy target '${target.name}' root is not a regular directory: ${projectDirectory}`);
+    }
+    const requestedId = target.config.id;
+    const listResponse = await http.get(`/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments`);
+    if (!listResponse.ok) throw new Error(`Failed to list frontend deployments (HTTP ${listResponse.status})`);
+    const selected = selectDeployment(
+        deploymentList(listResponse.data), requestedId, await packageName(projectDirectory), target.config.name,
+    );
+    const configuredBuildCommand = String(target.config.buildCommand || selected.buildCommand || "").trim();
+    const buildCommand = configuredBuildCommand || (skipBuild ? "" : await defaultBuildCommand(projectDirectory, configRoot));
+    const configuredOutput = String(target.config.outputDirectory || "").trim();
+    const remoteOutput = selected.outputDirectory && selected.outputDirectory !== "." ? selected.outputDirectory : "";
+    const outputDirectory = resolveInsideProject(
+        projectDirectory,
+        configuredOutput || remoteOutput || defaultOutputDirectory(selected.framework),
+    );
+    const build = createBuildEnvironment(target.config.buildEnv, environmentVariables);
+    assertBuildEnvironment(build, skipBuild);
+    if (!skipBuild) {
+        await runBuild(buildCommand, projectDirectory, build.env, json);
+    }
 
-function phaseReporter(json: boolean | undefined) {
-    const started = performance.now();
-    return (phase: string, detail: string) => {
-        if (!json) console.error(`  ${phase.padEnd(10)} ${detail}`);
-        return Math.round(performance.now() - started);
-    };
-}
-
-function deployResponse(result: Record<string, unknown>, json: boolean | undefined): ToolResponse {
-    if (json) return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    const lines = [
-        result.unchanged === true ? "Already up to date." : `Deployed ${String(result.target || result.deployment_id || result.slug)}.`,
-        result.url ? `URL: ${String(result.url)}` : null,
-        result.release_id ? `Release: ${String(result.release_id)}` : null,
-        result.active_version ? `Active version: ${String(result.active_version)}` : null,
-        result.file_count ? `Files: ${String(result.file_count)}` : null,
-        `Duration: ${(Number(result.duration_ms) / 1000).toFixed(1)}s`,
-    ].filter((line): line is string => Boolean(line));
-    return { content: [{ type: "text", text: lines.join("\n") }] };
+    const collected = await collectArchiveFiles(outputDirectory);
+    return publishFrontendRelease(
+        http, projectRef, selected.id,
+        () => createCollectedFrontendArchive(outputDirectory, collected), collected.treeSha256,
+    );
 }
 
 export function registerDeployTools(
-    server: { tool: (...args: any[]) => void },
+    server: ToolServer,
     http: HttpTransport,
     options: DeployToolOptions = {},
 ): void {
-    server.tool(
+    registerTool(server,
         "deploy",
-        "Build and publish the linked frontend with one command",
+        "Build and publish the linked project with one command",
         deployToolSchema,
-        async (args: Record<string, unknown>) => {
+        async (args) => {
             const invocationDirectory = resolve(String(args.cwd || options.cwd || process.cwd()));
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");
-            const configRoot = await findDeployConfigRoot(invocationDirectory);
+            if (args.assets_only === true && args.backend === true) throw new Error("Choose either frontend assets or backend deployment");
+            if (typeof args.status === "string") {
+                if (args.assets_only === true || args.backend === true) throw new Error("Status cannot be combined with publishing options");
+                const environmentId = options.environment?.trim() || options.application?.environmentId?.trim();
+                if (!environmentId) throw new Error("Deployment status requires SUPACLOUD_ENV");
+                return readProjectDeploymentStatus(http, projectRef, environmentId, args.status);
+            }
+            const configRoot = await findDeployConfigRoot(invocationDirectory, options.environment ?? undefined);
+
             const config = await readDeployConfig(configRoot);
-            const target = selectTarget(configRoot, invocationDirectory, config, String(args.target || "").trim() || undefined);
-            const projectDirectory = target.root;
-            const targetState = await lstat(projectDirectory).catch(() => null);
-            if (!targetState?.isDirectory() || targetState.isSymbolicLink()) {
-                throw new Error(`Deploy target '${target.name}' root is not a regular directory: ${projectDirectory}`);
-            }
-            const requestedId = String(args.id || target.config.id || "").trim() || undefined;
-            const report = phaseReporter(args.json === true);
-            report("inspect", `${target.name} (${projectRef})`);
-
-            if (target.config.type === "edge_function") {
-                if (!options.edgeFunctionDeploy) throw new Error("Edge Function deploy support is unavailable in this CLI context");
-                const slug = target.config.slug || requestedId || target.name;
-                const functionListResponse = await options.edgeFunctionDeploy({
-                    action: "list",
-                    ref: projectRef,
-                });
-                if (functionListResponse.isError) {
-                    throw new Error(`Unable to read the current identity for Edge Function '${slug}'`);
+            const application = options.application?.id
+                ? options.application
+                : config.application ? {
+                    ...config.application, environmentId: options.environment || config.application.environmentId,
+                } : undefined;
+            const legacyManifest = await hasProjectReleaseManifest(configRoot);
+            const assetsOnly = args.assets_only === true
+                || (args.backend !== true && selectFrontendTarget(configRoot, config) !== null);
+            if (assetsOnly) {
+                if (!selectFrontendTarget(configRoot, config)) {
+                    throw new Error("Static asset deployment requires a frontend configuration in supacloud.json");
                 }
-                const functionListText = functionListResponse.content.find((chunk) => chunk.type === "text")?.text;
-                if (!functionListText) throw new Error(`Unable to read the current identity for Edge Function '${slug}'`);
-                const functions = projectedFunctionList(JSON.parse(functionListText));
-                if (!functions) throw new Error(`Invalid current identity for Edge Function '${slug}'`);
-                const current = functions?.find((candidate) => candidate.slug === slug);
-                const activeVersion = current && typeof current.version === "number" ? String(current.version) : "absent";
-                const activationId = current && typeof current.activation_id === "string" ? current.activation_id : "legacy";
-                if (!activeVersion || !activationId) throw new Error(`Edge Function '${slug}' has an invalid active identity`);
-                const buildCommand = String(args.build_command || target.config.buildCommand || "").trim()
-                    || (args.skip_build === true ? "" : await defaultBuildCommand(projectDirectory, configRoot));
-                const bundleDirectory = resolveInsideProject(
-                    projectDirectory,
-                    String(args.output_dir || target.config.bundleDirectory || target.config.outputDirectory || "dist"),
-                    true,
+                const environmentId = options.environment?.trim() || application?.environmentId?.trim();
+                if (!environmentId || !Value.Check(ApplicationIdSchema, environmentId)) {
+                    throw new Error("Static asset deployment requires SUPACLOUD_ENV");
+                }
+                await requireProjectDeploymentProtocol(http, projectRef, environmentId);
+                const result = await publishConfiguredFrontend(
+                    http, projectRef, configRoot,
+                    args.skip_build === true, args.json === true, options.environmentVariables,
                 );
-                if (args.dry_run === true) {
-                    return { content: [{ type: "text" as const, text: JSON.stringify({
-                        ok: true,
-                        dry_run: true,
-                        type: target.config.type,
-                        target: target.name,
-                        project_ref: projectRef,
-                        slug,
-                        build_command: args.skip_build === true ? null : buildCommand,
-                        bundle_directory: bundleDirectory,
-                        expected_active_version: activeVersion,
-                        expected_activation_id: activationId,
-                    }, null, 2) }] };
+                if (!result) throw new Error("Static asset deployment did not produce a receipt");
+                return result;
+            }
+            if (legacyManifest) {
+                throw new Error(`${DEPLOYMENT_UPGRADE} Replace deploy-manifest.json with the current application delivery configuration; no remote mutation was performed.`);
+            }
+            if (application?.id) {
+                if (Object.values(config.targets ?? {}).some(target => target.type === "edge_function")) {
+                    throw new Error("PROJECT_DEPLOYMENT_UNSUPPORTED: Application deployment cannot yet include declared Edge Function targets. No partial deployment was performed.");
                 }
-                if (args.skip_build !== true) {
-                    report("build", buildCommand);
-                    await runBuild(buildCommand, projectDirectory);
-                } else {
-                    report("build", "skipped");
+                if (!options.applicationRelease) {
+                    throw new Error("Application release support is unavailable in this CLI context");
                 }
-                report("deploy", `edge function ${slug}`);
-                const deployed = await options.edgeFunctionDeploy({
-                    action: "deploy_bundle",
+                const environmentId = application.environmentId?.trim();
+                if (!environmentId || !Value.Check(ApplicationIdSchema, environmentId)
+                    || !Value.Check(ApplicationIdSchema, application.id)) {
+                    throw new Error("Application profile requires SUPACLOUD_APPLICATION_ENVIRONMENT_ID or SUPACLOUD_ENV");
+                }
+                const configurationPath = application.configurationPath?.trim();
+                const configurationId = application.configurationId?.trim();
+                if (configurationPath && configurationId) {
+                    throw new Error("Application profile must set only one of SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
+                }
+                await requireProjectDeploymentProtocol(http, projectRef, environmentId);
+                const result = await options.applicationRelease({
+                    action: "release",
                     ref: projectRef,
-                    slug,
-                    "bundle-dir": bundleDirectory,
-                    entrypoint: target.config.entrypoint || "index.ts",
-                    minify: target.config.minify,
-                    verify_jwt: target.config.verifyJwt,
-                    framework: target.config.framework,
-                    "expected-active-version": activeVersion,
-                    "expected-activation-id": activationId,
+                    id: application.id,
+                    environment_id: environmentId,
+                    root: configRoot,
+                    ...(configurationPath ? { configuration_path: configurationPath } : {}),
+                    ...(configurationId ? { configuration_id: configurationId } : {}),
+                    ...(application.manifestPath ? { manifest_path: application.manifestPath } : {}),
+                    ...(args.skip_build === true ? { skip_build: true } : {}),
+                    ...(args.json === true ? { format: "json", json: true } : {}),
                 });
-                if (deployed.isError) return deployed;
-                const deployedText = deployed.content.find((chunk) => chunk.type === "text")?.text;
-                const deployedPayload = deployedText ? record(JSON.parse(deployedText)) : null;
-                const durationMs = report("done", slug);
-                return deployResponse({
-                    ok: true,
-                    unchanged: false,
-                    type: target.config.type,
-                    target: target.name,
-                    project_ref: projectRef,
-                    slug,
-                    active_version: deployedPayload?.active_version,
-                    activation_id: deployedPayload?.activation_id,
-                    duration_ms: durationMs,
-                }, args.json === true);
+                return result;
             }
 
-            const listResponse = await http.get(`/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments`);
-            if (!listResponse.ok) throw new Error(`Failed to list frontend deployments (HTTP ${listResponse.status})`);
-            const selected = selectDeployment(deploymentList(listResponse.data), requestedId, await packageName(projectDirectory));
-            const configuredBuildCommand = String(args.build_command || target.config.buildCommand || selected.buildCommand || "").trim();
-            const buildCommand = configuredBuildCommand
-                || (args.skip_build === true ? "" : await defaultBuildCommand(projectDirectory, configRoot));
-            const configuredOutput = String(args.output_dir || target.config.outputDirectory || "").trim();
-            const remoteOutput = selected.outputDirectory && selected.outputDirectory !== "." ? selected.outputDirectory : "";
-            const outputDirectory = resolveInsideProject(
-                projectDirectory,
-                configuredOutput || remoteOutput || defaultOutputDirectory(selected.framework),
-            );
-
-            if (args.dry_run === true) {
-                return { content: [{ type: "text" as const, text: JSON.stringify({
-                    ok: true,
-                    dry_run: true,
-                    project_ref: projectRef,
-                    deployment_id: selected.id,
-                    build_command: args.skip_build === true ? null : buildCommand,
-                    output_directory: outputDirectory,
-                }, null, 2) }] };
-            }
-
-            if (args.skip_build !== true) {
-                report("build", buildCommand);
-                await runBuild(buildCommand, projectDirectory);
-            } else {
-                report("build", "skipped");
-            }
-
-            report("package", relative(projectDirectory, outputDirectory) || ".");
-            const archive = await createFrontendArchive(outputDirectory);
-            try {
-                const inventory = payload(await listFrontendReleases(http, projectRef, selected.id, undefined, 100));
-                const activeReleaseId = typeof inventory.active_release_id === "string" ? inventory.active_release_id : null;
-                const activeActivationId = typeof inventory.active_activation_id === "string" ? inventory.active_activation_id : null;
-
-                if (archive.sha256 === activeReleaseId) {
-                    const durationMs = report("done", "already current");
-                    return deployResponse({
-                        ok: true,
-                        unchanged: true,
-                        project_ref: projectRef,
-                        deployment_id: selected.id,
-                        release_id: archive.sha256,
-                        url: selected.deploymentUrl,
-                        file_count: archive.fileCount,
-                        source_bytes: archive.sourceBytes,
-                        duration_ms: durationMs,
-                    }, args.json === true);
-                }
-
-                report("upload", `${archive.fileCount} files`);
-                const uploaded = payload(await uploadFrontendRelease(http, projectRef, selected.id, archive.archivePath));
-                const release = record(uploaded.release);
-                const releaseId = requiredString(release?.release_id, "release.release_id");
-                if (releaseId !== archive.sha256) throw new Error("Uploaded release identity does not match the local archive");
-
-                report("activate", releaseId.slice(0, 12));
-                const mutationId = crypto.randomUUID();
-                const activated = payload(await activateFrontendRelease(http, {
-                    projectRef,
-                    deploymentId: selected.id,
-                    releaseId,
-                    expectedActiveReleaseId: activeReleaseId || "absent",
-                    expectedActivationId: activeActivationId || "absent",
-                    mutationId,
-                }));
-                const finalResponse = await http.get(
-                    `/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments/${encodeURIComponent(selected.id)}`,
-                );
-                const finalDeployment = finalResponse.ok ? frontendDeployment(finalResponse.data) : selected;
-                const durationMs = report("done", finalDeployment.deploymentUrl || selected.id);
-                return deployResponse({
-                    ok: true,
-                    unchanged: false,
-                    project_ref: projectRef,
-                    deployment_id: selected.id,
-                    release_id: activated.active_release_id,
-                    activation_id: activated.activation_id,
-                    url: finalDeployment.deploymentUrl,
-                    file_count: archive.fileCount,
-                    source_bytes: archive.sourceBytes,
-                    duration_ms: durationMs,
-                }, args.json === true);
-            } finally {
-                await archive.cleanup();
-            }
+            throw new Error(DEPLOYMENT_UPGRADE);
         },
     );
 }

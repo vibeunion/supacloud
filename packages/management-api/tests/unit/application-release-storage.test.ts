@@ -114,3 +114,23 @@ test("repeat import detects stored corruption without replacing the existing rel
   await expect(storage.importRelease(input)).rejects.toThrow();
   expect(await readFile(entry, "utf8")).toBe("corrupt");
 });
+
+test("materializes a verified release into a branch-scoped immutable namespace", async () => {
+  const input = await fixture();
+  const storage = new ApplicationReleaseStorage(join(root, "store"));
+  const source = await storage.importRelease(input);
+  const branch = await storage.materializeRelease(
+    input.projectRef, input.applicationId, source.release_id, "pvbranch123",
+  );
+  expect(branch).toMatchObject({
+    project_ref: "pvbranch123",
+    application_id: input.applicationId,
+    manifest_sha256: source.manifest_sha256,
+  });
+  expect(branch.release_id).not.toBe(source.release_id);
+  expect(await storage.readRelease("pvbranch123", input.applicationId, branch.release_id)).toEqual(branch);
+  const materializedAgain = await storage.materializeRelease(
+    input.projectRef, input.applicationId, source.release_id, "pvbranch123",
+  );
+  expect(materializedAgain).toEqual(branch);
+});

@@ -14,6 +14,7 @@ import {
   type StudioSessionService,
 } from "../services/studio-session.service";
 import type { CollaboratorCapability } from "../services/project-collaborator.service";
+import type { TrustedPrincipal } from "../services/bff-proof.service";
 import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
 import { isAppError } from "../utils/errors";
 import { resolveTaskOutputInvoker } from "../utils/task-output";
@@ -81,14 +82,17 @@ export async function verifyProjectJwt(
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
+    const headerPart = parts[0];
+    const payloadPart = parts[1];
+    if (headerPart === undefined || payloadPart === undefined) return null;
 
-    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof header.alg !== "string") return null;
+    const header = JSON.parse(Buffer.from(headerPart, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof header["alg"] !== "string") return null;
 
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof payload.role !== "string" || !payload.role) return null;
+    const payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof payload["role"] !== "string" || !payload["role"]) return null;
 
-    if (typeof payload.exp === "number" && payload.exp < Date.now() / 1000) {
+    if (typeof payload["exp"] === "number" && payload["exp"] < Date.now() / 1000) {
       return null;
     }
 
@@ -98,10 +102,11 @@ export async function verifyProjectJwt(
     for (const ref of candidateRefs) {
       const verification = await verifyProjectJwtPayload(ref, token);
       if (verification) {
+        const sub = typeof verification.payload["sub"] === "string" ? verification.payload["sub"] : undefined;
         return {
-          role: String(verification.payload.role),
+          role: String(verification.payload["role"]),
           ref,
-          sub: typeof verification.payload.sub === "string" ? verification.payload.sub : undefined,
+          ...(sub === undefined ? {} : { sub }),
         };
       }
     }
@@ -158,6 +163,12 @@ const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
     manage: "tenant.config.manage",
   },
   { prefixes: ["/database/migrations"], read: "database.migrations.read", manage: "database.migrations.manage" },
+  {
+    prefixes: [],
+    pattern: /^\/environments\/[A-Za-z0-9_-]{1,64}\/deployments(?:\/|$)/,
+    read: "operations.read",
+    manage: "operations.manage",
+  },
   {
     prefixes: [
       "/advisors", "/notebooks", "/applications", "/auto-branching", "/backups", "/branches", "/dashboard", "/database", "/diagnostics",
@@ -414,12 +425,15 @@ async function enforceDelegatedCapability(
   request: Request,
   ref: string,
   capability: CollaboratorCapability,
+  principal?: TrustedPrincipal,
 ): Promise<void> {
-  const { resolveTrustedPrincipal } = await import("../services/bff-proof.service");
-  const principal = await resolveTrustedPrincipal(request, ref);
-  if (capability === "audit.write" && ["user", "system"].includes(principal.type)) return;
+  const resolvedPrincipal = principal ?? await (async () => {
+    const { resolveTrustedPrincipal } = await import("../services/bff-proof.service");
+    return resolveTrustedPrincipal(request, ref);
+  })();
+  if (capability === "audit.write" && ["user", "system"].includes(resolvedPrincipal.type)) return;
   const { requireCapability } = await import("../services/project-collaborator.service");
-  await requireCapability(ref, principal, capability);
+  await requireCapability(ref, resolvedPrincipal, capability);
 }
 
 export async function requireProjectOrAdminAuth(request: Request, ref: string): Promise<{ status: number; body: { error: string } } | undefined> {
@@ -430,4 +444,27 @@ export async function requireProjectOrAdminAuth(request: Request, ref: string): 
   if (auth.role === "master" || auth.role === "admin") return undefined;
   if (auth.role === "project" && auth.ref === ref) return undefined;
   return { status: 403, body: { error: "Project service role or admin privileges required" } };
+}
+
+/**
+ * Authorize a rewritten project path with a principal that was already
+ * verified on the original request. This is for internal fan-out only: the
+ * caller must preserve the original request's authentication boundary.
+ */
+export async function requireProjectOrAdminAuthWithTrustedPrincipal(
+  request: Request,
+  ref: string,
+  principal: TrustedPrincipal,
+): Promise<{ status: number; body: { error: string } } | undefined> {
+  const capability = delegatedProjectCapability(request, ref);
+  if (!capability) {
+    return { status: 403, body: { error: "Delegated access is unavailable for this project route" } };
+  }
+  try {
+    await enforceDelegatedCapability(request, ref, capability, principal);
+    return undefined;
+  } catch (error: unknown) {
+    if (!isAppError(error)) throw error;
+    return { status: error.statusCode, body: { error: error.message } };
+  }
 }

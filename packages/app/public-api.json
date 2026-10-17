@@ -6,7 +6,7 @@
     {
       "name": "AbstractControl",
       "kind": "both",
-      "signature": "export declare abstract class AbstractControl<TValue = any> {\n    private _value;\n    protected _status: FormControlStatus;\n    protected _errors: ValidationErrors | null;\n    private _pristine;\n    private _touched;\n    private _parent;\n    private _validationRun;\n    protected _validator: ValidatorFn | null;\n    protected _asyncValidator: AsyncValidatorFn | null;\n    constructor(validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get value(): TValue;\n    protected setRawValue(val: TValue): void;\n    get status(): FormControlStatus;\n    get valid(): boolean;\n    get invalid(): boolean;\n    get pending(): boolean;\n    get disabled(): boolean;\n    get enabled(): boolean;\n    get errors(): ValidationErrors | null;\n    get pristine(): boolean;\n    get dirty(): boolean;\n    get touched(): boolean;\n    get untouched(): boolean;\n    get parent(): FormGroup | FormArray | null;\n    setParent(parent: FormGroup | FormArray | null): void;\n    markAsTouched(): void;\n    markAsUntouched(): void;\n    markAsDirty(): void;\n    markAsPristine(): void;\n    disable(): void;\n    enable(): void;\n    setErrors(errors: ValidationErrors | null): void;\n    protected cancelPendingValidation(): void;\n    hasError(errorCode: string, path?: string | (string | number)[]): boolean;\n    getError(errorCode: string, path?: string | (string | number)[]): unknown;\n    abstract setValue(value: any): void;\n    abstract patchValue(value: any): void;\n    abstract reset(value?: any): void;\n    get(_path: string | (string | number)[]): AbstractControl | null;\n    updateValueAndValidity(): void;\n}"
+      "signature": "export declare abstract class AbstractControl<TValue = unknown> {\n    private _value;\n    protected _status: FormControlStatus;\n    protected _errors: ValidationErrors | null;\n    private _pristine;\n    private _touched;\n    private _parent;\n    private _validationRun;\n    protected _validator: ValidatorFn | null;\n    protected _asyncValidator: AsyncValidatorFn | null;\n    constructor(validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get value(): TValue;\n    protected setRawValue(val: TValue): void;\n    get status(): FormControlStatus;\n    get valid(): boolean;\n    get invalid(): boolean;\n    get pending(): boolean;\n    get disabled(): boolean;\n    get enabled(): boolean;\n    get errors(): ValidationErrors | null;\n    get pristine(): boolean;\n    get dirty(): boolean;\n    get touched(): boolean;\n    get untouched(): boolean;\n    get parent(): FormGroup | FormArray | null;\n    setParent(parent: FormGroup | FormArray | null): void;\n    markAsTouched(): void;\n    markAsUntouched(): void;\n    markAsDirty(): void;\n    markAsPristine(): void;\n    disable(): void;\n    enable(): void;\n    setErrors(errors: ValidationErrors | null): void;\n    protected cancelPendingValidation(): void;\n    hasError(errorCode: string, path?: string | (string | number)[]): boolean;\n    getError(errorCode: string, path?: string | (string | number)[]): unknown;\n    abstract setValue(value: TValue): void;\n    abstract patchValue(value: TValue): void;\n    abstract reset(value?: TValue): void;\n    get(_path: string | (string | number)[]): AbstractControl | null;\n    updateValueAndValidity(): void;\n}"
     },
     {
       "name": "AbstractControlOptions",
@@ -276,7 +276,7 @@
     {
       "name": "createContractCommandClient",
       "kind": "value",
-      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input): Promise<unknown>;\n    lookup?(input: Input): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    isDefinitiveFailure?(error: unknown): boolean;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
+      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input, signal?: AbortSignal): Promise<unknown>;\n    lookup?(input: Input, signal?: AbortSignal): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    failureMetadata?(error: unknown): unknown;\n    isDefinitiveFailure?(error: unknown): boolean;\n}, options?: {\n    timeoutMs?: number;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
     },
     {
       "name": "createDestroyRef",
@@ -404,9 +404,24 @@
       "signature": "export declare function effect(effectFn: () => void | (() => void), options?: EffectOptions): () => void;"
     },
     {
+      "name": "EffectErrorMapping",
+      "kind": "type",
+      "signature": "export interface EffectErrorMapping {\n    tag: string;\n    status: number;\n    code: string;\n    message?: string;\n}"
+    },
+    {
       "name": "EffectOptions",
       "kind": "type",
       "signature": "export interface EffectOptions {\n    destroyRef?: {\n        onDestroy(callback: () => void | Promise<void>): () => void;\n    };\n}"
+    },
+    {
+      "name": "EffectRetryPolicy",
+      "kind": "type",
+      "signature": "export type EffectRetryPolicy = \"none\" | \"explicit\";"
+    },
+    {
+      "name": "EffectRouteOptions",
+      "kind": "type",
+      "signature": "export interface EffectRouteOptions {\n    required?: true;\n    errors?: readonly EffectErrorMapping[];\n    dependencies?: readonly string[];\n    retry?: EffectRetryPolicy;\n    maxAttempts?: number;\n    timeoutMs?: number;\n}"
     },
     {
       "name": "ENVIRONMENT_INITIALIZER",
@@ -471,7 +486,7 @@
     {
       "name": "FactoryProvider",
       "kind": "type",
-      "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: any[]) => T;\n    deps?: ProviderDep[];\n}"
+      "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: never[]) => T;\n    deps?: ProviderDep[];\n}"
     },
     {
       "name": "FeatureEvent",
@@ -511,7 +526,7 @@
     {
       "name": "FormControl",
       "kind": "both",
-      "signature": "export declare class FormControl<T = any> extends AbstractControl<T | null> {\n    constructor(formState?: T | {\n        value: T;\n        disabled?: boolean;\n    }, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    setValue(value: T): void;\n    patchValue(value: T): void;\n    reset(formState?: T | null): void;\n}"
+      "signature": "export declare class FormControl<T = unknown> extends AbstractControl<T | null> {\n    constructor(formState?: T | {\n        value: T;\n        disabled?: boolean;\n    }, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    setValue(value: T | null): void;\n    patchValue(value: T | null): void;\n    reset(formState?: T | null): void;\n}"
     },
     {
       "name": "FormControlStatus",
@@ -596,7 +611,7 @@
     {
       "name": "getPipeMetadata",
       "kind": "value",
-      "signature": "export declare function getPipeMetadata(target: any): PipeMetadata | undefined;"
+      "signature": "export declare function getPipeMetadata(target: Function | null | undefined): PipeMetadata | undefined;"
     },
     {
       "name": "getQueryMeta",
@@ -1101,7 +1116,7 @@
     {
       "name": "PipeTransform",
       "kind": "type",
-      "signature": "export interface PipeTransform<T = any, R = any> {\n    transform(value: T, ...args: any[]): R;\n}"
+      "signature": "export interface PipeTransform<T = unknown, R = unknown> {\n    transform(value: T, ...args: unknown[]): R;\n}"
     },
     {
       "name": "PLATFORM_BROWSER_ID",
@@ -1321,7 +1336,7 @@
     {
       "name": "RouteOptions",
       "kind": "type",
-      "signature": "export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    parse?: \"none\";\n    allowDeleteBody?: true;\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    body?: Schemas[\"body\"] extends TSchema ? Schemas[\"body\"] : unknown;\n    params?: Schemas[\"params\"] extends TSchema ? Schemas[\"params\"] : unknown;\n    query?: Schemas[\"query\"] extends TSchema ? Schemas[\"query\"] : unknown;\n    headers?: Schemas[\"headers\"] extends TSchema ? Schemas[\"headers\"] : unknown;\n    cookie?: Schemas[\"cookie\"] extends TSchema ? Schemas[\"cookie\"] : unknown;\n    response?: Schemas[\"response\"] extends TSchema ? Schemas[\"response\"] : unknown;\n    responses?: Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? Schemas[\"responses\"] : Readonly<Record<string | number, unknown>>;\n    command?: Type<unknown>;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    title?: string;\n    data?: Record<string, unknown>;\n    aspects?: Aspect[];\n}"
+      "signature": "export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    parse?: \"none\";\n    allowDeleteBody?: true;\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    body?: Schemas[\"body\"] extends TSchema ? Schemas[\"body\"] : unknown;\n    params?: Schemas[\"params\"] extends TSchema ? Schemas[\"params\"] : unknown;\n    query?: Schemas[\"query\"] extends TSchema ? Schemas[\"query\"] : unknown;\n    headers?: Schemas[\"headers\"] extends TSchema ? Schemas[\"headers\"] : unknown;\n    cookie?: Schemas[\"cookie\"] extends TSchema ? Schemas[\"cookie\"] : unknown;\n    response?: Schemas[\"response\"] extends TSchema ? Schemas[\"response\"] : unknown;\n    responses?: Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? Schemas[\"responses\"] : Readonly<Record<string | number, unknown>>;\n    effect?: EffectRouteOptions;\n    command?: Type<unknown>;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    title?: string;\n    data?: Record<string, unknown>;\n    aspects?: Aspect[];\n}"
     },
     {
       "name": "RouteParamBinding",
@@ -1466,7 +1481,7 @@
     {
       "name": "TestModuleMetadata",
       "kind": "type",
-      "signature": "export interface TestModuleMetadata {\n    providers?: Array<Provider | EnvironmentProviders>;\n    imports?: Array<{\n        providers?: Array<Provider | EnvironmentProviders>;\n    } | any>;\n}"
+      "signature": "export interface TestModuleMetadata {\n    providers?: Array<Provider | EnvironmentProviders>;\n    imports?: Array<{\n        providers?: Array<Provider | EnvironmentProviders>;\n    }>;\n}"
     },
     {
       "name": "Title",
@@ -1506,7 +1521,7 @@
     {
       "name": "Type",
       "kind": "type",
-      "signature": "export interface Type<T> {\n    new (...args: any[]): T;\n}"
+      "signature": "export interface Type<T> {\n    new (...args: never[]): T;\n}"
     },
     {
       "name": "untracked",

@@ -111,7 +111,7 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
   let pg: InstanceType<typeof PGlite>
   try {
     pg = new PGlite({
-      dataDir,
+      ...(dataDir === undefined ? {} : { dataDir }),
       extensions,
       ...(standaloneAssets
         ? {
@@ -144,7 +144,7 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
   return {
     async query<T>(sql: string, params?: unknown[]): Promise<EngineResults<T>> {
       const res = await pg.query<T>(sql, params)
-      return { rows: res.rows, affectedRows: res.affectedRows }
+      return { rows: res.rows, ...(res.affectedRows === undefined ? {} : { affectedRows: res.affectedRows }) }
     },
     async exec(sql: string): Promise<void> {
       await pg.exec(sql)
@@ -154,7 +154,7 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
         return fn({
           async query<R>(sql: string, params?: unknown[]): Promise<EngineResults<R>> {
             const res = await tx.query<R>(sql, params)
-            return { rows: res.rows, affectedRows: res.affectedRows }
+            return { rows: res.rows, ...(res.affectedRows === undefined ? {} : { affectedRows: res.affectedRows }) }
           },
           async exec(sql: string): Promise<void> {
             await tx.exec(sql)
@@ -186,8 +186,8 @@ function getStandaloneAssets(): StandalonePgliteAssets | undefined {
 function withEmbeddedBundle<T>(extension: Extension<T>, bundlePath: URL): Extension<T> {
   return {
     ...extension,
-    setup: async (pg, emscriptenOpts, clientOnly) => ({
-      ...await extension.setup(pg, emscriptenOpts, clientOnly),
+    setup: async (...args: Parameters<Extension<T>['setup']>) => ({
+      ...await extension.setup(...args),
       bundlePath,
     }),
   }

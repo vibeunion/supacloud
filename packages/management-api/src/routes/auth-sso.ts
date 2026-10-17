@@ -23,7 +23,7 @@ async function getGoTrueHeaders(ref: string) {
 }
 
 export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
-  .beforeHandle(requireAuthRuntimeManagement("sso"))
+  .onBeforeHandle(requireAuthRuntimeManagement("sso"))
 
   .get(
     "/:ref/auth/sso/providers",

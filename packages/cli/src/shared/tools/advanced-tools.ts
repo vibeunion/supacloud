@@ -23,6 +23,7 @@ import { Type } from "typebox";
 import { buildFunctionAot, validateFunctionAot } from "./function-aot";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
+import { registerTool, type ToolServer } from "../tool-server";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import {
     releaseControlFailure,
@@ -51,7 +52,7 @@ function scaffoldFiles(framework: FunctionFramework, slug: string): Record<strin
             "package.json": JSON.stringify({
                 private: true,
                 type: "module",
-                dependencies: { elysia: "2.0.0-beta.21" },
+                dependencies: { elysia: "2.0.0-beta.32" },
             }, null, 2) + "\n",
             "index.ts": `import { Elysia } from "elysia";\n\nexport default new Elysia()\n  .get("/", () => ({ function: "${slug}", framework: "elysia" }));\n`,
         };
@@ -74,14 +75,13 @@ function scaffoldFiles(framework: FunctionFramework, slug: string): Record<strin
                 scripts: { build: "vite build" },
                 devDependencies: {
                     "@supacloud/function-adapter": "^0.1.0",
-                    "@sveltejs/kit": "^2.70.3",
+                    "@sveltejs/kit": "^3.0.1",
                     "@sveltejs/vite-plugin-svelte": "^7.3.0",
                     svelte: "^5.57.0",
                     vite: "^8.2.2",
                 },
             }, null, 2) + "\n",
-            "svelte.config.js": `import adapter from "@supacloud/function-adapter/sveltekit-adapter";\n\nexport default { kit: { adapter: adapter() } };\n`,
-            "vite.config.ts": `import { sveltekit } from "@sveltejs/kit/vite";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({ plugins: [sveltekit()] });\n`,
+            "vite.config.ts": `import { sveltekit } from "@sveltejs/kit/vite";\nimport adapter from "@supacloud/function-adapter/sveltekit-adapter";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({ plugins: [sveltekit({ adapter: adapter() })] });\n`,
             "src/routes/+server.ts": `export function GET() {\n  return Response.json({ function: "${slug}", framework: "sveltekit-function" });\n}\n`,
         };
     }
@@ -240,8 +240,7 @@ async function runBunBuild(args: string[]): Promise<{ stdout: string; stderr: st
         ]);
         if (exitCode !== 0) {
             const error = new Error(`bun build exited with code ${exitCode}: ${stderr}`);
-            (error as any).stdout = stdout;
-            (error as any).stderr = stderr;
+            if (error instanceof Error) Object.assign(error, { stdout, stderr });
             throw error;
         }
         return { stdout, stderr };
@@ -658,6 +657,9 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
     if (!response) return false;
     if (expected.verify_jwt !== undefined && response.verify_jwt !== expected.verify_jwt) return false;
     if (expected.framework !== undefined && response.framework !== expected.framework) return false;
+    if (response.bytecode !== undefined && response.bytecode !== "off"
+        && response.bytecode !== "auto" && response.bytecode !== "required") return false;
+    if (expected.bytecode !== undefined && response.bytecode !== expected.bytecode) return false;
     if (expected.background_routes !== undefined) {
         if (!Array.isArray(response.background_routes)) return false;
         if (JSON.stringify(response.background_routes) !== JSON.stringify(expected.background_routes)) return false;
@@ -757,6 +759,7 @@ interface ConfirmedFunctionMutation {
     activeVersion: string;
     activationId: string;
     verifyJwt: boolean;
+    bytecode?: EdgeFunctionConfigInput["bytecode"];
     framework?: EdgeFunctionConfigInput["framework"];
     capabilities?: EdgeFunctionConfigInput["capabilities"];
     limits?: EdgeFunctionConfigInput["limits"];
@@ -868,6 +871,7 @@ function confirmedFunctionMutation(
         activeVersion,
         activationId,
         verifyJwt: config.verify_jwt,
+        ...(config.bytecode === undefined ? {} : { bytecode: config.bytecode as EdgeFunctionConfigInput["bytecode"] }),
         ...(framework === undefined ? {} : { framework: framework as FunctionFramework }),
         ...(config.capabilities === undefined ? {} : { capabilities: config.capabilities as EdgeFunctionConfigInput["capabilities"] }),
         ...(config.limits === undefined ? {} : { limits: config.limits as EdgeFunctionConfigInput["limits"] }),
@@ -892,6 +896,7 @@ function functionMutationResponse(
         active_version: confirmed.activeVersion,
         version: confirmed.activeVersion,
         verify_jwt: confirmed.verifyJwt,
+        ...(confirmed.bytecode === undefined ? {} : { bytecode: confirmed.bytecode }),
         ...(confirmed.framework === undefined ? {} : { framework: confirmed.framework }),
         ...(confirmed.capabilities === undefined ? {} : { capabilities: confirmed.capabilities }),
         ...(confirmed.limits === undefined ? {} : { limits: confirmed.limits }),
@@ -970,14 +975,14 @@ async function activateFunctionVersion(
 }
 
 export function registerAdvancedTools(
-    server: { tool: (...args: any[]) => void },
+    server: ToolServer,
     http: HttpTransport,
     environment: NodeJS.ProcessEnv = process.env,
     options: { readOnly?: boolean } = {},
 ): void {
 
     // ═══ Edge Functions (8→1) ═══
-    server.tool(
+    registerTool(server,
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
 Actions: list, get_config, deploy, deploy_bundle, config, source, activate, delete, check, scaffold`,
@@ -1001,9 +1006,10 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             "bundle-dir": optional(Type.String(), "[deploy_bundle] Local self-contained UTF-8 bundle directory; excludes node_modules, .git, AppleDouble, symlinks, and special files"),
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
-            aot: optional(Type.Boolean(), "[deploy] Locally precompile a trusted Elysia app before uploading; off by default"),
+            aot: optional(Type.Boolean(), "[deploy] Experimental: execute trusted local Elysia initialization to precompile before uploading; off by default"),
             "aot-entry": optional(Type.String(), "[deploy --aot] Module exporting the Elysia app (defaults to path)"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
+            bytecode: optional(withDescription(stringEnum(["off", "auto", "required"]), "[deploy/deploy_bundle/config] Generate Bun bytecode during Edge Runtime preheat")),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
             framework: optional(withDescription(stringEnum(["fetch", "elysia", "hono", "sveltekit-function"]), "[deploy/deploy_bundle/config/scaffold] Fetch framework adapter profile")),
             capabilities: optional(functionCapabilitiesSchema, "[deploy/deploy_bundle/config] Host capabilities: secrets, outbound_hosts, bindings, background"),
@@ -1025,7 +1031,14 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 "[deploy/deploy_bundle/config/activate/delete] Required activation ID from list, or 'legacy' for a new or legacy function",
             ),
         },
-        async (args: any) => {
+        async (args) => {
+            // AOT imports trusted application code, so block it before any local execution.
+            if (args.aot === true && options.readOnly) {
+                return {
+                    isError: true,
+                    content: [{ type: "text" as const, text: "⚠️ Edge Function AOT deployment blocked in read-only mode." }],
+                };
+            }
             validateFunctionAot(args);
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             if (args.action === "scaffold") {
@@ -1033,7 +1046,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             }
             const {
                 action, ref, slug, path: pathArg, output, entrypoint, minify,
-                verify_jwt, background_routes, framework, capabilities, limits,
+                verify_jwt, bytecode, background_routes, framework, capabilities, limits,
                 max_request_body_bytes, max_body_size_mb,
             } = args;
             rejectActionSpecificFlags(action, args);
@@ -1043,8 +1056,10 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             const expectedActivationId = FUNCTION_IDENTITY_MUTATIONS.has(action)
                 ? requiredExpectedActivationId(args, action)
                 : undefined;
-            let code = args.code as string | undefined;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            let code = args.code;
+            const need: <T>(field: string, value: T) => asserts value is NonNullable<T> = (field, value) => {
+                if (value === undefined || value === null || value === "") throw new Error(`'${field}' required for '${action}'`);
+            };
 
             let text: string;
 
@@ -1060,8 +1075,9 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
 
             const functionConfig = (): EdgeFunctionConfigInput => ({
                 ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
+                ...(bytecode === undefined ? {} : { bytecode }),
                 ...(Array.isArray(background_routes) ? { background_routes } : {}),
-                ...(typeof framework === "string" ? { framework: framework as EdgeFunctionConfigInput["framework"] } : {}),
+                ...(framework === undefined ? {} : { framework }),
                 ...(capabilities === undefined ? {} : { capabilities }),
                 ...(resolvedLimits === undefined ? {} : { limits: resolvedLimits }),
             });
@@ -1075,8 +1091,13 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 try {
                     await runBunBuild([tmpFile, "--external", "*"]);
                     return { ok: true };
-                } catch (e: any) {
-                    return { ok: false, err: `${e.stdout || ""}\n${e.stderr || e.message}` };
+                } catch (error: unknown) {
+                    const stdout = typeof error === "object" && error !== null && "stdout" in error
+                        && typeof error.stdout === "string" ? error.stdout : "";
+                    const stderr = typeof error === "object" && error !== null && "stderr" in error
+                        && typeof error.stderr === "string" ? error.stderr : "";
+                    const message = error instanceof Error ? error.message : String(error);
+                    return { ok: false, err: `${stdout}\n${stderr || message}` };
                 } finally {
                     rmSync(tmpDir, { recursive: true, force: true });
                 }
@@ -1093,13 +1114,15 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
 
             switch (action) {
                 case "list":
+                    need("ref", ref);
                     return functionListResponse(await http.get(edgeFunctionResourcePath(ref)));
                 case "get_config":
+                    need("ref", ref);
                     need("slug", slug);
                     return readFunctionIdentity(http, ref, slug);
                 case "check":
                     need("code (or path)", code);
-                    const checkRes = await checkSyntax(code!);
+                    const checkRes = await checkSyntax(code);
                     if (checkRes.ok) {
                         text = `✅ Syntax check passed for function`;
                     } else {
@@ -1107,6 +1130,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                     }
                     break;
                 case "deploy":
+                    need("ref", ref);
                     need("slug", slug);
                     const deployCode = await preparedDeployCode(args);
                     if (!deployCode.prebundled) {
@@ -1134,6 +1158,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     }, deploymentResponse);
                 case "deploy_bundle":
+                    need("ref", ref);
                     need("slug", slug);
                     const deployBundleFiles = preparedBundleFiles(args);
                     const bundleResponse = await http.postReleaseMutation(`${edgeFunctionResourcePath(ref, slug)}/bundle`, {
@@ -1153,6 +1178,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     }, bundleResponse);
                 case "config":
+                    need("ref", ref);
                     need("slug", slug);
                     if (!hasFunctionConfig()) {
                         throw new Error("'verify_jwt', 'background_routes', 'framework', 'capabilities', 'limits', 'max_request_body_bytes', or 'max_body_size_mb' required for 'config'");
@@ -1164,6 +1190,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     });
                 case "source":
+                    need("ref", ref);
                     need("slug", slug);
                     return readFunctionSource(http, {
                         projectRef: ref,
@@ -1172,6 +1199,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         output,
                     });
                 case "delete":
+                    need("ref", ref);
                     need("slug", slug);
                     return deleteFunction(http, {
                         projectRef: ref,
@@ -1185,7 +1213,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
     );
 
     // ═══ Secrets (3→1) ═══
-    server.tool(
+    registerTool(server,
         "secrets",
         `Project secrets (environment variables for Edge Functions).
 Actions: list, upsert, delete`,
@@ -1195,11 +1223,11 @@ Actions: list, upsert, delete`,
             secrets: withDescription(secretsSchema, "[upsert] Secret list as JSON array or KEY=VALUE,KEY2=VALUE2"),
             "from-env": withDescription(
                 environmentSecretNamesSchema,
-                "[upsert] Comma-separated environment variable names; values are read from this CLI process",
+                "[upsert] Comma-separated environment variable names; values are read from the selected CLI environment",
             ),
             name: optional(Type.String(), "[delete] Secret name to delete"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, secrets, name } = args;
             const environmentNames = args["from-env"] as string[] | undefined;
             let text: string;
@@ -1235,7 +1263,7 @@ Actions: list, upsert, delete`,
     );
 
     // ═══ Platform (metrics + backup + network + org → 1) ═══
-    server.tool(
+    registerTool(server,
         "platform",
         `Platform monitoring, backups, network, and organizations.
 Actions: metrics, list_backups, create_backup, network, update_network, list_orgs, get_org`,
@@ -1249,9 +1277,9 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
             slug: optional(Type.String(), "[get_org] Organization slug"),
             allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, slug, allowed_cidrs } = args;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            const need = (f: string, v: unknown) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             let text: string;
             switch (action) {
                 case "metrics":
@@ -1290,7 +1318,7 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
     );
 
     // ═══ Task Events (3→1) ═══
-    server.tool(
+    registerTool(server,
         "task_events",
         `Task lifecycle webhook configuration.
 Actions: register_webhook, unregister_webhook, inspect_webhook`,
@@ -1300,7 +1328,7 @@ Actions: register_webhook, unregister_webhook, inspect_webhook`,
             url: optional(Type.String(), "[register_webhook] HTTPS webhook URL for task lifecycle events"),
             secret: optional(Type.String(), "[register_webhook] Optional HMAC secret for webhook verification"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, url, secret } = args;
             let text: string;
             switch (action) {
@@ -1336,7 +1364,7 @@ Actions: register_webhook, unregister_webhook, inspect_webhook`,
     );
 
     // ═══ Diagnostics (4→1) ═══
-    server.tool(
+    registerTool(server,
         "diagnostics",
         `Platform and project diagnostics: health checks, diagnostic runs, and repair.
 Actions: list_checks, run_checks, get_run, repair`,
@@ -1346,7 +1374,7 @@ Actions: list_checks, run_checks, get_run, repair`,
             run_id: optional(Type.String(), "[get_run/repair] Diagnostic run ID"),
             check_id: optional(Type.String(), "[repair] Check result ID to repair"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, run_id, check_id } = args;
             let text: string;
             switch (action) {

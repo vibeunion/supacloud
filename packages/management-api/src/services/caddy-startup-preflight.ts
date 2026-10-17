@@ -53,20 +53,20 @@ export function assertUniqueCaddyIds(candidateConfig: unknown): void {
 
 function isolatedStartupConfig(candidateConfig: unknown, storageRoot: string): Record<string, unknown> {
     const isolatedConfig = structuredClone(candidateConfig) as Record<string, unknown>;
-    isolatedConfig.admin = { disabled: true };
-    isolatedConfig.storage = { module: "file_system", root: storageRoot };
+    isolatedConfig["admin"] = { disabled: true };
+    isolatedConfig["storage"] = { module: "file_system", root: storageRoot };
 
-    const apps = recordOf(isolatedConfig.apps);
+    const apps = recordOf(isolatedConfig["apps"]);
     if (!apps) return isolatedConfig;
-    delete apps.tls;
-    const servers = recordOf(recordOf(apps.http)?.servers);
+    delete apps["tls"];
+    const servers = recordOf(recordOf(apps["http"])?.["servers"]);
     if (!servers) return isolatedConfig;
     for (const serverValue of Object.values(servers)) {
         const server = recordOf(serverValue);
         if (!server) continue;
-        server.listen = ["127.0.0.1:0"];
-        server.automatic_https = { disable: true };
-        delete server.tls_connection_policies;
+        server["listen"] = ["127.0.0.1:0"];
+        server["automatic_https"] = { disable: true };
+        delete server["tls_connection_policies"];
     }
     return isolatedConfig;
 }

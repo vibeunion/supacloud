@@ -42,7 +42,7 @@ function withPublisher(run: (fixture: {
       publish: (args = []) => {
         const result = Bun.spawnSync(["bash", "publish.sh", ...args], {
           cwd: root,
-          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture,
+          env: { ...process.env, PATH: `${bin}:${process.env["PATH"]}`, CAPTURE: capture,
             POSTGRES_IMAGE: "example.invalid/postgres" },
         });
         return { exitCode: result.exitCode, stderr: result.stderr.toString() };

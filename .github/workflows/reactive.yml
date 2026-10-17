@@ -51,7 +51,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.3"
       - name: App build, types and tests
         run: |
           bun run scripts/build-command-dependencies.ts app
@@ -103,7 +103,7 @@ jobs:
       - name: Packed minimum Angular version
         run: bun run scripts/check_angular_consumer.ts
         env:
-          SUPACLOUD_ANGULAR_TEST_VERSION: "22.1.5"
+          SUPACLOUD_ANGULAR_TEST_VERSION: "22.2.2"
       - name: All starter defaults
         run: |
           cd packages/cli

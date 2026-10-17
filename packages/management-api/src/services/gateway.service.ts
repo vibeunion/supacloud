@@ -11,6 +11,7 @@ import {
 } from "../utils/project-routing";
 import { normalizeProjectConfig, resolveExternalAuthEndpointConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
+import { isRecord, recordOrEmpty } from "../utils/record";
 import { stableStringify } from "../utils/stable-json";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
@@ -28,6 +29,7 @@ import {
     buildTenantCorsOrigins,
     isCorsSubroute,
     isCustomGatewayRouteId,
+    makeFunctionCorsErrorFallback,
     makeCorsSubroute,
     makeCustomGatewayRoute,
     makeReverseProxy,
@@ -99,7 +101,7 @@ function assertDurableCaddyConfig(candidate: unknown): asserts candidate is Cadd
     if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
         throw new Error("Durable Caddy config must be a JSON object");
     }
-    const routes = (candidate as CaddyConfig).apps?.http?.servers?.supacloud?.routes;
+    const routes = (candidate as CaddyConfig).apps?.http?.servers?.["supacloud"]?.routes;
     if (!Array.isArray(routes)) {
         throw new Error("Durable Caddy config is missing the canonical route array");
     }
@@ -154,8 +156,8 @@ const SECURITY_API_MATCHERS: CaddyMatcher[] = [{
 }];
 
 function routeMatcherStrings(route: CaddyRoute, field: "host" | "path"): string[] {
-    if (!Array.isArray(route.match)) return [];
-    return uniqueStrings(route.match.flatMap((matcher) => {
+    if (!Array.isArray(route["match"])) return [];
+    return uniqueStrings(route["match"].flatMap((matcher) => {
         const values = (matcher as Record<string, unknown>)[field];
         return Array.isArray(values) ? values.map(String) : [];
     }));
@@ -173,7 +175,7 @@ function customRouteMayServeOrdinaryApi(route: CaddyRoute): boolean {
 function hostScopedCorsHandlers(route: CaddyRoute): Record<string, unknown>[] {
     const hosts = routeMatcherStrings(route, "host");
     if (hosts.length === 0) return [];
-    const handlers = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+    const handlers = Array.isArray(route["handle"]) ? route["handle"] as Record<string, unknown>[] : [];
     return handlers.filter(isCorsSubroute).map((handler) => ({
         handler: "subroute",
         routes: [{ match: [{ host: hosts }], handle: [handler] }],
@@ -244,6 +246,7 @@ export interface GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     configureApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
+    removeApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
     verifyApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
     verifyApplicationRouteAbsent(input: ApplicationGatewayInput): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
@@ -413,10 +416,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private async caddyRequest(pathname: string, method = "GET", body?: unknown): Promise<Response> {
+        const serializedBody = body === undefined ? undefined : JSON.stringify(body);
         return fetch(`${config.caddyAdminUrl}${pathname}`, {
             method,
-            headers: body ? { "Content-Type": "application/json" } : undefined,
-            body: body === undefined ? undefined : JSON.stringify(body),
+            ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" } }),
+            ...(serializedBody === undefined ? {} : { body: serializedBody }),
         });
     }
 
@@ -563,7 +567,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (this.hydrated) return;
         const parsed = await this.readDurableConfig();
         if (parsed) {
-            const routes = parsed.apps.http.servers.supacloud.routes;
+            const server = parsed.apps.http.servers["supacloud"];
+            if (server === undefined) throw new Error("Durable Caddy config is missing the SupaCloud server");
+            const routes = server.routes;
             for (const route of routes) {
                 const id = typeof route?.["@id"] === "string" ? route["@id"] : "";
                 if (!id || id === CADDY_UNMATCHED_HOST_ROUTE_ID) continue;
@@ -577,13 +583,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private hydrateCertificatesFromConfig(parsed: CaddyConfig): void {
-        const certs = (parsed.apps?.tls as Record<string, any> | undefined)?.certificates?.load_files;
+        const tls = recordOrEmpty(parsed.apps?.tls);
+        const certs = recordOrEmpty(tls["certificates"])["load_files"];
         if (!Array.isArray(certs)) return;
         for (const cert of certs) {
-            if (typeof cert?.certificate !== "string" || typeof cert?.key !== "string") continue;
-            const id = `disk-${hashStr(`${cert.certificate}:${cert.key}`)}`;
+            if (!isRecord(cert) || typeof cert["certificate"] !== "string" || typeof cert["key"] !== "string") continue;
+            const certificate = cert["certificate"];
+            const key = cert["key"];
+            const id = `disk-${hashStr(`${certificate}:${key}`)}`;
             if (!this.certsById.has(id)) {
-                this.certsById.set(id, { certificate: cert.certificate, key: cert.key });
+                this.certsById.set(id, { certificate, key });
             }
         }
     }
@@ -632,38 +641,54 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (!projectRef) return route;
 
         const migrated = JSON.parse(JSON.stringify(route)) as CaddyRoute;
-        const handle = Array.isArray(migrated.handle) ? migrated.handle as Record<string, unknown>[] : [];
+        const handle = Array.isArray(migrated["handle"]) ? migrated["handle"] as Record<string, unknown>[] : [];
         // Functions and storage routes own their upstream CORS policy; drop any
         // gateway-rendered CORS subroute left over from older route shapes.
         const migratedHandle = handle.filter((handler) =>
-            !(isStorageRoute && handler.strip_path_prefix === "/storage/v1")
+            !(isStorageRoute && handler["strip_path_prefix"] === "/storage/v1")
             && !isCorsSubroute(handler));
-        migrated.handle = migratedHandle;
+        migrated["handle"] = migratedHandle;
 
-        const proxy = migratedHandle.find((handler) => handler.handler === "reverse_proxy") as Record<string, any> | undefined;
+        const proxy = migratedHandle.find((handler) => handler["handler"] === "reverse_proxy");
         if (!proxy) return migrated;
 
         const canonicalHost = `${projectRef}.api.${config.baseDomain}`;
-        proxy.headers = proxy.headers && typeof proxy.headers === "object" ? proxy.headers : {};
-        proxy.headers.request = proxy.headers.request && typeof proxy.headers.request === "object" ? proxy.headers.request : {};
-        proxy.headers.request.set = proxy.headers.request.set && typeof proxy.headers.request.set === "object" ? proxy.headers.request.set : {};
-        proxy.headers.request.set.Host = [canonicalHost];
-        proxy.headers.request.set["X-Forwarded-Host"] = [canonicalHost];
-        proxy.headers.request.set["X-Project-Ref"] = [projectRef];
-        proxy.headers.request.set["x-project-ref"] = [projectRef];
-        proxy.headers.request.set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
+        const headers = recordOrEmpty(proxy["headers"]);
+        const request = recordOrEmpty(headers["request"]);
+        const set = recordOrEmpty(request["set"]);
+        proxy["headers"] = headers;
+        headers["request"] = request;
+        request["set"] = set;
+        set["Host"] = [canonicalHost];
+        set["X-Forwarded-Host"] = [canonicalHost];
+        set["X-Project-Ref"] = [projectRef];
+        set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
 
         if (isStorageRoute) {
-            proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
-            delete proxy.headers.response.delete;
-            delete proxy.flush_interval;
+            const response = recordOrEmpty(headers["response"]);
+            headers["response"] = response;
+            delete response["delete"];
+            delete proxy["flush_interval"];
         }
 
         if (isFunctionsRoute) {
-            // Preserve function-owned CORS headers on existing deployments.
-            if (proxy.headers.response && typeof proxy.headers.response === "object") {
-                delete proxy.headers.response.delete;
-                if (Object.keys(proxy.headers.response).length === 0) delete proxy.headers.response;
+            if (config.edgeFunctionsCorsMode === "auto") {
+                setRouteCors(migrated, buildTenantCorsOrigins(
+                    projectRef,
+                    undefined,
+                    routeMatcherStrings(migrated, "host"),
+                ));
+            } else {
+                // Preserve function-owned CORS headers on existing deployments.
+                if (isRecord(headers["response"])) {
+                    delete headers["response"]["delete"];
+                    if (Object.keys(headers["response"]).length === 0) delete headers["response"];
+                }
+                if (!migratedHandle.some((handler) => handler["handler"] === "subroute" && "errors" in handler)) {
+                    migratedHandle.unshift(makeFunctionCorsErrorFallback(
+                        buildTenantCorsOrigins(projectRef, undefined, routeMatcherStrings(migrated, "host")),
+                    ));
+                }
             }
         }
 
@@ -671,8 +696,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private hydrateRateLimitFromRoute(routeId: string, route: CaddyRoute): void {
-        const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
-        const rateHandler = handle.find((handler) => handler.handler === "rate_limit");
+        const handle = Array.isArray(route["handle"]) ? route["handle"] as Record<string, unknown>[] : [];
+        const rateHandler = handle.find((handler) => handler["handler"] === "rate_limit");
         const limits = this.extractRateLimits(rateHandler);
         if (!limits) return;
 
@@ -688,13 +713,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private extractRateLimits(handler: Record<string, unknown> | undefined): { second: number; minute: number; hour: number } | null {
-        const zones = handler?.rate_limits;
+        const zones = handler?.["rate_limits"];
         if (!zones || typeof zones !== "object") return null;
 
         const limits = { second: 0, minute: 0, hour: 0 };
-        for (const [zoneName, zone] of Object.entries(zones as Record<string, any>)) {
-            const window = String(zone?.window || "");
-            const maxEvents = Number(zone?.max_events || 0);
+        for (const [zoneName, rawZone] of Object.entries(recordOrEmpty(zones))) {
+            const zone = recordOrEmpty(rawZone);
+            const window = String(zone["window"] || "");
+            const maxEvents = Number(zone["max_events"] || 0);
             const encoded = zoneName.match(/_(second|minute|hour)_configured_([0-9]+(?:\.[0-9]+)?)$/);
             if (encoded) {
                 const dimension = encoded[1] as keyof RateLimitConfig;
@@ -733,20 +759,22 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const bCustom = bid.startsWith("route-custom-") || bid.startsWith("route-hosted-") || bid.startsWith("route-supauth-");
         if (aCustom !== bCustom) return aCustom ? -1 : 1;
 
-        const aPriority = typeof a.__supacloud_priority === "number" ? a.__supacloud_priority : 0;
-        const bPriority = typeof b.__supacloud_priority === "number" ? b.__supacloud_priority : 0;
+        const aPriority = typeof a["__supacloud_priority"] === "number" ? a["__supacloud_priority"] : 0;
+        const bPriority = typeof b["__supacloud_priority"] === "number" ? b["__supacloud_priority"] : 0;
         if (aPriority !== bPriority) return bPriority - aPriority;
 
-        const aPath = Array.isArray((a.match as any)?.[0]?.path) ? String((a.match as any)[0].path[0] || "") : "";
-        const bPath = Array.isArray((b.match as any)?.[0]?.path) ? String((b.match as any)[0].path[0] || "") : "";
+        const aMatch = Array.isArray(a["match"]) && isRecord(a["match"][0]) ? a["match"][0] : undefined;
+        const bMatch = Array.isArray(b["match"]) && isRecord(b["match"][0]) ? b["match"][0] : undefined;
+        const aPath = Array.isArray(aMatch?.["path"]) ? String(aMatch["path"][0] || "") : "";
+        const bPath = Array.isArray(bMatch?.["path"]) ? String(bMatch["path"][0] || "") : "";
         if (aPath.length !== bPath.length) return bPath.length - aPath.length;
 
-        const aProtocolMatcher = (a.match as any)?.[0]?.vars?.["{http.request.scheme}"];
-        const bProtocolMatcher = (b.match as any)?.[0]?.vars?.["{http.request.scheme}"];
+        const aProtocolMatcher = recordOrEmpty(aMatch?.["vars"])["{http.request.scheme}"];
+        const bProtocolMatcher = recordOrEmpty(bMatch?.["vars"])["{http.request.scheme}"];
         const aProtocol = typeof aProtocolMatcher === "string" || Array.isArray(aProtocolMatcher)
-            || typeof (a.match as any)?.[0]?.protocol === "string";
+            || typeof aMatch?.["protocol"] === "string";
         const bProtocol = typeof bProtocolMatcher === "string" || Array.isArray(bProtocolMatcher)
-            || typeof (b.match as any)?.[0]?.protocol === "string";
+            || typeof bMatch?.["protocol"] === "string";
         if (aProtocol !== bProtocol) return aProtocol ? -1 : 1;
         return aid.localeCompare(bid);
     }
@@ -875,11 +903,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private renderRouteForCaddy(route: CaddyRoute): CaddyRoute {
         const rendered = JSON.parse(JSON.stringify(route)) as CaddyRoute;
-        delete rendered.__supacloud_priority;
+        delete rendered["__supacloud_priority"];
         const id = String(rendered["@id"] || "");
         if (id.startsWith(SECURITY_RATE_LIMIT_ROUTE_PREFIX)) return rendered;
-        const handle = Array.isArray(rendered.handle) ? rendered.handle as Record<string, unknown>[] : [];
-        const withoutRateLimit = handle.filter((handler) => handler.handler !== "rate_limit");
+        const handle = Array.isArray(rendered["handle"]) ? rendered["handle"] as Record<string, unknown>[] : [];
+        const withoutRateLimit = handle.filter((handler) => handler["handler"] !== "rate_limit");
 
         const customLimits = this.customRateLimits.get(id);
         let rateLimitHandler: Record<string, unknown> | null = null;
@@ -896,11 +924,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
         if (rateLimitHandler) {
             const transformIndex = withoutRateLimit.findIndex((handler) =>
-                handler.handler === "rewrite" || handler.handler === "reverse_proxy",
+                handler["handler"] === "rewrite" || handler["handler"] === "reverse_proxy",
             );
             const insertAt = transformIndex >= 0 ? transformIndex : withoutRateLimit.length;
             withoutRateLimit.splice(insertAt, 0, rateLimitHandler);
-            rendered.handle = withoutRateLimit;
+            rendered["handle"] = withoutRateLimit;
         }
 
         return rendered;
@@ -1179,8 +1207,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const hosts: string[] = [];
         for (const id of this.projectRouteIds(projectRef)) {
             const route = this.routesById.get(id);
-            const match = Array.isArray(route?.match) ? route.match[0] as Record<string, unknown> | undefined : undefined;
-            if (match && Array.isArray(match.host)) hosts.push(...match.host as string[]);
+            const match = Array.isArray(route?.["match"]) ? route["match"][0] as Record<string, unknown> | undefined : undefined;
+            if (match && Array.isArray(match["host"])) hosts.push(...match["host"] as string[]);
         }
         return uniqueStrings(hosts);
     }
@@ -1367,6 +1395,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         corsOrigins?: string[];
         readTimeout?: number;
         preserveUpstreamCors?: boolean;
+        corsErrorFallback?: boolean;
         streaming?: boolean;
         upstreamTls?: boolean;
         upstreamTlsInsecureSkipVerify?: boolean;
@@ -1376,8 +1405,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
+            // See makeCustomGatewayRoute: emit a single canonical project-ref
+            // header so Caddy does not join a duplicate into "ref,ref".
             "X-Project-Ref": opts.projectRef,
-            "x-project-ref": opts.projectRef,
             "X-Forwarded-Host": "{http.request.host}",
             "X-Forwarded-Proto": "{http.request.scheme}",
         };
@@ -1391,6 +1421,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ? makeCorsSubroute(opts.corsOrigins)
             : null;
         if (corsSubroute) handle.push(corsSubroute);
+        if (opts.corsErrorFallback) handle.push(makeFunctionCorsErrorFallback(opts.corsOrigins || []));
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
         // 只压缩迁移清单，不改变认证响应、下载和流式接口的传输行为。
@@ -1434,11 +1465,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
         readTimeout?: number;
     }): CaddyRoute {
         const route = this.makeRoute(opts);
-        const baseMatch = Array.isArray(route.match)
-            ? route.match[0] as Record<string, unknown>
+        const baseMatch = Array.isArray(route["match"])
+            ? route["match"][0] as Record<string, unknown>
             : {};
         const matcherName = sanitizeCaddyId(opts.id);
-        route.match = [
+        route["match"] = [
             {
                 ...baseMatch,
                 header_regexp: {
@@ -1458,7 +1489,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 },
             },
         ];
-        route.__supacloud_priority = 100;
+        route["__supacloud_priority"] = 100;
         return route;
     }
 
@@ -1642,9 +1673,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
         const cloned = JSON.parse(JSON.stringify(parent)) as CaddyRoute;
         cloned["@id"] = routeId;
-        const match = Array.isArray(cloned.match) ? cloned.match[0] as Record<string, unknown> | undefined : undefined;
+        const match = Array.isArray(cloned["match"]) ? cloned["match"][0] as Record<string, unknown> | undefined : undefined;
         if (match) {
-            match.path = [normalizedPath.endsWith("*") ? normalizedPath : `${normalizedPath.replace(/\/$/, "")}*`];
+            match["path"] = [normalizedPath.endsWith("*") ? normalizedPath : `${normalizedPath.replace(/\/$/, "")}*`];
         }
         return cloned;
     }
@@ -1683,10 +1714,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const hostIp = await this.detectHostIp();
             const projectConfig = normalizeProjectConfig(projectRouting);
             const routingConfig = normalizeProjectRoutingConfig(projectRouting);
-            const authConfig = projectConfig.auth && typeof projectConfig.auth === "object" && !Array.isArray(projectConfig.auth)
-                ? projectConfig.auth as Record<string, unknown>
+            const authConfig = projectConfig["auth"] && typeof projectConfig["auth"] === "object" && !Array.isArray(projectConfig["auth"])
+                ? projectConfig["auth"] as Record<string, unknown>
                 : {};
-            const externalAuth = resolveExternalAuthEndpointConfig(authConfig.third_party_auth);
+            const externalAuth = resolveExternalAuthEndpointConfig(authConfig["third_party_auth"]);
             const externalAuthUpstream = externalAuth
                 ? normalizeCustomUpstream(externalAuth.auth_upstream)
                 : null;
@@ -1697,7 +1728,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     WHERE ref=${config.authRuntimeOwnerRef} AND status='active' AND deleted_at IS NULL
                 `;
                 const ownerConfig = normalizeProjectConfig(owner?.config);
-                const port = Number(ownerConfig.gotrue_port);
+                const port = Number(ownerConfig["gotrue_port"]);
                 if (!owner || !Number.isInteger(port) || port <= 0) {
                     throw new Error(`shared auth runtime owner ${config.authRuntimeOwnerRef} is unavailable`);
                 }
@@ -1711,7 +1742,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 ? `${hostIp}:${config.port}`
                 : directAuthUpstream;
             const authHeaders = sharedAuthPort !== null
-                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
+                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`]
                     : externalAuthUpstream && externalAuth?.auth_host_header
                         ? [`Host:${externalAuth.auth_host_header}`, `X-Forwarded-Host:${externalAuth.auth_host_header}`]
                         : undefined;
@@ -1728,6 +1759,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 resolveProjectStudioHost(projectRef, routingConfig),
             ]);
             const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [
+                hostIp,
                 ...hosts,
                 ...authHosts,
                 ...studioHosts,
@@ -1744,7 +1776,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 corsOrigins,
                 readTimeout: config.restProxyTimeoutMs,
             });
-            restOpenApiRoute.__supacloud_priority = 200;
+            restOpenApiRoute["__supacloud_priority"] = 200;
 
             const opaqueRoutes = [
                 this.makeOpaqueApiKeyProxyRoute({
@@ -1808,11 +1840,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     path: "/auth/v1*",
                     upstream: authUpstream,
                     projectRef,
-                    stripPrefix: sharedAuthProxy ? undefined : "/auth/v1",
-                    headers: authProxyHeaders,
+                    ...(sharedAuthProxy ? {} : { stripPrefix: "/auth/v1" }),
+                    ...(authProxyHeaders === undefined ? {} : { headers: authProxyHeaders }),
                     corsOrigins,
-                    upstreamTls: authUpstreamTls,
-                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
+                    ...(authUpstreamTls === undefined ? {} : { upstreamTls: authUpstreamTls }),
+                    ...(authUpstreamTlsInsecureSkipVerify === undefined
+                        ? {} : { upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify }),
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "gotrue-well-known"),
@@ -1821,10 +1854,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     rewriteUri: "/.well-known/oauth-authorization-server",
                     upstream: directAuthUpstream,
                     projectRef,
-                    headers: authHeaders,
+                    ...(authHeaders === undefined ? {} : { headers: authHeaders }),
                     corsOrigins,
-                    upstreamTls: authUpstreamTls,
-                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
+                    ...(authUpstreamTls === undefined ? {} : { upstreamTls: authUpstreamTls }),
+                    ...(authUpstreamTlsInsecureSkipVerify === undefined
+                        ? {} : { upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify }),
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "functions"),
@@ -1837,10 +1871,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                         `X-Forwarded-Host:${projectRef}.api.${config.baseDomain}`,
                     ],
                     readTimeout: 500_000,
-                    corsOrigins,
-                    // Functions own their CORS policy (origin allowlists, custom
-                    // headers); preflight must reach the function itself.
-                    preserveUpstreamCors: true,
+                    corsOrigins: config.edgeFunctionsCorsMode === "auto" ? ["*"] : corsOrigins,
+                    preserveUpstreamCors: config.edgeFunctionsCorsMode !== "auto",
+                    corsErrorFallback: config.edgeFunctionsCorsMode !== "auto",
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "storage-resumable"),
@@ -1907,11 +1940,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     path: "/auth/v1*",
                     upstream: authUpstream,
                     projectRef,
-                    stripPrefix: sharedAuthProxy ? undefined : "/auth/v1",
-                    headers: authProxyHeaders,
+                    ...(sharedAuthProxy ? {} : { stripPrefix: "/auth/v1" }),
+                    ...(authProxyHeaders === undefined ? {} : { headers: authProxyHeaders }),
                     corsOrigins,
-                    upstreamTls: authUpstreamTls,
-                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
+                    ...(authUpstreamTls === undefined ? {} : { upstreamTls: authUpstreamTls }),
+                    ...(authUpstreamTlsInsecureSkipVerify === undefined
+                        ? {} : { upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify }),
                 }));
                 this.routesById.set(caddyRouteId(projectRef, "auth-domain-gotrue-well-known"), this.makeRoute({
                     id: caddyRouteId(projectRef, "auth-domain-gotrue-well-known"),
@@ -1920,10 +1954,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     rewriteUri: "/.well-known/oauth-authorization-server",
                     upstream: directAuthUpstream,
                     projectRef,
-                    headers: authHeaders,
+                    ...(authHeaders === undefined ? {} : { headers: authHeaders }),
                     corsOrigins,
-                    upstreamTls: authUpstreamTls,
-                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
+                    ...(authUpstreamTls === undefined ? {} : { upstreamTls: authUpstreamTls }),
+                    ...(authUpstreamTlsInsecureSkipVerify === undefined
+                        ? {} : { upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify }),
                 }));
             } else {
                 this.routesById.delete(caddyRouteId(projectRef, "opaque-auth-domain"));
@@ -1950,14 +1985,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
-            const matches = Array.isArray(route?.match) ? route.match as Record<string, unknown>[] : [];
+            const matches = Array.isArray(route?.["match"]) ? route["match"] as Record<string, unknown>[] : [];
             for (const match of matches) {
-                match.host = uniqueStrings([...(Array.isArray(match.host) ? match.host as string[] : []), ...apiDomains]);
+                match["host"] = uniqueStrings([...(Array.isArray(match["host"]) ? match["host"] as string[] : []), ...apiDomains]);
             }
         }
         const studio = this.routesById.get(caddyRouteId(projectRef, "studio"));
-        const studioMatch = Array.isArray(studio?.match) ? studio.match[0] as Record<string, unknown> | undefined : undefined;
-        if (studioMatch) studioMatch.host = uniqueStrings([...(Array.isArray(studioMatch.host) ? studioMatch.host as string[] : []), ...studioDomains]);
+        const studioMatch = Array.isArray(studio?.["match"]) ? studio["match"][0] as Record<string, unknown> | undefined : undefined;
+        if (studioMatch) studioMatch["host"] = uniqueStrings([...(Array.isArray(studioMatch["host"]) ? studioMatch["host"] as string[] : []), ...studioDomains]);
         await this.persistAndLoad();
         return true;
     }
@@ -1973,10 +2008,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const id = String(route["@id"] || "");
             if (id.startsWith(APPLICATION_ROUTE_PREFIX)) continue;
             if (!id.includes(`-${projectRef}-`)) continue;
-            const matches = Array.isArray(route.match) ? route.match as Record<string, unknown>[] : [];
+            const matches = Array.isArray(route["match"]) ? route["match"] as Record<string, unknown>[] : [];
             for (const match of matches) {
-                if (Array.isArray(match.host)) {
-                    match.host = (match.host as string[]).filter((host) => !remove.has(normalizeCaddyHost(host)));
+                if (Array.isArray(match["host"])) {
+                    match["host"] = (match["host"] as string[]).filter((host) => !remove.has(normalizeCaddyHost(host)));
                 }
             }
         }
@@ -2036,8 +2071,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
             for (const project of projects) {
                 const ref = project.ref as string;
                 const cfg = normalizeProjectConfig(project.config);
-                const pgrstPort = cfg.postgrest_port as number | undefined;
-                const gotruePort = cfg.gotrue_port as number | undefined;
+                const pgrstPort = cfg["postgrest_port"] as number | undefined;
+                const gotruePort = cfg["gotrue_port"] as number | undefined;
                 if (!pgrstPort || !gotruePort) {
                     errors.push(`${ref}: missing port config`);
                     continue;
@@ -2047,7 +2082,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     errors.push(`${ref}: ${result.error || "unknown error"}`);
                     continue;
                 }
-                const customResult = await this.configureCustomGatewayRoutes(ref, normalizeCustomGatewayRoutes(cfg.gateway_routes));
+                const customResult = await this.configureCustomGatewayRoutes(ref, normalizeCustomGatewayRoutes(cfg["gateway_routes"]));
                 if (customResult.success) updated++;
                 else errors.push(`${ref}: ${customResult.error || "custom route reconcile failed"}`);
             }
@@ -2157,6 +2192,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
         });
     }
 
+    async removeApplicationRoute(input: ApplicationGatewayInput): Promise<void> {
+        const owned = structuredClone(input);
+        const { id } = applicationGatewayRoute(owned);
+        await this.serializeOperation(async () => {
+            if (this.deferredPersistDepth > 0) throw new Error("APPLICATION_GATEWAY_DEFERRED_WRITE");
+            await this.verifyApplicationRouteUnlocked(owned);
+            await this.removeRoutes([id]);
+            await this.verifyApplicationRouteAbsentUnlocked(owned);
+        });
+    }
+
     async verifyApplicationRoute(input: ApplicationGatewayInput): Promise<void> {
         const owned = structuredClone(input);
         await this.serializeOperation(() => this.verifyApplicationRouteUnlocked(owned));
@@ -2167,7 +2213,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (!response.ok) throw new Error(`Caddy application read-back failed with ${response.status}`);
         verifyApplicationGatewayRoutes(await response.json(), input);
         const durable = await this.readDurableConfig();
-        verifyApplicationGatewayRoutes(durable?.apps?.http?.servers?.supacloud?.routes, input);
+        verifyApplicationGatewayRoutes(durable?.apps?.http?.servers?.["supacloud"]?.routes, input);
     }
 
     private async verifyApplicationRouteAbsentUnlocked(input: ApplicationGatewayInput): Promise<void> {
@@ -2177,7 +2223,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const liveRoutes = await response.json();
         verifyApplicationGatewayActivationAbsent(liveRoutes, input);
         const durable = await this.readDurableConfig();
-        const durableRoutes = durable?.apps?.http?.servers?.supacloud?.routes;
+        const durableRoutes = durable?.apps?.http?.servers?.["supacloud"]?.routes;
         verifyApplicationGatewayActivationAbsent(durableRoutes, input);
     }
 
@@ -2195,7 +2241,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 const existing = this.routesById.get(id);
                 return existing ? [[id, JSON.parse(JSON.stringify(existing)) as CaddyRoute] as const] : [];
             }));
-            const allHosts = uniqueStrings([...this.hostsForProjectRoutes(route.projectRef), ...route.hosts]);
+            const gatewayHostIp = await this.detectHostIp();
+            const allHosts = uniqueStrings([
+                ...this.hostsForProjectRoutes(route.projectRef),
+                ...route.hosts,
+                gatewayHostIp,
+            ]);
             const origins = buildTenantCorsOrigins(route.projectRef, undefined, allHosts);
             for (const id of routeIds) {
                 const projectRoute = this.routesById.get(id);
@@ -2207,6 +2258,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 const ownerOrigins = buildTenantCorsOrigins(authOwnerRef, undefined, [
                     ...this.hostsForProjectRoutes(authOwnerRef),
                     ...route.hosts,
+                    gatewayHostIp,
                 ]);
                 for (const id of ownerRouteIds) {
                     const ownerRoute = this.routesById.get(id);
@@ -2265,12 +2317,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
             }
             if (!candidate || typeof candidate !== "object") return;
             const record = candidate as Record<string, unknown>;
-            if (record.handler === "file_server" && typeof record.root === "string") roots.add(record.root);
+            if (record["handler"] === "file_server" && typeof record["root"] === "string") roots.add(record["root"]);
             for (const child of Object.values(record)) visit(child);
         };
         visit(route);
         if (roots.size !== 1) throw new Error("Caddy frontend route does not have one canonical static root");
-        return [...roots][0];
+        return [...roots][0] ?? null;
     }
 
     private async detectHostIp(): Promise<string> {
@@ -2279,7 +2331,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const result = await $`ip addr show ${iface}`.nothrow().quiet();
             if (result.exitCode === 0) {
                 const match = result.text().match(/inet (\d+\.\d+\.\d+\.\d+)/);
-                if (match) return match[1];
+                if (match?.[1] !== undefined) return match[1];
             }
         }
         return "127.0.0.1";
@@ -2387,6 +2439,7 @@ export class GatewayService implements GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     configureApplicationRoute(input: ApplicationGatewayInput) { return this.provider.configureApplicationRoute(input); }
+    removeApplicationRoute(input: ApplicationGatewayInput) { return this.provider.removeApplicationRoute(input); }
     verifyApplicationRoute(input: ApplicationGatewayInput) { return this.provider.verifyApplicationRoute(input); }
     verifyApplicationRouteAbsent(input: ApplicationGatewayInput) { return this.provider.verifyApplicationRouteAbsent(input); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }

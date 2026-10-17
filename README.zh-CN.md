@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh |
 
 ```bash
 npm install -g @supacloud/cli
-supacloud-cli app init --root ./my-app --name my-app
+supacloud app init --root ./my-app --name my-app
 cd my-app
 bun install
 bun run check
@@ -93,7 +93,7 @@ bunx supacloud-lite keys
 
 | 命令 | 使用者与职责 |
 | --- | --- |
-| `supacloud-cli` | 项目使用者：开发、数据库、函数、存储、日志和前端工作流。 |
+| `supacloud` | 项目使用者：开发、数据库、函数、存储、日志和前端工作流。 |
 | `supacloud-admin` | 平台运维者：安装、升级、SSH 诊断和平台级项目生命周期管理。 |
 | `supacloudctl` | 可选的本地统一分发入口，不是服务端二进制。 |
 

@@ -120,7 +120,9 @@ const DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.servi
 const DEFAULT_EMBEDDED_EDGE_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf";
 const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_WORKERS_PER_CPU = 2;
-const MIN_DEFAULT_EDGE_WORKER_POOL_SIZE = 4;
+// Sizing heuristics, not per-request limits; reserve headroom for the host and background pool.
+const DEFAULT_EDGE_MEMORY_PER_WORKER_MB = 512;
+const DEFAULT_EDGE_FOREGROUND_MEMORY_RATIO = 0.75;
 const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 2;
 const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
 const DEFAULT_EDGE_TASKS_MAX = 256;
@@ -985,9 +987,22 @@ export function resolveEdgeRuntimeCapacityConfig(input: EdgeRuntimeCapacityInput
     const env = input.env || process.env;
     const cpuCount = positiveInteger(input.cpuCount, os.cpus().length || 1);
     const totalMemoryMb = positiveInteger(input.totalMemoryMb, Math.floor(os.totalmem() / 1024 / 1024));
+    const memoryMaxMb = positiveInteger(
+        env.SUPACLOUD_EDGE_MEMORY_MAX_MB,
+        Math.floor(totalMemoryMb * DEFAULT_EDGE_RESOURCE_RATIO),
+    );
+    const configuredMemoryHighMb = positiveInteger(
+        env.SUPACLOUD_EDGE_MEMORY_HIGH_MB,
+        Math.floor(memoryMaxMb * 0.8),
+    );
+    const memoryHighMb = Math.min(configuredMemoryHighMb, memoryMaxMb);
     const defaultWorkerPoolSize = Math.max(
-        MIN_DEFAULT_EDGE_WORKER_POOL_SIZE,
-        Math.min(DEFAULT_EDGE_WORKER_POOL_SIZE, cpuCount * DEFAULT_EDGE_WORKERS_PER_CPU),
+        1,
+        Math.min(
+            DEFAULT_EDGE_WORKER_POOL_SIZE,
+            cpuCount * DEFAULT_EDGE_WORKERS_PER_CPU,
+            Math.floor(memoryHighMb * DEFAULT_EDGE_FOREGROUND_MEMORY_RATIO / DEFAULT_EDGE_MEMORY_PER_WORKER_MB),
+        ),
     );
     const workerPoolSize = positiveInteger(
         env.SUPACLOUD_EDGE_WORKER_POOL_SIZE || env.WORKER_POOL_SIZE,
@@ -1005,21 +1020,13 @@ export function resolveEdgeRuntimeCapacityConfig(input: EdgeRuntimeCapacityInput
         env.SUPACLOUD_EDGE_CPU_QUOTA_PERCENT,
         Math.max(100, Math.floor(cpuCount * DEFAULT_EDGE_RESOURCE_RATIO * 100)),
     );
-    const memoryMaxMb = positiveInteger(
-        env.SUPACLOUD_EDGE_MEMORY_MAX_MB,
-        Math.floor(totalMemoryMb * DEFAULT_EDGE_RESOURCE_RATIO),
-    );
-    const memoryHighMb = positiveInteger(
-        env.SUPACLOUD_EDGE_MEMORY_HIGH_MB,
-        Math.floor(memoryMaxMb * 0.8),
-    );
     const tasksMax = positiveInteger(env.SUPACLOUD_EDGE_TASKS_MAX, DEFAULT_EDGE_TASKS_MAX);
 
     return {
         workerPoolSize,
         backgroundWorkerPoolSize,
         cpuQuotaPercent,
-        memoryHighMb: Math.min(memoryHighMb, memoryMaxMb),
+        memoryHighMb,
         memoryMaxMb,
         tasksMax,
     };
@@ -1027,10 +1034,9 @@ export function resolveEdgeRuntimeCapacityConfig(input: EdgeRuntimeCapacityInput
 
 export function buildEdgeRuntimeCapacityDropIn(config: EdgeRuntimeCapacityConfig) {
     return `[Service]
-# Managed by supacloud upgrade. These values are deliberately applied in a
-# late drop-in so stale low worker/resource limits from older installs do not
-# keep foreground Edge Function reads queued behind a small pool. Background
-# capacity stays bounded separately because every idle Bun Worker retains memory.
+# Managed by supacloud upgrade. Default foreground capacity is bounded by CPU
+# and memory.high, with headroom for the host and background pool. Explicit
+# worker overrides require workload-specific sizing; each worker retains memory.
 Environment=WORKER_POOL_SIZE=${config.workerPoolSize}
 Environment=BACKGROUND_WORKER_POOL_SIZE=${config.backgroundWorkerPoolSize}
 MemoryHigh=${formatSystemdMemory(config.memoryHighMb)}

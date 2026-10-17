@@ -2,12 +2,20 @@ import { Elysia, status, t } from "elysia";
 import {
   ApplicationConfigurationWriteSchema, ApplicationConfigurationIdSchema,
   ApplicationActivationIdSchema, ApplicationActivationWriteSchema, ApplicationActivationResultSchema,
-  ApplicationActivationRetirementResultSchema, DeploymentEvidenceSchema, parseDeploymentEvidence,
-  type DeploymentEvidence,
+  ApplicationActivationRetirementResultSchema, ApplicationRollbackSnapshotSchema, DeploymentEvidenceSchema, parseDeploymentEvidence,
+  ApplicationReleaseTransferPlanSchema, ApplicationReleaseTransferResultSchema,
+  ApplicationPromotionPlanSchema,
+  ApplicationActivationHistorySchema, ApplicationActivationHistoryCursorSchema, type DeploymentEvidence,
+  applicationPreviewBranchRef, applicationReleaseId,
+  ApplicationDeployRequestSchema,
 } from "@supacloud/delivery";
 import { sql } from "../db";
-import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
+import {
+  getVerifiedRequestPrincipal, requireProjectOrAdminAuth, requireProjectOrAdminAuthWithTrustedPrincipal,
+} from "../middleware/auth";
 import { ApplicationReleaseError, ApplicationReleaseStorage } from "../services/application-release-storage";
+import { ApplicationReleaseTransfers, ApplicationReleaseTransferError } from "../services/application-release-transfer";
+import { resolveTrustedPrincipal } from "../services/bff-proof.service";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import { uploadApplicationRelease } from "../services/application-release-upload";
 import { ApplicationActiveStorage } from "../services/application-active-storage";
@@ -19,6 +27,22 @@ import type { ApplicationDeploymentService } from "../services/application-deplo
 import { ConflictError } from "../utils/errors";
 import { ApplicationDeploymentEvidenceStorage } from "../services/application-deployment-evidence";
 import { ApplicationDeploymentEvidenceObserver } from "../services/application-deployment-evidence-observer";
+import { victoriaLogsService } from "../services/victorialogs.service";
+import { applicationRuntimePlan } from "../services/application-runtime";
+import { buildApplicationPreviewReceipt, publicApplicationPreviewReceipt } from "../services/application-preview-contract";
+import { ApplicationPreviewService, APPLICATION_PREVIEW_MIN_TTL_SECONDS, APPLICATION_PREVIEW_MAX_TTL_SECONDS } from "../services/application-preview.service";
+import { ApplicationDeployPlans, ApplicationDeployPlanError } from "../services/application-deploy-plan";
+import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
+import { ApplicationRollbackError, ApplicationRollbackSnapshots } from "../services/application-rollback";
+import { ApplicationActivationHistoryReader, ApplicationHistoryError } from "../services/application-history";
+import {
+  ApplicationPromotions, ApplicationPromotionError, createDefaultApplicationPromotions,
+} from "../services/application-promotion";
+import type { ApplicationPromotionExecutor } from "../services/application-promotion-executor";
+import type { ApplicationPromotionReconciler } from "../services/application-promotion-reconciler";
+import { ApplicationPreviewConflictError } from "../repositories/project-config-writes";
+import type { ApplicationDeploymentOrchestrator } from "../services/application-deployment-orchestrator";
+import { ApplicationDeploymentOrchestrationError } from "../services/application-deployment-orchestrator";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -45,6 +69,12 @@ function activationFailure(error: unknown, identity: {
 }
 
 interface ApplicationRouteDependencies {
+  promotions?: Pick<ApplicationPromotions, "readPlan">;
+  promotionExecutor?: Pick<ApplicationPromotionExecutor, "execute">;
+  promotionReconciler?: Pick<ApplicationPromotionReconciler, "status" | "reconcile">;
+  deploymentOrchestrator?: Pick<ApplicationDeploymentOrchestrator, "execute">;
+  transfers?: Pick<ApplicationReleaseTransfers, "readPlan" | "transfer">;
+  deployPlans?: Pick<ApplicationDeployPlans, "read">;
   storage?: ApplicationReleaseStorage;
   authorize?: typeof requireProjectOrAdminAuth;
   projectExists?: (projectRef: string) => Promise<boolean>;
@@ -57,6 +87,11 @@ interface ApplicationRouteDependencies {
   deployment?: Pick<ApplicationDeploymentService, "activateConfigured" | "reconcile" | "retireConfigured">;
   retirementVerifier?: unknown;
   principal?: typeof getVerifiedRequestPrincipal;
+  previews?: Pick<ApplicationPreviewService, "list" | "get" | "create" | "reconcile" | "cleanup"> & {
+    read?: ApplicationPreviewService["read"];
+  };
+  rollback?: Pick<ApplicationRollbackSnapshots, "read">;
+  history?: Pick<ApplicationActivationHistoryReader, "read">;
 }
 
 async function projectExists(ref: string): Promise<boolean> {
@@ -73,12 +108,52 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const storage = dependencies.storage ?? new ApplicationReleaseStorage();
   const authorize = dependencies.authorize ?? requireProjectOrAdminAuth;
   const exists = dependencies.projectExists ?? projectExists;
+  const transfers = dependencies.transfers ?? new ApplicationReleaseTransfers(storage);
+  const promotions = dependencies.promotions ?? createDefaultApplicationPromotions();
+  // Delegated (SupaOAuth BFF) proofs are bound to the original method/path/body, so a
+  // rewritten source path cannot replay them. Resolve the trusted principal once against
+  // the original target request, then reuse it for every source-path capability check.
+  const authorizeSource = async (
+    sourceRequest: Request, targetRequest: Request, targetRef: string, ref: string,
+  ): Promise<{ status: number; body: { error: string } } | undefined> => {
+    if (hasSupaOAuthDelegationHeaders(targetRequest)) {
+      return requireProjectOrAdminAuthWithTrustedPrincipal(
+        sourceRequest, ref, await resolveTrustedPrincipal(targetRequest, targetRef),
+      );
+    }
+    return authorize(sourceRequest, ref);
+  };
+  const sourceAccess = async (
+    request: Request, targetRef: string, ref: string, id: string, releaseId: string,
+  ) => {
+    const url = new URL(request.url);
+    url.pathname = `/v1/projects/${ref}/applications/${id}/releases/${releaseId}`;
+    url.search = "";
+    // 重新构造源 GET 请求，使项目 scope 和委托读取权限均基于源路径。
+    const sourceRequest = new Request(url, { method: "GET", headers: request.headers });
+    const denied = await authorizeSource(sourceRequest, request, targetRef, ref);
+    if (denied) throw new ApplicationReleaseTransferError("APPLICATION_RELEASE_TRANSFER_SOURCE_DENIED", denied.status);
+    if (!await exists(ref)) throw new ApplicationReleaseTransferError("APPLICATION_RELEASE_TRANSFER_SOURCE_NOT_FOUND", 404);
+  };
   const active = dependencies.active ?? new ApplicationActiveStorage();
   const readiness = dependencies.readiness ?? new ApplicationReadiness();
   const migrations = dependencies.migrations ?? new ApplicationMigrations({ storage });
   const configurations = dependencies.configurations ?? new ApplicationConfigurations();
   const evidence = dependencies.evidence ?? new ApplicationDeploymentEvidenceStorage();
   const evidenceObserver = dependencies.evidenceObserver;
+  const previews = dependencies.previews ?? new ApplicationPreviewService({ releases: storage });
+  const readPreview = dependencies.previews?.read
+    ? (projectRef: string, previewId: string) => dependencies.previews!.read!(projectRef, previewId)
+    : (projectRef: string, previewId: string) => previews.get(projectRef, previewId);
+  const deployPlans = dependencies.deployPlans ?? new ApplicationDeployPlans({
+    releases: storage, active, readiness, migrations,
+  });
+  const rollback = dependencies.rollback ?? new ApplicationRollbackSnapshots({ active, releases: storage });
+  const history = dependencies.history ?? new ApplicationActivationHistoryReader({ active });
+  const promotionExecutor = dependencies.promotionExecutor;
+  const promotionReconciler = dependencies.promotionReconciler;
+  const deployment = dependencies.deployment;
+  const deploymentOrchestrator = dependencies.deploymentOrchestrator;
   const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
     if (!evidenceObserver) return;
     try {
@@ -97,9 +172,32 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
   });
   const routes = new Elysia({ prefix: "/v1/projects/:ref/applications", name: "application-releases" })
-    .error(({ error }) => {
+    .onError(({ error }) => {
+      if (error instanceof ApplicationPromotionError) {
+        return status(error.statusCode, { code: error.code, error: "Application promotion plan is unavailable" });
+      }
+      if (error instanceof ApplicationPreviewConflictError) {
+        return status(409, { code: error.code, error: "Application preview identity changed" });
+      }
+      if (error instanceof ApplicationReleaseTransferError) {
+        return status(error.statusCode, { code: error.code, error: "Application release transfer is unavailable" });
+      }
+      if (error instanceof ApplicationDeployPlanError) {
+        return status(error.statusCode, { code: error.code, error: "Application deploy plan is unavailable" });
+      }
+      if (error instanceof ApplicationDeploymentOrchestrationError) {
+        return status(error.statusCode, {
+          ...error.details, code: error.code, error: "Application deployment orchestration failed",
+        });
+      }
       if (error instanceof ApplicationReleaseError || error instanceof ApplicationConfigurationError) {
         return status(error.statusCode, { code: error.code, error: error.message });
+      }
+      if (error instanceof ApplicationRollbackError) {
+        return status(error.statusCode, { code: error.code, error: "Application rollback snapshot is unavailable" });
+      }
+      if (error instanceof ApplicationHistoryError) {
+        return status(error.statusCode, { code: error.code, error: "Application activation history is unavailable" });
       }
       if (error instanceof ApplicationDevelopmentError) {
         return status(error.statusCode, { code: error.code, error: error.message });
@@ -114,7 +212,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       }
       return status(500, { code: "APPLICATION_RELEASE_FAILED", error: "Application release request failed" });
     })
-    .beforeHandle(async ({ request, params: values }) => {
+    .onBeforeHandle(async ({ request, params: values }) => {
       const denied = await authorize(request, values.ref);
       if (denied) return status(denied.status, denied.body);
       if (!await exists(values.ref)) return status(404, { code: "PROJECT_NOT_FOUND", error: "Project not found" });
@@ -126,6 +224,114 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
       configuration: await configurations.read(scope(values)),
     }))
+    .get("/:id/environments/:environmentId/promotion-plan", {
+      params: environmentParams,
+      response: { 200: ApplicationPromotionPlanSchema },
+      query: t.Object({
+        source_ref: t.String({ pattern: "^[a-z0-9-]{1,20}$" }),
+        source_environment_id: environmentParams.properties.environmentId,
+        source_release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        configuration_id: t.Optional(ApplicationConfigurationIdSchema),
+      }, { additionalProperties: false }),
+      beforeHandle: async ({ params: values, query, request }) => {
+        await sourceAccess(request, values.ref, query.source_ref, values.id, query.source_release_id);
+        const url = new URL(request.url);
+        url.pathname = `/v1/projects/${query.source_ref}/applications/${values.id}/environments/${query.source_environment_id}/runtime`;
+        url.search = "";
+        const denied = await authorizeSource(
+          new Request(url, { method: "GET", headers: request.headers }), request, values.ref, query.source_ref,
+        );
+        if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
+      },
+      detail: { tags: ["applications"], summary: "Plan an immutable environment promotion without executing changes" },
+    }, ({ params: values, query }) => promotions.readPlan({
+      projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
+      sourceProjectRef: query.source_ref, sourceEnvironmentId: query.source_environment_id,
+      sourceReleaseId: query.source_release_id,
+      ...(query.configuration_id === undefined ? {} : { configurationId: query.configuration_id }),
+    }))
+    .get("/:id/environments/:environmentId/deploy-plan", {
+      params: environmentParams,
+      query: t.Object({
+        release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        configuration_id: ApplicationConfigurationIdSchema,
+      }),
+      detail: { tags: ["applications"], summary: "Compare a stored candidate with verified active state without runtime effects" },
+    }, ({ params: values, query }) => deployPlans.read({
+      ...scope(values), releaseId: query.release_id, configurationId: query.configuration_id,
+    }))
+    .post("/:id/environments/:environmentId/promotions", {
+      params: environmentParams,
+      body: t.Object({
+        mutation_id: t.String({ format: "uuid" }),
+        source_ref: t.String({ pattern: "^[a-z0-9-]{1,20}$" }),
+        source_environment_id: environmentParams.properties.environmentId,
+        source_release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        configuration_id: ApplicationConfigurationIdSchema,
+        plan: ApplicationPromotionPlanSchema,
+        approved_migration_digest: t.Optional(t.String({ pattern: "^[a-f0-9]{64}$" })),
+      }, { additionalProperties: false }),
+      detail: { tags: ["applications"], summary: "Execute a reviewed immutable application promotion" },
+    }, async ({ params: values, body, request }) => {
+      if (!promotionExecutor) {
+        return status(503, { code: "APPLICATION_PROMOTION_EXECUTOR_UNAVAILABLE", error: "Application promotion executor is unavailable" });
+      }
+      const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      await sourceAccess(request, values.ref, body.source_ref, values.id, body.source_release_id);
+      const sourceUrl = new URL(request.url);
+      sourceUrl.pathname = `/v1/projects/${body.source_ref}/applications/${values.id}/environments/${body.source_environment_id}/runtime`;
+      sourceUrl.search = "";
+      const denied = await authorizeSource(
+        new Request(sourceUrl, { method: "GET", headers: request.headers }), request, values.ref, body.source_ref,
+      );
+      if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
+      return promotionExecutor.execute({
+        projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
+        sourceProjectRef: body.source_ref, sourceEnvironmentId: body.source_environment_id,
+        sourceReleaseId: body.source_release_id, configurationId: body.configuration_id,
+        mutationId: body.mutation_id, plan: body.plan,
+        ...(body.approved_migration_digest === undefined ? {} : {
+          approvedMigrationDigest: body.approved_migration_digest,
+        }),
+        principal: actor,
+      });
+    })
+    .get("/:id/environments/:environmentId/promotions/:mutationId", {
+      params: t.Object({ ...environmentParams.properties, mutationId: t.String({ format: "uuid" }) }),
+      detail: { tags: ["applications"], summary: "Read a promotion outcome and fixed phase metadata without effects" },
+    }, async ({ params: values, request }) => {
+      if (!promotionReconciler) return status(503, {
+        code: "APPLICATION_PROMOTION_RECONCILER_UNAVAILABLE", error: "Application promotion observation is unavailable",
+      });
+      const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      return promotionReconciler.status({ ...scope(values), mutationId: values.mutationId, principal: actor });
+    })
+    .post("/:id/environments/:environmentId/promotions/:mutationId/reconcile", {
+      params: t.Object({ ...environmentParams.properties, mutationId: t.String({ format: "uuid" }) }),
+      body: t.Object({}, { additionalProperties: false }),
+      detail: { tags: ["applications"], summary: "Confirm an already completed promotion without replaying uncertain effects" },
+    }, async ({ params: values, request }) => {
+      if (!promotionReconciler) return status(503, {
+        code: "APPLICATION_PROMOTION_RECONCILER_UNAVAILABLE", error: "Application promotion observation is unavailable",
+      });
+      const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      return promotionReconciler.reconcile(
+        { ...scope(values), mutationId: values.mutationId, principal: actor },
+        async input => {
+          await sourceAccess(request, values.ref, input.sourceProjectRef, input.applicationId, input.sourceReleaseId);
+          const sourceUrl = new URL(request.url);
+          sourceUrl.pathname = `/v1/projects/${input.sourceProjectRef}/applications/${input.applicationId}/environments/${input.sourceEnvironmentId}/runtime`;
+          sourceUrl.search = "";
+          const denied = await authorizeSource(
+            new Request(sourceUrl, { method: "GET", headers: request.headers }), request, values.ref, input.sourceProjectRef,
+          );
+          if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
+        },
+      );
+    })
     .get("/:id/environments/:environmentId/configurations/:configurationId", {
       params: t.Object({ ...environmentParams.properties, configurationId: ApplicationConfigurationIdSchema }),
       detail: { tags: ["applications"], summary: "Read an immutable configuration revision without variable values" },
@@ -160,6 +366,20 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         readiness: report,
       };
     })
+    .get("/:id/environments/:environmentId/history", {
+      params: environmentParams,
+      query: t.Object({
+        cursor: t.Optional(ApplicationActivationHistoryCursorSchema),
+        limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100, multipleOf: 1 })),
+      }),
+      response: { 200: ApplicationActivationHistorySchema },
+      detail: { tags: ["applications"], summary: "Read successful activation journal history without inspecting artifacts" },
+    }, ({ params: values, query }) => history.read(scope(values), query))
+    .get("/:id/environments/:environmentId/rollback-snapshot", {
+      params: environmentParams,
+      response: { 200: ApplicationRollbackSnapshotSchema },
+      detail: { tags: ["applications"], summary: "Observe the journal-verified previous activation and current rollback CAS" },
+    }, ({ params: values }) => rollback.read(scope(values)))
     .get("/:id/environments/:environmentId/deployment-evidence", {
       params: environmentParams,
       detail: { tags: ["applications"], summary: "Read the last validated single-node deployment evidence" },
@@ -167,6 +387,156 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
       evidence: await evidence.read(values.ref, values.id, values.environmentId),
     }))
+    .get("/:id/environments/:environmentId/logs", {
+      params: environmentParams,
+      query: t.Object({
+        limit: t.Optional(t.Numeric({ minimum: 1, maximum: 1000, multipleOf: 1 })),
+        offset: t.Optional(t.Numeric({ minimum: 0, maximum: 1_000_000, multipleOf: 1 })),
+        service: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+        start: t.Optional(t.String()),
+        end: t.Optional(t.String()),
+      }),
+      detail: { tags: ["applications"], summary: "Read logs for the current application activation" },
+    }, async ({ params: values, query }) => {
+      const current = await active.readForApplication(values.ref, values.id, values.environmentId);
+      if (!current) {
+        return {
+          project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+          release_id: null, activation_id: null, result: [], pagination: {
+            offset: query.offset ?? 0, limit: query.limit ?? 200, total: 0,
+          },
+        };
+      }
+      const runtime = current.runtime;
+      const plan = applicationRuntimePlan(runtime);
+      const targets = query.service && query.service !== "all"
+        ? plan.targets.filter(target => target.name === query.service || target.sourceTarget === query.service)
+        : plan.targets;
+      if (query.service && query.service !== "all" && targets.length === 0) {
+        return {
+          project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+          release_id: runtime.release.release_id, activation_id: runtime.activationId, result: [], pagination: {
+            offset: query.offset ?? 0, limit: query.limit ?? 200, total: 0,
+          },
+        };
+      }
+      const result = await victoriaLogsService.queryProjectLogs(values.ref, {
+        units: targets.map(target => target.unit),
+        ...(query.search === undefined ? {} : { search: query.search }),
+        ...(query.start === undefined ? {} : { start: query.start }),
+        ...(query.end === undefined ? {} : { end: query.end }),
+        ...(query.limit === undefined ? {} : { limit: query.limit }),
+        ...(query.offset === undefined ? {} : { offset: query.offset }),
+      });
+      return {
+        project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+        release_id: runtime.release.release_id, activation_id: runtime.activationId,
+        result,
+        pagination: {
+          offset: query.offset ?? 0, limit: query.limit ?? 200, total: result.length,
+        },
+      };
+    })
+    .get("/:id/environments/:environmentId/preview-plan", {
+      params: environmentParams,
+      query: t.Object({
+        release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        branch_ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }),
+        data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
+        configuration_id: t.Optional(t.String({ format: "uuid" })),
+        preview_id: t.Optional(t.String({ pattern: "^[a-f0-9-]{8,64}$" })),
+        ttl_seconds: t.Optional(t.Integer({ minimum: APPLICATION_PREVIEW_MIN_TTL_SECONDS, maximum: APPLICATION_PREVIEW_MAX_TTL_SECONDS })),
+      }),
+      detail: { tags: ["applications"], summary: "Build a read-only isolated application preview plan" },
+    }, async ({ params: values, query }) => {
+      const release = await storage.readRelease(values.ref, values.id, query.release_id);
+      if (query.preview_id !== undefined && applicationPreviewBranchRef(query.preview_id) !== query.branch_ref) {
+        throw new ApplicationPreviewConflictError();
+      }
+      return buildApplicationPreviewReceipt({
+        previewId: query.preview_id ?? crypto.randomUUID(),
+        projectRef: values.ref,
+        applicationId: values.id,
+        environmentId: values.environmentId,
+        releaseId: query.preview_id === undefined ? release.release_id
+          : applicationReleaseId(query.branch_ref, values.id, release.manifest_sha256),
+        branchRef: query.branch_ref,
+        dataMode: query.data_mode ?? "schema_only",
+        ...(query.ttl_seconds === undefined ? {} : { expiresAt: new Date(Date.now() + query.ttl_seconds * 1000).toISOString() }),
+      });
+    })
+    .get("/:id/environments/:environmentId/previews", {
+      params: environmentParams,
+      detail: { tags: ["applications"], summary: "List application preview receipts" },
+    }, async ({ params: values }) => ({
+      project_ref: values.ref,
+      application_id: values.id,
+      environment_id: values.environmentId,
+      previews: (await previews.list(values.ref, values.id, values.environmentId)).map(publicApplicationPreviewReceipt),
+    }))
+    .post("/:id/environments/:environmentId/previews", {
+      params: environmentParams,
+      body: t.Object({
+        release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        preview_id: t.Optional(t.String({ pattern: "^[a-f0-9-]{8,64}$" })),
+        branch_name: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
+        data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
+        configuration_id: t.Optional(t.String({ format: "uuid" })),
+        ttl_seconds: t.Optional(t.Integer({ minimum: APPLICATION_PREVIEW_MIN_TTL_SECONDS, maximum: APPLICATION_PREVIEW_MAX_TTL_SECONDS })),
+      }),
+      detail: { tags: ["applications"], summary: "Provision an isolated application preview" },
+    }, async ({ params: values, body }) => {
+      const receipt = await previews.create({
+        projectRef: values.ref,
+        applicationId: values.id,
+        environmentId: values.environmentId,
+        releaseId: body.release_id,
+        ...(body.preview_id === undefined ? {} : { previewId: body.preview_id }),
+        ...(body.branch_name === undefined ? {} : { branchName: body.branch_name }),
+        ...(body.data_mode === undefined ? {} : { dataMode: body.data_mode }),
+        ...(body.configuration_id === undefined ? {} : { configurationId: body.configuration_id }),
+        ...(body.ttl_seconds === undefined ? {} : { ttlSeconds: body.ttl_seconds }),
+      });
+      return status(202, publicApplicationPreviewReceipt(receipt));
+    })
+    .get("/:id/environments/:environmentId/previews/:previewId", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      detail: { tags: ["applications"], summary: "Read an application preview receipt" },
+    }, async ({ params: values }) => {
+      const receipt = await readPreview(values.ref, values.previewId);
+      if (!receipt || receipt.project_ref !== values.ref || receipt.preview_id !== values.previewId
+        || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      return publicApplicationPreviewReceipt(receipt);
+    })
+    .post("/:id/environments/:environmentId/previews/:previewId/reconcile", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      detail: { tags: ["applications"], summary: "Explicitly resume persisted application preview provisioning" },
+    }, async ({ params: values }) => {
+      const receipt = await readPreview(values.ref, values.previewId);
+      if (!receipt || receipt.project_ref !== values.ref || receipt.preview_id !== values.previewId
+        || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      const reconciled = await previews.reconcile(values.ref, values.previewId);
+      if (!reconciled) return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      return publicApplicationPreviewReceipt(reconciled);
+    })
+    .delete("/:id/environments/:environmentId/previews/:previewId", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      detail: { tags: ["applications"], summary: "Clean up an application preview" },
+    }, async ({ params: values }) => {
+      const receipt = await readPreview(values.ref, values.previewId);
+      if (!receipt || receipt.project_ref !== values.ref || receipt.preview_id !== values.previewId
+        || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      const cleaned = await previews.cleanup(values.ref, values.previewId);
+      if (!cleaned) return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      return publicApplicationPreviewReceipt(cleaned);
+    })
     .put("/:id/environments/:environmentId/deployment-evidence", {
       params: environmentParams,
       body: DeploymentEvidenceSchema,
@@ -208,6 +578,37 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         evidence: await evidence.write(observed),
       };
     })
+    .get("/:id/release-transfer-plan", {
+      params,
+      response: { 200: ApplicationReleaseTransferPlanSchema },
+      query: t.Object({
+        source_ref: params.properties.ref,
+        source_release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+      }, { additionalProperties: false }),
+      beforeHandle: ({ params: values, query, request }) =>
+        sourceAccess(request, values.ref, query.source_ref, values.id, query.source_release_id),
+      detail: { tags: ["applications"], summary: "Compare a verified source artifact with target inventory without copying or activating" },
+    }, ({ params: values, query }) =>
+      transfers.readPlan({
+        projectRef: values.ref, applicationId: values.id,
+        sourceProjectRef: query.source_ref, sourceReleaseId: query.source_release_id,
+      }))
+    .post("/:id/release-transfers", {
+      params,
+      response: { 200: ApplicationReleaseTransferResultSchema },
+      body: t.Object({
+        source_ref: params.properties.ref,
+        source_release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        expected_manifest_sha256: t.String({ pattern: "^[a-f0-9]{64}$" }),
+      }, { additionalProperties: false }),
+      beforeHandle: ({ params: values, body, request }) =>
+        sourceAccess(request, values.ref, body.source_ref, values.id, body.source_release_id),
+      detail: { tags: ["applications"], summary: "Materialize a verified artifact in the target project without build, configuration copying or activation" },
+    }, ({ params: values, body }) =>
+      transfers.transfer({
+        projectRef: values.ref, applicationId: values.id, sourceProjectRef: body.source_ref,
+        sourceReleaseId: body.source_release_id, expectedManifestSha256: body.expected_manifest_sha256,
+      }))
     .get("/:id/releases", {
       params,
       query: t.Object({
@@ -251,7 +652,6 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     });
   // Register writes only with a composed deployment service, including its
   // mandatory application compatibility verifier. Upload-only hosts stay inert.
-  const deployment = dependencies.deployment;
   if (deployment) {
     const principal = dependencies.principal ?? getVerifiedRequestPrincipal;
     const failure = t.Object({
@@ -264,6 +664,29 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       409: failure,
       503: failure,
     };
+    if (deploymentOrchestrator) routes.post("/:id/environments/:environmentId/deploy", {
+      params: environmentParams,
+      body: ApplicationDeployRequestSchema,
+      detail: { tags: ["applications"], summary: "Run one durable backend deploy and optionally bind a Web release" },
+    }, async ({ params: values, body, request }) => {
+      const actor = await principal(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      try {
+        const result = await deploymentOrchestrator.execute({
+          projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
+          request: body, principal: actor,
+        });
+        await persistObservedEvidence(values);
+        return result;
+      } catch (error) {
+        if (error instanceof ApplicationDeploymentOrchestrationError) {
+          return status(error.statusCode, {
+            ...error.details, code: error.code, error: "Application deployment orchestration failed",
+          });
+        }
+        throw error;
+      }
+    });
     routes.post("/:id/environments/:environmentId/activations", {
       params: environmentParams, body: ApplicationActivationWriteSchema,
       response,

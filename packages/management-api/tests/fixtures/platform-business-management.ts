@@ -58,7 +58,7 @@ export function businessManagementSettings(input: BusinessManagementInput, env =
   const host = `business-${input.ref}.localhost`;
   const configuration = parseApplicationConfigurationWrite({
     configuration_id: crypto.randomUUID(), expected_configuration_id: null,
-    configuration: { bun_version: "1.4.2", targets: [
+    configuration: { bun_version: "1.4.3", targets: [
       { name: "api", kind: "http", hosts: [host], environment: input.environment.api },
       { name: "jobs", kind: "worker", hosts: [], environment: input.environment.jobs },
     ] },

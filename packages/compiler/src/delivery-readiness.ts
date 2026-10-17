@@ -7,16 +7,16 @@ export function renderDeliveryRuntimeIdentity(): string {
   return `
 function deliveryRuntimeIdentity(kind: "http" | "worker") {
   const env = deliveryProcess.env;
-  if (env.SUPACLOUD_ACTIVATION_ID === undefined) return null;
+  if (env["SUPACLOUD_ACTIVATION_ID"] === undefined) return null;
   const identity = {
     schema: "supacloud.application-runtime.v1",
-    project_ref: env.SUPACLOUD_PROJECT_REF,
-    application_id: env.SUPACLOUD_APPLICATION_ID,
-    environment_id: env.SUPACLOUD_ENVIRONMENT_ID,
-    release_id: env.SUPACLOUD_RELEASE_ID,
-    activation_id: env.SUPACLOUD_ACTIVATION_ID,
-    target: env.SUPACLOUD_TARGET,
-    object_id: env.SUPACLOUD_OBJECT_ID,
+    project_ref: env["SUPACLOUD_PROJECT_REF"],
+    application_id: env["SUPACLOUD_APPLICATION_ID"],
+    environment_id: env["SUPACLOUD_ENVIRONMENT_ID"],
+    release_id: env["SUPACLOUD_RELEASE_ID"],
+    activation_id: env["SUPACLOUD_ACTIVATION_ID"],
+    target: env["SUPACLOUD_TARGET"],
+    object_id: env["SUPACLOUD_OBJECT_ID"],
     kind, pid: deliveryProcess.pid,
   };
   const matches = (value: string | undefined, pattern: RegExp) => typeof value === "string" && pattern.test(value);

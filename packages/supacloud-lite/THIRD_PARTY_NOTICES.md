@@ -20,10 +20,10 @@ SupaCloud Lite 使用 ElectricSQL PGlite 作为嵌入式 PostgreSQL 引擎。
 
 Lite also bundles the official PGlite extension packages:
 
-- `@electric-sql/pglite-pgvector` 0.0.9
-- `@electric-sql/pglite-postgis` 0.2.8
-- `@electric-sql/pglite-pg_textsearch` 0.0.10
-- `@electric-sql/pglite-pgmq` 0.0.6
+- `@electric-sql/pglite-pgvector` 0.0.11
+- `@electric-sql/pglite-postgis` 0.2.10
+- `@electric-sql/pglite-pg_textsearch` 0.0.12
+- `@electric-sql/pglite-pgmq` 0.0.8
 
 These packages are published by ElectricSQL under Apache-2.0 and their
 extension archives are embedded in the standalone binary.
@@ -66,13 +66,13 @@ SupaCloud Lite 使用 `tar` 作为跨平台流式快照归档依赖，避免把�
 
 ## Bun runtime
 
-SupaCloud Lite 单二进制由 Bun 1.4.2 编译并内嵌 Bun runtime，最终用户无需另外安装 Bun、Node.js 或 npm。
+SupaCloud Lite 单二进制由 Bun 1.4.3 编译并内嵌 Bun runtime，最终用户无需另外安装 Bun、Node.js 或 npm。
 
-- Version: 1.4.2
+- Version: 1.4.3
 - Bun license: MIT
 - Upstream: `https://github.com/oven-sh/bun`
-- Local runtime notice: `LICENSES/BUN-1.4.2-RUNTIME-NOTICES.txt`
-- Notice source: Bun 1.4.2 `docs/project/license.mdx` 的逐字副本
+- Local runtime notice: `LICENSES/BUN-1.4.3-RUNTIME-NOTICES.txt`
+- Notice source: Bun 1.4.3 `docs/project/license.mdx` 的逐字副本
 - Linked-library coverage: JavaScriptCore/WebKit、`boringssl`、`brotli`、`libarchive`、`lol-html`、`ls-hpack`、`ls-qpack`、`lsquic`、`mimalloc`、`picohttp`、`zstd`、`simdutf`、`tinycc`、`uSockets`、`zlib-ng`、`c-ares`、`libicu` 78、`libbase64`、Windows 上的 `libuv`、`libdeflate`、`libjpeg-turbo`、`libspng`、`libwebp`、`highway`、`HdrHistogram_c`、Linux/Windows 上的 `sqlite`、uWebSockets fork 和 Tigerbeetle IO 代码
 - Polyfill coverage: `acorn`、`acorn-walk`、`assert`、`browserify-zlib`、`buffer`、`constants-browserify`、`crypto-browserify`、`domain-browser`、`events`、`https-browserify`、`os-browserify`、`path-browserify`、`process`、`punycode`、`querystring-es3`、`stream-browserify`、`stream-http`、`string_decoder`、`timers-browserify`、`tty-browserify`、`url`、`util`、`vm-browserify`
 

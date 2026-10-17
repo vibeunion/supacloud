@@ -29,6 +29,7 @@ import {
 } from './project-runtime.js'
 import { createSnapshot, restoreSnapshot } from './snapshot.js'
 import { waitForShutdown } from './shutdown.js'
+import { createLocalAuthUser } from './auth-cli.js'
 
 interface CliOptions extends ProjectRuntimeOptions {
   command: string
@@ -41,6 +42,9 @@ interface CliOptions extends ProjectRuntimeOptions {
   serviceRole: boolean
   force: boolean
   json: boolean
+  email?: string
+  passwordStdin?: boolean
+  emailConfirm?: boolean
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -97,6 +101,12 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--service-role') options.serviceRole = true
     else if (argument === '--force') options.force = true
     else if (argument === '--json') options.json = true
+    else if (argument === '--email') options.email = next()
+    else if (argument === '--password-stdin') options.passwordStdin = true
+    else if (argument === '--email-confirm') options.emailConfirm = true
+    else if (argument.startsWith('--password')) {
+      throw new Error('password arguments are not supported; use --password-stdin')
+    }
     else if (argument === '--version') {
       console.log(packageJson.version)
       process.exit(0)
@@ -112,7 +122,21 @@ function parseArgs(argv: string[]): CliOptions {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
+  if (options.command !== 'auth' && (options.email !== undefined || options.passwordStdin || options.emailConfirm)) {
+    throw new Error('--email, --password-stdin and --email-confirm are only supported by auth create-user')
+  }
   const paths = resolveProjectPaths(options)
+
+  if (options.command === 'auth') {
+    if (options.positionals.length !== 1 || options.positionals[0] !== 'create-user') {
+      throw new Error('usage: auth create-user --email <email> --password-stdin [--email-confirm] [--json]')
+    }
+    const user = await createLocalAuthUser(options)
+    await writeStandardOutput(options.json
+      ? `${JSON.stringify(user, null, 2)}\n`
+      : `Created Auth user ${user.id} (${user.email}); email confirmed: ${user.email_confirmed ? 'yes' : 'no'}\n`)
+    return
+  }
 
   if (options.command === 'version' || options.command === '--version') {
     await writeStandardOutput(`${packageJson.version}\n`)
@@ -193,10 +217,18 @@ async function main(): Promise<void> {
   if (options.command === 'doctor') {
     const config = loadProjectConfig(paths.projectDir, process.env, options.runtimeMode)
     const replication = resolveNativeReplicationOptions(options, paths.databaseEngine)
-    const report = liteCapabilities(paths.databaseEngine, replication?.profile)
+    const report = liteCapabilities(paths.databaseEngine, replication?.profile, config.auth.enabled !== false)
     report.runtime_mode = config.lite.runtimeMode
     if (options.identityModule ?? config.lite.identityModule) {
-      report.identity = { mode: 'external', verification: 'unverified' }
+      report.identity = {
+        mode: 'external',
+        verification: 'unverified',
+        local_auth: {
+          status: 'disabled',
+          reason: 'EXTERNAL_IDENTITY_CONFIGURED',
+          verification: 'configuration-only',
+        },
+      }
     }
     if (paths.dataDir && existsSync(join(paths.dataDir, 'PG_VERSION'))) {
       const engine = paths.databaseEngine === 'native'
@@ -503,6 +535,7 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
       `${report.postgres_extensions.installed.length} installed)`,
   )
   output.push(`identity: ${report.identity.mode} (${report.identity.verification})`)
+  output.push(`local_auth: ${report.identity.local_auth.status} (${report.identity.local_auth.reason}, configuration-only)`)
   output.push(`migration_formats: ${report.migrations.formats.join(', ')}`)
   if (report.powersync_readiness) {
     output.push(`powersync_ready: ${report.powersync_readiness.ready}`)
@@ -541,6 +574,7 @@ Commands:
   status                list applied migrations
   keys                  print the anon key
   keys --service-role   also print the privileged service_role key
+  auth create-user      create a local Auth user while the project server is stopped
   gen types             emit Supabase-shaped TypeScript database types
   db reset              reset initialized database/storage and re-run migrations
   db diff               print schema changes outside migrations
@@ -575,7 +609,10 @@ Options:
       --replication-tls-cert <p> PostgreSQL TLS certificate
       --replication-tls-key <p> PostgreSQL TLS private key
       --memory            use an in-memory PGlite database
-      --json              emit machine-readable doctor/migrate/status output
+      --json              emit machine-readable doctor/migrate/status/auth output
+      --email <email>     auth create-user: account email
+      --password-stdin    auth create-user: read one password line from redirected stdin
+      --email-confirm     auth create-user: explicitly mark the email as confirmed
       --runtime-mode      development (default) or strict
       --postgres-dir      operator-managed PostgreSQL installation (native only)
       --identity-module   trusted external identity bridge module

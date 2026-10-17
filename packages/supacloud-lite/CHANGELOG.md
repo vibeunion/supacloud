@@ -1,5 +1,250 @@
 # Changelog
 
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.30.0...supacloud-lite-v0.31.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+* converge SDK-aware vibecoding defaults and local development ([#1607](https://github.com/vibeunion/supacloud/issues/1607)) ([cd66672](https://github.com/vibeunion/supacloud/commit/cd6667252a6a8fe0cc0539bc8610ebb8a818af51))
+* default RxJS support with compatible SupaCloud JS calls ([#1556](https://github.com/vibeunion/supacloud/issues/1556)) ([b3015cb](https://github.com/vibeunion/supacloud/commit/b3015cb161c0d87e6611f6c4fc60c120a8c9fffe))
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+* **lite:** add offline auth user provisioning ([#1911](https://github.com/vibeunion/supacloud/issues/1911)) ([e9c8931](https://github.com/vibeunion/supacloud/commit/e9c89319cf39d9fe2d71ceac9ab76e6856bb5d84))
+* **lite:** bundle PostgreSQL extension parity set ([#1849](https://github.com/vibeunion/supacloud/issues/1849)) ([233fb1b](https://github.com/vibeunion/supacloud/commit/233fb1bb9d52673a7f38d77d47e8c1e6c0b7c5e4))
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+* reduce approval infrastructure wiring and reuse business contracts ([#1948](https://github.com/vibeunion/supacloud/issues/1948)) ([7c68543](https://github.com/vibeunion/supacloud/commit/7c6854338968209c2bbd658782224db238650aeb))
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* **lite:** classify PL/pgSQL failures as server errors ([#1986](https://github.com/vibeunion/supacloud/issues/1986)) ([27c5e29](https://github.com/vibeunion/supacloud/commit/27c5e29b351e2b6bc0d3da55a1ccb6607e4e06a5))
+* **lite:** close backend after startup failure ([#1903](https://github.com/vibeunion/supacloud/issues/1903)) ([3de47be](https://github.com/vibeunion/supacloud/commit/3de47be7821072b88563d51ee388bf76062040f4))
+* **lite:** enforce read-only table and view requests ([#1941](https://github.com/vibeunion/supacloud/issues/1941)) ([d726716](https://github.com/vibeunion/supacloud/commit/d726716a1492a5a581f99a1aa40f15a1125a23aa))
+* **lite:** enforce RPC transaction access modes ([#1936](https://github.com/vibeunion/supacloud/issues/1936)) ([fb90dcc](https://github.com/vibeunion/supacloud/commit/fb90dcc43ed49a45656e1877493eaa641ef494da))
+* **lite:** normalize filesystem storage roots ([#1902](https://github.com/vibeunion/supacloud/issues/1902)) ([f1b5141](https://github.com/vibeunion/supacloud/commit/f1b5141c1e831e68aaf94b505909c9e4942a42df))
+* **lite:** preserve single-column table RPC responses ([#1971](https://github.com/vibeunion/supacloud/issues/1971)) ([63edb93](https://github.com/vibeunion/supacloud/commit/63edb937322130796260a1284c09cc895735214e))
+* **lite:** reject ineligible password logins ([#1998](https://github.com/vibeunion/supacloud/issues/1998)) ([479e967](https://github.com/vibeunion/supacloud/commit/479e96719209f7aed26c44663d78e1442a7097f0))
+* **lite:** report effective local auth configuration in doctor ([#1907](https://github.com/vibeunion/supacloud/issues/1907)) ([c167617](https://github.com/vibeunion/supacloud/commit/c1676176bdd5a2c057114474186570b7e6d5d0dd))
+* **lite:** resolve RPC overloads using required arguments ([#1967](https://github.com/vibeunion/supacloud/issues/1967)) ([e00ffaf](https://github.com/vibeunion/supacloud/commit/e00ffafd41aa52c8f14c2e81f3bb8a8914b336c8))
+* **lite:** roll back rejected singular REST writes ([#1925](https://github.com/vibeunion/supacloud/issues/1925)) ([0af235d](https://github.com/vibeunion/supacloud/commit/0af235d55a3619ffd150e4b16751a27a32d1f2e0))
+* pin Elysia 2 beta compatibility boundary ([#1467](https://github.com/vibeunion/supacloud/issues/1467)) ([bdb2a2e](https://github.com/vibeunion/supacloud/commit/bdb2a2e658cae4160f2a774b5c459d1a2d8fb601))
+* **worker:** ship reviewed PGMQ job controls and concurrency repairs ([#1689](https://github.com/vibeunion/supacloud/issues/1689)) ([e283915](https://github.com/vibeunion/supacloud/commit/e283915e66e119b75ad1b909e18816270b5d01e3))
+
+
+### Elegance & Refactoring
+
+* use ESM-only owned packages and Lite launcher ([#1582](https://github.com/vibeunion/supacloud/issues/1582)) ([ed5ac78](https://github.com/vibeunion/supacloud/commit/ed5ac78ee3ab22567268fa276e5b016ad1e8b575))
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+* release main ([#1474](https://github.com/vibeunion/supacloud/issues/1474)) ([6255eb7](https://github.com/vibeunion/supacloud/commit/6255eb7e7eefc4ee5cd06bef05d4c81a29be706a))
+* release main ([#1484](https://github.com/vibeunion/supacloud/issues/1484)) ([41b3e72](https://github.com/vibeunion/supacloud/commit/41b3e72d25dd8b1ea1d3dea5b75c90bdea9be797))
+* release main ([#1561](https://github.com/vibeunion/supacloud/issues/1561)) ([3ee71e3](https://github.com/vibeunion/supacloud/commit/3ee71e301e7a5499780b45ec6c64e53698000029))
+* release main ([#1609](https://github.com/vibeunion/supacloud/issues/1609)) ([b52c79c](https://github.com/vibeunion/supacloud/commit/b52c79ceda912786f1299ae2d618172f9252607a))
+* release main ([#1647](https://github.com/vibeunion/supacloud/issues/1647)) ([9afdb5c](https://github.com/vibeunion/supacloud/commit/9afdb5c348a2e87169e8898b3842091bb8f1ddea))
+* release main ([#1657](https://github.com/vibeunion/supacloud/issues/1657)) ([1a3f7ff](https://github.com/vibeunion/supacloud/commit/1a3f7ff901f05dda38ed4827d70a91a4acccd8b3))
+* release main ([#1668](https://github.com/vibeunion/supacloud/issues/1668)) ([a7ce18b](https://github.com/vibeunion/supacloud/commit/a7ce18b73e0a2e93df664fb8da08cd40f3bdae82))
+* release main ([#1691](https://github.com/vibeunion/supacloud/issues/1691)) ([2d47123](https://github.com/vibeunion/supacloud/commit/2d47123013522350129d49480ce6d132595976db))
+* release main ([#1695](https://github.com/vibeunion/supacloud/issues/1695)) ([2b9da10](https://github.com/vibeunion/supacloud/commit/2b9da1004b8cc1fd78cfcad79110d5c5eba5349d))
+* release main ([#1743](https://github.com/vibeunion/supacloud/issues/1743)) ([dcbf82c](https://github.com/vibeunion/supacloud/commit/dcbf82c29fb6de94bd6be0c37df20662a6861b2e))
+* release main ([#1747](https://github.com/vibeunion/supacloud/issues/1747)) ([cbdf2a4](https://github.com/vibeunion/supacloud/commit/cbdf2a426aeb5a405a4d27820fdfb51dd489b93a))
+* release main ([#1767](https://github.com/vibeunion/supacloud/issues/1767)) ([d31bf06](https://github.com/vibeunion/supacloud/commit/d31bf06a2bfbdb353554a44576d0c54685f46193))
+* release main ([#1825](https://github.com/vibeunion/supacloud/issues/1825)) ([4819f95](https://github.com/vibeunion/supacloud/commit/4819f95ae7ce722b58f4858261c100c448c9975e))
+* release main ([#1857](https://github.com/vibeunion/supacloud/issues/1857)) ([6b98454](https://github.com/vibeunion/supacloud/commit/6b9845403733f7ffac7711587982979d928702b2))
+* release main ([#1890](https://github.com/vibeunion/supacloud/issues/1890)) ([8b88c00](https://github.com/vibeunion/supacloud/commit/8b88c00e4eb523203520757219be1bc42e45e44d))
+* release main ([#1904](https://github.com/vibeunion/supacloud/issues/1904)) ([c9dc22b](https://github.com/vibeunion/supacloud/commit/c9dc22b89383eefffe11ae4cfa6df57114165a78))
+* release main ([#1909](https://github.com/vibeunion/supacloud/issues/1909)) ([e6590d5](https://github.com/vibeunion/supacloud/commit/e6590d539d92bd99a31e91f9a48f98d0d5a177a5))
+* release main ([#1930](https://github.com/vibeunion/supacloud/issues/1930)) ([2a0a7fa](https://github.com/vibeunion/supacloud/commit/2a0a7fa8ad5c2d88bd8b9ce76b9a6a1744428eb4))
+* release main ([#1937](https://github.com/vibeunion/supacloud/issues/1937)) ([c63b5dd](https://github.com/vibeunion/supacloud/commit/c63b5dd722571e884dbbca379781ecf44542d643))
+* release main ([#1944](https://github.com/vibeunion/supacloud/issues/1944)) ([206d711](https://github.com/vibeunion/supacloud/commit/206d711a0012bad9465283f2f2bfc5f4eb80d269))
+* release main ([#1952](https://github.com/vibeunion/supacloud/issues/1952)) ([1693369](https://github.com/vibeunion/supacloud/commit/1693369010c63e77de8012d0a8acd7b116def94c))
+* release main ([#1955](https://github.com/vibeunion/supacloud/issues/1955)) ([1d93a49](https://github.com/vibeunion/supacloud/commit/1d93a491a8ee2b514e18b802db71233c4535bc23))
+* release main ([#1969](https://github.com/vibeunion/supacloud/issues/1969)) ([89ba2f7](https://github.com/vibeunion/supacloud/commit/89ba2f77a0f8831cd4be3aa9ccca81886ec3bfb0))
+* release main ([#1982](https://github.com/vibeunion/supacloud/issues/1982)) ([02cb9a7](https://github.com/vibeunion/supacloud/commit/02cb9a7011588e7d02e22a84f972c324e4983de4))
+* release main ([#1988](https://github.com/vibeunion/supacloud/issues/1988)) ([e1b912d](https://github.com/vibeunion/supacloud/commit/e1b912df24c27cf822d1f82df6561248783abbb5))
+* release main ([#1999](https://github.com/vibeunion/supacloud/issues/1999)) ([af2a885](https://github.com/vibeunion/supacloud/commit/af2a885e70d8baf3bad4cc3c8264efe62b87d8e9))
+* release main ([#2030](https://github.com/vibeunion/supacloud/issues/2030)) ([2f7cf91](https://github.com/vibeunion/supacloud/commit/2f7cf91d941ab583ebe21d901069a16e55efc48a))
+* unify project licensing under Apache-2.0 ([#1566](https://github.com/vibeunion/supacloud/issues/1566)) ([36dd377](https://github.com/vibeunion/supacloud/commit/36dd37796147a5e7051534d6d9535f13ad881a93))
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.5...supacloud-lite-v0.30.0) (2026-10-17)
+
+
+### Features
+
+* add configurable image-transformation input and output limits with a 500 MiB default and maximum ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Bug Fixes
+
+* enforce account eligibility consistently for bearer, email, OAuth and refresh authentication ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+* prepare isolated package artifacts against the current database dependency ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Dependencies
+
+* align the published @supacloud/db dependency to 0.18.1.
+
+## [0.29.5](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.4...supacloud-lite-v0.29.5) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lite:** reject ineligible password logins ([#1998](https://github.com/vibeunion/supacloud/issues/1998)) ([479e967](https://github.com/vibeunion/supacloud/commit/479e96719209f7aed26c44663d78e1442a7097f0))
+
+## [0.29.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.3...supacloud-lite-v0.29.4) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lite:** classify PL/pgSQL failures as server errors ([#1986](https://github.com/vibeunion/supacloud/issues/1986)) ([27c5e29](https://github.com/vibeunion/supacloud/commit/27c5e29b351e2b6bc0d3da55a1ccb6607e4e06a5))
+
+## [0.29.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.2...supacloud-lite-v0.29.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lite:** preserve single-column table RPC responses ([#1971](https://github.com/vibeunion/supacloud/issues/1971)) ([63edb93](https://github.com/vibeunion/supacloud/commit/63edb937322130796260a1284c09cc895735214e))
+
+## [0.29.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.1...supacloud-lite-v0.29.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** resolve RPC overloads using required arguments ([#1967](https://github.com/vibeunion/supacloud/issues/1967)) ([e00ffaf](https://github.com/vibeunion/supacloud/commit/e00ffafd41aa52c8f14c2e81f3bb8a8914b336c8))
+
+## [0.29.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.29.0...supacloud-lite-v0.29.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** enforce read-only table and view requests ([#1941](https://github.com/vibeunion/supacloud/issues/1941)) ([d726716](https://github.com/vibeunion/supacloud/commit/d726716a1492a5a581f99a1aa40f15a1125a23aa))
+
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.3...supacloud-lite-v0.29.0) (2026-10-15)
+
+
+### Features
+
+* reduce approval infrastructure wiring and reuse business contracts ([#1948](https://github.com/vibeunion/supacloud/issues/1948)) ([7c68543](https://github.com/vibeunion/supacloud/commit/7c6854338968209c2bbd658782224db238650aeb))
+
+## [0.28.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.2...supacloud-lite-v0.28.3) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.28.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.1...supacloud-lite-v0.28.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** enforce RPC transaction access modes ([#1936](https://github.com/vibeunion/supacloud/issues/1936)) ([fb90dcc](https://github.com/vibeunion/supacloud/commit/fb90dcc43ed49a45656e1877493eaa641ef494da))
+
+## [0.28.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.28.0...supacloud-lite-v0.28.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **lite:** roll back rejected singular REST writes ([#1925](https://github.com/vibeunion/supacloud/issues/1925)) ([0af235d](https://github.com/vibeunion/supacloud/commit/0af235d55a3619ffd150e4b16751a27a32d1f2e0))
+
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.27.1...supacloud-lite-v0.28.0) (2026-10-14)
+
+
+### Features
+
+* **lite:** add offline auth user provisioning ([#1911](https://github.com/vibeunion/supacloud/issues/1911)) ([e9c8931](https://github.com/vibeunion/supacloud/commit/e9c89319cf39d9fe2d71ceac9ab76e6856bb5d84))
+
+
+### Bug Fixes
+
+* **lite:** normalize filesystem storage roots ([#1902](https://github.com/vibeunion/supacloud/issues/1902)) ([f1b5141](https://github.com/vibeunion/supacloud/commit/f1b5141c1e831e68aaf94b505909c9e4942a42df))
+* **lite:** report effective local auth configuration in doctor ([#1907](https://github.com/vibeunion/supacloud/issues/1907)) ([c167617](https://github.com/vibeunion/supacloud/commit/c1676176bdd5a2c057114474186570b7e6d5d0dd))
+
+## [0.27.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.27.0...supacloud-lite-v0.27.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **lite:** close backend after startup failure ([#1903](https://github.com/vibeunion/supacloud/issues/1903)) ([3de47be](https://github.com/vibeunion/supacloud/commit/3de47be7821072b88563d51ee388bf76062040f4))
+
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.26.0...supacloud-lite-v0.27.0) (2026-10-14)
+
+
+### Features
+
+* **compiler:** enforce vibecoding defaults ([886c82f](https://github.com/vibeunion/supacloud/commit/886c82f1462261e10c490586cc9446cb447a21ae))
+
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.25.1...supacloud-lite-v0.26.0) (2026-10-12)
+
+
+### Features
+
+* **lite:** bundle PostgreSQL extension parity set ([#1849](https://github.com/vibeunion/supacloud/issues/1849)) ([233fb1b](https://github.com/vibeunion/supacloud/commit/233fb1bb9d52673a7f38d77d47e8c1e6c0b7c5e4))
+
+## [0.25.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.25.0...supacloud-lite-v0.25.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.24.0...supacloud-lite-v0.25.0) (2026-10-10)
+
+
+### Features
+
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.23.0...supacloud-lite-v0.24.0) (2026-10-10)
+
+
+### Features
+
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.22.1...supacloud-lite-v0.23.0) (2026-10-09)
+
+
+### Features
+
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+
+## [0.22.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.22.0...supacloud-lite-v0.22.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.21.1...supacloud-lite-v0.22.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
+
+### Bug Fixes
+
+* **worker:** ship reviewed PGMQ job controls and concurrency repairs ([#1689](https://github.com/vibeunion/supacloud/issues/1689)) ([e283915](https://github.com/vibeunion/supacloud/commit/e283915e66e119b75ad1b909e18816270b5d01e3))
+
 ## [0.21.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.21.0...supacloud-lite-v0.21.1) (2026-10-06)
 
 

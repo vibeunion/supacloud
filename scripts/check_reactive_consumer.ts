@@ -17,16 +17,16 @@ const env: Record<string, string> = {};
 for (const [key, value] of Object.entries(process.env)) {
   if (value !== undefined && !/^(SUPACLOUD_|SUPABASE_|APP_ENV$|NODE_ENV$|PORT$|NODE_PATH$)/.test(key)) env[key] = value;
 }
-env.HOME = join(temporary, "home");
-env.USERPROFILE = env.HOME;
-env.XDG_CONFIG_HOME = join(env.HOME, ".config");
-env.BUN_TMPDIR = join(temporary, "bun-tmp");
+env["HOME"] = join(temporary, "home");
+env["USERPROFILE"] = env["HOME"];
+env["XDG_CONFIG_HOME"] = join(env["HOME"], ".config");
+env["BUN_TMPDIR"] = join(temporary, "bun-tmp");
 const run = (args: string[], cwd = project): Promise<string> => runStarterCommand(args, {
   cwd, env, signal: interruption.signal, timeoutMs: 180_000,
 });
 
 try {
-  for (const directory of [project, env.HOME, env.BUN_TMPDIR]) await mkdir(directory, { recursive: true });
+  for (const directory of [project, env["HOME"], env["BUN_TMPDIR"]]) await mkdir(directory, { recursive: true });
   const overrides: Record<string, string> = {};
   for (const directory of ["contracts", "query", "app", "supacloud-js"]) {
     const root = join(repo, "packages", directory);

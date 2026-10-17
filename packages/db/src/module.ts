@@ -15,6 +15,10 @@ export interface PolicyDecl {
   roles: string[];
   /** Relative path to SQL source file */
   source: string;
+  /** Exact pg_get_expr output; null requires an absent expression. Omit to skip. */
+  usingExpr?: string | null;
+  /** Exact pg_get_expr output; null requires an absent expression. Omit to skip. */
+  checkExpr?: string | null;
   /** Relative path to test file */
   tests?: string[];
 }
@@ -22,6 +26,8 @@ export interface PolicyDecl {
 export interface FunctionDecl {
   /** Schema-qualified function name: public.case_create */
   name: string;
+  /** Exact schema.name(oidvectortypes(proargtypes)), e.g. public.case_create(uuid, text). */
+  signature?: string;
   source: string;
   /** Business permission identifier, e.g. case.create */
   permission?: string;
@@ -36,6 +42,8 @@ export interface TriggerDecl {
   name: string;
   /** Schema-qualified table name */
   table: string;
+  /** Catalog triggers are expected to be enabled unless explicitly overridden. */
+  enabled?: boolean;
   source: string;
 }
 

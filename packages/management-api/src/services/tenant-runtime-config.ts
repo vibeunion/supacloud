@@ -188,7 +188,7 @@ function validatePasskeyOrigin(origin: string, rpId: string): void {
 }
 
 export function renderGoTruePasskeyEnv(authConfig: Record<string, unknown>): string {
-    const passkey = readRecordSetting(authConfig.passkey);
+    const passkey = readRecordSetting(authConfig["passkey"]);
     const enabled = readBooleanSetting(
         authConfig,
         "passkey_enabled",
@@ -196,7 +196,7 @@ export function renderGoTruePasskeyEnv(authConfig: Record<string, unknown>): str
     );
     if (!enabled) return "GOTRUE_PASSKEY_ENABLED=false";
 
-    const webauthn = readRecordSetting(authConfig.webauthn);
+    const webauthn = readRecordSetting(authConfig["webauthn"]);
     const rawRpId = readStringSetting(authConfig, "webauthn_rp_id", readStringSetting(webauthn, "rp_id"));
     const rpDisplayName = readStringSetting(
         authConfig,
@@ -213,7 +213,7 @@ export function renderGoTruePasskeyEnv(authConfig: Record<string, unknown>): str
 
     const rpId = normalizePasskeyRpId(rawRpId);
     origins.forEach((origin) => validatePasskeyOrigin(origin, rpId));
-    const rawMaxPasskeys = authConfig.passkey_max_passkeys_per_user ?? passkey.max_passkeys_per_user ?? 10;
+    const rawMaxPasskeys = authConfig["passkey_max_passkeys_per_user"] ?? passkey["max_passkeys_per_user"] ?? 10;
     const maxPasskeys = Number(rawMaxPasskeys);
     if (!Number.isSafeInteger(maxPasskeys) || maxPasskeys < 1) {
         throw new Error("passkey_max_passkeys_per_user must be a positive integer");
@@ -254,7 +254,7 @@ export function renderGoTrueProviderLinkingEnv(authConfig: Record<string, unknow
 }
 
 export function renderGoTrueSamlEnv(authConfig: Record<string, unknown>): string {
-    const saml = readRecordSetting(authConfig.saml);
+    const saml = readRecordSetting(authConfig["saml"]);
     const enabled = readBooleanSetting(saml, "enabled", readBooleanSetting(authConfig, "saml_enabled", false));
     if (!enabled) return "";
 

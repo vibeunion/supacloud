@@ -14,7 +14,7 @@ const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 const DEV_SCRIPT = `import { watchProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
 let server: ReturnType<typeof Bun.spawn> | undefined;
 let restarts = Promise.resolve();
 let closing = false;
@@ -47,8 +47,8 @@ await watcher.ready;
 
 const SERVE_SCRIPT = `import { createDemo } from "./sandbox";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
-const port = Number(process.env.PORT ?? "3000");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
+const port = Number(process.env["PORT"] ?? "3000");
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
 const sandbox = createDemo();
 const server = Bun.serve({
@@ -65,13 +65,15 @@ export interface AppAdapters {
   deps: NonNullable<ApplicationOptions["deps"]>;
   requestContext: NonNullable<ApplicationOptions["requestContext"]>;
   commandGovernance: CommandGovernance;
-  onExecution?: ApplicationOptions["onExecution"];
+  onExecution?: NonNullable<ApplicationOptions["onExecution"]>;
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
 export function createApp(adapters: AppAdapters) {
+  const { onExecution, ...rest } = adapters;
   return createApplication({
-    ...adapters,
+    ...rest,
+    ...(onExecution === undefined ? {} : { onExecution }),
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
   });
@@ -94,7 +96,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
-      engines: { bun: ">=1.4.2" },
+      engines: { bun: ">=1.4.3" },
       scripts: {
         compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
         "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
@@ -112,12 +114,13 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       dependencies: {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
-        elysia: "2.0.0-beta.21",
+        effect: "4.0.5",
+        elysia: "2.0.0-beta.32",
         ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
-        "@types/bun": "^1.4.2",
+        "@types/bun": "^1.4.3",
         typescript: "^7.0.2",
       },
     }),
@@ -125,6 +128,10 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       compilerOptions: {
         target: "ES2022", module: "ESNext", moduleResolution: "bundler",
         strict: true, experimentalDecorators: true, skipLibCheck: true,
+        noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+        noImplicitOverride: true, noPropertyAccessFromIndexSignature: true,
+        noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
+        useUnknownInCatchVariables: true,
         noEmit: true, types: ["bun"],
       },
       include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "supacloud.config.ts"],
@@ -142,6 +149,16 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
+  effect: {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+    requireTaggedErrorTypes: true,
+    requireExactDependencyTypes: true,
+    requireTimeoutForDependencies: true,
+    forbidDirectRuntimeExecution: true,
+    forbidDirectThrows: true,
+  },
   typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
   disallowControllerDirectDb: true,
   detectOrphanModules: true,
@@ -171,20 +188,34 @@ export const CreateOrderBody = t.Object({ name: t.String({ minLength: 1 }) });
 export const OrderResult = t.Object({ id: t.String(), name: t.String() });
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,
-    "src/orders/orders.ts": `import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
+    "src/orders/orders.ts": `import { Effect } from "effect";
+import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
 import { status } from "elysia";
 import { OrderParams, CreateOrderBody, OrderResult, HealthResult } from "./contracts";
 @Controller("/orders")
 export class OrdersController {
-  @Get("/health", { responses: { 200: HealthResult } })
-  health(): { ok: boolean } { return { ok: true }; }
+  @Get("/health", {
+    responses: { 200: HealthResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 
-  @Get("/:id", { params: OrderParams, responses: { 200: OrderResult } })
-  get(@Param("id") id: string): { id: string; name: string } { return { id, name: "demo" }; }
+  @Get("/:id", {
+    params: OrderParams,
+    responses: { 200: OrderResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  get(@Param("id") id: string): Effect.Effect<{ id: string; name: string }, never, never> {
+    return Effect.succeed({ id, name: "demo" });
+  }
 
-  @Post("/", { body: CreateOrderBody, responses: { 201: OrderResult } })
+  @Post("/", {
+    body: CreateOrderBody,
+    responses: { 201: OrderResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
   create(@Body() body: { name: string }) {
-    return status(201, { id: "demo", name: body.name });
+    return Effect.succeed(status(201, { id: "demo", name: body.name }));
   }
 }
 
@@ -198,7 +229,7 @@ export const OrdersFeature = defineFeatureSlice({
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Memory adapters are restricted to development and test");
   }
   return createMemorySandbox({
@@ -302,7 +333,7 @@ export const SyncFeature = defineFeatureSlice({
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Memory adapters are restricted to development and test");
   }
   return createMemorySandbox({
@@ -360,22 +391,27 @@ function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies):
     "src/features/health/contracts.ts": `import { t } from "elysia";
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,
-    "src/features/health/health.ts": `import { Controller, Get, Module } from "@supacloud/app/core";
+    "src/features/health/health.ts": `import { Effect } from "effect";
+import { Controller, Get, Module } from "@supacloud/app/core";
 import { HealthResult } from "./contracts";
 @Controller("/health")
 export class HealthController {
-  @Get("/", { responses: { 200: HealthResult } })
-  health(): { ok: boolean } { return { ok: true }; }
+  @Get("/", {
+    responses: { 200: HealthResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 }
 
 @Module({ name: "health", tags: ["type:feature"], controllers: [HealthController] })
 export class HealthModule {}
 `,
-    "src/features/health/health.test.ts": `import { expect, test } from "bun:test";
+    "src/features/health/health.test.ts": `import { Effect } from "effect";
+import { expect, test } from "bun:test";
 import { HealthController } from "./health";
 
-test("health is a public, side-effect-free operation", () => {
-  expect(new HealthController().health()).toEqual({ ok: true });
+test("health is a public, side-effect-free operation", async () => {
+  expect(await Effect.runPromise(new HealthController().health())).toEqual({ ok: true });
 });
 `,
     "src/app.module.ts": `import { Module } from "@supacloud/app/core";
@@ -388,7 +424,7 @@ export class AppModule {}
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Local adapters are restricted to development and test");
   }
   return createMemorySandbox({ modules: createCompiledModules() });
@@ -485,8 +521,8 @@ The compiler discovers this declaration; no runtime container lookup is needed.
 With the matching candidate/released CLI installed:
 
 \`\`\`sh
-supacloud-cli app generate --kind resource --name inventory --register-in src/app.module.ts --dry-run --format json
-supacloud-cli app generate --kind resource --name inventory --register-in src/app.module.ts
+supacloud app generate --kind resource --name inventory --register-in src/app.module.ts --dry-run --format json
+supacloud app generate --kind resource --name inventory --register-in src/app.module.ts
 bun run check
 bun run inspect
 \`\`\`

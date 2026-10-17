@@ -39,7 +39,7 @@ const testApp = new Elysia()
 
     return { authorized: true, authError: null };
   })
-  .beforeHandle(({ authorized, authError }) => {
+  .onBeforeHandle(({ authorized, authError }) => {
     if (authorized === false) {
       return { error: authError || "Unauthorized" };
     }

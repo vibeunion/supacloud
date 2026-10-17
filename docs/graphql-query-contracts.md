@@ -64,7 +64,7 @@ Scenario: The starter does not invent a deployed schema
 
 Make database-backed read queries easy to write, validate and call without
 introducing a second application runtime. The platform extension remains opt-in.
-The explicit `supacloud-cli app init --template command` reference preconfigures
+The explicit `supacloud app init --template command` reference preconfigures
 query contracts. The default minimal starter uses ordinary PostgREST reads and
 does not require GraphQL. General App/compiler configuration and the low-level `compileProject`
 API enable contracts only when `graphql` is configured. Existing REST,
@@ -98,7 +98,7 @@ direct requests sent without the generated client remain possible.
 
 ## Usage
 
-`supacloud-cli app init --template command` includes the configuration, example snapshot, query and
+`supacloud app init --template command` includes the configuration, example snapshot, query and
 offline client test. For an existing project:
 
 ```ts

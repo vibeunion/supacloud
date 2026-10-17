@@ -26,7 +26,7 @@ const loggerErrorSpy = spyOn(logger, "error");
 const { projectMutationRoutes } = await import("../../src/routes/project-mutations");
 const app = new Elysia().use(projectMutationRoutes);
 const validationApp = new Elysia()
-  .error(({ error, set }) => {
+  .onError(({ error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     if (code === "VALIDATION") return validationErrorResponse(set);
     logger.error(`test error [${code}]`, error);

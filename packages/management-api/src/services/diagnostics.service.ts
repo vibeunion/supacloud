@@ -14,6 +14,65 @@ import type {
 } from "./diagnostics.types";
 import { getAllChecks, getCheck } from "./diagnostics.registry";
 import "../diagnostics/checks/index";
+import { isRecord } from "../utils/record";
+
+function stringField(row: Record<string, unknown>, key: string): string {
+  const value = row[key];
+  if (typeof value !== "string") throw new TypeError(`Missing diagnostic field: ${key}`);
+  return value;
+}
+
+function nullableStringField(row: Record<string, unknown>, key: string): string | null {
+  const value = row[key];
+  if (value === null || value === undefined) return null;
+  return stringField(row, key);
+}
+
+function runScope(value: unknown): DiagnosticScope {
+  if (value === "project" || value === "platform") return value;
+  throw new TypeError("Invalid diagnostic run scope");
+}
+
+function runStatus(value: unknown): DiagnosticRun["status"] {
+  if (value === "running" || value === "completed" || value === "failed") return value;
+  throw new TypeError("Invalid diagnostic run status");
+}
+
+function resultStatus(value: unknown): DiagnosticResultRow["status"] {
+  if (value === "pass" || value === "drift" || value === "missing" || value === "tampered"
+    || value === "unreachable" || value === "degraded" || value === "error") return value;
+  throw new TypeError("Invalid diagnostic result status");
+}
+
+function diagnosticDate(value: unknown): Date {
+  if (!(value instanceof Date) && typeof value !== "string" && typeof value !== "number") {
+    throw new TypeError("Invalid diagnostic timestamp");
+  }
+  const date = new Date(value instanceof Date ? value.getTime() : value);
+  if (!Number.isFinite(date.getTime())) throw new TypeError("Invalid diagnostic timestamp");
+  return date;
+}
+
+function diagnosticMetadata(value: unknown): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) throw new TypeError("Invalid diagnostic metadata");
+  return value;
+}
+
+function diagnosticSummary(input: unknown): DiagnosticRunSummary | null {
+  const value: unknown = typeof input === "string" ? JSON.parse(input) : input;
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) throw new TypeError("Invalid diagnostic summary");
+  const count = (key: keyof DiagnosticRunSummary): number => {
+    const item = value[key];
+    if (typeof item !== "number" || !Number.isSafeInteger(item) || item < 0) throw new TypeError(`Invalid diagnostic count: ${key}`);
+    return item;
+  };
+  return {
+    total: count("total"), pass: count("pass"), drift: count("drift"), missing: count("missing"),
+    tampered: count("tampered"), unreachable: count("unreachable"), degraded: count("degraded"), error: count("error"),
+  };
+}
 
 // --- Run orchestration ---
 
@@ -118,17 +177,17 @@ export async function getRunResults(runId: string): Promise<DiagnosticResultRow[
     WHERE run_id = ${runId}
     ORDER BY created_at ASC
   `;
-  return rows.map((r: any) => ({
-    id: r.id,
-    runId: r.run_id,
-    checkId: r.check_id,
-    status: r.status,
-    message: r.message,
-    detail: r.detail,
-    repairPreview: r.repair_preview,
-    repairCommand: r.repair_command,
-    metadata: r.metadata,
-    createdAt: new Date(r.created_at),
+  return rows.map((r: Record<string, unknown>) => ({
+    id: stringField(r, "id"),
+    runId: stringField(r, "run_id"),
+    checkId: stringField(r, "check_id"),
+    status: resultStatus(r["status"]),
+    message: stringField(r, "message"),
+    detail: nullableStringField(r, "detail"),
+    repairPreview: nullableStringField(r, "repair_preview"),
+    repairCommand: nullableStringField(r, "repair_command"),
+    metadata: diagnosticMetadata(r["metadata"]),
+    createdAt: diagnosticDate(r["created_at"]),
   }));
 }
 
@@ -238,9 +297,14 @@ function summarizeResults(results: DiagnosticCheckResult[]): DiagnosticRunSummar
     unreachable: 0, degraded: 0, error: 0,
   };
   for (const r of results) {
-    const key = r.status as keyof DiagnosticRunSummary;
-    if (key in summary && typeof summary[key] === "number") {
-      (summary as any)[key]++;
+    switch (r.status) {
+      case "pass": summary.pass++; break;
+      case "drift": summary.drift++; break;
+      case "missing": summary.missing++; break;
+      case "tampered": summary.tampered++; break;
+      case "unreachable": summary.unreachable++; break;
+      case "degraded": summary.degraded++; break;
+      case "error": summary.error++; break;
     }
   }
   return summary;
@@ -266,14 +330,15 @@ async function persistResults(runId: string, results: DiagnosticCheckResult[]): 
   }
 }
 
-function mapRunRow(r: any): DiagnosticRun {
+function mapRunRow(r: Record<string, unknown>): DiagnosticRun {
   return {
-    id: r.id,
-    scope: r.scope,
-    projectRef: r.project_ref,
-    status: r.status,
-    startedAt: new Date(r.started_at),
-    completedAt: r.completed_at ? new Date(r.completed_at) : null,
-    summary: typeof r.summary === "string" ? JSON.parse(r.summary) : r.summary,
+    id: stringField(r, "id"),
+    scope: runScope(r["scope"]),
+    projectRef: nullableStringField(r, "project_ref"),
+    status: runStatus(r["status"]),
+    startedAt: diagnosticDate(r["started_at"]),
+    completedAt: r["completed_at"] === null || r["completed_at"] === undefined
+      ? null : diagnosticDate(r["completed_at"]),
+    summary: diagnosticSummary(r["summary"]),
   };
 }

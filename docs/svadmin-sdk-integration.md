@@ -77,6 +77,69 @@ see its README for `onNavigate`. Cancellation does not prove server rollback and
 must not clear a persisted unresolved operation. Refresh affected queries only
 after confirmation and while the original tenant/actor still owns that cache.
 
+## Bind the generated review reference
+
+The command starter emits `src/client/reviews.ts` and
+`src/client/review-transport.ts`. Bind these to the existing SVAdmin view/store;
+no SVAdmin dependency is added to the generated application.
+
+```ts
+import { createAuthenticatedFetch } from "@supacloud/js/contracts";
+import { createReviewClient, createReviewPendingStore } from "./client/reviews";
+import { createReviewTransport } from "./client/review-transport";
+
+// Run inside a mounted, identity-scoped view, never a server module singleton.
+const pending = createReviewPendingStore(localStorage, {
+  projectId: session.projectId,
+  tenantId: session.tenantId,
+  applicationId: "reviews",
+  subject: session.subject,
+});
+const client = createReviewClient(createReviewTransport({
+  supabase: session.supabase,
+  apiOrigin: applicationOrigin,
+  authenticatedFetch: createAuthenticatedFetch({
+    getAccessToken: () => session.getAccessToken(),
+  }),
+}), pending);
+const unsubscribe = client.subscribe(() => updateView(client.snapshot()));
+updateView(client.snapshot());
+void client.load();
+
+// Register this with the view's unmount and identity-change lifecycle.
+function dispose() {
+  unsubscribe();
+  client.dispose();
+}
+```
+
+Here `session`, `applicationOrigin` and `updateView` are application-owned
+bindings, not new SDK globals. Capture one immutable session identity. Its token
+supplier must refuse a switched identity, and its Supabase instance must not
+silently adopt another actor's token. Dispose and reconstruct the view on
+project, tenant or subject change; never just change credentials in place.
+
+Bind rows and read feedback to `state.list`; bind approval/upload buttons to
+`client.approve(row)` / `client.upload(row, file)`. Disable mutations while
+submitting or unknown, and expose `client.reconcile()` separately. Recovery reads
+the original authorized operation receipt, not the current row state. Do not
+wrap these calls in an SVAdmin mutation retry hook. Only confirmed results may
+invalidate other affected queries, and only while their original scope is active.
+
+The reference pending store survives reload but is not an atomic cross-tab
+lock. Keep one active mutation owner per identity/application. Logout and
+unmount must not delete unknown operations. Stored pending data contains no
+tokens, business rows or file bytes; storage corruption blocks writes.
+
+See [customer workflow acceptance](customer-workflow-completion.md#browser-acceptance)
+for the reproducible browser-to-native-database fixture. Its optional `--svadmin`
+view uses installed SVAdmin Button/Table components, Svelte subscriptions and
+unmount cleanup. On October 16, 2026 that view passed the same real-database
+upload, approval, conflict, reload-recovery and foreign-identity scenarios as
+the DOM view, with strict Svelte diagnostics enabled. This verifies those
+components and the reference binding, not every SVAdmin provider or the deployed
+customer UI. Neither the template nor the SDK gains a hard UI dependency.
+
 ## Compatibility before upgrading the task adapter
 
 At the integration baseline, svadmin pins SDK `0.23.1` for tests and declares

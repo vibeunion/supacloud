@@ -1,7 +1,6 @@
-import { sql, resolveDbName, resolveSlotName } from '../db';
+import { sql, resolveDbName, resolveSlotName, getProjectDb } from '../db';
 import { SQL_MODULES } from '../db/sql-modules';
 import { renderPlatformRpcOwnershipSql } from '../services/platform-ownership';
-import { databaseService } from '../services/database.service';
 import { TENANT_PUBLIC_SCHEMA_ACCESS_SQL } from '../services/tenant-public-schema-access';
 import { logger } from '../utils/logger';
 
@@ -594,8 +593,8 @@ async function main() {
 
     for (const project of projects) {
        const dbName = await resolveDbName(project.ref);
-       const tenantDb = (databaseService as any).getTenantDb(dbName);
        try {
+          const tenantDb = getProjectDb(dbName);
           await tenantDb.unsafe(ALTER_TENANT_SQL);
           const slotName = resolveSlotName(project.ref);
           try {

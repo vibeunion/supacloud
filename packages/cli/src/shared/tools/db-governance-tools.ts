@@ -12,20 +12,13 @@ import {
     type QueryExecutor,
     type ReconcileReport,
 } from "@supacloud/db";
+import { runDbWorkflow, type DbWorkflowAction } from "./db-workflow";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: DbToolArguments) => Promise<unknown>,
-    ) => void;
-};
+import { registerTool, type ToolServer, type ToolResult } from "../tool-server";
 
 export interface DbToolArguments {
-    action: "lint" | "explain" | "module_check";
+    action: "context" | "lint" | "explain" | "module_check" | DbWorkflowAction;
     module?: string;
     root?: string;
     module_file?: string;
@@ -34,6 +27,47 @@ export interface DbToolArguments {
     schema?: string;
     lite?: boolean;
     project_dir?: string;
+    schema_dir?: string;
+    db_major_version?: number;
+    out?: string;
+    dir?: string;
+    ref?: string;
+    approved_digest?: string;
+    application_role?: string;
+    migration_role?: string;
+    database?: string;
+}
+
+export interface DatabaseAiContextObject {
+    kind: "table" | "policy" | "function" | "trigger" | "grant";
+    name: string;
+    module: string;
+    table?: string;
+    source: string | null;
+    tests: string[];
+    security?: string;
+    permission?: string;
+    transaction?: string;
+    audit?: string;
+    idempotency?: string;
+}
+
+export interface DatabaseAiContext {
+    version: 1;
+    scope: "database-ai-context";
+    root: string;
+    selectedModules: string[];
+    target: string | null;
+    objects: DatabaseAiContextObject[];
+    maintenance: {
+        structureSource: "drizzle" | "declarative-sql";
+        behaviorSource: "sql";
+        generatedPaths: string[];
+        protectedPaths: string[];
+        forwardMigrationPath: string;
+        rules: string[];
+    };
+    verification: string[];
 }
 
 export interface DbGovernanceToolOptions {
@@ -42,11 +76,9 @@ export interface DbGovernanceToolOptions {
     liteSpawn?: LiteSpawn;
     /** Overrides the supacloud-lite binary lookup; null simulates a missing binary (tests). */
     liteBinary?: string | null;
-}
-
-interface ToolResult {
-    isError: boolean;
-    content: Array<{ type: "text"; text: string }>;
+    projectRef?: string;
+    apiUrl?: string;
+    runDatabase?: () => ((args: Record<string, unknown>) => Promise<ToolResult>) | undefined;
 }
 
 function textResult(text: string, isError = false): ToolResult {
@@ -114,6 +146,85 @@ function formatReconcileReport(report: ReconcileReport): string {
     return lines.join("\n");
 }
 
+function moduleObjects(module: DatabaseModule): DatabaseAiContextObject[] {
+    return [
+        ...module.tables.map((table) => ({
+            kind: "table" as const, name: table, module: module.name,
+            source: null, tests: [],
+        })),
+        ...module.policies.map((policy) => ({
+            kind: "policy" as const, name: policy.name, module: module.name,
+            table: policy.table, source: policy.source, tests: policy.tests ?? [],
+        })),
+        ...module.functions.map((fn) => ({
+            kind: "function" as const, name: fn.name, module: module.name,
+            source: fn.source, tests: fn.tests ?? [], security: fn.security,
+            permission: fn.permission, transaction: fn.transaction,
+            audit: fn.audit, idempotency: fn.idempotency,
+        })),
+        ...module.triggers.map((trigger) => ({
+            kind: "trigger" as const, name: trigger.name, module: module.name,
+            table: trigger.table, source: trigger.source, tests: [],
+        })),
+        ...module.grants.map((grant) => ({
+            kind: "grant" as const, name: `${grant.object}:${grant.privilege}:${grant.role}`,
+            module: module.name, source: grant.source, tests: [],
+        })),
+    ];
+}
+
+function objectMatchesTarget(object: DatabaseAiContextObject, target: string): boolean {
+    return object.name === target
+        || object.table === target
+        || (object.kind === "policy" && `${object.table}.${object.name}` === target)
+        || (object.kind === "grant" && object.name.startsWith(`${target}:`));
+}
+
+export function buildDatabaseAiContext(
+    modules: readonly DatabaseModule[],
+    root: string,
+    moduleName?: string,
+    target?: string,
+): DatabaseAiContext {
+    const selected = moduleName
+        ? modules.filter((module) => module.name === moduleName)
+        : [...modules];
+    if (moduleName && selected.length === 0) {
+        throw new Error(`未找到数据库模块: ${moduleName}（可用: ${modules.map((module) => module.name).join(", ") || "none"}）`);
+    }
+    const allObjects = selected.flatMap(moduleObjects);
+    const objects = target ? allObjects.filter((object) => objectMatchesTarget(object, target)) : allObjects;
+    if (target && objects.length === 0) throw new Error(`未找到数据库对象: ${target}`);
+    const sqlFirst = existsSync(join(root, "supabase/schemas"));
+    return {
+        version: 1,
+        scope: "database-ai-context",
+        root,
+        selectedModules: selected.map((module) => module.name),
+        target: target ?? null,
+        objects,
+        maintenance: {
+            structureSource: sqlFirst ? "declarative-sql" : "drizzle",
+            behaviorSource: "sql",
+            generatedPaths: [...(sqlFirst ? ["db/schema.ts"] : []), "generated/", "bootstrap/schema.sql", "output/database-audit/"],
+            protectedPaths: ["migrations/", "supabase/migrations/", "generated/"],
+            forwardMigrationPath: sqlFirst ? "supabase/migrations/<timestamp>_<intent>.sql" : "migrations/<timestamp>_<intent>.sql",
+            rules: [
+                "Edit the selected maintained source, not a generated snapshot.",
+                ...(sqlFirst ? ["Author structure in supabase/schemas SQL; derive Drizzle query models, never run a second migration generator."] : []),
+                "Keep RPC, RLS, trigger and grant behavior in explicit SQL sources.",
+                "Create a new forward migration; never rewrite an applied migration.",
+                "Run lint, focused behavior tests and catalog reconciliation after edits.",
+            ],
+        },
+        verification: [
+            "supacloud db lint --module_file db/modules.ts",
+            "supacloud db explain --target <object>",
+            "supacloud db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"",
+        ],
+    };
+}
+
 /** Testable orchestration point: inject executor, read catalog, and reconcile against declared modules. */
 export async function runModuleCheck(
     module: DatabaseModule,
@@ -161,6 +272,15 @@ async function runExplain(args: DbToolArguments, root: string): Promise<ToolResu
     const manifest = buildDatabaseManifest(modules);
     const text = explainObject(manifest, target);
     return textResult(text, text.startsWith("未找到对象"));
+}
+
+async function runContext(args: DbToolArguments, root: string): Promise<ToolResult> {
+    const modules = await loadDatabaseModules(root, args.module_file);
+    return textResult(JSON.stringify(
+        buildDatabaseAiContext(modules, root, args.module, args.target),
+        null,
+        2,
+    ));
 }
 
 interface LiteSubprocessResult {
@@ -239,26 +359,48 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
     const environment = options.environment || process.env;
     const fallbackRoot = options.currentWorkingDirectory || process.cwd();
     const liteSpawn = options.liteSpawn || defaultLiteSpawn;
-    server.tool(
+    registerTool(server,
         "db",
-        "Local database governance (@supacloud/db): lint declared modules, explain objects, reconcile against a live catalog or a local SupaCloud Lite project. Actions: lint, explain, module_check",
+        "Database governance (@supacloud/db): inspect, reverse-adopt, diff, plan and apply through explicit source and migration boundaries. Actions: context, lint, explain, module_check, reverse, diff, plan, apply, role_check, role_sql",
         {
-            action: withDescription(stringEnum(["lint", "explain", "module_check"]), "Database governance action"),
-            module: optional(Type.String(), "[lint] Only lint this manifest module (default: all)"),
+            action: withDescription(stringEnum(["context", "lint", "explain", "module_check", "reverse", "diff", "plan", "apply", "role_check", "role_sql"]), "Database governance action"),
+            module: optional(Type.String(), "[context/lint] Only select this manifest module (default: all)"),
             root: optional(Type.String(), "[*] Project root (default: current directory)"),
             module_file: optional(Type.String(), "[*] File exporting defineDatabaseModule(...) (default: <root>/db/modules.ts)"),
-            target: optional(Type.String(), "[explain] Policy / function / table name to explain"),
+            target: optional(Type.String(), "[context/explain] Policy / function / table name to explain"),
             database_url: optional(Type.String(), "[module_check] Postgres connection URL (default: DATABASE_URL)"),
             schema: optional(Type.String(), "[module_check] Comma-separated schemas to inspect (default: public)"),
             lite: optional(Type.Boolean(), "[module_check] Reconcile against a local SupaCloud Lite project (runs supacloud-lite db check)"),
             project_dir: optional(Type.String(), "[module_check] Lite project directory (with --lite; default: --root)"),
+            schema_dir: optional(Type.String(), "[diff] Maintained declarative SQL directory (default: supabase/schemas)"),
+            db_major_version: optional(Type.Number(), "[reverse/diff] PostgreSQL shadow major version (default: 17)"),
+            out: optional(Type.String(), "[reverse/diff] Candidate output path (reverse requires a new directory)"),
+            dir: optional(Type.String(), "[diff/plan/apply] Reviewed forward migration directory"),
+            ref: optional(Type.String(), "[plan/apply] Target project ref"),
+            approved_digest: optional(Type.String(), "[apply] Exact digest returned by db plan"),
+            application_role: optional(Type.String(), "[role_sql] Application database role"),
+            migration_role: optional(Type.String(), "[role_sql] Privileged migration role"),
+            database: optional(Type.String(), "[role_sql] PostgreSQL database name"),
         },
         async (request) => {
             const root = resolve(request.root || fallbackRoot);
             switch (request.action) {
+                case "context": return runContext(request, root);
                 case "lint": return runLint(request, root);
                 case "explain": return runExplain(request, root);
                 case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary);
+                case "reverse":
+                case "diff":
+                case "plan":
+                case "apply":
+                case "role_check":
+                case "role_sql":
+                    return runDbWorkflow({ ...request, action: request.action }, root, {
+                        environment,
+                        projectRef: options.projectRef,
+                        apiUrl: options.apiUrl,
+                        runDatabase: options.runDatabase,
+                    });
                 default:
                     return textResult(`Unknown db action: ${String(request.action)}`, true);
             }

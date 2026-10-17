@@ -29,7 +29,7 @@ const records = pgSchema("app").table("settings", {
 });
 const rowSchema = createSelectSchema(records);
 // `drizzle-orm/typebox-legacy` is the only Drizzle schema helper that keeps
-// the 0.34 type identity drizzle-orm@1.0.0-rc.4 is built against; its 1.x
+// the 0.34 type identity drizzle-orm@1.0.0-rc.5 is built against; its 1.x
 // `typebox` helper still subclasses the removed `Type.Base`. Wrap the derived,
 // marker-less JSON Schema property map with TypeBox 1.x before projecting.
 const rowProjection = Type.Object(rowSchema.properties);

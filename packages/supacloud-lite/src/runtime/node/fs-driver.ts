@@ -3,7 +3,7 @@
  * under a single root directory, with path-traversal protection on every key.
  */
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, normalize, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
 import type { StorageDriver } from '../types.js'
 
 /**
@@ -11,19 +11,22 @@ import type { StorageDriver } from '../types.js'
  * single root directory. Keys map to relative paths beneath the root.
  */
 export class FsStorageDriver implements StorageDriver {
-  constructor(private root: string) {}
+  constructor(private root: string) {
+    this.root = resolvePath(root)
+  }
 
   /**
    * Resolve a storage key to an absolute path inside the root.
    *
-   * SECURITY: rejects keys that escape the root (e.g. `../`); the normalized
-   * path must stay under `root` + separator or the key is refused.
+   * SECURITY: rejects keys that escape the root (e.g. `../`) or resolve to
+   * the root itself.
    *
    * @throws if the key would resolve outside the root directory.
    */
   private resolve(key: string): string {
-    const path = normalize(join(this.root, key))
-    if (!path.startsWith(normalize(this.root) + sep)) {
+    const path = join(this.root, key)
+    const relativePath = relative(this.root, path)
+    if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
       throw new Error(`invalid storage key: ${key}`)
     }
     return path

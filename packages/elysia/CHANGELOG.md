@@ -1,5 +1,110 @@
 # Changelog
 
+## [0.33.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.33.1...elysia-v0.33.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* cover bounded starter task version and failure handling ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
+
+### Dependencies
+
+* align the published @supacloud/app, @supacloud/commands and @supacloud/contracts dependencies to 0.27.2, 0.9.4 and 0.11.2.
+
+## [0.33.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.33.0...elysia-v0.33.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **cli:** align starter review versions with postgres integer ([#2000](https://github.com/vibeunion/supacloud/issues/2000)) ([76e8cf2](https://github.com/vibeunion/supacloud/commit/76e8cf22ec7b4b62c6fa0c214294d0054b063fe3))
+* **cli:** reconcile committed upload registrations before storage ([#1995](https://github.com/vibeunion/supacloud/issues/1995)) ([7a9fef8](https://github.com/vibeunion/supacloud/commit/7a9fef833cf182e9aa59efd23518b17128b3a9ca))
+
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.32.0...elysia-v0.33.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** share receipt contracts and verify client recovery ([#1989](https://github.com/vibeunion/supacloud/issues/1989)) ([8e319cd](https://github.com/vibeunion/supacloud/commit/8e319cdfb7933d1291dc666f047da56841135b72))
+
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.31.1...elysia-v0.32.0) (2026-10-16)
+
+
+### Features
+
+* **cli:** complete review task status and recovery lifecycle ([#1970](https://github.com/vibeunion/supacloud/issues/1970)) ([4ed6b7b](https://github.com/vibeunion/supacloud/commit/4ed6b7b8a9baced763de5602b67e1bb62d0479e2))
+* **elysia:** expose read-only transactional command lookup ([#1977](https://github.com/vibeunion/supacloud/issues/1977)) ([3452413](https://github.com/vibeunion/supacloud/commit/345241318e337eac6d52953c3e84ee51899e133a))
+
+## [0.31.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.31.0...elysia-v0.31.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **cli:** recover committed attachment results before job replay ([#1953](https://github.com/vibeunion/supacloud/issues/1953)) ([d7dcf24](https://github.com/vibeunion/supacloud/commit/d7dcf2487441b4e223b64137f1660af0be7434e7))
+
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.30.1...elysia-v0.31.0) (2026-10-15)
+
+
+### Features
+
+* reduce approval infrastructure wiring and reuse business contracts ([#1948](https://github.com/vibeunion/supacloud/issues/1948)) ([7c68543](https://github.com/vibeunion/supacloud/commit/7c6854338968209c2bbd658782224db238650aeb))
+
+## [0.30.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.30.0...elysia-v0.30.1) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.29.2...elysia-v0.30.0) (2026-10-14)
+
+
+### Features
+
+* **stability:** add FA delivery and acceptance governance ([#1915](https://github.com/vibeunion/supacloud/issues/1915)) ([f70b607](https://github.com/vibeunion/supacloud/commit/f70b6079234d849d5059dd5a879d22b895022987))
+
+## [0.29.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.29.1...elysia-v0.29.2) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.29.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.29.0...elysia-v0.29.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **elysia:** reuse managed Effect runtimes ([#1810](https://github.com/vibeunion/supacloud/issues/1810)) ([c31a62d](https://github.com/vibeunion/supacloud/commit/c31a62d133fa6497077a020c901b0c781f570dab))
+
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.28.0...elysia-v0.29.0) (2026-10-10)
+
+
+### Features
+
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.27.1...elysia-v0.28.0) (2026-10-09)
+
+
+### Features
+
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+
+## [0.27.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.27.0...elysia-v0.27.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.26.0...elysia-v0.27.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.25.0...elysia-v0.26.0) (2026-10-07)
 
 

@@ -28,11 +28,11 @@ function parseJwks(value: unknown): { keys?: unknown } | null {
 }
 
 function isSupportedPublicVerificationKey(key: JsonWebKey): boolean {
-    if (typeof key.kid !== "string" || !key.kid.trim()) return false;
+    if (typeof key["kid"] !== "string" || !key["kid"].trim()) return false;
     if (PRIVATE_JWK_FIELDS.some((field) => field in key)) return false;
-    return (key.kty === "EC" && key.alg === "ES256")
-        || (key.kty === "RSA" && key.alg === "RS256")
-        || (key.kty === "OKP" && key.alg === "EdDSA");
+    return (key["kty"] === "EC" && key["alg"] === "ES256")
+        || (key["kty"] === "RSA" && key["alg"] === "RS256")
+        || (key["kty"] === "OKP" && key["alg"] === "EdDSA");
 }
 
 export function normalizeRealtimeJwtJwks(value: unknown): { keys: JsonWebKey[] } | undefined {

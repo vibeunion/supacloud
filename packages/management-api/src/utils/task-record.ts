@@ -110,9 +110,9 @@ export function parseTaskRecord(value: unknown): ProjectTask {
   if (!isRecord(value)) throw new InvalidTaskRecordError();
   const record = {
     ...value,
-    payload: parseTaskJsonObject(value.payload),
-    result: value.result === null ? null : parseTaskJsonObject(value.result),
-    metadata: value.metadata === null ? null : parseTaskJsonObject(value.metadata),
+    payload: parseTaskJsonObject(value["payload"]),
+    result: value["result"] === null ? null : parseTaskJsonObject(value["result"]),
+    metadata: value["metadata"] === null ? null : parseTaskJsonObject(value["metadata"]),
   };
   if (!Value.Check(taskSchema, record)) throw new InvalidTaskRecordError();
   return structuredClone(record);
@@ -120,7 +120,7 @@ export function parseTaskRecord(value: unknown): ProjectTask {
 
 export function parseTaskAttemptRecord(value: unknown): ProjectTaskAttempt {
   if (!isRecord(value)) throw new InvalidTaskRecordError();
-  const record = { ...value, logs: decodeJson(value.logs) };
+  const record = { ...value, logs: decodeJson(value["logs"]) };
   if (!Value.Check(attemptSchema, record)) throw new InvalidTaskRecordError();
   if (record.logs?.some((entry) => !Number.isFinite(Date.parse(entry.timestamp)))) throw new InvalidTaskRecordError();
   return structuredClone(record);

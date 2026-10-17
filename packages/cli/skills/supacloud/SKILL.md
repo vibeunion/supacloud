@@ -1,0 +1,125 @@
+---
+name: supacloud
+description: Use when operating, implementing, diagnosing, deploying, or documenting a SupaCloud project through supacloud, especially project endpoint discovery, database schema, functions/RPC, triggers, RLS, indexes, grants, extensions, migrations, backups, auth, storage, Edge Functions, frontend, queues, task events, diagnostics, or gateway work. Also use when an AI might otherwise call SQL, psql, a database API, or the Management API directly.
+---
+
+# SupaCloud CLI
+
+Use `supacloud` as the project-level control surface and keep durable changes reproducible from version-controlled files. Use `supacloud-admin` only for server/platform operations.
+
+## Non-negotiable rules
+
+1. Inspect repository state and project context before any action:
+
+   ```bash
+   git status --short --branch
+   supacloud status
+   ```
+
+   A missing remote project context does not block local `migration_new`, `db_diff`, or `db_reset`; it blocks remote inspection/apply until context is supplied.
+
+2. Never place secrets, service-role keys, database URLs, passwords, or tokens in commands that will be logged, source files, migration files, or chat output.
+3. Treat schema, functions/RPC, triggers, RLS policies, indexes, grants, extensions, and seed/reference-data changes as migrations. Do not apply them through `database query`, `psql`, a dashboard SQL editor, or a raw Management API call.
+4. Use `database query` only for read-only inspection unless the user explicitly authorizes a documented break-glass operation. Break-glass work still requires a backup, rollback SQL, and a follow-up migration in the same task.
+5. Run a remote migration dry-run before apply. Production apply requires explicit user approval in the current task.
+6. Do not edit `supabase_migrations.schema_migrations` through ordinary SQL. Migration history is an application ledger, not a schema backup or source of truth. For a proven-equivalent historical baseline, use the controlled `database baseline_migrations` action with dry-run and explicit approval.
+7. Service-role credentials authenticate the SupaCloud Management API. Never reinterpret them as PostgreSQL passwords or forward them to the official Supabase CLI.
+8. Read project domains through `supacloud project endpoints`. Do not infer API, Auth, or Studio origins by concatenating project refs and base domains. The projection reports configuration, not DNS/certificate/runtime readiness.
+9. Cross-project enumeration is an Admin boundary. Use `supacloud-admin project list` or `supacloud-admin project list_endpoints`; do not attempt to widen project credentials.
+
+## Workflow
+
+For normal application deployment, run `supacloud --env <name> deploy`.
+Use the current application delivery configuration and a bound application ID.
+Do not assemble a client-side sequence of scope generation, backup, migration
+apply, PostgREST refresh, Function deployment and Web activation.
+The server owns that sequence. Old `deploy --target` and `frontend` publishing
+actions are removed: upgrade CLI and server together, migrate the configuration,
+and retry the unified command. Do not substitute a legacy endpoint when it fails.
+The inspection and database-maintenance workflow below is not a deployment checklist.
+
+1. Classify the request using [references/command-map.md](references/command-map.md).
+2. For database work, load [references/database-workflow.md](references/database-workflow.md) and choose either new-change or historical-drift reconciliation.
+3. For AI-assisted database changes, first request bounded context:
+
+   ```bash
+   supacloud db context --module_file db/modules.ts --module <module>
+   supacloud db context --module_file db/modules.ts --target <object>
+   ```
+
+   Use the returned source/test paths and ownership boundary; do not scan or
+   edit the complete schema dump.
+4. Prefer the smallest read-only inspection that proves current state.
+5. Create or update version-controlled artifacts before remote writes.
+6. Verify locally, inspect the diff, and run the narrowest relevant tests.
+7. Preview remote changes with `--dry_run`.
+8. Apply only within the user-authorized environment and scope.
+9. Read back migration history and affected resources; report exact evidence and any remaining drift.
+
+## Project endpoint inspection
+
+For the selected project:
+
+```bash
+supacloud status
+supacloud project endpoints
+```
+
+The fixed projection contains credential-free API/Auth/Studio origins, hosts,
+schemes, source classifications, and API aliases. Follow it with the relevant
+health or gateway command before claiming that DNS, TLS, routing, or a runtime is
+ready. Project-wide or fleet-wide inventories belong to `supacloud-admin`.
+
+## Database default
+
+For a new database change:
+
+```bash
+supacloud supabase migration_new --name add_accounts
+# Edit the generated SQL migration.
+supacloud supabase db_reset --no_seed
+supacloud supabase push --ref <project-ref> --dir supabase/migrations --dry_run
+# Apply only after explicit approval.
+supacloud supabase push --ref <project-ref> --dir supabase/migrations
+```
+
+Use `db_diff` as an authoring aid, not as permission to bypass review:
+
+```bash
+supacloud supabase db_diff --schema public --name reconcile_public_schema
+```
+
+For existing declarative SQL projects, `supabase db_schema_declarative_sync`
+generates without applying by default. Preserve the repository's schema authority
+and review the migration before any apply. `config_pull` previews official
+Supabase configuration, not SupaCloud Management settings. Native local stacks
+remain alpha and require `SUPACLOUD_ENABLE_NATIVE_STACK=1`; do not silently switch
+an existing Docker workflow. Lite drift pull writes drafts by default; only use
+`--baseline` for reviewed DDL already present in the live local state.
+
+For a database that was previously changed directly, stop further direct writes and follow the reconciliation workflow in [references/database-workflow.md](references/database-workflow.md). Do not push guessed historical migrations against a live database. After schema equivalence is proven, preview and record the baseline through:
+
+```bash
+supacloud database baseline_migrations \
+  --ref <project-ref> \
+  --dir supabase/migrations \
+  --dry_run
+```
+
+## CLI boundaries
+
+- `supacloud`: selected-project status and endpoint projection, database, migrations, auth, storage, Edge Functions, frontend, queues, task events, diagnostics, and project gateway configuration.
+- `supacloud-admin`: installation, upgrades, SSH diagnostics, platform-wide project/endpoint inventory, project lifecycle, tenant runtime, and server operations.
+- Official `supabase` CLI: invoked only through the allowlisted `supacloud supabase` adapter for supported local authoring or explicit-DSN inspection commands.
+- Direct HTTP/SQL: read-only diagnosis or an explicitly approved break-glass path; never the default implementation path.
+
+## Completion evidence
+
+Before declaring success, provide:
+
+- migration filenames and reviewed diff;
+- local reset/test/typecheck evidence appropriate to the project;
+- remote dry-run evidence;
+- explicit approval reference for production apply;
+- applied migration/read-back evidence;
+- backup and rollback references for destructive or reconciliation work.

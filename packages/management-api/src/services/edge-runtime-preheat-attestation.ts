@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ATTESTED_REVISION_PATTERN } from "./runtime-revision";
 
 const PREHEAT_SCHEMA = "supacloud.edge-runtime-preheat-attestation.v1";
@@ -124,16 +125,16 @@ function loadedEnvironment(candidate: unknown): {
 } | null {
   const environment = objectRecord(candidate);
   if (!environment || !exactKeys(environment, ENV_KEYS)) return null;
-  if (environment.load_state !== "loaded" || environment.load_source !== "management_api") {
+  if (environment["load_state"] !== "loaded" || environment["load_source"] !== "management_api") {
     return null;
   }
-  if (typeof environment.loaded_revision !== "string"
-    || !ATTESTED_REVISION_PATTERN.test(environment.loaded_revision)
-    || typeof environment.env_proof !== "string"
-    || !ATTESTED_REVISION_PATTERN.test(environment.env_proof)) return null;
+  if (typeof environment["loaded_revision"] !== "string"
+    || !ATTESTED_REVISION_PATTERN.test(environment["loaded_revision"])
+    || typeof environment["env_proof"] !== "string"
+    || !ATTESTED_REVISION_PATTERN.test(environment["env_proof"])) return null;
   return {
-    loadedRevision: environment.loaded_revision,
-    envProof: environment.env_proof,
+    loadedRevision: environment["loaded_revision"],
+    envProof: environment["env_proof"],
   };
 }
 
@@ -144,50 +145,53 @@ function runtimeAttestation(
 ): RuntimeAttestation | null {
   const attestation = objectRecord(candidate);
   if (!attestation || !exactKeys(attestation, ATTESTATION_KEYS)) return null;
-  const environment = loadedEnvironment(attestation.tenant_env);
+  const environment = loadedEnvironment(attestation["tenant_env"]);
   const resolvedVersion = expected.resolvedVersion;
   if (!environment
-    || attestation.schema !== PREHEAT_SCHEMA
-    || attestation.project_ref !== expected.projectRef
-    || attestation.function_slug !== expected.functionSlug
-    || attestation.requested_version !== expected.requestedVersion
-    || attestation.target_version !== resolvedVersion
-    || attestation.resolved_version !== resolvedVersion
-    || attestation.artifact_sha256 !== expected.artifactSha256
-    || attestation.verify_jwt !== expected.verifyJwt
-    || attestation.activation_id !== expected.activationId
-    || (attestation.activation_id !== null
-      && (typeof attestation.activation_id !== "string"
-        || !UUID_PATTERN.test(attestation.activation_id)))
+    || attestation["schema"] !== PREHEAT_SCHEMA
+    || attestation["project_ref"] !== expected.projectRef
+    || attestation["function_slug"] !== expected.functionSlug
+    || attestation["requested_version"] !== expected.requestedVersion
+    || attestation["target_version"] !== resolvedVersion
+    || attestation["resolved_version"] !== resolvedVersion
+    || attestation["artifact_sha256"] !== expected.artifactSha256
+    || attestation["verify_jwt"] !== expected.verifyJwt
+    || attestation["activation_id"] !== expected.activationId
+    || (attestation["activation_id"] !== null
+      && (typeof attestation["activation_id"] !== "string"
+        || !UUID_PATTERN.test(attestation["activation_id"])))
     || !SHA256_PATTERN.test(expected.artifactSha256)
-    || typeof attestation.runtime_instance_id !== "string"
-    || !UUID_PATTERN.test(attestation.runtime_instance_id)
-    || attestation.execution_profile !== executionProfile
-    || typeof attestation.module_env_proof !== "string"
-    || !ATTESTED_REVISION_PATTERN.test(attestation.module_env_proof)
-    || attestation.module_loaded !== true) return null;
+    || typeof attestation["runtime_instance_id"] !== "string"
+    || !UUID_PATTERN.test(attestation["runtime_instance_id"])
+    || attestation["execution_profile"] !== executionProfile
+    || typeof attestation["module_env_proof"] !== "string"
+    || !ATTESTED_REVISION_PATTERN.test(attestation["module_env_proof"])
+    || attestation["module_loaded"] !== true) return null;
   return {
-    runtimeInstanceId: attestation.runtime_instance_id,
-    verifyJwt: attestation.verify_jwt,
-    activationId: attestation.activation_id as string | null,
+    runtimeInstanceId: attestation["runtime_instance_id"],
+    verifyJwt: attestation["verify_jwt"],
+    activationId: attestation["activation_id"] as string | null,
     executionProfile,
-    moduleEnvProof: attestation.module_env_proof,
+    moduleEnvProof: attestation["module_env_proof"],
     ...environment,
   };
 }
 
 function rotationGeneration(candidate: unknown): number | null {
   const rotation = objectRecord(candidate);
+  const hasParkedRetired = rotation !== null && Object.hasOwn(rotation, "parkedRetired");
+  const keys = hasParkedRetired ? [...ROTATION_KEYS, "parkedRetired"] : ROTATION_KEYS;
   if (rotation === null
-    || !exactKeys(rotation, ROTATION_KEYS)
-    || !ROTATION_KEYS.every((key) => nonNegativeInteger(rotation[key]))) return null;
-  const attempted = rotation.attempted as number;
-  const idleRetired = rotation.idleRetired as number;
-  const busyTainted = rotation.busyTainted as number;
-  const alreadyTainted = rotation.alreadyTainted as number;
-  if (attempted !== idleRetired + busyTainted + alreadyTainted
-    || rotation.immediateReplacements !== idleRetired) return null;
-  return rotation.generation as number;
+    || !exactKeys(rotation, keys)
+    || !keys.every((key) => nonNegativeInteger(rotation[key]))) return null;
+  const attempted = rotation["attempted"] as number;
+  const idleRetired = rotation["idleRetired"] as number;
+  const parkedRetired = hasParkedRetired ? rotation["parkedRetired"] as number : 0;
+  const busyTainted = rotation["busyTainted"] as number;
+  const alreadyTainted = rotation["alreadyTainted"] as number;
+  if (attempted !== idleRetired + parkedRetired + busyTainted + alreadyTainted
+    || rotation["immediateReplacements"] !== idleRetired) return null;
+  return rotation["generation"] as number;
 }
 
 function validatedPool(
@@ -199,25 +203,25 @@ function validatedPool(
   const optionalKeys = expected.requestedVersion === null ? [] : ["rotation"];
   if (!pool || !exactOptionalKeys(pool, POOL_KEYS, optionalKeys)) return null;
   if (!POOL_KEYS.slice(0, 5).every((key) => nonNegativeInteger(pool[key]))) return null;
-  if ((pool.succeeded as number) > (pool.attempted as number)
-    || (pool.cacheHits as number) + (pool.cacheMisses as number) > (pool.attempted as number)) return null;
+  if ((pool["succeeded"] as number) > (pool["attempted"] as number)
+    || (pool["cacheHits"] as number) + (pool["cacheMisses"] as number) > (pool["attempted"] as number)) return null;
   const generation = expected.requestedVersion === null
     ? null
-    : rotationGeneration(pool.rotation);
+    : rotationGeneration(pool["rotation"]);
   if (expected.requestedVersion !== null && generation === null) return null;
-  const attestation = pool.attestation === null
+  const attestation = pool["attestation"] === null
     ? null
-    : runtimeAttestation(pool.attestation, expected, executionProfile);
-  if ((pool.attempted as number) === 0
-    || pool.succeeded !== pool.attempted
-    || (pool.cacheHits as number) + (pool.cacheMisses as number) !== pool.succeeded
+    : runtimeAttestation(pool["attestation"], expected, executionProfile);
+  if ((pool["attempted"] as number) === 0
+    || pool["succeeded"] !== pool["attempted"]
+    || (pool["cacheHits"] as number) + (pool["cacheMisses"] as number) !== pool["succeeded"]
     || attestation === null) return null;
   return {
-    attempted: pool.attempted as number,
-    succeeded: pool.succeeded as number,
-    cacheHits: pool.cacheHits as number,
-    cacheMisses: pool.cacheMisses as number,
-    durationMs: pool.durationMs as number,
+    attempted: pool["attempted"] as number,
+    succeeded: pool["succeeded"] as number,
+    cacheHits: pool["cacheHits"] as number,
+    cacheMisses: pool["cacheMisses"] as number,
+    durationMs: pool["durationMs"] as number,
     generation,
     attestation,
   };
@@ -231,6 +235,74 @@ function sameRuntimeBase(left: RuntimeAttestation, right: RuntimeAttestation): b
     && left.activationId === right.activationId;
 }
 
+// Preserve protocol structure without logging arbitrary runtime strings or unknown fields.
+export function diagnoseEdgeRuntimePreheat(
+  payload: unknown,
+  expected: ExpectedEdgeRuntimePreheat,
+): Record<string, unknown> {
+  const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+  const shape = (value: unknown, keys: readonly string[]): Record<string, unknown> => {
+    const record = objectRecord(value);
+    if (!record) return { type: value === null ? "null" : typeof value };
+    return {
+      missing: keys.filter((key) => !Object.hasOwn(record, key)),
+      unknownKeyHashes: Object.keys(record).filter((key) => !keys.includes(key)).map(digest),
+      fields: Object.fromEntries(keys.filter((key) => Object.hasOwn(record, key)).map((key) => {
+        const entry = record[key];
+        const safe = entry === null || typeof entry === "boolean"
+          || (typeof entry === "number" && Number.isFinite(entry))
+          ? entry
+          : typeof entry === "string"
+            ? { type: "string", sha256: digest(entry), length: entry.length }
+            : { type: Array.isArray(entry) ? "array" : typeof entry };
+        return [key, safe];
+      })),
+    };
+  };
+  const identity = (value: unknown, profile: RuntimeAttestation["executionProfile"]) => {
+    const record = objectRecord(value);
+    const matches = {
+      schema: PREHEAT_SCHEMA,
+      project_ref: expected.projectRef,
+      function_slug: expected.functionSlug,
+      requested_version: expected.requestedVersion,
+      target_version: expected.resolvedVersion,
+      resolved_version: expected.resolvedVersion,
+      artifact_sha256: expected.artifactSha256,
+      verify_jwt: expected.verifyJwt,
+      activation_id: expected.activationId,
+      execution_profile: profile,
+      module_loaded: true,
+    };
+    return {
+      ...shape(value, ATTESTATION_KEYS),
+      valid: runtimeAttestation(value, expected, profile) !== null,
+      matches: Object.fromEntries(Object.entries(matches).map(([key, entry]) => [key, record?.[key] === entry])),
+      environment: shape(record?.["tenant_env"], ENV_KEYS),
+    };
+  };
+  const response = objectRecord(payload);
+  const pool = (profile: RuntimeAttestation["executionProfile"]) => {
+    const value = response?.[profile];
+    const record = objectRecord(value);
+    return {
+      ...shape(value, [...POOL_KEYS, "rotation", "error"]),
+      valid: validatedPool(value, expected, profile) !== null,
+      identity: identity(record?.["attestation"], profile),
+      rotation: shape(record?.["rotation"], [...ROTATION_KEYS, "parkedRetired"]),
+      rotationValid: rotationGeneration(record?.["rotation"]) !== null,
+    };
+  };
+  return {
+    expected,
+    response: shape(payload, RESPONSE_KEYS),
+    identity: identity(response?.["attestation"], "foreground"),
+    foreground: pool("foreground"),
+    background: pool("background"),
+    valid: validateEdgeRuntimePreheat(payload, expected) !== null,
+  };
+}
+
 export function validateEdgeRuntimePreheat(
   payload: unknown,
   expected: ExpectedEdgeRuntimePreheat,
@@ -240,12 +312,12 @@ export function validateEdgeRuntimePreheat(
   const expectedFunctionId = `${expected.projectRef}_${expected.functionSlug}${
     expected.resolvedVersion === null ? "" : `_v${expected.resolvedVersion}`
   }`;
-  if (response.preheated !== expectedFunctionId
-    || response.version !== expected.requestedVersion
-    || response.success !== true) return null;
-  const attestation = runtimeAttestation(response.attestation, expected, "foreground");
-  const foreground = validatedPool(response.foreground, expected, "foreground");
-  const background = validatedPool(response.background, expected, "background");
+  if (response["preheated"] !== expectedFunctionId
+    || response["version"] !== expected.requestedVersion
+    || response["success"] !== true) return null;
+  const attestation = runtimeAttestation(response["attestation"], expected, "foreground");
+  const foreground = validatedPool(response["foreground"], expected, "foreground");
+  const background = validatedPool(response["background"], expected, "background");
   if (!attestation || !foreground || !background) return null;
   if (!foreground.attestation || !background.attestation
     || !sameRuntimeBase(foreground.attestation, attestation)

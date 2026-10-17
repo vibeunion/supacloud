@@ -7,9 +7,10 @@ import {
 } from "./release-control-contract";
 
 const scope = {
-  schema: "supacloud.release-control.v1",
+  schema: "supacloud.release-control.v2",
   releaseId: "release-20260906-001",
   sourceCommit: "a".repeat(40),
+  targetEnvironmentId: "production",
   targetProjectRef: "a".repeat(20),
   components: [
     { kind: "function", slug: "fa-api", artifactSha256: "b".repeat(64) },
@@ -26,6 +27,7 @@ describe("release control contract", () => {
       schema: scope.schema,
       releaseId: scope.releaseId,
       sourceCommit: scope.sourceCommit,
+      targetEnvironmentId: scope.targetEnvironmentId,
       targetProjectRef: scope.targetProjectRef,
       components: scope.components.map((component) => ({ ...component })),
     })));
@@ -38,9 +40,17 @@ describe("release control contract", () => {
     })).toThrow("unique and sorted");
   });
 
+  test("rejects a scope without a concrete target environment", () => {
+    const { targetEnvironmentId: _targetEnvironmentId, ...legacyScope } = scope;
+    expect(() => parseReleaseScope(legacyScope)).toThrow("unsupported or missing fields");
+    expect(() => parseReleaseScope({ ...scope, targetEnvironmentId: " " })).toThrow(
+      "targetEnvironmentId is invalid",
+    );
+  });
+
   test("requires read-back payloads for applied and reconciled receipts", () => {
     const receipt = parseReleaseReceipt({
-      schema: "supacloud.release-control.v1",
+      schema: "supacloud.release-control.v2",
       releaseId: scope.releaseId,
       scopeSha256: "d".repeat(64),
       phase: "reconciled",

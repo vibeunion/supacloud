@@ -36,7 +36,7 @@ export async function serveBun(backend: SupaliteBackendShape, opts: ServeOptions
   const server = Bun.serve<WsData>({
     port: opts.port ?? 54321,
     hostname: host,
-    async fetch(req: Request, srv: any) {
+    async fetch(req: Request, srv: Bun.Server<WsData>) {
       const url = new URL(req.url)
       if (url.pathname.startsWith('/realtime/v1') && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
         const ok = srv.upgrade(req, { data: { vsn: url.searchParams.get('vsn') ?? '1.0.0' } })

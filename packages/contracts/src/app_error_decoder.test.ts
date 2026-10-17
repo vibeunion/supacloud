@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decodeAppError } from "./app_error.js";
+import { decodeAppError, decodeErrorMetadata } from "./app_error.js";
 
 describe("app error decoder", () => {
   test("maps command and HTTP boundaries without trusting payload shape", () => {
@@ -15,5 +15,15 @@ describe("app error decoder", () => {
       kind: "dependency",
       service: "project-api",
     });
+  });
+
+  test("accepts legacy envelopes and validates additive recovery metadata", () => {
+    const metadata = { retryability: "read-only", idempotency: "required", deadlineAt: null, outcome: "unknown" } as const;
+    expect(decodeAppError({ code: "COMMAND_OUTCOME_UNKNOWN", metadata }, 503)).toMatchObject({ metadata });
+    expect(decodeErrorMetadata({ ...metadata, retryability: "same-key-only" })).toBeUndefined();
+    expect(decodeErrorMetadata({ ...metadata, deadlineAt: NaN })).toBeUndefined();
+    expect(decodeErrorMetadata({ ...metadata, deadlineAt: -1 })).toBeUndefined();
+    expect(decodeErrorMetadata({ ...metadata, outcome: "success" })).toBeUndefined();
+    expect(decodeErrorMetadata({ ...metadata, privateToken: "not-returned" })).toEqual(metadata);
   });
 });

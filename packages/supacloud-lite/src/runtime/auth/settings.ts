@@ -63,39 +63,39 @@ export const DEFAULT_AUTH_SETTINGS: AuthSettings = {
 /** Clamp/typecheck a stored or patched settings object into a valid one. */
 function sanitize(raw: Record<string, unknown>): AuthSettings {
   const s = { ...DEFAULT_AUTH_SETTINGS }
-  if (typeof raw.disableSignup === 'boolean') s.disableSignup = raw.disableSignup
-  if (typeof raw.anonymousUsers === 'boolean') s.anonymousUsers = raw.anonymousUsers
-  if (typeof raw.autoconfirm === 'boolean') s.autoconfirm = raw.autoconfirm
-  if (typeof raw.minPasswordLength === 'number' && Number.isFinite(raw.minPasswordLength)) {
-    s.minPasswordLength = Math.max(4, Math.min(72, Math.floor(raw.minPasswordLength)))
+  if (typeof raw["disableSignup"] === 'boolean') s.disableSignup = raw["disableSignup"]
+  if (typeof raw["anonymousUsers"] === 'boolean') s.anonymousUsers = raw["anonymousUsers"]
+  if (typeof raw["autoconfirm"] === 'boolean') s.autoconfirm = raw["autoconfirm"]
+  if (typeof raw["minPasswordLength"] === 'number' && Number.isFinite(raw["minPasswordLength"])) {
+    s.minPasswordLength = Math.max(4, Math.min(72, Math.floor(raw["minPasswordLength"])))
   }
-  if (Array.isArray(raw.disabledProviders)) {
-    s.disabledProviders = raw.disabledProviders.filter((p): p is string => typeof p === 'string').slice(0, 50)
+  if (Array.isArray(raw["disabledProviders"])) {
+    s.disabledProviders = raw["disabledProviders"].filter((p: unknown): p is string => typeof p === 'string').slice(0, 50)
   }
-  if (typeof raw.otpLength === 'number' && Number.isFinite(raw.otpLength)) {
-    s.otpLength = Math.max(6, Math.min(10, Math.floor(raw.otpLength)))
+  if (typeof raw["otpLength"] === 'number' && Number.isFinite(raw["otpLength"])) {
+    s.otpLength = Math.max(6, Math.min(10, Math.floor(raw["otpLength"])))
   }
-  if (typeof raw.otpExpirySeconds === 'number' && Number.isFinite(raw.otpExpirySeconds) && raw.otpExpirySeconds > 0) {
-    s.otpExpirySeconds = Math.floor(raw.otpExpirySeconds)
+  if (typeof raw["otpExpirySeconds"] === 'number' && Number.isFinite(raw["otpExpirySeconds"]) && raw["otpExpirySeconds"] > 0) {
+    s.otpExpirySeconds = Math.floor(raw["otpExpirySeconds"])
   }
-  if (typeof raw.smsEnabled === 'boolean') s.smsEnabled = raw.smsEnabled
-  if (typeof raw.smsSignupEnabled === 'boolean') s.smsSignupEnabled = raw.smsSignupEnabled
-  if (typeof raw.smsOtpCooldownSeconds === 'number' && Number.isFinite(raw.smsOtpCooldownSeconds)) {
-    s.smsOtpCooldownSeconds = Math.max(0, Math.min(86_400, Math.floor(raw.smsOtpCooldownSeconds)))
+  if (typeof raw["smsEnabled"] === 'boolean') s.smsEnabled = raw["smsEnabled"]
+  if (typeof raw["smsSignupEnabled"] === 'boolean') s.smsSignupEnabled = raw["smsSignupEnabled"]
+  if (typeof raw["smsOtpCooldownSeconds"] === 'number' && Number.isFinite(raw["smsOtpCooldownSeconds"])) {
+    s.smsOtpCooldownSeconds = Math.max(0, Math.min(86_400, Math.floor(raw["smsOtpCooldownSeconds"])))
   }
   if (
-    typeof raw.smsTemplate === 'string'
-    && raw.smsTemplate.length > 0
-    && raw.smsTemplate.length <= 1_000
-    && /\{\{\s*\.Code\s*\}\}/.test(raw.smsTemplate)
+    typeof raw["smsTemplate"] === 'string'
+    && raw["smsTemplate"].length > 0
+    && raw["smsTemplate"].length <= 1_000
+    && /\{\{\s*\.Code\s*\}\}/.test(raw["smsTemplate"])
   ) {
-    s.smsTemplate = raw.smsTemplate
+    s.smsTemplate = raw["smsTemplate"]
   }
-  if (typeof raw.maxEnrolledFactors === 'number' && Number.isFinite(raw.maxEnrolledFactors) && raw.maxEnrolledFactors > 0) {
-    s.maxEnrolledFactors = Math.floor(raw.maxEnrolledFactors)
+  if (typeof raw["maxEnrolledFactors"] === 'number' && Number.isFinite(raw["maxEnrolledFactors"]) && raw["maxEnrolledFactors"] > 0) {
+    s.maxEnrolledFactors = Math.floor(raw["maxEnrolledFactors"])
   }
-  if (typeof raw.totpEnrollEnabled === 'boolean') s.totpEnrollEnabled = raw.totpEnrollEnabled
-  if (typeof raw.totpVerifyEnabled === 'boolean') s.totpVerifyEnabled = raw.totpVerifyEnabled
+  if (typeof raw["totpEnrollEnabled"] === 'boolean') s.totpEnrollEnabled = raw["totpEnrollEnabled"]
+  if (typeof raw["totpVerifyEnabled"] === 'boolean') s.totpVerifyEnabled = raw["totpVerifyEnabled"]
   return s
 }
 
@@ -172,13 +172,13 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
     }
   }
   if ('disabledProviders' in patch) {
-    const arr = patch.disabledProviders
-    if (!Array.isArray(arr) || arr.some((p) => typeof p !== 'string')) {
+    const arr = patch["disabledProviders"]
+    if (!Array.isArray(arr) || arr.some((p: unknown) => typeof p !== 'string')) {
       return 'disabledProviders must be an array of provider names'
     }
   }
   if ('smsTemplate' in patch) {
-    const template = patch.smsTemplate
+    const template = patch["smsTemplate"]
     if (
       typeof template !== 'string'
       || template.length === 0

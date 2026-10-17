@@ -6,7 +6,7 @@
  */
 
 /** Result of a query: returned rows plus, for writes, the affected row count. */
-export interface EngineResults<T = any> {
+export interface EngineResults<T = unknown> {
   /** result rows, typed as `T` */
   rows: T[]
   /** rows touched by an INSERT/UPDATE/DELETE; undefined for plain SELECTs */
@@ -16,7 +16,7 @@ export interface EngineResults<T = any> {
 /** Handle passed to a transaction callback; scoped to the open transaction. */
 export interface EngineTx {
   /** run a parameterized query within the transaction */
-  query<T = any>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
   /** run one or more statements within the transaction (no params) */
   exec(sql: string): Promise<void>
 }
@@ -32,7 +32,7 @@ export interface DbEngine {
   /** true for subset engines (pg-mem) that can't run the full plpgsql/RLS bootstrap */
   minimalBootstrap?: boolean
   /** run a parameterized query */
-  query<T = any>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
   /** run multiple SQL statements (no params) */
   exec(sql: string): Promise<void>
   /** serialized transaction; implementations must guarantee mutual exclusion */

@@ -142,7 +142,7 @@
       </div>
     {:else}
       <div class="text-center py-4">
-        <p class="text-xs text-muted-foreground">创建部署后，可在站点设置中上传 ZIP 文件进行部署</p>
+        <p class="text-xs text-muted-foreground">创建部署后，可在站点设置中上传 tar.zst 文件进行部署</p>
       </div>
     {/if}
   </div>

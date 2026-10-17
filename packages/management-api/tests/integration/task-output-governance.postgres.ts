@@ -167,21 +167,27 @@ try {
   const runtimeDb = await import("../../src/db"); closeRuntimeDb = runtimeDb.closeDb;
   const { taskOutputService } = await import("../../src/services/task-output.service");
   // Production service and HTTP error mapping, not driver-error message matching.
-  await sql`UPDATE public.project_task_output_quotas SET max_events_per_minute = 1,
-    window_start = date_trunc('minute', clock_timestamp()), window_events = 1 WHERE project_ref = 'quota-race'`;
-  const httpId = await task("quota-race"), writerToken = crypto.randomUUID();
+  // A single {} event exceeds this isolated byte budget even in a fresh minute;
+  // starting the HTTP server across a minute boundary cannot reset the rejection.
+  await sql`INSERT INTO public.project_task_output_quotas(project_ref, max_bytes_per_minute)
+    VALUES ('quota-http', 1)`;
+  const httpId = await task("quota-http"), writerToken = crypto.randomUUID();
   const routes = createTaskOutputRoutes({ ...taskOutputService,
     async authorizeRead() { return { invokerUserId: owner }; },
     async authorizeWrite(request) { return request.headers.get('authorization') === `Bearer ${writerToken}`
       ? null : Response.json({ code: 'FORBIDDEN' }, { status: 403 }); },
   });
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: request => routes.handle(request) });
-  const response = await fetch(`http://127.0.0.1:${server.port}/v1/projects/quota-race/tasks/${httpId}/events`, {
+  const response = await fetch(`http://127.0.0.1:${server.port}/v1/projects/quota-http/tasks/${httpId}/events`, {
     method: 'POST', headers: { authorization: `Bearer ${writerToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ attempt: 1, event_id: crypto.randomUUID(), type: 'progress', payload: {} }),
+    signal: AbortSignal.timeout(10_000),
   });
   assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '60');
   assert.equal((await response.json()).code, 'TASK_OUTPUT_PROJECT_RATE_LIMIT');
+  const rejectedQuota = await quota("quota-http");
+  assert.equal(rejectedQuota.window_events, 0);
+  assert.equal(rejectedQuota.retained_events, "0");
   const storeId = await task("quota-store");
   await sql`UPDATE public.project_task_output_quotas SET max_retained_bytes = 1 WHERE project_ref = 'quota-store'`;
   await assert.rejects(taskOutputService.append('quota-store', storeId, {

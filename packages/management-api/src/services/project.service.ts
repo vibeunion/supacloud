@@ -244,17 +244,17 @@ export class ProjectService {
     // Build initial config with custom domain if provided
     const initialConfig: Record<string, unknown> = {};
     if (request.domain) {
-      initialConfig.custom_domain = request.domain;
+      initialConfig["custom_domain"] = request.domain;
     }
     // Support explicit api_domain / studio_domain (takes precedence over base domain)
     if (request.api_domain) {
-      initialConfig.api_domain = request.api_domain;
+      initialConfig["api_domain"] = request.api_domain;
     }
     if (request.auth_domain) {
-      initialConfig.auth_domain = request.auth_domain;
+      initialConfig["auth_domain"] = request.auth_domain;
     }
     if (request.studio_domain) {
-      initialConfig.studio_domain = request.studio_domain;
+      initialConfig["studio_domain"] = request.studio_domain;
     }
 
     // 1. Create project record in database (status: creating)
@@ -670,7 +670,7 @@ export class ProjectService {
     const settings = await this.getProjectSettings(ref);
     if (!settings) return null;
 
-    const raw = (settings.background_tasks || {}) as Record<string, unknown>;
+    const raw = (settings["background_tasks"] || {}) as Record<string, unknown>;
     const pickNumber = (value: unknown, fallback: number, min: number, max: number) => {
       const parsed = Number(value);
       if (!Number.isFinite(parsed)) return fallback;
@@ -678,11 +678,11 @@ export class ProjectService {
     };
 
     return {
-      concurrency: pickNumber(raw.concurrency, this.defaultBackgroundTaskSettings.concurrency, BACKGROUND_TASK_SETTING_LIMITS.concurrency.min, BACKGROUND_TASK_SETTING_LIMITS.concurrency.max),
-      max_attempts: pickNumber(raw.max_attempts, this.defaultBackgroundTaskSettings.max_attempts, BACKGROUND_TASK_SETTING_LIMITS.max_attempts.min, BACKGROUND_TASK_SETTING_LIMITS.max_attempts.max),
-      max_payload_bytes: pickNumber(raw.max_payload_bytes, this.defaultBackgroundTaskSettings.max_payload_bytes, BACKGROUND_TASK_SETTING_LIMITS.max_payload_bytes.min, BACKGROUND_TASK_SETTING_LIMITS.max_payload_bytes.max),
-      timeout_sec_default: pickNumber(raw.timeout_sec_default, this.defaultBackgroundTaskSettings.timeout_sec_default, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_default.min, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_default.max),
-      timeout_sec_max: pickNumber(raw.timeout_sec_max, this.defaultBackgroundTaskSettings.timeout_sec_max, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_max.min, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_max.max),
+      concurrency: pickNumber(raw["concurrency"], this.defaultBackgroundTaskSettings.concurrency, BACKGROUND_TASK_SETTING_LIMITS.concurrency.min, BACKGROUND_TASK_SETTING_LIMITS.concurrency.max),
+      max_attempts: pickNumber(raw["max_attempts"], this.defaultBackgroundTaskSettings.max_attempts, BACKGROUND_TASK_SETTING_LIMITS.max_attempts.min, BACKGROUND_TASK_SETTING_LIMITS.max_attempts.max),
+      max_payload_bytes: pickNumber(raw["max_payload_bytes"], this.defaultBackgroundTaskSettings.max_payload_bytes, BACKGROUND_TASK_SETTING_LIMITS.max_payload_bytes.min, BACKGROUND_TASK_SETTING_LIMITS.max_payload_bytes.max),
+      timeout_sec_default: pickNumber(raw["timeout_sec_default"], this.defaultBackgroundTaskSettings.timeout_sec_default, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_default.min, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_default.max),
+      timeout_sec_max: pickNumber(raw["timeout_sec_max"], this.defaultBackgroundTaskSettings.timeout_sec_max, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_max.min, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_max.max),
     };
   }
 

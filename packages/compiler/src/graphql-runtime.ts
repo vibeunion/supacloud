@@ -99,8 +99,10 @@ export function renderGraphqlValidators(
     return unsupported(type);
   }
   const operations = [...operationNames].sort();
+  const suffixFor = (name: string): "Query" | "Mutation" =>
+    operationKinds.get(name) === "mutation" ? "Mutation" : "Query";
   const parsers = operations.map((name) => {
-    const typeName = `${name}${operationKinds.get(name) === "mutation" ? "Mutation" : "Query"}`;
+    const typeName = `${name}${suffixFor(name)}`;
     const symbol = exports.get(typeName);
     if (!symbol) throw new Error(`Missing generated operation type: ${typeName}`);
     const check = reference(checker.getDeclaredTypeOfSymbol(symbol));
@@ -124,13 +126,13 @@ function isGraphqlArray(value: unknown): value is unknown[] {
 ${[...definitions.values()].join("\n")}
 ${parsers.join("\n")}
 export interface GraphqlQueryResults {
-${operations.map((name) => `  ${JSON.stringify(name)}: ${name}Query;`).join("\n")}
+${operations.map((name) => `  ${JSON.stringify(name)}: ${name}${suffixFor(name)};`).join("\n")}
 }
 export function isGraphqlResult<Name extends keyof GraphqlQueryResults>(
   name: Name, value: unknown,
 ): value is GraphqlQueryResults[Name] {
   switch (name) {
-${operations.map((name) => `    case ${JSON.stringify(name)}: return is${name}Query(value);`).join("\n")}
+${operations.map((name) => `    case ${JSON.stringify(name)}: return is${name}${suffixFor(name)}(value);`).join("\n")}
     default: return false;
   }
 }

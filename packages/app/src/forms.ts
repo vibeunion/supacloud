@@ -21,7 +21,7 @@ export interface AbstractControlOptions {
 /**
  * Base class for all Angular-style form controls: FormControl, FormGroup, FormArray.
  */
-export abstract class AbstractControl<TValue = any> {
+export abstract class AbstractControl<TValue = unknown> {
   private _value!: TValue;
   protected _status: FormControlStatus = "VALID";
   protected _errors: ValidationErrors | null = null;
@@ -184,9 +184,9 @@ export abstract class AbstractControl<TValue = any> {
     return control._errors[errorCode] ?? null;
   }
 
-  abstract setValue(value: any): void;
-  abstract patchValue(value: any): void;
-  abstract reset(value?: any): void;
+  abstract setValue(value: TValue): void;
+  abstract patchValue(value: TValue): void;
+  abstract reset(value?: TValue): void;
 
   get(_path: string | (string | number)[]): AbstractControl | null {
     return null;
@@ -232,7 +232,7 @@ export abstract class AbstractControl<TValue = any> {
 /**
  * Tracks the value and validity status of an individual form control.
  */
-export class FormControl<T = any> extends AbstractControl<T | null> {
+export class FormControl<T = unknown> extends AbstractControl<T | null> {
   constructor(
     formState?: T | { value: T; disabled?: boolean },
     validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null,
@@ -258,13 +258,13 @@ export class FormControl<T = any> extends AbstractControl<T | null> {
     }
   }
 
-  setValue(value: T): void {
+  setValue(value: T | null): void {
     this.setRawValue(value);
     this.markAsDirty();
     this.updateValueAndValidity();
   }
 
-  patchValue(value: T): void {
+  patchValue(value: T | null): void {
     this.setValue(value);
   }
 

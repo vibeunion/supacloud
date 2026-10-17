@@ -56,8 +56,12 @@ export async function generateTypes(db: Database, schema = 'public'): Promise<st
   const views = new Map<string, ColumnRow[]>()
   for (const c of cols) {
     const target = c.table_kind === 'r' ? tables : views
-    if (!target.has(c.table_name)) target.set(c.table_name, [])
-    target.get(c.table_name)!.push(c)
+    let columns = target.get(c.table_name)
+    if (!columns) {
+      columns = []
+      target.set(c.table_name, columns)
+    }
+    columns.push(c)
   }
 
   const tsType = (udt: string, nullable: boolean): string => {

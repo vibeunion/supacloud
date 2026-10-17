@@ -90,7 +90,7 @@ try {
   await waitFor("PostgreSQL", async () => (await sql("SELECT 1;")) === "1");
   await sql(`CREATE ROLE authenticator LOGIN NOINHERIT PASSWORD '${password}';`);
   await sql(await readFile(join(fixture, "schema.sql"), "utf8"));
-  evidence.database = JSON.parse(await sql(`SELECT json_build_object(
+  evidence["database"] = JSON.parse(await sql(`SELECT json_build_object(
     'postgres', current_setting('server_version'), 'pg_graphql', extversion,
     'orders', (SELECT count(*) FROM orders), 'items', (SELECT count(*) FROM order_items),
     'deliveries', (SELECT count(*) FROM deliveries)) FROM pg_extension WHERE extname = 'pg_graphql';`));
@@ -126,7 +126,7 @@ try {
         }
         return fetch(restUrl + (graphql ? "/rpc/graphql" : url.pathname.slice("/rest/v1".length)) + url.search, {
           method: request.method, headers,
-          body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
+          ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: await request.arrayBuffer() }),
           redirect: "error",
         });
       }
@@ -165,11 +165,11 @@ try {
   assert.equal(governance.features.filtering, true);
   assert.equal(governance.features.ordering, true);
   assert.equal(governance.features.byPk, true);
-  evidence.featureMatrix = governance.features;
+  evidence["featureMatrix"] = governance.features;
   const anonymousPath = join(work, "anonymous.graphql");
   await pullGraphqlSchema({ url, output: anonymousPath, publishableKey: "synthetic-public" });
   assert.ok(!(await readFile(anonymousPath, "utf8")).includes("ordersCollection"));
-  evidence.roleSchemas = { anonymousCannotSeeOrders: true, authenticatedCannotSeePrivateColumnsOrMutations: true };
+  evidence["roleSchemas"] = { anonymousCannotSeeOrders: true, authenticatedCannotSeePrivateColumnsOrMutations: true };
   await mkdir(join(work, "src"), { recursive: true });
   await cp(join(fixture, "order.graphql"), join(work, "src/order.graphql"));
   const options = { rootDir: join(work, "src"), outDir: join(work, "generated"), graphql: { schema: schemaPath, typedDocuments: true } };
@@ -208,12 +208,12 @@ try {
   for (const method of ["POST", "PATCH", "DELETE"]) {
     const response = await fetch(url + "/rest/v1/orders?id=eq.1", {
       method, headers: { Authorization: `Bearer ${tokenA}`, "Content-Type": "application/json" },
-      body: method === "DELETE" ? undefined : JSON.stringify({ status: "approved" }),
+      ...(method === "DELETE" ? {} : { body: JSON.stringify({ status: "approved" }) }),
     });
     assert.ok(response.status === 401 || response.status === 403, `${method}: ${response.status}`);
   }
   assert.equal(await sql("SELECT md5(string_agg(o::text, '' ORDER BY id)) FROM orders o;"), originalData);
-  evidence.isolation = { anonymousDenied: true, invalidJwtDenied: true, missingTenantReturnsNoRows: true, crossTenantDeniedBothWays: true, nestedRlsEnforced: true, graphqlAndRestWritesDenied: true, rowsUnchanged: true };
+  evidence["isolation"] = { anonymousDenied: true, invalidJwtDenied: true, missingTenantReturnsNoRows: true, crossTenantDeniedBothWays: true, nestedRlsEnforced: true, graphqlAndRestWritesDenied: true, rowsUnchanged: true };
   console.log("GraphQL pilot: real JWT, grants, nested RLS and direct-write denial passed");
 
   const originalArtifact = await readFile(join(work, "generated/graphql.ts"), "utf8");
@@ -235,7 +235,7 @@ try {
   await sql("ALTER TABLE orders RENAME COLUMN reference TO number;");
   await pullGraphqlSchema(roleSchema);
   assert.deepEqual((await compileProject(options)).diagnostics, []);
-  evidence.migration = { driftDetectedWithoutWriting: true, refreshedSchemaRejectsOldQuery: true, workingArtifactsPreserved: true };
+  evidence["migration"] = { driftDetectedWithoutWriting: true, refreshedSchemaRejectsOldQuery: true, workingArtifactsPreserved: true };
 
   const restPath = "/rest/v1/orders?id=eq.1&select=id,number,status,total_cents,customer:customers(id,name,email),items:order_items(id,sku,description,quantity,unit_price_cents),deliveries(id,carrier,tracking,status)";
   const restResult = await (await fetch(url + restPath, { headers: { Authorization: `Bearer ${tokenA}` } })).json();
@@ -252,7 +252,7 @@ try {
     })).sort(byId),
     deliveries: orderNode.deliveries.edges.map(({ node }: { node: { id: number; carrier: string; tracking: string; status: string } }) => node).sort(byId),
   }]);
-  evidence.resultEquivalence = { allSelectedFieldsCompared: true, relationshipOrderingNormalized: true };
+  evidence["resultEquivalence"] = { allSelectedFieldsCompared: true, relationshipOrderingNormalized: true };
   const graphqlTimes: number[] = [];
   const restTimes: number[] = [];
   for (let n = 0; n < 35; n++) {
@@ -273,12 +273,12 @@ try {
   };
   const performanceResult = { graphql: stats(graphqlTimes), embeddedRest: stats(restTimes), localBudgetMs: 500, requestsPerDetail: { graphql: 1, embeddedRest: 1 } };
   assert.ok(performanceResult.graphql.p95Ms! < 500, "GraphQL exceeds the local 500ms p95 smoke budget");
-  evidence.performance = performanceResult;
-  evidence.codeReduction = { bespokeBackendEndpoints: 0, handwrittenQueryFiles: 1, frontendCallsPerDetail: 1, comparison: "Embedded REST also needs one request; no measured developer-time saving is claimed." };
+  evidence["performance"] = performanceResult;
+  evidence["codeReduction"] = { bespokeBackendEndpoints: 0, handwrittenQueryFiles: 1, frontendCallsPerDetail: 1, comparison: "Embedded REST also needs one request; no measured developer-time saving is claimed." };
   await sql(`COMMENT ON SCHEMA public IS '@graphql({"inflect_names":true,"introspection":false,"max_rows":100})';`);
   await assert.rejects(pullGraphqlSchema({ ...roleSchema, check: true }), /schema export failed/);
   assert.equal((await queries.OrderDetail({ id: 1 })).ordersCollection.edges[0].node.id, 1);
-  evidence.productionIntrospection = { disabledExportFails: true, authorizedDataQueryStillWorks: true };
+  evidence["productionIntrospection"] = { disabledExportFails: true, authorizedDataQueryStillWorks: true };
 
   await cp(join(fixture, "client.ts"), join(work, "src/client.ts"));
   await command([join(repo, "packages/compiler/node_modules/.bin/tsc"), "--noEmit", "--strict",
@@ -286,7 +286,7 @@ try {
     join(work, "src/client.ts")]);
   const bundle = await Bun.build({ entrypoints: [join(work, "src/client.ts")], outdir: join(work, "browser"), target: "browser" });
   assert.ok(bundle.success, String(bundle.logs));
-  evidence.frontend = { strictTypecheck: true, browserBundle: true };
+  evidence["frontend"] = { strictTypecheck: true, browserBundle: true };
   await writeFile(join(output, "report.json"), JSON.stringify(evidence, null, 2) + "\n");
   console.log(JSON.stringify({ ok: true, report: join(output, "report.json"), ...performanceResult }, null, 2));
   if (keepServing) {

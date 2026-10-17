@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrationVersionFromFilename, registerDatabaseTools, vectorWarningsForPendingMigrations } from "./database-tools";
+import type { ToolInvocation } from "../tool-server";
 
 interface CapturedDatabaseToolResponse {
     content: Array<{ text: string }>;
@@ -89,6 +90,47 @@ function sqlBatchReceipt(
 }
 
 describe("database migration helpers", () => {
+    test("rebase_migrations plans by default and writes only after explicit approval", async () => {
+        const root = mkdtempSync(join(tmpdir(), "database-rebase-"));
+        const source = join(root, "migrations");
+        const output = join(root, "rebased");
+        const baseline = join(root, "schema.sql");
+        mkdirSync(source, { recursive: true });
+        writeFileSync(join(source, "20260101000000_one.sql"), "CREATE TABLE one(id int);\n");
+        writeFileSync(join(source, "20260201000000_two.sql"), "ALTER TABLE one ADD COLUMN name text;\n");
+        writeFileSync(baseline, "CREATE TABLE one(id int, name text);\n");
+        try {
+            const callback = captureDatabaseTool({});
+            const plan = await callback({
+                action: "rebase_migrations",
+                dir: source,
+                baseline_file: baseline,
+                baseline_version: "20261008000000",
+                output_dir: output,
+                retain_after_version: "20260101000000",
+            });
+            expect(JSON.parse(plan.content[0].text)).toMatchObject({
+                mode: "plan",
+                baselineMigration: "20261008000000_reconstructed_schema.sql",
+            });
+            expect(existsSync(output)).toBe(false);
+
+            const written = await callback({
+                action: "rebase_migrations",
+                dir: source,
+                baseline_file: baseline,
+                baseline_version: "20261008000000",
+                output_dir: output,
+                retain_after_version: "20260101000000",
+                write: true,
+            });
+            expect(JSON.parse(written.content[0].text)).toMatchObject({ mode: "written" });
+            expect(existsSync(join(output, "migration-rebase.manifest.json"))).toBe(true);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     test.each([
         ["apply_migration", { action: "apply_migration", ref: "proj", name: "safe_name", sql: "SELECT 1;" }],
         ["create_table_rls", {
@@ -2167,19 +2209,18 @@ describe("database migration helpers", () => {
   });
 
   test("execute action is rejected when readOnly is enabled", async () => {
-    let callback: ((args: Record<string, unknown>) => Promise<CapturedDatabaseToolResponse>) | undefined;
+    let callback: ToolInvocation | undefined;
     registerDatabaseTools({
-      tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
+      tool(name, _description, _schema, toolCallback) {
         if (name === "database") callback = toolCallback;
       },
-    }, {} as any, { readOnly: true });
+    }, undefined, { readOnly: true });
+    if (!callback) throw new Error("database tool was not registered");
 
-    const response = await callback!({
+    await expect(callback({
       action: "execute",
       ref: "proj",
       sql: "INSERT INTO items VALUES (1)",
-    });
-
-    expect(response.content[0].text).toContain("Write blocked: execute (read-only mode)");
+    })).rejects.toThrow("- action:");
   });
 });

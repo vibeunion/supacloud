@@ -423,10 +423,11 @@ async function activeResourceMutation(
 export async function readActiveProjectMutationForResource(
   projectRef: string,
   resource: ProjectMutationResource,
+  database: SQL = sql,
 ): Promise<ProjectMutationState | null> {
   if (!/^[A-Za-z0-9_-]{1,20}$/.test(projectRef)) throw new Error("Project ref is invalid");
   const resourceKey = projectMutationResourceKey(resource);
-  const [row] = await sql`
+  const [row] = await database`
     SELECT * FROM project_mutations
     WHERE project_ref = ${projectRef} AND resource_key = ${resourceKey}
       AND status IN ('pending', 'running', 'failed_retryable', 'outcome_unknown')
@@ -750,9 +751,11 @@ export async function completeProjectMutationFailure(
   if (input.status !== "failed_retryable" && input.recoveryNotBefore !== undefined) {
     throw new Error("Only retryable mutation failures may set a recovery timestamp");
   }
+  const { recoveryNotBefore: recoveryInput, ...completion } = input;
+  const recoveryNotBefore = recoveryTimestamp(recoveryInput);
   return finishProjectMutation(transaction, {
-    ...input,
-    recoveryNotBefore: recoveryTimestamp(input.recoveryNotBefore),
+    ...completion,
+    ...(recoveryNotBefore === undefined ? {} : { recoveryNotBefore }),
     receipt: input.receipt ?? {},
     responseStatus: input.responseStatus ?? null,
   });

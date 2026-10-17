@@ -66,11 +66,15 @@ export interface FunctionInfo {
   schema: string
   name: string
   returnsSet: boolean
+  /** Explicit RETURNS TABLE outputs, including a single base/domain/enum column. */
+  returnsTable: boolean
   returnType: string
   /** pg_type.typtype: b=base, c=composite, p=pseudo, d=domain, e=enum */
   returnTypType: string
   /** pg_proc.provolatile: v=volatile, s=stable, i=immutable. Volatile calls may run DDL. */
   volatility: string
+  /** Leading input arguments without a PostgreSQL default. */
+  requiredArgCount: number
   args: FunctionArg[]
 }
 
@@ -82,7 +86,7 @@ export interface SchemaInfo {
 
 /** A function that runs a parameterized query, e.g. one bound to a transaction. */
 export interface Querier {
-  <T = any>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
+  <T = unknown>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
 }
 
 /**
@@ -154,7 +158,7 @@ export class Database {
   }
 
   /** Superuser query - used by auth/storage internals and introspection. */
-  query<T = any>(sql: string, params?: unknown[]): Promise<EngineResults<T>> {
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<EngineResults<T>> {
     return this.engine.query<T>(sql, params)
   }
 
@@ -379,10 +383,17 @@ export class Database {
     // table -> constraint -> ordered column list
     const uniqByTable = new Map<string, Map<string, string[]>>()
     for (const u of uniq.rows) {
-      if (!uniqByTable.has(u.table_name)) uniqByTable.set(u.table_name, new Map())
-      const byConstraint = uniqByTable.get(u.table_name)!
-      if (!byConstraint.has(u.constraint_name)) byConstraint.set(u.constraint_name, [])
-      byConstraint.get(u.constraint_name)!.push(u.column_name)
+      let byConstraint = uniqByTable.get(u.table_name)
+      if (!byConstraint) {
+        byConstraint = new Map()
+        uniqByTable.set(u.table_name, byConstraint)
+      }
+      let columns = byConstraint.get(u.constraint_name)
+      if (!columns) {
+        columns = []
+        byConstraint.set(u.constraint_name, columns)
+      }
+      columns.push(u.column_name)
     }
 
     const fks = await this.engine.query<{
@@ -417,22 +428,28 @@ export class Database {
 
     const pkSet = new Map<string, Set<string>>()
     for (const pk of pks.rows) {
-      if (!pkSet.has(pk.table_name)) pkSet.set(pk.table_name, new Set())
-      pkSet.get(pk.table_name)!.add(pk.column_name)
+      let columns = pkSet.get(pk.table_name)
+      if (!columns) {
+        columns = new Set()
+        pkSet.set(pk.table_name, columns)
+      }
+      columns.add(pk.column_name)
     }
 
     const tables = new Map<string, TableInfo>()
     for (const c of cols.rows) {
-      if (!tables.has(c.table_name)) {
-        tables.set(c.table_name, {
+      let table = tables.get(c.table_name)
+      if (!table) {
+        table = {
           schema,
           name: c.table_name,
           columns: [],
           primaryKey: [...(pkSet.get(c.table_name) ?? [])],
           uniqueKeys: [...(uniqByTable.get(c.table_name)?.values() ?? [])],
-        })
+        }
+        tables.set(c.table_name, table)
       }
-      tables.get(c.table_name)!.columns.push({
+      table.columns.push({
         name: c.column_name,
         udtName: c.udt_name,
         isNullable: c.is_nullable === 'YES',
@@ -476,15 +493,28 @@ export class Database {
     const res = await this.engine.query<{
       name: string
       returns_set: boolean
+      returns_table: boolean
       return_type: string
       return_typtype: string
       volatility: string
-      identity_args: string
+      required_arg_count: number
+      input_args: FunctionArg[]
     }>(
       `select p.proname as name, p.proretset as returns_set,
+              coalesce('t' = any(p.proargmodes), false) as returns_table,
               t.typname as return_type, t.typtype as return_typtype,
               p.provolatile as volatility,
-              pg_get_function_identity_arguments(p.oid) as identity_args
+              p.pronargs - p.pronargdefaults as required_arg_count,
+              coalesce((
+                select json_agg(json_build_object(
+                  'name', coalesce(a.name, ''),
+                  'type', format_type(a.type, null)
+                ) order by a.ordinal)
+                from unnest(coalesce(p.proallargtypes, p.proargtypes::oid[]),
+                            p.proargnames, p.proargmodes)
+                  with ordinality as a(type, name, mode, ordinal)
+                where a.mode is null or a.mode in ('i', 'b', 'v')
+              ), '[]'::json) as input_args
        from pg_proc p
        join pg_namespace n on n.oid = p.pronamespace
        join pg_type t on t.oid = p.prorettype
@@ -495,10 +525,12 @@ export class Database {
       schema,
       name: r.name,
       returnsSet: r.returns_set,
+      returnsTable: r.returns_table,
       returnType: r.return_type,
       returnTypType: r.return_typtype,
       volatility: r.volatility,
-      args: parseIdentityArgs(r.identity_args),
+      requiredArgCount: r.required_arg_count,
+      args: r.input_args,
     }))
     this.fnCache.set(key, fns)
     return fns
@@ -644,11 +676,13 @@ export function parseIdentityArgs(identity: string): FunctionArg[] {
   if (current.trim()) parts.push(current)
   return parts.map((part) => {
     const tokens = part.trim().split(/\s+/)
-    while (tokens.length > 1 && ['IN', 'OUT', 'INOUT', 'VARIADIC'].includes(tokens[0])) {
+    while (tokens.length > 1 && ['IN', 'OUT', 'INOUT', 'VARIADIC'].includes(tokens[0] ?? '')) {
       tokens.shift()
     }
-    if (tokens.length === 1) return { name: '', type: tokens[0] }
-    const name = tokens[0].replace(/^"|"$/g, '')
+    const first = tokens[0]
+    if (first === undefined || first === '') throw new Error('invalid function identity argument')
+    if (tokens.length === 1) return { name: '', type: first }
+    const name = first.replace(/^"|"$/g, '')
     return { name, type: tokens.slice(1).join(' ') }
   })
 }

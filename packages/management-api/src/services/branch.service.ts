@@ -78,9 +78,9 @@ function buildPostgresProcessEnvironment(connection: ParsedPostgresConnection): 
   for (const key of Object.keys(environment)) {
     if (key === "DATABASE_URL" || key.startsWith("PG")) delete environment[key];
   }
-  environment.PGPASSWORD = connection.password;
-  if (connection.environment.PGSSLMODE) {
-    environment.PGSSLMODE = connection.environment.PGSSLMODE;
+  environment["PGPASSWORD"] = connection.password;
+  if (connection.environment["PGSSLMODE"]) {
+    environment["PGSSLMODE"] = connection.environment["PGSSLMODE"];
   }
   return environment;
 }
@@ -221,6 +221,7 @@ export interface CreateBranchInput {
   branchRef: string;
   name: string;
   dataMode?: BranchDataMode;
+  previewId?: string;
 }
 
 export type BranchDataMode = "schema_only" | "full_clone";
@@ -286,6 +287,9 @@ interface ReplacementRecoveryResult {
 class BranchService {
   async createBranch(input: CreateBranchInput): Promise<void> {
     const { parentRef, branchRef, name } = input;
+    if (input.previewId !== undefined && !/^[a-f0-9-]{8,64}$/.test(input.previewId)) {
+      throw new Error("APPLICATION_PREVIEW_ID_INVALID");
+    }
     const dataMode = input.dataMode ?? "schema_only";
     const parent = await projectRepository.findByRef(parentRef);
     if (!parent) throw new Error("Parent project not found");
@@ -319,6 +323,7 @@ class BranchService {
         branch_name: name,
         is_branch: true,
         branch_data_mode: dataMode,
+        ...(input.previewId === undefined ? {} : { application_preview_id: input.previewId }),
       },
     });
     if (!branchProject) throw new Error("Failed to create branch project record");
@@ -423,7 +428,7 @@ class BranchService {
     dataMode: BranchDataMode = "full_clone",
   ): Promise<void> {
     // The platform admin DB credentials are used for both sides of the dump/restore.
-    const adminDbUrl = process.env.DATABASE_URL;
+    const adminDbUrl = process.env["DATABASE_URL"];
     if (!adminDbUrl) throw new Error("DATABASE_URL is not set; cannot clone branch database");
     const connection = this.parsePostgresConnection(adminDbUrl);
     const processEnvironment = buildPostgresProcessEnvironment(connection);
@@ -531,7 +536,7 @@ class BranchService {
     if (sslModes.length > 1 || (sslModes[0] && !POSTGRES_SSL_MODES.has(sslModes[0]))) {
       throw new Error("DATABASE_URL contains an invalid sslmode");
     }
-    if (sslModes[0]) environment.PGSSLMODE = sslModes[0];
+    if (sslModes[0]) environment["PGSSLMODE"] = sslModes[0];
     return { username, password, hostname, port, database, environment };
   }
 
@@ -849,27 +854,30 @@ class BranchService {
   }
 
   async deleteBranch(branchRef: string): Promise<void> {
-    // Stop runtime first.
-    try {
+    // 停止或删除失败时保留项目身份，允许重试，不能把软删除误报为资源已清理。
+    await tenantRuntimeService.stopRuntime(branchRef);
+    const dbName = generateDbName(branchRef);
+    await removeProjectDbCache(dbName);
+    await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
+    if (await this.databaseExists(dbName)) throw new Error("BRANCH_DATABASE_DELETION_UNCONFIRMED");
+    if (!await projectRepository.softDelete(branchRef)) throw new Error("BRANCH_PROJECT_DELETION_UNCONFIRMED");
+  }
+
+  /** Preview callers hold admission and lifecycle locks and verify ownership first. */
+  async deletePreviewBranch(branchRef: string): Promise<void> {
+    if (!/^pv[a-f0-9]{18}$/.test(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH");
+    await withProjectMigrationLocks({ projectRefs: [branchRef] }, async () => {
+      await branchReplacementJournal.assertInactive([branchRef]);
       await tenantRuntimeService.stopRuntime(branchRef);
-    } catch (err: unknown) {
-      logger.warn(`[branch] failed to stop runtime for ${branchRef}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Drop the branch database.
-    try {
+      if ((await tenantRuntimeService.checkStatus(branchRef)).status !== "stopped") {
+        throw new Error("APPLICATION_PREVIEW_CLEANUP_RUNTIME_UNCONFIRMED");
+      }
       const dbName = generateDbName(branchRef);
+      await removeProjectDbCache(dbName);
       await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
-    } catch (err: unknown) {
-      logger.warn(`[branch] failed to drop database for ${branchRef}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Soft-delete the branch project row.
-    await projectRepository.softDelete(branchRef);
+      if (await this.databaseExists(dbName)) throw new Error("APPLICATION_PREVIEW_CLEANUP_BRANCH_UNCONFIRMED");
+      await projectRepository.softDelete(branchRef);
+    });
   }
 
   async replaceParentDatabaseFromBranch(input: {
@@ -1294,7 +1302,7 @@ class BranchService {
   }
 
   private adminPostgresConnection(database: string): ParsedPostgresConnection {
-    const adminDbUrl = process.env.DATABASE_URL;
+    const adminDbUrl = process.env["DATABASE_URL"];
     if (!adminDbUrl) throw new Error("DATABASE_URL is not set");
     return { ...this.parsePostgresConnection(adminDbUrl), database };
   }

@@ -59,9 +59,9 @@ export function normalizeCustomPostgrestSchemas(value: unknown): string[] {
 
 export function projectCustomPostgrestSchemas(projectConfig: unknown): string[] {
   const config = normalizeProjectConfig(projectConfig);
-  const postgrest = config.postgrest;
+  const postgrest = config["postgrest"];
   if (!postgrest || typeof postgrest !== "object" || Array.isArray(postgrest)) return [];
-  return normalizeCustomPostgrestSchemas((postgrest as Record<string, unknown>).exposed_schemas);
+  return normalizeCustomPostgrestSchemas((postgrest as Record<string, unknown>)["exposed_schemas"]);
 }
 
 export function effectivePostgrestSchemas(

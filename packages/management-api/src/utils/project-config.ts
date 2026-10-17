@@ -30,10 +30,10 @@ export function mergeProjectConfig(
 
 export function normalizeOAuthServerConfig(value: unknown): Record<string, unknown> {
   const config = isRecord(value) ? { ...value } : {};
-  if (typeof config.authorizationPath === "string" && typeof config.authorization_path !== "string") {
-    config.authorization_path = config.authorizationPath;
+  if (typeof config["authorizationPath"] === "string" && typeof config["authorization_path"] !== "string") {
+    config["authorization_path"] = config["authorizationPath"];
   }
-  delete config.authorizationPath;
+  delete config["authorizationPath"];
   return config;
 }
 
@@ -59,28 +59,28 @@ export type ExternalAuthEndpointConfig = ThirdPartyAuthConfig & {
 
 export function normalizeThirdPartyAuthConfig(value: unknown): ThirdPartyAuthConfig {
   const config = isRecord(value) ? { ...value } : {};
-  const authUpstream = pickString(config.auth_upstream) || pickString(config.authUpstream);
-  const mode = config.auth_endpoint_mode === "local" || config.authEndpointMode === "local"
+  const authUpstream = pickString(config["auth_upstream"]) || pickString(config["authUpstream"]);
+  const mode = config["auth_endpoint_mode"] === "local" || config["authEndpointMode"] === "local"
     ? "local"
     : "external";
-  const issuer = pickString(config.issuer);
-  const jwksUrl = pickString(config.jwks_url) || pickString(config.jwksUrl);
-  const audience = normalizeAudience(config.audience);
-  const clientId = pickString(config.client_id) || pickString(config.clientId);
-  const authHostHeader = pickString(config.auth_host_header) || pickString(config.authHostHeader);
+  const issuer = pickString(config["issuer"]);
+  const jwksUrl = pickString(config["jwks_url"]) || pickString(config["jwksUrl"]);
+  const audience = normalizeAudience(config["audience"]);
+  const clientId = pickString(config["client_id"]) || pickString(config["clientId"]);
+  const authHostHeader = pickString(config["auth_host_header"]) || pickString(config["authHostHeader"]);
 
   return {
-    enabled: config.enabled === true,
+    enabled: config["enabled"] === true,
     ...(issuer === undefined ? {} : { issuer }),
     ...(jwksUrl === undefined ? {} : { jwks_url: jwksUrl }),
-    jwt_jwks: config.jwt_jwks ?? config.jwtJwks,
+    jwt_jwks: config["jwt_jwks"] ?? config["jwtJwks"],
     ...(audience === undefined ? {} : { audience }),
     ...(clientId === undefined ? {} : { client_id: clientId }),
     auth_endpoint_mode: mode,
     ...(authUpstream === undefined ? {} : { auth_upstream: authUpstream }),
     ...(authHostHeader === undefined ? {} : { auth_host_header: authHostHeader }),
-    auth_upstream_tls_insecure_skip_verify: config.auth_upstream_tls_insecure_skip_verify === true || config.authUpstreamTlsInsecureSkipVerify === true,
-    claim_mapping: normalizeClaimMapping(config.claim_mapping ?? config.claimMapping),
+    auth_upstream_tls_insecure_skip_verify: config["auth_upstream_tls_insecure_skip_verify"] === true || config["authUpstreamTlsInsecureSkipVerify"] === true,
+    claim_mapping: normalizeClaimMapping(config["claim_mapping"] ?? config["claimMapping"]),
   };
 }
 
@@ -92,8 +92,8 @@ export function resolveExternalAuthEndpointConfig(value: unknown): ExternalAuthE
 
 export function resolveProjectExternalAuthEndpointConfig(value: unknown): ExternalAuthEndpointConfig | null {
   const projectConfig = normalizeProjectConfig(value);
-  const authConfig = isRecord(projectConfig.auth) ? projectConfig.auth : {};
-  return resolveExternalAuthEndpointConfig(authConfig.third_party_auth);
+  const authConfig = isRecord(projectConfig["auth"]) ? projectConfig["auth"] : {};
+  return resolveExternalAuthEndpointConfig(authConfig["third_party_auth"]);
 }
 
 function pickString(value: unknown): string | undefined {

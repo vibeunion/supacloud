@@ -8,7 +8,7 @@ import { GOOD_PROJECT_FILES } from "../packages/compiler/src/fixtures/good-proje
 import { writeFixtureProject } from "../packages/compiler/src/fixtures/helpers";
 
 // Transfer only this detached directory to the dedicated Linux test machine.
-assert.equal(Bun.version, "1.4.2");
+assert.equal(Bun.version, "1.4.3");
 const output = await mkdtemp(join(tmpdir(), "supacloud-linux-delivery-"));
 const project = join(output, "project");
 try {

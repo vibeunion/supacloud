@@ -49,6 +49,7 @@ const functionLimitsSchema = t.Object({
   max_response_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
   wait_until_timeout_ms: t.Optional(t.Integer({ minimum: 1, maximum: 900_000 })),
 }, { additionalProperties: false });
+const functionBytecodeSchema = t.Union([t.Literal("off"), t.Literal("auto"), t.Literal("required")]);
 
 async function requireFunctionManagementAuth(request: Request, ref: string) {
   const authError = await requireProjectOrAdminAuth(request, ref);
@@ -82,6 +83,7 @@ function deploymentConfig(
   framework: EdgeFunctionFramework | undefined,
   capabilities?: EdgeFunctionCapabilities,
   limits?: EdgeFunctionLimits,
+  bytecode?: EdgeFunctionConfigSnapshot["bytecode"],
 ): EdgeFunctionDeploymentConfig {
   return {
     ...(typeof verifyJwt === "boolean" ? { verify_jwt: verifyJwt } : {}),
@@ -89,12 +91,14 @@ function deploymentConfig(
     ...(framework ? { framework } : {}),
     ...(capabilities ? { capabilities } : {}),
     ...(limits ? { limits } : {}),
+    ...(bytecode ? { bytecode } : {}),
   };
 }
 
 function functionConfigProjection(config: EdgeFunctionConfigSnapshot) {
   return {
     verify_jwt: config.verify_jwt,
+    bytecode: config.bytecode ?? "off",
     framework: config.framework ?? "fetch",
     background_routes: config.background_routes ?? [],
     ...(config.version === undefined ? {} : { version: config.version }),
@@ -269,6 +273,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       code: t.String({ minLength: 1, maxLength: 10 * 1024 * 1024 }),
       config: t.Optional(t.Object({
         verify_jwt: t.Optional(t.Boolean()), framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
+        bytecode: t.Optional(functionBytecodeSchema),
         background_routes: t.Optional(t.Array(t.String(), { maxItems: 128 })),
         capabilities: t.Optional(functionCapabilitiesSchema), limits: t.Optional(functionLimitsSchema),
       }, { additionalProperties: false })),
@@ -309,7 +314,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         metadata: t.Optional(t.Any()),
         file: t.Optional(t.Any()),
       }),
-      type: "multipart",
+      parse: "formdata",
       detail: { tags: ["frontend"], summary: "Deploy function via multipart upload" },
     },
     async ({ params, body, query, request }) => {
@@ -939,6 +944,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           maxLength: 64,
         })),
         verify_jwt: t.Optional(t.Boolean()),
+        bytecode: t.Optional(functionBytecodeSchema),
         background_routes: t.Optional(t.Array(t.String())),
         framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
         capabilities: t.Optional(functionCapabilitiesSchema),
@@ -971,6 +977,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           body.framework,
           body.capabilities,
           body.limits,
+          body.bytecode,
         ),
       });
       const failure = deploymentFailure(deployment);
@@ -1009,6 +1016,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body: t.Optional(t.String()),
         code: t.Optional(t.String()),
         verify_jwt: t.Optional(t.Boolean()),
+        bytecode: t.Optional(functionBytecodeSchema),
         background_routes: t.Optional(t.Array(t.String())),
         framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
         capabilities: t.Optional(functionCapabilitiesSchema),
@@ -1041,6 +1049,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         framework,
         body.capabilities,
         body.limits,
+        body.bytecode,
       );
       const expectedId = expectedActivationId(body.expected_activation_id);
       if (expectedId === null) return invalidExpectedActivationId();
@@ -1121,6 +1130,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         entrypoint: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
         verify_jwt: t.Optional(t.Boolean()),
+        bytecode: t.Optional(functionBytecodeSchema),
         background_routes: t.Optional(t.Array(t.String())),
         framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
         capabilities: t.Optional(functionCapabilitiesSchema),
@@ -1151,6 +1161,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           body.framework,
           body.capabilities,
           body.limits,
+          body.bytecode,
         ),
       });
       const failure = deploymentFailure(deployment);
@@ -1322,6 +1333,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
         verify_jwt: t.Optional(t.Boolean()),
+        bytecode: t.Optional(functionBytecodeSchema),
         background_routes: t.Optional(t.Array(t.String())),
         framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
         capabilities: t.Optional(functionCapabilitiesSchema),
@@ -1341,7 +1353,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         const updated = await edgeFunctionService.updateConfig(
           params.ref,
           params.slug,
-          deploymentConfig(body.verify_jwt, body.background_routes, body.framework, body.capabilities, body.limits),
+          deploymentConfig(body.verify_jwt, body.background_routes, body.framework, body.capabilities, body.limits, body.bytecode),
           expectedId,
         );
         return {

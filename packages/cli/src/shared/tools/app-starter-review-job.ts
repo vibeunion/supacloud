@@ -2,10 +2,11 @@ export const STARTER_REVIEW_JOB = `import { DB_CLIENT, Inject, Injectable, Job }
 import { ApplicationError } from "@supacloud/elysia";
 import { t } from "elysia";
 import type { Static } from "elysia/type";
+import { REVIEW_VERSION_MAX } from "./limits";
 
 export const AttachmentInput = t.Object({
   reviewId: t.String({ minLength: 1, maxLength: 100 }),
-  version: t.Integer({ minimum: 2 }),
+  version: t.Integer({ minimum: 2, maximum: REVIEW_VERSION_MAX }),
   artifactId: t.String({ format: "uuid" }),
 }, { additionalProperties: false });
 
@@ -19,6 +20,8 @@ export type ReviewAttachmentInput = Static<typeof AttachmentInput>;
 export type ReviewAttachmentResult = Static<typeof AttachmentResult>;
 
 export interface ReviewAttachmentStore {
+  // Reauthorize before returning a committed result; null means execution is still needed.
+  readResult(input: ReviewAttachmentInput): Promise<ReviewAttachmentResult | null>;
   // Resolve the immutable artifact under the worker's own authorization and current review revision.
   readAttachment(input: ReviewAttachmentInput): Promise<{ body: Uint8Array; sha256: string }>;
   // Revalidate revision/ownership and persist idempotently in a transaction; return the durable result.
@@ -34,6 +37,8 @@ export class VerifyReviewAttachment {
   constructor(@Inject(DB_CLIENT) private readonly store: ReviewAttachmentStore) {}
 
   async run(input: ReviewAttachmentInput): Promise<ReviewAttachmentResult> {
+    const committed = await this.store.readResult(input);
+    if (committed !== null) return committed;
     const source = await this.store.readAttachment(input);
     if (source.body.byteLength < 1 || source.body.byteLength > 1048576) {
       throw new ApplicationError("Attachment size is outside the supported range", { code: "ATTACHMENT_SIZE_INVALID" });
@@ -59,6 +64,7 @@ const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", b
 test("attachment job awaits the authorized reader and the committed result", async () => {
   let recorded: ReviewAttachmentResult | undefined;
   const job = new VerifyReviewAttachment({
+    async readResult() { return null; },
     async readAttachment() { return { body, sha256 }; },
     async recordAttachment(_input, result) { await Promise.resolve(); recorded = result; return result; },
   });
@@ -75,14 +81,31 @@ test("missing authorization, corrupted bytes and persistence failures are not su
     async () => ({ body: new Uint8Array(1048577), sha256 }),
   ]) {
     const job = new VerifyReviewAttachment({
+      async readResult() { return null; },
       readAttachment, async recordAttachment(_input, result) { records++; return result; },
     });
     await expect(job.run(input)).rejects.toThrow();
   }
   expect(records).toBe(0);
   await expect(new VerifyReviewAttachment({
+    async readResult() { return null; },
     async readAttachment() { return { body, sha256 }; },
     async recordAttachment() { throw new Error("Commit failed"); },
   }).run(input)).rejects.toThrow("Commit failed");
+});
+
+test("a reauthorized committed result avoids another download or write", async () => {
+  const result = { ...input, sha256, bytes: body.byteLength };
+  const job = new VerifyReviewAttachment({
+    async readResult() { return result; },
+    async readAttachment() { throw new Error("Must not download again"); },
+    async recordAttachment() { throw new Error("Must not write again"); },
+  });
+  expect(await job.run(input)).toEqual(result);
+  await expect(new VerifyReviewAttachment({
+    async readResult() { throw new Error("Access revoked"); },
+    async readAttachment() { throw new Error("Must not download"); },
+    async recordAttachment() { throw new Error("Must not write"); },
+  }).run(input)).rejects.toThrow("Access revoked");
 });
 `;

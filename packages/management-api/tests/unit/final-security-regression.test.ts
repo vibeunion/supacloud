@@ -175,38 +175,54 @@ describe("final security regressions", () => {
     }
   });
 
-  test("function config read projects one atomic tombstone snapshot", async () => {
-    const getStateSpy = spyOn(edgeFunctionService, "getState").mockResolvedValue({
-      active_version: "absent",
-      config: {
-        verify_jwt: false,
-        background_routes: ["/jobs/*"],
-        activation_id: nextActivationId,
-        persisted_unknown_field: "must-not-reflect",
-      } as Awaited<ReturnType<typeof edgeFunctionService.getState>>["config"],
-    });
-    const request = appWith(projectFunctionsRoutes);
-
-    try {
-      const response = await request("/v1/projects/proj_1/functions/hello/config", {
-        headers: masterHeaders,
-      });
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        project_ref: "proj_1",
-        slug: "hello",
+  test.each([undefined, "off", "auto", "required"] as const)(
+    "function config read projects one atomic tombstone snapshot with bytecode %s",
+    async (bytecode) => {
+      const getStateSpy = spyOn(edgeFunctionService, "getState").mockResolvedValue({
         active_version: "absent",
-        verify_jwt: false,
-        framework: "fetch",
-        background_routes: ["/jobs/*"],
-        activation_id: nextActivationId,
+        config: {
+          verify_jwt: false,
+          ...(bytecode === undefined ? {} : { bytecode }),
+          background_routes: ["/jobs/*"],
+          activation_id: nextActivationId,
+          persisted_unknown_field: "must-not-reflect",
+        } as Awaited<ReturnType<typeof edgeFunctionService.getState>>["config"],
       });
-      expect(getStateSpy).toHaveBeenCalledWith("proj_1", "hello");
-    } finally {
-      getStateSpy.mockRestore();
-    }
-  });
+      const getConfigSpy = spyOn(edgeFunctionService, "getConfig").mockRejectedValue(
+        new Error("must not read config outside the atomic state snapshot"),
+      );
+      const getActiveVersionSpy = spyOn(edgeFunctionService, "getActiveVersion").mockRejectedValue(
+        new Error("must not read version outside the atomic state snapshot"),
+      );
+      const request = appWith(projectFunctionsRoutes);
+
+      try {
+        const response = await request("/v1/projects/proj_1/functions/hello/config", {
+          headers: masterHeaders,
+        });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          project_ref: "proj_1",
+          slug: "hello",
+          active_version: "absent",
+          verify_jwt: false,
+          bytecode: bytecode ?? "off",
+          framework: "fetch",
+          background_routes: ["/jobs/*"],
+          activation_id: nextActivationId,
+        });
+        expect(getStateSpy).toHaveBeenCalledWith("proj_1", "hello");
+        expect(getStateSpy).toHaveBeenCalledTimes(1);
+        expect(getConfigSpy).not.toHaveBeenCalled();
+        expect(getActiveVersionSpy).not.toHaveBeenCalled();
+      } finally {
+        getStateSpy.mockRestore();
+        getConfigSpy.mockRestore();
+        getActiveVersionSpy.mockRestore();
+      }
+    },
+  );
 
   test("function version detail rejects legacy zero before service dispatch", async () => {
     const getVersionSpy = spyOn(edgeFunctionService, "getVersion").mockRejectedValue(

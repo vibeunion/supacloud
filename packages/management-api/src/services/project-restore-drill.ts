@@ -111,7 +111,7 @@ export async function verifyRestoreInventory(root: string, snapshot: RestoreSnap
 }
 
 function baseEnvironment() {
-  return { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: "/drill", LANG: "C.UTF-8" };
+  return { PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin", HOME: "/drill", LANG: "C.UTF-8" };
 }
 
 async function run(cmd: string[], env: Record<string, string>, timeoutMs = 120_000): Promise<string> {
@@ -287,8 +287,8 @@ async function verifyFunctions(snapshot: RestoreSnapshot, directory: string, env
     for (const check of snapshot.http_checks) {
       const headers: Record<string, string> = { "x-project-ref": snapshot.project_ref };
       if (check.auth === "service_role") {
-        if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Restored runtime credential is missing");
-        headers.apikey = env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!env["SUPABASE_SERVICE_ROLE_KEY"]) throw new Error("Restored runtime credential is missing");
+        headers["apikey"] = env["SUPABASE_SERVICE_ROLE_KEY"];
       }
       const response = await fetch(`http://127.0.0.1:${EDGE_PORT}/functions/v1/${check.slug}${check.path}`, {
         headers, redirect: "error", signal: AbortSignal.timeout(30_000),

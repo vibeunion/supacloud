@@ -126,7 +126,14 @@ function parseGoDurationSeconds(
         if (match.index !== offset) {
             return invalidPolicyValue(field, "must be seconds or a Go duration such as 30m or 24h");
         }
-        seconds += Number(match[1]) * DURATION_UNIT_SECONDS[match[2]];
+        const amount = match[1];
+        const unit = match[2];
+        if (amount === undefined || unit === undefined) {
+            return invalidPolicyValue(field, "must be seconds or a Go duration such as 30m or 24h");
+        }
+        const unitSeconds = DURATION_UNIT_SECONDS[unit];
+        if (unitSeconds === undefined) return invalidPolicyValue(field, "unsupported duration unit");
+        seconds += Number(amount) * unitSeconds;
         offset = DURATION_TOKEN.lastIndex;
     }
     DURATION_TOKEN.lastIndex = 0;
@@ -223,10 +230,14 @@ export function normalizeAuthSessionPolicyPatch(
             consumedKeys.add(name);
             return parseAuthSessionPolicyValue(field, input[name]);
         });
-        if (parsed.slice(1).some((value) => !policyValuesEqual(value, parsed[0]))) {
+        const first = parsed[0];
+        if (first === undefined) {
+            throw new AuthSessionPolicyValidationError(field, "a policy value is required");
+        }
+        if (parsed.slice(1).some((value) => !policyValuesEqual(value, first))) {
             invalidPolicyValue(field, `conflicting values supplied through ${supplied.join(", ")}`);
         }
-        values[field] = parsed[0];
+        values[field] = first;
     }
 
     return { values, consumedKeys };
@@ -257,7 +268,7 @@ export function readAuthSessionPolicy(
     for (const field of AUTH_SESSION_POLICY_KEYS) {
         const preferredName = [field, ...AUTH_SESSION_POLICY_ALIASES[field]]
             .find((name) => Object.prototype.hasOwnProperty.call(authConfig, name));
-        if (preferredName) prioritizedInput[preferredName] = authConfig[preferredName];
+        if (preferredName !== undefined) prioritizedInput[preferredName] = authConfig[preferredName];
     }
     const patch = normalizeAuthSessionPolicyPatch(prioritizedInput);
     return {

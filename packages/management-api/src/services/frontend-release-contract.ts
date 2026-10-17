@@ -1,14 +1,21 @@
 import { createHash } from "node:crypto";
 import type { FrontendDeployment } from "../types/frontend";
 import type { MutationPrincipal } from "./project-mutation.service";
+import {
+  FRONTEND_ARCHIVE_MAX_BYTES,
+  FRONTEND_ARCHIVE_MAX_FILES,
+  FRONTEND_ARCHIVE_MAX_SOURCE_BYTES,
+  FRONTEND_ARCHIVE_FORMAT,
+  FRONTEND_ARCHIVE_RELEASE_SCHEMA,
+} from "@supacloud/delivery/frontend-archive";
 
 export const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
-export const FRONTEND_RELEASE_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
-export const FRONTEND_RELEASE_MAX_FILES = 10_000;
-export const FRONTEND_RELEASE_MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
+export const FRONTEND_RELEASE_ARCHIVE_MAX_BYTES = FRONTEND_ARCHIVE_MAX_BYTES;
+export const FRONTEND_RELEASE_MAX_FILES = FRONTEND_ARCHIVE_MAX_FILES;
+export const FRONTEND_RELEASE_MAX_UNCOMPRESSED_BYTES = FRONTEND_ARCHIVE_MAX_SOURCE_BYTES;
 export const FRONTEND_RELEASE_LIST_DEFAULT_LIMIT = 50;
 export const FRONTEND_RELEASE_LIST_MAX_LIMIT = 100;
-export const FRONTEND_RELEASE_SCHEMA = "supacloud.frontend-release.v1" as const;
+export const FRONTEND_RELEASE_SCHEMA = FRONTEND_ARCHIVE_RELEASE_SCHEMA;
 export const FRONTEND_ACTIVE_RELEASE_SCHEMA = "supacloud.frontend-active-release.v1" as const;
 export const FRONTEND_ACTIVATION_CHECKPOINT_SCHEMA = "supacloud.frontend-release-activation.v1" as const;
 export const FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE = "CADDY_GATEWAY_DURABILITY_UNKNOWN" as const;
@@ -33,6 +40,7 @@ export interface FrontendReleaseRecord {
   file_count: number;
   created_at: string;
   kind: "prebuilt_static";
+  archive_format: typeof FRONTEND_ARCHIVE_FORMAT;
 }
 
 export interface FrontendActiveReleaseRecord {
@@ -67,6 +75,16 @@ export interface FrontendReleaseInventory {
   active_activation_id: string | null;
   releases: FrontendReleaseRecord[];
   next_cursor: string | null;
+}
+
+export interface FrontendRollbackSnapshot {
+  schema: "supacloud.frontend-rollback-snapshot.v1";
+  project_ref: string;
+  deployment_id: string;
+  active_release_id: string | null;
+  active_activation_id: string | null;
+  previous_release: FrontendReleaseRecord | null;
+  previous_activation_id: string | null;
 }
 
 export interface FrontendReleaseListPage {
@@ -252,17 +270,18 @@ export function assertExpectedFrontendActivationId(candidate: string): void {
 export function parseReleaseRecord(candidate: unknown): FrontendReleaseRecord {
   const keys = [
     "schema", "project_ref", "deployment_id", "release_id", "sha256", "tree_sha256",
-    "size_bytes", "file_count", "created_at", "kind",
+    "size_bytes", "file_count", "created_at", "kind", "archive_format",
   ] as const;
   const record = exactRecord(candidate, keys);
-  if (!record || record.schema !== FRONTEND_RELEASE_SCHEMA || record.kind !== "prebuilt_static"
-    || typeof record.project_ref !== "string" || typeof record.deployment_id !== "string"
-    || typeof record.release_id !== "string" || !RELEASE_ID_PATTERN.test(record.release_id)
-    || record.sha256 !== record.release_id || typeof record.tree_sha256 !== "string"
-    || !RELEASE_ID_PATTERN.test(record.tree_sha256)
-    || !Number.isSafeInteger(record.size_bytes) || Number(record.size_bytes) < 1
-    || !Number.isSafeInteger(record.file_count) || Number(record.file_count) < 1
-    || !canonicalTimestamp(record.created_at)) {
+  if (!record || record["schema"] !== FRONTEND_RELEASE_SCHEMA || record["kind"] !== "prebuilt_static"
+    || record["archive_format"] !== FRONTEND_ARCHIVE_FORMAT
+    || typeof record["project_ref"] !== "string" || typeof record["deployment_id"] !== "string"
+    || typeof record["release_id"] !== "string" || !RELEASE_ID_PATTERN.test(record["release_id"])
+    || record["sha256"] !== record["release_id"] || typeof record["tree_sha256"] !== "string"
+    || !RELEASE_ID_PATTERN.test(record["tree_sha256"])
+    || !Number.isSafeInteger(record["size_bytes"]) || Number(record["size_bytes"]) < 1
+    || !Number.isSafeInteger(record["file_count"]) || Number(record["file_count"]) < 1
+    || !canonicalTimestamp(record["created_at"])) {
     throw frontendReleaseError("FRONTEND_RELEASE_STORAGE_INVALID", 500, "Frontend release metadata is invalid");
   }
   return record as unknown as FrontendReleaseRecord;
@@ -274,14 +293,14 @@ export function parseActiveRelease(candidate: unknown): FrontendActiveReleaseRec
     "activation_id", "activated_at", "mutation_id",
   ] as const;
   const record = exactRecord(candidate, keys);
-  if (!record || record.schema !== FRONTEND_ACTIVE_RELEASE_SCHEMA
-    || typeof record.project_ref !== "string" || typeof record.deployment_id !== "string"
-    || typeof record.release_id !== "string" || !RELEASE_ID_PATTERN.test(record.release_id)
-    || record.sha256 !== record.release_id || typeof record.tree_sha256 !== "string"
-    || !RELEASE_ID_PATTERN.test(record.tree_sha256) || !canonicalTimestamp(record.activated_at)
-    || typeof record.activation_id !== "string" || !MUTATION_ID_PATTERN.test(record.activation_id)
-    || typeof record.mutation_id !== "string" || !MUTATION_ID_PATTERN.test(record.mutation_id)
-    || record.activation_id !== record.mutation_id) {
+  if (!record || record["schema"] !== FRONTEND_ACTIVE_RELEASE_SCHEMA
+    || typeof record["project_ref"] !== "string" || typeof record["deployment_id"] !== "string"
+    || typeof record["release_id"] !== "string" || !RELEASE_ID_PATTERN.test(record["release_id"])
+    || record["sha256"] !== record["release_id"] || typeof record["tree_sha256"] !== "string"
+    || !RELEASE_ID_PATTERN.test(record["tree_sha256"]) || !canonicalTimestamp(record["activated_at"])
+    || typeof record["activation_id"] !== "string" || !MUTATION_ID_PATTERN.test(record["activation_id"])
+    || typeof record["mutation_id"] !== "string" || !MUTATION_ID_PATTERN.test(record["mutation_id"])
+    || record["activation_id"] !== record["mutation_id"]) {
     throw frontendReleaseError(
       "FRONTEND_RELEASE_AUTHORITY_INVALID",
       500,
@@ -300,29 +319,29 @@ export function parseActivationCheckpoint(candidate: unknown): FrontendActivatio
     "previous_route",
   ] as const;
   const record = exactRecord(candidate, keys);
-  if (!record || record.schema !== FRONTEND_ACTIVATION_CHECKPOINT_SCHEMA
-    || !["prepared", "authority_applied", "route_applied"].includes(String(record.phase))
-    || typeof record.deployment_id !== "string" || !DEPLOYMENT_ID_PATTERN.test(record.deployment_id)
-    || typeof record.release_id !== "string" || !RELEASE_ID_PATTERN.test(record.release_id)
-    || typeof record.expected_active_release_id !== "string"
-    || (record.expected_active_release_id !== "absent"
-      && !RELEASE_ID_PATTERN.test(record.expected_active_release_id))
-    || typeof record.activation_id !== "string" || !MUTATION_ID_PATTERN.test(record.activation_id)
-    || typeof record.expected_activation_id !== "string"
-    || (record.expected_activation_id !== "absent"
-      && !MUTATION_ID_PATTERN.test(record.expected_activation_id))
-    || !canonicalTimestamp(record.activated_at)
-    || !["absent", "legacy", "release"].includes(String(record.previous_route))) {
+  if (!record || record["schema"] !== FRONTEND_ACTIVATION_CHECKPOINT_SCHEMA
+    || !["prepared", "authority_applied", "route_applied"].includes(String(record["phase"]))
+    || typeof record["deployment_id"] !== "string" || !DEPLOYMENT_ID_PATTERN.test(record["deployment_id"])
+    || typeof record["release_id"] !== "string" || !RELEASE_ID_PATTERN.test(record["release_id"])
+    || typeof record["expected_active_release_id"] !== "string"
+    || (record["expected_active_release_id"] !== "absent"
+      && !RELEASE_ID_PATTERN.test(record["expected_active_release_id"]))
+    || typeof record["activation_id"] !== "string" || !MUTATION_ID_PATTERN.test(record["activation_id"])
+    || typeof record["expected_activation_id"] !== "string"
+    || (record["expected_activation_id"] !== "absent"
+      && !MUTATION_ID_PATTERN.test(record["expected_activation_id"]))
+    || !canonicalTimestamp(record["activated_at"])
+    || !["absent", "legacy", "release"].includes(String(record["previous_route"]))) {
     throw frontendReleaseError(
       "FRONTEND_RELEASE_CHECKPOINT_INVALID",
       503,
       "Frontend release activation checkpoint is invalid",
     );
   }
-  if (record.previous_authority !== null) {
+  if (record["previous_authority"] !== null) {
     let previous: FrontendActiveReleaseRecord;
     try {
-      previous = parseActiveRelease(record.previous_authority);
+      previous = parseActiveRelease(record["previous_authority"]);
     } catch {
       throw frontendReleaseError(
         "FRONTEND_RELEASE_CHECKPOINT_INVALID",
@@ -330,19 +349,19 @@ export function parseActivationCheckpoint(candidate: unknown): FrontendActivatio
         "Frontend release activation checkpoint is invalid",
       );
     }
-    if (record.previous_route !== "release"
-      || previous.deployment_id !== record.deployment_id
-      || previous.release_id !== record.expected_active_release_id
-      || previous.activation_id !== record.expected_activation_id) {
+    if (record["previous_route"] !== "release"
+      || previous.deployment_id !== record["deployment_id"]
+      || previous.release_id !== record["expected_active_release_id"]
+      || previous.activation_id !== record["expected_activation_id"]) {
       throw frontendReleaseError(
         "FRONTEND_RELEASE_CHECKPOINT_INVALID",
         503,
         "Frontend release activation checkpoint is invalid",
       );
     }
-  } else if (record.previous_route === "release"
-    || record.expected_active_release_id !== "absent"
-    || record.expected_activation_id !== "absent") {
+  } else if (record["previous_route"] === "release"
+    || record["expected_active_release_id"] !== "absent"
+    || record["expected_activation_id"] !== "absent") {
     throw frontendReleaseError(
       "FRONTEND_RELEASE_CHECKPOINT_INVALID",
       503,

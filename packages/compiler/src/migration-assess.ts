@@ -164,15 +164,18 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
   };
   try {
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
-    if (!isRecord(parsed) || parsed.version !== 1) throw new Error("invalid manifest");
+    if (!isRecord(parsed) || parsed["version"] !== 1) throw new Error("invalid manifest");
+    const commands = arrayLength(parsed["commands"]);
+    const routes = arrayLength(parsed["routes"]);
+    const permissions = arrayLength(parsed["permissions"]);
     contractsManifest = {
       path: contractsManifestPath,
       present: true,
       sha256: await sha256(contractsManifestPath),
       version: 1,
-      ...(arrayLength(parsed.commands) === undefined ? {} : { commands: arrayLength(parsed.commands) }),
-      ...(arrayLength(parsed.routes) === undefined ? {} : { routes: arrayLength(parsed.routes) }),
-      ...(arrayLength(parsed.permissions) === undefined ? {} : { permissions: arrayLength(parsed.permissions) }),
+      ...(commands === undefined ? {} : { commands }),
+      ...(routes === undefined ? {} : { routes }),
+      ...(permissions === undefined ? {} : { permissions }),
     };
   } catch {
     findings.push({

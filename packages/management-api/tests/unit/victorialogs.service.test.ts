@@ -57,6 +57,27 @@ describe("VictoriaLogsService", () => {
     ]);
   });
 
+  test("scopes application log queries to the activated systemd units", async () => {
+    let query = "";
+    const service = new VictoriaLogsService({
+      fetcher: async (_input, init) => {
+        query = new URLSearchParams(String(init?.body || "")).get("query") || "";
+        return new Response("");
+      },
+    });
+
+    await service.queryProjectLogs("proj_1", {
+      units: [
+        "supacloud-application-proj_1-01234567-89ab-4def-8123-456789abcdef-api.service",
+        "supacloud-application-proj_1-01234567-89ab-4def-8123-456789abcdef-worker.service",
+      ],
+    });
+
+    expect(query).toContain('_SYSTEMD_UNIT:="supacloud-application-proj_1-01234567-89ab-4def-8123-456789abcdef-api.service"');
+    expect(query).toContain(" OR ");
+    expect(query).toContain('_SYSTEMD_UNIT:="supacloud-application-proj_1-01234567-89ab-4def-8123-456789abcdef-worker.service"');
+  });
+
   test("escapes LogsQL literals and rejects invalid project refs", async () => {
     let query = "";
     const service = new VictoriaLogsService({

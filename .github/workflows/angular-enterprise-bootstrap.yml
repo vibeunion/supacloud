@@ -20,13 +20,13 @@ jobs:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.2'
+          bun-version: '1.4.3'
       - name: Record source and install exact lockfile dependencies
         run: |
           git rev-parse HEAD
           bun --version
           status=0
-          for package in contracts commands delivery compiler db app query supacloud-js testing elysia cli; do
+          for package in contracts commands db delivery compiler app query supacloud-js testing elysia cli; do
             (cd "packages/$package" && bun install --frozen-lockfile --ignore-scripts) || status=1
           done
           exit "$status"
@@ -40,7 +40,7 @@ jobs:
           tar --null -T /tmp/angular-enterprise-paths -cf /tmp/angular-enterprise-evidence/dependencies.tar
           cp "$(command -v bun)" /tmp/angular-enterprise-evidence/bun
           git rev-parse HEAD > /tmp/angular-enterprise-evidence/commit.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: angular-enterprise-verification-environment

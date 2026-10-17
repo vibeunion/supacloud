@@ -4,6 +4,10 @@
     "experimentalDecorators": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "useUnknownInCatchVariables": true
   }
 }

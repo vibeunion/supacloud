@@ -1,5 +1,116 @@
 # Changelog
 
+## [0.19.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.19.0...delivery-v0.19.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* preserve failure severity in customer summaries ([#2016](https://github.com/vibeunion/supacloud/issues/2016)) ([acfe760](https://github.com/vibeunion/supacloud/commit/acfe760d04173e95c0f24d056e464334b59e942a))
+
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.18.1...delivery-v0.19.0) (2026-10-16)
+
+
+### Features
+
+* connect scoped AI workflows, reference clients and deployment evidence ([#1950](https://github.com/vibeunion/supacloud/issues/1950)) ([aa1737a](https://github.com/vibeunion/supacloud/commit/aa1737a68ce7c4429e432c9526be579f6888a9dd))
+
+## [0.18.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.18.0...delivery-v0.18.1) (2026-10-15)
+
+
+### Miscellaneous Chores
+
+* upgrade workspace dependencies ([#1940](https://github.com/vibeunion/supacloud/issues/1940)) ([77ad418](https://github.com/vibeunion/supacloud/commit/77ad418e0568ceeeea0b59a10a3bbc451a68a95f))
+
+## [0.18.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.17.0...delivery-v0.18.0) (2026-10-14)
+
+
+### Features
+
+* **stability:** add FA delivery and acceptance governance ([#1915](https://github.com/vibeunion/supacloud/issues/1915)) ([f70b607](https://github.com/vibeunion/supacloud/commit/f70b6079234d849d5059dd5a879d22b895022987))
+
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.16.0...delivery-v0.17.0) (2026-10-14)
+
+
+### Features
+
+* **delivery:** declare Edge Function targets in the delivery plan ([#1893](https://github.com/vibeunion/supacloud/issues/1893)) ([1312281](https://github.com/vibeunion/supacloud/commit/131228138edd0d2a4484eea82a80257a88eaf795))
+
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.15.1...delivery-v0.16.0) (2026-10-12)
+
+
+### Features
+
+* **deploy:** unify frontend upload with project deployment ([#1862](https://github.com/vibeunion/supacloud/issues/1862)) ([b022c72](https://github.com/vibeunion/supacloud/commit/b022c72331d47d2ab69ebc86fa6450fc9dcd1a37))
+
+## [0.15.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.15.0...delivery-v0.15.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* validate deployment receipts and prevent silent Web-only fallback ([#1854](https://github.com/vibeunion/supacloud/issues/1854)) ([8138707](https://github.com/vibeunion/supacloud/commit/813870786a845cee9a726f9dda2b6c889c8e8cdd))
+
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.14.1...delivery-v0.15.0) (2026-10-12)
+
+
+### Features
+
+* unify application backend and web deployment ([#1828](https://github.com/vibeunion/supacloud/issues/1828)) ([119fb30](https://github.com/vibeunion/supacloud/commit/119fb30381ee5636a936262319b1e50f19de994b))
+
+## [0.14.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.14.0...delivery-v0.14.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.13.0...delivery-v0.14.0) (2026-10-11)
+
+
+### Features
+
+* **app:** orchestrate application releases on platform ([#1808](https://github.com/vibeunion/supacloud/issues/1808)) ([6488889](https://github.com/vibeunion/supacloud/commit/64888896e4a26ecffb5888c26ae18f47804e60e8))
+
+## [0.13.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.12.0...delivery-v0.13.0) (2026-10-11)
+
+
+### Features
+
+* **app:** make preview lifecycle resumable and verifiable ([#1786](https://github.com/vibeunion/supacloud/issues/1786)) ([cfd2782](https://github.com/vibeunion/supacloud/commit/cfd2782809fcc6055fe2f4a7c98857c3de204a12))
+
+## [0.12.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.11.0...delivery-v0.12.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771))
+
+### Features
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771)) ([819fd3d](https://github.com/vibeunion/supacloud/commit/819fd3d5497a0ce86c9ee3cf1ed4ef4ae4db8637))
+
+## [0.11.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.10.0...delivery-v0.11.0) (2026-10-11)
+
+
+### Features
+
+* **app:** add verified read-only environment promotion plans ([#1785](https://github.com/vibeunion/supacloud/issues/1785)) ([454b86f](https://github.com/vibeunion/supacloud/commit/454b86fc5f7d7f01b90c801c1f0f1eaa1a53fb03))
+* **app:** transfer verified releases across environment projects ([#1784](https://github.com/vibeunion/supacloud/issues/1784)) ([b45db88](https://github.com/vibeunion/supacloud/commit/b45db8810bf184d564b375b299d14407bc686e2a))
+
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.9.0...delivery-v0.10.0) (2026-10-11)
+
+
+### Features
+
+* **applications:** verified read-only deploy plan and no-op observation ([#1778](https://github.com/vibeunion/supacloud/issues/1778)) ([8d8098d](https://github.com/vibeunion/supacloud/commit/8d8098d2ae809c53da1f937d6c10139cbb153ae4))
+* **delivery:** inspect verified application activation history ([#1781](https://github.com/vibeunion/supacloud/issues/1781)) ([46e1ba4](https://github.com/vibeunion/supacloud/commit/46e1ba437bd6a2821d35fb69b1bd945df45e5f26))
+
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.8.0...delivery-v0.9.0) (2026-10-11)
+
+
+### Features
+
+* **applications:** journal-selected application rollback ([#1776](https://github.com/vibeunion/supacloud/issues/1776)) ([68a191c](https://github.com/vibeunion/supacloud/commit/68a191c73d9f5437303885a2f95ba33109d12bc5))
+
 ## [0.8.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.7.0...delivery-v0.8.0) (2026-10-05)
 
 

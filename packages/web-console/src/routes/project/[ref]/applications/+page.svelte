@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { untrack } from "svelte";
   import { t } from "svelte-i18n";
-  import { RefreshCw } from "lucide-svelte";
+  import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-svelte";
   import Button from "@svadmin/ui/components/ui/button/button.svelte";
   import { apiClient } from "$lib/api";
   import {
@@ -13,6 +13,16 @@
   import {
     loadApplicationDevelopment, type ApplicationDevelopmentResponse,
   } from "$lib/application-development";
+
+  type PreviewRecord = {
+    preview_id: string; status: string; release_id: string; branch_name: string;
+    created_at: string; updated_at: string;
+    cleanup: { required: boolean; completed: boolean; error: string | null };
+    resources: {
+      database_branch: { status: string; branch_ref: string };
+      smoke_test: { status: string; passed: string[]; failed: string[] };
+    };
+  };
 
   let application = $state("");
   let environment = $state("");
@@ -28,6 +38,19 @@
   let development = $state<ApplicationDevelopmentResponse | null>(null);
   let developmentState = $state("idle");
   let developmentSelection = $state<{ releaseId: string; target: string; objectId: string } | null>(null);
+  let capacity = $state<{
+    pressure: string; activeAllocations: number; activePorts: number; projectAllocations: number;
+    usage: { cpu: number; memoryMiB: number; connections: number; concurrency: number; ports: number };
+    remaining: { cpu: number; memoryMiB: number; connections: number; concurrency: number; ports: number } | null;
+  } | null>(null);
+  let capacityState = $state("idle");
+  let capacityHistory = $state<Array<{
+    generatedAt: string; pressure: string; activeAllocations: number; activePorts: number;
+    usage: { cpu: number; memoryMiB: number; connections: number; concurrency: number; ports: number };
+  }>>([]);
+  let previews = $state<PreviewRecord[]>([]);
+  let previewState = $state("idle");
+  let previewMutation = $state(false);
   const scope = $derived({
     ref: page.params.ref ?? "",
     application: page.url.searchParams.get("application") ?? "",
@@ -42,6 +65,62 @@
     cursor = undefined;
     previousCursors = [];
     developmentSelection = null;
+  });
+  $effect(() => {
+    const selected = scope;
+    void revision;
+    const controller = new AbortController();
+    previews = [];
+    previewState = validApplicationScope(selected) ? "loading" : "idle";
+    if (validApplicationScope(selected)) {
+      void apiClient(`/v1/projects/${selected.ref}/applications/${selected.application}/environments/${selected.environment}/previews`, {
+        signal: controller.signal,
+      }).then(async response => {
+        if (!response.ok) throw new Error("previews");
+        const payload = await response.json() as { previews?: PreviewRecord[] };
+        return Array.isArray(payload.previews) ? payload.previews : [];
+      }).then(value => {
+        if (!controller.signal.aborted) { previews = value; previewState = "ready"; }
+      }).catch(() => {
+        if (!controller.signal.aborted) previewState = "error";
+      });
+    }
+    return () => controller.abort();
+  });
+  $effect(() => {
+    const selected = scope;
+    void revision;
+    const controller = new AbortController();
+    capacity = null;
+    capacityHistory = [];
+    capacityState = validApplicationScope(selected) ? "loading" : "idle";
+    if (validApplicationScope(selected)) {
+      void Promise.all([
+        apiClient(`/v1/projects/${selected.ref}/capacity`, { signal: controller.signal }),
+        apiClient(`/v1/projects/${selected.ref}/capacity/history?limit=12`, { signal: controller.signal }),
+      ]).then(async ([response, historyResponse]) => {
+        if (!response.ok || !historyResponse.ok) throw new Error("capacity");
+        const value = await response.json() as unknown;
+        const historyValue = await historyResponse.json() as unknown;
+        if (!value || typeof value !== "object" || Array.isArray(value)
+          || !("usage" in value) || !value.usage || typeof value.usage !== "object"
+          || !("pressure" in value) || typeof value.pressure !== "string") {
+          throw new Error("capacity");
+        }
+        const history = historyValue && typeof historyValue === "object" && !Array.isArray(historyValue)
+          && "history" in historyValue && Array.isArray(historyValue.history) ? historyValue.history : [];
+        return { value: value as NonNullable<typeof capacity>, history };
+      }).then(result => {
+        if (!controller.signal.aborted) {
+          capacity = result.value;
+          capacityHistory = result.history as typeof capacityHistory;
+          capacityState = "ready";
+        }
+      }).catch(() => {
+        if (!controller.signal.aborted) capacityState = "error";
+      });
+    }
+    return () => controller.abort();
   });
   $effect(() => {
     const selected = scope;
@@ -113,13 +192,51 @@
     const url = new URL(page.url.href);
     url.searchParams.set("application", application.trim());
     url.searchParams.set("environment", environment.trim());
-    void goto(`${url.pathname}${url.search}`, { reset: false });
+    void goto(`${url.pathname}${url.search}`, { invalidateAll: false });
   }
   function refresh() {
     untrack(() => { cursor = undefined; previousCursors = []; revision += 1; });
   }
   function inspect(releaseId: string, target: string, objectId: string) {
     developmentSelection = { releaseId, target, objectId };
+  }
+  async function createPreview() {
+    const selected = scope;
+    const releaseId = releases?.releases[0]?.release_id;
+    if (!validApplicationScope(selected) || !releaseId || previewMutation) return;
+    previewMutation = true;
+    try {
+      const response = await apiClient(`/v1/projects/${selected.ref}/applications/${selected.application}/environments/${selected.environment}/previews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ release_id: releaseId, data_mode: "schema_only" }),
+      });
+      if (!response.ok) throw new Error("preview");
+      const created = await response.json() as PreviewRecord;
+      previews = [created, ...previews];
+      previewState = "ready";
+    } catch {
+      previewState = "error";
+    } finally {
+      previewMutation = false;
+    }
+  }
+  async function cleanupPreview(previewId: string) {
+    const selected = scope;
+    if (!validApplicationScope(selected) || previewMutation) return;
+    previewMutation = true;
+    try {
+      const response = await apiClient(`/v1/projects/${selected.ref}/applications/${selected.application}/environments/${selected.environment}/previews/${previewId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("cleanup");
+      const updated = await response.json() as PreviewRecord;
+      previews = previews.map(item => item.preview_id === previewId ? updated : item);
+    } catch {
+      previewState = "error";
+    } finally {
+      previewMutation = false;
+    }
   }
 </script>
 
@@ -185,6 +302,85 @@
         </dl>
       {/if}
     </section>
+    <section class="space-y-3" aria-busy={capacityState === "loading"}>
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="text-base font-semibold">{$t("Applications.capacity")}</h2>
+        {#if capacity}<span class="text-xs font-medium uppercase text-muted-foreground">{capacity.pressure}</span>{/if}
+      </div>
+      {#if capacityState === "loading"}<p role="status">{$t("Applications.loading")}</p>
+      {:else if capacityState === "error"}<p role="alert">{$t("Applications.capacity_unavailable")}</p>
+      {:else if capacity}
+        <dl class="grid gap-2 text-sm sm:grid-cols-3">
+          <div><dt class="text-muted-foreground">{$t("Applications.active_allocations")}</dt><dd>{capacity.activeAllocations}</dd></div>
+          <div><dt class="text-muted-foreground">{$t("Applications.project_allocations")}</dt><dd>{capacity.projectAllocations}</dd></div>
+          <div><dt class="text-muted-foreground">{$t("Applications.active_ports")}</dt><dd>{capacity.activePorts} / {capacity.usage.ports + (capacity.remaining?.ports ?? 0)}</dd></div>
+          <div><dt class="text-muted-foreground">CPU</dt><dd>{capacity.usage.cpu} / {capacity.usage.cpu + (capacity.remaining?.cpu ?? 0)}</dd></div>
+          <div><dt class="text-muted-foreground">{$t("Applications.memory")}</dt><dd>{capacity.usage.memoryMiB} MiB / {capacity.usage.memoryMiB + (capacity.remaining?.memoryMiB ?? 0)} MiB</dd></div>
+          <div><dt class="text-muted-foreground">{$t("Applications.concurrency")}</dt><dd>{capacity.usage.concurrency} / {capacity.usage.concurrency + (capacity.remaining?.concurrency ?? 0)}</dd></div>
+        </dl>
+        <p class="text-xs text-muted-foreground">{$t("Applications.capacity_note")}</p>
+        {#if capacityHistory.length > 0}
+          <div class="border-t pt-3">
+            <h3 class="text-sm font-semibold">{$t("Applications.capacity_history")}</h3>
+            <div class="mt-2 overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead><tr class="border-b">
+                  <th class="p-2">{$t("Applications.time")}</th>
+                  <th class="p-2">{$t("Applications.status")}</th>
+                  <th class="p-2">CPU</th>
+                  <th class="p-2">{$t("Applications.memory")}</th>
+                  <th class="p-2">{$t("Applications.active_ports")}</th>
+                </tr></thead>
+                <tbody>{#each capacityHistory.slice(0, 6) as item (item.generatedAt)}
+                  <tr class="border-b">
+                    <td class="p-2">{item.generatedAt}</td>
+                    <td class="p-2">{item.pressure}</td>
+                    <td class="p-2">{item.usage.cpu}</td>
+                    <td class="p-2">{item.usage.memoryMiB} MiB</td>
+                    <td class="p-2">{item.activePorts}</td>
+                  </tr>
+                {/each}</tbody>
+              </table>
+            </div>
+          </div>
+        {/if}
+      {/if}
+    </section>
+    <section class="space-y-3" aria-busy={previewState === "loading"}>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-base font-semibold">{$t("Applications.previews")}</h2>
+        <Button variant="outline" onclick={createPreview} disabled={previewMutation || !releases?.releases.length} title={$t("Applications.create_preview")}>
+          {#if previewMutation}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Plus class="h-4 w-4" />{/if}
+          {$t("Applications.create_preview")}
+        </Button>
+      </div>
+      {#if previewState === "loading"}<p role="status">{$t("Applications.loading")}</p>
+      {:else if previewState === "error"}<p role="alert">{$t("Applications.preview_unavailable")}</p>
+      {:else if previews.length === 0}<p class="text-sm text-muted-foreground">{$t("Applications.no_previews")}</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[720px] text-left text-sm">
+            <thead><tr class="border-b">
+              <th class="p-2">{$t("Applications.preview")}</th><th class="p-2">{$t("Applications.status")}</th>
+              <th class="p-2">{$t("Applications.branch")}</th><th class="p-2">{$t("Applications.smoke_test")}</th><th class="p-2"></th>
+            </tr></thead>
+            <tbody>{#each previews as preview (preview.preview_id)}
+              <tr class="border-b">
+                <td class="p-2 font-mono text-xs">{preview.preview_id.slice(0, 12)}</td>
+                <td class="p-2">{preview.status}</td>
+                <td class="p-2 font-mono text-xs">{preview.resources.database_branch.branch_ref}</td>
+                <td class="p-2">{preview.resources.smoke_test.status}</td>
+                <td class="p-2 text-right">
+                  <Button variant="outline" onclick={() => cleanupPreview(preview.preview_id)} disabled={previewMutation || preview.status === "cleaned"} aria-label={$t("Applications.cleanup_preview")} title={$t("Applications.cleanup_preview")}>
+                    <Trash2 class="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
+            {/each}</tbody>
+          </table>
+        </div>
+      {/if}
+    </section>
     <section class="space-y-3" aria-busy={releaseState === "loading"}>
       <h2 class="text-base font-semibold">{$t("Applications.releases")}</h2>
       {#if releaseState === "loading"}<p role="status">{$t("Applications.loading")}</p>
@@ -230,6 +426,44 @@
             <div><dt class="text-muted-foreground">{$t("Applications.jobs")}</dt><dd>{development.context.jobs.length}</dd></div>
             <div><dt class="text-muted-foreground">{$t("Applications.resources")}</dt><dd>{development.context.resources.length}</dd></div>
           </dl>
+          <div class="space-y-2">
+            <h3 class="text-sm font-semibold">{$t("Applications.relationships")}</h3>
+            {#if development.context.routes.length === 0 && development.context.jobs.length === 0}
+              <p class="text-sm text-muted-foreground">{$t("Applications.no_relationships")}</p>
+            {:else}
+              <div class="overflow-x-auto rounded-md border">
+                <table class="w-full min-w-[720px] text-left text-xs">
+                  <thead class="bg-muted/50">
+                    <tr>
+                      <th class="p-2 font-medium">{$t("Applications.api")}</th>
+                      <th class="p-2 font-medium">{$t("Applications.command")}</th>
+                      <th class="p-2 font-medium">{$t("Applications.job")}</th>
+                      <th class="p-2 font-medium">{$t("Applications.resources")}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y">
+                    {#each development.context.routes as route (`${route.method}:${route.path}`)}
+                      {@const command = route.command ? development.context.commands.find(candidate => candidate.module === route.module && candidate.name === route.command) : undefined}
+                      <tr>
+                        <td class="p-2 font-mono">{route.method} {route.path}</td>
+                        <td class="p-2">{route.command ?? "—"}</td>
+                        <td class="p-2">—</td>
+                        <td class="p-2">{command?.resources.map(resource => resource.resource).join(", ") || "—"}</td>
+                      </tr>
+                    {/each}
+                    {#each development.context.jobs as job (`job:${job.module}:${job.name}`)}
+                      <tr>
+                        <td class="p-2">—</td>
+                        <td class="p-2">—</td>
+                        <td class="p-2 font-mono">{job.module}.{job.name}</td>
+                        <td class="p-2">{job.resources.map(resource => resource.resource).join(", ") || "—"}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </div>
           <h3 class="text-sm font-semibold">{$t("Applications.diagnostics")}</h3>
           {#if development.context.diagnostics.length === 0}<p class="text-sm text-muted-foreground">{$t("Applications.no_diagnostics")}</p>
           {:else}

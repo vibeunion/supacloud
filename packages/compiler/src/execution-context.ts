@@ -116,35 +116,75 @@ function requestIdentifier(input: unknown): input is string {
   return typeof input === "string" && /^[A-Za-z0-9._:-]{1,256}$/.test(input);
 }
 
+const metadataFields = ["kind", "operation", "stage", "phase", "requestId", "durationMs", "attempt", "traceId"];
+
 function decodeMetadata(input: unknown): ExecutionMetadata[] {
   const envelope = record(input);
   if (Object.keys(envelope).some((key) => key !== "version" && key !== "events")
-    || envelope.version !== 1 || !Array.isArray(envelope.events)
-    || envelope.events.length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
-  const events = envelope.events.map((entry: unknown): ExecutionMetadata => {
+    || envelope["version"] !== 1 || !Array.isArray(envelope["events"])
+    || envelope["events"].length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
+  const events = envelope["events"].map((entry: unknown): ExecutionMetadata => {
     const event = record(entry);
     if (Object.keys(event).some((key) =>
-      !["kind", "operation", "stage", "phase", "requestId", "durationMs", "attempt", "traceId"].includes(key))
-      || (event.kind !== "route" && event.kind !== "command" && event.kind !== "job")
-      || (event.phase !== "started" && event.phase !== "succeeded" && event.phase !== "failed")
-      || !metadataText(event.operation, 512) || !metadataText(event.stage, 256)
-      || ("requestId" in event && !requestIdentifier(event.requestId))
-      || ("traceId" in event && !requestIdentifier(event.traceId))
-      || ("attempt" in event && (typeof event.attempt !== "number" || !Number.isInteger(event.attempt)
-        || event.attempt < 1 || event.attempt > 1_000_000))
-      || ("durationMs" in event && (typeof event.durationMs !== "number" || !Number.isFinite(event.durationMs)
-        || event.durationMs < 0 || event.durationMs > Number.MAX_SAFE_INTEGER))) return invalid();
+      !metadataFields.includes(key))
+      || (event["kind"] !== "route" && event["kind"] !== "command" && event["kind"] !== "job")
+      || (event["phase"] !== "started" && event["phase"] !== "succeeded" && event["phase"] !== "failed")
+      || !metadataText(event["operation"], 512) || !metadataText(event["stage"], 256)
+      || ("requestId" in event && !requestIdentifier(event["requestId"]))
+      || ("traceId" in event && !requestIdentifier(event["traceId"]))
+      || ("attempt" in event && (typeof event["attempt"] !== "number" || !Number.isInteger(event["attempt"])
+        || event["attempt"] < 1 || event["attempt"] > 1_000_000))
+      || ("durationMs" in event && (typeof event["durationMs"] !== "number" || !Number.isFinite(event["durationMs"])
+        || event["durationMs"] < 0 || event["durationMs"] > Number.MAX_SAFE_INTEGER))) return invalid();
     return {
-      kind: event.kind,
-      operation: event.operation, stage: event.stage, phase: event.phase,
-      ...(event.requestId === undefined ? {} : { requestId: event.requestId as string }),
-      ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs as number }),
-      ...(event.attempt === undefined ? {} : { attempt: event.attempt as number }),
-      ...(event.traceId === undefined ? {} : { traceId: event.traceId as string }),
+      kind: event["kind"],
+      operation: event["operation"], stage: event["stage"], phase: event["phase"],
+      ...(event["requestId"] === undefined ? {} : { requestId: event["requestId"] as string }),
+      ...(event["durationMs"] === undefined ? {} : { durationMs: event["durationMs"] as number }),
+      ...(event["attempt"] === undefined ? {} : { attempt: event["attempt"] as number }),
+      ...(event["traceId"] === undefined ? {} : { traceId: event["traceId"] as string }),
     };
   });
   if (Buffer.byteLength(JSON.stringify({ version: 1, events }), "utf8") > EXECUTION_CONTEXT_LIMITS.inputBytes) return invalid();
   return events;
+}
+
+function executionLogEnvelope(entries: unknown[]): { version: 1; events: ExecutionMetadata[] } {
+  if (!entries.length || entries.length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
+  const events = entries.map(entry => {
+    const log = record(entry);
+    const http = log["event"] === "review-http-execution" && log["component"] === "review-http";
+    const worker = log["event"] === "review-worker-execution" && log["component"] === "review-attachment-worker";
+    if ((!http && !worker)
+      || (http && (log["kind"] !== "route" && log["kind"] !== "command" || "workerId" in log))
+      || (worker && log["kind"] !== "job")
+      || ("workerId" in log && !requestIdentifier(log["workerId"]))
+      || Object.keys(log).some(key => !metadataFields.includes(key)
+        && !["event", "component", "timestamp", "workerId"].includes(key))
+      || typeof log["timestamp"] !== "string" || log["timestamp"].length > 32
+      || !Number.isFinite(Date.parse(log["timestamp"]))
+      || new Date(log["timestamp"]).toISOString() !== log["timestamp"]) return invalid();
+    // Strip only validated wrapper fields, never silently ignore an unknown log record.
+    return Object.fromEntries(Object.entries(log).filter(([key]) => metadataFields.includes(key)));
+  });
+  return { version: 1, events: decodeMetadata({ version: 1, events }) };
+}
+
+function parseExecutionFile(content: string): unknown {
+  let value: unknown;
+  try { value = JSON.parse(content); }
+  catch {
+    const lines = content.split(/\r?\n/).filter(line => line.trim().length > 0);
+    if (!lines.length || lines.length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
+    let entries: unknown[];
+    try { entries = lines.map(line => JSON.parse(line) as unknown); }
+    catch { return invalid(); }
+    return executionLogEnvelope(entries);
+  }
+  if (value !== null && typeof value === "object" && !Array.isArray(value) && "event" in value) {
+    return executionLogEnvelope([value]);
+  }
+  return value;
 }
 
 /** Read only a bounded regular file; parse failures never echo file contents or paths. */
@@ -162,8 +202,7 @@ export async function readExecutionMetadata(path: string): Promise<unknown> {
         offset += bytesRead;
       }
       if (offset > EXECUTION_CONTEXT_LIMITS.inputBytes) return invalid();
-      try { return JSON.parse(buffer.subarray(0, offset).toString("utf8")); }
-      catch { return invalid(); }
+      return parseExecutionFile(buffer.subarray(0, offset).toString("utf8"));
     } finally {
       await file.close();
     }
@@ -331,9 +370,10 @@ function correlateSnapshot(
   const pack: ExecutionContextPack = {
     version: 1, subject: context.subject, requestId, correlation: "current-graph-only",
     deploymentVerified: false, eventsTrusted: false,
-    modules: modules.slice(0, EXECUTION_CONTEXT_LIMITS.modules).map((module) => ({
-      name: module.name, ...(sourceFile(module.file) ? { file: sourceFile(module.file) } : {}),
-    })),
+    modules: modules.slice(0, EXECUTION_CONTEXT_LIMITS.modules).map((module) => {
+      const file = sourceFile(module.file);
+      return { name: module.name, ...(file === undefined ? {} : { file }) };
+    }),
     files: files.slice(0, EXECUTION_CONTEXT_LIMITS.files),
     executionPlans: [...matchedPlans].slice(0, EXECUTION_CONTEXT_LIMITS.plans),
     events: retained, diagnostics: diagnostics.slice(0, EXECUTION_CONTEXT_LIMITS.diagnostics),

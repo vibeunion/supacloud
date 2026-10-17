@@ -1,7 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { Type } from "typebox";
-import { stringEnum } from "./shared/schema";
+import { stringEnum, validateToolArguments } from "./shared/schema";
 import { cliToolResultIsError, runCli } from "./shared/cli";
 import {
     resolveSupaCloudContext,
@@ -32,12 +32,16 @@ import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
+import { registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
+import { runProjectDeployment } from "./shared/tools/project-deployment";
+import type { ToolSchema } from "./shared/schema";
+import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
 import packageMetadata from "../package.json" with { type: "json" };
 
-type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
+type ToolEntry = { schema: ToolSchema; callback: (args: unknown) => Promise<ToolResult> };
 type ToolMap = Record<string, ToolEntry>;
 
-const commandName = "supacloud-cli";
+const commandName = "supacloud";
 const preferredCommand = commandName;
 const projectActionSchema = stringEnum([
     "get", "pause", "restore", "health", "logs", "api_keys", "settings",
@@ -218,27 +222,21 @@ async function createProjectStatusResult(context: ResolvedContext) {
     };
 }
 
-function unwrapMcpSchema(schema: any): any {
-    if (schema && typeof schema === "object" && !Array.isArray(schema) && "args" in schema) {
-        const argsSchema = schema.args;
-        if (argsSchema && typeof argsSchema === "object" && !Array.isArray(argsSchema)) {
-            return argsSchema;
-        }
-    }
-    return schema;
-}
-
-function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
+function captureTools(register: (server: ToolServer) => void): ToolMap {
     const tools: ToolMap = {};
     const server = {
-        tool(name: string, _description: string, schemaOrCallback: any, callback?: any) {
-            if (typeof schemaOrCallback === "function") {
-                tools[name] = { schema: {}, callback: schemaOrCallback };
-            } else {
-                tools[name] = { schema: unwrapMcpSchema(schemaOrCallback), callback };
-            }
+        tool(
+            name: string,
+            _description: string,
+            schema: ToolSchema,
+            callback: (args: unknown) => Promise<ToolResult>,
+        ) {
+            tools[name] = {
+                schema,
+                callback,
+            };
         },
-    };
+    } satisfies ToolServer;
     register(server);
     return tools;
 }
@@ -250,7 +248,7 @@ function printHelp(context: ResolvedContext) {
 
     console.error(`
 ╔═══════════════════════════════════════════════════════════╗
-║  supacloud-cli                                           ║
+║  supacloud                                           ║
 ║  Project CLI for SupaCloud users                         ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -258,6 +256,8 @@ USAGE
 
   ${preferredCommand} [global flags] deploy [--flags]
   ${preferredCommand} [global flags] <module> <action> [--flags]
+  ${preferredCommand} init [--root <directory>]
+  ${preferredCommand} env <list|check> [--root <directory>]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
   ${preferredCommand} --version
@@ -290,10 +290,13 @@ DEFAULT CONTEXT
 
 EXAMPLES
 
+  ${preferredCommand} init
+  ${preferredCommand} env check
+  ${preferredCommand} env check --json
   ${preferredCommand} status
   ${preferredCommand} deploy
-  ${preferredCommand} deploy --target web
-  ${preferredCommand} deploy --target api
+  ${preferredCommand} --env test deploy
+  ${preferredCommand} --env production deploy --confirm-production <project-ref>
   ${preferredCommand} dev sync --env test --target functions --function api
   ${preferredCommand} dev status --env test
   ${preferredCommand} dev watch --env test --target project
@@ -303,13 +306,12 @@ EXAMPLES
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
   ${preferredCommand} release logical_backup_create --ref abc123
+  ${preferredCommand} release logical_backup_status --ref abc123 --backup_id <backup_id>
   ${preferredCommand} release logical_backup_restore --ref abc123 --backup_id <backup_id> --expected_sha256 <sha256> --restore_confirmation RESTORE_PROJECT:abc123:<backup_id>:<sha256>
   ${preferredCommand} release postgrest_status --ref abc123
   ${preferredCommand} release postgrest_restart --ref abc123
   ${preferredCommand} release release_canary_fixture_stage_replay --ref abc123 --subject <uuid> --request_id <uuid>
   ${preferredCommand} release release_canary_fixture_disable_replay --ref abc123 --fixture_id <uuid> --disable_request_id <uuid> --issuer <issuer-url> --subject <uuid>
-  ${preferredCommand} release scope_rebind --file supacloud/fa/release-scopes/20260907-intake-p1-production.json
-  ${preferredCommand} release scope_inspect --file supacloud/fa/release-scopes/20260907-intake-p1-production.json
   ${preferredCommand} queue stats --queue emails
   ${preferredCommand} queue dlq --queue emails --limit 20
   ${preferredCommand} frontend list --ref abc123
@@ -317,6 +319,7 @@ EXAMPLES
   ${preferredCommand} database query --ref abc123 --file ./queries/vector-search.sql
   ${preferredCommand} database migration_inventory --ref abc123
   ${preferredCommand} database lint_migrations --dir supabase/migrations
+  ${preferredCommand} database rebase_migrations --dir supabase/migrations --baseline_file backups/schema.sql --baseline_version 20261008000000 --output_dir supabase/migrations-rebased
   ${preferredCommand} database push_migrations --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} supabase migration_new --name add_accounts
   ${preferredCommand} supabase db_diff --schema public --name add_accounts
@@ -340,16 +343,37 @@ EXAMPLES
   ${preferredCommand} app compile --root .
   ${preferredCommand} app plan --root . --format json
   ${preferredCommand} app build --root .
+  ${preferredCommand} --env test app release --id orders --environment_id test --configuration_path configuration.json
   ${preferredCommand} app upload --ref abc123 --id orders --manifest_path generated/delivery/delivery.manifest.json
   ${preferredCommand} app configure --ref abc123 --id orders --environment_id test --configuration_path configuration.json
-  ${preferredCommand} app deploy --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid> --activation_id <uuid> --expected_activation_id absent
+  ${preferredCommand} app deploy-plan --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
+  ${preferredCommand} app diff --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
+  ${preferredCommand} app deploy --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
   ${preferredCommand} app status --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app evidence --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app diff --ref abc123 --id orders --environment_id production --source_ref staging --source_environment_id staging --source_release_id <sha256>
+  ${preferredCommand} --env production app promote-plan --id orders --environment_id production --source_ref staging --source_environment_id staging --source_release_id <sha256>
+  ${preferredCommand} app preview-plan --ref abc123 --id orders --environment_id test --release_id <sha256> --branch_ref preview-orders
+  ${preferredCommand} app preview --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid> --ttl_seconds 3600 --wait
+  ${preferredCommand} app previews --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app preview-list --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app preview-status --ref abc123 --id orders --environment_id test --preview_id <uuid> --wait --timeout_seconds 300
+  ${preferredCommand} app preview-reconcile --ref abc123 --id orders --environment_id test --preview_id <uuid>
+  ${preferredCommand} app preview-cleanup --ref abc123 --id orders --environment_id test --preview_id <uuid>
+  ${preferredCommand} --env production app promote --id orders --environment_id production --source_ref staging --source_environment_id staging --source_release_id <sha256> --confirm-production abc123
+  ${preferredCommand} app promote-status --ref abc123 --id orders --environment_id production --mutation_id <uuid>
+  ${preferredCommand} app promote-reconcile --ref abc123 --id orders --environment_id production --mutation_id <uuid>
+  ${preferredCommand} app preview-create --ref abc123 --id orders --environment_id test --release_id <sha256> --data_mode schema_only
+  ${preferredCommand} app preview-list --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app preview-cleanup --ref abc123 --id orders --environment_id test --preview_id <preview-id>
+  ${preferredCommand} app logs --ref abc123 --id orders --environment_id test
   ${preferredCommand} app rollback --ref abc123 --id orders --environment_id test --release_id <old-sha256> --configuration_id <uuid> --activation_id <new-uuid> --expected_activation_id <current-uuid>
   ${preferredCommand} app check --root . --strict
   ${preferredCommand} app graph --root . --format json
   ${preferredCommand} app explain --target CaseService
   ${preferredCommand} app context --root . --format json
   ${preferredCommand} app context --root . --target CaseModule --format json
+  ${preferredCommand} app context --root . --target CaseModule --events execution.ndjson --request-id request-123 --format json
   ${preferredCommand} app doctor --root .
   ${preferredCommand} app fix --root . --fix fix.json --write
   ${preferredCommand} generate --kind module --name billing
@@ -359,10 +383,18 @@ EXAMPLES
   ${preferredCommand} context --format json
   ${preferredCommand} context --target CaseModule --format json
   ${preferredCommand} doctor
+  ${preferredCommand} db context --root . --module_file db/modules.ts --module cases
+  ${preferredCommand} db context --root . --module_file db/modules.ts --target public.case_create
   ${preferredCommand} db lint --root . --module_file db/modules.ts
   ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
   ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."
   ${preferredCommand} db module_check --lite --project_dir .
+  ${preferredCommand} db reverse --schema public --out output/database-audit/reverse
+  ${preferredCommand} db diff --schema_dir supabase/schemas --out output/database-audit/diff
+  ${preferredCommand} db plan --dir supabase/migrations
+  ${preferredCommand} db apply --dir supabase/migrations --approved_digest <reviewed-digest>
+  ${preferredCommand} db role_check --schema public
+  ${preferredCommand} db role_sql --application_role app_user --migration_role app_migrator --database app_db
   ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
@@ -395,7 +427,8 @@ function authorizedToolMap(
     validateExecutionPolicyCoverage(tools);
     for (const [moduleName, tool] of Object.entries(tools)) {
         const callback = tool.callback;
-        tool.callback = async (args: Record<string, unknown>) => {
+        tool.callback = async (args) => {
+            validateToolArguments(tool.schema, args);
             authorizeExecution(moduleName, args, { context, confirmProduction });
             return callback(args);
         };
@@ -409,7 +442,7 @@ function writeDevProgress(result: { content: Array<{ type: string; text: string 
 }
 
 function createCliTools(context: ResolvedContext, confirmProduction?: string): ToolMap {
-    let pushMigrations: ((args: Record<string, unknown>) => Promise<any>) | undefined;
+    let pushMigrations: ToolInvocation | undefined;
     const tools: ToolMap = {
         status: {
             schema: {},
@@ -417,16 +450,24 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         },
     };
 
-    Object.assign(tools, captureTools((server) => registerSupabaseCliTools(server as any, {
+    Object.assign(tools, captureTools((server) => registerSupabaseCliTools(server, {
         getPushMigrations: () => pushMigrations,
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     })));
-    Object.assign(tools, captureTools((server) => registerLiteCliTools(server as any)));
-    Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
-    Object.assign(tools, captureTools((server) => registerAppTools(server as any, { onDevProgress: writeDevProgress })));
-    Object.assign(tools, captureTools((server) => registerAppAliases(server as any)));
-    Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server as any)));
+    Object.assign(tools, captureTools((server) => registerLiteCliTools(server)));
+    Object.assign(tools, captureTools((server) => registerAiTools(server)));
+    Object.assign(tools, captureTools((server) => registerDeveloperExperienceTools(server, {
+        cwd: process.cwd(),
+        activeContext: context,
+    })));
+    Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
+    Object.assign(tools, captureTools((server) => registerAppAliases(server)));
+    Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
+        projectRef: context.projectRef || undefined,
+        apiUrl: context.apiUrl || undefined,
+        runDatabase: () => tools.database?.callback,
+    })));
     const registerContextAwareHelp = () => {
         tools.project = {
             schema: { action: projectActionSchema },
@@ -470,12 +511,12 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
             };
         }
         const storageContextCallback = tools.storage.callback;
-        const storageHelpTool = captureTools((server) => registerStorageTools(server as any, {} as HttpTransport)).storage;
+        const storageHelpTool = captureTools((server) => registerStorageTools(server, {} as HttpTransport)).storage;
         if (storageHelpTool) {
             tools.storage = { schema: storageHelpTool.schema, callback: storageContextCallback };
         }
         const branchContextCallback = tools.branch.callback;
-        const branchHelpTool = captureTools((server) => registerBranchTools(server as any, {} as any, {
+        const branchHelpTool = captureTools((server) => registerBranchTools(server, {} as HttpTransport, {
             readOnly: true,
         })).branch;
         if (branchHelpTool) {
@@ -484,7 +525,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         const frontendContextCallback = tools.frontend.callback;
         tools.applications = { schema: APPLICATION_TOOL_SCHEMA, callback: tools.applications.callback };
         const frontendHelpTool = captureTools((server) => (
-            registerFrontendTools(server as any, {} as HttpTransport)
+            registerFrontendTools(server, {} as HttpTransport)
         )).frontend;
         if (frontendHelpTool) {
             tools.frontend = { schema: frontendHelpTool.schema, callback: frontendContextCallback };
@@ -503,14 +544,14 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 }],
             }),
         };
-        Object.assign(tools, captureTools((server) => registerDatabaseTools(server as any, undefined, {
+        Object.assign(tools, captureTools((server) => registerDatabaseTools(server, undefined, {
             localOnly: true,
         })));
-        Object.assign(tools, captureTools((server) => registerReleaseTools(server as any, undefined, {
+        Object.assign(tools, captureTools((server) => registerReleaseTools(server, undefined, {
             localOnly: true,
             projectRef: context.projectRef || undefined,
         })));
-        Object.assign(tools, captureTools((server) => registerRemoteDevTools(server as any, {
+        Object.assign(tools, captureTools((server) => registerRemoteDevTools(server, {
             cwd: process.cwd(),
             host: process.env.SUPACLOUD_DEV_HOST || context.host,
             sshUser: context.sshUser,
@@ -533,7 +574,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                             "Provide one of these sources:",
                             "",
                             "  1. Named environment file",
-                            "     supacloud-cli --env test status",
+                            "     supacloud --env test status",
                             "",
                             "  2. Explicit environment variables",
                             "     SUPACLOUD_API_URL=https://your-project.example.com",
@@ -568,16 +609,16 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
 
     const assign = (extra: ToolMap) => Object.assign(tools, extra);
 
-    assign(captureTools((server) => registerUserProjectCliTools(server as any, http, {
+    assign(captureTools((server) => registerUserProjectCliTools(server, http, {
         projectRef: context.projectRef || undefined,
     })));
-    const databaseTools = captureTools((server) => registerDatabaseTools(server as any, http, {
+    const databaseTools = captureTools((server) => registerDatabaseTools(server, http, {
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     }));
     pushMigrations = databaseTools.database?.callback;
     assign(databaseTools);
-    assign(captureTools((server) => registerRemoteDevTools(server as any, {
+    assign(captureTools((server) => registerRemoteDevTools(server, {
         cwd: process.cwd(),
         host: process.env.SUPACLOUD_DEV_HOST || context.host,
         sshUser: context.sshUser,
@@ -587,42 +628,57 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         environment: context.environment,
         runDatabase: databaseTools.database?.callback,
     })));
-    assign(captureTools((server) => registerAuthTools(server as any, http)));
-    assign(captureTools((server) => registerOAuthClientTools(server as any, http)));
-    assign(captureTools((server) => registerStorageTools(server as any, http)));
-    const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
+    assign(captureTools((server) => registerAuthTools(server, http)));
+    assign(captureTools((server) => registerOAuthClientTools(server, http)));
+    assign(captureTools((server) => registerStorageTools(server, http)));
+    const advancedTools = captureTools((server) => registerAdvancedTools(server, http, context.environmentVariables, {
         readOnly: context.readOnly,
     }));
     assign(advancedTools);
-    assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {
+    assign(captureTools((server) => registerScheduledFunctionTools(server, http, process.env, {
         readOnly: context.readOnly,
     })));
-    assign(captureTools((server) => registerMutationTools(server as any, http)));
-    assign(captureTools((server) => registerReleaseTools(server as any, http, {
+    assign(captureTools((server) => registerMutationTools(server, http)));
+    assign(captureTools((server) => registerReleaseTools(server, http, {
         projectRef: context.projectRef || undefined,
         applicationHttp,
         applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
-    assign(captureTools((server) => registerFrontendTools(server as any, http)));
+    assign(captureTools((server) => registerFrontendTools(server, http)));
     assign(captureTools((server) => registerApplicationTools(server, http)));
-    Object.assign(tools, captureTools((server) => registerAppTools(server as any, {
+    Object.assign(tools, captureTools((server) => registerAppTools(server, {
         getApplications: () => tools.applications?.callback,
         onDevProgress: writeDevProgress,
         projectRef: context.projectRef || undefined,
+        projectDeployment: args => runProjectDeployment(http, args),
     })));
-    assign(captureTools((server) => registerDeployTools(server as any, http, {
+    assign(captureTools((server) => registerDeployTools(server, http, {
+        environment: context.environment,
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),
-        edgeFunctionDeploy: advancedTools.edge_functions?.callback,
+        environmentVariables: context.environmentVariables,
+        application: context.applicationId ? {
+            id: context.applicationId,
+            environmentId: context.applicationEnvironmentId,
+            ...(context.applicationConfigurationPath ? { configurationPath: context.applicationConfigurationPath } : {}),
+            ...(context.applicationConfigurationId ? { configurationId: context.applicationConfigurationId } : {}),
+            ...(context.applicationManifestPath ? { manifestPath: context.applicationManifestPath } : {}),
+        } : undefined,
+        applicationRelease: (args) => tools.app
+            ? tools.app.callback(args)
+            : Promise.resolve({
+                isError: true,
+                content: [{ type: "text" as const, text: "Application release support is unavailable in this CLI context" }],
+            }),
     })));
-    assign(captureTools((server) => registerGatewayTools(server as any, http, {
+    assign(captureTools((server) => registerGatewayTools(server, http, {
         projectRef: context.projectRef || undefined,
     })));
-    assign(captureTools((server) => registerBranchTools(server as any, http, {
+    assign(captureTools((server) => registerBranchTools(server, http, {
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     })));
-    assign(captureTools((server) => registerQueueTools(server as any, http, {
+    assign(captureTools((server) => registerQueueTools(server, http, {
         projectRef: context.projectRef || undefined,
     })));
 
@@ -638,7 +694,9 @@ async function main() {
     }
     const globalOptions = parseGlobalOptions(rawArgs);
     const args = globalOptions.args;
-    const contextDirectory = args[0] === "deploy" ? await findDeployConfigRoot(process.cwd()) : process.cwd();
+    const contextDirectory = args[0] === "deploy"
+        ? await findDeployConfigRoot(process.cwd(), globalOptions.environmentName)
+        : process.cwd();
     const context = resolveSupaCloudContext(process.env, contextDirectory, {
         environmentName: globalOptions.environmentName,
         envFile: globalOptions.envFile,
@@ -650,7 +708,16 @@ async function main() {
     }
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
-    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db"].includes(args[0]) && cliTools[args[0]]) {
+    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db", "env"].includes(args[0]) && cliTools[args[0]]) {
+        if ("action" in cliTools[args[0]].schema) {
+            if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
+                console.error(`This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`);
+                process.exitCode = 1;
+                return;
+            }
+            await runCli(cliTools, args, { commandName });
+            return;
+        }
         const result = await cliTools[args[0]].callback({});
         if (result?.content && Array.isArray(result.content)) {
             for (const chunk of result.content) {

@@ -63,6 +63,12 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
         credentialScope: "management",
         source: "process_env",
         sourcePath: null,
+        environmentVariables: {},
+        applicationId: "",
+        applicationEnvironmentId: "",
+        applicationConfigurationPath: "",
+        applicationConfigurationId: "",
+        applicationManifestPath: "",
         insecureTls: false,
         ...overrides,
     };
@@ -131,7 +137,7 @@ describe("CLI execution policy", () => {
     });
 
     test("blocks cross-project production reads before the CLI sends HTTP", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-read-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-read-"));
         let requestCount = 0;
         const server = Bun.serve({
             hostname: "127.0.0.1",
@@ -177,6 +183,14 @@ describe("CLI execution policy", () => {
     });
 
     test("classifies immutable frontend release reads and protects their mutations", () => {
+        expect(executionMode("frontend", "get_active_release", {})).toBe("read");
+        expect(executionMode("frontend", "rollback", {})).toBe("write");
+        expect(() => authorizeExecution("frontend", { action: "get_active_release", ref: "prod-ref" }, {
+            context: context({ readOnly: true }),
+        })).not.toThrow();
+        expect(() => authorizeExecution("frontend", { action: "get_active_release", ref: "other-ref" }, {
+            context: context({ readOnly: true }),
+        })).toThrow("cannot target a different project");
         expect(executionMode("frontend", "list_releases", {})).toBe("read");
         expect(executionMode("frontend", "get_release", {})).toBe("read");
         expect(executionMode("frontend", "upload_release", {})).toBe("write");

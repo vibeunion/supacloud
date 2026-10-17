@@ -50,7 +50,7 @@ export function installEdgeRuntimeShim(): void {
       if (scope && !scope.allowed) {
         throw new Error(NOT_ENABLED_MESSAGE)
       }
-      const task = Promise.resolve(promise).catch((error) => {
+      const task = Promise.resolve(promise).catch((error: unknown) => {
         console.error('[EdgeRuntime.waitUntil] background task failed', error)
       })
       // outside an invocation there is no flush to join; run detached
@@ -58,7 +58,7 @@ export function installEdgeRuntimeShim(): void {
     },
   }
   installed = runtime
-  ;(globalThis as Record<string, unknown>).EdgeRuntime = runtime
+  ;(globalThis as Record<string, unknown>)["EdgeRuntime"] = runtime
 }
 
 /**

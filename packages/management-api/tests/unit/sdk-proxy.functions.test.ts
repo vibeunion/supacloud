@@ -236,6 +236,49 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("OPTIONS /functions/v1 resolves the tenant from the request host without credentials", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+        verify_jwt: false,
+        version: "7",
+      } as Awaited<ReturnType<typeof edgeFunctionService.getConfig>>));
+      setSdkProxySqlForTests(async () => [{
+        ref: "proj_1",
+        config: { api_domain: "localhost" },
+      }]);
+      setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        calls.push({ url, init });
+        return Promise.resolve(new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, POST, OPTIONS",
+          },
+        }));
+      }) as typeof fetch);
+
+      const response = await request("/functions/v1/hello", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://untrusted.example",
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "authorization, content-type",
+        },
+      });
+
+      expect(response.status).toBe(204);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9005/functions/v1/hello");
+      expect(calls[0]?.init?.method).toBe("OPTIONS");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    });
+  });
+
   test("POST /functions/v1 preserves upstream CORS headers on actual responses", async () => {
     await withSdkProxyTestContext(async ({ calls }) => {
       setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
@@ -1349,6 +1392,38 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("auth proxy normalizes a duplicated gateway-injected project-ref header", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockResolvedValueOnce(null),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref")) {
+          return [{ ref: "proj_from_header", config: {} }];
+        }
+        if (text.includes("SELECT config")) {
+          return [{ config: { gotrue_port: 8361, postgrest_port: 7361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/auth/v1/health", {
+        method: "GET",
+        headers: {
+          host: "127.0.0.1:9090",
+          // Caddy joins a route that defines both the canonical "X-Project-Ref"
+          // and lower-case "x-project-ref" into "ref,ref".
+          "x-project-ref": "proj_from_header,proj_from_header",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    });
+  });
+
   test("functions proxy accepts gateway-injected project ref on trusted custom API host without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       let sawProjectLookup = false;
@@ -1480,6 +1555,47 @@ describe("sdkProxyRoutes functions proxy", () => {
         expect(await response.json()).toEqual({ message: "Upstream Proxy Timeout" });
       } finally {
         config.restProxyTimeoutMs = originalRestTimeout;
+      }
+    });
+  });
+
+  test.each(["GET", "POST"])("reports connection refusal as 503 without replaying %s", async (method) => {
+    await withSdkProxyTestContext(async () => {
+      for (const error of [
+        new Error("ECONNREFUSED: Unable to connect. Is the computer able to access the url?"),
+        Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }),
+        new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } }),
+      ]) {
+        let attempts = 0;
+        setSdkProxyFetchForTests((() => {
+          attempts++;
+          return Promise.reject(error);
+        }) as typeof fetch);
+        const response = await request("/functions/v1/hello", {
+          method,
+          headers: { "x-project-ref": "proj_1", apikey: "anon" },
+          ...(method === "POST" ? { body: "payload" } : {}),
+        });
+        expect(attempts).toBe(1);
+        expect(response.status).toBe(503);
+        expect(response.headers.get("retry-after")).toBe("2");
+        expect(await response.json()).toEqual({ message: "Upstream Temporarily Unavailable" });
+      }
+    });
+  });
+
+  test("keeps unrelated proxy errors and ambiguous disconnects non-retryable", async () => {
+    await withSdkProxyTestContext(async () => {
+      const cyclic = new Error("internal failure");
+      cyclic.cause = cyclic;
+      for (const error of [new Error("Internal failure"), cyclic, new Error("ECONNRESET")]) {
+        setSdkProxyFetchForTests((() => Promise.reject(error)) as typeof fetch);
+        const response = await request("/functions/v1/hello", {
+          headers: { "x-project-ref": "proj_1", apikey: "anon" },
+        });
+        expect(response.status).toBe(500);
+        expect(response.headers.has("retry-after")).toBe(false);
+        expect(await response.json()).toEqual({ message: "Internal Proxy Error" });
       }
     });
   });

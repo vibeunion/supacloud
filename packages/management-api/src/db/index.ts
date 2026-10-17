@@ -15,6 +15,7 @@ function parseDatabaseUrl(url: string) {
     throw new Error(`Invalid DATABASE_URL format: ${url}`);
   }
   const [, username, password, hostname, port, database] = urlMatch;
+  if (port === undefined || database === undefined) throw new Error(`Invalid DATABASE_URL format: ${url}`);
   return {
     hostname: hostname || "localhost",
     port: parseInt(port, 10),
@@ -225,10 +226,10 @@ export async function removeProjectDbCache(dbName: string) {
 }
 
 export class PgError extends Error {
-  code?: string;
-  details?: string;
-  hint?: string;
-  durationMs?: number;
+  code: string | undefined;
+  details: string | undefined;
+  hint: string | undefined;
+  durationMs: number | undefined;
   constructor(message: string, code?: string, details?: string, hint?: string) {
     super(message);
     this.name = "PgError";
@@ -467,9 +468,9 @@ export function sqlExecutionError(error: unknown, durationMs: number): PgError {
   const pgError = error && typeof error === "object"
     ? error as Record<string, unknown>
     : {};
-  const originalCode = typeof pgError.code === "string" ? pgError.code : undefined;
-  const sqlState = typeof pgError.errno === "string" ? pgError.errno : undefined;
-  const originalMessage = typeof pgError.message === "string" ? pgError.message : "Unknown error";
+  const originalCode = typeof pgError["code"] === "string" ? pgError["code"] : undefined;
+  const sqlState = typeof pgError["errno"] === "string" ? pgError["errno"] : undefined;
+  const originalMessage = typeof pgError["message"] === "string" ? pgError["message"] : "Unknown error";
   const wasCancelled = originalCode === "QUERY_CANCELLED";
   const wasStatementTimeout = !wasCancelled
     && (originalCode === "57014" || sqlState === "57014")
@@ -479,8 +480,8 @@ export function sqlExecutionError(error: unknown, durationMs: number): PgError {
       ? "Query cancelled"
       : wasStatementTimeout ? "Query timed out" : originalMessage,
     wasCancelled ? "QUERY_CANCELLED" : wasStatementTimeout ? "QUERY_TIMEOUT" : originalCode,
-    typeof pgError.details === "string" ? pgError.details : undefined,
-    typeof pgError.hint === "string" ? pgError.hint : undefined,
+    typeof pgError["details"] === "string" ? pgError["details"] : undefined,
+    typeof pgError["hint"] === "string" ? pgError["hint"] : undefined,
   );
   normalizedError.durationMs = durationMs;
   return normalizedError;

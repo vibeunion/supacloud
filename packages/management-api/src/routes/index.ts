@@ -1,4 +1,6 @@
 import { createDefaultApplicationRouteComposition } from "../services/application-deployment-composition";
+import { createProjectDeploymentRoutes } from "./project-deployments";
+import { ApplicationDeploymentWorker } from "../workers/application-deployment.worker";
 
 export { projectRoutes } from "./projects";
 export { projectDashboardRoutes } from "./project-dashboard";
@@ -35,6 +37,9 @@ export { frontendRoutes } from "./frontend";
 export { createApplicationRoutes } from "./applications";
 const defaultApplicationRouteComposition = createDefaultApplicationRouteComposition();
 export const applicationRoutes = defaultApplicationRouteComposition.routes;
+export const applicationPreviews = defaultApplicationRouteComposition.previews;
+export const projectDeploymentRoutes = createProjectDeploymentRoutes(defaultApplicationRouteComposition.deploymentOrchestrator);
+export const applicationDeploymentWorker = new ApplicationDeploymentWorker(defaultApplicationRouteComposition.deploymentOrchestrator);
 export { createDefaultApplicationRouteComposition };
 export { webhookRoutes } from "./webhook";
 export { deployRoutes } from "./deploy";
@@ -55,6 +60,8 @@ export { autoBranchingRoutes } from "./auto-branching";
 export { projectRbacRoutes } from "./project-rbac";
 export { projectWebhookRoutes } from "./project-webhooks";
 export { projectAuditRoutes } from "./project-audit";
+export { projectEventRoutes } from "./project-events";
+export { createProjectCapacityRoutes, projectCapacityRoutes } from "./project-capacity";
 export { projectCapabilityRoutes } from "./project-capabilities";
 export { projectAuthHookRuntimeRoutes } from "./project-auth-hook-runtime";
 export { projectOrganizationRoutes } from "./project-organizations";

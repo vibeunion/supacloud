@@ -7,6 +7,7 @@ import {
 } from "./schema";
 import type { ToolSchema } from "./schema";
 import { redactSshOutput } from "./transports/ssh";
+import type { ToolInvocation } from "@supacloud/cli/tool-runtime";
 
 interface CliRunOptions {
     commandName?: string;
@@ -57,7 +58,7 @@ export function formatCliError(error: unknown): string {
 }
 
 export async function runCli(
-    cliTools: Record<string, { schema: ToolSchema; callback: (args: any) => Promise<any> }>,
+    cliTools: Record<string, { schema: ToolSchema; callback: ToolInvocation }>,
     args: string[],
     options: CliRunOptions = {}
 ) {
@@ -149,7 +150,7 @@ export async function runCli(
         process.exit(0);
     }
     
-    const parsedArgs: Record<string, any> = {};
+    const parsedArgs: Record<string, unknown> = {};
     let startIdx: number = 1;
 
     // Check if there is an action argument (assuming index 1 is action if not starting with '--')
@@ -177,7 +178,7 @@ export async function runCli(
     try {
         const validatedArgs = parseToolArguments(tool.schema, parsedArgs);
 
-        const result = await tool.callback(validatedArgs) as CliToolResult;
+        const result = await tool.callback(validatedArgs);
         if (result && result.content && Array.isArray(result.content)) {
             for (const c of result.content) {
                 if (c.type === "text") {

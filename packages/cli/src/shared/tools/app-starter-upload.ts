@@ -1,13 +1,24 @@
-export const STARTER_UPLOAD_FEATURE = `import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
+export const STARTER_UPLOAD_FEATURE = `import { Effect } from "effect";
+import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
 import { ApplicationError } from "@supacloud/elysia";
-import { UploadBody, UploadLocation, UploadParams, UploadResult } from "./contracts";
-
-export interface ReviewUploadInput { reviewId: string; artifactId: string; expectedVersion: number }
-export interface ReviewUploadLocation { artifactId: string; bucketId: string; objectPath: string }
-export interface ReviewUploadResult { artifactId: string; runId: string; objectPath: string; sha256: string; bytes: number }
+import { UploadBody, UploadLocation, UploadParams, UploadResult,
+  type ReviewUploadBody, type ReviewUploadInput, type ReviewUploadLocation, type ReviewUploadResult } from "./contracts";
+export type { ReviewUploadInput, ReviewUploadLocation, ReviewUploadResult } from "./contracts";
+type PreviewUploadError =
+  | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+  | { readonly _tag: "UPLOAD_INPUT_INVALID" }
+  | { readonly _tag: "UPLOAD_DENIED" }
+  | { readonly _tag: "UPLOADS_UNAVAILABLE" };
+type RegisterUploadError =
+  | PreviewUploadError
+  | { readonly _tag: "UPLOAD_CONTENT_INVALID" }
+  | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
+  | { readonly _tag: "COMMAND_REJECTED" }
+  | { readonly _tag: "UPLOAD_OUTCOME_UNKNOWN" };
 export interface ReviewUploadPort {
   previewUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadLocation>;
   registerUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadResult>;
+  lookupUpload?(context: unknown, input: ReviewUploadInput): Promise<boolean>;
 }
 @Injectable({ scope: "request" })
 export class ReviewUploads {
@@ -28,13 +39,47 @@ export class ReviewUploads {
 export class ReviewUploadsController {
   constructor(@Inject(ReviewUploads) private readonly uploads: ReviewUploads) {}
 
-  @Post("/:id/attachment-upload", { params: UploadParams, body: UploadBody, responses: { 200: UploadLocation } })
-  preview(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Promise<ReviewUploadLocation> {
-    return this.uploads.preview({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion });
+  @Post("/:id/attachment-upload", {
+    params: UploadParams,
+    body: UploadBody,
+    responses: { 200: UploadLocation },
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+        { tag: "UPLOAD_INPUT_INVALID", status: 400, code: "UPLOAD_INPUT_INVALID" },
+        { tag: "UPLOAD_DENIED", status: 403, code: "UPLOAD_DENIED" },
+        { tag: "UPLOADS_UNAVAILABLE", status: 501, code: "UPLOADS_UNAVAILABLE" },
+      ],
+      retry: "none",
+    },
+  })
+  preview(@Param("id") id: string, @Body() body: ReviewUploadBody): Effect.Effect<ReviewUploadLocation, PreviewUploadError, never> {
+    return Effect.promise(() => this.uploads.preview({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
-  @Post("/:id/attachment-registration", { params: UploadParams, body: UploadBody, responses: { 200: UploadResult } })
-  register(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Promise<ReviewUploadResult> {
-    return this.uploads.register({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion });
+  @Post("/:id/attachment-registration", {
+    params: UploadParams,
+    body: UploadBody,
+    responses: { 200: UploadResult },
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+        { tag: "UPLOAD_INPUT_INVALID", status: 400, code: "UPLOAD_INPUT_INVALID" },
+        { tag: "UPLOAD_DENIED", status: 403, code: "UPLOAD_DENIED" },
+        { tag: "UPLOAD_CONTENT_INVALID", status: 400, code: "UPLOAD_CONTENT_INVALID" },
+        { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+        { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
+        { tag: "UPLOADS_UNAVAILABLE", status: 501, code: "UPLOADS_UNAVAILABLE" },
+        { tag: "UPLOAD_OUTCOME_UNKNOWN", status: 503, code: "UPLOAD_OUTCOME_UNKNOWN" },
+      ],
+      retry: "none",
+    },
+  })
+  register(@Param("id") id: string, @Body() body: ReviewUploadBody): Effect.Effect<ReviewUploadResult, RegisterUploadError, never> {
+    return Effect.promise(() => this.uploads.register({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
 }
 `;
@@ -42,9 +87,11 @@ export class ReviewUploadsController {
 export const STARTER_UPLOAD_SCHEMA = `-- Apply explicitly with the migration owner.
 ALTER TABLE public.starter_members ADD COLUMN storage_subject uuid UNIQUE;
 GRANT SELECT (subject,enabled,can_approve,storage_subject) ON public.starter_members TO authenticated;
+DROP POLICY IF EXISTS starter_member_read ON public.starter_members;
 CREATE POLICY starter_member_read ON public.starter_members FOR SELECT TO authenticated
   USING (subject=COALESCE(NULLIF(auth.jwt()->>'external_sub',''),auth.jwt()->>'sub') AND storage_subject=auth.uid());
 GRANT SELECT ON public.starter_reviews TO authenticated;
+DROP POLICY IF EXISTS starter_review_read ON public.starter_reviews;
 CREATE POLICY starter_review_read ON public.starter_reviews FOR SELECT TO authenticated
   USING (owner_id=COALESCE(NULLIF(auth.jwt()->>'external_sub',''),auth.jwt()->>'sub') AND EXISTS (
     SELECT 1 FROM public.starter_members m WHERE m.subject=owner_id
@@ -52,11 +99,14 @@ CREATE POLICY starter_review_read ON public.starter_reviews FOR SELECT TO authen
   ));
 INSERT INTO storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
   VALUES ('review-attachments','review-attachments',false,1048576,ARRAY['text/plain']);
+DROP POLICY IF EXISTS starter_attachment_read ON storage.objects;
 CREATE POLICY starter_attachment_read ON storage.objects FOR SELECT TO authenticated
   USING (bucket_id='review-attachments');
+DROP POLICY IF EXISTS starter_attachment_insert ON storage.objects;
 CREATE POLICY starter_attachment_insert ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id='review-attachments');
 -- Restrictive fences also apply when the host already has permissive Storage policies.
+DROP POLICY IF EXISTS starter_attachment_owner_fence ON storage.objects;
 CREATE POLICY starter_attachment_owner_fence ON storage.objects AS RESTRICTIVE FOR ALL TO authenticated
   USING (bucket_id<>'review-attachments' OR (split_part(name,'/',1)=auth.uid()::text AND EXISTS (
     SELECT 1 FROM public.starter_reviews r JOIN public.starter_members m ON m.subject=r.owner_id
@@ -69,8 +119,10 @@ CREATE POLICY starter_attachment_owner_fence ON storage.objects AS RESTRICTIVE F
       WHERE r.id=split_part(name,'/',2) AND r.state='draft' AND m.subject=COALESCE(NULLIF(auth.jwt()->>'external_sub',''),auth.jwt()->>'sub')
         AND m.storage_subject=auth.uid() AND m.enabled AND m.can_approve
     )));
+DROP POLICY IF EXISTS starter_attachment_update_fence ON storage.objects;
 CREATE POLICY starter_attachment_update_fence ON storage.objects AS RESTRICTIVE FOR UPDATE TO authenticated
   USING (bucket_id<>'review-attachments') WITH CHECK (bucket_id<>'review-attachments');
+DROP POLICY IF EXISTS starter_attachment_delete_fence ON storage.objects;
 CREATE POLICY starter_attachment_delete_fence ON storage.objects AS RESTRICTIVE FOR DELETE TO authenticated
   USING (bucket_id<>'review-attachments');
 `;
@@ -80,7 +132,8 @@ import { SupaCloudArtifactsClient } from "@supacloud/js";
 import { createTransactionalCommand, plaintextCommandInput } from "@supacloud/commands";
 import { CommandError } from "@supacloud/contracts";
 import { createPostgresCommandStore, type CommandTransaction } from "@supacloud/db";
-import { ApplicationError, requireTrustedIdentity } from "@supacloud/elysia";
+import { ApplicationError, createSchemaDecoder, requireTrustedIdentity } from "@supacloud/elysia";
+import { UploadInput, UploadResult } from "../review/contracts";
 import type { ReviewAttachmentOptions } from "./review-attachments";
 import type { ReviewUploadInput, ReviewUploadPort, ReviewUploadResult } from "../review/uploads";
 
@@ -95,20 +148,15 @@ function rows(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) throw new TypeError("Invalid upload database result");
   return value.map(record);
 }
+const decodeInput = createSchemaDecoder(UploadInput, { normalize: false });
+const result = createSchemaDecoder(UploadResult, { normalize: false });
 function capture(value: unknown): ReviewUploadInput {
-  const item = record(value), uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (typeof item.reviewId !== "string" || !uuid.test(item.reviewId)
-    || typeof item.artifactId !== "string" || !uuid.test(item.artifactId)
-    || typeof item.expectedVersion !== "number" || !Number.isSafeInteger(item.expectedVersion) || item.expectedVersion < 1) {
+  try {
+    const input = decodeInput(value);
+    return { ...input, reviewId: input.reviewId.toLowerCase(), artifactId: input.artifactId.toLowerCase() };
+  } catch {
     throw new ApplicationError("Invalid upload input", { status: 400, code: "UPLOAD_INPUT_INVALID" });
   }
-  return { reviewId: item.reviewId.toLowerCase(), artifactId: item.artifactId.toLowerCase(), expectedVersion: item.expectedVersion };
-}
-function result(value: unknown): ReviewUploadResult {
-  const item = record(value);
-  if (typeof item.artifactId !== "string" || typeof item.runId !== "string" || typeof item.objectPath !== "string"
-    || typeof item.sha256 !== "string" || typeof item.bytes !== "number") throw new TypeError("Invalid upload receipt");
-  return { artifactId: item.artifactId, runId: item.runId, objectPath: item.objectPath, sha256: item.sha256, bytes: item.bytes };
 }
 
 export async function createReviewUploadAdapters(options: ReviewAttachmentOptions): Promise<ReviewUploadPort> {
@@ -117,15 +165,15 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
     "SELECT project_id,tenant_id FROM public.starter_application WHERE singleton",
   )));
   if (!projectId.trim() || !tenantId.trim() || binding.length !== 1
-    || binding[0]?.project_id !== projectId || binding[0]?.tenant_id !== tenantId) {
+    || binding[0]?.["project_id"] !== projectId || binding[0]?.["tenant_id"] !== tenantId) {
     throw new Error("Upload database project/tenant binding mismatch");
   }
   const artifacts = new SupaCloudArtifactsClient(service);
   function actor(context: unknown): string {
     const who = requireTrustedIdentity(context);
-    const access = record(record(context).access);
-    if (access.projectId !== projectId || access.tenantId !== tenantId
-      || !Array.isArray(access.permissions) || !access.permissions.includes("review.approve")) {
+    const access = record(record(context)["access"]);
+    if (access["projectId"] !== projectId || access["tenantId"] !== tenantId
+      || !Array.isArray(access["permissions"]) || !access["permissions"].includes("review.approve")) {
       throw new ApplicationError("Upload permission denied", { status: 403, code: "UPLOAD_DENIED" });
     }
     return who.subject;
@@ -135,19 +183,36 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
       "SELECT m.storage_subject::text AS storage_subject FROM public.starter_reviews r " +
       "JOIN public.starter_members m ON m.subject=r.owner_id CROSS JOIN public.starter_application p " +
       "WHERE r.id=$1 AND r.owner_id=$2 AND ((r.state='draft' AND r.version=$3) OR " +
-      "($6::boolean AND r.state='approved' AND r.version=$3+1 AND EXISTS (" +
+      "($6::boolean AND r.state='approved' AND r.version=$3::bigint+1 AND EXISTS (" +
       "SELECT 1 FROM public.starter_attachments b WHERE b.review_id=r.id AND b.artifact_id=$7::uuid AND b.owner_id=$2 " +
       "AND b.object_path=m.storage_subject::text || '/' || r.id || '/' || $7::text || '.txt'))) " +
       "AND m.enabled AND m.can_approve AND m.storage_subject IS NOT NULL " +
       "AND p.singleton AND p.project_id=$4 AND p.tenant_id=$5 FOR UPDATE OF r,m FOR SHARE OF p",
       [input.reviewId, subject, input.expectedVersion, projectId, tenantId, replay, input.artifactId],
     ));
-    if (allowed.length !== 1 || typeof allowed[0]?.storage_subject !== "string") {
+    if (allowed.length !== 1 || typeof allowed[0]?.["storage_subject"] !== "string") {
       throw new ApplicationError("Upload ownership, permission or revision changed", { status: 403, code: "UPLOAD_DENIED" });
     }
-    return allowed[0].storage_subject + "/" + input.reviewId + "/" + input.artifactId + ".txt";
+    return allowed[0]["storage_subject"] + "/" + input.reviewId + "/" + input.artifactId + ".txt";
   }
+  const receiptLookup = createTransactionalCommand({
+    name: "review.attach", store: createPostgresCommandStore(database), inputCodec: plaintextCommandInput,
+    input: capture, result,
+    async authorize(who, request, tx) {
+      try { await authorize(tx, who.actorId, request, true); return "allow"; }
+      catch (error) {
+        if (error instanceof ApplicationError && error.code === "UPLOAD_DENIED") return "deny";
+        throw error;
+      }
+    },
+    execute: async () => { throw new Error("Receipt lookup cannot register an upload"); },
+    audit: { event: "review.attachment-bound", details: request => ({ reviewId: request.reviewId, artifactId: request.artifactId }) },
+  });
   return {
+    async lookupUpload(context, value) {
+      const input = capture(value), subject = actor(context);
+      return (await receiptLookup.lookup({ actorId: subject, tenantId }, input.artifactId, input))?.status === "confirmed";
+    },
     async previewUpload(context, value) {
       const input = capture(value), subject = actor(context);
       const objectPath = await database.transaction(tx => authorize(tx, subject, input));
@@ -155,8 +220,14 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
     },
     async registerUpload(context, value) {
       const input = capture(value), subject = actor(context);
-      const objectPath = await database.transaction(tx => authorize(tx, subject, input, true));
       try {
+        // Only an authorized, validated receipt can bypass external registration.
+        const saved = await receiptLookup.lookup({ actorId: subject, tenantId }, input.artifactId, input);
+        if (saved !== null) {
+          if (saved.status !== "confirmed") throw new CommandError("COMMAND_RECEIPT_INVALID");
+          return saved.result;
+        }
+        const objectPath = await database.transaction(tx => authorize(tx, subject, input, true));
         const downloaded = await service.storage.from("review-attachments").download(objectPath);
         if (downloaded.error || !downloaded.data) throw new Error("Upload unavailable");
         const blob = downloaded.data;

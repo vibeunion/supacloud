@@ -1,0 +1,105 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import Button from "@svadmin/ui/components/ui/button/button.svelte";
+  import * as Table from "@svadmin/ui/components/ui/table/index.js";
+  import { createFixtureClient, fixture, fixtureSubject } from "./starter-browser-session";
+  import type { ReviewClientState } from "../src/client/reviews";
+
+  let subject = $state(fixtureSubject());
+  let loseResponse = $state(false), failList = $state(false), selected = $state<File>();
+  let output = $state("");
+  let binding = $state<Awaited<ReturnType<typeof createFixtureClient>>>();
+  let viewState = $state<ReviewClientState>({
+    list: { status: "idle", rows: [] }, mutation: { status: "idle", operation: null },
+  });
+  let dispose = () => {};
+  onMount(() => {
+    let disposed = false;
+    let unsubscribe = () => {};
+    dispose = () => { disposed = true; unsubscribe(); binding?.client.dispose(); };
+    window.addEventListener("pagehide", dispose, { once: true });
+    void createFixtureClient(subject, {
+      loseResponse: () => loseResponse, failList: () => failList,
+    }).then(value => {
+      if (disposed) { value.client.dispose(); return; }
+      binding = value;
+      const update = () => { viewState = value.client.snapshot(); };
+      unsubscribe = value.client.subscribe(update);
+      update();
+      void value.client.load();
+    }).catch(() => { if (!disposed) output = "Session initialization failed"; });
+    return () => { window.removeEventListener("pagehide", dispose); dispose(); };
+  });
+  const blocked = $derived(!binding || viewState.mutation.status === "unknown" || viewState.mutation.status === "submitting"
+    || viewState.list.status !== "ready" || viewState.list.rows[0]?.state !== "draft");
+  function changeIdentity() {
+    dispose();
+    sessionStorage.setItem("fixture-subject", subject);
+    location.reload();
+  }
+  function approve() {
+    const row = viewState.list.rows[0];
+    if (row) void binding?.client.approve(row);
+  }
+  function upload() {
+    const row = viewState.list.rows[0];
+    if (row && selected) void binding?.client.upload(row, selected);
+  }
+  async function readEvidence() {
+    output = JSON.stringify(await (await fixture("evidence")).json(), null, 2);
+  }
+  async function conflict() {
+    output = JSON.stringify(await (await fixture("conflict", "POST")).json());
+  }
+  async function probeDenied() {
+    if (!binding) return;
+    output = JSON.stringify(await binding.transport.approve({
+      kind: "approve", reviewId: binding.reviewId, expectedVersion: 1, operationId: crypto.randomUUID(),
+    }));
+  }
+</script>
+
+<main data-svadmin-fixture>
+  <h1>Review acceptance fixture</h1>
+  <div class="toolbar">
+    <label>Identity <select id="identity" bind:value={subject} onchange={changeIdentity}>
+      <option>owner</option><option>other</option>
+    </select></label>
+    <Button id="refresh" variant="outline" onclick={() => binding?.client.load()}>Refresh</Button>
+    <label><input type="checkbox" id="lose" bind:checked={loseResponse} /> Lose approval response</label>
+    <label><input type="checkbox" id="fail-list" bind:checked={failList} /> Fail list request</label>
+  </div>
+  <p>List: <output id="list-status">{viewState.list.status}</output></p>
+  <Table.Root id="rows" density="compact">
+    <Table.Header><Table.Row><Table.Head>Review</Table.Head><Table.Head>State</Table.Head><Table.Head>Version</Table.Head></Table.Row></Table.Header>
+    <Table.Body>
+      {#each viewState.list.rows as row (row.id)}
+        <Table.Row data-review-row><Table.Cell>{row.id}</Table.Cell><Table.Cell>{row.state}</Table.Cell><Table.Cell>v{row.version}</Table.Cell></Table.Row>
+      {/each}
+    </Table.Body>
+  </Table.Root>
+  <div class="toolbar">
+    <label>Attachment <input id="file" type="file" accept="text/plain"
+      onchange={event => { selected = event.currentTarget.files?.[0]; }} /></label>
+    <Button id="upload" onclick={upload} disabled={blocked || !selected}>Upload</Button>
+    <Button id="approve" onclick={approve} disabled={blocked}>Approve</Button>
+    <Button id="recover" variant="outline" onclick={() => binding?.client.reconcile()}
+      disabled={viewState.mutation.status !== "unknown" || !viewState.mutation.operation}>Check receipt</Button>
+  </div>
+  <div class="toolbar">
+    <Button id="conflict" variant="outline" onclick={conflict}>Advance database version</Button>
+    <Button id="denied" variant="outline" onclick={probeDenied}>Probe foreign approval</Button>
+  </div>
+  <p>Mutation: <output id="mutation-status">{viewState.mutation.status}</output></p>
+  <p>Operation: <output id="operation">{viewState.mutation.operation?.operationId ?? ""}</output></p>
+  <Button id="evidence" variant="outline" onclick={readEvidence}>Read evidence</Button>
+  <pre id="result">{output}</pre>
+</main>
+
+<style>
+  main { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 24px; margin-bottom: 24px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; }
+  p { margin: 16px 0; overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin-top: 16px; }
+</style>

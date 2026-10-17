@@ -10,7 +10,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 function functionName(value: unknown): string {
   if (!Array.isArray(value)) return "";
-  return value.map(item => record(record(item).String).sval).join(".");
+  return value.map(item => record(record(item)["String"])["sval"]).join(".");
 }
 function optionalName(value: unknown): boolean {
   const name = functionName(value);
@@ -24,16 +24,16 @@ export async function sharedProfile(sql: string): Promise<string> {
   const kept: string[] = [];
   for (const statement of parsed.stmts) {
     const node = record(statement.stmt);
-    const extension = record(node.CreateExtensionStmt).extname;
+    const extension = record(node["CreateExtensionStmt"])["extname"];
     if (extension === "pg_cron" || extension === "pg_net") continue;
-    if (optionalName(record(node.CreateFunctionStmt).funcname)) continue;
-    const comment = record(node.CommentStmt);
-    if (comment.objtype === "OBJECT_FUNCTION"
-      && optionalName(record(record(comment.object).ObjectWithArgs).objname)) continue;
-    const targets = record(node.SelectStmt).targetList;
+    if (optionalName(record(node["CreateFunctionStmt"])["funcname"])) continue;
+    const comment = record(node["CommentStmt"]);
+    if (comment["objtype"] === "OBJECT_FUNCTION"
+      && optionalName(record(record(comment["object"])["ObjectWithArgs"])["objname"])) continue;
+    const targets = record(node["SelectStmt"])["targetList"];
     if (Array.isArray(targets) && targets.length === 1) {
-      const call = record(record(record(targets[0]).ResTarget).val).FuncCall;
-      if (optionalName(record(call).funcname)) continue;
+      const call = record(record(record(targets[0])["ResTarget"])["val"])["FuncCall"];
+      if (optionalName(record(call)["funcname"])) continue;
     }
     const start = statement.stmt_location ?? 0;
     const end = statement.stmt_len ? start + statement.stmt_len : bytes.length;

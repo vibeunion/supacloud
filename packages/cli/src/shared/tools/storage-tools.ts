@@ -4,21 +4,13 @@ import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
     releaseControlFailure,
     releaseControlMutationFailure,
     releaseControlSuccess,
     type ReleaseControlToolResponse,
 } from "./release-control-response";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: Record<string, unknown>) => Promise<ReleaseControlToolResponse>,
-    ) => void;
-};
 
 type StorageAction =
     | "status"
@@ -516,7 +508,7 @@ function executeBucketAction(
 }
 
 export function registerStorageTools(server: ToolServer, http: HttpTransport): void {
-    server.tool(
+    registerTool(server,
         "storage",
         `S3/MinIO storage management.
 Actions: status, list_buckets, get_bucket, create_bucket, update_bucket, delete_bucket, list_files, upload_base64, delete_file, upload, upload_file`,
@@ -557,9 +549,13 @@ Actions: status, list_buckets, get_bucket, create_bucket, update_bucket, delete_
                     const bucket = requiredBucketId(args);
                     const response = await http.get(`/v1/storage/${ref}/buckets/${bucket}/files`);
                     if (!response.ok) { text = `❌ Failed (${response.status})`; break; }
-                    const files = response.data as any[];
+                    const files = response.data;
                     if (!Array.isArray(files) || !files.length) { text = "No files."; break; }
-                    text = `📁 Files (${files.length}):\n` + files.map((file: any) => `  - ${file.name} (${file.size ? (file.size / 1024).toFixed(1) + "KB" : "?"})`).join("\n");
+                    text = `📁 Files (${files.length}):\n` + files.map((raw: unknown) => {
+                        const file = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+                        const size = typeof file["size"] === "number" ? file["size"] : 0;
+                        return `  - ${String(file["name"] ?? "")} (${size ? (size / 1024).toFixed(1) + "KB" : "?"})`;
+                    }).join("\n");
                     break;
                 }
                 case "upload_base64": {

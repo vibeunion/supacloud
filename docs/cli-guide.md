@@ -2,24 +2,22 @@
 
 SupaCloud exposes three explicit local command surfaces with strict ownership boundaries:
 
-- `@supacloud/cli` / `supacloud-cli`
+- `@supacloud/cli` / `supacloud`
 - `@supacloud/admin` / `supacloud-admin`
 - the optional `supacloud` npm package / `supacloudctl`, whose normal dispatch is local-only; `supacloudctl check-update [cli|admin]` explicitly queries npm without downloading or executing `latest`
 
-The bare `supacloud` command is not a local CLI compatibility alias. It is the
-compiled active server binary installed at `/usr/local/bin/supacloud`; do not
-use an installed prior release to execute a target release's upgrade contract.
-Project work uses `supacloud-cli`, platform upgrades use `supacloud-admin`, and
-the optional local umbrella command is `supacloudctl`.
+Project work uses `supacloud`, platform upgrades use `supacloud-admin`, and
+the optional local umbrella command is `supacloudctl`. The server's native
+`/usr/local/bin/supacloud` is a separate managed-host installation.
 
 ```text
-supacloud-cli        project-scoped user/developer CLI
+supacloud            project-scoped user/developer CLI
 supacloud-admin      server and platform administration CLI
 supacloudctl         local dispatcher for the two installed CLIs
-/usr/local/bin/supacloud  compiled server binary (not a CLI alias)
+/usr/local/bin/supacloud  compiled server binary on managed hosts
 ```
 
-## `supacloud-cli`
+## `supacloud`
 
 Project-scoped by default. Intended for project users and developers.
 
@@ -30,6 +28,39 @@ Project-scoped by default. Intended for project users and developers.
 - Reads `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
 - Reads `SUPACLOUD_PROJECT_REF` when the ref cannot be inferred
 - Can still accept explicit `--ref` when needed
+
+### First-run project setup
+
+For an existing SupaCloud application with a Vue/Vite, Svelte or static frontend,
+initialize the project profiles once:
+
+```bash
+supacloud init
+supacloud env list
+supacloud env check
+supacloud --env test deploy
+```
+
+`init` creates `supacloud.json`, non-secret
+`.env.supacloud.test.example` and `.env.supacloud.production.example` files,
+and adds ignore rules for real profile files. It never overwrites an existing
+`supacloud.json`. The output directory is inferred from the detected framework
+(`dist` for Vite/Vue, `out` for Next.js and `build` for Svelte).
+Set `SUPACLOUD_APPLICATION_ID` in the selected profile to the application's ID,
+and configure its current SupaCloud delivery build. A standalone frontend profile
+without an application binding no longer enables deployment.
+
+Copy an example to a real profile and fill in credentials locally:
+
+```bash
+cp .env.supacloud.test.example .env.supacloud.test
+supacloud env check --json
+```
+
+`env list` and `env check` are local-only. They never contact the Management API
+and never print token or service-role values. `env check` distinguishes a profile
+that is valid for `status` from one that is ready for `deploy`; incomplete
+production profiles fail before any remote command is attempted.
 
 When auto-linking from `SUPABASE_URL`, the CLI accepts tenant API domains and
 derives the matching Management API host. For example,
@@ -45,28 +76,54 @@ explicitly to override host inference.
 ```bash
 npm install -g @supacloud/cli
 
-supacloud-cli status
-supacloud-cli deploy
-supacloud-cli project get
-supacloud-cli project logs --log_type database
-supacloud-cli database query --sql "select now()"
-supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
-supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
-supacloud-cli supabase migration_new --name add_accounts
-supacloud-cli supabase db_diff --schema public --name add_accounts
-supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
-supacloud-cli frontend list --ref abc123
-supacloud-cli frontend list_releases --ref abc123 --id web
-supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
+supacloud status
+supacloud deploy
+supacloud project get
+supacloud project logs --log_type database
+supacloud database query --sql "select now()"
+supacloud database query --ref abc123 --file ./queries/vector-search.sql
+supacloud database push_migrations --ref abc123 --dir supabase/migrations --dry_run
+supacloud supabase migration_new --name add_accounts
+supacloud supabase db_diff --schema public --name add_accounts
+supacloud supabase push --ref abc123 --dir supabase/migrations --dry_run
+supacloud frontend list --ref abc123
+supacloud frontend list_releases --ref abc123 --id web
 ```
 
 ### One-command deploy
 
-`supacloud-cli deploy` is the normal developer path for a linked application. It
-supports a frontend and backend living in separate directories. Frontend targets
-use immutable static releases; `edge_function` targets use the existing verified
-Edge Function bundle protocol. The command runs the target build, publishes only
-that target, and reads the final identity back.
+`supacloud deploy` publishes the configured static frontend through its direct
+release path. It does not wait for the Application backend, migrations, Edge
+Functions or Storage. Use `supacloud deploy --backend` for an Application
+backend release; it builds and uploads the immutable artifact, inserts a durable
+job, and returns `accepted` before background migration/runtime activation.
+Use `supacloud deploy --status <deployment-id>` to read its verified state.
+Only a later `succeeded` receipt means the backend is complete. The CLI builds
+and uploads artifacts; SupaCloud plans the release, reads CAS and verifies the
+result.
+The CLI first performs a bounded read-only protocol check. A missing, mismatched
+or cross-environment response stops the command before building or uploading.
+Upgrade the CLI and server together; there is no legacy deployment fallback.
+
+### Application rollback
+
+Application releases can be inspected and rolled back without guessing from the
+release list:
+
+```bash
+supacloud app rollback-plan --id reviews --environment_id test
+supacloud app rollback --id reviews --environment_id test
+```
+
+The plan is read-only. For a default rollback, SupaCloud selects the previous
+activation from the successful journal, verifies its retained release and
+configuration evidence, and uses the current activation as the CAS value. The
+CLI creates a new activation ID and does not replay an uncertain request.
+Rollback re-runs compatibility, readiness and route checks; it does not reverse
+database migrations, restore business data, or undo external side effects.
+Explicit `--release_id`, `--configuration_id` and
+`--expected_activation_id` values remain available when an operator has a
+separately verified target.
 
 ### Remote test development sync
 
@@ -75,10 +132,10 @@ reload only the affected development target. This path is separate from
 immutable Function releases and is rejected for production environments.
 
 ```bash
-supacloud-cli --env test dev sync --target functions --function api
-supacloud-cli --env test dev sync --target db
-supacloud-cli --env test dev watch --target project
-supacloud-cli --env test dev status
+supacloud --env test dev sync --target functions --function api
+supacloud --env test dev sync --target db
+supacloud --env test dev watch --target project
+supacloud --env test dev status
 ```
 
 The selected environment supplies `SUPACLOUD_DEV_HOST` (or `SUPACLOUD_HOST`)
@@ -115,95 +172,70 @@ the sync and reload. `dev migrate` runs `drizzle-kit generate`, performs a
 SupaCloud migration dry-run, and only applies when `--apply` is explicitly set:
 
 ```bash
-supacloud-cli --env test dev migrate
-supacloud-cli --env test dev migrate --apply
+supacloud --env test dev migrate
+supacloud --env test dev migrate --apply
 ```
 
-Simple single-frontend projects usually need no file. Monorepos should add a
-repository-root `supacloud.json`:
+For executable application delivery, bind the application in the selected profile
+or repository-root `supacloud.json`. Static-only sites omit `application` entirely.
+For a frontend in a separate directory:
 
 ```json
 {
-  "defaultTarget": "web",
-  "targets": {
-    "web": {
-      "type": "frontend",
-      "root": "apps/web",
-      "id": "web",
-      "buildCommand": "bun run build",
-      "outputDirectory": "dist"
-    },
-    "api": {
-      "type": "edge_function",
-      "root": "apps/api",
-      "slug": "api",
-      "buildCommand": "bun run bundle",
-      "bundleDirectory": "dist",
-      "entrypoint": "index.ts",
-      "verifyJwt": true,
-      "minify": true
-    }
+  "application": { "id": "orders", "environmentId": "test" },
+  "frontend": {
+    "root": "apps/web",
+    "id": "web",
+    "buildCommand": "bun run build",
+    "outputDirectory": "dist",
+    "buildEnv": ["VITE_API_URL", "VITE_SUPABASE_ANON_KEY"]
   }
 }
 ```
+
+`buildEnv` is for public build-time variables. The CLI rejects platform
+credentials and sensitive names such as tokens, passwords, database URLs, and
+private keys. Runtime secrets use the separate Secrets API and are never copied
+into a static frontend build.
 
 ```bash
-# From a target workspace, the target is selected automatically.
-cd apps/web
-supacloud-cli deploy
-cd ../api
-supacloud-cli deploy
-
-# From the repository root, select a target explicitly.
-supacloud-cli deploy --target web
-supacloud-cli deploy --target api
-
-# Inspect the resolved plan without building or writing remotely.
-supacloud-cli deploy --target web --dry_run
-
-# Publish an output directory already built by CI.
-supacloud-cli deploy --target web --skip_build --output_dir dist
+# Upgrade before migrating an old deployment script.
+npm install -g @supacloud/cli@latest
+supacloud --env test deploy
+# Existing Web output and an application manifest configured in the profile:
+supacloud --env test deploy --skip_build
+# Publish only static assets while preserving a mixed repository's backend:
+supacloud --env test deploy --assets_only
 ```
 
-When multiple targets exist and the command runs at the repository root, it
-fails closed unless `defaultTarget` or `--target` is provided. Running inside a
-target directory selects the deepest matching `root`. Relative output and bundle
-directories are resolved against that target root, while lockfiles are detected
-from the target root up to the repository root.
-
-The legacy shape remains supported:
-
-```json
-{
-  "frontend": {
-    "id": "web",
-    "root": "apps/web",
-    "buildCommand": "bun run build",
-    "outputDirectory": "dist"
-  }
-}
-```
+`--target`, `--id`, `--build_command`, `--output_dir`, `--plan`, `--diff` and
+`--dry_run` were removed from `deploy`. Build settings belong in configuration.
+Use `app deploy-plan` for an explicit read-only review of an uploaded application
+release. Standalone `edge_function` target declarations must be migrated to the
+application delivery configuration; the CLI will not silently omit them.
+Historical `deploy-manifest.json` files are not reused as deployment scopes.
+Explicit `--assets_only` leaves them and all Functions/schedules untouched.
 
 Production profiles retain the standard explicit confirmation gate:
 
 ```bash
-supacloud-cli --env production --confirm-production abc123 deploy
+supacloud --env production --confirm-production abc123 deploy
 ```
 
-Both `--key value` and `--key=value` syntax are supported. `supacloud-cli status`
+Both `--key value` and `--key=value` syntax are supported. `supacloud status`
 reports configuration, Management API connectivity, and authentication as
 separate checks, and returns a non-zero exit code when a required check fails.
 
 One-off execution without global install:
 
 ```bash
-npm exec --package @supacloud/cli -- supacloud-cli status
+npm exec --package @supacloud/cli -- supacloud status
 ```
 
 Bun users can force the same package to run with Bun, including on Windows:
 
 ```bash
-bunx --bun --package @supacloud/cli supacloud-cli status
+bunx --bun --package @supacloud/cli supacloud status
 ```
 
 ### Application framework commands
@@ -214,29 +246,31 @@ without a Management API context and never mutate the database.
 
 ```bash
 # scaffold modules, commands, queries and controllers
-supacloud-cli app generate --kind module --name case
-supacloud-cli app generate --kind command --name accept --module case
+supacloud app generate --kind module --name case
+supacloud app generate --kind command --name accept --module case
 
 # compile decorator metadata into static factories + app.manifest.json
-supacloud-cli app compile --root . --out_dir generated --strict
+supacloud app compile --root . --out_dir generated --strict
 
 # validate only (no files written), print the module dependency tree,
 # or explain a single provider/command/controller
-supacloud-cli app check
-supacloud-cli app graph --format json
-supacloud-cli app explain --target CaseService
-supacloud-cli app export-tools
-supacloud-cli app export-tools --format json
+supacloud app check
+supacloud app graph --format json
+supacloud app explain --target CaseService
+supacloud app export-tools
+supacloud app export-tools --format json
 
 # SQL governance over defineDatabaseModule sources
-supacloud-cli db lint --module_file db/modules.ts
-supacloud-cli db explain --target public.case_create
+supacloud db context --root . --module_file db/modules.ts --module cases
+supacloud db context --root . --module_file db/modules.ts --target public.case_create
+supacloud db lint --module_file db/modules.ts
+supacloud db explain --target public.case_create
 
 # read-only catalog reconcile against a live database
-supacloud-cli db module_check --module_file db/modules.ts --database_url "$DATABASE_URL"
+supacloud db module_check --module_file db/modules.ts --database_url "$DATABASE_URL"
 
 # or reconcile against a local SupaCloud Lite project (delegates to supacloud-lite db check)
-supacloud-cli db module_check --lite --project_dir .
+supacloud db module_check --lite --project_dir .
 ```
 
 `app export-tools` reads `generated/app.manifest.json` and exports commands with
@@ -255,28 +289,34 @@ URL (requires `supacloud-lite` on PATH). See
 [Database Governance](./database-governance.md) and
 [Application Framework](./application-framework.md).
 
+`db context` is a read-only, structured context projection for AI agents. It
+returns only the selected database modules or object and includes each
+maintained source/test path, the Drizzle-versus-SQL ownership boundary,
+protected/generated paths, and focused verification commands. It does not
+read or rewrite the historical migration directory.
+
 ### AI/Agent Skill
 
-`@supacloud/cli` ships a `supacloud-cli` Skill for Codex and other Skill-compatible
+`@supacloud/cli` ships a `supacloud` Skill for Codex and other Skill-compatible
 agents. The human guide remains this document; the Skill converts the same
 rules into runtime instructions so an agent does not default to direct remote
 SQL or Management API writes.
 
 ```bash
 # Inspect the packaged source and default Codex destination.
-supacloud-cli ai show_skill
+supacloud ai show_skill
 
 # Preview installation; no project credentials are needed.
-supacloud-cli ai install_skill --dry_run
+supacloud ai install_skill --dry_run
 
 # Install into $CODEX_HOME/skills or ~/.codex/skills.
-supacloud-cli ai install_skill
+supacloud ai install_skill
 
 # Install into another agent's explicit Skill root.
-supacloud-cli ai install_skill --target /path/to/skills
+supacloud ai install_skill --target /path/to/skills
 ```
 
-Installation is idempotent. If an existing `supacloud-cli` Skill differs, the
+Installation is idempotent. If an existing `supacloud` Skill differs, the
 CLI refuses to overwrite it. `--force` creates a timestamped adjacent backup
 before replacement; combine it with `--dry_run` to preview the backup path.
 
@@ -296,19 +336,19 @@ catalog is refreshed.
 ### SupaCloud Lite CLI adapter
 
 Lite supports CLI workflows through its standalone `supacloud-lite` binary and
-through `supacloud-cli lite`. The main CLI adapter is local-only: it does not
+through `supacloud lite`. The main CLI adapter is local-only: it does not
 use Management API credentials, the official Supabase CLI, or a Postgres DSN
 for the PGlite state directory.
 
 ```bash
-supacloud-cli lite migrate --project_dir .
-supacloud-cli lite status --project_dir .
-supacloud-cli lite db_diff --project_dir . --file add_accounts
-supacloud-cli lite db_pull --project_dir . --file remote_schema
-supacloud-cli lite gen_types --project_dir . --output src/database.types.ts
-supacloud-cli lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud-cli lite doctor --project_dir . --json
-supacloud-cli lite start --project_dir . --port 54321
+supacloud lite migrate --project_dir .
+supacloud lite status --project_dir .
+supacloud lite db_diff --project_dir . --file add_accounts
+supacloud lite db_pull --project_dir . --file remote_schema
+supacloud lite gen_types --project_dir . --output src/database.types.ts
+supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
+supacloud lite doctor --project_dir . --json
+supacloud lite start --project_dir . --port 54321
 ```
 
 Executable resolution is `SUPACLOUD_LITE_CLI_BIN`, then the project-local
@@ -318,12 +358,12 @@ remote project operations.
 
 ### Official Supabase CLI adapter
 
-`supacloud-cli supabase` is a thin, allowlisted adapter around the official
+`supacloud supabase` is a thin, allowlisted adapter around the official
 open-source Supabase CLI. SupaCloud does not fork or vendor the upstream CLI.
 The adapter resolves the executable in this order:
 
 1. `SUPACLOUD_SUPABASE_CLI_BIN` (an explicit executable path)
-2. `SUPABASE_CLI_VERSION=2.110.0` (explicit opt-in to a pinned Bun/npm package runner)
+2. `SUPABASE_CLI_VERSION=2.120.0` as the recommended pinned Bun/npm package runner version
 3. `<workdir>/node_modules/supabase`
 4. `supabase` on `PATH`
 
@@ -334,19 +374,19 @@ Windows under Node.js, use an installed official CLI or
 
 ```bash
 # Local schema authoring; SupaCloud credentials are not required.
-supacloud-cli supabase migration_new --name add_accounts
-supacloud-cli supabase db_diff --schema public --name add_accounts
-supacloud-cli supabase db_reset --no_seed
+supacloud supabase migration_new --name add_accounts
+supacloud supabase db_diff --schema public --name add_accounts
+supacloud supabase db_reset --no_seed
 
 # Remote inspection and backup require an explicit, percent-encoded Postgres DSN.
-supacloud-cli supabase db_pull --db_url "$SUPACLOUD_DB_URL" --declarative
-supacloud-cli supabase migration_list --db_url "$SUPACLOUD_DB_URL"
-supacloud-cli supabase db_dump --db_url "$SUPACLOUD_DB_URL" --file backups/schema.sql
-supacloud-cli supabase gen_types --db_url "$SUPACLOUD_DB_URL" --schema public --file src/database.types.ts
+supacloud supabase db_pull --db_url "$SUPACLOUD_DB_URL" --declarative
+supacloud supabase migration_list --db_url "$SUPACLOUD_DB_URL"
+supacloud supabase db_dump --db_url "$SUPACLOUD_DB_URL" --file backups/schema.sql
+supacloud supabase gen_types --db_url "$SUPACLOUD_DB_URL" --schema public --file src/database.types.ts
 
 # Remote migration application stays on the SupaCloud control plane.
-supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
-supacloud-cli supabase push --ref abc123 --dir supabase/migrations
+supacloud supabase push --ref abc123 --dir supabase/migrations --dry_run
+supacloud supabase push --ref abc123 --dir supabase/migrations
 ```
 
 `supabase push` deliberately delegates to the existing
@@ -380,13 +420,13 @@ from a clean local database. Only then record the historical files through the
 controlled baseline action:
 
 ```bash
-supacloud-cli database baseline_migrations \
+supacloud database baseline_migrations \
   --ref abc123 \
   --dir supabase/migrations \
   --dry_run
 
 # After reviewing every listed file and receiving explicit approval:
-supacloud-cli database baseline_migrations \
+supacloud database baseline_migrations \
   --ref abc123 \
   --dir supabase/migrations
 ```
@@ -396,12 +436,41 @@ migration-mode API without executing the migration DDL. It is appropriate only
 when the live schema has already been proven equivalent to those files. Never
 write migration-history tables through `database query`.
 
+For a large historical migration chain, use the local rebase workflow after
+capturing and reviewing a schema-only snapshot. The command never writes the
+remote database and never removes the source directory. Without `--write` it
+only prints the plan:
+
+```bash
+supacloud database rebase_migrations \
+  --dir supabase/migrations \
+  --baseline_file backups/pre-rebase-schema.sql \
+  --baseline_version 20261008000000 \
+  --retain_after_version 20261001000000 \
+  --output_dir supabase/migrations-rebased
+
+supacloud database rebase_migrations \
+  --dir supabase/migrations \
+  --baseline_file backups/pre-rebase-schema.sql \
+  --baseline_version 20261008000000 \
+  --retain_after_version 20261001000000 \
+  --output_dir supabase/migrations-rebased \
+  --write
+```
+
+The output contains one reconstructed baseline, selected forward migrations
+and `migration-rebase.manifest.json` with SHA-256 records for the complete
+source history. Review the baseline for omitted data backfills, reference data,
+extensions, grants, RLS, functions and triggers; replay it in a clean database
+before replacing the active migration directory. Keep the original directory
+as an archive until remote migration history and schema read-back are complete.
+
 ### Database SQL files
 
 For complex SQL, pgvector queries, and transaction blocks, prefer `--file`:
 
 ```bash
-supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
+supacloud database query --ref abc123 --file ./queries/vector-search.sql
 ```
 
 The Management API response shape is stable:
@@ -466,23 +535,45 @@ Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for ap
 - `diagnostics`
 - `gateway` (requires an admin-capable token)
 
-The `frontend` group supports both the existing deployment/Git/legacy ZIP
-actions and immutable prebuilt release control. Use `list_releases` to read the
-active release and activation IDs, `upload_release` to stream a local ZIP bound
-to its SHA-256, and `activate_release` with the observed IDs plus a retry-stable
-UUIDv4 mutation ID. The CLI verifies upload and activation readback before
-reporting success. Production mutations require exact project confirmation;
-read-only mode blocks them before opening the archive or sending HTTP.
+The `frontend` group supports hosting management, inspection and explicit
+operator rollback. Use `get_active_release` to read
+the verified current artifact and activation IDs without scanning historical
+archives. `list_releases` remains the paginated, full-integrity audit interface.
+Publishing commands `deploy_git`, `deploy_upload`, `redeploy`, `upload_release`
+and `activate_release` were removed. Use `supacloud deploy` instead.
+Production mutations require exact project confirmation; read-only mode blocks
+them before opening an archive or sending HTTP.
 
 ```bash
-supacloud-cli frontend list_releases --ref abc123 --id web
-supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
-supacloud-cli frontend activate_release --ref abc123 --id web \
-  --release_id <sha256> \
-  --expected_active_release_id <current-sha256-or-absent> \
-  --expected_activation_id <current-uuid-v4-or-absent> \
-  --mutation_id <retry-stable-uuid-v4>
+supacloud frontend list_releases --ref abc123 --id web
+supacloud frontend get_active_release --ref abc123 --id web
+supacloud frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256>
+supacloud frontend rollback --ref abc123 --id web
 ```
+
+The active snapshot is read-only and protected by the deployment lock. It
+verifies the active immutable archive/tree, returns zero or one release, and
+does not hash unrelated historical releases. Inspection and operator rollback
+use this path. An HTTP 404 reports that the deployment or endpoint is missing;
+check the deployment and upgrade the server. There is no historical-inventory
+fallback for older servers.
+
+For immutable frontend deployments the platform retains previous artifacts.
+`deploy --json` returns the application receipt for executable application delivery,
+or the immutable frontend receipt for assets-only delivery. Assets-only publication
+keeps the pre-upload CAS and exposes its mutation ID even on an unknown outcome.
+For an operator rollback,
+run `frontend rollback`; SupaCloud supplies the journal-verified previous
+release, while the CLI observes current CAS and creates the mutation UUID.
+An explicit `--release_id <previous-release-sha256>` remains available for a
+deliberate target. Concurrent writes fail without refreshing CAS or retrying.
+Release history is content-hash-sorted, so the client never guesses from its
+first record. Automated deployment compensation belongs on the server, not in
+client scripts that refresh CAS and retry writes.
+No download, rebuild or reupload is needed. A null previous release indicates legacy/initial
+deployment, not a verified rollback backup. This does not replace database or
+Storage backups and never authorizes automatic database restore.
 
 `edge_functions deploy --path <file-or-directory>` uses Bun to bundle local
 TypeScript and dependencies and runs a local syntax check before upload. The
@@ -492,6 +583,13 @@ artifact for CLI, Web Console, and direct API deployments alike. For
 `--files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'`.
 Release automation that already has a final runtime artifact can use
 `edge_functions deploy --prebundled-path <file> --expected-sha256 <sha256>`.
+Use `--bytecode off|auto|required` on `deploy`, `deploy_bundle`, or `config` to
+control the host-generated Bun bytecode cache for the Function. The setting
+defaults to `off`, is applied during Edge Runtime preheat, and is returned in
+the Function configuration. `auto` falls back to JavaScript when the final
+artifact is not bytecode-compatible; `required` makes preheat fail instead.
+The CLI does not upload `.jsc` files and bytecode is never compiled per
+request.
 The lowercase SHA-256 binds the caller-approved bytes before any request. The
 CLI reads through a held regular-file descriptor and rejects file drift or
 non-round-trippable UTF-8; the server independently validates the digest and

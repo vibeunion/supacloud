@@ -7,10 +7,15 @@ import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates"
 import { STARTER_REVIEW_JOB, STARTER_REVIEW_JOB_TEST } from "./app-starter-review-job";
 import { STARTER_ATTACHMENT_POSTGRES, STARTER_ATTACHMENT_SCHEMA } from "./app-starter-attachments";
 import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from "./app-starter-attachment-worker";
+import { STARTER_EXECUTION_OBSERVABILITY, STARTER_WORKER_OBSERVABILITY } from "./app-starter-execution-observability";
 import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER } from "./app-starter-upload";
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
+import { STARTER_REVIEW_CLIENT, STARTER_REVIEW_TRANSPORT, STARTER_REVIEW_CLIENT_TEST } from "./app-starter-client";
+import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
+import { STARTER_REVIEW_QUERY } from "./app-starter-query";
+import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
@@ -20,9 +25,14 @@ const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 export function appStarterFiles(name: string): Record<string, string> {
     return {
         ...starterDatabaseFiles(),
+        "src/review/list-reviews.ts": STARTER_REVIEW_QUERY,
+        "src/review/task-contracts.ts": STARTER_TASK_CONTRACTS,
+        "src/review/tasks.ts": STARTER_TASK_FEATURE,
+        "src/host/review-tasks.ts": STARTER_TASK_HOST,
+        "migrations/005-review-task-recovery.sql": STARTER_TASK_SCHEMA,
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
-            engines: { bun: ">=1.4.2" },
+            engines: { bun: ">=1.4.3" },
             scripts: {
                 compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
                 "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
@@ -51,13 +61,14 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
-                elysia: "2.0.0-beta.21",
+                effect: "4.0.5",
+                elysia: "2.0.0-beta.32",
                 rxjs: appMetadata.dependencies.rxjs,
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
                 "drizzle-kit": dbMetadata.devDependencies["drizzle-kit"],
-                "@types/bun": "^1.4.2",
+                "@types/bun": "^1.4.3",
                 typescript: "^7.0.2",
             },
         }),
@@ -65,9 +76,13 @@ export function appStarterFiles(name: string): Record<string, string> {
             compilerOptions: {
                 target: "ES2022", module: "ESNext", moduleResolution: "bundler",
                 strict: true, experimentalDecorators: true, skipLibCheck: true,
+                noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+                noImplicitOverride: true, noPropertyAccessFromIndexSignature: true,
+                noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
+                useUnknownInCatchVariables: true,
                 noEmit: true, types: ["bun"],
             },
-            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
+            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/modules.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
         }),
         "bunfig.toml": "env = false\n",
         ".gitignore": [
@@ -84,10 +99,20 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
+  databaseGovernance: { mode: "check", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" },
+  effect: {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+    requireTaggedErrorTypes: true,
+    requireExactDependencyTypes: true,
+    requireTimeoutForDependencies: true,
+    forbidDirectRuntimeExecution: true,
+    forbidDirectThrows: true,
+  },
   typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
   disallowControllerDirectDb: true,
   detectOrphanModules: true,
-  graphql: { schema: "graphql/schema.graphql" },
   commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
   delivery: {
     version: 1,
@@ -97,53 +122,10 @@ export default defineSupacloudConfig({
         { source: "migrations/002-review-attachments.sql", version: "2", name: "review_attachments", executor: "project-migration" },
         { source: "migrations/003-review-uploads.sql", version: "3", name: "review_uploads", executor: "operator-provisioning" },
         { source: "migrations/004-review-runtime-roles.sql", version: "4", name: "review_runtime_roles", executor: "operator-provisioning" },
+        { source: "migrations/005-review-task-recovery.sql", version: "5", name: "review_task_recovery", executor: "operator-provisioning" },
       ],
     },
   },
-});
-`,
-        "graphql/schema.graphql": `# Offline query-contract example, not a deployed database schema.
-# SYNTHETIC TEST FIXTURE ONLY. Database First is the sole server-schema model.
-# Do not extend this fixture as a server schema; change database declarations and export.
-# Replace using a snapshot exported with the intended caller role before integration.
-type Query {
-  reviewCollection(first: Int): ReviewConnection!
-}
-type ReviewConnection {
-  edges: [ReviewEdge!]!
-}
-type ReviewEdge {
-  node: Review!
-}
-type Review {
-  id: ID!
-  state: String!
-  version: Int!
-}
-`,
-        "src/review/reviews.graphql": `query ReviewList($first: Int = 20) {
-  reviewCollection(first: $first) {
-    edges { node { id state version } }
-  }
-}
-`,
-        "tests/graphql.test.ts": `import { expect, test } from "bun:test";
-import { createGraphqlClient, type ReviewListQuery } from "../generated/graphql";
-
-test("generated query client preserves its read contract without a live database", async () => {
-  const data: ReviewListQuery = {
-    reviewCollection: { edges: [{ node: { id: "demo", state: "draft", version: 1 } }] },
-  };
-  const queries = createGraphqlClient({
-    url: "https://project.example.test",
-    getAccessToken: async () => "synthetic-user-token",
-    fetch: async (_url, request) => {
-      expect(new Headers(request?.headers).get("Authorization")).toBe("Bearer synthetic-user-token");
-      expect(JSON.parse(String(request?.body)).variables).toEqual({ first: 10 });
-      return Response.json({ data });
-    },
-  });
-  expect(await queries.ReviewList({ first: 10 })).toEqual(data);
 });
 `,
         "REACTIVE.md": STARTER_REACTIVE_GUIDE,
@@ -153,12 +135,31 @@ test("generated query client preserves its read contract without a live database
         "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
         "scripts/dev.ts": `import { watchProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
+const profile = process.env["SUPACLOUD_DEV_PROFILE"] === "integration" ? "integration" : "fast";
+if (profile === "integration") {
+  const databaseUrl = process.env["SUPACLOUD_DEV_DATABASE_URL"];
+  if (!databaseUrl) throw new Error("Integration requires an explicit loopback PostgreSQL database");
+  const url = new URL(databaseUrl);
+  if (!["postgres:", "postgresql:"].includes(url.protocol)
+    || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+    || url.pathname.length <= 1 || url.search || url.hash
+    || process.env["DATABASE_SOCKET_PATH"]
+    || (process.env["DATABASE_URL"] && process.env["DATABASE_URL"] !== databaseUrl)) {
+    throw new Error("Integration requires an explicit loopback PostgreSQL database without conflicting settings");
+  }
+  process.env["DATABASE_URL"] = databaseUrl;
+}
+const configured = compileOptionsFromConfig(await loadSupacloudConfig());
+const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;
+const options = configured.databaseGovernance
+  ? { ...configured, databaseGovernance: { ...configured.databaseGovernance, mode: governanceMode } }
+  : configured;
 let server: ReturnType<typeof Bun.spawn> | undefined;
 let restarts = Promise.resolve();
 let closing = false;
 const watcher = watchProject({
-  ...compileOptionsFromConfig(await loadSupacloudConfig()),
+  ...options,
   writeOnError: false,
   onEvent: (event) => {
     if (event.type === "compile-error") console.error(event.diagnostics);
@@ -166,7 +167,7 @@ const watcher = watchProject({
     restarts = restarts.then(async () => {
       if (server) { server.kill(); await server.exited; }
       if (closing) return;
-      const entry = process.env.SUPACLOUD_DEV_PROFILE === "integration" ? "scripts/serve-integration.ts" : "scripts/serve.ts";
+      const entry = process.env["SUPACLOUD_DEV_PROFILE"] === "integration" ? "scripts/serve-integration.ts" : "scripts/serve.ts";
       server = Bun.spawn([process.execPath, "--no-env-file", entry], {
         stdin: "inherit", stdout: "inherit", stderr: "inherit", env: process.env,
       });
@@ -184,16 +185,16 @@ process.once("SIGINT", close);
 process.once("SIGTERM", close);
 await watcher.ready;
 `,
-        "scripts/integration.ts": `if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
-process.env.SUPACLOUD_DEV_PROFILE = "integration";
+        "scripts/integration.ts": `if (process.env["APP_ENV"] !== "development") throw new Error("Integration is development-only");
+process.env["SUPACLOUD_DEV_PROFILE"] = "integration";
 await import("./dev");
 export {};
 `,
         "scripts/serve-integration.ts": `import { createCompiledModules } from "../generated/application";
 import { createDeliveryApplication } from "../src/delivery-host";
 
-if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
-const databaseUrl = process.env.SUPACLOUD_DEV_DATABASE_URL;
+if (process.env["APP_ENV"] !== "development") throw new Error("Integration is development-only");
+const databaseUrl = process.env["SUPACLOUD_DEV_DATABASE_URL"];
 try {
   if (!databaseUrl) throw new Error();
   const url = new URL(databaseUrl);
@@ -203,12 +204,12 @@ try {
 } catch {
   throw new Error("Integration requires an explicit loopback PostgreSQL database");
 }
-if (process.env.DATABASE_SOCKET_PATH
-  || (process.env.DATABASE_URL && process.env.DATABASE_URL !== databaseUrl)) {
+if (process.env["DATABASE_SOCKET_PATH"]
+  || (process.env["DATABASE_URL"] && process.env["DATABASE_URL"] !== databaseUrl)) {
   throw new Error("Conflicting integration database settings");
 }
-process.env.DATABASE_URL = databaseUrl;
-const port = Number(process.env.PORT ?? "3000");
+process.env["DATABASE_URL"] = databaseUrl;
+const port = Number(process.env["PORT"] ?? "3000");
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
 const abort = new AbortController();
 const stopStartup = () => abort.abort();
@@ -228,8 +229,8 @@ console.log("Local integration: " + server.url);
 `,
         "scripts/serve.ts": `import { createDemo } from "./sandbox";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
-const port = Number(process.env.PORT ?? "3000");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
+const port = Number(process.env["PORT"] ?? "3000");
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
 const sandbox = createDemo();
 const server = Bun.serve({
@@ -242,7 +243,7 @@ console.log("Local demo: " + server.url);
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Memory adapters are restricted to development and test");
   }
   const sandbox = createMemorySandbox({
@@ -262,13 +263,15 @@ export interface AppAdapters {
   deps: NonNullable<ApplicationOptions["deps"]>;
   requestContext: NonNullable<ApplicationOptions["requestContext"]>;
   commandGovernance: CommandGovernance;
-  onExecution?: ApplicationOptions["onExecution"];
+  onExecution?: NonNullable<ApplicationOptions["onExecution"]>;
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
 export function createApp(adapters: AppAdapters) {
+  const { onExecution, ...rest } = adapters;
   return createApplication({
-    ...adapters,
+    ...rest,
+    ...(onExecution === undefined ? {} : { onExecution }),
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
   });
@@ -284,15 +287,18 @@ export function createCompiledModules(): never {
   throw new Error("Run bun run compile before starting the application");
 }
 `,
-        "src/review/review.ts": `import {
+        "src/review/review.ts": `import { Effect } from "effect";
+import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,
 } from "@supacloud/app";
-import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
-import { ApproveBody, HealthResult, Params, ReviewResult } from "./contracts";
+import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "@supacloud/elysia";
+import { ApproveBody, HealthResult, Params, ReviewResult, type ApprovalBody, type Review } from "./contracts";
+import { REVIEW_VERSION_MAX } from "./limits";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
-import type { ReviewRow } from "../../db/schema";
+import { ReviewReceipts, ReviewReceiptsController, type ReviewReceiptPort } from "./receipts";
+import { ReviewTasks, ReviewTasksController, type ReviewTaskPort } from "./tasks";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -307,9 +313,8 @@ export const reviewSpec = defineFeatureSpec({
   },
 });
 
-type Review = Pick<ReviewRow, "state" | "version">;
 // Production implementations must bind both operations to the current transaction.
-export interface ReviewStore extends Partial<ReviewUploadPort> {
+export interface ReviewStore extends Partial<ReviewUploadPort>, Partial<ReviewReceiptPort>, Partial<ReviewTaskPort> {
   get(table: string, key: string): unknown;
   set(table: string, key: string, value: Review): void | Promise<void>;
 }
@@ -320,13 +325,12 @@ export const requireRequest: Aspect = (context, next) => {
   return next();
 };
 
+const decodeReview = createSchemaDecoder(ReviewResult, { normalize: false });
 function readReview(value: unknown): Review {
-  if (typeof value !== "object" || value === null ||
-      !("state" in value) || (value.state !== "draft" && value.state !== "approved") ||
-      !("version" in value) || typeof value.version !== "number") {
+  try { return decodeReview(value); }
+  catch {
     throw new ApplicationError("Review not found", { status: 404, code: "REVIEW_NOT_FOUND" });
   }
-  return { state: value.state, version: value.version };
 }
 
 @Command({
@@ -341,6 +345,9 @@ export class ApproveReview {
     if (current.version !== expectedVersion) {
       throw new ApplicationError("Review state or version changed", { status: 409, code: "REVIEW_CONFLICT" });
     }
+    if (current.version === REVIEW_VERSION_MAX) {
+      throw new ApplicationError("Review version is exhausted", { status: 409, code: "REVIEW_CONFLICT" });
+    }
     const next = {
       state: assertFeatureTransition(reviewSpec, current.state, "approve"),
       version: current.version + 1,
@@ -350,37 +357,84 @@ export class ApproveReview {
   }
 }
 
+type ReviewError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "REVIEW_NOT_FOUND" }
+    | { readonly _tag: "REVIEW_PERMISSION_DENIED" }
+    | { readonly _tag: "REVIEW_CONFLICT" }
+    | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
+    | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
+    | { readonly _tag: "COMMAND_REJECTED" }
+    | { readonly _tag: "COMMAND_BINDING_MISMATCH" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+
 @Controller("/reviews")
 export class ReviewController {
   constructor(@Inject(ApproveReview) private readonly approveReview: ApproveReview) {}
 
-  @Get("/health", { responses: { 200: HealthResult } })
-  health(): { ok: boolean } { return { ok: true }; }
+  @Get("/health", {
+    responses: { 200: HealthResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 
-  @Post("/:id/approve", { command: ApproveReview, params: Params, body: ApproveBody, responses: { 200: ReviewResult } })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Promise<Review> {
-    return this.approveReview.execute(id, body.expectedVersion);
+  @Post("/:id/approve", {
+    command: ApproveReview,
+    params: Params,
+    body: ApproveBody,
+    responses: { 200: ReviewResult },
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+        { tag: "REVIEW_NOT_FOUND", status: 404, code: "REVIEW_NOT_FOUND" },
+        { tag: "REVIEW_PERMISSION_DENIED", status: 403, code: "REVIEW_PERMISSION_DENIED" },
+        { tag: "REVIEW_CONFLICT", status: 409, code: "REVIEW_CONFLICT" },
+        { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
+        { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+        { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
+        { tag: "COMMAND_BINDING_MISMATCH", status: 501, code: "COMMAND_BINDING_MISMATCH" },
+        { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+      ],
+      retry: "none",
+    },
+  })
+  approve(@Param("id") id: string, @Body() body: ApprovalBody): Effect.Effect<Review, ReviewError, never> {
+    return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
   }
 }
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads], controllers: [ReviewController, ReviewUploadsController],
+  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts, ReviewTasks],
+  controllers: [ReviewController, ReviewUploadsController, ReviewReceiptsController, ReviewTasksController],
   jobs: [VerifyReviewAttachment],
 });
 `,
         "src/review/attachment.ts": STARTER_REVIEW_JOB,
-        "src/review/contracts.ts": `import { t } from "elysia";
+        "src/review/limits.ts": `// Matches the existing PostgreSQL integer version columns; widening requires a migration.
+export const REVIEW_VERSION_MAX = 2147483647;
+`,
+        "src/review/contracts.ts": `import { t, type UnwrapSchema } from "elysia";
+import { REVIEW_VERSION_MAX } from "./limits";
 export const Params = t.Object({ id: t.String({ minLength: 1 }) });
-export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1 }) });
+export const ReviewVersion = t.Integer({ minimum: 1, maximum: REVIEW_VERSION_MAX });
+export const ApproveBody = t.Object({ expectedVersion: ReviewVersion });
+export const ApprovalInput = t.Object({ ...Params.properties, ...ApproveBody.properties }, { additionalProperties: false });
+export type ApprovalBody = UnwrapSchema<typeof ApproveBody>;
 export const ReviewResult = t.Object({
   state: t.Union([t.Literal("draft"), t.Literal("approved")]),
-  version: t.Integer({ minimum: 1 }),
+  version: ReviewVersion,
 });
+export type Review = UnwrapSchema<typeof ReviewResult>;
 export const HealthResult = t.Object({ ok: t.Boolean() });
 export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
 export const UploadBody = t.Object({
-  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1 }),
+  artifactId: t.String({ format: "uuid" }), expectedVersion: ReviewVersion,
+}, { additionalProperties: false });
+export const UploadInput = t.Object({
+  reviewId: UploadParams.properties.id, ...UploadBody.properties,
 }, { additionalProperties: false });
 export const UploadLocation = t.Object({
   artifactId: t.String({ format: "uuid" }), bucketId: t.String(), objectPath: t.String(),
@@ -389,12 +443,41 @@ export const UploadResult = t.Object({
   artifactId: t.String({ format: "uuid" }), runId: t.String({ format: "uuid" }),
   objectPath: t.String(), sha256: t.String({ pattern: "^[a-f0-9]{64}$" }), bytes: t.Integer({ minimum: 1, maximum: 1048576 }),
 });
+export const ReceiptParams = t.Object({
+  id: t.String({ minLength: 1 }), operationId: t.String({ format: "uuid" }),
+});
+export const ReceiptQuery = t.Object({
+  kind: t.Union([t.Literal("approve"), t.Literal("upload")]),
+  expectedVersion: t.String({ pattern: "^[1-9][0-9]*$", maxLength: 16 }),
+}, { additionalProperties: false });
+export const ReceiptResult = t.Object({
+  status: t.Union([t.Literal("confirmed"), t.Literal("unknown")]),
+  operationId: t.String({ format: "uuid" }), reviewId: t.String({ minLength: 1 }),
+});
+export const ReceiptOperation = t.Object({
+  kind: ReceiptQuery.properties.kind,
+  reviewId: ReceiptParams.properties.id,
+  operationId: ReceiptParams.properties.operationId,
+  expectedVersion: ApprovalInput.properties.expectedVersion,
+}, { additionalProperties: false });
+export type ReviewOperation = UnwrapSchema<typeof ReceiptOperation>;
+export type ReviewReceipt = UnwrapSchema<typeof ReceiptResult>;
+export type ReviewUploadBody = UnwrapSchema<typeof UploadBody>;
+export type ReviewUploadInput = UnwrapSchema<typeof UploadInput>;
+export type ReviewUploadLocation = UnwrapSchema<typeof UploadLocation>;
+export type ReviewUploadResult = UnwrapSchema<typeof UploadResult>;
 `,
+        "src/review/receipts.ts": STARTER_REVIEW_RECEIPTS,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
+        "src/client/reviews.ts": STARTER_REVIEW_CLIENT,
+        "src/client/review-transport.ts": STARTER_REVIEW_TRANSPORT,
+        "tests/review-client.test.ts": STARTER_REVIEW_CLIENT_TEST,
         "src/host/review-uploads.ts": STARTER_UPLOAD_ADAPTER,
         "src/host/review-postgres.ts": STARTER_REVIEW_POSTGRES,
         "src/host/review-attachments.ts": STARTER_ATTACHMENT_POSTGRES,
         "src/host/review-attachment-worker.ts": STARTER_ATTACHMENT_WORKER,
+        "src/host/review-worker-observability.ts": STARTER_WORKER_OBSERVABILITY,
+        "src/host/review-execution-observability.ts": STARTER_EXECUTION_OBSERVABILITY,
         "src/delivery-worker.ts": STARTER_ATTACHMENT_DELIVERY_WORKER,
         "src/delivery-host.ts": STARTER_REVIEW_DELIVERY_HOST,
         "migrations/001-review.sql": STARTER_REVIEW_SCHEMA,
@@ -470,7 +553,6 @@ test("the production composition root rejects missing governance adapters", () =
 \`\`\`sh
 bun install
 bun run db:generate
-bun run check
 bun run dev
 \`\`\`
 
@@ -493,6 +575,25 @@ It is not a complete Maker-Checker workflow or a production authorization policy
 
 ## Frontend SDK Boundary
 
+src/client/reviews.ts supplies framework-neutral loading/empty/denied/error and
+submission/conflict/unknown states. src/client/review-transport.ts binds ordinary
+reads and private uploads to the existing user-scoped Supabase client, and
+approval/registration to createAuthenticatedFetch. It never uses a service key.
+Bind snapshot/subscribe to the view or SVAdmin store; dispose on identity change.
+The example lists at most 100 rows. Loading and permission failures clear rows.
+Unknown writes keep their operation ID and block resubmission. The default
+lookup calls GET /reviews/:id/operations/:operationId with kind and
+expectedVersion. It rechecks current authorization and reads the original
+durable receipt; current row state alone cannot confirm the operation.
+Construct createReviewPendingStore(localStorage, { projectId, tenantId,
+applicationId, subject }) and pass it as createReviewClient's second argument.
+The scope must come from the current authenticated session and application
+binding. It stores no token or file bytes. Reload restores unknown, then
+reconcile() performs only a receipt read; denied/conflicting lookup stays
+unknown. Storage failures block writes. Dispose never deletes pending evidence.
+Use one active mutation owner per identity/application: localStorage is not a
+cross-tab atomic lock. Do not clear unresolved records to enable another write.
+
 Use @supacloud/js as the platform SDK around your existing user-scoped
 @supabase/supabase-js client. Pass that same client to existing UI providers;
 supacloud.supabase exposes it unchanged. Keep UI routing, forms and query
@@ -506,55 +607,35 @@ origin. The authenticated transport rejects missing credentials and redirects
 and does not replay a write after 401. Its underlying fetch must also be
 single-attempt.
 
-Reuse the same session resolver for generated/graphql.ts when adopting queries.
 The local memory demo is not this authenticated production integration.
 Never use supacloud.commands or supacloud.workflows from a browser action:
 those RPCs require service-role credentials. Browser business commands use
 application endpoints, optionally composed through @supacloud/js/contracts.
 Management API tokens and service-role keys remain on trusted servers.
 
-## Typed Queries
+## Reads
 
-This starter uses Database First as its only GraphQL server-schema model.
-Drizzle and reviewed SQL define the database; pg_graphql reflects the migrated
-database under the caller's role. Do not add GraphQL resolver/decorator classes
-or independently authored server SDL. Business writes continue through Commands.
+Ordinary reads use PostgREST through the existing user-scoped
+@supabase/supabase-js client: client.from("starter_reviews").select("id,state,version").
+Use the caller's session, RLS and grants; never introduce a second session store.
+Business writes continue through the governed Command/RPC boundary.
 
-GraphQL is preconfigured as the recommended read path. Edit src/review/reviews.graphql;
-compile, check and dev validate it against graphql/schema.graphql and generate
-generated/graphql.ts. Import createGraphqlClient from that file and call
-queries.ReviewList({ first: 20 }). Its variables and selected results are typed.
-Pass a public project key and a getAccessToken callback that reads the current
-user session. Never pass a service-role key to browser code.
+Use listReviews from src/review/list-reviews.ts for the paginated review list.
+Type the existing client with ReviewReadDatabase (a read-only projection derived
+from db/schema.ts), then call listReviews(client, { page: 1, pageSize: 25, signal }).
+The helper returns data, total, page, pageSize and hasNextPage, orders by the unique
+id and preserves PostgREST errors. Pages are one-based and limited to 100 rows.
+Exact counts obey RLS but may be expensive on large tables; offset pages are not
+a cross-request snapshot when records change. No owner filter replaces RLS.
+Do not create a service-role client or a second auth session for this helper.
+Existing starters can add this file without a new migration only if their reviewed
+review-table grants and identity-mapping RLS from migration 003 are already applied.
+The projection is not a full database export and grants no write access.
 
-The included schema is a synthetic offline test fixture, not a deployed database.
-Do not hand-edit graphql/schema.graphql to add application fields. Change database
-declarations, apply migrations and export the actual schema. Replace the fixture
-with a snapshot exported under the intended caller role before real integration:
-
-\`\`\`sh
-bun node_modules/@supacloud/compiler/dist/cli.js graphql-schema \\
-  --url https://your-project.example \\
-  --key-env SUPACLOUD_PUBLISHABLE_KEY --token-env APP_USER_ACCESS_TOKEN
-\`\`\`
-
-After migrations or grants change, and before promotion, run the same command
-with --check --json to detect drift without writing. If it fails, explicitly
-re-export, review the snapshot diff, compile and run application typechecks and
-role/RLS tests. Normal compile/check/dev remain offline; they cannot prove that
-a snapshot came from a database or is current. Keep the exported snapshot and
-generated types in version control.
-
-The flags name environment variables, not credential values. Export requires
-GraphQL and introspection already enabled on the selected development project.
-The compiler does not enable extensions or alter database permissions.
-Production introspection may remain disabled. Queries do not pass through
-application Command/AOP; RLS and grants remain mandatory. Business writes stay
-in Commands. Existing projects without GraphQL configuration remain unaffected.
-Enabled contracts always reject invalid queries, including with strict: false.
-To opt this starter out entirely, set graphql: false and remove its example
-query test and unused generated client; do not replace checked queries with
-untyped calls to bypass validation.
+GraphQL is not generated or enabled by this starter. For a specific Query Contract,
+explicitly configure graphql.schema with a role-scoped database export and add
+checked query documents. Drizzle and append-only migrations remain the database
+authority; the export is a protocol snapshot, not a second schema source.
 
 ## Environments
 
@@ -622,11 +703,12 @@ This is not production-role acceptance. Ordinary API clients cannot edit members
 or the database binding. No migration, binding, member or review is auto-created
 by the HTTP host. This SQL file is not a migration runner or a recovery receipt.
 
-The starter's delivery.build.migrations explicitly declares these four files.
+The starter's delivery.build.migrations explicitly declares these five files.
 Immutable targets archive their exact bytes and a migrations.json inventory;
 project migrations and operator provisioning use separate directories.
 001-002 declare project migration handling. 003 changes Storage policies and
-004 creates cluster-wide roles, so both declare operator provisioning; ordinary
+004 creates cluster-wide roles and 005 adds the task recovery ledger and scoped
+backend grants, so these declare operator provisioning; ordinary
 project-role permission to perform those changes has not been established.
 These raw SQL hashes are not the platform ledger's normalized-statement
 checksums. Building or copying an archive never applies SQL, proves compatibility
@@ -653,6 +735,16 @@ authenticated upload requests return 501. With that setting, SUPACLOUD_URL and
 SUPACLOUD_SERVICE_ROLE_KEY are required; shipped adapters register/bind uploads
 and enqueue attachment verification through afterApproved in the approval
 transaction. A separately delivered worker consumes it.
+With attachments enabled, GET /reviews/:id/attachment-task returns the current
+authorized task state. POST /reviews/:id/attachment-task/retry takes expectedVersion,
+expectedRunId and a new recoveryId UUID. Reuse that same body/recoveryId after an
+uncertain response; do not generate another key until the outcome is reconciled.
+Only failed runs can be retried. A retry creates a linked new run, receipt and audit
+in one transaction, preserving the old run and its attempts. Concurrent distinct
+recovery requests cannot both replace the same failed run. Read status after the
+receipt: its queued state describes submission, not necessarily the current state.
+Apply migration 005 before updating either HTTP or Worker code; it extends only
+backend capabilities. Do not grant Workflow access to browser roles.
 An HTTP listener or immutable build does not prove full-platform identity,
 migration compatibility, activation, application rollback or data recovery.
 
@@ -705,6 +797,15 @@ the existing Workflow and invokes the compiled Job with a ReviewAttachmentStore.
 Its reader authorizes the worker independently; its writer rechecks the review
 revision/artifact binding and persists the result idempotently before acknowledgement.
 After a lost acknowledgement, reconcile that result instead of repeating effects.
+The generated Job first calls store.readResult. The PostgreSQL adapter rechecks
+current permission, ownership, revision and project/tenant binding inside the
+read transaction, then validates a stored result with AttachmentResult. A valid
+committed result skips Storage download and result insertion on redelivery.
+Revoked access or a malformed/conflicting result fails closed, not as a cache miss.
+Existing custom ReviewAttachmentStore implementations must add readResult with
+these same authorization and validation guarantees when adopting this Job.
+This does not automatically restart a halted worker, reset the attempt budget,
+or make external side effects atomic with the database.
 
 src/host/review-attachments.ts supplies createReviewAttachmentAdapters with a
 durable store and enqueue callback for the approval adapter's afterApproved hook.
@@ -756,12 +857,35 @@ committed idempotent result. The host's failure promise makes the executable exi
 nonzero with bounded cleanup. Restart only after investigating an ownership or
 receipt failure; repeated automatic restart can exhaust an unknown run's attempts.
 
+The delivery worker emits review-worker-execution JSON lines to stdout using
+src/host/review-worker-observability.ts, which re-exports the shared observer
+from src/host/review-execution-observability.ts. Events contain timestamp, workerId,
+kind, operation, stage, phase and optional requestId/durationMs. For attachment
+jobs, requestId is the Workflow run ID; join it to starter_attachments.run_id
+or the current starter_attachment_retries lineage, not to an HTTP request ID.
+Only selected execution metadata is serialized, never input, output, errors,
+credentials or database parameters. Correlation identifiers must be opaque,
+non-secret identifiers; malformed identifiers and invalid durations are omitted.
+Logging is best effort and cannot alter a job outcome. A succeeded stage is not
+proof of queue settlement: confirm the Workflow receipt and durable attachment
+result separately. Configure stdout collection in the deployment environment;
+the starter does not install a collector or prove gateway trace propagation.
+
+The HTTP delivery host uses the same serializer for review-http-execution events
+with component review-http. Route and command events preserve their requestId
+from the existing request context and do not contain a workerId. Do not equate
+that request ID with a Workflow run ID or an idempotency key. Identity resolution
+and failures before an execution observer is reached are not covered by these
+events; use the platform's existing request/identity logs for those failures.
+Both hosts emit only execution metadata, not access logs or audit receipts.
+
 The memory demo does not start this worker. The included unit tests exercise the
 handler contract, not production Storage, queue delivery or external identity.
 
 ## Inspection And Repair
 
 \`\`\`sh
+supacloud app context --root . --target review --events execution.ndjson --request-id request-123 --format json
 bunx supacloud-compiler context review --root src --json
 bunx supacloud-compiler context review --root src --events execution-events.json --request-id request-123 --json
 bunx supacloud-compiler explain review --root src
@@ -770,9 +894,22 @@ bunx supacloud-compiler fix ./fix.json --dry-run
 \`\`\`
 
 Context packs include directional dependencies, relevant aspect files, diagnostics
-and static execution plans. Ordinary context can include declared source expressions;
-inspect it before sharing. The optional --events example expects a trusted host
+and static execution plans, without provider values or source expressions.
+The app context entry point retains its module workflow and adds a separate
+execution evidence block when --events and --request-id are provided together.
+It requires an explicit --target and --format json, rejects --write, and
+resolves relative event paths from --root. The top-level context alias supports
+the same flags. Omit both execution flags for the unchanged authoring context.
+The optional --events example expects a trusted host
 to capture approved onExecution metadata in { "version": 1, "events": [...] }.
+It also accepts a bounded JSON-lines export containing only the generated
+review-http-execution and review-worker-execution records. Pass that file
+directly as --events execution.ndjson; use the HTTP request ID or Workflow run
+ID appropriate to the selected operation. Unknown log records, extra fields,
+malformed lines and oversized files fail the entire read rather than being
+silently skipped. Wrapper timestamps, component names and worker IDs are
+validated then excluded from the context metadata. Review the export before
+sharing; context correlation still does not authenticate the log source.
 It selects one opaque request ID, omits payloads and source expressions, and applies
 input/output size limits. It does not read arbitrary logs, prove deployment versions,
 identify a root cause or apply repairs. Never put credentials or business data in

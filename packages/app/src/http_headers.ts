@@ -76,7 +76,7 @@ export class HttpHeaders {
     const lower = name.toLowerCase();
     const newMap = new Map(this.headersMap);
     const newNames = new Map(this.originalNames);
-    const existing = newMap.get(lower) ? [...newMap.get(lower)!] : [];
+    const existing = [...(newMap.get(lower) ?? [])];
     if (Array.isArray(value)) {
       existing.push(...value);
     } else {

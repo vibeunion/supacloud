@@ -3,21 +3,13 @@ import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
     releaseControlFailure,
     releaseControlMutationFailure,
     releaseControlSuccess,
     type ReleaseControlToolResponse,
 } from "./release-control-response";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: Record<string, unknown>) => Promise<ReleaseControlToolResponse>,
-    ) => void;
-};
 
 type ReleaseCanaryOAuthClient = {
     client_id: string;
@@ -271,7 +263,7 @@ async function deleteReleaseCanaryClient(
 }
 
 export function registerOAuthClientTools(server: ToolServer, http: HttpTransport): void {
-    server.tool(
+    registerTool(server,
         "oauth_clients",
         "Dedicated release-canary public OAuth client lifecycle. It only manages the exact supacloud-release-canary public authorization-code client and never returns client secrets.",
         {

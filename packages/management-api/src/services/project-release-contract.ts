@@ -30,14 +30,14 @@ export function releaseAuthority(release: ProjectRelease, previous: ProjectRelea
 export function parseProjectRelease(raw: string, projectRef: string): ProjectReleaseSnapshot {
   if (Buffer.byteLength(raw) > 1024 * 1024) throw new Error("Release manifest exceeds 1 MiB");
   const { config, authority } = parseEdgeFunctionActivationManifest(raw);
-  if (!authority || config.schema !== PROJECT_RELEASE_SCHEMA || config.project_ref !== projectRef
-    || config.mutation_id !== authority.activation_id || !RELEASE_ID.test(String(config.mutation_id))
-    || !/^[a-f0-9]{64}$/.test(String(config.request_fingerprint))
-    || !config.members || typeof config.members !== "object" || Array.isArray(config.members)
+  if (!authority || config["schema"] !== PROJECT_RELEASE_SCHEMA || config["project_ref"] !== projectRef
+    || config["mutation_id"] !== authority.activation_id || !RELEASE_ID.test(String(config["mutation_id"]))
+    || !/^[a-f0-9]{64}$/.test(String(config["request_fingerprint"]))
+    || !config["members"] || typeof config["members"] !== "object" || Array.isArray(config["members"])
     || stableSha256(config) !== authority.artifact_sha256 || authority.target_state !== "active") {
     throw new Error("Release manifest identity or digest is invalid");
   }
-  const entries = Object.entries(config.members);
+  const entries = Object.entries(config["members"]);
   if (entries.length < 1 || entries.length > 128) throw new Error("Release must contain 1-128 functions");
   for (const [slug, member] of entries) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(slug) || slug === PROJECT_RELEASE_SLUG
@@ -47,8 +47,8 @@ export function parseProjectRelease(raw: string, projectRef: string): ProjectRel
     const parsed = parseEdgeFunctionActivationManifest(JSON.stringify({
       ...member.config, _supacloud_activation: member.authority,
     }));
-    if (parsed.authority?.target_state !== "active" || typeof parsed.config.version !== "string"
-      || !/^[1-9]\d*$/.test(parsed.config.version) || !Number.isSafeInteger(Number(parsed.config.version))) {
+    if (parsed.authority?.target_state !== "active" || typeof parsed.config["version"] !== "string"
+      || !/^[1-9]\d*$/.test(parsed.config["version"]) || !Number.isSafeInteger(Number(parsed.config["version"]))) {
       throw new Error("Release member must identify an immutable positive version");
     }
   }

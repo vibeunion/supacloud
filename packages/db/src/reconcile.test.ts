@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { DatabaseCatalog } from './catalog.js';
+import { readCatalog, type DatabaseCatalog, type QueryExecutor } from './catalog.js';
 import { defineDatabaseModule } from './module.js';
 import { reconcileModule } from './reconcile.js';
 
@@ -60,6 +60,7 @@ const baseCatalog: DatabaseCatalog = {
     {
       schema: 'public',
       name: 'case_create',
+      identityArguments: '',
       security: 'definer',
       searchPath: 'public',
       language: 'plpgsql',
@@ -87,6 +88,78 @@ function codes(report: ReturnType<typeof reconcileModule>): string[] {
 }
 
 describe('reconcileModule', () => {
+  test('catalog maps canonical input types without parameter names', async () => {
+    const executor: QueryExecutor = {
+      async query<T>(sql: string): Promise<T[]> {
+        if (!sql.includes('FROM pg_proc')) return [];
+        expect(sql).toContain('pg_catalog.oidvectortypes(p.proargtypes)');
+        return [{
+          schema: 'public', name: 'case_create', identity_arguments: 'uuid, text',
+          security_definer: true, config: ['search_path=""'], language: 'sql',
+        }] as T[];
+      },
+    };
+    const catalog = await readCatalog(executor);
+    expect(catalog.functions[0].identityArguments).toBe('uuid, text');
+    expect(reconcileModule(defineDatabaseModule({
+      name: 'rpc',
+      functions: [{
+        name: 'public.case_create', signature: 'public.case_create(uuid, text)',
+        security: 'definer', source: 'rpc.sql',
+      }],
+    }), catalog).ok).toBe(true);
+  });
+
+  test('policy role sets ignore ordering but preserve identifier case', () => {
+    const catalog = cloneCatalog();
+    const module = structuredClone(baseModule);
+    module.policies[0].roles = ['authenticated', 'Reviewer'];
+    catalog.policies[0].roles = ['Reviewer', 'authenticated', 'Reviewer'];
+    expect(reconcileModule(module, catalog).ok).toBe(true);
+    catalog.policies[0].roles = ['reviewer', 'authenticated'];
+    expect(codes(reconcileModule(module, catalog))).toContain('policy-roles-mismatch');
+  });
+
+  test('policy expressions preserve literal whitespace and explicit absence', () => {
+    const catalog = cloneCatalog();
+    const module = structuredClone(baseModule);
+    module.policies[0].usingExpr = "label = 'a  b'";
+    module.policies[0].checkExpr = null;
+    catalog.policies[0].usingExpr = "label = 'a b'";
+    expect(codes(reconcileModule(module, catalog))).toContain('policy-using-mismatch');
+    catalog.policies[0].usingExpr = module.policies[0].usingExpr;
+    expect(reconcileModule(module, catalog).ok).toBe(true);
+    catalog.policies[0].checkExpr = 'true';
+    expect(codes(reconcileModule(module, catalog))).toContain('policy-check-mismatch');
+  });
+
+  test('explicit signatures cannot fall back to another overload or unknown metadata', () => {
+    const catalog = cloneCatalog();
+    const module = structuredClone(baseModule);
+    module.functions[0].signature = 'public.case_create(uuid)';
+    expect(codes(reconcileModule(module, catalog))).toContain('missing-function');
+    catalog.functions.push({
+      ...catalog.functions[0], identityArguments: 'uuid', searchPath: null,
+    });
+    expect(codes(reconcileModule(module, catalog))).toContain('definer-without-search-path');
+    catalog.functions.reverse();
+    expect(codes(reconcileModule(module, catalog))).toContain('definer-without-search-path');
+    catalog.functions = [{ ...baseCatalog.functions[0] }];
+    delete catalog.functions[0].identityArguments;
+    expect(codes(reconcileModule(module, catalog))).toContain('missing-function');
+    delete module.functions[0].signature;
+    expect(reconcileModule(module, catalog).ok).toBe(true);
+  });
+
+  test('declared disabled triggers must remain disabled', () => {
+    const module = structuredClone(baseModule);
+    module.triggers[0].enabled = false;
+    const catalog = cloneCatalog();
+    expect(codes(reconcileModule(module, catalog))).toContain('trigger-enabled-mismatch');
+    catalog.triggers[0].enabled = false;
+    expect(reconcileModule(module, catalog).ok).toBe(true);
+  });
+
   test('全一致时 ok=true 且无 issue', () => {
     const report = reconcileModule(baseModule, cloneCatalog());
     expect(report.module).toBe('cases');
@@ -100,6 +173,35 @@ describe('reconcileModule', () => {
     const report = reconcileModule(baseModule, catalog);
     expect(report.ok).toBe(false);
     expect(codes(report)).toContain('missing-policy');
+  });
+
+  test('missing-table：声明的表在 catalog 中不存在', () => {
+    const catalog = cloneCatalog();
+    catalog.tables = [];
+    const report = reconcileModule(baseModule, catalog);
+    expect(report.ok).toBe(false);
+    expect(codes(report)).toContain('missing-table');
+  });
+
+  test('policy contract：操作、角色和声明的表达式必须与 catalog 一致', () => {
+    const module = defineDatabaseModule({
+      ...baseModule,
+      policies: [{
+        ...baseModule.policies[0],
+        operation: 'update',
+        roles: ['anon'],
+        usingExpr: 'tenant_id = other_tenant()',
+        checkExpr: 'tenant_id = current_tenant()',
+      }],
+    });
+    const report = reconcileModule(module, cloneCatalog());
+    expect(codes(report)).toEqual(expect.arrayContaining([
+      'policy-command-mismatch',
+      'policy-roles-mismatch',
+      'policy-using-mismatch',
+      'policy-check-mismatch',
+    ]));
+    expect(report.ok).toBe(false);
   });
 
   test('missing-function：声明的函数在 catalog 中不存在', () => {
@@ -153,12 +255,35 @@ describe('reconcileModule', () => {
   });
 
   test('definer-without-search-path：searchPath 含 pg_temp 或空元素', () => {
-    for (const bad of ['public, pg_temp', 'public, ', '"$user", public,,']) {
+    for (const bad of ['public, pg_temp', 'public, ', '"$user", public,,', '"$user", public']) {
       const catalog = cloneCatalog();
       catalog.functions[0].searchPath = bad;
       const report = reconcileModule(baseModule, catalog);
       expect(codes(report)).toContain('definer-without-search-path');
     }
+  });
+
+  test('definer-without-search-path：显式空 search_path 是合法的固定路径', () => {
+    for (const path of ['', '""']) {
+      const catalog = cloneCatalog();
+      catalog.functions[0].searchPath = path;
+      expect(reconcileModule(baseModule, catalog).ok).toBe(true);
+    }
+  });
+
+  test('function overload：同名重载必须通过完整 signature 选择', () => {
+    const catalog = cloneCatalog();
+    catalog.functions.push({
+      ...catalog.functions[0],
+      identityArguments: 'uuid',
+    });
+    expect(codes(reconcileModule(baseModule, catalog))).toContain('ambiguous-function-overload');
+
+    const module = defineDatabaseModule({
+      ...baseModule,
+      functions: [{ ...baseModule.functions[0], signature: 'public.case_create()' }],
+    });
+    expect(codes(reconcileModule(module, catalog))).not.toContain('ambiguous-function-overload');
   });
 
   test('security-mismatch：声明 invoker 但 catalog 为 definer（路径固定则不报 error）', () => {
@@ -225,6 +350,6 @@ describe('reconcileModule', () => {
     catalog.triggers[0].enabled = false;
     const report = reconcileModule(baseModule, catalog);
     expect(codes(report)).not.toContain('undeclared-trigger');
-    expect(codes(report)).not.toContain('missing-trigger');
+    expect(codes(report)).toContain('disabled-trigger');
   });
 });

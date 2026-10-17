@@ -37,7 +37,14 @@ and error payloads, WebSocket behavior, activation/preheat, and representative
 Function dispatch. Environment-dependent route registration must match at
 capture and runtime. Health/version checks alone do not prove API parity.
 
-## Function Publish Option
+## Experimental Function Publish Option
+
+Unlike the platform A/B tooling, this explicitly requested CLI option publishes
+an artifact through the ordinary deployment API. It is not enabled by default.
+Replay the Function's authentication, validation, status/error payloads and
+application behavior against a non-AOT build before production use. In particular,
+coercion/codec schemas can change validation error detail. Read-only mode rejects
+AOT deployment before importing local application code.
 
 ```sh
 supacloud-cli edge_functions deploy --ref abc123 --slug hello \
@@ -88,7 +95,7 @@ Validated with Bun 1.4.3 on macOS arm64 and platform Elysia 2.0.0-beta.21:
   environment access, byte-exact prebundled upload, SHA and activation identity.
 - A Function AOT bundle passes Management's prebundled normalization unchanged.
 - Management capture warns that 23 coercion/codec validator slots may produce
-  coarser 422 error details. The current replay shows no public contract
+  coarser 422 error details. The sampled replay scenarios show no public contract
   difference because the Management error hook intentionally returns the stable
   `400 Validation failed` envelope. Keep the replay as a release gate.
 
@@ -115,6 +122,47 @@ test data in both candidates, compare their public contracts, and measure cold
 startup, warm latency, throughput, and memory under the same workload. Keep plain
 builds as the default until these gates pass; the probe replay alone is not
 production approval.
+
+## Current-Main Review Evidence
+
+Additional review on Linux x64, Bun 1.4.3 and Elysia 2.0.0-beta.32:
+
+- The CLI suite passes 155 tests, including minified and unminified AOT runtime
+  auth/validation, runtime and module-initialization environment values, parent
+  credential/`.env` isolation, disconnected app rejection, exact upload SHA/CAS,
+  and rejecting AOT in read-only mode before local execution.
+- Both generated Function variants pass Management's normalization byte-for-byte.
+- Both platform A/B pairs build. Edge capture isolation tests reject any attempt
+  to instantiate a Worker or listener and verify no Function directory is created.
+- Both Edge bundles pass the same 30 activation/config/CORS tests, including
+  attested artifact/symlink rejection, activation fencing, restart identity,
+  authenticated dispatch and preflight behavior.
+- A focused Management exported-app replay matches all 747 registered method/path
+  entries and nine status/body responses: version, missing/invalid/master auth,
+  provider data, invalid numeric coercion queries, metrics auth and missing paths.
+  This is **not** a database-backed or comprehensive authenticated API replay.
+- The committed 25-scenario Management HTTP replay also passes on this version,
+  including malformed JSON, storage envelopes, runtime-only authentication,
+  AppError mappings, multipart upload, streaming, OpenAPI JSON and probe WebSocket
+  echo. These probes use real app hooks but do not exercise business writes.
+- Current Management capture warns about **24** coercion/codec validator slots.
+  The sampled global validation responses match, but the warning is not waived.
+  Database-backed business behavior, real authenticated/business WebSocket flows
+  and full API parity remain unverified. Probe echo coverage does not waive them.
+
+The Edge suites can be replayed without changing the fixtures after building:
+
+```sh
+bun --no-env-file test scripts/elysia-aot-ab.test.ts
+for mode in plain aot; do
+  SUPACLOUD_EDGE_TEST_ENTRYPOINT=/tmp/edge-aot-ab/edge-runtime-$mode.js \
+    bun --no-env-file test packages/edge-runtime/server-function-config.test.ts \
+      packages/edge-runtime/server-options-preflight.test.ts
+done
+```
+
+These results support continued experimental evaluation only. They do not promote
+AOT to the platform defaults or establish production readiness.
 
 ## Acceptance Scenarios
 
