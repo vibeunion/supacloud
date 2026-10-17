@@ -219,7 +219,10 @@ export async function transformImage(
   const actualSourceSize = source instanceof Uint8Array
     ? source.byteLength
     : await Promise.resolve(source.size as number | Promise<number>)
-  const sourceSize = Math.max(knownSourceSize ?? 0, actualSourceSize)
+  const declaredSourceSize = typeof knownSourceSize === 'number' && Number.isFinite(knownSourceSize) && knownSourceSize >= 0
+    ? knownSourceSize
+    : 0
+  const sourceSize = Math.max(declaredSourceSize, actualSourceSize)
   if (sourceSize > limits.maxInputBytes) {
     return imageTransformInputTooLarge(limits.maxInputBytes)
   }
