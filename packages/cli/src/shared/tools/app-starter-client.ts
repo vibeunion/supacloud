@@ -89,11 +89,19 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
       try { listener(); } catch {}
     }
   };
-  function finish(operation: ReviewOperation, result: ReviewWriteResult) {
+  function outcome(operation: ReviewOperation, result: unknown): ReviewWriteResult["status"] {
+    try {
+      if (result === null || typeof result !== "object" || Array.isArray(result) || !("status" in result)) return "unknown";
+      const status = result.status;
+      if (status === "denied" || status === "conflict") return status;
+      if (status === "confirmed" && "operationId" in result && "reviewId" in result
+        && result.operationId === operation.operationId && result.reviewId === operation.reviewId) return "confirmed";
+    } catch { /* Invalid adapters must not discard recovery evidence. */ }
+    return "unknown";
+  }
+  function finish(operation: ReviewOperation, result: unknown) {
     if (closed) return;
-    let status = result.status === "confirmed"
-      && (result.operationId !== operation.operationId || result.reviewId !== operation.reviewId)
-      ? "unknown" : result.status;
+    let status = outcome(operation, result);
     if (status !== "unknown") {
       try {
         if (pending) {
@@ -174,7 +182,10 @@ export function createReviewClient(transport: ReviewTransport, pending?: ReviewP
       try {
         const result = await transport.lookup(structuredClone(operation));
         // Denial or conflict during lookup does not prove the original write did not commit.
-        finish(operation, result.status === "confirmed" ? result : { status: "unknown" });
+        // Normalize once: custom adapter accessors may change between reads.
+        finish(operation, outcome(operation, result) === "confirmed"
+          ? { status: "confirmed", operationId: operation.operationId, reviewId: operation.reviewId }
+          : { status: "unknown" });
         if (snapshot().mutation.status === "confirmed") await load();
       } catch {
         finish(operation, { status: "unknown" });
@@ -381,6 +392,72 @@ test("conflict refreshes but does not retry the write; wrong receipt remains unk
   await wrong.approve(draft);
   expect(wrong.snapshot().mutation.status).toBe("unknown");
 });
+
+test("malformed adapter outcomes preserve pending evidence across writes and recovery", async () => {
+  const malformed: unknown[] = [
+    null, undefined, false, [], "confirmed", {}, { status: "complete" }, { status: 200 },
+    { status: "confirmed" }, { status: "confirmed", operationId: "foreign", reviewId: draft.id },
+    { get status() { throw new Error("private adapter detail"); } },
+  ];
+  for (const kind of ["approve", "upload"] as const) {
+    for (const value of malformed) {
+      let saved: ReviewOperation | null = null, sends = 0, clears = 0, reads = 0, recovered = false;
+      const readSaved = (): ReviewOperation | null => saved;
+      // Simulate an untyped/custom adapter crossing the public TypeScript boundary.
+      const invalid = value as ReviewWriteResult;
+      const send = async () => { sends++; return invalid; };
+      const client = createReviewClient(transport({
+        approve: send, upload: send,
+        list: async () => { reads++; return []; },
+        lookup: async op => recovered
+          ? { status: "confirmed", operationId: op.operationId, reviewId: op.reviewId } : invalid,
+      }), {
+        load: () => saved, save: op => { saved = op; },
+        clear: () => { clears++; saved = null; },
+      });
+      const submit = () => kind === "approve" ? client.approve(draft)
+        : client.upload(uploadDraft, new Blob(["hello"], { type: "text/plain" }));
+      await submit();
+      const original = client.snapshot().mutation.operation;
+      expect(original).not.toBeNull();
+      expect(readSaved()).toEqual(original);
+      expect(client.snapshot().mutation).toEqual({ status: "unknown", operation: original });
+      await client.reconcile();
+      await submit();
+      expect(client.snapshot().mutation).toEqual({ status: "unknown", operation: original });
+      expect(readSaved()).toEqual(original);
+      expect(sends).toBe(1); expect(clears).toBe(0); expect(reads).toBe(0);
+      expect(JSON.stringify(client.snapshot())).not.toContain("private adapter detail");
+      recovered = true;
+      await client.reconcile();
+      expect(client.snapshot().mutation.status).toBe("confirmed");
+      expect(readSaved()).toBeNull();
+      expect(sends).toBe(1); expect(clears).toBe(1); expect(reads).toBe(1);
+    }
+  }
+});
+test("recovery validates adapter accessors once before clearing pending evidence", async () => {
+  let saved: ReviewOperation | null = null, reads = 0, sends = 0, clears = 0;
+  const client = createReviewClient(transport({
+    approve: async () => { sends++; return { status: "unknown" }; },
+    lookup: async operation => ({
+      get status() { return ++reads === 1 ? "confirmed" as const : "denied" as const; },
+      operationId: operation.operationId, reviewId: operation.reviewId,
+    }),
+  }), {
+    load: () => saved, save: operation => { saved = operation; },
+    clear: () => { clears++; saved = null; },
+  });
+  await client.approve(draft);
+  expect(client.snapshot().mutation.status).toBe("unknown");
+  await client.reconcile();
+  expect(reads).toBe(1);
+  expect(client.snapshot().mutation.status).toBe("confirmed");
+  expect(saved).toBeNull();
+  expect(clears).toBe(1);
+  expect(sends).toBe(1);
+});
+
 test("upload validates size/type, retains failure identity, and disposal drops late results", async () => {
   let uploads = 0;
   const client = createReviewClient(transport({ upload: async () => { uploads++; throw new Error("private"); } }));
