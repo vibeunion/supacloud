@@ -152,4 +152,70 @@ describe('Bearer Auth endpoint account eligibility', () => {
     expect((await invoke('verify')).status).toBe(422)
     expect((await db!.query('select token from auth.refresh_tokens')).rows).toHaveLength(1)
   })
+
+  for (const change of [
+    "update auth.users set banned_until = now() + interval '1 hour' where id = $1",
+    "update auth.users set banned_until = 'infinity' where id = $1",
+    'update auth.users set deleted_at = now() where id = $1',
+    'delete from auth.users where id = $1',
+  ]) {
+    test(`rejects a user update when ${change} commits before the write`, async () => {
+      const original = db!.transaction.bind(db!)
+      let afterChange: Awaited<ReturnType<typeof snapshot>> | undefined
+      let identities: unknown
+      const changed = spyOn(db!, 'transaction').mockImplementationOnce(
+        async <T>(fn: (query: Querier) => Promise<T>): Promise<T> => {
+          await db!.query(change, [userId])
+          afterChange = await snapshot()
+          identities = (await db!.query('select * from auth.identities')).rows
+          return original(fn)
+        },
+      )
+      try {
+        const response = await invoke('update-user')
+        expect(response.status).toBe(401)
+        expect(await response.json()).toMatchObject({ error_code: 'no_authorization' })
+        expect(afterChange).toBeDefined()
+        expect(await snapshot()).toEqual(afterChange)
+        expect((await db!.query('select * from auth.identities')).rows).toEqual(identities)
+      } finally {
+        changed.mockRestore()
+      }
+    })
+  }
+
+  test('still upgrades an eligible anonymous user and creates its email identity', async () => {
+    await db!.query('update auth.users set is_anonymous = true where id = $1', [userId])
+    const response = await invoke('update-user')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      id: userId, is_anonymous: false,
+      app_metadata: { provider: 'email', providers: ['email'] },
+      identities: [expect.objectContaining({ provider: 'email' })],
+    })
+  })
+
+  test('does not overwrite provider metadata when an anonymous account became permanent before the write', async () => {
+    await db!.query('update auth.users set is_anonymous = true where id = $1', [userId])
+    const original = db!.transaction.bind(db!)
+    const changed = spyOn(db!, 'transaction').mockImplementationOnce(
+      async <T>(fn: (query: Querier) => Promise<T>): Promise<T> => {
+        await db!.query(
+          `update auth.users set is_anonymous = false,
+           raw_app_meta_data = '{"provider":"google","providers":["google","email"]}' where id = $1`,
+          [userId],
+        )
+        return original(fn)
+      },
+    )
+    try {
+      const response = await invoke('update-user')
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        is_anonymous: false, app_metadata: { provider: 'google', providers: ['google', 'email'] },
+      })
+    } finally {
+      changed.mockRestore()
+    }
+  })
 })
