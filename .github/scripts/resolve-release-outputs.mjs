@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { validateReleaseIdentity } from './validate-release-identity.mjs';
 
 /** @param {string} command @param {string[]} args */
 const execute = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim();
@@ -12,7 +13,47 @@ const execute = (command, args) => execFileSync(command, args, { encoding: 'utf8
  * @returns {Record<string, string>}
  */
 export function resolveReleaseOutputs(input, run = execute) {
-  if (input.outcome === 'success') return input.outputs;
+  if (input.outcome === 'success') {
+    if (!/^[a-f0-9]{40}$/.test(input.sha)) throw new Error('Invalid release source commit');
+    const read = file => JSON.parse(run('git', ['show', `${input.sha}:${file}`]));
+    const current = read('.release-please-manifest.json');
+    const config = read('release-please-config.json');
+    const released = Object.entries(input.outputs)
+      .filter(([key, value]) => key.endsWith('--release_created') && value === 'true')
+      .map(([key]) => key.slice(0, -'--release_created'.length));
+    const declared = JSON.parse(input.outputs.paths_released || '[]');
+    if (!Array.isArray(declared) || new Set(declared).size !== declared.length
+      || declared.length !== released.length || declared.some(path => !released.includes(path))
+      || (input.outputs.releases_created === 'true') !== (released.length > 0)) {
+      throw new Error('Inconsistent release output inventory');
+    }
+    for (const path of released) {
+      // A delayed release from another commit cannot use this event's parent
+      // manifest to establish completeness. Recover it explicitly instead.
+      if (input.outputs[`${path}--sha`] !== input.sha) {
+        throw new Error(`Release output source mismatch: ${path}`);
+      }
+      // Validate paths before using them in a git object lookup.
+      validateReleaseIdentity(path, current[path], config, current[path], input.outputs[`${path}--tag_name`]);
+      validateReleaseIdentity(path, current[path], config, read(`${path}/package.json`).version,
+        input.outputs[`${path}--tag_name`]);
+      if (input.outputs[`${path}--version`] !== undefined
+        && input.outputs[`${path}--version`] !== current[path]) {
+        throw new Error(`Release output version mismatch: ${path}`);
+      }
+    }
+    // Dispatch with no new releases is an intentional npm-only retry. Normal
+    // pushes (and dispatches creating releases) must cover every manifest bump.
+    if (input.event === 'push' || released.length > 0) {
+      const previous = JSON.parse(run('git', ['show', `${input.sha}^:.release-please-manifest.json`]));
+      for (const [path, version] of Object.entries(current)) {
+        if (previous[path] !== version && !released.includes(path)) {
+          throw new Error(`Missing changed release output: ${path}`);
+        }
+      }
+    }
+    return input.outputs;
+  }
   if (input.outcome !== 'failure' || input.repository !== 'vibeunion/supacloud'
     || input.event !== 'push' || input.ref !== 'refs/heads/main'
     || !/^[a-f0-9]{40}$/.test(input.sha)) {

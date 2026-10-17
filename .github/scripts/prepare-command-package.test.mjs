@@ -279,7 +279,7 @@ test('recovery runs the command package graph after a tag-only release', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /recover_npm:\n\s+description: Retry missing command-package publications[\s\S]*?type: boolean/);
   assert.match(workflow,
-    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && inputs\.recover_management_tag == '' && inputs\.recover_edge_runtime_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true \|\| \(inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'\) \|\| \(inputs\.recover_query == true && github\.ref == 'refs\/heads\/main'\)\) \}\}/);
+    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && needs\.release-please\.result == 'success' && inputs\.recover_management_tag == '' && inputs\.recover_edge_runtime_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true \|\| \(inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'\) \|\| \(inputs\.recover_query == true && github\.ref == 'refs\/heads\/main'\)\) \}\}/);
   const contracts = workflow.indexOf('name: Publish command contracts');
   const commands = workflow.indexOf('name: Publish durable commands');
   assert.match(workflow.slice(contracts, commands), /inputs\.recover_npm == true/);
