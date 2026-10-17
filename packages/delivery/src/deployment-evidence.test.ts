@@ -138,3 +138,44 @@ test("free-form receipt notes never become recovery commands or leak into summar
   expect(JSON.stringify(summarizeDeploymentEvidence(value))).not.toContain("private");
   expect(formatDeploymentEvidence(value)).not.toContain("arbitrary");
 });
+
+test("failed compatibility is not downgraded to missing proof in legacy customer summaries", () => {
+  const value = evidence();
+  value.database.migration.compatibility = "failed";
+  value.status = deriveDeploymentEvidenceStatus(value);
+  expect(value.status).toBe("incomplete");
+  expect(parseDeploymentEvidence(value)).toEqual(value);
+  const report = summarizeDeploymentEvidence(value);
+  expect(report.status).toBe("failed");
+  expect(report.recordedStatus).toBe("incomplete");
+  expect(report.issues.map(issue => [issue.component, issue.status])).toEqual([["database.migration", "failed"]]);
+  expect(formatDeploymentEvidence(value)).toContain("status:     failed");
+  expect(formatDeploymentEvidence(value)).toContain("recorded status: incomplete (customer assessment differs)");
+  expect(value.status).toBe("incomplete");
+});
+
+test("rollback uncertainty takes precedence over missing operational proof", () => {
+  const value = evidence();
+  value.rollback.status = "unknown";
+  value.database.backup.latest_success_at = null;
+  value.status = deriveDeploymentEvidenceStatus(value);
+  const report = summarizeDeploymentEvidence(value);
+  expect(report.recordedStatus).toBe("incomplete");
+  expect(report.status).toBe("unknown");
+  expect(report.issues.map(issue => [issue.component, issue.status]))
+    .toEqual([["database.backup", "incomplete"], ["code-rollback", "unknown"]]);
+  expect(report.automaticMutationRetry).toBe(false);
+  expect(report.liveObservationPerformed).toBe(false);
+});
+
+test("known failures take precedence over unknown rollback and preserve all issues", () => {
+  const value = evidence();
+  value.components[0]!.status = "failed";
+  value.rollback.status = "unknown";
+  value.status = deriveDeploymentEvidenceStatus(value);
+  const report = summarizeDeploymentEvidence(value);
+  expect(report.status).toBe("failed");
+  expect(report.recordedStatus).toBe("failed");
+  expect(report.issues.map(issue => [issue.component, issue.status]))
+    .toEqual([["management-api", "failed"], ["code-rollback", "unknown"]]);
+});
