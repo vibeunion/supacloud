@@ -1,4 +1,6 @@
 import { Worker, type WorkerOptions } from "worker_threads";
+import { functionBytecodeCache } from "./function-bytecode";
+import type { FunctionBytecodeArtifact } from "./function-bytecode-contract";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
@@ -36,6 +38,7 @@ interface DispatchOptions {
   moduleVersion?: string;
   envProof?: string;
   artifactSha256?: string;
+  bytecode?: "off" | "auto" | "required";
   env: Record<string, string>;
   internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
   request: Request;
@@ -192,6 +195,8 @@ type PreheatOptions = {
   moduleVersion?: string;
   envProof?: string;
   attestation?: EdgeRuntimePreheatIdentity;
+  bytecode?: "off" | "auto" | "required";
+  bytecodeArtifact?: FunctionBytecodeArtifact;
   maxWorkers?: number;
 };
 
@@ -223,6 +228,7 @@ export type VersionedPreheatRequest = {
   moduleVersion: string;
   envProof?: string;
   attestation?: EdgeRuntimePreheatIdentity;
+  bytecode?: "off" | "auto" | "required";
   maxWorkers?: number;
 };
 
@@ -1051,6 +1057,8 @@ export class WorkerPool {
         moduleVersion: opts.moduleVersion,
         envProof: opts.envProof,
         artifactSha256: opts.artifactSha256,
+        bytecode: opts.bytecode,
+        bytecodeArtifact: functionBytecodeCache.lookup(opts),
         env: opts.env,
         internalBindings: opts.internalBindings,
         tlsPolicy,
@@ -1504,6 +1512,8 @@ export class WorkerPool {
       moduleVersion: request.options.moduleVersion,
       envProof: request.options.envProof,
       artifactSha256: request.options.attestation?.artifact_sha256,
+      bytecode: request.options.bytecode,
+      bytecodeArtifact: request.options.bytecodeArtifact,
       attestation: request.options.attestation,
       env: request.env,
       tlsPolicy,
@@ -1543,8 +1553,16 @@ export class WorkerPool {
   private async preheatWorker(request: WorkerPreheatRequest): Promise<WorkerPreheatResult> {
     this.assignWorkerProject(request.worker, request.options.projectRef);
     try {
+      const bytecodeArtifact = await functionBytecodeCache.prepare({
+        functionPath: request.functionPath,
+        projectRoot: request.projectRoot,
+        artifactSha256: request.options.attestation?.artifact_sha256,
+        bytecode: request.options.bytecode,
+      });
       const tlsPolicy = await this.resolveTlsPolicy(request.env);
-      return this.waitForWorkerPreheat(request, tlsPolicy);
+      return this.waitForWorkerPreheat({
+        ...request, options: { ...request.options, bytecodeArtifact },
+      }, tlsPolicy);
     } catch (error) {
       return this.failedPreheat(
         request,
@@ -1608,6 +1626,7 @@ export class WorkerPool {
             options: {
               projectRef: request.projectRef, moduleVersion: request.moduleVersion,
               envProof: request.envProof, attestation: request.attestation,
+              bytecode: request.bytecode,
             },
           }, workers), start);
           if (result.succeeded !== workers.length || result.attestation === null) {
@@ -1637,6 +1656,7 @@ export class WorkerPool {
         moduleVersion: request.moduleVersion,
         envProof: request.envProof,
         attestation: request.attestation,
+        bytecode: request.bytecode,
         maxWorkers: request.maxWorkers,
       },
     });
