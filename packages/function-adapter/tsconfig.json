@@ -11,6 +11,8 @@
   "include": [
     "src/index.ts",
     "src/sveltekit.ts",
-    "src/sveltekit-adapter.ts"
+    "src/sveltekit-adapter.ts",
+    "src/worker-http.ts",
+    "src/scheduled-worker.ts"
   ]
 }
