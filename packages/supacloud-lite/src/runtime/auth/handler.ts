@@ -513,19 +513,6 @@ export class AuthHandler {
         'Email changes that require confirmation are not supported by SupaCloud Lite V1'
       )
     }
-    // Upgrading an anonymous user to a permanent one: adding an email (and
-    // usually a password) keeps the same id + data, flips is_anonymous off, and
-    // records an email identity - matching supabase.auth.updateUser({ email }).
-    const upgradingAnon = (user.is_anonymous ?? false) && !!body.email
-    if (body.email) {
-      const email = body.email.toLowerCase().trim()
-      const clash = await this.db.query(`select id from auth.users where email = $1 and id <> $2`, [email, user.id])
-      if (clash.rows.length > 0) {
-        return authError(422, 'email_exists', 'A user with this email address has already been registered')
-      }
-      params.push(email)
-      sets.push(`email = $${params.length}, email_confirmed_at = now()`)
-    }
     if (body.password) {
       if (body.password.length < this.settings.minPasswordLength) {
         return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
@@ -537,24 +524,45 @@ export class AuthHandler {
       params.push(JSON.stringify(body.data))
       sets.push(`raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || $${params.length}::jsonb`)
     }
-    if (upgradingAnon) {
-      sets.push(`is_anonymous = false`)
-      sets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
-    }
-    if (sets.length === 0) {
-      return json(200, this.userJson(user, await this.getUserFactors(user.id), await this.getUserIdentities(user.id)))
-    }
-    params.push(user.id)
-    const payload = await this.db.transaction(async (query) => {
-      const res = await query<UserRow>(
-        `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
-        params
+    const response = await this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
       )
-      const updated = res.rows[0]
+      const current = currentResult.rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+
+      const transactionSets = [...sets]
+      const transactionParams = [...params]
+      const upgradingAnon = (current.is_anonymous ?? false) && !!body.email
+      if (body.email) {
+        const email = body.email.toLowerCase().trim()
+        const clash = await query(`select id from auth.users where email = $1 and id <> $2`, [email, current.id])
+        if (clash.rows.length > 0) {
+          return authError(422, 'email_exists', 'A user with this email address has already been registered')
+        }
+        transactionParams.push(email)
+        transactionSets.push(`email = $${transactionParams.length}, email_confirmed_at = now()`)
+      }
+      if (upgradingAnon) {
+        transactionSets.push(`is_anonymous = false`)
+        transactionSets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
+      }
+      if (transactionSets.length === 0) {
+        return json(200, await this.userJsonWithRelations(current, query))
+      }
+      transactionParams.push(current.id)
+      const updatedResult = await query<UserRow>(
+        `update auth.users set ${transactionSets.join(', ')}, updated_at = now() where id = $${transactionParams.length} returning *`,
+        transactionParams
+      )
+      const updated = updatedResult.rows[0]
+      if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
       if (body.email) await this.ensureEmailIdentity(updated, query)
-      return this.userJsonWithRelations(updated, query)
+      return json(200, await this.userJsonWithRelations(updated, query))
     })
-    return json(200, payload)
+    return response
   }
 
   private async logout(req: Request, url: URL): Promise<Response> {
