@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.9](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.8...edge-runtime-v0.32.9) (2026-10-17)
+
+
+### Bug Fixes
+
+* integrate reviewed customer, auth and release repairs ([#2027](https://github.com/vibeunion/supacloud/issues/2027)) ([5c07903](https://github.com/vibeunion/supacloud/commit/5c07903f20bfb069229cf3a829886fe96c78c288))
+
 ## [0.32.8](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.32.7...edge-runtime-v0.32.8) (2026-10-16)
 
 
