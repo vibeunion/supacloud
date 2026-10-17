@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.22](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.21...supacloud-v0.16.22) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+* **supacloud-lite:** bind email tokens to current account address ([#2047](https://github.com/vibeunion/supacloud/issues/2047)) ([355d08c](https://github.com/vibeunion/supacloud/commit/355d08cdbc7d0d90085a2208557f1decc1d15e82))
+
 ## [0.16.21](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.20...supacloud-v0.16.21) (2026-10-17)
 
 
