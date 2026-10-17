@@ -23,6 +23,23 @@ test("image declared-size boundary accepts 500 MiB and rejects the next byte", a
   expect(await transformImage(new OversizedBlob(), options, 1)).toMatchObject({ ok: false, status: 413 });
 });
 
+test("image transformation ignores invalid declared sizes and uses actual bytes", async () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGZkAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const options = { resize: "contain", format: "png" } as const;
+  for (const declaredSize of [undefined, Number.NaN, Infinity, -Infinity, -1, 1]) {
+    for (const source of [png, new Blob([png])]) {
+      expect(await transformImage(source, options, declaredSize, { maxInputBytes: 1 })).toMatchObject({
+        ok: false, status: 413,
+        message: "The source image exceeds the transformation limit (1 bytes)",
+      });
+      expect((await transformImage(source, options, declaredSize, { maxInputBytes: png.byteLength })).ok).toBe(true);
+    }
+  }
+});
+
 test("Lite config exposes separate operator-owned image limits", async () => {
   const root = await mkdtemp(join(process.cwd(), ".conversion-config-"));
   try {
@@ -92,4 +109,29 @@ test("Storage Handler rejects a declared oversized image before reading object b
   }, new URL("https://image.test.invalid?format=png"), false);
   expect(response.status).toBe(413);
   expect(reads).toBe(0);
+});
+
+test("Storage Handler checks actual bytes when metadata is missing, invalid, or understated", async () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGZkAAAAASUVORK5CYII=",
+    "base64",
+  );
+  for (const size of [undefined, null, "bad", Number.NaN, Infinity, -1, 1]) {
+    for (const maxInputBytes of [1, png.byteLength]) {
+      let reads = 0;
+      const handler = new StorageHandler(null as never, {
+        put: async () => {}, get: async () => { reads++; return png; },
+        delete: async () => {}, deleteMany: async () => {},
+      }, { jwtSecret: "test", imageTransformLimits: { maxInputBytes } });
+      const boundary = handler as unknown as {
+        transformImageResponse(row: unknown, url: URL, head: boolean): Promise<Response>;
+      };
+      const response = await boundary.transformImageResponse({
+        id: "id", bucket_id: "images", name: "test.png", owner: null, version: null,
+        metadata: { size, mimetype: "image/png" },
+      }, new URL("https://image.test.invalid?format=png"), false);
+      expect(reads).toBe(1);
+      expect(response.status).toBe(maxInputBytes === 1 ? 413 : 200);
+    }
+  }
 });
