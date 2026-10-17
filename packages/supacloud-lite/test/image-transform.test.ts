@@ -14,6 +14,17 @@ import type { StorageDriver } from '../src/runtime/types.js'
 const sourcePng = await new Bun.Image(createBmp(4, 2)).png().bytes()
 
 describe('storage image transforms', () => {
+  test('omits absent optional values and preserves supplied values', () => {
+    expect(parseImageTransform(new URLSearchParams())).toEqual({
+      ok: true,
+      value: { resize: 'contain', format: 'origin' },
+    })
+    expect(parseImageTransform(new URLSearchParams('width=8&height=4&resize=fill&format=webp&quality=80'))).toEqual({
+      ok: true,
+      value: { width: 8, height: 4, resize: 'fill', format: 'webp', quality: 80 },
+    })
+  })
+
   test('rejects cover and invalid transform parameters', () => {
     const cover = parseImageTransform(new URLSearchParams('width=8&resize=cover'))
     expect(cover.ok).toBe(false)
@@ -77,7 +88,10 @@ describe('storage image transforms', () => {
   })
 
   test('enforces the actual Blob size when metadata understates it', async () => {
-    const oversizedBlob = new Blob([new Uint8Array(25 * 1024 * 1024 + 1)])
+    class OversizedBlob extends Blob {
+      override get size() { return 500 * 1024 * 1024 + 1 }
+    }
+    const oversizedBlob = new OversizedBlob()
     const result = await transformImage(oversizedBlob, parseOptions('format=png'), 1)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(413)

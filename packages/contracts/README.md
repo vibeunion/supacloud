@@ -96,3 +96,19 @@ bun run typecheck:test
 bun test
 bun run build
 ```
+
+### Protocol error identity and releases
+
+`CommandError` uses a versioned nominal marker so independently bundled copies
+(including the ESM and CommonJS entrypoints) preserve protocol failure semantics.
+An arbitrary object or `Error` with a matching name/code is not a protocol error.
+The marker is an interoperability convention, not a security boundary against
+code already executing in the same process. Cross-realm errors and older,
+unbranded contracts releases are not recognized by this convention.
+
+When changing this protocol, publish fresh versions of affected consumers
+(`commands`, `db`, `elysia`, and their CLI/starter consumers) with the same exact
+contracts dependency, then verify a clean installed consumer graph. Release
+preparation resolves local dependency references, but cannot update the manifests
+inside versions already published to npm. Do not republish existing versions or
+rely on root-only overrides to repair consumers' transitive dependencies.
