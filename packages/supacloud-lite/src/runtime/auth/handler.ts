@@ -436,13 +436,40 @@ export class AuthHandler {
         await this.audit('login_failed', { actorEmail: email, traits: { grant_type: 'password' } })
         return authError(400, 'invalid_credentials', 'Invalid login credentials')
       }
-      // when confirmation is required, unverified accounts cannot sign in yet
-      if (!this.settings.autoconfirm && !user.email_confirmed_at) {
-        return authError(400, 'email_not_confirmed', 'Email not confirmed')
+      const response = await this.db.transaction(async (query) => {
+        const currentResult = await query<UserRow & { is_banned: boolean }>(
+          `select *, coalesce(banned_until > now(), false) as is_banned
+           from auth.users where id = $1 for update`,
+          [user.id],
+        )
+        const current = currentResult.rows[0]
+        if (!current || current.deleted_at !== null || !current.encrypted_password || current.email !== email) {
+          return authError(400, 'invalid_credentials', 'Invalid login credentials')
+        }
+        if (current.is_banned) {
+          return authError(400, 'user_banned', 'User is banned')
+        }
+        // Verify outside the lock, then ensure the verified credential is still current.
+        if (current.encrypted_password !== user.encrypted_password) {
+          return authError(400, 'invalid_credentials', 'Invalid login credentials')
+        }
+        if (!this.settings.autoconfirm && !current.email_confirmed_at) {
+          return authError(400, 'email_not_confirmed', 'Email not confirmed')
+        }
+        const signedIn = await query<UserRow>(
+          `update auth.users set last_sign_in_at = now() where id = $1 returning *`,
+          [current.id],
+        )
+        const updated = signedIn.rows[0]
+        if (!updated) {
+          return authError(400, 'invalid_credentials', 'Invalid login credentials')
+        }
+        return json(200, await this.sessionFor(updated, undefined, undefined, query))
+      })
+      if (response.ok) {
+        await this.audit('login', { actorId: user.id, actorEmail: email, traits: { grant_type: 'password' } })
       }
-      await this.db.query(`update auth.users set last_sign_in_at = now() where id = $1`, [user.id])
-      await this.audit('login', { actorId: user.id, actorEmail: user.email, traits: { grant_type: 'password' } })
-      return json(200, await this.sessionFor(user))
+      return response
     }
 
     if (grantType === 'refresh_token') {

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { AuthHandler } from '../src/runtime/auth/handler.js'
 import { InboxMailer } from '../src/runtime/auth/inbox.js'
 import { hashPassword } from '../src/runtime/auth/password.js'
@@ -11,6 +11,7 @@ describe('Password login account eligibility', () => {
   let auth: AuthHandler | undefined
   let userId: string
   let passwordHash: string
+  let replacementHash: string
   const email = 'password-eligibility@example.test'
   const password = 'correct-horse-battery-staple'
   const jwtSecret = 'password-eligibility-test-secret'.repeat(3)
@@ -19,6 +20,7 @@ describe('Password login account eligibility', () => {
   beforeAll(async () => {
     db = await Database.create()
     passwordHash = await hashPassword(password)
+    replacementHash = await hashPassword('replacement-password')
   }, 60_000)
 
   beforeEach(async () => {
@@ -57,12 +59,7 @@ describe('Password login account eligibility', () => {
     }), { role: 'anon', claims: null }, url)
   }
 
-  async function expectRejected(response: Response, code: string): Promise<void> {
-    expect(response.status).toBe(400)
-    const body: Record<string, unknown> = await response.json()
-    expect(body.error_code).toBe(code)
-    expect(body.access_token).toBeUndefined()
-    expect(body.refresh_token).toBeUndefined()
+  async function expectNoLogin(): Promise<void> {
     expect((await db!.query('select token from auth.refresh_tokens')).rows).toEqual([])
     expect((await db!.query(
       `select 1 from auth.audit_log_entries where payload->>'action' = 'login'`,
@@ -71,6 +68,30 @@ describe('Password login account eligibility', () => {
       'select last_sign_in_at = $1::timestamptz as unchanged from auth.users where id = $2',
       [previousSignIn, userId],
     )).rows[0].unchanged).toBe(true)
+  }
+
+  async function expectRejected(response: Response, code: string): Promise<void> {
+    expect(response.status).toBe(400)
+    const body: Record<string, unknown> = await response.json()
+    expect(body.error_code).toBe(code)
+    expect(body.access_token).toBeUndefined()
+    expect(body.refresh_token).toBeUndefined()
+    await expectNoLogin()
+  }
+
+  // Inject a committed change after the real password check, before session issuance.
+  async function loginAfterVerification(change: () => Promise<unknown>): Promise<Response> {
+    const verify = Bun.password.verify.bind(Bun.password)
+    const pending = spyOn(Bun.password, 'verify').mockImplementationOnce(async (candidate, hash, algorithm) => {
+      const matched = await verify(candidate, hash, algorithm)
+      await change()
+      return matched
+    })
+    try {
+      return await login()
+    } finally {
+      pending.mockRestore()
+    }
   }
 
   async function expectSession(response: Response): Promise<void> {
@@ -142,5 +163,78 @@ describe('Password login account eligibility', () => {
   test('retains the email confirmation requirement', async () => {
     await db!.query('update auth.users set email_confirmed_at = null where id = $1', [userId])
     await expectRejected(await login(), 'email_not_confirmed')
+  })
+
+  for (const scenario of [
+    { name: 'ban', update: "banned_until = now() + interval '1 hour'", code: 'user_banned' },
+    { name: 'indefinite ban', update: "banned_until = 'infinity'", code: 'user_banned' },
+    { name: 'soft deletion', update: 'deleted_at = now()', code: 'invalid_credentials' },
+    { name: 'email change', update: "email = 'replacement@example.test'", code: 'invalid_credentials' },
+    { name: 'password removal', update: 'encrypted_password = null', code: 'invalid_credentials' },
+    { name: 'confirmation removal', update: 'email_confirmed_at = null', code: 'email_not_confirmed' },
+  ]) {
+    test(`given verified credentials, when ${scenario.name} commits, then issuance is rejected`, async () => {
+      const response = await loginAfterVerification(() =>
+        db!.query(`update auth.users set ${scenario.update} where id = $1`, [userId]),
+      )
+      await expectRejected(response, scenario.code)
+    })
+  }
+
+  test('given a verified old password, when it is reset, then only the new password can sign in', async () => {
+    const response = await loginAfterVerification(() =>
+      db!.query('update auth.users set encrypted_password = $1 where id = $2', [replacementHash, userId]),
+    )
+    await expectRejected(response, 'invalid_credentials')
+    await expectSession(await login(email, 'replacement-password'))
+  })
+
+  test('rejects hard deletion during password verification without a server error', async () => {
+    const response = await loginAfterVerification(() => db!.query('delete from auth.users where id = $1', [userId]))
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error_code: 'invalid_credentials' })
+    expect((await db!.query('select token from auth.refresh_tokens')).rows).toEqual([])
+    expect((await db!.query(
+      `select 1 from auth.audit_log_entries where payload->>'action' = 'login'`,
+    )).rows).toEqual([])
+  })
+
+  test('given changed authorization data, when login succeeds, then claims reflect the current row', async () => {
+    const response = await loginAfterVerification(() =>
+      db!.query(
+        `update auth.users set role = 'authenticated', raw_app_meta_data = '{"access":"limited"}',
+           raw_user_meta_data = '{"name":"updated"}' where id = $1`,
+        [userId],
+      ),
+    )
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      access_token: string
+      user: { app_metadata: Record<string, unknown>; user_metadata: Record<string, unknown>; last_sign_in_at: string }
+    }
+    expect(await verifyJwt(body.access_token, jwtSecret)).toMatchObject({
+      sub: userId, role: 'authenticated', app_metadata: { access: 'limited' }, user_metadata: { name: 'updated' },
+    })
+    expect(body.user.app_metadata).toEqual({ access: 'limited' })
+    expect(body.user.user_metadata).toEqual({ name: 'updated' })
+    expect(Date.parse(body.user.last_sign_in_at)).toBeGreaterThan(Date.parse(previousSignIn))
+  })
+
+  test('given a session insert failure, when login fails, then sign-in time and success audit remain unchanged', async () => {
+    await db!.exec(`
+      create function public.reject_password_session() returns trigger language plpgsql as $$
+      begin raise exception 'password session insert failed'; end $$;
+      create trigger reject_password_session before insert on auth.refresh_tokens
+      for each row execute function public.reject_password_session();
+    `)
+    try {
+      const response = await login()
+      expect(response.status).toBe(500)
+      expect(await response.json()).toMatchObject({ error_code: 'unexpected_failure' })
+      await expectNoLogin()
+    } finally {
+      await db!.exec('drop trigger reject_password_session on auth.refresh_tokens; drop function public.reject_password_session();')
+    }
+    await expectSession(await login())
   })
 })
