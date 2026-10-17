@@ -9,6 +9,7 @@ import {
   imageTransformToSearchParams,
   parseImageTransform,
   transformImage,
+  imageTransformInputTooLarge,
   resolveImageTransformLimits,
   type ImageTransformLimits,
   type ImageTransformRequestOptions,
@@ -484,6 +485,11 @@ export class StorageHandler {
   private async transformImageResponse(row: ObjectRow, url: URL, head: boolean): Promise<Response> {
     const parsed = parseImageTransform(url.searchParams)
     if (!parsed.ok) return storageError(parsed.status, parsed.error, parsed.message)
+    const declaredSize = objectSize(row)
+    if (declaredSize !== undefined && declaredSize > this.transformLimits.maxInputBytes) {
+      const rejected = imageTransformInputTooLarge(this.transformLimits.maxInputBytes)
+      return storageError(rejected.status, rejected.error, rejected.message)
+    }
 
     let result: ImageTransformResult
     try {
