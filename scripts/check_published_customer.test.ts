@@ -1,13 +1,30 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertRegistryManifest, exactPublishedVersion, publishedConsumerEnvironment, writePrivateAcceptanceFile } from "./check_published_customer";
+import { assertInstalledPackagePath, assertPublishedPackageManifest, assertRegistryManifest, exactPublishedVersion, publishedConsumerEnvironment, writePrivateAcceptanceFile } from "./check_published_customer";
 
 test("published acceptance requires an immutable registry version", () => {
   expect(exactPublishedVersion("0.99.0")).toBe("0.99.0");
   for (const version of ["latest", "^0.99.0", "file:../cli", "../cli", "", undefined]) {
     expect(() => exactPublishedVersion(version)).toThrow("exact published version");
+  }
+});
+test("published package evidence requires the expected package identity and exact version", () => {
+  expect(assertPublishedPackageManifest({ name: "@supacloud/lite", version: "0.29.5" }, "@supacloud/lite", "0.29.5"))
+    .toBe("0.29.5");
+  expect(() => assertPublishedPackageManifest({ name: "@supacloud/compiler", version: "latest" }, "@supacloud/compiler"))
+    .toThrow("exact");
+  expect(() => assertPublishedPackageManifest({ name: "@supacloud/app", version: "0.1.0" }, "@supacloud/lite"))
+    .toThrow("name");
+  expect(() => assertPublishedPackageManifest({ name: "@supacloud/lite", version: "0.29.4" }, "@supacloud/lite", "0.29.5"))
+    .toThrow("match");
+  for (const version of [undefined, 29, "", "^0.29.5", "workspace:*"]) {
+    expect(() => assertPublishedPackageManifest({ name: "@supacloud/lite", version }, "@supacloud/lite"))
+      .toThrow();
+  }
+  for (const manifest of [null, [], {}, { version: "0.29.5" }]) {
+    expect(() => assertPublishedPackageManifest(manifest, "@supacloud/lite")).toThrow();
   }
 });
 test("consumer verification cannot fall back to workspace, tarballs or URLs", () => {
@@ -16,6 +33,44 @@ test("consumer verification cannot fall back to workspace, tarballs or URLs", ()
     expect(() => assertRegistryManifest({ overrides: { "@supacloud/app": version } })).toThrow();
   }
   expect(() => assertRegistryManifest({ overrides: { nested: { package: "1.0.0" } } })).toThrow();
+});
+
+test("consumer package checks accept canonical install aliases but reject external package links", async () => {
+  const root = await mkdtemp(join(tmpdir(), "published-installed-path-"));
+  try {
+    const nodeModules = join(root, "node_modules");
+    const packageRoot = join(nodeModules, "@supacloud", "compiler");
+    await mkdir(packageRoot, { recursive: true });
+    const entry = join(packageRoot, "index.js");
+    await writeFile(entry, "export {};\n");
+    await expect(assertInstalledPackagePath(await realpath(entry), nodeModules, "CLI compiler"))
+      .resolves.toBeUndefined();
+    const alias = join(root, "aliased_modules");
+    await symlink(nodeModules, alias, "junction");
+    await expect(assertInstalledPackagePath(entry, alias, "CLI compiler"))
+      .resolves.toBeUndefined();
+    await expect(assertInstalledPackagePath(join(alias, "@supacloud", "compiler", "index.js"), nodeModules, "CLI compiler"))
+      .resolves.toBeUndefined();
+    await symlink(packageRoot, join(nodeModules, "internal"), "junction");
+    await expect(assertInstalledPackagePath(join(nodeModules, "internal", "index.js"), nodeModules, "CLI compiler"))
+      .resolves.toBeUndefined();
+    const external = join(root, "node_modules-external");
+    await mkdir(external);
+    await writeFile(join(external, "index.js"), "export {};\n");
+    await symlink(external, join(nodeModules, "escaped"), "junction");
+    await expect(assertInstalledPackagePath(join(nodeModules, "escaped", "index.js"), nodeModules, "CLI compiler"))
+      .rejects.toThrow("must be an installed package");
+    await expect(assertInstalledPackagePath(join(external, "index.js"), nodeModules, "CLI compiler"))
+      .rejects.toThrow("must be an installed package");
+    await expect(assertInstalledPackagePath(root, nodeModules, "CLI compiler"))
+      .rejects.toThrow("must be an installed package");
+    await expect(assertInstalledPackagePath(nodeModules, nodeModules, "CLI compiler"))
+      .rejects.toThrow("must be an installed package");
+    await expect(assertInstalledPackagePath(join(packageRoot, "missing.js"), nodeModules, "CLI compiler"))
+      .rejects.toThrow();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("consumer subprocesses preserve proxy trust settings but not application credentials or TLS bypasses", () => {

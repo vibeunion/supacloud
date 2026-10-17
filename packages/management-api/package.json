@@ -1,7 +1,7 @@
 {
   "name": "@supacloud/management-api",
   "license": "Apache-2.0",
-  "version": "0.118.5",
+  "version": "0.120.0",
   "description": "SupaCloud Multi-tenant Management API",
   "type": "module",
   "scripts": {
@@ -40,7 +40,8 @@
     "build:macos-amd64": "bun build src/standalone.ts --compile --target=bun-macos-x64 --outfile=supacloud-macos-amd64",
     "build:macos-arm64": "bun build src/standalone.ts --compile --target=bun-macos-arm64 --outfile=supacloud-macos-arm64",
     "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64",
-    "build:all": "bun run prebuild && bun run build:linux && bun run build:macos"
+    "build:all": "bun run prebuild && bun run build:linux && bun run build:macos",
+    "build:aot:ab": "bun run ../../scripts/elysia-aot-ab.ts management-api"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
