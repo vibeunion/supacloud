@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { executeBufferedCommand } from '../scripts/subprocess.js'
+import { testTimeout } from './helpers/timeouts.js'
 import { createSymlinkIfPermitted } from './support/symlink.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
@@ -42,6 +44,7 @@ describe('db reset CLI', () => {
     expect(await readdir(stateDir)).toEqual([])
   })
 
+  // Two fresh on-disk PGlite initializations plus a status subprocess need the Windows budget.
   test('resets initialized state without replacing its secrets', async () => {
     const projectDir = await temporaryProject()
     const migrationsDir = join(projectDir, 'supabase', 'migrations')
@@ -67,7 +70,7 @@ describe('db reset CLI', () => {
     const status = await runCli(projectDir, ['status'])
     expect(status.exitCode).toBe(0)
     expect(status.stdout.includes(migrationVersion)).toBe(true)
-  }, 30_000)
+  }, testTimeout(30_000))
 
   test('preserves database and storage when the secrets marker is invalid', async () => {
     const projectDir = await temporaryProject()
@@ -163,19 +166,16 @@ async function temporaryProject(): Promise<string> {
 async function runCli(projectDir: string, command: string[]) {
   const bunExecutable = Bun.which('bun')
   if (!bunExecutable) throw new Error('Bun is required to run the Lite CLI test')
-  const cliProcess = Bun.spawn({
-    cmd: [bunExecutable, cliPath, ...command, '--project-dir', projectDir],
+  const execution = await executeBufferedCommand({
+    command: [bunExecutable, cliPath, ...command, '--project-dir', projectDir],
     cwd: projectDir,
     env: isolatedProjectEnvironment(),
-    stdout: 'pipe',
-    stderr: 'pipe',
+    timeoutMs: testTimeout(20_000),
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    cliProcess.exited,
-    new Response(cliProcess.stdout).text(),
-    new Response(cliProcess.stderr).text(),
-  ])
-  return { exitCode, stdout, stderr }
+  if (execution.timedOut) {
+    throw new Error(`Lite CLI ${command.join(' ')} exceeded its subprocess timeout`)
+  }
+  return execution
 }
 
 function isolatedProjectEnvironment(): Record<string, string | undefined> {

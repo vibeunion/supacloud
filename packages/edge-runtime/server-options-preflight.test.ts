@@ -115,7 +115,7 @@ function startEdgeRuntime(managementPort: number, corsMode = ""): TestRuntime {
   const edgePort = reserveEdgePort();
   const edgeProcess = Bun.spawn([
     process.execPath,
-    join(import.meta.dir, "server.ts"),
+    process.env.SUPACLOUD_EDGE_TEST_ENTRYPOINT || join(import.meta.dir, "server.ts"),
   ], {
     cwd: import.meta.dir,
     stdin: "ignore",

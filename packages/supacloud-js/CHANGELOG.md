@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.43.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.43.0...supacloud-js-v0.43.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* validate starter query page envelopes ([#2009](https://github.com/vibeunion/supacloud/issues/2009)) ([e8d392b](https://github.com/vibeunion/supacloud/commit/e8d392bb8ad05ca164bbb3b5e383a95b09aba80a))
+
+
+### Dependencies
+
+* align the published @supacloud/contracts dependency to 0.11.2; retain @supacloud/query 0.3.1.
+
 ## [0.43.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.42.1...supacloud-js-v0.43.0) (2026-10-15)
 
 

@@ -224,6 +224,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   const storage = new StorageHandler(db, config.storageDriver ?? new MemoryStorageDriver(), {
     jwtSecret,
     defaultFileSizeLimit: config.storageFileSizeLimit,
+    imageTransformLimits: config.storageImageTransformLimits,
     log,
   })
   if (config.buckets?.length) {

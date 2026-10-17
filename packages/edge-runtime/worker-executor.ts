@@ -40,6 +40,7 @@ import {
   assertTrustedFunctionArtifact,
   withTrustedFunctionArtifact,
 } from "./trusted-function-files";
+import { isFunctionBytecodeArtifact, type FunctionBytecodeArtifact } from "./function-bytecode-contract";
 
 const runtimeBunFile = Bun.file.bind(Bun);
 const setProjectRoot = initializeProjectRootControl();
@@ -83,6 +84,8 @@ type PreheatMessage = {
   moduleVersion?: string;
   envProof?: string;
   artifactSha256?: string;
+  bytecode?: "off" | "auto" | "required";
+  bytecodeArtifact?: FunctionBytecodeArtifact;
   attestation?: EdgeRuntimePreheatIdentity;
   env: Record<string, string>;
   tlsPolicy?: EdgeFetchTlsPolicy;
@@ -479,7 +482,20 @@ async function loadModule(input: {
   projectRef: string;
   envProof?: string;
   artifactSha256?: string;
+  bytecodeArtifact?: FunctionBytecodeArtifact;
+  bytecode?: "off" | "auto" | "required";
 }): Promise<LoadModuleResult> {
+  const derived = input.bytecodeArtifact;
+  if (input.bytecode === "required" && !derived) {
+    throw new Error("Required Function bytecode is not prepared");
+  }
+  if (derived) {
+    if (!input.artifactSha256 || derived.sourceSha256 !== input.artifactSha256
+      || input.bytecode === "off") throw new Error("Function bytecode source identity mismatch");
+    assertPathInProject(derived.path);
+    await assertExpectedArtifact(derived.path, derived.sha256);
+    await assertExpectedArtifact(`${derived.path}.jsc`, derived.bytecodeSha256);
+  }
   const identity: ModuleIdentity = {
     functionId: input.functionId,
     functionPath: input.functionPath,
@@ -487,7 +503,7 @@ async function loadModule(input: {
     envProof: input.envProof || "unverified-env",
     artifactSha256: input.artifactSha256 || "unverified-artifact",
   };
-  const cacheKey = buildModuleCacheKey(identity);
+  const cacheKey = `${buildModuleCacheKey(identity)}\n${derived?.path ?? ""}\n${derived?.sha256 ?? ""}`;
   const cached = moduleCache.get(cacheKey);
   if (cached) {
     try {
@@ -507,15 +523,21 @@ async function loadModule(input: {
     new Set<string>(),
     input.artifactSha256 !== undefined,
   );
+  if (derived) await assertTenantModuleGraphSafe(derived.path, new Set<string>(), true);
+  const importDerived = () => withTrustedFunctionArtifact(
+    derived!.path, derived!.sha256,
+    (jsPath) => withTrustedFunctionArtifact(
+      `${derived!.path}.jsc`, derived!.bytecodeSha256,
+      () => importModuleHandler(buildModuleImportUrl({ ...identity, functionPath: jsPath })),
+    ),
+  );
   const handler = input.artifactSha256 === undefined
     ? await importModuleHandler(buildModuleImportUrl(identity))
     : await withTrustedFunctionArtifact(
         input.functionPath,
         input.artifactSha256,
-        (descriptorPath) => importModuleHandler(buildModuleImportUrl({
-          ...identity,
-          functionPath: descriptorPath,
-        })),
+        (descriptorPath) => derived ? importDerived()
+          : importModuleHandler(buildModuleImportUrl({ ...identity, functionPath: descriptorPath })),
       );
   moduleCache.set(cacheKey, {
     handler,
@@ -598,6 +620,9 @@ function hasPreheatFields(candidate: Record<string, unknown>): boolean {
     && typeof candidate.projectRef === "string"
     && (candidate.moduleVersion === undefined || typeof candidate.moduleVersion === "string")
     && (candidate.envProof === undefined || typeof candidate.envProof === "string")
+    && (candidate.bytecode === undefined || candidate.bytecode === "off"
+      || candidate.bytecode === "auto" || candidate.bytecode === "required")
+    && (candidate.bytecodeArtifact === undefined || isFunctionBytecodeArtifact(candidate.bytecodeArtifact))
     && hasPreheatArtifactFields(candidate)
     && isStringRecord(candidate.env)
     && (candidate.tlsPolicy === undefined || isTlsPolicy(candidate.tlsPolicy));
@@ -717,6 +742,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
           projectRef: msg.projectRef,
           envProof: msg.envProof,
           artifactSha256: msg.artifactSha256,
+          bytecodeArtifact: msg.bytecodeArtifact,
+          bytecode: msg.bytecode,
         });
         await assertAttestedArtifact(msg.functionPath, msg.attestation);
         postToParent({
@@ -777,6 +804,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
       projectRef,
       envProof: msg.envProof,
       artifactSha256: msg.artifactSha256,
+      bytecodeArtifact: msg.bytecodeArtifact,
+      bytecode: msg.bytecode,
     });
     // Retirement may arrive while module loading is suspended. Do not enter
     // tenant code after the worker has already closed its parent port.
@@ -788,6 +817,10 @@ async function onParentMessage(msg: unknown): Promise<void> {
     }
     try {
       await assertExpectedArtifact(functionPath, msg.artifactSha256);
+      if (msg.bytecodeArtifact) {
+        await assertExpectedArtifact(msg.bytecodeArtifact.path, msg.bytecodeArtifact.sha256);
+        await assertExpectedArtifact(`${msg.bytecodeArtifact.path}.jsc`, msg.bytecodeArtifact.bytecodeSha256);
+      }
     } catch (error: unknown) {
       invalidateCachedModules((entry) => entry.functionId === functionId);
       throw error;

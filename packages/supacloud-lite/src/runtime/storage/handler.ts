@@ -9,6 +9,8 @@ import {
   imageTransformToSearchParams,
   parseImageTransform,
   transformImage,
+  resolveImageTransformLimits,
+  type ImageTransformLimits,
   type ImageTransformRequestOptions,
   type ImageTransformResult,
 } from './image-transform.js'
@@ -21,6 +23,7 @@ export interface StorageConfig {
   jwtSecret: string
   /** default per-bucket byte limit applied when a bucket sets none (config.toml storage.file_size_limit) */
   defaultFileSizeLimit?: number
+  imageTransformLimits?: ImageTransformLimits
   /** sink for progress/warning lines (e.g. image-transform no-op); no-op when omitted */
   log?: (message: string) => void
 }
@@ -174,12 +177,15 @@ export class StorageHandler {
   private tusUploads = new Map<string, TusUpload>()
   private mutationTail = Promise.resolve()
   private imageTransforms = new ImageTransformCache()
+  private readonly transformLimits: Required<ImageTransformLimits>
 
   constructor(
     private db: Database,
     private driver: StorageDriver,
     private config: StorageConfig
-  ) {}
+  ) {
+    this.transformLimits = resolveImageTransformLimits(config.imageTransformLimits)
+  }
 
   /** Create the given buckets if they don't already exist (config.toml storage.buckets.*). */
   async ensureBuckets(buckets: BucketSeed[]): Promise<void> {
@@ -484,7 +490,7 @@ export class StorageHandler {
       result = await this.imageTransforms.getOrTransform(imageTransformCacheKey(row.version, parsed.value), async () => {
         const source = await this.readObjectSource(row)
         if (source === null) throw new StorageObjectMissingError()
-        return transformImage(source, parsed.value, objectSize(row))
+        return transformImage(source, parsed.value, objectSize(row), this.transformLimits)
       })
     } catch (error) {
       if (error instanceof StorageObjectMissingError) {

@@ -16,6 +16,7 @@ export type WorkerHttpOptions<TResult> = {
   runBatch: (request: WorkerBatchRequest) => TResult | Promise<TResult>;
   defaultBatchSize: number;
   maxBatchSize?: number;
+  maxBodyBytes?: number;
   secretHeader?: string;
   minimumSecretLength?: number;
   successStatus?: (result: TResult) => 200 | 202;
@@ -52,8 +53,30 @@ async function parseBatchRequest(
   request: Request,
   defaultBatchSize: number,
   maxBatchSize: number,
+  maxBodyBytes: number,
 ): Promise<WorkerBatchRequest> {
-  const text = await request.text();
+  let text = "";
+  if (request.body) {
+    const reader = request.body.getReader();
+    const decoder = new TextDecoder();
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBodyBytes) {
+          // A stalled producer must not delay rejection of an oversized body.
+          void reader.cancel().catch(() => undefined);
+          throw new RangeError("request body exceeds the byte limit");
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
+  }
   if (!text.trim()) return { batchSize: defaultBatchSize };
 
   let payload: unknown;
@@ -66,7 +89,9 @@ async function parseBatchRequest(
     throw new TypeError("request body must be an object");
   }
 
-  const batchSize = (payload as Record<string, unknown>).batchSize ?? defaultBatchSize;
+  const batchSize = Object.hasOwn(payload, "batchSize")
+    ? (payload as Record<string, unknown>).batchSize
+    : defaultBatchSize;
   if (
     !Number.isSafeInteger(batchSize) ||
     Number(batchSize) < 1 ||
@@ -86,21 +111,25 @@ export function createWorkerHttpHandler<TResult>(
   options: WorkerHttpOptions<TResult>,
 ): (request: Request) => Promise<Response> {
   const errorCodes = { ...DEFAULT_ERROR_CODES, ...options.errorCodes };
+  const defaultBatchSize = options.defaultBatchSize;
   const maxBatchSize = options.maxBatchSize ?? 20;
+  const maxBodyBytes = options.maxBodyBytes ?? 4096;
   const minimumSecretLength = options.minimumSecretLength ?? 32;
   const secretHeader = options.secretHeader ?? "x-supacloud-worker-secret";
   if (
     !Number.isSafeInteger(maxBatchSize) || maxBatchSize < 1 ||
-    !Number.isSafeInteger(options.defaultBatchSize) ||
-    options.defaultBatchSize < 1 || options.defaultBatchSize > maxBatchSize ||
+    !Number.isSafeInteger(defaultBatchSize) ||
+    defaultBatchSize < 1 || defaultBatchSize > maxBatchSize ||
+    !Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1 ||
     !Number.isSafeInteger(minimumSecretLength) || minimumSecretLength < 32
   ) {
-    throw new RangeError("Invalid worker batch bounds or minimum secret length");
+    throw new RangeError("Invalid worker batch/body bounds or minimum secret length");
   }
   // Validate the configured header before accepting invocations.
   new Headers({ [secretHeader]: "" });
   const { expectedSecret } = options;
-  const matchesSecret = createSecretMatcher(expectedSecret);
+  const configured = typeof expectedSecret === "string" && expectedSecret.length >= minimumSecretLength;
+  const matchesSecret = configured ? createSecretMatcher(expectedSecret) : undefined;
 
   return async (request) => {
     if (request.method !== "POST") {
@@ -109,35 +138,36 @@ export function createWorkerHttpHandler<TResult>(
         405,
       );
     }
-    if (expectedSecret.length < minimumSecretLength) {
+    if (!configured) {
       return jsonResponse(
         { ok: false, error: { code: errorCodes.notConfigured, message: "Worker is unavailable." } },
         503,
       );
     }
-    if (!matchesSecret(request.headers.get(secretHeader) ?? "")) {
-      return jsonResponse(
-        { ok: false, error: { code: errorCodes.unauthorized, message: "Worker authentication failed." } },
-        401,
-      );
-    }
-
-    let batchRequest: WorkerBatchRequest;
     try {
-      batchRequest = await parseBatchRequest(
-        request,
-        options.defaultBatchSize,
-        maxBatchSize,
-      );
-    } catch (error) {
-      if (!(error instanceof TypeError) && !(error instanceof RangeError)) throw error;
-      return jsonResponse(
-        { ok: false, error: { code: errorCodes.invalidRequest, message: "Worker request is invalid." } },
-        400,
-      );
-    }
+      if (!matchesSecret?.(request.headers.get(secretHeader) ?? "")) {
+        return jsonResponse(
+          { ok: false, error: { code: errorCodes.unauthorized, message: "Worker authentication failed." } },
+          401,
+        );
+      }
 
-    try {
+      let batchRequest: WorkerBatchRequest;
+      try {
+        batchRequest = await parseBatchRequest(
+          request,
+          defaultBatchSize,
+          maxBatchSize,
+          maxBodyBytes,
+        );
+      } catch (error) {
+        if (!(error instanceof TypeError) && !(error instanceof RangeError)) throw error;
+        return jsonResponse(
+          { ok: false, error: { code: errorCodes.invalidRequest, message: "Worker request is invalid." } },
+          400,
+        );
+      }
+
       const result = await options.runBatch(batchRequest);
       return jsonResponse(
         { ok: true, result },
@@ -145,7 +175,7 @@ export function createWorkerHttpHandler<TResult>(
       );
     } catch (error) {
       try {
-        options.logError?.(error);
+        void Promise.resolve(options.logError?.(error)).catch(() => undefined);
       } catch {
         // Logging failures must not escape the HTTP error boundary.
       }

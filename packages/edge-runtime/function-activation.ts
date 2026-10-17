@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { readFunctionFile } from "./trusted-function-files";
+import { functionBytecodeMode } from "./function-bytecode-contract";
 
 export const EDGE_FUNCTION_ACTIVATION_SCHEMA = "supacloud.edge-function-activation.v1" as const;
 export const EDGE_FUNCTION_ACTIVATION_FIELD = "_supacloud_activation" as const;
@@ -31,6 +32,7 @@ export type EdgeFunctionActivationAuthority = {
 
 export type EdgeFunctionActivationConfig = {
   verify_jwt: boolean;
+  bytecode: "off" | "auto" | "required";
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
   capabilities: {
@@ -123,6 +125,7 @@ function parseConfig(document: Record<string, unknown>): EdgeFunctionActivationC
   }
   return {
     verify_jwt: document.verify_jwt !== false,
+    bytecode: functionBytecodeMode(document.bytecode),
     framework,
     version: rawVersion ?? null,
     capabilities: parseCapabilities(document.capabilities),

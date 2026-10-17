@@ -12,6 +12,7 @@ import type { AuthSettings } from '../auth/settings.js'
 import type { OAuthProviderConfig } from '../auth/oauth.js'
 import type { RateLimitRule } from '../auth/rate-limit.js'
 import type { BucketSeed } from '../types.js'
+import { resolveImageTransformLimits, type ImageTransformLimits } from '../storage/image-transform.js'
 import { runtimeMode, type RuntimeMode } from '../functions/profile.js'
 import type { GraphqlOptions } from '../graphql.js'
 import {
@@ -81,6 +82,8 @@ export interface ApiConfig {
 export interface StorageConfig {
   /** [storage].file_size_limit: default per-bucket byte limit */
   fileSizeLimit?: number
+  /** [storage.image_transformation].max_input_bytes / max_output_bytes */
+  imageTransformLimits?: ImageTransformLimits
   /** [storage.buckets.*]: buckets to create at boot */
   buckets?: BucketSeed[]
 }
@@ -352,6 +355,17 @@ function readStorage(root: ConfigTable): StorageConfig {
   const out: StorageConfig = {}
   const limit = getByteSize(storage, 'file_size_limit')
   if (limit !== undefined) out.fileSizeLimit = limit
+  const image = tableAt(root, 'storage.image_transformation')
+  if (image) {
+    const limits: ImageTransformLimits = {}
+    for (const [key, field] of [['max_input_bytes', 'maxInputBytes'], ['max_output_bytes', 'maxOutputBytes']] as const) {
+      if (!image.values.has(key)) continue
+      const value = getByteSize(image, key)
+      if (value === undefined) throw new Error(`Invalid image transformation ${key}`)
+      limits[field] = value
+    }
+    out.imageTransformLimits = resolveImageTransformLimits(limits)
+  }
 
   const buckets = tableAt(root, 'storage.buckets')
   if (buckets && buckets.children.size > 0) {
