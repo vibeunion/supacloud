@@ -16,6 +16,9 @@ It does not introduce a controller, session store or authorization wrapper.
   revoked membership, mismatched identity and absent claims expose no rows.
 - Given a PostgREST failure, when the helper runs, then it rejects with that error,
   rather than returning an empty successful page.
+- Given a successful HTTP response with a non-array page, an invalid exact count,
+  too many rows, or rows beyond the reported total, when the helper runs, then it
+  rejects instead of returning an untrusted page envelope.
 - Given a source field type change, when the generated query is typechecked,
   then its inferred response follows the source without editing generated types.
 
@@ -36,6 +39,9 @@ does not accept an owner ID or treat local session decoding as verification.
 Exact counts and offset pagination are intended for this bounded starter list,
 not a large-table query plan or snapshot guarantee. A user may see changed pages
 across requests. Missing counts fail explicitly rather than guessing a total.
+The helper validates the response envelope at runtime, but deliberately does not
+duplicate every row field validator; row shape remains the responsibility of the
+typed projection and the database/API contract.
 
 Local tests validate the actual generated helper using the Supabase client's
 HTTP transport and test existing policies separately in disposable PostgreSQL.
