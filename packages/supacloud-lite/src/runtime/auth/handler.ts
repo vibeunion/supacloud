@@ -1786,8 +1786,28 @@ export class AuthHandler {
       )).rows[0]
       if (!updated) return null
       await this.ensurePhoneIdentity(updated, query)
+      const synced = (await query<UserRow>(
+        `update auth.users
+         set raw_app_meta_data = jsonb_set(
+           coalesce(raw_app_meta_data, '{}'::jsonb),
+           '{providers}',
+           (
+             select jsonb_agg(provider order by provider)
+             from (
+               select distinct provider
+               from auth.identities
+               where user_id = $1
+             ) as providers
+           ),
+           true
+         ),
+         updated_at = now()
+         where id = $1
+         returning *`,
+        [updated.id],
+      )).rows[0]
       return this.sessionFor(
-        updated,
+        synced ?? updated,
         undefined,
         { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
         query

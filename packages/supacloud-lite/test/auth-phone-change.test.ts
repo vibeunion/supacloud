@@ -119,4 +119,43 @@ describe('Auth phone change compatibility', () => {
     expect(rejected.error?.code).toBe('phone_exists')
     expect(backend.smsInbox?.list()).toHaveLength(0)
   })
+
+  test('synchronizes providers when an email user confirms a phone change', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      authSettings: { smsOtpCooldownSeconds: 0 },
+      log: () => {},
+    })
+    backends.push(backend)
+    const admin = createClient('http://local', backend.serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: backend.fetch },
+    })
+    const client = clientFor(backend)
+
+    const created = await admin.auth.admin.createUser({
+      email: 'phone-provider-metadata@example.test',
+      password: 'correct-horse-battery-staple',
+      email_confirm: true,
+    })
+    expect(created.error).toBeNull()
+    expect((await client.auth.signInWithPassword({
+      email: 'phone-provider-metadata@example.test',
+      password: 'correct-horse-battery-staple',
+    })).error).toBeNull()
+
+    expect((await client.auth.updateUser({ phone: '+14155550124' })).error).toBeNull()
+    expect((await client.auth.resend({
+      type: 'phone_change',
+      phone: '+14155550124',
+    })).error).toBeNull()
+    const verified = await client.auth.verifyOtp({
+      type: 'phone_change',
+      phone: '+14155550124',
+      token: smsCode(backend),
+    })
+    expect(verified.error).toBeNull()
+    expect(verified.data.user?.app_metadata.providers).toEqual(['email', 'phone'])
+  })
 })
