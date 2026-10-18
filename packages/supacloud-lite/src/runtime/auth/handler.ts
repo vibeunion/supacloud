@@ -6,7 +6,7 @@ import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
 import type { Mailer, RequestContext, SmsMessage, SmsSender } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
-import { OAuthAccountIneligibleError, OAuthService, type OAuthProviderConfig } from './oauth.js'
+import { OAuthAccountIneligibleError, OAuthIdentityLinkError, OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { qrSvgDataUri } from './qr.js'
 import { DEFAULT_AUTH_SETTINGS, type AuthSettings } from './settings.js'
@@ -650,6 +650,20 @@ export class AuthHandler {
       const provider = typeof body.provider === 'string' ? body.provider.toLowerCase() : ''
       const idToken = body.id_token
       if (!provider || !idToken) return authError(400, 'validation_failed', 'provider and id_token required')
+      if (String(body.link_identity) === 'true' || body.link_identity === '1') {
+        const current = await this.userFromBearer(req)
+        if (!current) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+        try {
+          const linked = await this.oauth.linkIdentityWithIdToken(provider, idToken, current.id, body.access_token, body.nonce)
+          if (!linked) return authError(400, 'invalid_credentials', 'Invalid ID token')
+        } catch (error) {
+          if (error instanceof OAuthIdentityLinkError) {
+            return authError(422, error.code, 'Identity is already linked')
+          }
+          throw error
+        }
+        return this.sessionForOAuth(current.id).then((session) => json(200, session))
+      }
       const userId = await this.oauth.signInWithIdToken(provider, idToken, body.access_token, body.nonce)
       if (!userId) return authError(400, 'invalid_credentials', 'Invalid ID token')
       return this.db.transaction(async (query) => {

@@ -71,11 +71,12 @@ describe('OIDC ID token sign-in', () => {
       .sign(privateKey)
   }
 
-  async function request(body: Record<string, unknown>): Promise<Response> {
+  async function request(body: Record<string, unknown>, accessToken?: string): Promise<Response> {
     const url = new URL('https://lite.example.test/auth/v1/token?grant_type=id_token')
     return auth.handle(new Request(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      ...(accessToken ? { headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` } } : {}),
       body: JSON.stringify(body),
     }), { role: 'anon', claims: null }, url)
   }
@@ -140,5 +141,37 @@ describe('OIDC ID token sign-in', () => {
     const token = await idToken({ at_hash: atHash })
     expect((await request({ provider: 'google', id_token: token, access_token: accessToken })).status).toBe(200)
     expect((await request({ provider: 'google', id_token: token, access_token: 'wrong-access-token' })).status).toBe(400)
+  })
+
+  test('links a verified ID token to the current Bearer user', async () => {
+    const signedIn = await request({
+      provider: 'google',
+      id_token: await idToken({ sub: 'primary-user', email: 'primary@example.test' }),
+    })
+    const session = await signedIn.json() as { access_token: string; user: { id: string } }
+    const linkedToken = await idToken({ sub: 'linked-user', email: 'linked@example.test' })
+    const linked = await request({
+      provider: 'google',
+      id_token: linkedToken,
+      link_identity: true,
+    }, session.access_token)
+
+    expect(linked.status).toBe(200)
+    const body = await linked.json() as {
+      user: { id: string; identities: Array<{ id: string; provider: string }> }
+    }
+    expect(body.user.id).toBe(session.user.id)
+    expect(body.user.identities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'primary-user', provider: 'google' }),
+      expect.objectContaining({ id: 'linked-user', provider: 'google' }),
+    ]))
+
+    const duplicate = await request({
+      provider: 'google',
+      id_token: linkedToken,
+      link_identity: true,
+    }, session.access_token)
+    expect(duplicate.status).toBe(422)
+    expect(await duplicate.json()).toMatchObject({ error_code: 'identity_already_exists' })
   })
 })

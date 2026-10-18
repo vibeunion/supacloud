@@ -195,6 +195,31 @@ export class OAuthService {
     accessToken?: string,
     nonce?: string
   ): Promise<string | null> {
+    const profile = await this.verifyIdToken(providerName, token, accessToken, nonce)
+    if (!profile) return null
+    return this.upsertUser(providerName, profile)
+  }
+
+  /** Verify an OIDC ID token and attach its identity to an existing user. */
+  async linkIdentityWithIdToken(
+    providerName: string,
+    token: string,
+    userId: string,
+    accessToken?: string,
+    nonce?: string
+  ): Promise<boolean> {
+    const profile = await this.verifyIdToken(providerName, token, accessToken, nonce)
+    if (!profile) return false
+    await this.linkIdentityToUser(providerName, profile, userId)
+    return true
+  }
+
+  private async verifyIdToken(
+    providerName: string,
+    token: string,
+    accessToken?: string,
+    nonce?: string
+  ): Promise<OAuthProfile | null> {
     const provider = this.providers.get(providerName)
     const keySet = this.idTokenKeySets.get(providerName)
     if (!provider?.idTokenIssuer || !keySet || !token) return null
@@ -233,7 +258,7 @@ export class OAuthService {
       return null
     }
     if (!profile.id) return null
-    return this.upsertUser(providerName, profile)
+    return profile
   }
 
   private callbackUrl(): string {
