@@ -196,6 +196,64 @@ describe('Auth extended GoTrue compatibility', () => {
       await backend.close()
     }
   })
+
+  test('links an OAuth identity to the signed-in user without creating a second user', async () => {
+    const backend = await backendForTest({
+      siteUrl: 'http://app.local/callback',
+      oauthProviders: {
+        google: {
+          clientId: 'client-id', clientSecret: 'client-secret',
+          authorizeUrl: 'http://provider.local/authorize', tokenUrl: 'http://provider.local/token',
+          userInfoUrl: 'http://provider.local/userinfo',
+        },
+      },
+      oauthFetch: (async (input) => {
+        const url = new URL(String(input))
+        if (url.pathname === '/token') return Response.json({ access_token: 'provider-token' })
+        if (url.pathname === '/userinfo') {
+          return Response.json({ sub: 'linked-provider-user', email: 'linked-oauth@example.test', email_verified: true })
+        }
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch,
+    })
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'link-target@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+      const userId = signedUp.data.user?.id
+      if (!userId) throw new Error('Expected a signed-up user')
+
+      const linked = await client.auth.linkIdentity({
+        provider: 'google',
+        options: { redirectTo: 'http://app.local/callback', skipBrowserRedirect: true },
+      })
+      expect(linked.error).toBeNull()
+      const providerUrl = linked.data.url
+      if (!providerUrl) throw new Error('Expected an OAuth provider URL')
+      const providerParams = new URL(providerUrl).searchParams
+      const callback = await backend.fetch(
+        `http://local/auth/v1/callback?code=provider-code&state=${providerParams.get('state')}`,
+        { headers: apiHeaders(backend.anonKey) },
+      )
+      expect(callback.status).toBe(303)
+
+      const users = await backend.db.query<{ id: string }>('select id from auth.users order by created_at')
+      expect(users.rows).toHaveLength(1)
+      expect(users.rows[0].id).toBe(userId)
+      expect((await client.auth.getUserIdentities()).data.identities).toEqual([
+        expect.objectContaining({ provider: 'email' }),
+        expect.objectContaining({ provider: 'google' }),
+      ])
+      expect((await backend.db.query<{ user_id: string }>(
+        `select user_id from auth.identities where provider = 'google' and provider_id = 'linked-provider-user'`,
+      )).rows).toEqual([{ user_id: userId }])
+    } finally {
+      await backend.close()
+    }
+  })
 })
 
 function backendForTest(overrides: Parameters<typeof createLiteBackend>[0] = {}) {
