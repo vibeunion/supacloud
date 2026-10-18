@@ -124,6 +124,10 @@ export const featureSpec = defineFeatureSpec({
             from: "draft", to: "approved", command: "Approve${className}Command",
             permission: ${JSON.stringify(permission)}, transaction: "required",
             idempotency: "required", audit: ${JSON.stringify(`${name}.approved`)},
+            persistence: {
+                boundary: "database", optimisticLock: "required", versionField: "version",
+                receipt: "required", reconciliation: "none",
+            },
             route: "POST /${name}/:id/approve",
         },
     },
