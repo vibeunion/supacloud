@@ -14,6 +14,7 @@ export interface CommandRuntimeDescriptor {
   readonly transaction?: CommandRuntimeMode | string;
   readonly audit?: string;
   readonly idempotency?: CommandRuntimeMode | string;
+  readonly tenantScope?: CommandRuntimeMode | string;
 }
 
 export interface CommandRuntimeBranch {

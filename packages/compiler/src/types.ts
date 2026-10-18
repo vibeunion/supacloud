@@ -325,6 +325,7 @@ export interface CommandNode {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  tenantScope?: "required" | "none";
   /** Automatically registered without manual module declaration. */
   standalone?: boolean;
   /** Infrastructure resources this command uses, with the declared operations. */
@@ -363,6 +364,7 @@ export interface JobNode {
   maxAttempts?: number;
   /** Adapter-owned idempotency requirement. */
   idempotency?: JobIdempotency;
+  tenantScope?: "required" | "none";
   /** Infrastructure resources this job uses, with the declared operations. */
   uses?: InfraResourceUseRef[];
   aspects?: AspectRefNode[];
@@ -371,6 +373,7 @@ export interface JobNode {
 export interface QueryNode {
   className: string;
   name: string;
+  tenantScope?: "required" | "none";
 }
 
 export interface FeatureTransitionNode {
@@ -380,9 +383,12 @@ export interface FeatureTransitionNode {
   permission?: string;
   command?: string;
   route?: string;
+  routeBinding?: "command" | "controller";
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;
+  /** Job that continues the transition after the durable write is committed. */
+  job?: string;
   persistence?: FeaturePersistenceNode;
 }
 
@@ -390,6 +396,8 @@ export interface FeaturePersistenceNode {
   boundary: "database" | "external";
   optimisticLock: "required" | "none";
   versionField?: string;
+  tenantField?: string;
+  stateField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }
@@ -397,6 +405,7 @@ export interface FeaturePersistenceNode {
 export interface FeatureSpecNode {
   name: string;
   states: string[];
+  tenantField?: string;
   transitions: FeatureTransitionNode[];
   file?: string;
   line?: number;

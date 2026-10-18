@@ -132,6 +132,7 @@ export interface CommandOptions {
   audit?: string;
   /** Idempotency strategy, e.g. "required". */
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none";
   /** Automatically discover and register without manual module declaration. */
   standalone?: boolean;
   /** Infrastructure resources this command uses, with the operations it performs. */
@@ -180,6 +181,7 @@ export interface JobOptions<
   maxAttempts?: number;
   /** Whether the adapter must require an idempotency key for submission. */
   idempotency?: JobIdempotency;
+  tenantScope?: "required" | "none";
   /** Explicit static aspects applied around this job invocation. */
   aspects?: Aspect[];
   /** Infrastructure resources this job uses, with the operations it performs. */
@@ -199,6 +201,7 @@ export type CommandMeta = Omit<CommandOptions, "transaction" | "idempotency"> & 
 
 export interface QueryOptions {
   name: string;
+  tenantScope?: "required" | "none";
 }
 
 export type QueryMeta = QueryOptions;
