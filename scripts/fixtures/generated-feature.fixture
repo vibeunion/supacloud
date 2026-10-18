@@ -28,12 +28,22 @@ const governance: CommandGovernance = {
     },
 };
 const reader: CaseApprovalReadPort = {
-    list: async input => { assert.deepEqual(input, { state: "approved" }); return [row]; },
-    detail: async id => { assert.equal(id, "example"); return row; },
+    list: async (context, input) => {
+        assert.equal(context.tenantId, "fixture-tenant");
+        assert.equal(context.actorId, "fixture-reviewer");
+        assert.deepEqual(input, { state: "approved" });
+        return [row];
+    },
+    detail: async (context, id) => {
+        assert.equal(context.tenantId, "fixture-tenant");
+        assert.equal(id, "example");
+        return row;
+    },
 };
 const writer: CaseApprovalWritePort = {
-    approve: async input => {
+    approve: async (context, input) => {
         writes++;
+        assert.equal(context.tenantId, "fixture-tenant");
         assert.deepEqual(input, { id: "example", expectedVersion: 1, reason: "reviewed" });
         return row;
     },
