@@ -125,6 +125,7 @@ export const featureSpec = defineFeatureSpec({
             from: "draft", to: "approved", command: "Approve${className}Command",
             permission: ${JSON.stringify(permission)}, transaction: "required",
             idempotency: "required", audit: ${JSON.stringify(`${name}.approved`)},
+            job: ${JSON.stringify(`${name}.refresh`)},
             persistence: {
                 boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",
                 receipt: "required", reconciliation: "none",
