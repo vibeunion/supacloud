@@ -125,6 +125,7 @@ function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value 
     if (!isRecord(feature) || typeof feature["name"] !== "string" || feature["name"].trim() === "") return false;
     if (featureNames.has(feature["name"])) return false;
     featureNames.add(feature["name"]);
+    if (feature["tenantField"] !== undefined && !safeField(feature["tenantField"])) return false;
     const states = feature["states"];
     const transitions = feature["transitions"];
     if (!Array.isArray(states) || states.length === 0
@@ -144,6 +145,8 @@ function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value 
         if (!validFeaturePersistence(persistence)) return false;
         if (typeof transition["command"] !== "string" || transition["command"].trim() === ""
           || typeof transition["permission"] !== "string" || transition["permission"].trim() === "") return false;
+        if (isRecord(persistence) && persistence["boundary"] === "database"
+          && feature["tenantField"] !== persistence["tenantField"]) return false;
       }
       const job = transition["job"];
       if (job === undefined) return true;

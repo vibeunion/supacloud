@@ -119,7 +119,7 @@ test("migration assessment rejects downgraded transition Job metadata", async ()
       input: "RefreshCaseInput", mode: "task", idempotency: "none", tenantScope: "required",
     }],
     features: [{
-      name: "case", states: ["draft", "approved"],
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
       transitions: [{
         name: "approve", from: "draft", to: "approved", job: "case.refresh",
         jobDetails: {
@@ -153,7 +153,7 @@ test("migration assessment accepts transition Job bindings by class name", async
       mode: "task", idempotency: "required", tenantScope: "required",
     }],
     features: [{
-      name: "case", states: ["draft", "approved"],
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
       transitions: [{
         name: "approve", from: "draft", to: "approved", job: "RefreshCaseJob",
         jobDetails: {
