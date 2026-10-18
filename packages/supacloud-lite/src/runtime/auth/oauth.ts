@@ -317,8 +317,8 @@ export class OAuthService {
     // provider account with a victim's unverified email and take over their
     // account. Unverified → fall through and create a separate user.
     let userId: string | undefined
-    const email = profile.email?.toLowerCase().trim() ?? null
-    const verified = !!profile.email && profile.emailVerified === true
+    const email = typeof profile.email === 'string' ? profile.email.toLowerCase().trim() || null : null
+    const verified = email !== null && profile.emailVerified === true
     if (email && verified) {
       const byEmail = await query<{ id: string }>(`select id from auth.users where lower(email) = $1`, [email])
       userId = byEmail.rows[0]?.id
