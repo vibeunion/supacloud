@@ -1,5 +1,14 @@
-import type { Diagnostic, FeatureSpecNode, ModuleNode } from "./types";
+import type { ControllerNode, Diagnostic, FeatureSpecNode, ModuleNode, RouteNode } from "./types";
 import { isJobContextToken, joinRoutePaths } from "./util";
+
+export function featureTransitionForRoute(
+  module: ModuleNode,
+  controller: ControllerNode,
+  route: RouteNode,
+): FeatureSpecNode["transitions"][number] | undefined {
+  const routePath = `${route.method} ${joinRoutePaths(controller.path, route.path)}`;
+  return module.featureSpec?.transitions.find((transition) => transition.route === routePath);
+}
 
 /** Validate the declaration itself and its bindings within the owning module. */
 export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode): Diagnostic[] {
