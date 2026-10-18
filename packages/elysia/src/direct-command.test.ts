@@ -5,10 +5,15 @@ const module: Pick<CompiledModule, "name" | "commands" | "aspects"> = {
   name: "review", commands: [{ className: "Approve", name: "approve", permission: "approve",
     transaction: "required", audit: "approved", idempotency: "required", rpc: "approve_review" }],
 };
-function execute(governance: CommandGovernance, handler = async (input: number) => input + 1,
-  target = module, stages: string[] = []) {
+function execute<Input = number>(
+  governance: CommandGovernance,
+  handler: (input: Input) => number | Promise<number> = (input) => (input as number) + 1,
+  target = module,
+  stages: string[] = [],
+  input: Input = 4 as Input,
+) {
   return executeCompiledCommand({
-    module: target, command: "Approve", input: 4,
+    module: target, command: "Approve", input,
     request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
     governance, handler, observer: (event) => { if (event.phase === "started") stages.push(event.stage); },
     decode: (value) => { if (typeof value !== "number") throw Error("invalid result"); return value; },
@@ -55,6 +60,37 @@ test("replayed RPC outcomes are decoded and never execute the handler", async ()
     capabilities: { audit: true, transaction: true, idempotency: true }, execute: () => ({ bad: true }),
   } } }, async () => ++writes)).rejects.toThrow("invalid result");
   expect(writes).toBe(0);
+});
+
+test("selects the matching RPC branch and rejects unmatched input", async () => {
+  const selected: string[] = [];
+  const target = {
+    ...module,
+    commands: [{
+      ...module.commands?.[0]!,
+      rpc: undefined,
+      audit: undefined,
+      transaction: "none" as const,
+      idempotency: "none" as const,
+      branches: [
+        { when: 'resource === "a"', rpc: "save_a", transaction: "none" as const, idempotency: "none" as const },
+        { when: 'resource === "b"', rpc: "save_b", transaction: "none" as const, idempotency: "none" as const },
+      ],
+    }],
+  };
+  const result = await execute({
+    authorize: () => {},
+    rpc: Object.fromEntries(["save_a", "save_b"].map((name) => [name, {
+      capabilities: { audit: true, transaction: true, idempotency: true },
+      execute: async (_inv, next) => { selected.push(name); return next(); },
+    }])),
+  }, async () => 7, target as typeof module, [], { resource: "a" });
+  expect(result).toBe(7);
+  expect(selected).toEqual(["save_a"]);
+  await expect(execute({
+    authorize: () => {},
+    rpc: { save_a: { capabilities: { audit: true, transaction: true, idempotency: true }, execute: (_inv, next) => next() } },
+  }, async () => 7, target as typeof module, [], { resource: "c" })).rejects.toMatchObject({ code: "COMMAND_BRANCH_UNMATCHED" });
 });
 
 function preview(governance: Pick<CommandGovernance, "authorize">, previewFn: (input: number) => unknown,
