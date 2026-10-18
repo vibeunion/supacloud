@@ -2025,7 +2025,7 @@ export class AuthHandler {
       )
       const currentUser = currentUsers.rows[0]
       if (!currentUser) return null
-      const currentFactors = await query<{ id: string; secret: string; status: string }>(
+      const currentFactors = await query<{ id: string; secret: string; status: string; factor_type: string }>(
         `select id, secret, status from auth.mfa_factors
          where id = $1 and user_id = $2 for update`,
         [factorId, user.id],
