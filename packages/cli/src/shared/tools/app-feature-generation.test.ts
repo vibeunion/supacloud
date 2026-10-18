@@ -146,6 +146,19 @@ test("the generated approval compiles only with the explicit persistent capabili
     };
     expect(contractsManifest.features?.[0]?.transitions?.[0]?.jobDetails?.input)
         .toBe("CaseApprovalRefreshInput");
+    const clientCompilation = await compileProject({
+        ...options,
+        generateClient: true,
+        commandCapabilities: {
+            requirePersistentAdapters: true, permission: true,
+            rpc: { approveCase: { boundary: "database", transaction: true, idempotency: true, audit: true } },
+        },
+    });
+    expect(clientCompilation.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+    const generatedClient = await readFile(join(root, "generated/client.ts"), "utf8");
+    expect(generatedClient).toContain("/case-approval/:id/approve");
+    expect(generatedClient).toContain("/case-approval/");
+    expect(generatedClient).toContain("/case-approval");
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);
