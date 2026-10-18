@@ -38,6 +38,8 @@ export interface ContractManifest {
       jobDetails?: {
         name: string;
         className: string;
+        input?: string;
+        output?: string;
         mode?: "task" | "workflow";
         idempotency?: "required" | "none";
         tenantScope?: "required" | "none";
@@ -134,6 +136,8 @@ export function buildContractManifest(
               jobDetails: {
                 name: job.name,
                 className: job.className,
+                ...(job.input === undefined ? {} : { input: job.input }),
+                ...(job.output === undefined ? {} : { output: job.output }),
                 ...(job.mode === undefined ? {} : { mode: job.mode }),
                 ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
                 ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),
