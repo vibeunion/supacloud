@@ -229,6 +229,8 @@ export interface EffectRouteNode {
 }
 
 export interface RouteNode {
+  /** Transport-level idempotency contract, independent of route command binding. */
+  idempotency?: "required" | "none";
   parse?: "none";
   allowDeleteBody?: true;
   contract?: {
