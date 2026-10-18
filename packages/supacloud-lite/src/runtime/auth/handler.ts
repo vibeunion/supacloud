@@ -1479,8 +1479,12 @@ export class AuthHandler {
     if (deleted.rows.length === 0) return null
     const updated = (await query<UserRow>(
       `update auth.users
-       set email = $1, email_confirmed_at = coalesce(email_confirmed_at, now()),
+         set email = $1, email_confirmed_at = now(),
            email_change = null, email_change_sent_at = null, email_change_confirm_status = 0,
+             is_anonymous = false,
+             raw_app_meta_data = case when is_anonymous
+               then coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb
+               else raw_app_meta_data end,
            updated_at = now()
        where id = $2
        returning *`,
