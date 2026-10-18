@@ -4,11 +4,12 @@ import { dirname, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import {
+  DELIVERY_ARTIFACT_MAX_FILE_BYTES, DELIVERY_ARTIFACT_MAX_TOTAL_BYTES,
   parseDeliveryBuildManifest, readDeliveryExecutableArchive, readDeliveryMigrationArchive, type DeliveryBuildManifest,
 } from "@supacloud/delivery";
 import { ApplicationReleaseError, type ApplicationReleaseStorage } from "./application-release-storage";
 
-export const APPLICATION_RELEASE_UPLOAD_MAX_BYTES = 140 * 1024 * 1024;
+export const APPLICATION_RELEASE_UPLOAD_MAX_BYTES = 500 * 1024 * 1024;
 const objectsSchema = Type.Record(
   Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
   Type.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -79,9 +80,9 @@ export async function uploadApplicationRelease(
   if (!Value.Check(objectsSchema, expectedObjects)) invalid();
   if (manifest.objects.length === 0 || manifest.objects.length > 32
     || manifest.objects.some(object => object.entryKind === "compiled-module-factory" || object.files.length > 1024)
-    || manifest.objects.some(object => object.files.some(file => file.bytes > 64 * 1024 * 1024))
+    || manifest.objects.some(object => object.files.some(file => file.bytes > DELIVERY_ARTIFACT_MAX_FILE_BYTES))
     || manifest.objects.reduce((total, object) =>
-      total + object.files.reduce((sum, file) => sum + file.bytes, 0), 0) > 128 * 1024 * 1024) invalid();
+      total + object.files.reduce((sum, file) => sum + file.bytes, 0), 0) > DELIVERY_ARTIFACT_MAX_TOTAL_BYTES) invalid();
   const inventory = manifest.objects.flatMap(object => object.files.map(file => ({
     path: `objects/${object.objectId}/${file.path}`, bytes: file.bytes,
   })));
