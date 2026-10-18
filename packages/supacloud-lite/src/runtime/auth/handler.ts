@@ -952,7 +952,7 @@ export class AuthHandler {
   }
 
   private async confirmEmailTokenUser(query: Querier, claimedToken: EmailTokenCandidate): Promise<UserRow | null> {
-    await query(`delete from auth.one_time_tokens where email = $1`, [claimedToken.email])
+    await query(`delete from auth.one_time_tokens where lower(email) = lower($1)`, [claimedToken.email])
     const users = await query<UserRow>(
       `update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()), last_sign_in_at = now()
        where id = $1 returning *`,
@@ -971,7 +971,7 @@ export class AuthHandler {
     const candidates = await query<EmailTokenCandidate>(
       `select id, user_id, email from auth.one_time_tokens
        where token = $1 and token_type = any($2::text[])
-         and ($3::text is null or email = $3) and expires_at > now()
+         and ($3::text is null or lower(email) = lower($3)) and expires_at > now()
          and attempts < $4`,
       [redemption.token, redemption.tokenTypes, redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
     )
@@ -982,11 +982,11 @@ export class AuthHandler {
     if (!redemption.email) return
     await query(
       `update auth.one_time_tokens set attempts = attempts + 1
-       where email = $1 and token_type = any($2::text[]) and expires_at > now()`,
+       where lower(email) = lower($1) and token_type = any($2::text[]) and expires_at > now()`,
       [redemption.email, redemption.tokenTypes]
     )
     await query(
-      `delete from auth.one_time_tokens where email = $1 and attempts >= $2`,
+      `delete from auth.one_time_tokens where lower(email) = lower($1) and attempts >= $2`,
       [redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
     )
   }
