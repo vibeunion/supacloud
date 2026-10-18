@@ -2908,6 +2908,7 @@ export class AuthHandler {
   private async unenrollFactor(req: Request, factorId: string): Promise<Response> {
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    const hasAal2 = await this.requireAal2(req)
     return this.db.transaction(async (query) => {
       const currentResult = await query<UserRow>(
         `select * from auth.users where id = $1 and deleted_at is null
@@ -2915,13 +2916,16 @@ export class AuthHandler {
         [user.id],
       )
       if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
-      const factor = await query<{ id: string; factor_type: string }>(
-        `select id, factor_type from auth.mfa_factors where id = $1 and user_id = $2 for update`,
+      const factor = await query<{ id: string; factor_type: string; status: string }>(
+        `select id, factor_type, status from auth.mfa_factors where id = $1 and user_id = $2 for update`,
         [factorId, user.id],
       )
       if (factor.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
       if (factor.rows[0].factor_type === 'recovery_code') {
         return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+      }
+      if (factor.rows[0].status === 'verified' && !hasAal2) {
+        return authError(403, 'insufficient_aal', 'AAL2 required to unenroll a verified MFA factor')
       }
       const del = await query(
         `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
