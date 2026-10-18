@@ -848,7 +848,7 @@ export class AuthHandler {
         )
         const updated = updatedResult.rows[0]
         if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
-        if (requestedEmail) await this.ensureEmailIdentity(updated, query)
+        if (requestedEmail) await this.ensureEmailIdentity(updated, query, upgradingAnon)
         return json(200, await this.userJsonWithRelations(updated, query))
       })
     } catch (error) {
@@ -1872,28 +1872,41 @@ export class AuthHandler {
         message: 'Confirmation link accepted. Please proceed to confirm link sent to the other email',
       })
     }
-    const user = type === 'email_change'
-      ? emailChange
-      : await this.redeemUser(token, [type])
-    if (!user) {
-      return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
+    let user: UserRow | null = null
+    let session: Record<string, unknown> | null = null
+    if (type === 'email_change') {
+      user = emailChange
+    } else if (flow) {
+      user = await this.redeemUser(token, [type])
+    } else {
+      session = await this.redeem(token, [type], undefined, {
+        amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      })
     }
-    if (flow) {
-      const authCode = randomToken(24)
-      const claimed = await this.db.query<{ redirect_to: string | null }>(
-        `update auth.flow_state
-         set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
-         where id = $3 and auth_code is null and expires_at > now()
-         returning redirect_to`,
-        [authCode, user.id, flow.id],
-      )
-      const target = claimed.rows[0]?.redirect_to
-      if (target) return redirectWithQuery(target, { code: authCode })
+    if (type === 'email_change' || flow) {
+      if (!user) {
+        return new Response(null, { status: 303, headers: { location: redirectTo + '#error=access_denied&error_code=otp_expired' } })
+      }
+      if (flow) {
+        const authCode = randomToken(24)
+        const claimed = await this.db.query<{ redirect_to: string | null }>(
+          `update auth.flow_state
+           set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
+           where id = $3 and auth_code is null and expires_at > now()
+           returning redirect_to`,
+          [authCode, user.id, flow.id],
+        )
+        const target = claimed.rows[0]?.redirect_to
+        if (target) return redirectWithQuery(target, { code: authCode })
+      }
+      session = await this.sessionFor(user, undefined, {
+        amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      })
     }
-    const session = await this.sessionFor(user, undefined, {
-      amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
-    })
-    const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
+    if (!session) {
+      return new Response(null, { status: 303, headers: { location: redirectTo + '#error=access_denied&error_code=otp_expired' } })
+    }
+        const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
   }
 
@@ -3094,7 +3107,8 @@ export class AuthHandler {
 
   private async ensureEmailIdentity(
     user: UserRow,
-    query: Querier = (sql, params) => this.db.query(sql, params)
+    query: Querier = (sql, params) => this.db.query(sql, params),
+    syncProviders = true,
   ): Promise<void> {
     if (!user.email) return
     await query(
@@ -3104,7 +3118,7 @@ export class AuthHandler {
        set identity_data = excluded.identity_data, updated_at = now()`,
       [user.id, JSON.stringify({ sub: user.id, email: user.email })]
     )
-    await this.syncUserProviders(user, query)
+    if (syncProviders) await this.syncUserProviders(user, query)
   }
 
   private async ensurePhoneIdentity(
