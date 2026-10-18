@@ -175,7 +175,7 @@ test("feature transition route bindings carry command governance into generated 
   const featureGraph: ApplicationGraph = {
     externalTokens: [],
     modules: [{
-      name: "cases", className: "CasesModule", file: "cases.ts",
+      name: "cases", className: "CasesModule", file: "cases.ts", line: 0,
       imports: [], providers: [], queries: [], exports: [],
       commands: [{
         className: "ApproveCaseCommand",
