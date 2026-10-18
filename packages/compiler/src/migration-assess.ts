@@ -119,6 +119,30 @@ function validFeaturePersistence(value: unknown): boolean {
   return false;
 }
 
+function validCommandInventory(value: unknown): value is unknown[] {
+  const names = new Set<string>();
+  const classes = new Set<string>();
+  return Array.isArray(value) && value.every((command) => {
+    if (!isRecord(command)
+      || typeof command["name"] !== "string" || command["name"].trim() === ""
+      || typeof command["className"] !== "string" || command["className"].trim() === ""
+      || typeof command["module"] !== "string" || command["module"].trim() === ""
+      || typeof command["permission"] !== "string" || command["permission"].trim() === ""
+      || (command["transaction"] !== "required" && command["transaction"] !== "none")
+      || (command["idempotency"] !== "required" && command["idempotency"] !== "none")
+      || (command["tenantScope"] !== undefined
+        && command["tenantScope"] !== "required" && command["tenantScope"] !== "none")) return false;
+    if (names.has(command["name"]) || classes.has(command["className"])) return false;
+    if (command["rpc"] !== undefined
+      && (typeof command["rpc"] !== "string" || command["rpc"].trim() === "")) return false;
+    if (command["auditEvent"] !== undefined
+      && (typeof command["auditEvent"] !== "string" || command["auditEvent"].trim() === "")) return false;
+    names.add(command["name"]);
+    classes.add(command["className"]);
+    return true;
+  });
+}
+
 function validFeatureInventory(
   value: unknown,
   jobs: readonly unknown[],
@@ -323,7 +347,7 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
     if (!isRecord(parsed) || parsed["version"] !== 1
       || !validJobInventory(parsed["jobs"])
-      || !Array.isArray(parsed["commands"])
+      || !validCommandInventory(parsed["commands"])
       || !Array.isArray(parsed["routes"])
       || !validRpcInventory(parsed["rpc"], parsed["commands"])
       || !validFeatureInventory(parsed["features"], parsed["jobs"], parsed["commands"], parsed["routes"], parsed["rpc"])) {

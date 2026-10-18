@@ -219,6 +219,30 @@ test("migration assessment rejects Feature transitions with unregistered command
   expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
+test("migration assessment rejects an ungoverned top-level command", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-command-inventory-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1,
+    commands: [{
+      name: "UnprotectedCommand", className: "UnprotectedCommand", module: "case",
+      transaction: "none", idempotency: "none",
+    }],
+    queries: [], routes: [], permissions: [], jobs: [], rpc: [], features: [],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
+});
+
 test("migration assessment rejects Feature routes bound to another command", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-route-binding-"));
   await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
