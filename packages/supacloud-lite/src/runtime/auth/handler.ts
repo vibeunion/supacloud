@@ -1221,16 +1221,24 @@ export class AuthHandler {
       if (body.email_confirm === true) sets.push(`email_confirmed_at = now()`)
       if (sets.length === 0) return authError(400, 'validation_failed', 'nothing to update')
       params.push(idMatch[1])
-      const updated = await this.db.transaction(async (query) => {
-        const res = await query<UserRow>(
-          `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
-          params
-        )
-        const user = res.rows[0]
-        if (!user) return null
-        if (typeof body.email === 'string') await this.ensureEmailIdentity(user, query)
-        return this.userJsonWithRelations(user, query)
-      })
+      let updated: Record<string, unknown> | null
+      try {
+        updated = await this.db.transaction(async (query) => {
+          const res = await query<UserRow>(
+            `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
+            params
+          )
+          const user = res.rows[0]
+          if (!user) return null
+          if (typeof body.email === 'string') await this.ensureEmailIdentity(user, query)
+          return this.userJsonWithRelations(user, query)
+        })
+      } catch (error) {
+        if (databaseDiagnosticCode(error) === '23505' && typeof body.email === 'string') {
+          return authError(422, 'email_exists', 'A user with this email address has already been registered')
+        }
+        throw error
+      }
       if (!updated) return authError(404, 'user_not_found', 'User not found')
       return json(200, updated)
     }
