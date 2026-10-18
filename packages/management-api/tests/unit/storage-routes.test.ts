@@ -5,6 +5,7 @@ import { projectStorageRoutes, storageRoutes } from "../../src/routes/storage";
 import { StorageService } from "../../src/services/storage.service";
 import { mockBuckets, StorageRLS } from "../../src/services/storage-rls";
 import { storageVectorInternals } from "../../src/services/storage-vector.service";
+import { DEFAULT_IMAGOR_MAX_BYTES, resolveImagorMaxBytes } from "../../src/services/imagor.service";
 
 const BASE = "http://localhost";
 const CURRENT_REVISION = "1786406400000000";
@@ -16,6 +17,13 @@ function request(path: string, init?: RequestInit) {
 }
 
 describe("storage management routes", () => {
+  test("image transformation limits default to 500 MiB and accept lower operator settings", () => {
+    expect(DEFAULT_IMAGOR_MAX_BYTES).toBe(500 * 1024 * 1024);
+    expect(resolveImagorMaxBytes("128")).toBe(128);
+    expect(resolveImagorMaxBytes(String(DEFAULT_IMAGOR_MAX_BYTES))).toBe(DEFAULT_IMAGOR_MAX_BYTES);
+    expect(resolveImagorMaxBytes(String(DEFAULT_IMAGOR_MAX_BYTES + 1))).toBe(DEFAULT_IMAGOR_MAX_BYTES);
+    expect(resolveImagorMaxBytes("invalid")).toBe(DEFAULT_IMAGOR_MAX_BYTES);
+  });
   test("Web Console can manage vector buckets through project-scoped routes", async () => {
     storageVectorInternals.resetMockStore();
     const headers = { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" };
@@ -671,7 +679,7 @@ describe("storage management routes", () => {
       headers: {
         Authorization: "Bearer dev-master-token",
         "Content-Type": "image/png",
-        "Content-Length": String(64 * 1024 * 1024 + 1),
+        "Content-Length": String(DEFAULT_IMAGOR_MAX_BYTES + 1),
       },
       body: new Uint8Array([1]),
     });
@@ -691,7 +699,7 @@ describe("storage management routes", () => {
       expect(missing.status).toBe(404);
       expect(await missing.json()).toMatchObject({ code: "404" });
       downloadSpy.mockResolvedValue(
-        new Response("x", { headers: { "content-type": "image/tiff", "content-length": String(64 * 1024 * 1024 + 1) } }),
+        new Response("x", { headers: { "content-type": "image/tiff", "content-length": String(DEFAULT_IMAGOR_MAX_BYTES + 1) } }),
       );
       const oversized = await request("/v1/storage/proj_1/transform/thumbnail/evidence/huge.tiff");
       expect(oversized.status).toBe(413);
