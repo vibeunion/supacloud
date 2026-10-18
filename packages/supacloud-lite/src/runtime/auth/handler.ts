@@ -1757,7 +1757,7 @@ export class AuthHandler {
       return json(200, updated)
     }
     if (idMatch && method === 'DELETE') {
-      return await this.eraseUser(idMatch[1])
+      return await this.eraseUser(idMatch[1], req)
     }
     return authError(404, 'not_found', `unknown admin endpoint`)
   }
@@ -1967,7 +1967,12 @@ export class AuthHandler {
    * owned by the user are not removed here - see COMPLIANCE.md for the
    * storage-erasure step the operator must run.
    */
-  private async eraseUser(userId: string): Promise<Response> {
+  private async eraseUser(userId: string, req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => ({}))) as { should_soft_delete?: boolean }
+    const shouldSoftDelete = body.should_soft_delete === true
+    const userResult = await this.db.query<UserRow>(`select * from auth.users where id = $1`, [userId])
+    const user = userResult.rows[0]
+    if (!user) return authError(404, 'user_not_found', 'User not found')
     const before = await this.db.query<{ identities: number; sessions: number; factors: number }>(
       `select
          (select count(*) from auth.identities where user_id = $1)::int as identities,
@@ -1975,11 +1980,35 @@ export class AuthHandler {
          (select count(*) from auth.mfa_factors where user_id = $1)::int as factors`,
       [userId]
     )
+    if (shouldSoftDelete) {
+      const deleted = await this.db.transaction(async (query) => {
+        const updated = await query<UserRow>(
+          `update auth.users set deleted_at = coalesce(deleted_at, now()), updated_at = now()
+           where id = $1 returning *`,
+          [userId],
+        )
+        if (updated.rows.length === 0) return null
+        await query(`update auth.refresh_tokens set revoked = true, updated_at = now() where user_id = $1`, [userId])
+        await query(`delete from auth.one_time_tokens where user_id = $1`, [userId])
+        await query(`delete from auth.flow_state where user_id = $1`, [userId])
+        return updated.rows[0]
+      })
+      if (!deleted) return authError(404, 'user_not_found', 'User not found')
+      await this.audit('user_deleted', { actorId: userId, type: 'admin', traits: { erased: false, soft_deleted: true } })
+      const c = before.rows[0]
+      return json(200, {
+        user: this.userJson(deleted),
+        erased: false,
+        user_id: userId,
+        cascaded: { identities: c.identities, sessions: c.sessions, mfa_factors: c.factors },
+      })
+    }
     const del = await this.db.query(`delete from auth.users where id = $1 returning id`, [userId])
     if (del.rows.length === 0) return authError(404, 'user_not_found', 'User not found')
     const c = before.rows[0]
     await this.audit('user_deleted', { actorId: userId, type: 'admin', traits: { erased: true } })
     return json(200, {
+      user: this.userJson(user),
       erased: true,
       user_id: userId,
       cascaded: { identities: c.identities, sessions: c.sessions, mfa_factors: c.factors },
