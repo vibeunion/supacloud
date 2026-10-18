@@ -513,18 +513,25 @@ export class AuthHandler {
     const body = (await req.json().catch(() => ({}))) as Record<string, string>
 
     if (grantType === 'password') {
-      const email = (body.email ?? '').toLowerCase().trim()
+      const email = body.email === undefined ? null : normalizeEmailInput(body.email)
+      if (body.email !== undefined && !email) return authError(400, 'validation_failed', 'email must not be empty')
+      const phone = body.phone === undefined ? null : normalizePhone(body.phone)
+      if (body.phone !== undefined && !phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      if (!email && !phone) return authError(400, 'validation_failed', 'email or phone is required')
       const res = await this.db.query<UserRow & { is_banned: boolean }>(
         `select *, coalesce(banned_until > now(), false) as is_banned
-         from auth.users where lower(email) = $1 and deleted_at is null`,
-        [email],
+         from auth.users
+         where (($1::text is not null and lower(email) = $1)
+            or ($2::text is not null and phone = $2))
+           and deleted_at is null`,
+        [email, phone],
       )
       const user = res.rows[0]
       if (user?.encrypted_password && user.is_banned) {
         return authError(400, 'user_banned', 'User is banned')
       }
       if (!user || !user.encrypted_password || !(await verifyPassword(body.password ?? '', user.encrypted_password))) {
-        await this.audit('login_failed', { actorEmail: email, traits: { grant_type: 'password' } })
+        await this.audit('login_failed', { actorEmail: email ?? phone, traits: { grant_type: 'password' } })
         return authError(400, 'invalid_credentials', 'Invalid login credentials')
       }
       const response = await this.db.transaction(async (query) => {
@@ -538,7 +545,9 @@ export class AuthHandler {
           !current
           || current.deleted_at !== null
           || !current.encrypted_password
-          || current.email?.toLowerCase().trim() !== email
+          || (email
+            ? current.email?.toLowerCase().trim() !== email
+            : current.phone !== phone)
         ) {
           return authError(400, 'invalid_credentials', 'Invalid login credentials')
         }
@@ -549,7 +558,10 @@ export class AuthHandler {
         if (current.encrypted_password !== user.encrypted_password) {
           return authError(400, 'invalid_credentials', 'Invalid login credentials')
         }
-        if (!this.settings.autoconfirm && !current.email_confirmed_at) {
+        if (phone && !current.phone_confirmed_at) {
+          return authError(400, 'phone_not_confirmed', 'Phone not confirmed')
+        }
+        if (email && !this.settings.autoconfirm && !current.email_confirmed_at) {
           return authError(400, 'email_not_confirmed', 'Email not confirmed')
         }
         const signedIn = await query<UserRow>(
@@ -563,7 +575,7 @@ export class AuthHandler {
         return json(200, await this.sessionFor(updated, undefined, undefined, query))
       })
       if (response.ok) {
-        await this.audit('login', { actorId: user.id, actorEmail: email, traits: { grant_type: 'password' } })
+        await this.audit('login', { actorId: user.id, actorEmail: user.email ?? user.phone, traits: { grant_type: 'password' } })
       }
       return response
     }
