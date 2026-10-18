@@ -87,8 +87,11 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         if (transition.persistence.boundary === "database" && command.transaction !== "required") {
           error("feature-persistence-drift", `Database transition ${transition.name} requires command ${command.className} to declare transaction: "required".`);
         }
-        if (transition.persistence.boundary === "database" && command.tenantScope !== "required") {
+        if (command.tenantScope !== "required") {
           error("feature-command-tenant-boundary", `Command ${command.className} in Feature ${spec.name} must declare tenantScope: "required".`);
+        }
+        if (transition.persistence.boundary === "external" && command.transaction !== "none") {
+          error("feature-persistence-drift", `External transition ${transition.name} requires command ${command.className} to declare transaction: "none".`);
         }
         if (command.idempotency !== "required" || !command.audit) {
           error("feature-persistence-drift", `Persistent transition ${transition.name} requires command ${command.className} to declare idempotency and audit.`);

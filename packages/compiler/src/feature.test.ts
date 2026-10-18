@@ -244,6 +244,32 @@ describe("feature specs", () => {
       .toContain("feature-command-tenant-boundary");
   });
 
+  test("requires external transitions to avoid database transactions", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted", command: "SubmitCase",
+        permission: "case.submit",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      commands: [{
+        className: "SubmitCase", name: "case.submit", permission: "case.submit",
+        transaction: "required", idempotency: "required", audit: "case.submitted",
+        tenantScope: "required",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-persistence-drift");
+  });
+
   test("generates an explicit command slice scaffold", () => {
     const spec: FeatureSpecNode = {
       name: "case",
