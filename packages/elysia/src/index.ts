@@ -817,6 +817,10 @@ function selectCommandBranch(command: CompiledCommand, input: CommandInvocation[
   });
 }
 
+function validCommandBranchSelector(value: string): boolean {
+  return /^(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*===\s*(["'])(.*)\1$/.test(value);
+}
+
 /**
  * Compose the standard command governance order:
  * authorization -> idempotency -> transaction -> audit -> handler.
@@ -1042,6 +1046,11 @@ function assertCommandGovernanceReady(
       });
     }
     for (const branch of command.branches ?? []) {
+      if (!validCommandBranchSelector(branch.when)) {
+        throw new ApplicationError(`Command "${command.name}" has an invalid branch selector`, {
+          code: "COMMAND_BRANCH_SELECTOR_INVALID",
+        });
+      }
       const adapter = Object.hasOwn(governance.rpc ?? {}, branch.rpc) ? governance.rpc?.[branch.rpc] : undefined;
       if (!adapter || typeof adapter.execute !== "function" || !isRecord(adapter.capabilities)) {
         throw new ApplicationError(`Command "${command.name}" branch "${branch.when}" has no RPC governance adapter`, {
