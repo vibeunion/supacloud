@@ -1,4 +1,4 @@
-import { readdir, realpath } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { ApplicationGraph } from "@supacloud/compiler";
 
@@ -30,36 +30,49 @@ export async function createVerificationPlan(root: string, graph: ApplicationGra
     ...owner.controllers.flatMap(item => item.routes.flatMap(route =>
       (route.aspects ?? []).flatMap(aspect => aspect.file ? [aspect.file] : []))),
   ].filter((file): file is string => typeof file === "string");
-  const directories = [...new Set(sources.map(file => dirname(resolve(sourceRoot, file))))].sort();
-  const tests = new Set<string>();
   const manual: string[] = [];
-  const coverage: Array<{ directory: string; tests: string[]; basis: "colocated-not-proven" }> = [];
-  for (const directory of directories) {
-    if (!inside(requestedRoot, directory)) {
-      manual.push("A source directory is outside the project; select its owning project explicitly");
+  const validatedSources: string[] = [];
+  for (const source of new Set(sources)) {
+    const requested = resolve(sourceRoot, source);
+    if (!inside(requestedRoot, requested)) {
+      manual.push("A source file is outside the project; select its owning project explicitly");
       continue;
     }
-    const actual = await realpath(directory).catch((error: unknown) => {
+    const actual = await realpath(requested).catch((error: unknown) => {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
       throw error;
     });
     if (actual === null) {
-      manual.push(`Source directory is missing: ${relative(requestedRoot, directory).replaceAll("\\", "/")}`);
+      manual.push(`Source file is missing: ${relative(requestedRoot, requested).replaceAll("\\", "/")}`);
       continue;
     }
     if (!inside(project, actual)) {
+      manual.push("A source file is outside the project; select its owning project explicitly");
+      continue;
+    }
+    if (!(await stat(actual)).isFile()) {
+      manual.push(`Source is not a regular file: ${relative(requestedRoot, requested).replaceAll("\\", "/")}`);
+      continue;
+    }
+    validatedSources.push(actual);
+  }
+  const directories = [...new Set(validatedSources.map(file => dirname(file)))].sort();
+  const tests = new Set<string>();
+  const coverage: Array<{ directory: string; tests: string[]; basis: "colocated-not-proven" }> = [];
+  for (const directory of directories) {
+    if (!inside(project, await realpath(directory))) {
       manual.push("A source directory is outside the project; select its owning project explicitly");
       continue;
     }
     const local: string[] = [];
-    for (const entry of await readdir(actual, { withFileTypes: true })) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.isFile() && /\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) {
-        const file = relative(project, resolve(actual, entry.name)).replaceAll("\\", "/");
+        const file = relative(project, resolve(directory, entry.name)).replaceAll("\\", "/");
         tests.add(file);
         local.push(file);
       }
     }
-    const path = relative(project, actual).replaceAll("\\", "/") || ".";
+    const path = relative(project, directory).replaceAll("\\", "/") || ".";
     coverage.push({ directory: path, tests: local.sort(), basis: "colocated-not-proven" });
     if (!local.length) manual.push(`No colocated tests for source directory: ${path}`);
   }
@@ -71,7 +84,7 @@ export async function createVerificationPlan(root: string, graph: ApplicationGra
     source: "declaration",
     target: owner.name,
     ready: manual.length === 0,
-    files: [...new Set(sources.map(file => relative(requestedRoot, resolve(sourceRoot, file)).replaceAll("\\", "/")))].sort(),
+    files: [...new Set(validatedSources.map(file => relative(project, file).replaceAll("\\", "/")))].sort(),
     tests: selected.slice(0, 32),
     commands: selected.length <= 32 ? [
       ...selected.map(file => ["bun", "test", `./${file}`]),
