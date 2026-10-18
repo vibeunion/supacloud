@@ -137,11 +137,15 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('idempotency: "required",\n        effect:');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('invalidateTags: [\n                "case-approval.list",');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('"/:id/operations/:operationId"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.model.ts"), "utf8"))
         .toContain("export interface CaseApprovalReceiptPort");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalReceipt =");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain("export const CaseApprovalApproveInvalidateTags");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("requireFeatureRequestContext(this.jobContext)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
@@ -153,10 +157,15 @@ test("the generated approval compiles only with the explicit persistent capabili
     const contractsManifest = JSON.parse(
         await readFile(join(root, "generated/contracts.manifest.json"), "utf8"),
     ) as {
-        features?: Array<{ transitions?: Array<{ jobDetails?: { input?: string } }> }>;
+        features?: Array<{ transitions?: Array<{
+            invalidateTags?: string[];
+            jobDetails?: { input?: string };
+        }> }>;
     };
     expect(contractsManifest.features?.[0]?.transitions?.[0]?.jobDetails?.input)
         .toBe("CaseApprovalRefreshInput");
+    expect(contractsManifest.features?.[0]?.transitions?.[0]?.invalidateTags)
+        .toEqual(["case-approval.list", "case-approval.detail", "case-approval.receipt"]);
     const clientCompilation = await compileProject({
         ...options,
         generateClient: true,

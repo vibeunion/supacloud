@@ -1086,6 +1086,14 @@ function parseFeatureSpec(
     const idempotency = commandModeProp(options, "idempotency");
     const audit = stringLiteralProp(options, "audit");
     const job = stringLiteralProp(options, "job");
+    const invalidateTagsExpr = getProp(options, "invalidateTags");
+    const invalidateTags = invalidateTagsExpr === undefined
+      ? undefined
+      : ts.isArrayLiteralExpression(invalidateTagsExpr)
+        && invalidateTagsExpr.elements.every((element) => ts.isStringLiteral(element) && element.text.trim().length > 0)
+        ? invalidateTagsExpr.elements.map((element) => (element as ts.StringLiteral).text)
+        : undefined;
+    if (invalidateTagsExpr !== undefined && invalidateTags === undefined) return invalid();
     const persistenceExpr = getProp(options, "persistence");
     const persistence = persistenceExpr && ts.isObjectLiteralExpression(persistenceExpr)
       ? parseFeaturePersistence(persistenceExpr)
@@ -1101,6 +1109,7 @@ function parseFeatureSpec(
       ...(idempotency === undefined ? {} : { idempotency }),
       ...(audit === undefined ? {} : { audit }),
       ...(job === undefined ? {} : { job }),
+      ...(invalidateTags === undefined ? {} : { invalidateTags }),
       ...(persistence === undefined ? {} : { persistence }),
     });
   }
