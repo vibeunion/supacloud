@@ -182,6 +182,8 @@ export type {
   FeatureState,
   FeatureTransitionOptions,
 } from "./module";
+export { requireFeatureRequestContext } from "./feature_context";
+export type { FeatureRequestContext } from "./feature_context";
 export {
   APP_INITIALIZER,
   APP_LIFECYCLE,
