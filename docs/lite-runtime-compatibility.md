@@ -221,7 +221,7 @@ not grant direct Data API access without the Lite bridge.
 
 ### Strict Functions
 
-Strict mode defaults to a 900-second invocation limit, 500 MiB request and
+Strict mode defaults to a 900-second invocation limit, 30 MiB request and
 response limits, and a 300-second background waiting limit. Declared limits may
 be lower but not exceed these caps. Background work requires explicit
 `background = true`. Malformed declarations, missing declared functions and

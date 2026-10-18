@@ -18,7 +18,7 @@ function waitUntil(promise: Promise<unknown>): void {
 
 test('strict defaults and invalid limits are deterministic', () => {
   const entry = strictFunction({ handler: () => Response.json({ ok: true }) })
-  expect(entry.limits).toEqual({ timeoutMs: 900_000, maxRequestBodyBytes: 524288000, maxResponseBodyBytes: 524288000, waitUntilTimeoutMs: 300_000 })
+  expect(entry.limits).toEqual({ timeoutMs: 900_000, maxRequestBodyBytes: 31457280, maxResponseBodyBytes: 31457280, waitUntilTimeoutMs: 300_000 })
   expect(entry.capabilities?.background).toBe(false)
   for (const value of [-1, 0, 1.2, Number.NaN, 900_001]) {
     expect(() => strictFunction({ handler: () => new Response(), limits: { timeoutMs: value } })).toThrow()
