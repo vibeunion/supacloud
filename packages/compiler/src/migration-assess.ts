@@ -216,6 +216,20 @@ function validJobInventory(value: unknown): value is unknown[] {
   });
 }
 
+function validRpcInventory(value: unknown): value is unknown[] {
+  const commands = new Set<string>();
+  const adapters = new Set<string>();
+  return Array.isArray(value) && value.every((rpc) => {
+    if (!isRecord(rpc)
+      || typeof rpc["command"] !== "string" || rpc["command"].trim() === ""
+      || typeof rpc["adapter"] !== "string" || rpc["adapter"].trim() === "") return false;
+    if (commands.has(rpc["command"]) || adapters.has(rpc["adapter"])) return false;
+    commands.add(rpc["command"]);
+    adapters.add(rpc["adapter"]);
+    return true;
+  });
+}
+
 async function sha256(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
@@ -295,7 +309,7 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
       || !validJobInventory(parsed["jobs"])
       || !Array.isArray(parsed["commands"])
       || !Array.isArray(parsed["routes"])
-      || !Array.isArray(parsed["rpc"])
+      || !validRpcInventory(parsed["rpc"])
       || !validFeatureInventory(parsed["features"], parsed["jobs"], parsed["commands"], parsed["routes"], parsed["rpc"])) {
       throw new Error("invalid manifest");
     }

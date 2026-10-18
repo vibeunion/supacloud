@@ -282,6 +282,30 @@ test("migration assessment rejects duplicate Job inventory identities", async ()
   expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
+test("migration assessment rejects duplicate RPC inventory identities", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-rpc-duplicates-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1, commands: [], queries: [], routes: [], permissions: [], jobs: [],
+    rpc: [
+      { command: "ApproveCase", adapter: "approve_case" },
+      { command: "ApproveCase", adapter: "approve_case_v2" },
+    ],
+    features: [],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
+});
+
 test("CLI exposes the read-only assessment with an explicit non-SSR boundary", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-cli-"));
   const child = Bun.spawn([
