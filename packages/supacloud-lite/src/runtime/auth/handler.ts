@@ -2575,8 +2575,14 @@ export class AuthHandler {
         [user.id],
       )
       if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
-      const fr = await query(`select id from auth.mfa_factors where id = $1 and user_id = $2`, [factorId, user.id])
+      const fr = await query<{ id: string; factor_type: string }>(
+        `select id, factor_type from auth.mfa_factors where id = $1 and user_id = $2`,
+        [factorId, user.id],
+      )
       if (fr.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      if (fr.rows[0].factor_type === 'recovery_code') {
+        return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+      }
       const ins = await query(
         `insert into auth.mfa_challenges (factor_id, expires_at) values ($1, $2) returning id, expires_at`,
         [factorId, expiresAt]
@@ -2598,11 +2604,14 @@ export class AuthHandler {
     }
     const body = (await req.json().catch(() => ({}))) as { challenge_id?: string; code?: string }
     const fr = await this.db.query(
-      `select id, secret, status from auth.mfa_factors where id = $1 and user_id = $2`,
+      `select id, secret, status, factor_type from auth.mfa_factors where id = $1 and user_id = $2`,
       [factorId, user.id]
     )
-    const factor = fr.rows[0] as { id: string; secret: string; status: string } | undefined
+    const factor = fr.rows[0] as { id: string; secret: string; status: string; factor_type: string } | undefined
     if (!factor) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+    if (factor.factor_type === 'recovery_code') {
+      return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+    }
     const cr = await this.db.query(
       `select id, expires_at, verified_at from auth.mfa_challenges where id = $1 and factor_id = $2`,
       [body.challenge_id ?? '', factorId]
@@ -2628,12 +2637,16 @@ export class AuthHandler {
       const currentUser = currentUsers.rows[0]
       if (!currentUser) return null
       const currentFactors = await query<{ id: string; secret: string; status: string }>(
-        `select id, secret, status from auth.mfa_factors
+        `select id, secret, status, factor_type from auth.mfa_factors
          where id = $1 and user_id = $2 for update`,
         [factorId, user.id],
       )
       const currentFactor = currentFactors.rows[0]
-      if (!currentFactor || !(await verifyTotp(currentFactor.secret, body.code ?? ''))) return null
+      if (
+        !currentFactor
+        || currentFactor.factor_type === 'recovery_code'
+        || !(await verifyTotp(currentFactor.secret, body.code ?? ''))
+      ) return null
       const claimed = await query(
         `update auth.mfa_challenges set verified_at = now()
          where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
@@ -2902,11 +2915,18 @@ export class AuthHandler {
         [user.id],
       )
       if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const factor = await query<{ id: string; factor_type: string }>(
+        `select id, factor_type from auth.mfa_factors where id = $1 and user_id = $2 for update`,
+        [factorId, user.id],
+      )
+      if (factor.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      if (factor.rows[0].factor_type === 'recovery_code') {
+        return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+      }
       const del = await query(
         `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
-        [factorId, user.id]
+        [factorId, user.id],
       )
-      if (del.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
       return json(200, { id: factorId })
     })
   }

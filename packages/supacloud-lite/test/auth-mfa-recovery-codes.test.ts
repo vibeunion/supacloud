@@ -80,6 +80,27 @@ describe('Auth MFA recovery codes compatibility', () => {
     expect(status.data).toMatchObject({ total: 3, remaining: 3, type: 'recovery_code' })
     expect((await client.auth.mfa.recoveryCodes.generate()).error?.code).toBe('mfa_verified_factor_exists')
 
+    const clientSession = (await client.auth.getSession()).data.session
+    if (!clientSession) throw new Error('Expected an AAL2 session after TOTP verification')
+    const recoveryFactorId = generated.data!.id
+    for (const [path, method] of [
+      [`factors/${recoveryFactorId}/challenge`, 'POST'],
+      [`factors/${recoveryFactorId}/verify`, 'POST'],
+      [`factors/${recoveryFactorId}`, 'DELETE'],
+    ] as const) {
+      const response = await backend.fetch(new Request(`http://local/auth/v1/${path}`, {
+        method,
+        headers: {
+          apikey: backend.anonKey,
+          authorization: `Bearer ${clientSession.access_token}`,
+          'content-type': 'application/json',
+        },
+        ...(method === 'POST' ? { body: JSON.stringify({ challenge_id: 'not-a-challenge', code: '000000' }) } : {}),
+      }))
+      expect(response.status).toBe(422)
+      expect(await response.json()).toMatchObject({ error_code: 'validation_failed' })
+    }
+
     expect((await secondClient.auth.signInWithPassword({
       email: 'mfa-recovery@example.test',
       password: 'correct-horse-battery-staple',
