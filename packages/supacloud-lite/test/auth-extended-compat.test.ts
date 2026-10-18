@@ -166,6 +166,36 @@ describe('Auth extended GoTrue compatibility', () => {
       await backend.close()
     }
   })
+
+  test('unlinks a secondary identity without allowing the last identity to be removed', async () => {
+    const backend = await backendForTest()
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'unlink-identity@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+      const userId = signedUp.data.user!.id
+      await backend.db.query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1, 'github', 'github-unlink-user', $2::jsonb)`,
+        [userId, JSON.stringify({ sub: 'github-unlink-user' })],
+      )
+
+      const identities = await client.auth.getUserIdentities()
+      expect(identities.error).toBeNull()
+      const github = identities.data.identities.find((identity) => identity.provider === 'github')
+      if (!github) throw new Error('Expected the secondary identity')
+
+      expect((await client.auth.unlinkIdentity(github)).error).toBeNull()
+      expect((await client.auth.getUserIdentities()).data.identities).toHaveLength(1)
+      const remaining = (await client.auth.getUserIdentities()).data.identities[0]
+      expect((await client.auth.unlinkIdentity(remaining)).error?.code).toBe('cannot_unlink_identity')
+    } finally {
+      await backend.close()
+    }
+  })
 })
 
 function backendForTest(overrides: Parameters<typeof createLiteBackend>[0] = {}) {

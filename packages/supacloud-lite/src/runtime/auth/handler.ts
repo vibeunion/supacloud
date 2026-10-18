@@ -391,6 +391,9 @@ export class AuthHandler {
       if (path === 'token' && method === 'POST') return this.limit('token', req) ?? (await this.token(req, url))
       if (path === 'user' && method === 'GET') return await this.getUser(req)
       if (path === 'user' && method === 'PUT') return await this.updateUser(req)
+      if (/^user\/identities\/[^/]+$/.test(path) && method === 'DELETE') {
+        return await this.unlinkIdentity(req, decodeURIComponent(path.split('/')[2]))
+      }
       if (path === 'reauthenticate' && (method === 'GET' || method === 'POST')) return await this.reauthenticate(req)
       if (path === 'logout' && method === 'POST') return await this.logout(req, url)
       if (path === 'otp' && method === 'POST') return await this.sendOtp(req)
@@ -641,6 +644,33 @@ export class AuthHandler {
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
     return json(200, this.userJson(user, await this.getUserFactors(user.id), await this.getUserIdentities(user.id)))
+  }
+
+  private async unlinkIdentity(req: Request, identityId: string): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const identity = (await query<{ id: string }>(
+        `select id from auth.identities where id = $1 and user_id = $2`,
+        [identityId, user.id],
+      )).rows[0]
+      if (!identity) return authError(404, 'identity_not_found', 'Identity not found')
+      const count = await query<{ count: number }>(
+        `select count(*)::int as count from auth.identities where user_id = $1`,
+        [user.id],
+      )
+      if ((count.rows[0]?.count ?? 0) <= 1) {
+        return authError(422, 'cannot_unlink_identity', 'Cannot unlink the only identity')
+      }
+      await query(`delete from auth.identities where id = $1 and user_id = $2`, [identity.id, user.id])
+      return json(200, {})
+    })
   }
 
   private async updateUser(req: Request): Promise<Response> {
