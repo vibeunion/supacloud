@@ -149,9 +149,9 @@ export function resolveProvider(name: string, cfg: OAuthProviderConfig): Resolve
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
     })),
-    idTokenIssuer: cfg.idTokenIssuer ?? preset.idTokenIssuer,
-    idTokenJwksUrl: cfg.idTokenJwksUrl ?? preset.idTokenJwksUrl,
-    idTokenAudience: cfg.idTokenAudience ?? preset.idTokenAudience,
+    ...(cfg.idTokenIssuer ?? preset.idTokenIssuer) === undefined ? {} : { idTokenIssuer: cfg.idTokenIssuer ?? preset.idTokenIssuer },
+    ...(cfg.idTokenJwksUrl ?? preset.idTokenJwksUrl) === undefined ? {} : { idTokenJwksUrl: cfg.idTokenJwksUrl ?? preset.idTokenJwksUrl },
+    ...(cfg.idTokenAudience ?? preset.idTokenAudience) === undefined ? {} : { idTokenAudience: cfg.idTokenAudience ?? preset.idTokenAudience },
   }
 }
 
@@ -214,16 +214,16 @@ export class OAuthService {
     }
 
     if (typeof payload.sub !== 'string' || payload.sub.length === 0) return null
-    if (payload.nonce !== undefined && (typeof payload.nonce !== 'string' || payload.nonce !== nonce)) return null
+    if (payload['nonce'] !== undefined && (typeof payload['nonce'] !== 'string' || payload['nonce'] !== nonce)) return null
     const acceptedAudiences = provider.idTokenAudience ?? provider.clientId
     if (
       Array.isArray(payload.aud)
       && payload.aud.length > 1
-      && (typeof payload.azp !== 'string'
-        || (Array.isArray(acceptedAudiences) ? !acceptedAudiences.includes(payload.azp) : payload.azp !== acceptedAudiences))
+      && (typeof payload['azp'] !== 'string'
+        || (Array.isArray(acceptedAudiences) ? !acceptedAudiences.includes(payload['azp']) : payload['azp'] !== acceptedAudiences))
     ) return null
-    if (typeof payload.at_hash === 'string') {
-      if (!accessToken || (await oidcAtHash(accessToken, algorithm)) !== payload.at_hash) return null
+    if (typeof payload['at_hash'] === 'string') {
+      if (!accessToken || (await oidcAtHash(accessToken, algorithm)) !== payload['at_hash']) return null
     }
 
     let profile: OAuthProfile
