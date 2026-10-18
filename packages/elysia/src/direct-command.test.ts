@@ -5,8 +5,13 @@ const module: Pick<CompiledModule, "name" | "commands" | "aspects"> = {
   name: "review", commands: [{ className: "Approve", name: "approve", permission: "approve",
     transaction: "required", audit: "approved", idempotency: "required", rpc: "approve_review" }],
 };
-function execute(governance: CommandGovernance, handler = async (input: number) => input + 1,
-  target = module, stages: string[] = [], input: unknown = 4) {
+function execute<Input = number>(
+  governance: CommandGovernance,
+  handler: (input: Input) => number | Promise<number> = (input) => (input as number) + 1,
+  target = module,
+  stages: string[] = [],
+  input: Input = 4 as Input,
+) {
   return executeCompiledCommand({
     module: target, command: "Approve", input,
     request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
@@ -62,7 +67,7 @@ test("selects the matching RPC branch and rejects unmatched input", async () => 
   const target = {
     ...module,
     commands: [{
-      ...module.commands[0]!,
+      ...module.commands?.[0]!,
       rpc: undefined,
       audit: undefined,
       transaction: "none" as const,
