@@ -432,7 +432,7 @@ export class AuthHandler {
       const email = (body.email ?? '').toLowerCase().trim()
       const res = await this.db.query<UserRow & { is_banned: boolean }>(
         `select *, coalesce(banned_until > now(), false) as is_banned
-         from auth.users where email = $1 and deleted_at is null`,
+         from auth.users where lower(email) = $1 and deleted_at is null`,
         [email],
       )
       const user = res.rows[0]
@@ -450,7 +450,12 @@ export class AuthHandler {
           [user.id],
         )
         const current = currentResult.rows[0]
-        if (!current || current.deleted_at !== null || !current.encrypted_password || current.email !== email) {
+        if (
+          !current
+          || current.deleted_at !== null
+          || !current.encrypted_password
+          || current.email?.toLowerCase().trim() !== email
+        ) {
           return authError(400, 'invalid_credentials', 'Invalid login credentials')
         }
         if (current.is_banned) {
