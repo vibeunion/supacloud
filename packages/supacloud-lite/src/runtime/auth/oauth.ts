@@ -310,10 +310,10 @@ export class OAuthService {
     // provider account with a victim's unverified email and take over their
     // account. Unverified → fall through and create a separate user.
     let userId: string | undefined
-    const email = profile.email?.toLowerCase() ?? null
+    const email = profile.email?.toLowerCase().trim() ?? null
     const verified = !!profile.email && profile.emailVerified === true
     if (email && verified) {
-      const byEmail = await query<{ id: string }>(`select id from auth.users where email = $1`, [email])
+      const byEmail = await query<{ id: string }>(`select id from auth.users where lower(email) = $1`, [email])
       userId = byEmail.rows[0]?.id
       if (userId) await this.assertUserEligible(query, userId)
     }
@@ -324,7 +324,7 @@ export class OAuthService {
       // is left null so it can't collide with (or hijack) an existing user.
       let userEmail: string | null = verified ? email : null
       if (userEmail) {
-        const taken = await query(`select 1 from auth.users where email = $1`, [userEmail])
+        const taken = await query(`select 1 from auth.users where lower(email) = $1`, [userEmail])
         if (taken.rows.length > 0) userEmail = null
       }
       const created = await query<{ id: string }>(
@@ -346,7 +346,7 @@ export class OAuthService {
         createdUserId = user.id
       } else if (userEmail) {
         const existingEmail = await query<{ id: string }>(
-          `select id from auth.users where email = $1 for update`,
+          `select id from auth.users where lower(email) = $1 for update`,
           [userEmail],
         )
         userId = existingEmail.rows[0]?.id
