@@ -889,6 +889,9 @@ export class AuthHandler {
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email or phone is required')
+    if (resend && body.type === 'email_change') {
+      return this.resendEmailChange(req, email, body)
+    }
     const signupResend = resend && body.type === 'signup'
     return this.limit('otp', req) ?? this.issueToken(
       email,
@@ -900,6 +903,22 @@ export class AuthHandler {
       body.code_challenge,
       body.code_challenge_method
     )
+  }
+
+  private async resendEmailChange(
+    req: Request,
+    newEmail: string,
+    body: { code_challenge?: string | null; code_challenge_method?: string | null }
+  ): Promise<Response> {
+    const result = await this.db.query<UserRow>(
+      `select * from auth.users
+       where lower(email_change) = $1 and deleted_at is null
+         and (banned_until is null or banned_until <= now())`,
+      [newEmail],
+    )
+    const user = result.rows[0]
+    if (!user) return json(200, {})
+    return this.requestEmailChange(req, user, newEmail, body)
   }
 
   private async issuePhoneToken(
