@@ -7,12 +7,14 @@ import type {
   AspectRefNode,
   CachedModuleEntry,
   CommandNode,
+  CommandBranchNode,
   ControllerNode,
   DependencyGraphCache,
   Diagnostic,
   EffectErrorMappingNode,
   EffectCompilerOptions,
   EffectRouteNode,
+  FeaturePersistenceNode,
   HandlerParamNode,
   FunctionalInjectNode,
   FeatureSpecNode,
@@ -496,6 +498,7 @@ export async function analyzeProject(
         if (meta && booleanProp(meta, "standalone")) {
           const permission = stringLiteralProp(meta, "permission");
           const rpc = checkedRpc(meta, ctx);
+          const branches = checkedBranches(meta, ctx);
           const audit = stringLiteralProp(meta, "audit");
           const standaloneName = stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name;
           const standaloneUses = parseInfraResourceUseRefs(
@@ -512,6 +515,7 @@ export async function analyzeProject(
             name: standaloneName,
             ...(permission === undefined ? {} : { permission }),
             ...(rpc === undefined ? {} : { rpc }),
+            ...(branches === undefined ? {} : { branches }),
             transaction: checkedCommandMode(meta, "transaction", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             ...(audit === undefined ? {} : { audit }),
             idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
@@ -902,6 +906,7 @@ function parseModule(
         );
         const permission = stringLiteralProp(meta, "permission");
         const rpc = checkedRpc(meta, ctx);
+        const branches = checkedBranches(meta, ctx);
         const audit = stringLiteralProp(meta, "audit");
         const commandName = stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>";
         const uses = parseInfraResourceUseRefs(
@@ -912,14 +917,17 @@ function parseModule(
           lineOf(cls),
         );
         rejectUndeclaredResourceUses(uses, moduleResourceNames, ctx, `command ${commandName}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
+        const tenantScope = commandModeProp(meta, "tenantScope");
         commands.push({
           className: cls.name?.text ?? "<anonymous>",
           name: commandName,
           ...(permission === undefined ? {} : { permission }),
           ...(rpc === undefined ? {} : { rpc }),
+          ...(branches === undefined ? {} : { branches }),
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
+          ...(tenantScope === undefined ? {} : { tenantScope }),
           ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
           ...(uses.length > 0 ? { uses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
@@ -962,12 +970,14 @@ function parseModule(
           lineOf(cls),
         );
         rejectUndeclaredResourceUses(jobUses, moduleResourceNames, ctx, `job ${stringLiteralProp(meta, "name") ?? className}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
+        const tenantScope = commandModeProp(meta, "tenantScope");
         jobs.push({
           className,
           name: stringLiteralProp(meta, "name") ?? className,
           serviceKey: camelName(provider?.token ?? className),
           scope,
           ...contract,
+          ...(tenantScope === undefined ? {} : { tenantScope }),
           ...(jobUses.length > 0 ? { uses: jobUses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
         });
@@ -977,9 +987,11 @@ function parseModule(
     if (queryDec) {
       const meta = decoratorObjectArg(queryDec);
       if (meta) {
+        const tenantScope = commandModeProp(meta, "tenantScope");
         queries.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
+          ...(tenantScope === undefined ? {} : { tenantScope }),
         });
       }
     }
@@ -1039,6 +1051,7 @@ function parseFeatureSpec(
   };
   if (!ts.isObjectLiteralExpression(input)) return invalid();
   const name = stringLiteralProp(input, "name");
+  const tenantField = stringLiteralProp(input, "tenantField");
   const statesExpr = getProp(input, "states");
   const transitionObject = getProp(input, "transitions");
   if (!name || !statesExpr || !ts.isArrayLiteralExpression(statesExpr) ||
@@ -1060,27 +1073,65 @@ function parseFeatureSpec(
     const from = stringLiteralProp(options, "from");
     const to = stringLiteralProp(options, "to");
     if (!from || !to || options.properties.some((prop) => !ts.isPropertyAssignment(prop)) ||
-      ["permission", "command", "route", "audit"].some((key) => getProp(options, key) && !stringLiteralProp(options, key)) ||
+      ["permission", "command", "route", "routeBinding", "audit", "job"].some((key) => getProp(options, key) && !stringLiteralProp(options, key)) ||
       ["transaction", "idempotency"].some((key) => getProp(options, key) && !commandModeProp(options, key))) {
       return invalid();
     }
     const permission = stringLiteralProp(options, "permission");
     const command = stringLiteralProp(options, "command");
     const route = stringLiteralProp(options, "route");
+    const routeBinding = stringLiteralProp(options, "routeBinding");
+    if (routeBinding !== undefined && routeBinding !== "command" && routeBinding !== "controller") return invalid();
     const transaction = commandModeProp(options, "transaction");
     const idempotency = commandModeProp(options, "idempotency");
     const audit = stringLiteralProp(options, "audit");
+    const job = stringLiteralProp(options, "job");
+    const persistenceExpr = getProp(options, "persistence");
+    const persistence = persistenceExpr && ts.isObjectLiteralExpression(persistenceExpr)
+      ? parseFeaturePersistence(persistenceExpr)
+      : undefined;
+    if (persistenceExpr && !persistence) return invalid();
     transitions.push({
       name: propertyName(property.name), from, to,
       ...(permission === undefined ? {} : { permission }),
       ...(command === undefined ? {} : { command }),
       ...(route === undefined ? {} : { route }),
+      ...(routeBinding === undefined ? {} : { routeBinding }),
       ...(transaction === undefined ? {} : { transaction }),
       ...(idempotency === undefined ? {} : { idempotency }),
       ...(audit === undefined ? {} : { audit }),
+      ...(job === undefined ? {} : { job }),
+      ...(persistence === undefined ? {} : { persistence }),
     });
   }
-  return { name, states, transitions, file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input) };
+  return {
+    name, states,
+    ...(tenantField === undefined ? {} : { tenantField }),
+    transitions,
+    file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input),
+  };
+}
+
+function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersistenceNode | undefined {
+  if (input.properties.some((property) => !ts.isPropertyAssignment(property))) return undefined;
+  const boundary = stringLiteralProp(input, "boundary");
+  const optimisticLock = commandModeProp(input, "optimisticLock");
+  const versionField = stringLiteralProp(input, "versionField");
+  const tenantField = stringLiteralProp(input, "tenantField");
+  const stateField = stringLiteralProp(input, "stateField");
+  const receipt = commandModeProp(input, "receipt");
+  const reconciliation = commandModeProp(input, "reconciliation");
+  if ((boundary !== "database" && boundary !== "external")
+    || (optimisticLock !== "required" && optimisticLock !== "none")
+    || (receipt !== "required" && receipt !== "none")
+    || (reconciliation !== "required" && reconciliation !== "none")) return undefined;
+  return {
+    boundary, optimisticLock,
+    ...(versionField === undefined ? {} : { versionField }),
+    ...(tenantField === undefined ? {} : { tenantField }),
+    ...(stateField === undefined ? {} : { stateField }),
+    receipt, reconciliation,
+  };
 }
 
 /** Resolves route options passed inline, through a const, or via defineRouteContract. */
@@ -2733,6 +2784,74 @@ function checkedRpc(meta: ObjectLiteralExpression, ctx: AnalysisContext): string
     message: "Command rpc must be a non-empty string literal identifying a configured adapter.",
     suggestion: "Declare a named RPC adapter and its tested persistence capabilities." });
   return undefined;
+}
+
+function checkedBranches(meta: ObjectLiteralExpression, ctx: AnalysisContext): CommandBranchNode[] | undefined {
+  const expression = getProp(meta, "branches");
+  if (!expression) return undefined;
+  if (!ts.isArrayLiteralExpression(expression)) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "invalid-command-branches",
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+      message: "Command branches must be an explicit object array.",
+      suggestion: "Declare each branch as { when, rpc, transaction, audit, idempotency, boundary }.",
+    });
+    return undefined;
+  }
+  const branches: CommandBranchNode[] = [];
+  for (const item of expression.elements) {
+    if (!ts.isObjectLiteralExpression(item)) {
+      ctx.diagnostics.push({
+        severity: "error",
+        code: "invalid-command-branches",
+        file: sourcePath(ctx.rootDir, item.getSourceFile().fileName),
+        line: lineOf(item),
+        message: "Command branches entries must be object literals.",
+      });
+      continue;
+    }
+    const when = stringLiteralProp(item, "when");
+    const rpc = stringLiteralProp(item, "rpc");
+    const transaction = checkedCommandMode(item, "transaction", ctx, "command branch") ?? "none";
+    const audit = stringLiteralProp(item, "audit");
+    const idempotency = checkedCommandMode(item, "idempotency", ctx, "command branch") ?? "none";
+    const boundary = stringLiteralProp(item, "boundary");
+    const validBoundary = boundary === undefined || boundary === "database" || boundary === "external";
+    const validWhen = when !== undefined && /^(?:[A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)*\s*===\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')$/.test(when);
+    if (!when || !validWhen || !rpc?.trim() || !validBoundary) {
+      ctx.diagnostics.push({
+        severity: "error",
+        code: "invalid-command-branches",
+        file: sourcePath(ctx.rootDir, item.getSourceFile().fileName),
+        line: lineOf(item),
+        message: "Command branches require a restricted equality selector, a non-empty rpc, and a valid boundary.",
+        suggestion: "Use when: 'resource === \"value\"' (or body.resource/params.resource/query.resource), plus a named RPC adapter.",
+      });
+      continue;
+    }
+    branches.push({
+      when,
+      rpc,
+      transaction,
+      ...(audit === undefined ? {} : { audit }),
+      idempotency,
+      ...(boundary === undefined ? {} : { boundary }),
+    });
+  }
+  if (branches.length === 0) return [];
+  if (new Set(branches.map((branch) => branch.when)).size !== branches.length) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "duplicate-command-branch",
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+      message: "Command branches must use distinct selectors.",
+      suggestion: "Make each branch selector mutually distinct.",
+    });
+  }
+  return branches;
 }
 
 /**

@@ -28,7 +28,7 @@ function zip(
   for (const [name, content] of entries) {
     const path = Buffer.from(name), source = Buffer.from(content), compressed = stored ? source : deflateRawSync(source);
     const crc = fault === "crc" ? 0 : Bun.hash.crc32(source);
-    const size = fault === "oversized" ? 301 * 1024 * 1024 : source.byteLength;
+    const size = fault === "oversized" ? 501 * 1024 * 1024 : source.byteLength;
     const flags = fault === "encrypted" ? 0x801 : 0x800;
     const header = Buffer.alloc(30);
     header.writeUInt32LE(0x04034b50);

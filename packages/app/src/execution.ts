@@ -5,6 +5,7 @@
 import type { Aspect } from "./aspect";
 import type { CommandRuntimeCapabilities, CommandRuntimeInvocation } from "./command_runtime";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution_observer";
+import { requireFeatureRequestContext } from "./feature_context";
 
 export { executionRequestId, executionTrace, observeExecution } from "./execution_observer";
 export type { ExecutionEvent, ExecutionObserver } from "./execution_observer";
@@ -132,9 +133,20 @@ export function createCommandPipeline<Invocation extends CommandPipelineInvocati
   }
   return async (invocation, handler) => {
     const { command } = invocation;
-    for (const mode of [command.transaction, command.idempotency]) {
+    for (const mode of [command.transaction, command.idempotency, command.tenantScope]) {
       if (mode !== undefined && mode !== "required" && mode !== "none") {
         throw new ExecutionPipelineError("Invalid command governance mode", "COMMAND_MODE_INVALID");
+      }
+    }
+    if (command.tenantScope === "required") {
+      try {
+        requireFeatureRequestContext(invocation.requestContext);
+      } catch {
+        throw new ExecutionPipelineError(
+          "Feature request context is required for this command",
+          "COMMAND_TENANT_CONTEXT_REQUIRED",
+          401,
+        );
       }
     }
     const observe = <Result>(stage: string, run: ExecutionNext<Result>) =>

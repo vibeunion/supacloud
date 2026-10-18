@@ -10,7 +10,8 @@ xigu-fa approval flow as the domain reference; do not replace its authoritative
 RPCs, receipts, permissions or state tables.
 
 This iteration adds `app generate --kind feature` to the existing generator.
-It creates six files, reuses preflight/preview/registration/rollback behavior,
+It creates eight files, including a typed fixture and an authenticated E2E
+entry point, and reuses preflight/preview/registration/rollback behavior,
 and requires explicit permission and RPC capability names. It does not add a
 second engine, database schema, hand-maintained client or transport abstraction.
 
@@ -19,7 +20,7 @@ second engine, database schema, hand-maintained client or transport abstraction.
 | Outcome | This iteration | Remaining evidence |
 | --- | --- | --- |
 | Golden business slice and four-stack comparison | Approval scope and common acceptance below; recorded-agent evaluator has a bounded `create-feature-slice` task | NestJS, Spring, a named Go stack, and SupaCloud implementations and comparable measured trials |
-| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, routes, tests and delivery checklist generated together | Real database bindings, generated browser client adoption, authenticated E2E, fixtures and delivery read-back |
+| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, routes, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
 | Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Durable authorization, version checks, audit, outbox and result recovery in the chosen customer flow |
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
 
@@ -97,7 +98,7 @@ attestation. No improvement ratio or ecosystem ranking is established here.
 
 - Feature-generator regression: preview/apply, explicit capability requirements,
   parent registration, conflicts, compiler acceptance/rejection and generated
-  service tests/type checking.
+  fixture/service tests, E2E entry-point generation and type checking.
 - Existing app-tool regression: 21 tests passed.
 - Recorded-agent evaluator: 4 tests passed, including cross-feature scope denial.
 - CLI typecheck and build passed.
@@ -131,8 +132,9 @@ authorization, idempotency, state transitions, audit or outbox behavior.
 
 1. Bind this recipe to one approved xigu-fa operation using its existing RPC and
    source-of-truth tables; keep authorization and state rules in that application.
-2. Connect the compiler-generated client and existing query adapter, then run
-   authenticated negative, concurrency, crash and recovery acceptance.
+2. Connect the compiler-generated client and existing query adapter, configure
+   the generated E2E environment, then run authenticated negative, concurrency,
+   crash and recovery acceptance.
 3. Verify the published dependency tuple and test-environment deployment/upgrade.
    Local candidate-package acceptance is complete; publication is not verified.
 4. Implement the three comparison stacks against the same contract and record

@@ -5,6 +5,8 @@ import { canonical, digest, noLinks, readBoundedOwned } from "./delivery-files";
 import type { DeliveryTarget } from "./delivery-schema";
 
 const JSON_LIMIT = 1_048_576;
+export const DELIVERY_ARTIFACT_MAX_FILE_BYTES = 500 * 1024 * 1024;
+export const DELIVERY_ARTIFACT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
 
 export async function readDeliveryManifest(manifestPath: string) {
   const selected = resolve(manifestPath);
@@ -26,8 +28,8 @@ export async function readDeliverySelection(manifestPath: string, target: string
 export async function readVerifiedDeliveryFiles(
   root: string, object: DeliveryObject, target: DeliveryTarget, selectedPaths: ReadonlySet<string>,
 ): Promise<Map<string, Buffer>> {
-  if (object.files.length > 1024 || object.files.some(file => file.bytes > 64 * 1024 * 1024)
-    || object.files.reduce((bytes, file) => bytes + file.bytes, 0) > 128 * 1024 * 1024) {
+  if (object.files.length > 1024 || object.files.some(file => file.bytes > DELIVERY_ARTIFACT_MAX_FILE_BYTES)
+    || object.files.reduce((bytes, file) => bytes + file.bytes, 0) > DELIVERY_ARTIFACT_MAX_TOTAL_BYTES) {
     throw new Error("Artifact inventory exceeds limits.");
   }
   const objectRoot = join(root, "objects", object.objectId);
