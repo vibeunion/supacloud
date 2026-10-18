@@ -357,6 +357,12 @@ export class AuthHandler {
       if (path === 'resend' && method === 'POST') return await this.sendOtp(req, true)
       if (path === 'verify' && method === 'POST') return this.limit('verify', req) ?? (await this.verifyToken(req))
       if (path === 'verify' && method === 'GET') return await this.verifyLink(url)
+      if (path === 'invite' && method === 'POST') {
+        if (ctx.role !== 'service_role') {
+          return authError(403, 'insufficient_permissions', 'Admin endpoints require the service_role key')
+        }
+        return await this.generateAdminMagicLink(req, true, 'invite')
+      }
       if (path === 'factors' && method === 'POST') return await this.enrollFactor(req)
       if (/^factors\/[^/]+\/challenge$/.test(path) && method === 'POST')
         return await this.challengeFactor(req, path.split('/')[1])
@@ -1673,7 +1679,7 @@ export class AuthHandler {
     return authError(404, 'not_found', `unknown admin endpoint`)
   }
 
-  private async generateAdminMagicLink(req: Request): Promise<Response> {
+  private async generateAdminMagicLink(req: Request, sendEmail = false, forcedType?: 'invite'): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as {
       type?: string
       email?: string
@@ -1681,6 +1687,7 @@ export class AuthHandler {
       redirect_to?: string
       data?: Record<string, unknown>
     }
+    if (forcedType) body.type = forcedType
     if (!['signup', 'invite', 'magiclink', 'recovery'].includes(body.type ?? '')) {
       return authError(422, 'unsupported_link_type', 'Only signup, invite, magiclink, and recovery link generation are supported')
     }
@@ -1763,6 +1770,15 @@ export class AuthHandler {
     actionUrl.searchParams.set('token', hashedToken)
     actionUrl.searchParams.set('type', body.type!)
     actionUrl.searchParams.set('redirect_to', redirectTo)
+    if (sendEmail) {
+      await this.audit('user_invited', { actorId: user.id, actorEmail: email, type: 'admin' })
+      await this.config.mailer.send({
+        to: email,
+        subject: 'You have been invited',
+        text: `Accept your invitation with this link: ${actionUrl}`,
+      })
+      return json(200, { user: this.userJson(user, [], await this.getUserIdentities(user.id)) })
+    }
     const auditAction =
       body.type === 'invite' ? 'user_invited'
         : body.type === 'signup' ? 'user_signedup'
