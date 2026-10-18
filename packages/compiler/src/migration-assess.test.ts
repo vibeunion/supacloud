@@ -160,6 +160,13 @@ test("migration assessment accepts transition Job bindings by class name", async
           input: "RefreshCaseInput",
           mode: "task", idempotency: "required", tenantScope: "required",
         },
+        command: "ApproveCase",
+        permission: "case.approve",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
       }],
     }],
   }), "utf8");

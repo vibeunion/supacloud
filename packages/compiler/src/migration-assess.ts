@@ -91,20 +91,60 @@ function arrayLength(value: unknown): number | undefined {
   return Array.isArray(value) ? value.length : undefined;
 }
 
+function safeField(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+}
+
+function validFeaturePersistence(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const boundary = value["boundary"];
+  const receipt = value["receipt"];
+  const reconciliation = value["reconciliation"];
+  if (boundary === "database") {
+    const fields = [value["tenantField"], value["versionField"], value["stateField"]];
+    return value["optimisticLock"] === "required"
+      && fields.every(safeField)
+      && new Set(fields).size === 3
+      && receipt === "required"
+      && reconciliation === "none";
+  }
+  if (boundary === "external") {
+    return value["optimisticLock"] === "none"
+      && value["versionField"] === undefined
+      && value["tenantField"] === undefined
+      && value["stateField"] === undefined
+      && receipt === "required"
+      && reconciliation === "required";
+  }
+  return false;
+}
+
 function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value is unknown[] {
+  const featureNames = new Set<string>();
   return Array.isArray(value) && value.every((feature) => {
     if (!isRecord(feature) || typeof feature["name"] !== "string" || feature["name"].trim() === "") return false;
+    if (featureNames.has(feature["name"])) return false;
+    featureNames.add(feature["name"]);
     const states = feature["states"];
     const transitions = feature["transitions"];
     if (!Array.isArray(states) || states.length === 0
       || states.some((state) => typeof state !== "string" || state.trim() === "")
       || new Set(states).size !== states.length
       || !Array.isArray(transitions)) return false;
+    const transitionNames = new Set<string>();
     return transitions.every((transition) => {
       if (!isRecord(transition)
         || typeof transition["name"] !== "string" || transition["name"].trim() === ""
         || typeof transition["from"] !== "string" || !states.includes(transition["from"])
         || typeof transition["to"] !== "string" || !states.includes(transition["to"])) return false;
+      if (transitionNames.has(transition["name"])) return false;
+      transitionNames.add(transition["name"]);
+      const persistence = transition["persistence"];
+      if (persistence !== undefined) {
+        if (!validFeaturePersistence(persistence)) return false;
+        if (typeof transition["command"] !== "string" || transition["command"].trim() === ""
+          || typeof transition["permission"] !== "string" || transition["permission"].trim() === "") return false;
+      }
       const job = transition["job"];
       if (job === undefined) return true;
       const details = transition["jobDetails"];
