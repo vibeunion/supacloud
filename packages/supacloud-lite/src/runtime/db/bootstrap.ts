@@ -36,6 +36,9 @@ create table if not exists auth.users (
   updated_at timestamptz default now(),
   phone text unique,
   phone_confirmed_at timestamptz,
+  phone_change text default '',
+  phone_change_token text default '',
+  phone_change_sent_at timestamptz,
   banned_until timestamptz,
   deleted_at timestamptz,
   is_anonymous boolean default false
@@ -46,6 +49,9 @@ alter table auth.users add column if not exists email_change_sent_at timestamptz
 alter table auth.users add column if not exists email_change_token_new text default '';
 alter table auth.users add column if not exists email_change_token_current text default '';
 alter table auth.users add column if not exists email_change_confirm_status smallint default 0;
+alter table auth.users add column if not exists phone_change text default '';
+alter table auth.users add column if not exists phone_change_token text default '';
+alter table auth.users add column if not exists phone_change_sent_at timestamptz;
 
 create table if not exists auth.refresh_tokens (
   id bigserial primary key,
