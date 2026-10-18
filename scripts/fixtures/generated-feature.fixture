@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { ApplicationError, type CommandGovernance } from "@supacloud/elysia";
 import { createApp } from "../src/application";
-import type { CaseApprovalReadPort, CaseApprovalWritePort } from "../src/features/case-approval/case-approval.model";
+import type { CaseApprovalReadPort, CaseApprovalWritePort } from "../src/features/case-approval/case-approval.model";\n\nconst trustedContext = () => ({\n    requestId: "fixture-request",\n    identity: { authenticated: true, subject: "fixture-reviewer" },\n    access: { tenantId: "fixture-tenant", permissions: ["cases:approve"] },\n    idempotencyKey: "fixture-approval",\n});
 
 assert.throws(() => createApp({
     deps: {}, requestContext: () => ({}), commandGovernance: { authorize: () => {} },
@@ -44,7 +44,7 @@ const approvalRequest = (expectedVersion = 1) => new Request("http://localhost/c
     body: JSON.stringify({ expectedVersion, reason: "reviewed" }),
 });
 
-const unbound = createApp({ deps: {}, requestContext: () => ({}), commandGovernance: governance });
+const unbound = createApp({ deps: {}, requestContext: trustedContext, commandGovernance: governance });
 for (const path of ["/case-approval", "/case-approval/example"]) {
     const response = await unbound.handle(new Request("http://localhost" + path));
     assert.equal(response.status, 500);
