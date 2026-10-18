@@ -19,7 +19,13 @@ export {
 } from "./provider";
 export type { Provider, ProviderDep, Token, Type } from "./provider";
 export { defineModule, defineFeatureSlice, defineFeatureSpec } from "./module";
-export type { FeatureSliceOptions, FeatureSpecOptions, FeatureState, FeatureEvent } from "./module";
+export type {
+  FeaturePersistenceOptions,
+  FeatureSliceOptions,
+  FeatureSpecOptions,
+  FeatureState,
+  FeatureEvent,
+} from "./module";
 export { defineRouteHandler, defineRouteContract, defineTypedRoute } from "./route_contract";
 export type {
   RouteContractSchemas, RouteHandlerInput, RouteHandlerOutput, RouteResponseMap,
