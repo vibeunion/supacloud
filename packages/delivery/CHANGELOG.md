@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.19.4...delivery-v0.20.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
+
+### Bug Fixes
+
+* **delivery:** align release upload limits at 500 MiB ([#2075](https://github.com/vibeunion/supacloud/issues/2075)) ([14f25d4](https://github.com/vibeunion/supacloud/commit/14f25d4aee7cb41118f6849ca0a36373b3e14bcf))
+
 ## [0.19.4](https://github.com/vibeunion/supacloud/compare/delivery-v0.19.3...delivery-v0.19.4) (2026-10-17)
 
 
