@@ -117,6 +117,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         if (job.mode === undefined) {
           error("feature-job-mode", `Job ${job.className} in Feature ${spec.name} must declare mode: "task" or "workflow".`);
         }
+        if (job.input === undefined) {
+          error("feature-job-contract", `Job ${job.className} in Feature ${spec.name} must declare an input schema.`);
+        }
       }
     }
     if (transition.route) {

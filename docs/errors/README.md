@@ -140,6 +140,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC6117](SC6117.md) | `feature-job-unresolved` | compiler |
 | [SC6118](SC6118.md) | `feature-job-idempotency` | compiler |
 | [SC6119](SC6119.md) | `feature-job-mode` | compiler |
+| [SC6120](SC6120.md) | `feature-job-contract` | compiler |
 | [SC8101](SC8101.md) | `duplicate-resource` | compiler |
 | [SC8102](SC8102.md) | `unknown-resource` | compiler |
 | [SC8103](SC8103.md) | `undeclared-resource-use` | compiler |

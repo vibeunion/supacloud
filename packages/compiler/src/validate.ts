@@ -141,6 +141,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "feature-job-unresolved": { code: "SC6117", docsUrl: "https://supacloud.dev/errors/SC6117" },
   "feature-job-idempotency": { code: "SC6118", docsUrl: "https://supacloud.dev/errors/SC6118" },
   "feature-job-mode": { code: "SC6119", docsUrl: "https://supacloud.dev/errors/SC6119" },
+  "feature-job-contract": { code: "SC6120", docsUrl: "https://supacloud.dev/errors/SC6120" },
   "feature-route-unresolved": { code: "SC6106", docsUrl: "https://supacloud.dev/errors/SC6106" },
   "feature-route-drift": { code: "SC6107", docsUrl: "https://supacloud.dev/errors/SC6107" },
   "invalid-feature-spec": { code: "SC6108", docsUrl: "https://supacloud.dev/errors/SC6108" },
