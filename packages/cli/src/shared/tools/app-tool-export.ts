@@ -80,9 +80,17 @@ function uniqueToolName(name: string, moduleName: string, used: Set<string>): st
 
 function findRouteForCommand(manifest: AppManifest, commandClassName: string): CommandRoute | undefined {
     for (const module of manifest.modules) {
+    const command = module.commands.find((candidate) =>
+        candidate.className === commandClassName || candidate.name === commandClassName);
+    if (!command) continue;
         for (const controller of module.controllers) {
             for (const route of controller.routes) {
-                if (route.command !== commandClassName) continue;
+        const transition = module.featureSpec?.transitions.find((candidate) =>
+            candidate.route !== undefined
+            && (candidate.command === command.className || candidate.command === command.name)
+            && candidate.route === `${route.method} ${controller.path}${route.path}`);
+        if (route.command !== command.className && route.command !== command.name
+          && transition === undefined) continue;
                 return {
                     httpMethod: route.method,
                     path: `${controller.path}${route.path}`,
