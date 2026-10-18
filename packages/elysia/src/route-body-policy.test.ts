@@ -65,6 +65,13 @@ test("route-level idempotency is enforced before an unbound write handler", asyn
   expect(await missing.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REQUIRED" });
   expect(calls).toBe(0);
 
+  const invalid = await app.handle(new Request("http://localhost/submit", {
+    method: "POST", headers: { "idempotency-key": "not a header value" },
+  }));
+  expect(invalid.status).toBe(400);
+  expect(await invalid.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+  expect(calls).toBe(0);
+
   const accepted = await app.handle(new Request("http://localhost/submit", {
     method: "POST", headers: { "idempotency-key": "submit-1" },
   }));

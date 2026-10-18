@@ -246,6 +246,7 @@ export type { SupAuthIdentity, SupAuthAccess, SupAuthRequestContext, SupAuthCont
 export const VERIFIED_JWT_SUBJECT_HEADER = "x-supacloud-jwt-sub";
 export const EXECUTION_ID_HEADER = "x-sb-execution-id";
 export const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{1,512}$/;
 
 export interface TrustedRequestIdentity {
   authenticated: boolean;
@@ -1033,8 +1034,8 @@ export function requireIdempotencyKey(invocation: CommandInvocation): string {
 
 function requireRouteIdempotencyKey(request: Request): string {
   const key = safeHeaderValue(request.headers.get(IDEMPOTENCY_KEY_HEADER), 512);
-  if (!key) {
-    throw new ApplicationError("Idempotency-Key header is required", {
+  if (!key || !idempotencyKeyPattern.test(key)) {
+    throw new ApplicationError("A valid Idempotency-Key header is required", {
       status: 400,
       code: "IDEMPOTENCY_KEY_REQUIRED",
     });
