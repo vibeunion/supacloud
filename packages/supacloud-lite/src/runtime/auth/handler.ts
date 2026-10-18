@@ -598,28 +598,51 @@ export class AuthHandler {
     flavor: 'login' | 'confirm' = 'login'
   ): Promise<Response> {
     const normalized = email.toLowerCase().trim()
-    let res = await this.db.query(`select * from auth.users where email = $1`, [normalized])
-    let user = res.rows[0] as UserRow | undefined
-    if (!user) {
-      if (!createUser) return json(200, {})
-      if (this.settings.disableSignup) return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
-      res = await this.db.query(
-        `insert into auth.users (aud, role, email, raw_app_meta_data, raw_user_meta_data)
-         values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', '{}')
-         returning *`,
-        [normalized]
-      )
-      user = res.rows[0] as UserRow
-    }
-    const code = randomOtp(this.settings.otpLength)
-    const linkToken = randomToken(24)
     const expiry = `${this.settings.otpExpirySeconds} seconds`
-    await this.db.query(`delete from auth.one_time_tokens where email = $1 and token_type = $2`, [normalized, tokenType])
-    await this.db.query(
-      `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
-       values ($1, $2, $3, $4, now() + $7::interval), ($1, $2, $5, $6, now() + $7::interval)`,
-      [user.id, normalized, tokenType, code, tokenType === 'otp' ? 'magiclink' : tokenType, linkToken, expiry]
-    )
+    const prepared = await this.db.transaction(async (query) => {
+      let user = (await query<UserRow>(
+        `select * from auth.users where email = $1 for update`,
+        [normalized],
+      )).rows[0]
+      if (!user) {
+        if (!createUser) return { kind: 'unknown' } as const
+        if (this.settings.disableSignup) return { kind: 'signup_disabled' } as const
+        const inserted = await query<UserRow>(
+          `insert into auth.users (aud, role, email, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', '{}')
+           on conflict (email) do nothing
+           returning *`,
+          [normalized]
+        )
+        user = inserted.rows[0]
+        if (!user) {
+          user = (await query<UserRow>(
+            `select * from auth.users where email = $1 for update`,
+            [normalized],
+          )).rows[0]
+        }
+      }
+      if (!user) return { kind: 'unknown' } as const
+
+      const code = randomOtp(this.settings.otpLength)
+      const linkToken = randomToken(24)
+      const tokenTypes = tokenType === 'otp' ? ['otp', 'magiclink'] : [tokenType]
+      await query(
+        `delete from auth.one_time_tokens where email = $1 and token_type = any($2::text[])`,
+        [normalized, tokenTypes],
+      )
+      await query(
+        `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
+         values ($1, $2, $3, $4, now() + $7::interval), ($1, $2, $5, $6, now() + $7::interval)`,
+        [user.id, normalized, tokenType, code, tokenType === 'otp' ? 'magiclink' : tokenType, linkToken, expiry]
+      )
+      return { kind: 'issued', user, code, linkToken } as const
+    })
+    if (prepared.kind === 'unknown') return json(200, {})
+    if (prepared.kind === 'signup_disabled') {
+      return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
+    }
+    const { user, code, linkToken } = prepared
     const kind = tokenType === 'otp' ? 'magiclink' : tokenType
     const link = `${this.config.apiUrl}/auth/v1/verify?token=${linkToken}&type=${kind}`
     await this.config.mailer.send({
