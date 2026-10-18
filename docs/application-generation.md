@@ -53,6 +53,13 @@ and a delivery checklist. `--permission` and `--rpc` are mandatory and are
 never inferred. The RPC must be registered in compiler capabilities and the
 runtime host.
 
+Generated read/write ports receive `FeatureRequestContext` from the framework.
+It contains the verified request ID, tenant, actor and permissions. Adapters
+must use it for tenant predicates and authorization and must not accept those
+values from request bodies, query parameters or forwarded headers. An
+authenticated context may have no feature permission; the governed Command
+still performs the authoritative permission check.
+
 Register the capability in the existing `supacloud.config.ts`, preserving its
 other policies and any existing RPC entries:
 
