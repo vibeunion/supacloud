@@ -394,7 +394,8 @@ export class AuthHandler {
         `insert into auth.users
            (aud, role, email, encrypted_password, email_confirmed_at, last_sign_in_at,
             raw_app_meta_data, raw_user_meta_data)
-         values ('authenticated', 'authenticated', $1, $2, case when $4 then now() else null end, now(),
+         values ('authenticated', 'authenticated', $1, $2, case when $4 then now() else null end,
+                 case when $4 then now() else null end,
                  '{"provider":"email","providers":["email"]}', $3)
          on conflict (email) do nothing
          returning *`,
