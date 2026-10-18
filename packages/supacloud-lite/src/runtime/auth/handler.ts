@@ -2320,6 +2320,7 @@ export class AuthHandler {
       return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
     }
 
+
     const emailOtp = randomOtp(this.settings.otpLength)
     const hashedToken = await sha256Hex(randomToken(32))
     const expiry = `${this.settings.otpExpirySeconds} seconds`
@@ -2336,6 +2337,7 @@ export class AuthHandler {
       const existing = await query<UserRow>(
         `select * from auth.users where lower(email) = $1 for update`,
         [email],
+
       )
       let linkedUser = existing.rows[0]
       if (!linkedUser && (body.type === 'recovery' || body.type === 'email_change_current' || body.type === 'email_change_new')) {
