@@ -122,9 +122,12 @@ test("the generated approval compiles only with the explicit persistent capabili
         },
     });
     expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
-    expect(compiled.graph.modules[0]?.featureSpec?.transitions[0]?.permission).toBe("cases:approve");
-    expect(compiled.graph.modules[0]?.commands[0]?.rpc).toBe("approveCase");
-    expect(compiled.graph.modules[0]?.queries).toHaveLength(1);
+    const featureModule = compiled.graph.modules.find(module => module.featureSpec);
+    expect(featureModule?.featureSpec?.transitions[0]?.permission).toBe("cases:approve");
+    expect(featureModule?.commands[0]?.rpc).toBe("approveCase");
+    expect(featureModule?.queries).toHaveLength(1);
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('tenantField: "tenant_id"');
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);
