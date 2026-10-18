@@ -71,7 +71,7 @@ test("rejects non-literal route idempotency policies", async () => {
       "src/features/case/case.controller.ts": controller,
     });
     const graph = await analyzeProject(root);
-    expect(graph.diagnostics.some((diagnostic) => diagnostic.code === "invalid-route-idempotency")).toBe(true);
+    expect((graph.diagnostics ?? []).some((diagnostic) => diagnostic.code === "invalid-route-idempotency")).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

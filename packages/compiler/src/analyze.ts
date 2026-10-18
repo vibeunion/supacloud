@@ -2111,7 +2111,8 @@ function parseController(
       if (optionsObject) {
         const parsePolicy = routePolicyProperty(optionsObject, "parse", ctx);
         const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
-        route.idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);
+        const idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);
+        if (idempotency !== undefined) route.idempotency = idempotency;
         if (parsePolicy.unresolved || deletePolicy.unresolved) {
           ctx.diagnostics.push({ severity: "error", code: "unresolved-route-body-policy", file,
             message: `Route ${route.handler} body policy must be statically resolvable; dynamic spreads, computed keys and shorthand policies are unsupported.` });
