@@ -109,13 +109,13 @@ function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value 
       if (job === undefined) return true;
       const details = transition["jobDetails"];
       const inventory = jobs.find((candidate) =>
-        isRecord(candidate) && candidate["name"] === job,
+        isRecord(candidate) && (candidate["name"] === job || candidate["className"] === job),
       );
       const contractFields = ["input", "output", "mode", "idempotency", "tenantScope"] as const;
       return typeof job === "string" && job.trim() !== ""
         && isRecord(details)
         && isRecord(inventory)
-        && details["name"] === job
+        && (details["name"] === job || details["className"] === job)
         && typeof details["className"] === "string" && details["className"].trim() !== ""
         && (details["mode"] === "task" || details["mode"] === "workflow")
         && details["idempotency"] === "required"
