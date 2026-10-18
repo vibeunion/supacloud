@@ -167,11 +167,16 @@ function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value 
 }
 
 function validJobInventory(value: unknown): value is unknown[] {
+  const names = new Set<string>();
+  const classes = new Set<string>();
   return Array.isArray(value) && value.every((job) => {
     if (!isRecord(job)
       || typeof job["name"] !== "string" || job["name"].trim() === ""
       || typeof job["className"] !== "string" || job["className"].trim() === ""
       || typeof job["module"] !== "string" || job["module"].trim() === "") return false;
+    if (names.has(job["name"]) || classes.has(job["className"])) return false;
+    names.add(job["name"]);
+    classes.add(job["className"]);
     if (job["input"] !== undefined && (typeof job["input"] !== "string" || job["input"].trim() === "")) return false;
     if (job["inputKind"] !== undefined && job["inputKind"] !== "opaque" && job["inputKind"] !== "declared") return false;
     if (job["output"] !== undefined && (typeof job["output"] !== "string" || job["output"].trim() === "")) return false;
