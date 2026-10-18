@@ -221,6 +221,7 @@ export function buildContractManifest(
           : module.commands.find((candidate) =>
             candidate.className === featureTransition.command || candidate.name === featureTransition.command);
         const governedCommand = command ?? featureCommand;
+        const effectiveCommand = route.command ?? featureTransition?.command;
         const idempotency = route.idempotency
           ?? command?.idempotency
           ?? featureTransition?.idempotency;
@@ -232,8 +233,7 @@ export function buildContractManifest(
           module: module.name,
           controller: controller.className,
           handler: route.handler,
-          ...(route.command === undefined && featureTransition?.command === undefined
-            ? {} : { command: route.command ?? featureTransition?.command }),
+          ...(effectiveCommand === undefined ? {} : { command: effectiveCommand }),
           ...(governedCommand?.permission === undefined ? {} : { permission: governedCommand.permission }),
           ...(idempotency === undefined ? {} : { idempotency }),
           ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
