@@ -137,6 +137,12 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('idempotency: "required",\n        effect:');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('"/:id/operations/:operationId"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.model.ts"), "utf8"))
+        .toContain("export interface CaseApprovalReceiptPort");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain("export const CaseApprovalReceipt =");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("requireFeatureRequestContext(this.jobContext)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("input: CaseApprovalRefreshInput");
@@ -168,6 +174,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(generatedE2E).toContain('test.skipIf(!enabled)');
     expect(generatedE2E).toContain('expect(replay.status).toBe(first.status)');
     expect(generatedE2E).toContain('expect(replayBody).toEqual(firstBody)');
+    expect(generatedE2E).toContain("durable receipt");
     expect(generatedE2E).toContain('conflicting replay');
     expect(generatedE2E).toContain('Promise.all');
     expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION');
