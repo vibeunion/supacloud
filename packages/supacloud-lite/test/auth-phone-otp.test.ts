@@ -151,6 +151,7 @@ describe('phone OTP compatibility', () => {
     )
 
     expect((await client.auth.signInWithOtp({ phone: '+8613710137100' })).error).toBeNull()
+    expect((await admin.auth.admin.getUserById(created.data.user!.id)).data.user?.app_metadata.providers).toEqual(['phone'])
     const verified = await client.auth.verifyOtp({
       phone: '+8613710137100',
       token: smsCode(backend),

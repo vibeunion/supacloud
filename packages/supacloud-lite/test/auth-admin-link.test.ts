@@ -38,6 +38,10 @@ describe('Auth admin link compatibility', () => {
       expect(properties?.email_otp).toMatch(/^\d{6}$/)
       expect(properties?.hashed_token).toMatch(/^[0-9a-f]{64}$/)
       if (!properties) throw new Error('generateLink returned no properties')
+      await backend.db.query(
+        `update auth.users set raw_app_meta_data = '{}'::jsonb where id = $1`,
+        [generated.data.user?.id],
+      )
 
       const regenerated = await serviceClient.auth.admin.generateLink({
         type: 'magiclink',
@@ -45,6 +49,7 @@ describe('Auth admin link compatibility', () => {
       })
       expect(regenerated.error).toBeNull()
       expect(regenerated.data.user?.id).toBe(generated.data.user?.id)
+      expect(regenerated.data.user?.app_metadata.providers).toEqual(['email'])
       expect(regenerated.data.properties?.hashed_token).not.toBe(properties.hashed_token)
       const regeneratedToken = regenerated.data.properties?.hashed_token
       if (!regeneratedToken) throw new Error('regenerated link returned no token hash')

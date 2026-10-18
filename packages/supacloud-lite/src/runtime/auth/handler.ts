@@ -1343,7 +1343,7 @@ export class AuthHandler {
 
         const resolved = await this.phoneUser(query, request)
         if (resolved === 'unknown' || resolved === 'signup_disabled') return { state: resolved }
-        await this.createPhoneIdentity(query, resolved)
+        await this.ensurePhoneIdentity(resolved, query)
         await query(`delete from auth.one_time_tokens where phone = $1 and token_type = 'sms'`, [request.phone])
         await query(
           `insert into auth.one_time_tokens (id, user_id, phone, token_type, token, expires_at)
@@ -1393,15 +1393,6 @@ export class AuthHandler {
       [phone]
     )
     return users.rows[0]
-  }
-
-  private createPhoneIdentity(query: Querier, user: UserRow): Promise<unknown> {
-    return query(
-      `insert into auth.identities (user_id, provider, provider_id, identity_data)
-       values ($1, 'phone', $2, $3::jsonb)
-       on conflict (provider, provider_id) do nothing`,
-      [user.id, user.phone, JSON.stringify({ sub: user.id, phone: user.phone, phone_verified: user.phone_confirmed_at != null })]
-    )
   }
 
   private async deliverPhoneOtp(
@@ -2360,12 +2351,7 @@ export class AuthHandler {
         )
         linkedUser = result.rows[0]
       }
-      await query(
-        `insert into auth.identities (user_id, provider, provider_id, identity_data)
-         values ($1::uuid, 'email', $1::text, $2::jsonb)
-         on conflict (provider, provider_id) do nothing`,
-        [linkedUser.id, JSON.stringify({ sub: linkedUser.id, email })]
-      )
+      await this.ensureEmailIdentity(linkedUser, query)
       await query(
         `delete from auth.one_time_tokens
          where lower(email) = $1 and token_type = any($2::text[])`,
