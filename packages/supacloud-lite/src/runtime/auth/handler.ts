@@ -315,8 +315,8 @@ export class AuthHandler {
       if (path === 'logout' && method === 'POST') return await this.logout(req, url)
       if (path === 'otp' && method === 'POST') return await this.sendOtp(req)
       if (path === 'recover' && method === 'POST') return this.limit('recover', req) ?? (await this.sendRecovery(req))
-      if (['magiclink', 'resend'].includes(path) && method === 'POST')
-        return await this.sendOtp(req)
+      if (path === 'magiclink' && method === 'POST') return await this.sendOtp(req)
+      if (path === 'resend' && method === 'POST') return await this.sendOtp(req, true)
       if (path === 'verify' && method === 'POST') return this.limit('verify', req) ?? (await this.verifyToken(req))
       if (path === 'verify' && method === 'GET') return await this.verifyLink(url)
       if (path === 'factors' && method === 'POST') return await this.enrollFactor(req)
@@ -713,12 +713,13 @@ export class AuthHandler {
     return json(200, {})
   }
 
-  private async sendOtp(req: Request): Promise<Response> {
+  private async sendOtp(req: Request, resend = false): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as {
       email?: string
       phone?: string
       create_user?: boolean
       channel?: string
+      type?: string
       data?: Record<string, unknown>
     }
     if (body.email && body.phone) return authError(400, 'validation_failed', 'email and phone are mutually exclusive')
@@ -732,11 +733,12 @@ export class AuthHandler {
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email or phone is required')
+    const signupResend = resend && body.type === 'signup'
     return this.limit('otp', req) ?? this.issueToken(
       email,
       'otp',
-      body.create_user !== false,
-      'login',
+      signupResend ? false : body.create_user !== false,
+      signupResend ? 'confirm' : 'login',
       recordValue(body.data),
       new URL(req.url).searchParams.get('redirect_to')
     )
