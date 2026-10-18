@@ -254,6 +254,55 @@ describe('Auth extended GoTrue compatibility', () => {
       await backend.close()
     }
   })
+
+  test('returns an identity conflict instead of a server error for concurrent OAuth links', async () => {
+    const backend = await backendForTest({
+      siteUrl: 'http://app.local/callback',
+      oauthProviders: {
+        google: {
+          clientId: 'client-id', clientSecret: 'client-secret',
+          authorizeUrl: 'http://provider.local/authorize', tokenUrl: 'http://provider.local/token',
+          userInfoUrl: 'http://provider.local/userinfo',
+        },
+      },
+      oauthFetch: (async (input) => {
+        const url = new URL(String(input))
+        if (url.pathname === '/token') return Response.json({ access_token: 'provider-token' })
+        if (url.pathname === '/userinfo') return Response.json({ sub: 'concurrent-provider-user' })
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch,
+    })
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'concurrent-link@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+
+      const starts = await Promise.all([
+        client.auth.linkIdentity({ provider: 'google', options: { redirectTo: 'http://app.local/callback', skipBrowserRedirect: true } }),
+        client.auth.linkIdentity({ provider: 'google', options: { redirectTo: 'http://app.local/callback', skipBrowserRedirect: true } }),
+      ])
+      expect(starts.every((result) => result.error === null && result.data.url !== undefined)).toBe(true)
+
+      const callbacks = await Promise.all(starts.map((result) => {
+        const state = new URL(result.data.url!).searchParams.get('state')
+        return backend.fetch(`http://local/auth/v1/callback?code=provider-code&state=${state}`, {
+          headers: apiHeaders(backend.anonKey),
+        })
+      }))
+      expect(callbacks.map((response) => response.status)).toEqual([303, 303])
+      const locations = callbacks.map((response) => new URL(response.headers.get('location')!))
+      expect(locations.filter((location) => location.hash.includes('access_token='))).toHaveLength(1)
+      expect(locations.filter((location) => location.hash.includes('identity_already_exists'))).toHaveLength(1)
+      expect((await backend.db.query(
+        `select provider_id from auth.identities where provider = 'google'`,
+      )).rows).toEqual([{ provider_id: 'concurrent-provider-user' }])
+    } finally {
+      await backend.close()
+    }
+  })
 })
 
 function backendForTest(overrides: Parameters<typeof createLiteBackend>[0] = {}) {
