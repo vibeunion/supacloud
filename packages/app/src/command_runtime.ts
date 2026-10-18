@@ -10,9 +10,19 @@ export interface CommandRuntimeDescriptor {
   readonly name: string;
   readonly permission?: string;
   readonly rpc?: string;
+  readonly branches?: readonly CommandRuntimeBranch[];
   readonly transaction?: CommandRuntimeMode | string;
   readonly audit?: string;
   readonly idempotency?: CommandRuntimeMode | string;
+}
+
+export interface CommandRuntimeBranch {
+  readonly when: string;
+  readonly rpc: string;
+  readonly transaction?: CommandRuntimeMode | string;
+  readonly audit?: string;
+  readonly idempotency?: CommandRuntimeMode | string;
+  readonly boundary?: "database" | "external";
 }
 
 export interface CommandRuntimeInput {

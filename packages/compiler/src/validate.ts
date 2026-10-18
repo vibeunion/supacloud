@@ -907,6 +907,16 @@ export function validateGraph(
         );
       }
 
+      if (command.rpc && command.branches) {
+        error("command-rpc-branches-conflict", `Command ${command.name} cannot declare both rpc and branches.`, module.file, module.line);
+      }
+      const branchAdapters = command.branches ?? [];
+      for (const branch of branchAdapters) {
+        if (typeof options !== "object" ||
+          !Object.hasOwn(options.commandCapabilities?.rpc ?? {}, branch.rpc)) {
+          error("command-rpc-unavailable", `Command ${command.name} requires configured RPC adapter '${branch.rpc}'.`, module.file, module.line);
+        }
+      }
       if (command.rpc && (typeof options !== "object" ||
         !Object.hasOwn(options.commandCapabilities?.rpc ?? {}, command.rpc))) {
         error("command-rpc-unavailable", `Command ${command.name} requires configured RPC adapter '${command.rpc}'.`, module.file, module.line);
@@ -914,12 +924,46 @@ export function validateGraph(
       if (typeof options === "object" && options.commandCapabilities) {
         const hostCaps = options.commandCapabilities;
         const rpcCaps = command.rpc && Object.hasOwn(hostCaps.rpc ?? {}, command.rpc) ? hostCaps.rpc?.[command.rpc] : undefined;
+        const branchCaps = branchAdapters.map((branch) => ({
+          branch,
+          capabilities: Object.hasOwn(hostCaps.rpc ?? {}, branch.rpc) ? hostCaps.rpc?.[branch.rpc] : undefined,
+        }));
+        for (const { branch, capabilities } of branchCaps) {
+          if (capabilities?.boundary === "external" && (branch.transaction === "required" || capabilities.transaction === true)) {
+            error("command-external-transaction",
+              `Command ${command.name} branch '${branch.when}' calls an external service; use transaction: 'none'.`,
+              module.file, module.line,
+              "Use transaction: 'none' with durable intent and reconciliation.");
+          }
+          if (branch.audit && capabilities?.audit !== true) {
+            error("command-audit-unsupported",
+              `Command ${command.name} branch '${branch.when}' declares audit, but runtime audit persistence is unavailable.`,
+              module.file, module.line);
+          }
+          if (branch.idempotency === "required" && capabilities?.idempotency !== true) {
+            error("command-idempotency-unsupported",
+              `Command ${command.name} branch '${branch.when}' declares idempotency, but receipt persistence is unavailable.`,
+              module.file, module.line);
+          }
+          if (branch.transaction === "required" && capabilities?.transaction !== true) {
+            error("command-transaction-unsupported",
+              `Command ${command.name} branch '${branch.when}' declares transaction, but transaction support is unavailable.`,
+              module.file, module.line);
+          }
+        }
         if (hostCaps.requirePersistentAdapters && (
           (command.rpc !== undefined && (!rpcCaps?.boundary || rpcCaps.audit !== true || rpcCaps.idempotency !== true))
+          || (branchCaps.length > 0 && branchCaps.some(({ branch, capabilities }) =>
+            !capabilities?.boundary || capabilities.audit !== true || capabilities.idempotency !== true
+            || (capabilities.boundary === "database" && (capabilities.transaction !== true || branch.transaction !== "required"))
+          ))
           || hostCaps.permission !== true || !command.permission
-          || !command.audit || command.idempotency !== "required"
+          || (branchCaps.length === 0 && (!command.audit || command.idempotency !== "required"))
+          || (branchCaps.length > 0 && branchCaps.some(({ branch }) => !branch.audit || branch.idempotency !== "required"))
+          || (branchCaps.length > 0 && branchCaps.some(({ capabilities }) =>
+            capabilities?.boundary === "external" && capabilities.reconcile !== true))
           || (command.rpc !== undefined && rpcCaps?.boundary === "database" && (rpcCaps.transaction !== true || command.transaction !== "required"))
-          || (command.rpc === undefined && (hostCaps.audit !== true || hostCaps.idempotency !== true
+          || (command.rpc === undefined && branchCaps.length === 0 && (hostCaps.audit !== true || hostCaps.idempotency !== true
             || hostCaps.transaction !== true || command.transaction !== "required"))
           || (command.rpc !== undefined && rpcCaps?.boundary === "external" && rpcCaps.reconcile !== true)
         )) {
