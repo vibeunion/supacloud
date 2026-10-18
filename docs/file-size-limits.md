@@ -46,3 +46,9 @@ The larger processing limit increases peak memory and temporary I/O risk.
 Operators should size worker memory, concurrency and admission controls for
 the selected workload. The default is expressed in MiB (`500 * 1024 * 1024`);
 image rejection messages report the effective limit in bytes.
+
+Management API project-scoped image transforms use the same 500 MiB default for
+source and `max_bytes` output filtering. Set
+`SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES` to a positive byte count up to
+524288000 to lower that limit for the service, then restart it. This is an
+operator limit; URL parameters cannot raise it.
