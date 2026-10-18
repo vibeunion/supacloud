@@ -1786,28 +1786,8 @@ export class AuthHandler {
       )).rows[0]
       if (!updated) return null
       await this.ensurePhoneIdentity(updated, query)
-      const synced = (await query<UserRow>(
-        `update auth.users
-         set raw_app_meta_data = jsonb_set(
-           coalesce(raw_app_meta_data, '{}'::jsonb),
-           '{providers}',
-           (
-             select jsonb_agg(provider order by provider)
-             from (
-               select distinct provider
-               from auth.identities
-               where user_id = $1
-             ) as providers
-           ),
-           true
-         ),
-         updated_at = now()
-         where id = $1
-         returning *`,
-        [updated.id],
-      )).rows[0]
       return this.sessionFor(
-        synced ?? updated,
+        updated,
         undefined,
         { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
         query
@@ -3066,6 +3046,7 @@ export class AuthHandler {
        set identity_data = excluded.identity_data, updated_at = now()`,
       [user.id, JSON.stringify({ sub: user.id, email: user.email })]
     )
+    await this.syncUserProviders(user, query)
   }
 
   private async ensurePhoneIdentity(
@@ -3080,6 +3061,34 @@ export class AuthHandler {
        set identity_data = excluded.identity_data, updated_at = now()`,
       [user.id, user.phone, JSON.stringify({ sub: user.id, phone: user.phone, phone_verified: Boolean(user.phone_confirmed_at) })]
     )
+    await this.syncUserProviders(user, query)
+  }
+
+  private async syncUserProviders(
+    user: UserRow,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<void> {
+    const updated = (await query<UserRow>(
+      `update auth.users
+       set raw_app_meta_data = jsonb_set(
+         coalesce(raw_app_meta_data, '{}'::jsonb),
+         '{providers}',
+         (
+           select jsonb_agg(provider order by provider)
+           from (
+             select distinct provider
+             from auth.identities
+             where user_id = $1
+           ) as providers
+         ),
+         true
+       ),
+       updated_at = now()
+       where id = $1
+       returning *`,
+      [user.id],
+    )).rows[0]
+    if (updated) Object.assign(user, updated)
   }
 
   private async userJsonWithRelations(
