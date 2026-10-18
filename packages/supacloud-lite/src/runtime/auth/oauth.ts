@@ -334,19 +334,17 @@ export class OAuthService {
   private async linkIdentityToUser(provider: string, profile: OAuthProfile, userId: string): Promise<void> {
     await this.db.transaction(async (query) => {
       await this.assertUserEligible(query, userId)
-      const existing = await query<{ user_id: string }>(
-        `select user_id from auth.identities where provider = $1 and provider_id = $2`,
-        [provider, profile.id],
-      )
-      if (existing.rows.length > 0) {
-        throw new OAuthIdentityLinkError('identity_already_exists')
-      }
       const identityData = JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })
-      await query(
+      const inserted = await query<{ user_id: string }>(
         `insert into auth.identities (user_id, provider, provider_id, identity_data)
-         values ($1, $2, $3, $4::jsonb)`,
+         values ($1, $2, $3, $4::jsonb)
+         on conflict (provider, provider_id) do nothing
+         returning user_id`,
         [userId, provider, profile.id, identityData],
       )
+      if (inserted.rows.length === 0) {
+        throw new OAuthIdentityLinkError('identity_already_exists')
+      }
       await query(
         `update auth.users
          set raw_app_meta_data = jsonb_set(
