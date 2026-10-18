@@ -52,6 +52,7 @@ export interface ApplicationDevelopmentRoute {
   controller: string;
   handler: string;
   command?: string;
+  idempotency?: "required" | "none";
   aspects: string[];
   schemaKinds?: Record<string, DevelopmentSchemaKind>;
 }
@@ -198,7 +199,8 @@ export function createApplicationDevelopmentContext(
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const candidates = module.commands.filter(command => command.className === route.command || command.name === route.command);
-        const command = candidates.length === 1 ? candidates[0]?.name : undefined;
+        const commandNode = candidates.length === 1 ? candidates[0] : undefined;
+        const command = commandNode?.name;
         const kinds = schemaKinds(route);
         routes.push({
           module: module.name,
@@ -207,6 +209,8 @@ export function createApplicationDevelopmentContext(
           controller: controller.className,
           handler: route.handler,
           ...(command === undefined ? {} : { command }),
+          ...(route.idempotency ?? commandNode?.idempotency) === undefined
+            ? {} : { idempotency: route.idempotency ?? commandNode?.idempotency },
           aspects: (route.aspects ?? []).map((aspect) => aspect.name),
           ...(kinds === undefined ? {} : { schemaKinds: kinds }),
         });

@@ -774,6 +774,9 @@ class ModuleGenerator {
     if (this.module.controllers.length === 0) return "[]";
     const items = this.module.controllers.map((controller) => {
       const routes = controller.routes.map((route) => {
+        const command = route.command === undefined ? undefined
+          : this.module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
+        const idempotency = route.idempotency ?? command?.idempotency;
         const responseEntries = normalizedResponseEntries(route.responses);
         const hasResponseMap = responseEntries.length > 0;
         const fields: string[] = [
@@ -799,8 +802,8 @@ class ModuleGenerator {
         if (route.effect !== undefined) {
           fields.push(`effect: ${JSON.stringify(route.effect)}`);
         }
-        if (route.idempotency !== undefined) {
-          fields.push(`idempotency: ${JSON.stringify(route.idempotency)}`);
+        if (idempotency !== undefined) {
+          fields.push(`idempotency: ${JSON.stringify(idempotency)}`);
         }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
         if (route.guards && route.guards.length > 0) {
@@ -1432,6 +1435,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
 
         routeTypes.push(`export type ${requestTypeName} = ${requestType};`);
         routeTypes.push(`export type ${responseTypeName} = ${responseType === "never" ? "unknown" : responseType};`);
+        const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
+        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const routeFields = [
           `method: ${JSON.stringify(route.method)}`,
           `path: ${JSON.stringify(fullPath)}`,
@@ -1454,7 +1459,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["data", route.data],
           ["parse", route.parse],
           ["allowDeleteBody", route.allowDeleteBody],
-          ["idempotency", route.idempotency],
+          ["idempotency", idempotencyMode === "none" ? undefined : idempotencyMode],
         ] as const) {
           if (value !== undefined) routeFields.push(`${key}: ${JSON.stringify(value)}`);
         }
@@ -1492,9 +1497,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `{ ${responseSchemaEntries.map(([status, local]) => `${JSON.stringify(status)}: ${local}`).join(", ")} }`
           : "undefined";
         const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
-        const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
         const procedureKind = route.method === "GET" || route.method === "HEAD" ? "query" : "mutation";
-        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const procedureMetadata = {
           key: `${controller.className}.${route.handler}`,
           method: route.method,
@@ -2210,6 +2213,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
         const operationBase = pascalName(`${module.name}_${controller.className}_${route.handler}`);
         const operationId = uniqueName(operationBase, operationIds);
         const command = route.command ? commandByClass.get(route.command) : undefined;
+        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const requiresAuth = (route.guards?.length ?? 0) > 0 || command !== undefined;
         const responseKind = route.contract?.response;
         const responseContentType = responseKind === "binary" || responseKind === "stream"
@@ -2251,7 +2255,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
           responseKind: responseKind ?? (route.nativeResponse ? "native-response" : undefined),
           ...(route.parse === undefined ? {} : { parse: route.parse }),
           ...(route.allowDeleteBody === undefined ? {} : { allowDeleteBody: route.allowDeleteBody }),
-          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+          ...(idempotencyMode === "none" ? {} : { idempotency: idempotencyMode }),
           module: module.name,
           controller: controller.className,
           handler: route.handler,
@@ -2333,6 +2337,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  handler: string;",
     "  command?: string;",
     "  permission?: string;",
+    "  idempotency?: \"required\" | \"none\";",
     "  guards?: readonly string[];",
     "  canMatch?: readonly string[];",
     "  canDeactivate?: readonly string[];",
@@ -2585,6 +2590,9 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  for (const name of headersSchema ? schemaPropertyNames(headersSchema) : []) parameters.push({",
     '    name, in: "header", required: schemaRequired(headersSchema, name), schema: schemaProperty(headersSchema, name),',
     "  });",
+    "  if (definition.idempotency === \"required\") parameters.push({",
+    '    name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]{1,512}$" },',
+    "  });",
     "  const cookieSchema = definition.cookieSchema ? OPENAPI_SCHEMA_REGISTRY[definition.cookieSchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
     "  for (const name of cookieSchema ? schemaPropertyNames(cookieSchema) : []) parameters.push({",
     '    name, in: "cookie", required: schemaRequired(cookieSchema, name), schema: schemaProperty(cookieSchema, name),',
@@ -2607,6 +2615,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     '    responses["500"] = { description: "Internal server error", content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } } };',
     '    responses["200"] = { description: "Successful response" };',
     "  }",
+    '  if (definition.idempotency === "required") responses["400"] = { description: "Idempotency-Key is missing or invalid", content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } } };',
     "  const operation: Record<string, unknown> = {",
     "    operationId: definition.operationId, tags: [...definition.tags], summary: definition.summary, responses,",
     "    ...(parameters.length === 0 ? {} : { parameters }),",
@@ -2617,6 +2626,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "      module: definition.module, controller: definition.controller, handler: definition.handler,",
     "      ...(definition.command ? { command: definition.command } : {}),",
     "      ...(definition.permission ? { permission: definition.permission } : {}),",
+    "      ...(definition.idempotency ? { idempotency: definition.idempotency } : {}),",
     "      ...(definition.guards ? { guards: [...definition.guards] } : {}),",
     "      ...(definition.canMatch ? { canMatch: [...definition.canMatch] } : {}),",
     "      ...(definition.canDeactivate ? { canDeactivate: [...definition.canDeactivate] } : {}),",
@@ -2682,6 +2692,9 @@ export function renderPermissions(graph: ApplicationGraph): string {
           const cmd = module.commands.find((c) => c.className === route.command);
           perm = cmd?.permission;
         }
+        const command = route.command === undefined ? undefined
+          : module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
+        const idempotency = route.idempotency ?? command?.idempotency;
         if (perm) permissions.add(perm);
         bindings.push({
           method: route.method,
@@ -2690,7 +2703,7 @@ export function renderPermissions(graph: ApplicationGraph): string {
           handler: route.handler,
           ...(route.command === undefined ? {} : { command: route.command }),
           ...(perm === undefined ? {} : { permission: perm }),
-          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+          ...(idempotency === undefined ? {} : { idempotency }),
         });
       }
     }
@@ -2718,6 +2731,7 @@ export function renderPermissions(graph: ApplicationGraph): string {
     "  handler: string;",
     "  command?: string;",
     "  permission?: string;",
+    "  idempotency?: \"required\" | \"none\";",
     "}",
     "",
     "export const RoutePermissions: RoutePermissionBinding[] = " + JSON.stringify(bindings, null, 2) + ";",

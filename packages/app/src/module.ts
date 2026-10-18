@@ -15,6 +15,8 @@ export interface FeatureTransitionOptions<State extends string = string> {
   audit?: string;
   /** Job that continues the transition after the durable write is committed. */
   job?: string;
+  /** Explicit query tags invalidated after the transition succeeds. */
+  invalidateTags?: readonly string[];
   persistence?: FeaturePersistenceOptions;
 }
 

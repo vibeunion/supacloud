@@ -15,6 +15,10 @@ export function featureScaffold(
 export const ${className}Params = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
 });
+export const ${className}ReceiptParams = t.Object({
+    id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
+    operationId: t.String({ minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]+$" }),
+});
 export const ${className}ListQuery = t.Object({
     state: t.Optional(t.Union([t.Literal("draft"), t.Literal("approved")])),
 });
@@ -27,6 +31,25 @@ export const ${className}Row = t.Object({
     state: t.String(),
     version: t.Integer({ minimum: 1 }),
 });
+export const ${className}Receipt = t.Object({
+    operationId: t.String({ minLength: 1, maxLength: 512 }),
+    status: t.Union([
+        t.Literal("pending"), t.Literal("confirmed"), t.Literal("failed"), t.Literal("unknown"),
+    ]),
+    state: t.String(),
+    version: t.Integer({ minimum: 1 }),
+});
+/** Query tags are explicit cache contracts; use them with @supacloud/query. */
+export const ${className}QueryTags = {
+    list: ${JSON.stringify(`${name}.list`)},
+    detail: ${JSON.stringify(`${name}.detail`)},
+    receipt: ${JSON.stringify(`${name}.receipt`)},
+} as const;
+export const ${className}ApproveInvalidateTags = [
+    ${className}QueryTags.list,
+    ${className}QueryTags.detail,
+    ${className}QueryTags.receipt,
+] as const;
 export const ${className}ListResponse = t.Array(${className}Row);
 export const ${className}RefreshInput = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
@@ -39,6 +62,8 @@ export const ${className}RefreshInput = t.Object({
 import type {
     ${className}ApproveBody,
     ${className}ListQuery,
+    ${className}Receipt,
+    ${className}ReceiptParams,
     ${className}Row,
     ${className}RefreshInput,
 } from "./${name}.contracts";
@@ -48,6 +73,7 @@ export type ${className}ListInput = StaticDecode<typeof ${className}ListQuery>;
 export type ${className}ApproveInput = StaticDecode<typeof ${className}ApproveBody>;
 export type ${className}ApproveCommand = ${className}ApproveInput & { id: string };
 export type ${className}Result = StaticDecode<typeof ${className}Row>;
+export type ${className}ReceiptResult = StaticDecode<typeof ${className}Receipt>;
 export type ${className}RefreshJobInput = StaticDecode<typeof ${className}RefreshInput>;
 
 export interface ${className}ReadPort {
@@ -59,11 +85,18 @@ export interface ${className}WritePort {
     approve(context: FeatureRequestContext, input: ${className}ApproveCommand): Promise<${className}Result>;
 }
 
+export interface ${className}ReceiptPort {
+    lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}ReceiptResult>;
+}
+
 export const ${className}Reader = new InjectionToken<${className}ReadPort>(
     "${name}.reader", { scope: "request" },
 );
 export const ${className}Writer = new InjectionToken<${className}WritePort>(
     "${name}.writer", { scope: "request" },
+);
+export const ${className}Receipts = new InjectionToken<${className}ReceiptPort>(
+    "${name}.receipts", { scope: "request" },
 );
 `,
         [`${name}.service.ts`]: `import {
@@ -72,10 +105,12 @@ export const ${className}Writer = new InjectionToken<${className}WritePort>(
 } from "@supacloud/app/core";
 import {
     ${className}Reader,
+    ${className}Receipts,
     ${className}Writer,
     type ${className}ApproveInput,
     type ${className}ReadPort,
     type ${className}Result,
+    type ${className}ReceiptPort,
     type ${className}WritePort,
 } from "./${name}.model";
 
@@ -85,6 +120,7 @@ export class ${className}Service {
         @Inject(REQUEST_CONTEXT) private readonly requestContext: unknown,
         @Inject(${className}Reader) @Optional() private readonly reader?: ${className}ReadPort,
         @Inject(${className}Writer) @Optional() private readonly writer?: ${className}WritePort,
+        @Inject(${className}Receipts) @Optional() private readonly receipts?: ${className}ReceiptPort,
     ) {}
 
     private context(): FeatureRequestContext {
@@ -105,6 +141,11 @@ export class ${className}Service {
         if (!this.writer) throw new Error("Bind ${className}Writer with durable command governance");
         return this.writer.approve(this.context(), { ...input, id });
     }
+
+    async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
+        if (!this.receipts) throw new Error("Bind ${className}Receipts with durable receipt lookup");
+        return this.receipts.lookup(this.context(), { id, operationId });
+    }
 }
 `,
         [`${name}.feature.ts`]: `import { Effect } from "effect";
@@ -116,6 +157,8 @@ import {
 import {
     ${className}ApproveBody,
     ${className}ListQuery,
+    ${className}Receipt,
+    ${className}ReceiptParams,
     ${className}ListResponse,
     ${className}Params,
     ${className}RefreshInput,
@@ -125,6 +168,7 @@ import { ${className}Service } from "./${name}.service";
 import type {
     ${className}ApproveInput,
     ${className}ListInput,
+    ${className}ReceiptResult,
     ${className}RefreshJobInput,
     ${className}Result,
 } from "./${name}.model";
@@ -139,6 +183,11 @@ export const featureSpec = defineFeatureSpec({
             permission: ${JSON.stringify(permission)}, transaction: "required",
             idempotency: "required", audit: ${JSON.stringify(`${name}.approved`)},
             job: ${JSON.stringify(`${name}.refresh`)},
+            invalidateTags: [
+                ${JSON.stringify(`${name}.list`)},
+                ${JSON.stringify(`${name}.detail`)},
+                ${JSON.stringify(`${name}.receipt`)},
+            ],
             persistence: {
                 boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",
                 receipt: "required", reconciliation: "none",
@@ -223,6 +272,7 @@ export class ${className}Controller {
         body: ${className}ApproveBody,
         responses: { 200: ${className}Row },
         command: Approve${className}Command,
+        idempotency: "required",
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
     approve(
@@ -230,6 +280,18 @@ export class ${className}Controller {
         @Body() body: ${className}ApproveInput,
     ): Effect.Effect<${className}Result, never, never> {
         return Effect.promise(() => this.approveCommand.execute(id, body));
+    }
+
+    @Get("/:id/operations/:operationId", {
+        params: ${className}ReceiptParams,
+        responses: { 200: ${className}Receipt },
+        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+    })
+    receipt(
+        @Param("id") id: string,
+        @Param("operationId") operationId: string,
+    ): Effect.Effect<${className}ReceiptResult, never, never> {
+        return Effect.promise(() => this.service.receipt(id, operationId));
     }
 }
 
@@ -378,6 +440,16 @@ test.skipIf(!enabled)("${name} authenticated list/detail/approval E2E", async ()
     const firstBody = await json(first);
     expect([200, 409, 422]).toContain(first.status);
 
+    // A lost response is recovered through the durable receipt, never by
+    // submitting the approval again.
+    const recovered = await fetch(
+        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/operations/" + encodeURIComponent(config.idempotencyKey), config.baseUrl),
+        { headers },
+    );
+    expect(recovered.ok).toBe(true);
+    const recoveredBody = await json(recovered);
+    expect(recoveredBody).toMatchObject({ operationId: config.idempotencyKey });
+
     // Replaying an identical command may return the original success or a
     // domain conflict, but it must never create a second successful transition.
     const replay = await approve(config.idempotencyKey);
@@ -437,6 +509,8 @@ test.skipIf(!tenantIsolationEnabled)("${name} rejects cross-tenant access", asyn
 - [ ] Bind ${className}Writer to a transactional RPC or persistent Command adapter.
 - [ ] Register the \`${rpc}\` compiler and runtime RPC capability.
 - [ ] Verify RLS, permission denial, stale version, identical replay and conflicting replay.
+- [ ] Verify receipt lookup recovers a lost response without resubmitting the Command.
+- [ ] Pass \`${className}ApproveInvalidateTags\` to the generated mutation's \`invalidateTags\` option.
 - [ ] Verify the refresh job uses the existing Workflow/Queue delivery path.
 - [ ] Run the generated client contract and authenticated E2E test.
 - [ ] Run \`supacloud app check --format json\`, package tests and the selected deployment receipt.
@@ -466,7 +540,9 @@ inside this transaction. The refresh Job is an explicit unimplemented integratio
 point, not an automatically scheduled workflow.
 
 Compile the routes with the existing client generator and use @supacloud/query for
-identity-scoped caching/invalidation. There is deliberately no second hand-maintained
+identity-scoped caching/invalidation. Use the generated \`${className}ApproveInvalidateTags\`
+constant for the approval mutation; tags are explicit and never inferred from route names.
+There is deliberately no second hand-maintained
 HTTP client. A committed approval followed by a failed refresh is still committed;
 recover its receipt instead of resending. Use the host's standard error translation
 and requestId propagation; the scaffold does not claim to implement those adapters.

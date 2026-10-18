@@ -11,6 +11,7 @@ function graph(): ApplicationGraph {
     imports: [], providers: [], controllers: [{ className: "OrdersController", path: "/orders",
       file: "src/orders.ts", importPath: "src/orders", scope: "application", deps: [],
       routes: [{ method: "POST", path: "/", handler: "create", command: "CreateOrder",
+        idempotency: "required",
         schemaKinds: { body: "declared" }, aspects: [{ name: "Trace", expression: "PRIVATE" }] }],
     }], commands: [{ name: "orders.create", className: "CreateOrder", transaction: "required", idempotency: "required" }],
     jobs: [{ name: "orders.cleanup", className: "Cleanup", serviceKey: "Cleanup", scope: "job", mode: "task" }],
