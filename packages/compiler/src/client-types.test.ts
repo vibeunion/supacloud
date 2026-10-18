@@ -128,6 +128,47 @@ test("generated client exposes query and mutation procedures with explicit idemp
   }
 });
 
+test("generated client enforces route idempotency without a command binding", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-route-idempotency-"));
+  try {
+    const routeGraph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "items", className: "ItemsModule", file: "items.ts", line: 1,
+        imports: [], providers: [], queries: [], commands: [], exports: [],
+        controllers: [{
+          className: "ItemsController", path: "/items", scope: "application",
+          deps: [], file: "items.ts", importPath: "./items",
+          routes: [{ method: "POST", path: "/:id/close", handler: "close", idempotency: "required" }],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(routeGraph),
+      "consumer.ts": [
+        'import { createApiClient, API_PROCEDURES } from "./client";',
+        "const client = createApiClient();",
+        'client.items.close.mutate({ params: { id: "item-1" } }, { idempotencyKey: "item-1-v1" });',
+        "// @ts-expect-error Route-level idempotency requires an execution key.",
+        'client.items.close.mutate({ params: { id: "item-1" } });',
+        'const required: "required" = API_PROCEDURES[0]?.idempotency === "required" ? "required" : "required";',
+        "void required;",
+      ].join("\n"),
+    });
+    const program = ts.createProgram([join(root, "consumer.ts")], {
+      strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0", baseUrl: root,
+      paths: { typebox: [typeboxPath] },
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+      .toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("generated client and OpenAPI honor the enhanced strict baseline with schema-derived request sections", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-client-request-types-"));
   try {

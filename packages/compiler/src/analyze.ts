@@ -1224,6 +1224,29 @@ function checkedCommandMode(
   return value;
 }
 
+function checkedRouteIdempotency(
+  object: ObjectLiteralExpression,
+  ctx: AnalysisContext,
+  route: string,
+): "required" | "none" | undefined {
+  const expression = getProp(object, "idempotency");
+  const value = stringLiteralProp(object, "idempotency");
+  if (expression && value !== "required" && value !== "none") {
+    const file = sourcePath(ctx.rootDir, expression.getSourceFile().fileName);
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "invalid-route-idempotency",
+      errorCode: "SC3028",
+      docsUrl: "https://supacloud.dev/errors/SC3028",
+      message: `${route}.idempotency must be the explicit literal "required" or "none".`,
+      file,
+      line: lineOf(expression),
+      suggestion: `Choose the intended idempotency policy explicitly; use "required" for replayable mutations or "none" for routes without that contract.`,
+    });
+  }
+  return value === "required" || value === "none" ? value : undefined;
+}
+
 function parseProvider(
   el: Expression,
   exportsSet: Set<string>,
@@ -2088,6 +2111,8 @@ function parseController(
       if (optionsObject) {
         const parsePolicy = routePolicyProperty(optionsObject, "parse", ctx);
         const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
+        const idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);
+        if (idempotency !== undefined) route.idempotency = idempotency;
         if (parsePolicy.unresolved || deletePolicy.unresolved) {
           ctx.diagnostics.push({ severity: "error", code: "unresolved-route-body-policy", file,
             message: `Route ${route.handler} body policy must be statically resolvable; dynamic spreads, computed keys and shorthand policies are unsupported.` });
