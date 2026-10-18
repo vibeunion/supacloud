@@ -318,6 +318,7 @@ export class OAuthService {
       userId = byEmail.rows[0]?.id
       if (userId) await this.assertUserEligible(query, userId)
     }
+    let createdUserId: string | undefined
     if (!userId) {
       // Only claim the email on the new user when the provider verified it AND
       // it isn't already owned by another account. An unverified or taken email
@@ -341,14 +342,35 @@ export class OAuthService {
       const user = created.rows[0]
       if (!user) throw new Error('OAuth user creation returned no row')
       userId = user.id
+      createdUserId = user.id
     }
-    await query(
+    const identityData = JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })
+    const linked = await query<{ user_id: string }>(
       `insert into auth.identities (user_id, provider, provider_id, identity_data)
-       values ($1, $2, $3, $4::jsonb)`,
-      [userId, provider, profile.id, JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })]
+       values ($1, $2, $3, $4::jsonb)
+       on conflict (provider, provider_id) do nothing
+       returning user_id`,
+      [userId, provider, profile.id, identityData]
     )
-    if (!userId) throw new Error('OAuth identity has no user ID')
-    return userId
+    if (linked.rows[0]) return linked.rows[0].user_id
+
+    const raced = await query<{ user_id: string }>(
+      `select user_id from auth.identities where provider = $1 and provider_id = $2`,
+      [provider, profile.id]
+    )
+    const racedUserId = raced.rows[0]?.user_id
+    if (!racedUserId) throw new Error('OAuth identity conflict has no winner')
+    if (createdUserId && createdUserId !== racedUserId) {
+      await query(`delete from auth.users where id = $1`, [createdUserId])
+    }
+    await this.assertUserEligible(query, racedUserId)
+    await query(
+      `update auth.identities set last_sign_in_at = now(), identity_data = $3
+       where provider = $1 and provider_id = $2`,
+      [provider, profile.id, identityData]
+    )
+    await query(`update auth.users set last_sign_in_at = now() where id = $1`, [racedUserId])
+    return racedUserId
   }
 
   private async assertUserEligible(query: Querier, userId: string): Promise<void> {
