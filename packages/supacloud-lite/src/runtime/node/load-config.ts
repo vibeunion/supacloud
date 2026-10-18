@@ -202,6 +202,7 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   const sms = tableAt(root, 'auth.sms')
   const mfa = tableAt(root, 'auth.mfa')
   const mfaTotp = tableAt(root, 'auth.mfa.totp')
+  const recoveryCodes = tableAt(root, 'auth.mfa.recovery_codes')
   const out: Partial<AuthSettings> = {}
 
   // Signups: [auth].disable_signup (legacy) or enable_signup at [auth]/[auth.email].
@@ -220,6 +221,10 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
 
   const minLen = getInt(auth, 'minimum_password_length')
   if (minLen !== undefined) out.minPasswordLength = minLen
+  const requireReauthentication =
+    getBool(auth, 'security_update_password_require_reauthentication')
+    ?? getBool(auth, 'password_require_reauthentication')
+  if (requireReauthentication !== undefined) out.requirePasswordReauthentication = requireReauthentication
 
   const otpLength = getInt(email, 'otp_length')
   if (otpLength !== undefined) out.otpLength = otpLength
@@ -241,6 +246,18 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   if (totpEnroll !== undefined) out.totpEnrollEnabled = totpEnroll
   const totpVerify = getBool(mfaTotp, 'verify_enabled')
   if (totpVerify !== undefined) out.totpVerifyEnabled = totpVerify
+  const recoveryEnroll = getBool(recoveryCodes, 'enroll_enabled')
+  if (recoveryEnroll !== undefined) out.recoveryCodesEnrollEnabled = recoveryEnroll
+  const recoveryVerify = getBool(recoveryCodes, 'verify_enabled')
+  if (recoveryVerify !== undefined) out.recoveryCodesVerifyEnabled = recoveryVerify
+  const recoveryCount = getInt(recoveryCodes, 'count')
+  if (recoveryCount !== undefined) out.recoveryCodesCount = recoveryCount
+  const recoveryLength = getInt(recoveryCodes, 'code_length')
+  if (recoveryLength !== undefined) out.recoveryCodeLength = recoveryLength
+  const recoveryAttempts = getInt(recoveryCodes, 'max_verify_attempts')
+  if (recoveryAttempts !== undefined) out.recoveryCodesMaxVerifyAttempts = recoveryAttempts
+  const recoveryLockout = getDurationSeconds(recoveryCodes, 'lockout_duration')
+  if (recoveryLockout !== undefined) out.recoveryCodesLockoutSeconds = recoveryLockout
 
   return out
 }
@@ -295,6 +312,9 @@ function readOAuthProviders(root: ConfigTable, env: Environment): Record<string,
         tokenUrl: getString(t, 'token_url') ?? (url ? `${url}/token` : undefined),
         userInfoUrl: getString(t, 'userinfo_url') ?? (url ? `${url}/userinfo` : undefined),
         scopes: getString(t, 'scopes'),
+        idTokenIssuer: getString(t, 'id_token_issuer') ?? getString(t, 'issuer'),
+        idTokenJwksUrl: getString(t, 'id_token_jwks_url') ?? getString(t, 'jwks_url'),
+        idTokenAudience: getString(t, 'id_token_audience') ?? clientId,
       }
     }
   }
@@ -332,6 +352,9 @@ function collectEnvProviders(
       tokenUrl: g('TOKEN_URL'),
       userInfoUrl: g('USERINFO_URL'),
       scopes: g('SCOPES'),
+      idTokenIssuer: g('ID_TOKEN_ISSUER') ?? g('ISSUER'),
+      idTokenJwksUrl: g('ID_TOKEN_JWKS_URL') ?? g('JWKS_URL'),
+      idTokenAudience: g('ID_TOKEN_AUDIENCE') ?? clientId,
     }
   }
 }
