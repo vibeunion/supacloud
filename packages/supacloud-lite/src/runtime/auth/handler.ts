@@ -420,6 +420,15 @@ export class AuthHandler {
         return await this.verifyFactor(req, path.split('/')[1])
       if (/^factors\/[^/]+$/.test(path) && method === 'DELETE')
         return await this.unenrollFactor(req, path.split('/')[1])
+      if (path === 'user/identities/authorize' && method === 'GET') {
+        const user = await this.userFromBearer(req)
+        if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
+        const provider = url.searchParams.get('provider') ?? ''
+        if (provider && this.settings.disabledProviders.includes(provider)) {
+          return authError(422, 'provider_disabled', `Sign-ins with ${provider} are disabled`)
+        }
+        return await this.oauth.authorize(url, user.id)
+      }
       if (path === 'authorize' && method === 'GET') {
         const provider = url.searchParams.get('provider') ?? ''
         if (provider && this.settings.disabledProviders.includes(provider)) {

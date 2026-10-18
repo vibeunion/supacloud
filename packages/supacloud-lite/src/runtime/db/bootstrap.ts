@@ -121,6 +121,7 @@ create table if not exists auth.flow_state (
   created_at timestamptz default now(),
   expires_at timestamptz not null
 );
+alter table auth.flow_state add column if not exists link_user_id uuid;
 
 create table if not exists auth.mfa_factors (
   id uuid primary key default gen_random_uuid(),
@@ -452,6 +453,7 @@ create table if not exists auth.flow_state (
   created_at timestamptz default now(),
   expires_at timestamptz not null
 );
+alter table auth.flow_state add column if not exists link_user_id uuid;
 
 create table if not exists auth.mfa_factors (
   id uuid primary key default gen_random_uuid(),

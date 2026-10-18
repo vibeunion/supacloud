@@ -22,6 +22,12 @@ export class OAuthAccountIneligibleError extends Error {
   }
 }
 
+export class OAuthIdentityLinkError extends Error {
+  constructor(public readonly code: 'identity_already_exists') {
+    super(code)
+  }
+}
+
 /** Operator-supplied config for one OAuth provider. Endpoint URLs are optional for presets (google, github). */
 export interface OAuthProviderConfig {
   /** OAuth client id issued by the provider */
@@ -147,7 +153,7 @@ export class OAuthService {
   }
 
   /** GET /authorize - persist state, redirect to the provider. */
-  async authorize(url: URL): Promise<Response> {
+  async authorize(url: URL, linkUserId?: string): Promise<Response> {
     const providerName = url.searchParams.get('provider') ?? ''
     const provider = this.providers.get(providerName)
     if (!provider) {
@@ -162,14 +168,15 @@ export class OAuthService {
     // value - an unallowed target falls back to the site URL.
     const redirectTo = resolveRedirect(url.searchParams.get('redirect_to'), this.siteUrl, this.uriAllowList, this.enforceRedirectAllowList)
     await this.db.query(
-      `insert into auth.flow_state (provider, provider_state, redirect_to, code_challenge, code_challenge_method, expires_at)
-       values ($1, $2, $3, $4, $5, now() + interval '10 minutes')`,
+      `insert into auth.flow_state (provider, provider_state, redirect_to, code_challenge, code_challenge_method, link_user_id, expires_at)
+       values ($1, $2, $3, $4, $5, $6, now() + interval '10 minutes')`,
       [
         providerName,
         providerState,
         redirectTo,
         url.searchParams.get('code_challenge'),
         url.searchParams.get('code_challenge_method'),
+        linkUserId ?? null,
       ]
     )
     const p = new URLSearchParams({
@@ -179,7 +186,11 @@ export class OAuthService {
       scope: scopes,
       state: providerState,
     })
-    return redirect(`${provider.authorizeUrl}?${p}`)
+    const providerUrl = `${provider.authorizeUrl}?${p}`
+    if (url.searchParams.get('skip_http_redirect') === 'true') {
+      return Response.json({ url: providerUrl })
+    }
+    return redirect(providerUrl)
   }
 
   /** GET /callback - exchange code, upsert user+identity, redirect back. */
@@ -210,9 +221,17 @@ export class OAuthService {
 
     let userId: string
     try {
-      userId = await this.upsertUser(provider.name, profile)
+      if (flow.link_user_id) {
+        await this.linkIdentityToUser(provider.name, profile, flow.link_user_id)
+        userId = flow.link_user_id
+      } else {
+        userId = await this.upsertUser(provider.name, profile)
+      }
     } catch (e) {
       if (e instanceof OAuthAccountIneligibleError) {
+        return redirectWithFragment(flow.redirect_to, { error: 'access_denied', error_code: e.code })
+      }
+      if (e instanceof OAuthIdentityLinkError) {
         return redirectWithFragment(flow.redirect_to, { error: 'access_denied', error_code: e.code })
       }
       return redirectWithFragment(flow.redirect_to, {
@@ -310,6 +329,41 @@ export class OAuthService {
 
   private async upsertUser(provider: string, profile: OAuthProfile): Promise<string> {
     return this.db.transaction((query) => this.upsertUserInTransaction(query, provider, profile))
+  }
+
+  private async linkIdentityToUser(provider: string, profile: OAuthProfile, userId: string): Promise<void> {
+    await this.db.transaction(async (query) => {
+      await this.assertUserEligible(query, userId)
+      const existing = await query<{ user_id: string }>(
+        `select user_id from auth.identities where provider = $1 and provider_id = $2`,
+        [provider, profile.id],
+      )
+      if (existing.rows.length > 0) {
+        throw new OAuthIdentityLinkError('identity_already_exists')
+      }
+      const identityData = JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })
+      await query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1, $2, $3, $4::jsonb)`,
+        [userId, provider, profile.id, identityData],
+      )
+      await query(
+        `update auth.users
+         set raw_app_meta_data = jsonb_set(
+           coalesce(raw_app_meta_data, '{}'::jsonb),
+           '{providers}',
+           (
+             select jsonb_agg(provider order by provider)
+             from auth.identities
+             where user_id = $1
+           ),
+           true
+         ),
+         updated_at = now()
+         where id = $1`,
+        [userId],
+      )
+    })
   }
 
   private async upsertUserInTransaction(query: Querier, provider: string, profile: OAuthProfile): Promise<string> {
@@ -439,6 +493,7 @@ interface FlowRow {
   code_challenge_method: string | null
   auth_code: string | null
   user_id: string | null
+  link_user_id: string | null
 }
 
 function redirect(location: string): Response {
