@@ -1129,6 +1129,24 @@ function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersist
   };
 }
 
+function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersistenceNode | undefined {
+  if (input.properties.some((property) => !ts.isPropertyAssignment(property))) return undefined;
+  const boundary = stringLiteralProp(input, "boundary");
+  const optimisticLock = commandModeProp(input, "optimisticLock");
+  const versionField = stringLiteralProp(input, "versionField");
+  const receipt = commandModeProp(input, "receipt");
+  const reconciliation = commandModeProp(input, "reconciliation");
+  if ((boundary !== "database" && boundary !== "external")
+    || (optimisticLock !== "required" && optimisticLock !== "none")
+    || (receipt !== "required" && receipt !== "none")
+    || (reconciliation !== "required" && reconciliation !== "none")) return undefined;
+  return {
+    boundary, optimisticLock,
+    ...(versionField === undefined ? {} : { versionField }),
+    receipt, reconciliation,
+  };
+}
+
 /** Resolves route options passed inline, through a const, or via defineRouteContract. */
 function resolveStaticObjectLiteral(
   input: Expression | undefined,
