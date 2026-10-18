@@ -326,32 +326,75 @@ import { ${className}Fixture } from "./${name}.fixture";
 
 const baseUrl = process.env.SUPACLOUD_FEATURE_E2E_URL;
 const authorization = process.env.SUPACLOUD_FEATURE_E2E_AUTHORIZATION;
+const fixtureId = process.env.SUPACLOUD_FEATURE_E2E_ID ?? ${className}Fixture.id;
 const idempotencyKey = process.env.SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY;
+const enabled = Boolean(baseUrl && authorization && idempotencyKey);
 
-test("${name} authenticated list/detail/approval E2E", async () => {
+function requireConfig(): { baseUrl: string; authorization: string; idempotencyKey: string } {
     if (!baseUrl || !authorization || !idempotencyKey) {
         throw new Error(
             "Set SUPACLOUD_FEATURE_E2E_URL, SUPACLOUD_FEATURE_E2E_AUTHORIZATION and " +
             "SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY before running this generated E2E test.",
         );
     }
-    const headers = { authorization, "content-type": "application/json" };
-    const list = await fetch(new URL("/${name}", baseUrl), { headers });
+    return { baseUrl, authorization, idempotencyKey };
+}
+
+async function json(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text) return undefined;
+    try {
+        return JSON.parse(text) as unknown;
+    } catch {
+        return text;
+    }
+}
+
+test.skipIf(!enabled)("${name} authenticated list/detail/approval E2E", async () => {
+    const config = requireConfig();
+    const headers = { authorization: config.authorization, "content-type": "application/json" };
+    const list = await fetch(new URL("/${name}", config.baseUrl), { headers });
     expect(list.ok).toBe(true);
     const detail = await fetch(
-        new URL("/${name}/" + encodeURIComponent(${className}Fixture.id), baseUrl),
+        new URL("/${name}/" + encodeURIComponent(fixtureId), config.baseUrl),
         { headers },
     );
     expect(detail.ok).toBe(true);
-    const approval = await fetch(
-        new URL("/${name}/" + encodeURIComponent(${className}Fixture.id) + "/approve", baseUrl),
+    const approve = (key: string, body = ${className}Fixture.approve) => fetch(
+        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/approve", config.baseUrl),
         {
             method: "POST",
-            headers: { ...headers, "idempotency-key": idempotencyKey },
-            body: JSON.stringify(${className}Fixture.approve),
+            headers: { ...headers, "idempotency-key": key },
+            body: JSON.stringify(body),
         },
     );
-    expect([200, 409, 422]).toContain(approval.status);
+    const first = await approve(config.idempotencyKey);
+    const firstBody = await json(first);
+    expect([200, 409, 422]).toContain(first.status);
+
+    // Replaying an identical command may return the original success or a
+    // domain conflict, but it must never create a second successful transition.
+    const replay = await approve(config.idempotencyKey);
+    const replayBody = await json(replay);
+    expect(replay.status).toBe(first.status);
+    expect(replayBody).toEqual(firstBody);
+
+    // Reusing a key with a different payload must be rejected by the receipt
+    // boundary instead of being treated as a new approval.
+    const conflicting = await approve(
+        config.idempotencyKey,
+        { ...${className}Fixture.approve, reason: "conflicting replay" },
+    );
+    expect([400, 409, 422]).toContain(conflicting.status);
+
+    // Two distinct keys racing on one version may commit at most one state
+    // transition. A fixture that is already terminal may reject both.
+    const [raceA, raceB] = await Promise.all([
+        approve(config.idempotencyKey + "-race-a"),
+        approve(config.idempotencyKey + "-race-b"),
+    ]);
+    expect([raceA.status, raceB.status].filter((status) => status >= 200 && status < 300).length)
+        .toBeLessThanOrEqual(1);
 });
 `,
         [`${name}.deployment.md`]: `# ${className} feature delivery checklist

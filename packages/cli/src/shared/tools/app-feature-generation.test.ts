@@ -162,6 +162,12 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(generatedClient).toContain("/case-approval/:id/approve");
     expect(generatedClient).toContain("/case-approval/");
     expect(generatedClient).toContain("/case-approval");
+    const generatedE2E = await readFile(join(root, "src/features/case-approval/case-approval.e2e.test.ts"), "utf8");
+    expect(generatedE2E).toContain('test.skipIf(!enabled)');
+    expect(generatedE2E).toContain('expect(replay.status).toBe(first.status)');
+    expect(generatedE2E).toContain('expect(replayBody).toEqual(firstBody)');
+    expect(generatedE2E).toContain('conflicting replay');
+    expect(generatedE2E).toContain('Promise.all');
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);
