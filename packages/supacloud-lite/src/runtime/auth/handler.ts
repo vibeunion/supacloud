@@ -335,8 +335,12 @@ export class AuthHandler {
       return authError(404, 'not_found', `unknown auth endpoint: ${path}`)
     } catch (e) {
       if (e instanceof OAuthAccountIneligibleError) return authError(400, e.code, e.message)
-      const msg = e instanceof Error ? e.message : String(e)
-      return authError(500, 'unexpected_failure', msg)
+      try {
+        this.config.log?.(`[auth] request_failed code=${databaseDiagnosticCode(e)}`)
+      } catch {
+        // A broken diagnostic sink must not change the sanitized auth response.
+      }
+      return authError(500, 'unexpected_failure', 'Unable to complete authentication request')
     }
   }
 
