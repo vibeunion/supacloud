@@ -619,7 +619,7 @@ export class AuthHandler {
     const expiry = `${this.settings.otpExpirySeconds} seconds`
     const prepared = await this.db.transaction(async (query) => {
       let user = (await query<UserRow>(
-        `select * from auth.users where email = $1 for update`,
+        `select * from auth.users where lower(email) = $1 for update`,
         [normalized],
       )).rows[0]
       if (!user) {
@@ -635,7 +635,7 @@ export class AuthHandler {
         user = inserted.rows[0]
         if (!user) {
           user = (await query<UserRow>(
-            `select * from auth.users where email = $1 for update`,
+            `select * from auth.users where lower(email) = $1 for update`,
             [normalized],
           )).rows[0]
         }
@@ -646,7 +646,7 @@ export class AuthHandler {
       const linkToken = randomToken(24)
       const tokenTypes = tokenType === 'otp' ? ['otp', 'magiclink'] : [tokenType]
       await query(
-        `delete from auth.one_time_tokens where email = $1 and token_type = any($2::text[])`,
+        `delete from auth.one_time_tokens where lower(email) = $1 and token_type = any($2::text[])`,
         [normalized, tokenTypes],
       )
       await query(
