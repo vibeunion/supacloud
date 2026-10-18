@@ -240,7 +240,7 @@ export class OAuthService {
   /** POST /token?grant_type=pkce - exchange an auth code + verifier for a session. */
   async exchangePkce(authCode: string, verifier: string): Promise<string | null> {
     const res = await this.db.query<FlowRow>(
-      `delete from auth.flow_state where auth_code = $1 and expires_at > now() returning *`,
+      `select * from auth.flow_state where auth_code = $1 and expires_at > now()`,
       [authCode]
     )
     const flow = res.rows[0]
@@ -252,7 +252,14 @@ export class OAuthService {
     } else if (flow.code_challenge && flow.code_challenge !== verifier) {
       return null // plain method
     }
-    return flow.user_id
+    const claimed = await this.db.transaction(async (query) => {
+      const consumed = await query<FlowRow>(
+        `delete from auth.flow_state where auth_code = $1 and expires_at > now() returning *`,
+        [authCode]
+      )
+      return consumed.rows[0] ?? null
+    })
+    return claimed?.user_id ?? null
   }
 
   private async exchangeCode(provider: ResolvedProvider, code: string): Promise<string> {
