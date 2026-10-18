@@ -119,7 +119,12 @@ function validFeaturePersistence(value: unknown): boolean {
   return false;
 }
 
-function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value is unknown[] {
+function validFeatureInventory(
+  value: unknown,
+  jobs: readonly unknown[],
+  commands: readonly unknown[],
+  routes: readonly unknown[],
+): value is unknown[] {
   const featureNames = new Set<string>();
   return Array.isArray(value) && value.every((feature) => {
     if (!isRecord(feature) || typeof feature["name"] !== "string" || feature["name"].trim() === "") return false;
@@ -147,6 +152,20 @@ function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value 
           || typeof transition["permission"] !== "string" || transition["permission"].trim() === "") return false;
         if (isRecord(persistence) && persistence["boundary"] === "database"
           && feature["tenantField"] !== persistence["tenantField"]) return false;
+      }
+      const commandName = transition["command"];
+      if (commandName !== undefined) {
+        const command = commands.find((candidate) =>
+          isRecord(candidate) && (candidate["name"] === commandName || candidate["className"] === commandName),
+        );
+        if (!isRecord(command)) return false;
+        if (transition["permission"] !== undefined && command["permission"] !== transition["permission"]) return false;
+      }
+      const routeName = transition["route"];
+      if (routeName !== undefined) {
+        const route = routes.find((candidate) => isRecord(candidate)
+          && `${candidate["method"]} ${candidate["path"]}` === routeName);
+        if (!isRecord(route) || route["command"] !== commandName) return false;
       }
       const job = transition["job"];
       if (job === undefined) return true;
@@ -267,7 +286,9 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
     if (!isRecord(parsed) || parsed["version"] !== 1
       || !validJobInventory(parsed["jobs"])
-      || !validFeatureInventory(parsed["features"], parsed["jobs"])) {
+      || !Array.isArray(parsed["commands"])
+      || !Array.isArray(parsed["routes"])
+      || !validFeatureInventory(parsed["features"], parsed["jobs"], parsed["commands"], parsed["routes"])) {
       throw new Error("invalid manifest");
     }
     const commands = arrayLength(parsed["commands"]);

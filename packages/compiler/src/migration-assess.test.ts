@@ -152,6 +152,11 @@ test("migration assessment accepts transition Job bindings by class name", async
       input: "RefreshCaseInput", inputKind: "declared",
       mode: "task", idempotency: "required", tenantScope: "required",
     }],
+    commands: [{
+      name: "ApproveCase", className: "ApproveCase", module: "case",
+      permission: "case.approve", transaction: "required", idempotency: "required",
+      tenantScope: "required",
+    }],
     features: [{
       name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
       transitions: [{
@@ -179,6 +184,75 @@ test("migration assessment accepts transition Job bindings by class name", async
   });
 
   expect(result.findings.map((finding) => finding.code)).not.toContain("contract-manifest-not-proven");
+});
+
+test("migration assessment rejects Feature transitions with unregistered commands", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-command-binding-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1, commands: [], queries: [], routes: [], permissions: [], jobs: [],
+    features: [{
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
+      transitions: [{
+        name: "approve", from: "draft", to: "approved",
+        command: "ApproveCase", permission: "case.approve",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    }],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
+});
+
+test("migration assessment rejects Feature routes bound to another command", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-route-binding-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1,
+    commands: [{
+      name: "ApproveCase", className: "ApproveCase", module: "case",
+      permission: "case.approve", transaction: "required", idempotency: "required",
+      tenantScope: "required",
+    }],
+    queries: [], permissions: [], jobs: [],
+    routes: [{ method: "POST", path: "/cases/:id/approve", command: "OtherCommand" }],
+    features: [{
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
+      transitions: [{
+        name: "approve", from: "draft", to: "approved",
+        command: "ApproveCase", permission: "case.approve", route: "POST /cases/:id/approve",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    }],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
 test("migration assessment rejects duplicate Job inventory identities", async () => {
