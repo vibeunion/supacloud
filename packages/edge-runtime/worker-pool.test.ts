@@ -5,12 +5,7 @@ import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import {
-  resolveMaxBodySizeBytes,
-  resolveProjectWorkerCacheOptions,
-  resolveWorkerReplacementBudget,
-  WorkerPool,
-} from "./worker-pool";
+import { resolveProjectWorkerCacheOptions, resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
 import { createMemoryPressureMonitor } from "./memory-pressure";
 import { functionBytecodeCache } from "./function-bytecode";
 import { benchmarkProjectWorkers } from "./worker-project-benchmark";
@@ -4321,7 +4316,7 @@ describe("WorkerPool body size limit", () => {
     }
   });
 
-  test("rejects request with content-length exceeding default limit (500 MiB)", async () => {
+  test("rejects request with content-length exceeding default limit (30MB)", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-limit-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -4336,7 +4331,7 @@ describe("WorkerPool body size limit", () => {
     pools.push(pool);
 
     try {
-      const oversizedLength = 500 * 1024 * 1024 + 1;
+      const oversizedLength = 31 * 1024 * 1024;
       const req = new Request("http://edge.local/functions/v1/test", {
         method: "POST",
         headers: { "content-length": String(oversizedLength) },
@@ -4357,13 +4352,13 @@ describe("WorkerPool body size limit", () => {
       expect(res.headers.has("x-supacloud-function-version")).toBe(false);
       const body = await res.json();
       expect(body.error).toContain("Request body too large");
-      expect(body.error).toContain("500MB");
+      expect(body.error).toContain("30MB");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("rejects request when actual body exceeds a lower function limit", async () => {
+  test("rejects request when actual body exceeds default limit", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-actual-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -4378,7 +4373,7 @@ describe("WorkerPool body size limit", () => {
     pools.push(pool);
 
     try {
-      const oversizedBody = "x".repeat(1025);
+      const oversizedBody = "x".repeat(31 * 1024 * 1024);
       const req = new Request("http://edge.local/functions/v1/test", {
         method: "POST",
         body: oversizedBody,
@@ -4386,7 +4381,6 @@ describe("WorkerPool body size limit", () => {
 
       const res = await pool.dispatch({
         functionId: "test_body_actual",
-        limits: { max_request_body_bytes: 1024 },
         projectRef: "test-project",
         functionPath,
         projectRoot,
@@ -4449,9 +4443,50 @@ describe("WorkerPool body size limit", () => {
     }
   });
 
-  test("falls back to default limit for invalid EDGE_MAX_BODY_SIZE_MB", () => {
-    expect(resolveMaxBodySizeBytes("Infinity")).toBe(500 * 1024 * 1024);
-    expect(resolveMaxBodySizeBytes("invalid")).toBe(500 * 1024 * 1024);
-    expect(resolveMaxBodySizeBytes("0")).toBe(500 * 1024 * 1024);
+  test("falls back to default limit for invalid EDGE_MAX_BODY_SIZE_MB", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-invalid-env-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("should not reach", { status: 200 });
+        }
+      }
+    `);
+
+    const previousLimit = process.env.EDGE_MAX_BODY_SIZE_MB;
+    process.env.EDGE_MAX_BODY_SIZE_MB = "Infinity";
+
+    const { WorkerPool: FreshPool } = await import("./worker-pool?" + Date.now());
+    const pool = new FreshPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const req = new Request("http://edge.local/functions/v1/test", {
+        method: "POST",
+        headers: { "content-length": String(31 * 1024 * 1024) },
+        body: "x".repeat(100),
+      });
+
+      const res = await pool.dispatch({
+        functionId: "test_body_invalid_env",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: req,
+      });
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain("30MB");
+    } finally {
+      if (previousLimit === undefined) {
+        delete process.env.EDGE_MAX_BODY_SIZE_MB;
+      } else {
+        process.env.EDGE_MAX_BODY_SIZE_MB = previousLimit;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 });
