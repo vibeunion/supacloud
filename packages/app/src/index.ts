@@ -178,6 +178,7 @@ export { defineFeatureSlice, defineFeatureSpec, defineModule } from "./module";
 export type {
   FeatureEvent,
   FeatureSliceOptions,
+  FeaturePersistenceOptions,
   FeatureSpecOptions,
   FeatureState,
   FeatureTransitionOptions,
