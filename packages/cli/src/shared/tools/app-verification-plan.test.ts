@@ -11,6 +11,7 @@ async function fixture() {
   roots.push(root);
   await mkdir(join(root, "src/health"), { recursive: true });
   await mkdir(join(root, "src/other"), { recursive: true });
+  await writeFile(join(root, "src/health/health.ts"), "");
   await writeFile(join(root, "src/health/health.test.ts"), "");
   await writeFile(join(root, "src/other/unrelated.test.ts"), "");
   const graph: ApplicationGraph = {
@@ -92,12 +93,13 @@ test("parent-directory sources cannot enumerate a sibling project using native p
   const plan = await createVerificationPlan(root, graph, "health");
   expect(plan.ready).toBe(false);
   expect(plan.tests).toEqual([]);
-  expect(plan.manual).toContain("A source directory is outside the project; select its owning project explicitly");
+  expect(plan.manual).toContain("A source file is outside the project; select its owning project explicitly");
 });
 
 test("separate command sources are included and uncovered directories remain explicit", async () => {
   const { root, graph } = await fixture();
   await mkdir(join(root, "src/commands"));
+  await writeFile(join(root, "src/commands/approve.ts"), "");
   graph.moduleHandlerFiles = { health: ["src/commands/approve.ts"] };
   const plan = await createVerificationPlan(root, graph, "health");
   expect(plan.files).toContain("src/commands/approve.ts");
@@ -135,5 +137,50 @@ test("missing source directories produce a manual gap, not an unstructured failu
   graph.moduleHandlerFiles = { health: ["src/missing/command.ts"] };
   const plan = await createVerificationPlan(root, graph, "health");
   expect(plan.ready).toBe(false);
-  expect(plan.manual).toContain("Source directory is missing: src/missing");
+  expect(plan.manual).toContain("Source file is missing: src/missing/command.ts");
+});
+
+test("a source file symlink cannot authorize another project's edit or test paths", async () => {
+  const { root, graph } = await fixture();
+  const outside = await fixture();
+  await rm(join(root, "src/health/health.ts"));
+  await symlink(join(outside.root, "src/health/health.ts"), join(root, "src/health/health.ts"));
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.ready).toBe(false);
+  expect(plan.files).toEqual([]);
+  expect(plan.tests).toEqual([]);
+  expect(plan.manual).toContain("A source file is outside the project; select its owning project explicitly");
+  expect(JSON.stringify(plan)).not.toContain(outside.root);
+});
+
+test("a missing source cannot be marked ready merely because its directory has tests", async () => {
+  const { root, graph } = await fixture();
+  await rm(join(root, "src/health/health.ts"));
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.ready).toBe(false);
+  expect(plan.files).toEqual([]);
+  expect(plan.tests).toEqual([]);
+  expect(plan.manual).toContain("Source file is missing: src/health/health.ts");
+});
+
+test("a directory cannot be advertised as an editable source file", async () => {
+  const { root, graph } = await fixture();
+  await rm(join(root, "src/health/health.ts"));
+  await mkdir(join(root, "src/health/health.ts"));
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.ready).toBe(false);
+  expect(plan.files).toEqual([]);
+  expect(plan.manual).toContain("Source is not a regular file: src/health/health.ts");
+});
+
+test("an internal file alias selects the canonical source and its colocated tests", async () => {
+  const { root, graph } = await fixture();
+  await writeFile(join(root, "src/other/implementation.ts"), "");
+  await rm(join(root, "src/health/health.ts"));
+  await symlink(join(root, "src/other/implementation.ts"), join(root, "src/health/health.ts"));
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.ready).toBe(true);
+  expect(plan.files).toEqual(["src/other/implementation.ts"]);
+  expect(plan.tests).toEqual(["src/other/unrelated.test.ts"]);
+  expect(plan.executed).toBe(false);
 });

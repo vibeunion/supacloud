@@ -1,7 +1,6 @@
 /**
- * An editable vertical feature slice. The generated ports are deliberately
- * fail-closed: database access, authorization and durable command adapters
- * remain application-owned and cannot be fabricated by the scaffold.
+ * An editable vertical feature slice. Persistence remains application-owned,
+ * while every generated port receives the trusted framework request context.
  */
 export function featureScaffold(
     name: string,
@@ -30,7 +29,9 @@ export const ${className}Row = t.Object({
 });
 export const ${className}ListResponse = t.Array(${className}Row);
 `,
-        [`${name}.model.ts`]: `import { InjectionToken } from "@supacloud/app/core";
+        [`${name}.model.ts`]: `import {
+    InjectionToken, type FeatureRequestContext,
+} from "@supacloud/app/core";
 import type {
     ${className}ApproveBody,
     ${className}ListQuery,
@@ -44,12 +45,12 @@ export type ${className}ApproveCommand = ${className}ApproveInput & { id: string
 export type ${className}Result = StaticDecode<typeof ${className}Row>;
 
 export interface ${className}ReadPort {
-    list(input: ${className}ListInput): Promise<${className}Result[]>;
-    detail(id: string): Promise<${className}Result>;
+    list(context: FeatureRequestContext, input: ${className}ListInput): Promise<${className}Result[]>;
+    detail(context: FeatureRequestContext, id: string): Promise<${className}Result>;
 }
 
 export interface ${className}WritePort {
-    approve(input: ${className}ApproveCommand): Promise<${className}Result>;
+    approve(context: FeatureRequestContext, input: ${className}ApproveCommand): Promise<${className}Result>;
 }
 
 export const ${className}Reader = new InjectionToken<${className}ReadPort>(
@@ -59,7 +60,10 @@ export const ${className}Writer = new InjectionToken<${className}WritePort>(
     "${name}.writer", { scope: "request" },
 );
 `,
-        [`${name}.service.ts`]: `import { Inject, Injectable, Optional } from "@supacloud/app/core";
+        [`${name}.service.ts`]: `import {
+    Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureRequestContext,
+    type FeatureRequestContext,
+} from "@supacloud/app/core";
 import {
     ${className}Reader,
     ${className}Writer,
@@ -72,23 +76,28 @@ import {
 @Injectable({ scope: "request" })
 export class ${className}Service {
     constructor(
+        @Inject(REQUEST_CONTEXT) private readonly requestContext: unknown,
         @Inject(${className}Reader) @Optional() private readonly reader?: ${className}ReadPort,
         @Inject(${className}Writer) @Optional() private readonly writer?: ${className}WritePort,
     ) {}
 
-    async list(input: Parameters<${className}ReadPort["list"]>[0]): Promise<${className}Result[]> {
+    private context(): FeatureRequestContext {
+        return requireFeatureRequestContext(this.requestContext);
+    }
+
+    async list(input: Parameters<${className}ReadPort["list"]>[1]): Promise<${className}Result[]> {
         if (!this.reader) throw new Error("Bind ${className}Reader with verified identity and tenant scope");
-        return this.reader.list(input);
+        return this.reader.list(this.context(), input);
     }
 
     async detail(id: string): Promise<${className}Result> {
         if (!this.reader) throw new Error("Bind ${className}Reader with verified identity and tenant scope");
-        return this.reader.detail(id);
+        return this.reader.detail(this.context(), id);
     }
 
     async approve(id: string, input: ${className}ApproveInput): Promise<${className}Result> {
         if (!this.writer) throw new Error("Bind ${className}Writer with durable command governance");
-        return this.writer.approve({ ...input, id });
+        return this.writer.approve(this.context(), { ...input, id });
     }
 }
 `,
@@ -115,6 +124,10 @@ export const featureSpec = defineFeatureSpec({
             from: "draft", to: "approved", command: "Approve${className}Command",
             permission: ${JSON.stringify(permission)}, transaction: "required",
             idempotency: "required", audit: ${JSON.stringify(`${name}.approved`)},
+            persistence: {
+                boundary: "database", optimisticLock: "required", versionField: "version",
+                receipt: "required", reconciliation: "none",
+            },
             route: "POST /${name}/:id/approve",
         },
     },
@@ -210,8 +223,24 @@ export const ${className}Feature = defineFeatureSlice({
         [`${name}.feature.test.ts`]: `import { expect, test } from "bun:test";
 import { ${className}Service } from "./${name}.service";
 
+const context = {
+    requestId: "request-example",
+    identity: { authenticated: true, subject: "reviewer-example" },
+    access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}] },
+};
+
+test("${name} rejects missing trusted tenant context before adapter execution", async () => {
+    let calls = 0;
+    const service = new ${className}Service(undefined, {
+        list: async () => { calls++; return []; },
+        detail: async () => { calls++; return { id: "example", state: "draft", version: 1 }; },
+    });
+    await expect(service.list({})).rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
+    expect(calls).toBe(0);
+});
+
 test("${name} fails closed until verified read and durable write ports are bound", async () => {
-    const service = new ${className}Service();
+    const service = new ${className}Service(context);
     await expect(service.list({})).rejects.toThrow("Bind ${className}Reader");
     await expect(service.detail("example")).rejects.toThrow("Bind ${className}Reader");
     await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("Bind ${className}Writer");
@@ -220,7 +249,7 @@ test("${name} fails closed until verified read and durable write ports are bound
 test("${name} preserves denied reads and rejected writes without fallback or retry", async () => {
     const denied = new Error("denied");
     let attempts = 0;
-    const service = new ${className}Service({
+    const service = new ${className}Service(context, {
         list: async () => { throw denied; },
         detail: async () => { throw denied; },
     }, {
@@ -234,8 +263,13 @@ test("${name} preserves denied reads and rejected writes without fallback or ret
 
 test("${name} forwards the authoritative version and result without inventing persistence", async () => {
     const row = { id: "example", state: "approved", version: 2 };
-    const service = new ${className}Service(undefined, {
-        async approve(input) {
+    const service = new ${className}Service(context, undefined, {
+        async approve(requestContext, input) {
+            expect(requestContext).toMatchObject({
+                requestId: "request-example",
+                tenantId: "tenant-example",
+                actorId: "reviewer-example",
+            });
             expect(input).toEqual({ id: "example", expectedVersion: 1, reason: "reviewed" });
             return row;
         },
@@ -255,6 +289,9 @@ test("${name} forwards the authoritative version and result without inventing pe
 
 The scaffold does not create migrations, infer permissions, or provide an in-memory
 production fallback. Database migrations remain the database source of truth.
+Every adapter receives a trusted framework context whose tenant and actor values
+come from verified identity/access data. Do not add tenant, actor, or permission
+fields to the request body as a substitute for this context.
 The HTTP schemas describe the boundary, not a second database model. Bind their
 fields to the existing database-source contract checker before delivery.
 The Writer input is derived from the approval body contract plus the route ID.

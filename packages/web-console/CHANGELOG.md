@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.5](https://github.com/vibeunion/supacloud/compare/web-console-v0.52.4...web-console-v0.52.5) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+
 ## [0.52.4](https://github.com/vibeunion/supacloud/compare/web-console-v0.52.3...web-console-v0.52.4) (2026-10-17)
 
 

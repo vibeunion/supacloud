@@ -14,6 +14,16 @@ export type ImagorRequest = {
     outputFormat: string | null;
 };
 
+export const DEFAULT_IMAGOR_MAX_BYTES = 500 * 1024 * 1024;
+
+export function resolveImagorMaxBytes(value = process.env.SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES): number {
+    const configured = Number(value);
+    return Number.isSafeInteger(configured) && configured > 0 && configured <= DEFAULT_IMAGOR_MAX_BYTES
+        ? configured
+        : DEFAULT_IMAGOR_MAX_BYTES;
+}
+
+const IMAGOR_MAX_BYTES = resolveImagorMaxBytes();
 const IMAGOR_URL = config.imagorUrl.replace(/\/+$/, "");
 
 function queryString(query: ImageTransformQuery, key: string): string | undefined {
@@ -163,7 +173,7 @@ function addStandardFilters(query: ImageTransformQuery, filters: string[], inclu
     const background = queryString(query, "background") || queryString(query, "background_color");
     if (background !== undefined) filters.push(filter("fill", [background]));
 
-    const maxBytes = boundedInteger(query, "max_bytes", 64 * 1024 * 1024);
+    const maxBytes = boundedInteger(query, "max_bytes", IMAGOR_MAX_BYTES);
     if (maxBytes !== undefined) filters.push(filter("max_bytes", [String(maxBytes)]));
 
     const trim = enabled(query, "trim") || queryString(query, "trim") === "true";

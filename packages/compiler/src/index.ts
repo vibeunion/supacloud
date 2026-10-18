@@ -195,6 +195,7 @@ export type {
   WatchOptions,
   FeatureSpecNode,
   FeatureTransitionNode,
+  FeaturePersistenceNode,
   GraphqlOptions,
   GraphqlContractSummary,
   OpenApiOptions,
