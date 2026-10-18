@@ -75,6 +75,31 @@ describe("feature specs", () => {
     expect(validateFeatureSpec(spec, module)).toEqual([]);
   });
 
+  test("accepts logical command names for framework-owned feature routes", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "case.accept",
+        permission: "case.accept", route: "POST /cases/:id/accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      controllers: [{
+        ...baseModule(spec).controllers[0]!,
+        routes: [{ ...baseModule(spec).controllers[0]!.routes[0]!, command: "case.accept" }],
+      }],
+    };
+    expect(validateFeatureSpec(spec, module)).toEqual([]);
+  });
+
   test("detects state and governance drift", () => {
     const spec: FeatureSpecNode = {
       name: "case",

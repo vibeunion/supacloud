@@ -150,7 +150,8 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         `${route.method} ${joinRoutePaths(controller.path, route.path)}` === transition.route));
       if (routes.length !== 1) {
         error("feature-route-unresolved", `Transition ${transition.name} must reference exactly one route '${transition.route}' in module ${module.name}.`);
-      } else if (command && transition.routeBinding !== "controller" && routes[0]?.command !== command.className) {
+      } else if (command && transition.routeBinding !== "controller"
+        && routes[0]?.command !== command.className && routes[0]?.command !== command.name) {
         error("feature-route-drift", `Route ${transition.route} is not bound to ${command.className}.`);
       } else if (transition.routeBinding === "controller" && routes[0]?.command !== undefined) {
         error("feature-route-drift", `Controller-bound route ${transition.route} must not also declare a framework command binding.`);
