@@ -122,6 +122,8 @@ export interface CommandOptions {
   name: string;
   /** Named RPC adapter owns declared persistence; application still owns permission timing. */
   rpc?: string;
+  /** Conditional RPC adapters for commands whose persistence route depends on input. */
+  branches?: CommandBranchOptions[];
   /** Permission identifier required to execute (e.g. "case.create"). */
   permission: string;
   /** Transaction requirement for the underlying write, e.g. "required". */
@@ -136,6 +138,16 @@ export interface CommandOptions {
   uses?: InfraResourceUse[];
   /** Explicit static aspects applied around this command invocation. */
   aspects?: Aspect[];
+}
+
+export interface CommandBranchOptions {
+  /** Restricted selector such as `resource === "flowsheet-default-signatures"`. */
+  when: string;
+  rpc: string;
+  transaction?: "required" | "none";
+  audit?: string;
+  idempotency?: "required" | "none";
+  boundary?: "database" | "external";
 }
 
 export type JobMode = "task" | "workflow";
