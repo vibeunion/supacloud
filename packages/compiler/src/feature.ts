@@ -31,12 +31,14 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       if (persistence.boundary === "database" &&
         (persistence.optimisticLock !== "required" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(persistence.versionField ?? "") ||
           !/^[A-Za-z_][A-Za-z0-9_]*$/.test(persistence.tenantField ?? "") ||
-          persistence.tenantField === persistence.versionField ||
+          !/^[A-Za-z_][A-Za-z0-9_]*$/.test(persistence.stateField ?? "") ||
+          new Set([persistence.tenantField, persistence.versionField, persistence.stateField]).size !== 3 ||
           persistence.receipt !== "required" || persistence.reconciliation !== "none")) {
-        error("feature-persistence-invalid", `Database transition ${transition.name} requires distinct safe tenant/version fields, optimistic locking, and a receipt, without reconciliation.`);
+        error("feature-persistence-invalid", `Database transition ${transition.name} requires distinct safe tenant/version/state fields, optimistic locking, and a receipt, without reconciliation.`);
       }
       if (persistence.boundary === "external" &&
         (persistence.optimisticLock !== "none" || persistence.versionField !== undefined || persistence.tenantField !== undefined ||
+          persistence.stateField !== undefined ||
           persistence.receipt !== "required" || persistence.reconciliation !== "required")) {
         error("feature-persistence-invalid", `External transition ${transition.name} requires a receipt and reconciliation, without database optimistic locking.`);
       }
@@ -101,7 +103,7 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
     return [name, {
       ...options,
       persistence: transition.persistence ?? {
-        boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id",
+        boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",
         receipt: "required", reconciliation: "none",
       },
     }];

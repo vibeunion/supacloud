@@ -19,6 +19,7 @@ export interface FeaturePersistenceOptions {
   optimisticLock: "required" | "none";
   versionField?: string;
   tenantField?: string;
+  stateField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }

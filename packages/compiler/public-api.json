@@ -571,7 +571,7 @@
     {
       "name": "FeaturePersistenceNode",
       "kind": "type",
-      "signature": "export interface FeaturePersistenceNode {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
+      "signature": "export interface FeaturePersistenceNode {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
     },
     {
       "name": "FeatureSpecNode",

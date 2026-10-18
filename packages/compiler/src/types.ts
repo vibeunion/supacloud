@@ -381,6 +381,7 @@ export interface FeaturePersistenceNode {
   optimisticLock: "required" | "none";
   versionField?: string;
   tenantField?: string;
+  stateField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }

@@ -57,6 +57,7 @@ describe("feature specs", () => {
           boundary: "database", optimisticLock: "required",
           versionField: "version",
           tenantField: "tenant_id",
+          stateField: "state",
           receipt: "required", reconciliation: "none",
         },
       }],
@@ -78,6 +79,7 @@ describe("feature specs", () => {
           boundary: "database", optimisticLock: "required",
           versionField: "version",
           tenantField: "tenant_id",
+          stateField: "state",
           receipt: "required", reconciliation: "none",
         },
       }],
@@ -115,6 +117,7 @@ describe("feature specs", () => {
           boundary: "database", optimisticLock: "required",
           versionField: "case.version",
           tenantField: "tenant_id",
+          stateField: "state",
           receipt: "required", reconciliation: "none",
         },
       }],
@@ -132,6 +135,7 @@ describe("feature specs", () => {
         persistence: {
           boundary: "database", optimisticLock: "required",
           versionField: "version", receipt: "required", reconciliation: "none",
+          stateField: "state",
         },
       }],
     };
