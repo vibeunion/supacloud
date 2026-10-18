@@ -62,11 +62,20 @@ test("generated procedure facade separates queries and mutations and forwards st
           transaction: "required",
           idempotency: "required",
         }],
+        featureSpec: {
+          name: "items",
+          states: ["draft", "accepted"],
+          transitions: [{
+            name: "accept", from: "draft", to: "accepted",
+            command: "AcceptItemCommand", route: "POST /items/accept",
+            invalidateTags: ["items", "items.detail"],
+          }],
+        },
         controllers: [{
           className: "ItemsController", path: "/items", scope: "application",
           deps: [], file: "items.ts", importPath: "src/items.controller",
           routes: [
-            { method: "GET", path: "/detail", handler: "detail" },
+            { method: "GET", path: "/detail", handler: "detail", tags: ["items"] },
             { method: "POST", path: "/accept", handler: "accept", command: "AcceptItemCommand" },
           ],
         }],
@@ -93,11 +102,12 @@ test("generated procedure facade separates queries and mutations and forwards st
     expect(generated.API_PROCEDURES).toEqual([
       {
         method: "GET", path: "/items/detail", controller: "ItemsController", handler: "detail",
-        kind: "query", idempotency: "none",
+        kind: "query", idempotency: "none", tags: ["items"],
       },
       {
         method: "POST", path: "/items/accept", controller: "ItemsController", handler: "accept",
         kind: "mutation", command: "item.accept", permission: "item.accept", idempotency: "required",
+        invalidateTags: ["items", "items.detail"],
       },
     ]);
   } finally {

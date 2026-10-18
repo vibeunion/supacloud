@@ -279,6 +279,7 @@ export class ${className}Controller {
 
     @Get("/", {
         query: ${className}ListQuery,
+        tags: [${JSON.stringify(`${name}.list`)}],
         responses: { 200: ${className}ListResponse },
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
@@ -288,6 +289,7 @@ export class ${className}Controller {
 
     @Get("/:id", {
         params: ${className}Params,
+        tags: [${JSON.stringify(`${name}.detail`)}],
         responses: { 200: ${className}Row },
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
@@ -312,6 +314,7 @@ export class ${className}Controller {
 
     @Get("/:id/operations/:operationId", {
         params: ${className}ReceiptParams,
+        tags: [${JSON.stringify(`${name}.receipt`)}],
         responses: { 200: ${className}Receipt },
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
@@ -324,6 +327,7 @@ export class ${className}Controller {
 
     @Get("/:id/operations/:operationId/status", {
         params: ${className}ReceiptParams,
+        tags: [${JSON.stringify(`${name}.job-status`)}],
         responses: { 200: ${className}JobStatus },
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
