@@ -1626,11 +1626,12 @@ export class AuthHandler {
         app_metadata?: Record<string, unknown>
       }
       const email = normalizeEmailInput(body.email)
-      if (!email) return authError(400, 'validation_failed', 'email is required')
+      if (body.email !== undefined && !email) return authError(400, 'validation_failed', 'email must not be empty')
       const phone = body.phone === undefined ? null : normalizePhone(body.phone)
       if (body.phone !== undefined && !phone) {
         return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
       }
+      if (!email && !phone) return authError(400, 'validation_failed', 'email or phone is required')
       if (body.phone_confirm !== undefined && typeof body.phone_confirm !== 'boolean') {
         return authError(400, 'validation_failed', 'phone_confirm must be a boolean')
       }
@@ -1638,11 +1639,13 @@ export class AuthHandler {
       if (banSeconds === undefined) return authError(400, 'validation_failed', 'ban_duration is invalid')
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
-        const existing = await query(
-          `select id from auth.users where lower(email) = $1 for update`,
-          [email.toLowerCase().trim()],
-        )
-        if (existing.rows.length > 0) return null
+        if (email) {
+          const existing = await query(
+            `select id from auth.users where lower(email) = $1 for update`,
+            [email],
+          )
+          if (existing.rows.length > 0) return { error: 'email_exists' as const }
+        }
         if (phone) {
           const phoneExisting = await query(
             `select id from auth.users where phone = $1 for update`,
@@ -1658,27 +1661,39 @@ export class AuthHandler {
                    $4, case when $5 then now() else null end,
                    case when $6::double precision is null then null
                      else now() + ($6::double precision * interval '1 second') end, $7, $8)
-           on conflict (email) do nothing
+           on conflict do nothing
            returning *`,
           [
-            email.toLowerCase().trim(),
+            email,
             hashed,
             body.email_confirm ?? false,
             phone,
             body.phone_confirm === true,
             banSeconds,
-            JSON.stringify({ provider: 'email', providers: ['email'], ...(body.app_metadata ?? {}) }),
+            JSON.stringify({
+              provider: email ? 'email' : 'phone',
+              providers: email && phone ? ['email', 'phone'] : [email ? 'email' : 'phone'],
+              ...(body.app_metadata ?? {}),
+            }),
             JSON.stringify(body.user_metadata ?? {}),
           ]
         )
         const user = res.rows[0]
         if (!user) return null
-        await this.ensureEmailIdentity(user, query)
+        if (email) await this.ensureEmailIdentity(user, query)
         if (phone) await this.ensurePhoneIdentity(user, query)
         return this.userJsonWithRelations(user, query)
       })
       if (!created) return authError(422, 'email_exists', 'A user with this email address has already been registered')
-      if ('error' in created) return authError(422, created.error, 'A user with this phone number has already been registered')
+      if ('error' in created) {
+        return authError(
+          422,
+          created.error,
+          created.error === 'email_exists'
+            ? 'A user with this email address has already been registered'
+            : 'A user with this phone number has already been registered'
+        )
+      }
       return json(200, created)
     }
     if (idMatch && method === 'GET') {
