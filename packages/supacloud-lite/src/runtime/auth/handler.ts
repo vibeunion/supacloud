@@ -214,6 +214,25 @@ function recordValue(value: unknown): Record<string, unknown> {
     : {}
 }
 
+const RECOVERY_CODE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567'
+
+function normalizeRecoveryCode(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/[\s-]/g, '').toLowerCase() : ''
+}
+
+function randomRecoveryCode(length: number): string {
+  let code = ''
+  while (code.length < length) {
+    const bytes = crypto.getRandomValues(new Uint8Array(Math.max(16, length - code.length)))
+    for (const byte of bytes) {
+      if (byte >= 224) continue
+      code += RECOVERY_CODE_ALPHABET[byte % RECOVERY_CODE_ALPHABET.length]
+      if (code.length === length) break
+    }
+  }
+  return code
+}
+
 function databaseDiagnosticCode(error: unknown): string {
   const candidate = typeof error === 'object' && error !== null && 'code' in error ? error.code : null
   return typeof candidate === 'string' && /^[0-9A-Z]{5}$/.test(candidate) ? candidate : 'database_error'
@@ -387,6 +406,11 @@ export class AuthHandler {
         return await this.generateAdminMagicLink(req, true, 'invite')
       }
       if (path === 'factors' && method === 'POST') return await this.enrollFactor(req)
+      if (path === 'factors/recovery-codes' && method === 'GET') return await this.recoveryCodesStatus(req)
+      if (path === 'factors/recovery-codes' && method === 'POST') return await this.generateRecoveryCodes(req)
+      if (path === 'factors/recovery-codes' && method === 'DELETE') return await this.deleteRecoveryCodes(req)
+      if (path === 'factors/recovery-codes/verify' && method === 'POST') return await this.verifyRecoveryCode(req)
+      if (path === 'factors/recovery-codes/regenerate' && method === 'POST') return await this.regenerateRecoveryCodes(req)
       if (/^factors\/[^/]+\/challenge$/.test(path) && method === 'POST')
         return await this.challengeFactor(req, path.split('/')[1])
       if (/^factors\/[^/]+\/verify$/.test(path) && method === 'POST')
@@ -2632,6 +2656,240 @@ export class AuthHandler {
       return authError(422, 'mfa_verification_failed', 'This challenge has already been verified')
     }
     return json(200, session)
+  }
+
+  private async recoveryCodesStatus(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    const result = await this.db.query<{ id: string; total: number; remaining: number }>(
+      `select f.id, count(c.id)::int as total,
+              count(c.id) filter (where c.consumed_at is null)::int as remaining
+       from auth.mfa_recovery_code_sets s
+       join auth.mfa_factors f on f.id = s.mfa_factor_id
+       left join auth.mfa_recovery_codes c on c.mfa_recovery_code_set_id = s.id
+       where s.user_id = $1
+       group by f.id`,
+      [user.id],
+    )
+    const row = result.rows[0]
+    if (!row) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+    return json(200, { id: row.id, type: 'recovery_code', total: row.total, remaining: row.remaining })
+  }
+
+  private async generateRecoveryCodes(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.recoveryCodesEnrollEnabled) {
+      return authError(422, 'mfa_recovery_codes_enroll_not_enabled', 'MFA enroll is disabled for recovery codes')
+    }
+    if (!(await this.requireAal2(req))) return authError(403, 'insufficient_aal', 'AAL2 required to generate recovery codes')
+    const body = (await req.json().catch(() => ({}))) as { friendly_name?: string }
+    const friendlyName = typeof body.friendly_name === 'string' && body.friendly_name.trim()
+      ? body.friendly_name.trim().slice(0, 255)
+      : 'Recovery codes'
+    const codes = Array.from({ length: this.settings.recoveryCodesCount }, () => randomRecoveryCode(this.settings.recoveryCodeLength))
+    const hashes = await Promise.all(codes.map((code) => hashPassword(code)))
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const existing = await query(`select 1 from auth.mfa_recovery_code_sets where user_id = $1`, [user.id])
+      if (existing.rows.length > 0) {
+        return authError(422, 'mfa_verified_factor_exists', 'Recovery codes are already enrolled for this user, use regenerate to rotate them')
+      }
+      const verified = await query<{ count: number }>(
+        `select count(*)::int as count from auth.mfa_factors
+         where user_id = $1 and status = 'verified' and factor_type <> 'recovery_code'`,
+        [user.id],
+      )
+      if ((verified.rows[0]?.count ?? 0) < 1) {
+        return authError(422, 'mfa_recovery_codes_sole_factor', 'At least one other verified factor is required to generate recovery codes')
+      }
+      const duplicate = await query(
+        `select 1 from auth.mfa_factors where user_id = $1 and friendly_name = $2`,
+        [user.id, friendlyName],
+      )
+      if (duplicate.rows.length > 0) {
+        return authError(422, 'mfa_factor_name_conflict', 'A factor with this friendly name already exists')
+      }
+      const factors = await query<{ count: number }>(
+        `select count(*)::int as count from auth.mfa_factors where user_id = $1`,
+        [user.id],
+      )
+      if ((factors.rows[0]?.count ?? 0) >= this.settings.maxEnrolledFactors) {
+        return authError(422, 'too_many_enrolled_mfa_factors', 'Maximum number of enrolled MFA factors reached')
+      }
+      const factor = (await query<{ id: string }>(
+        `insert into auth.mfa_factors (user_id, friendly_name, factor_type, status)
+         values ($1, $2, 'recovery_code', 'verified') returning id`,
+        [user.id, friendlyName],
+      )).rows[0]
+      const set = (await query<{ id: string }>(
+        `insert into auth.mfa_recovery_code_sets (user_id, mfa_factor_id) values ($1, $2) returning id`,
+        [user.id, factor.id],
+      )).rows[0]
+      for (const hash of hashes) {
+        await query(
+          `insert into auth.mfa_recovery_codes (mfa_recovery_code_set_id, code_hash) values ($1, $2)`,
+          [set.id, hash],
+        )
+      }
+      return json(200, {
+        id: factor.id, type: 'recovery_code', friendly_name: friendlyName,
+        total: codes.length, codes,
+      })
+    })
+  }
+
+  private async regenerateRecoveryCodes(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.recoveryCodesEnrollEnabled) {
+      return authError(422, 'mfa_recovery_codes_enroll_not_enabled', 'MFA enroll is disabled for recovery codes')
+    }
+    if (!(await this.requireAal2(req))) return authError(403, 'insufficient_aal', 'AAL2 required to regenerate recovery codes')
+    const codes = Array.from({ length: this.settings.recoveryCodesCount }, () => randomRecoveryCode(this.settings.recoveryCodeLength))
+    const hashes = await Promise.all(codes.map((code) => hashPassword(code)))
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const set = (await query<{ id: string; mfa_factor_id: string }>(
+        `select id, mfa_factor_id from auth.mfa_recovery_code_sets where user_id = $1 for update`,
+        [user.id],
+      )).rows[0]
+      if (!set) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+      const factor = (await query<{ id: string; friendly_name: string | null }>(
+        `select id, friendly_name from auth.mfa_factors where id = $1 and user_id = $2`,
+        [set.mfa_factor_id, user.id],
+      )).rows[0]
+      if (!factor) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+      await query(`delete from auth.mfa_recovery_codes where mfa_recovery_code_set_id = $1`, [set.id])
+      for (const hash of hashes) {
+        await query(
+          `insert into auth.mfa_recovery_codes (mfa_recovery_code_set_id, code_hash) values ($1, $2)`,
+          [set.id, hash],
+        )
+      }
+      await query(
+        `update auth.mfa_recovery_code_sets
+         set failed_verification_count = 0, verification_locked_until = null, updated_at = now()
+         where id = $1`,
+        [set.id],
+      )
+      return json(200, {
+        id: factor.id, type: 'recovery_code', friendly_name: factor.friendly_name ?? 'Recovery codes',
+        total: codes.length, codes,
+      })
+    })
+  }
+
+  private async deleteRecoveryCodes(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!(await this.requireAal2(req))) return authError(403, 'insufficient_aal', 'AAL2 required to delete recovery codes')
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const factor = (await query<{ id: string }>(
+        `select mfa_factor_id as id from auth.mfa_recovery_code_sets where user_id = $1 for update`,
+        [user.id],
+      )).rows[0]
+      if (!factor) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+      await query(
+        `delete from auth.mfa_recovery_codes
+         where mfa_recovery_code_set_id in (select id from auth.mfa_recovery_code_sets where user_id = $1)`,
+        [user.id],
+      )
+      await query(`delete from auth.mfa_recovery_code_sets where user_id = $1`, [user.id])
+      await query(`delete from auth.mfa_factors where id = $1 and user_id = $2`, [factor.id, user.id])
+      return json(200, { id: factor.id })
+    })
+  }
+
+  private async verifyRecoveryCode(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.recoveryCodesVerifyEnabled) {
+      return authError(422, 'mfa_recovery_codes_verify_not_enabled', 'MFA verification is disabled for recovery codes')
+    }
+    const body = (await req.json().catch(() => ({}))) as { code?: string }
+    const code = normalizeRecoveryCode(body.code)
+    if (!code) return authError(400, 'validation_failed', 'Code needs to be non-empty')
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const set = (await query<{ id: string; failed_verification_count: number; verification_locked_until: Date | string | null }>(
+        `select id, failed_verification_count, verification_locked_until
+         from auth.mfa_recovery_code_sets where user_id = $1 for update`,
+        [user.id],
+      )).rows[0]
+      if (!set) return authError(422, 'mfa_verification_failed', 'Invalid recovery code entered')
+      if (set.verification_locked_until && new Date(set.verification_locked_until).getTime() > Date.now()) {
+        return authError(429, 'mfa_recovery_codes_locked', 'Too many failed verification attempts, try again later')
+      }
+      const entries = await query<{ id: string; code_hash: string }>(
+        `select id, code_hash from auth.mfa_recovery_codes
+         where mfa_recovery_code_set_id = $1 and consumed_at is null`,
+        [set.id],
+      )
+      let matched: string | null = null
+      for (const entry of entries.rows) {
+        if (await verifyPassword(code, entry.code_hash) && matched === null) matched = entry.id
+      }
+      if (!matched) {
+        const failures = set.failed_verification_count + 1
+        await query(
+          `update auth.mfa_recovery_code_sets
+           set failed_verification_count = $1::int,
+               verification_locked_until = case when $1::int >= $2::int
+                 then now() + $3::interval else verification_locked_until end,
+               updated_at = now()
+           where id = $4::uuid`,
+          [failures, this.settings.recoveryCodesMaxVerifyAttempts, `${this.settings.recoveryCodesLockoutSeconds} seconds`, set.id],
+        )
+        return authError(422, 'mfa_verification_failed', 'Invalid recovery code entered')
+      }
+      const consumed = await query(
+        `update auth.mfa_recovery_codes set consumed_at = now()
+         where id = $1 and consumed_at is null returning id`,
+        [matched],
+      )
+      if (consumed.rows.length === 0) return authError(422, 'mfa_verification_failed', 'Invalid recovery code entered')
+      await query(
+        `update auth.mfa_recovery_code_sets
+         set failed_verification_count = 0, verification_locked_until = null, updated_at = now()
+         where id = $1`,
+        [set.id],
+      )
+      const session = await this.sessionFor(current, undefined, {
+        aal: 'aal2',
+        amr: [
+          { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
+          { method: 'mfa/recovery_code', timestamp: Math.floor(Date.now() / 1000) },
+        ],
+      }, query)
+      return json(200, session)
+    })
+  }
+
+  private async requireAal2(req: Request): Promise<boolean> {
+    const claims = await this.claimsFromBearer(req)
+    return claims?.aal === 'aal2'
   }
 
   private async unenrollFactor(req: Request, factorId: string): Promise<Response> {
