@@ -81,6 +81,9 @@ interface UserRow {
   updated_at: Date | string | null
   phone: string | null
   phone_confirmed_at: Date | string | null
+  phone_change: string | null
+  phone_change_token: string | null
+  phone_change_sent_at: Date | string | null
   is_anonymous: boolean | null
   banned_until: Date | string | null
   deleted_at: Date | string | null
@@ -618,6 +621,7 @@ export class AuthHandler {
     if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
     const body = (await req.json().catch(() => ({}))) as {
       email?: string
+      phone?: string
       password?: string
       data?: Record<string, unknown>
       code_challenge?: string | null
@@ -628,6 +632,12 @@ export class AuthHandler {
     const requestedEmail = body.email === undefined ? undefined : normalizeEmailInput(body.email)
     if (body.email !== undefined && !requestedEmail) {
       return authError(400, 'validation_failed', 'email must not be empty')
+    }
+    if (body.phone !== undefined) {
+      if (requestedEmail !== undefined) return authError(400, 'validation_failed', 'email and phone cannot be updated together')
+      const phone = normalizePhone(body.phone)
+      if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      return this.requestPhoneChange(req, user, phone)
     }
     if (requestedEmail && !this.settings.autoconfirm) {
       return this.requestEmailChange(req, user, requestedEmail, body)
@@ -920,6 +930,11 @@ export class AuthHandler {
       }
       const phone = normalizePhone(body.phone)
       if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      if (resend && body.type === 'phone_change') {
+        const user = await this.userFromBearer(req)
+        if (!user || user.phone_change !== phone) return json(200, {})
+        return this.requestPhoneChange(req, user, phone)
+      }
       return this.limit('sms', req) ?? this.issuePhoneToken(phone, body.create_user !== false, recordValue(body.data))
     }
     const email = normalizeEmailInput(body.email)
@@ -954,6 +969,62 @@ export class AuthHandler {
     const user = result.rows[0]
     if (!user) return json(200, {})
     return this.requestEmailChange(req, user, newEmail, body)
+  }
+
+  private async requestPhoneChange(req: Request, user: UserRow, newPhone: string): Promise<Response> {
+    const sender = this.config.smsSender
+    if (!this.settings.smsEnabled || !sender) {
+      return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+    }
+    const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', newPhone)
+    const limited = this.limitKey('sms', `phone:${fingerprint}`) ?? this.limit('sms', req)
+    if (limited) return limited
+    const token = randomOtp(this.settings.otpLength)
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:phone-otp:v1',
+      `${newPhone}\0${token}`
+    )}`
+    const issuanceId = crypto.randomUUID()
+    const prepared = await this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return null
+      if (current.phone === newPhone) return { user: current, unchanged: true } as const
+      const clash = await query(`select id from auth.users where phone = $1 and id <> $2`, [newPhone, current.id])
+      if (clash.rows.length > 0) return { conflict: true } as const
+      await query(`delete from auth.one_time_tokens where user_id = $1 and token_type = 'phone_change'`, [current.id])
+      await query(
+        `insert into auth.one_time_tokens (id, user_id, phone, token_type, token, expires_at)
+         values ($1, $2, $3, 'phone_change', $4, now() + $5::interval)`,
+        [issuanceId, current.id, newPhone, tokenDigest, `${this.settings.otpExpirySeconds} seconds`],
+      )
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set phone_change = $1, phone_change_token = $2, phone_change_sent_at = now(), updated_at = now()
+         where id = $3 returning *`,
+        [newPhone, tokenDigest, current.id],
+      )).rows[0]
+      return updated ? { user: updated, unchanged: false } as const : null
+    })
+    if (!prepared) return authError(401, 'no_authorization', 'Invalid or expired token')
+    if ('conflict' in prepared) return authError(422, 'phone_exists', 'A user with this phone number has already been registered')
+    if (prepared.unchanged) return json(200, await this.userJsonWithRelations(prepared.user))
+    try {
+      await this.sendPhoneOtp(sender, newPhone, this.settings.smsTemplate.replace(/\{\{\s*\.Code\s*\}\}/g, token))
+    } catch {
+      await this.db.query(`delete from auth.one_time_tokens where id = $1 and token = $2`, [issuanceId, tokenDigest])
+      await this.db.query(
+        `update auth.users set phone_change = null, phone_change_token = '', phone_change_sent_at = null where id = $1`,
+        [user.id],
+      )
+      return authError(502, 'sms_provider_failed', 'Unable to send the verification code')
+    }
+    return json(200, await this.userJsonWithRelations(prepared.user))
   }
 
   private async issuePhoneToken(
@@ -1291,6 +1362,18 @@ export class AuthHandler {
     }
     const token = body.token ?? body.token_hash
     if (!token) return authError(400, 'validation_failed', 'token or token_hash is required')
+    if (body.type === 'phone_change') {
+      const phone = normalizePhone(body.phone)
+      if (!phone || !body.token || !/^\d{6,10}$/.test(body.token)) {
+        return authError(400, 'validation_failed', 'phone, token, and type=phone_change are required')
+      }
+      const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', phone)
+      const limited = this.limitKey('verify', `phone:${fingerprint}`)
+      if (limited) return limited
+      const session = await this.redeemPhoneChange(phone, body.token)
+      if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+      return json(200, session)
+    }
     if (body.type === 'sms' || body.phone !== undefined) {
       const phone = normalizePhone(body.phone)
       if (body.type !== 'sms' || !phone || !body.token || !/^\d{6,10}$/.test(body.token)) {
@@ -1408,6 +1491,56 @@ export class AuthHandler {
       )
       return this.sessionFor(
         user,
+        undefined,
+        { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
+        query
+      )
+    })
+  }
+
+  private async redeemPhoneChange(phone: string, code: string): Promise<Record<string, unknown> | null> {
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:phone-otp:v1',
+      `${phone}\0${code}`
+    )}`
+    return this.db.transaction(async (query) => {
+      const candidate = (await query<{ id: string; user_id: string }>(
+        `select id, user_id from auth.one_time_tokens
+         where phone = $1 and token_type = 'phone_change' and token = $2 and expires_at > now()
+         limit 1`,
+        [phone, tokenDigest],
+      )).rows[0]
+      if (!candidate) return null
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and phone_change = $2 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [candidate.user_id, phone],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return null
+      const clash = await query(`select id from auth.users where phone = $1 and id <> $2`, [phone, current.id])
+      if (clash.rows.length > 0) return null
+      const claimed = await query(
+        `delete from auth.one_time_tokens where id = $1 and token = $2 returning id`,
+        [candidate.id, tokenDigest],
+      )
+      if (claimed.rows.length === 0) return null
+      await query(`delete from auth.identities where user_id = $1 and provider = 'phone'`, [current.id])
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set phone = $1, phone_confirmed_at = now(),
+             phone_change = null, phone_change_token = '', phone_change_sent_at = null,
+             updated_at = now()
+         where id = $2 and deleted_at is null
+           and (banned_until is null or banned_until <= now())
+         returning *`,
+        [phone, current.id],
+      )).rows[0]
+      if (!updated) return null
+      await this.ensurePhoneIdentity(updated, query)
+      return this.sessionFor(
+        updated,
         undefined,
         { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
         query
@@ -2556,6 +2689,10 @@ export class AuthHandler {
       ...(u.email_change ? {
         new_email: u.email_change,
         email_change_sent_at: iso(u.email_change_sent_at),
+      } : {}),
+      ...(u.phone_change ? {
+        new_phone: u.phone_change,
+        phone_change_sent_at: iso(u.phone_change_sent_at),
       } : {}),
       last_sign_in_at: iso(u.last_sign_in_at),
       app_metadata: u.raw_app_meta_data ?? {},
