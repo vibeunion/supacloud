@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/db-v0.18.4...db-v0.19.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
 ## [0.18.4](https://github.com/vibeunion/supacloud/compare/db-v0.18.3...db-v0.18.4) (2026-10-17)
 
 
