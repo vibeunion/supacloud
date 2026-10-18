@@ -188,8 +188,10 @@ describe('Auth extended GoTrue compatibility', () => {
       const github = identities.data.identities.find((identity) => identity.provider === 'github')
       if (!github) throw new Error('Expected the secondary identity')
 
+      expect((await client.auth.getUser()).data.user?.app_metadata.providers).toEqual(['email'])
       expect((await client.auth.unlinkIdentity(github)).error).toBeNull()
       expect((await client.auth.getUserIdentities()).data.identities).toHaveLength(1)
+      expect((await client.auth.getUser()).data.user?.app_metadata.providers).toEqual(['email'])
       const remaining = (await client.auth.getUserIdentities()).data.identities[0]
       expect((await client.auth.unlinkIdentity(remaining)).error?.code).toBe('cannot_unlink_identity')
     } finally {
