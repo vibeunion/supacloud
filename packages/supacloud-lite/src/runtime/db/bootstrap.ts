@@ -23,8 +23,10 @@ create table if not exists auth.users (
   email text unique,
   encrypted_password text,
   email_confirmed_at timestamptz,
+  email_change_token_new text default '',
   email_change text,
   email_change_sent_at timestamptz,
+  email_change_token_current text default '',
   email_change_confirm_status smallint default 0,
   last_sign_in_at timestamptz,
   raw_app_meta_data jsonb default '{}'::jsonb,
@@ -41,6 +43,8 @@ create table if not exists auth.users (
 
 alter table auth.users add column if not exists email_change text;
 alter table auth.users add column if not exists email_change_sent_at timestamptz;
+alter table auth.users add column if not exists email_change_token_new text default '';
+alter table auth.users add column if not exists email_change_token_current text default '';
 alter table auth.users add column if not exists email_change_confirm_status smallint default 0;
 
 create table if not exists auth.refresh_tokens (
@@ -339,6 +343,8 @@ create table if not exists auth.users (
 
 alter table auth.users add column if not exists email_change text;
 alter table auth.users add column if not exists email_change_sent_at timestamptz;
+alter table auth.users add column if not exists email_change_token_new text default '';
+alter table auth.users add column if not exists email_change_token_current text default '';
 alter table auth.users add column if not exists email_change_confirm_status smallint default 0;
 
 create table if not exists auth.refresh_tokens (
