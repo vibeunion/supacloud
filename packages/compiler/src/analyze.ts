@@ -913,6 +913,7 @@ function parseModule(
           lineOf(cls),
         );
         rejectUndeclaredResourceUses(uses, moduleResourceNames, ctx, `command ${commandName}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
+        const tenantScope = commandModeProp(meta, "tenantScope");
         commands.push({
           className: cls.name?.text ?? "<anonymous>",
           name: commandName,
@@ -921,9 +922,7 @@ function parseModule(
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
-          ...(commandModeProp(meta, "tenantScope") === undefined ? {} : {
-            tenantScope: commandModeProp(meta, "tenantScope"),
-          }),
+          ...(tenantScope === undefined ? {} : { tenantScope }),
           ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
           ...(uses.length > 0 ? { uses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
@@ -966,15 +965,14 @@ function parseModule(
           lineOf(cls),
         );
         rejectUndeclaredResourceUses(jobUses, moduleResourceNames, ctx, `job ${stringLiteralProp(meta, "name") ?? className}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
+        const tenantScope = commandModeProp(meta, "tenantScope");
         jobs.push({
           className,
           name: stringLiteralProp(meta, "name") ?? className,
           serviceKey: camelName(provider?.token ?? className),
           scope,
           ...contract,
-          ...(commandModeProp(meta, "tenantScope") === undefined ? {} : {
-            tenantScope: commandModeProp(meta, "tenantScope"),
-          }),
+          ...(tenantScope === undefined ? {} : { tenantScope }),
           ...(jobUses.length > 0 ? { uses: jobUses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
         });
@@ -984,12 +982,11 @@ function parseModule(
     if (queryDec) {
       const meta = decoratorObjectArg(queryDec);
       if (meta) {
+        const tenantScope = commandModeProp(meta, "tenantScope");
         queries.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
-          ...(commandModeProp(meta, "tenantScope") === undefined ? {} : {
-            tenantScope: commandModeProp(meta, "tenantScope"),
-          }),
+          ...(tenantScope === undefined ? {} : { tenantScope }),
         });
       }
     }
