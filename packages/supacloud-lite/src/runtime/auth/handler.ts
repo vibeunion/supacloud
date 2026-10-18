@@ -1674,8 +1674,8 @@ export class AuthHandler {
       redirect_to?: string
       data?: Record<string, unknown>
     }
-    if (body.type !== 'magiclink') {
-      return authError(422, 'unsupported_link_type', 'Only magiclink generation is supported')
+    if (body.type !== 'magiclink' && body.type !== 'recovery') {
+      return authError(422, 'unsupported_link_type', 'Only magiclink and recovery link generation are supported')
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
@@ -1697,6 +1697,9 @@ export class AuthHandler {
         [email],
       )
       let linkedUser = existing.rows[0]
+      if (!linkedUser && body.type === 'recovery') {
+        return null
+      }
       if (!linkedUser) {
         const result = await query<UserRow>(
           `insert into auth.users
@@ -1717,29 +1720,41 @@ export class AuthHandler {
       await query(
         `delete from auth.one_time_tokens
          where lower(email) = $1 and token_type = any($2::text[])`,
-        [email, '{otp,magiclink}']
+        [email, body.type === 'recovery' ? '{recovery}' : '{otp,magiclink}']
       )
       await query(
         `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
-         values ($1, $2, 'otp', $3, now() + $5::interval),
-                ($1, $2, 'magiclink', $4, now() + $5::interval)`,
-        [linkedUser.id, email, emailOtp, hashedToken, expiry]
+         values ($1, $2, $3, $4, now() + $7::interval),
+                ($1, $2, $5, $6, now() + $7::interval)`,
+        [
+          linkedUser.id,
+          email,
+          body.type === 'recovery' ? 'recovery' : 'otp',
+          emailOtp,
+          body.type === 'recovery' ? 'recovery' : 'magiclink',
+          hashedToken,
+          expiry,
+        ]
       )
       return linkedUser
     })
+    if (!user) return authError(404, 'user_not_found', 'User not found')
 
     const actionUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
     actionUrl.searchParams.set('token', hashedToken)
-    actionUrl.searchParams.set('type', 'magiclink')
+    actionUrl.searchParams.set('type', body.type!)
     actionUrl.searchParams.set('redirect_to', redirectTo)
-    await this.audit('user_magiclink_requested', { actorId: user.id, actorEmail: email, type: 'admin' })
+    await this.audit(
+      body.type === 'recovery' ? 'user_recovery_requested' : 'user_magiclink_requested',
+      { actorId: user.id, actorEmail: email, type: 'admin' }
+    )
     return json(200, {
       ...this.userJson(user, [], await this.getUserIdentities(user.id)),
       action_link: actionUrl.toString(),
       email_otp: emailOtp,
       hashed_token: hashedToken,
       redirect_to: redirectTo,
-      verification_type: 'magiclink',
+      verification_type: body.type,
     })
   }
 
