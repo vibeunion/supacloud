@@ -29,6 +29,13 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     if (transition.permission !== undefined && !transition.permission.trim()) {
       error("feature-governance-drift", `Transition ${transition.name} declares an empty permission.`);
     }
+    if (transition.invalidateTags !== undefined) {
+      if (transition.invalidateTags.length === 0
+        || transition.invalidateTags.some((tag) => !tag.trim())
+        || new Set(transition.invalidateTags).size !== transition.invalidateTags.length) {
+        error("feature-invalidation-tags-invalid", `Transition ${transition.name} must declare unique, non-empty invalidateTags.`);
+      }
+    }
     if (transition.persistence) {
       const persistence = transition.persistence;
       if (persistence.boundary === "database" &&
