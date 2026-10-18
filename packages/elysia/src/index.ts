@@ -144,6 +144,8 @@ export interface CompiledRoute {
   ) => Promise<unknown> | unknown;
   /** Class name of the @Command explicitly bound to this route. */
   command?: string;
+  /** Transport-level idempotency contract, independent of route command binding. */
+  idempotency?: "required" | "none";
   /** Statically generated route aspects. */
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
@@ -1029,6 +1031,17 @@ export function requireIdempotencyKey(invocation: CommandInvocation): string {
   return key;
 }
 
+function requireRouteIdempotencyKey(request: Request): string {
+  const key = safeHeaderValue(request.headers.get(IDEMPOTENCY_KEY_HEADER), 512);
+  if (!key) {
+    throw new ApplicationError("Idempotency-Key header is required", {
+      status: 400,
+      code: "IDEMPOTENCY_KEY_REQUIRED",
+    });
+  }
+  return key;
+}
+
 function assertCommandGovernanceReady(
   compiled: CompiledModule,
   governance: CommandGovernance | undefined,
@@ -1213,6 +1226,7 @@ export function createModulePlugin<
     "effect",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
+    "idempotency",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
     "input", "result", "request",
     "parse", "allowDeleteBody",
@@ -1233,6 +1247,19 @@ export function createModulePlugin<
         throw new ApplicationError(
           `Invalid compiled body policy on ${route.method} ${controller.path}${route.path}`,
           { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
+        );
+      }
+      if (route.idempotency !== undefined
+        && route.idempotency !== "required" && route.idempotency !== "none") {
+        throw new ApplicationError(
+          `Invalid idempotency policy on ${route.method} ${controller.path}${route.path}`,
+          { code: "ROUTE_IDEMPOTENCY_INVALID" },
+        );
+      }
+      if (route.idempotency === "required" && ["GET", "HEAD", "OPTIONS"].includes(route.method)) {
+        throw new ApplicationError(
+          `Route ${route.method} ${controller.path}${route.path} cannot require idempotency`,
+          { code: "ROUTE_IDEMPOTENCY_INVALID" },
         );
       }
     }
@@ -1378,6 +1405,15 @@ export function createModulePlugin<
                 throw new Error("HTTP policies must return Response or undefined");
               }
             }
+            if (route.idempotency === "required") {
+              requireRouteIdempotencyKey(context.request);
+            }
+          },
+        });
+      } else if (route.idempotency === "required") {
+        Object.assign(schema, {
+          beforeHandle: (context: ApplicationHttpContext<Http>) => {
+            requireRouteIdempotencyKey(context.request);
           },
         });
       }
