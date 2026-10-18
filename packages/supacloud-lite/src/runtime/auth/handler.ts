@@ -552,7 +552,7 @@ export class AuthHandler {
         const upgradingAnon = (current.is_anonymous ?? false) && !!body.email
         if (body.email) {
           const email = body.email.toLowerCase().trim()
-          const clash = await query(`select id from auth.users where email = $1 and id <> $2`, [email, current.id])
+          const clash = await query(`select id from auth.users where lower(email) = $1 and id <> $2`, [email, current.id])
           if (clash.rows.length > 0) {
             return authError(422, 'email_exists', 'A user with this email address has already been registered')
           }
