@@ -75,6 +75,8 @@ const INTERFACES = `export interface CompiledRoute {
   /** True when the handler returns a native Response rather than a framework value. */
   nativeResponse?: boolean;
   command?: string;
+  /** Transport-level idempotency contract, independent of route command binding. */
+  idempotency?: "required" | "none";
   guards?: string[];
   canMatch?: string[];
   canDeactivate?: string[];
