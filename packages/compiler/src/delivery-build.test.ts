@@ -34,7 +34,9 @@ test("builds a movable factory and reuses immutable artifacts; failures preserve
   expect(first.manifest.deploymentReady).toBe(false);
   expect(() => parseDeliveryBuildManifest({...first.manifest, routes: []})).toThrow();
   expect(() => parseDeliveryBuildManifest({...first.manifest, objects: []})).toThrow();
-  expect(first.manifest.routes).toEqual([{ method: "POST", path: "/cases/:caseId/accept", target: "api" }]);
+  expect(first.manifest.routes).toEqual([{
+    method: "POST", path: "/cases/:caseId/accept", target: "api", idempotency: "required",
+  }]);
   const object = requireValue(first.manifest.objects[0]);
   const bundle = join(root, "generated/delivery/objects", object.objectId, "bundle");
   const mtime = (await stat(join(bundle, "index.js"))).mtimeMs;
@@ -88,7 +90,7 @@ test("isolates route owners, includes assets, and invalidates only dependent tar
     if (!first.ok) throw new Error(JSON.stringify(first.diagnostics));
     expect(first.manifest.routes).toEqual([
       { method: "GET", path: "/health", target: "api" },
-      { method: "POST", path: "/cases/:caseId/accept", target: "cases" },
+      { method: "POST", path: "/cases/:caseId/accept", target: "cases", idempotency: "required" },
     ]);
     const cases = requireValue(first.manifest.objects.find((item) => item.name === "cases"));
     const api = requireValue(first.manifest.objects.find((item) => item.name === "api"));

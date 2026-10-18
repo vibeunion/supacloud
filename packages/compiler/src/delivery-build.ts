@@ -259,7 +259,12 @@ export async function buildDeliveryProject(
     const manifest = parseDeliveryBuildManifest({
       schemaVersion: 1, producer, deploymentReady: false, plan: planned.plan, objects,
       routes: planned.plan.targets.flatMap((target) => target.routes.map((route) =>
-        ({ method: route.method, path: route.path, target: target.name }))),
+        ({
+          method: route.method,
+          path: route.path,
+          target: target.name,
+          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+        }))),
       jobs: planned.plan.targets.flatMap((target) => target.jobs.map((job) => ({ name: job.name, target: target.name }))),
     });
     phase = "artifact-integrity";

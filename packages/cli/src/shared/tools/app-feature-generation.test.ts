@@ -135,6 +135,8 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('idempotency: "required",\n        effect:');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("requireFeatureRequestContext(this.jobContext)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("input: CaseApprovalRefreshInput");
