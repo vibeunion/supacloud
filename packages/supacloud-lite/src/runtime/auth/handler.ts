@@ -363,10 +363,19 @@ export class AuthHandler {
   // ── flows ─────────────────────────────────────────────────────────────
 
   private async signup(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as {
+    let body: {
       email?: string
       password?: string
       data?: Record<string, unknown>
+    }
+    try {
+      const parsed: unknown = await req.json()
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return authError(400, 'validation_failed', 'Signup body must be a JSON object')
+      }
+      body = parsed as typeof body
+    } catch {
+      return authError(400, 'validation_failed', 'Signup body must be valid JSON')
     }
 
     if (!('email' in body) && !('password' in body)) {
