@@ -198,9 +198,8 @@ export class OAuthService {
     try {
       const token = await this.exchangeCode(provider, code)
       profile = await this.fetchProfile(provider, token)
-    } catch (e) {
-      const msg = encodeURIComponent(e instanceof Error ? e.message : 'oauth_error')
-      return redirect(`${flow.redirect_to}#error=server_error&error_description=${msg}`)
+    } catch {
+      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth provider request failed')}`)
     }
 
     let userId: string
