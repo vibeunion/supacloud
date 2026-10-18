@@ -2192,7 +2192,7 @@ export class AuthHandler {
       if ('error' in created) {
         return authError(
           422,
-          created.error,
+          created.error as string,
           created.error === 'email_exists'
             ? 'A user with this email address has already been registered'
             : 'A user with this phone number has already been registered'
@@ -2338,11 +2338,13 @@ export class AuthHandler {
       if (!newEmail) return authError(400, 'validation_failed', 'new_email is required')
       if (newEmail === email) return authError(422, 'validation_failed', 'new_email must differ from email')
     }
-    if (body.type === 'signup' && !body.password) {
-      return authError(400, 'validation_failed', 'password is required for signup links')
-    }
-    if (body.type === 'signup' && body.password.length < this.settings.minPasswordLength) {
-      return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
+    if (body.type === 'signup') {
+      if (!body.password) {
+        return authError(400, 'validation_failed', 'password is required for signup links')
+      }
+      if (body.password.length < this.settings.minPasswordLength) {
+        return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
+      }
     }
 
 
@@ -2750,7 +2752,7 @@ export class AuthHandler {
       )
       const currentUser = currentUsers.rows[0]
       if (!currentUser) return null
-      const currentFactors = await query<{ id: string; secret: string; status: string }>(
+      const currentFactors = await query<{ id: string; secret: string; status: string; factor_type: string }>(
         `select id, secret, status, factor_type from auth.mfa_factors
          where id = $1 and user_id = $2 for update`,
         [factorId, user.id],
