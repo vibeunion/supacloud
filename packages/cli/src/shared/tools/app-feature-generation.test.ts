@@ -137,6 +137,8 @@ test("the generated approval compiles only with the explicit persistent capabili
         .toContain("input: CaseApprovalRefreshInput");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalRefreshInput = t.Object");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain('t.Union([t.Literal("draft"), t.Literal("approved")])');
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);

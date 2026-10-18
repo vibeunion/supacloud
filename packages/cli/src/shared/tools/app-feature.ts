@@ -16,7 +16,7 @@ export const ${className}Params = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
 });
 export const ${className}ListQuery = t.Object({
-    state: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
+    state: t.Optional(t.Union([t.Literal("draft"), t.Literal("approved")])),
 });
 export const ${className}ApproveBody = t.Object({
     expectedVersion: t.Integer({ minimum: 1 }),
@@ -205,7 +205,7 @@ export class ${className}Controller {
         responses: { 200: ${className}ListResponse },
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
-    list(@Query("state") state?: string): Effect.Effect<${className}Result[], never, never> {
+    list(@Query("state") state?: ${className}State): Effect.Effect<${className}Result[], never, never> {
         return Effect.promise(() => this.listQuery.execute(state === undefined ? {} : { state }));
     }
 
