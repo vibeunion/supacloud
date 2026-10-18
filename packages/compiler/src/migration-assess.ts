@@ -172,10 +172,10 @@ function validFeatureInventory(
       transitionNames.add(transition["name"]);
       const persistence = transition["persistence"];
       if (persistence !== undefined) {
-        if (!validFeaturePersistence(persistence)) return false;
+        if (!isRecord(persistence) || !validFeaturePersistence(persistence)) return false;
         if (typeof transition["command"] !== "string" || transition["command"].trim() === ""
           || typeof transition["permission"] !== "string" || transition["permission"].trim() === "") return false;
-        if (isRecord(persistence) && persistence["boundary"] === "database"
+        if (persistence["boundary"] === "database"
           && feature["tenantField"] !== persistence["tenantField"]) return false;
       }
       const commandName = transition["command"];
