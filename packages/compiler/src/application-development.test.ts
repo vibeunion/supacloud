@@ -44,6 +44,7 @@ function graph(): ApplicationGraph {
       path: "/orders",
       routes: [{
         method: "POST", path: "/", handler: "create", command: "OrdersCreate",
+        idempotency: "required",
         schemaKinds: { body: "declared", response: "opaque" },
         aspects: [{ name: "AuditAspect", expression: "PRIVATE_ASPECT_EXPRESSION" }],
       }],
@@ -85,7 +86,8 @@ test("projects the current graph into the versioned development contract", () =>
   }]);
   expect(context.routes).toEqual([{
     module: "orders", method: "POST", path: "/orders", controller: "OrdersController", handler: "create",
-    command: "orders.create", aspects: ["AuditAspect"], schemaKinds: { body: "declared", response: "opaque" },
+    command: "orders.create", idempotency: "required", aspects: ["AuditAspect"],
+    schemaKinds: { body: "declared", response: "opaque" },
   }]);
   expect(context.commands).toEqual([{
     module: "orders", name: "orders.create", permission: "orders.create",
