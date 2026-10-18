@@ -678,6 +678,22 @@ export class AuthHandler {
         return authError(422, 'cannot_unlink_identity', 'Cannot unlink the only identity')
       }
       await query(`delete from auth.identities where id = $1 and user_id = $2`, [identity.id, user.id])
+      await query(
+        `update auth.users
+         set raw_app_meta_data = jsonb_set(
+           coalesce(raw_app_meta_data, '{}'::jsonb),
+           '{providers}',
+           (
+             select jsonb_agg(provider order by provider)
+             from auth.identities
+             where user_id = $1
+           ),
+           true
+         ),
+         updated_at = now()
+         where id = $1`,
+        [user.id],
+      )
       return json(200, {})
     })
   }
