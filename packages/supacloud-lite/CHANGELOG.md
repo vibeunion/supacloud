@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.31.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.31.2...supacloud-lite-v0.31.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+* **lite:** align default storage size limit ([#2053](https://github.com/vibeunion/supacloud/issues/2053)) ([8414234](https://github.com/vibeunion/supacloud/commit/8414234d72fc42440ea1133646d6b11422097a4a))
+* **lite:** validate image size metadata ([#2046](https://github.com/vibeunion/supacloud/issues/2046)) ([9ea248e](https://github.com/vibeunion/supacloud/commit/9ea248ecca9cebf5b1bba8b70ea50195613d1f3d))
+* **supacloud-lite:** bind email tokens to current account address ([#2047](https://github.com/vibeunion/supacloud/issues/2047)) ([355d08c](https://github.com/vibeunion/supacloud/commit/355d08cdbc7d0d90085a2208557f1decc1d15e82))
+
 ## [0.31.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.31.1...supacloud-lite-v0.31.2) (2026-10-17)
 
 

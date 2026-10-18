@@ -494,6 +494,16 @@
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
     },
     {
+      "name": "FeaturePersistenceOptions",
+      "kind": "type",
+      "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
+    },
+    {
+      "name": "FeatureRequestContext",
+      "kind": "type",
+      "signature": "export interface FeatureRequestContext {\n    readonly requestId: string;\n    readonly tenantId: string;\n    readonly actorId: string;\n    readonly permissions: readonly string[];\n    readonly idempotencyKey?: string;\n}"
+    },
+    {
       "name": "FeatureSliceOptions",
       "kind": "type",
       "signature": "export interface FeatureSliceOptions extends ModuleOptions {\n    spec?: FeatureSpecOptions;\n}"
@@ -511,7 +521,7 @@
     {
       "name": "FeatureTransitionOptions",
       "kind": "type",
-      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n}"
+      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    persistence?: FeaturePersistenceOptions;\n}"
     },
     {
       "name": "flattenProviders",
@@ -1232,6 +1242,11 @@
       "name": "REQUEST_CONTEXT",
       "kind": "value",
       "signature": "export declare const REQUEST_CONTEXT: any;"
+    },
+    {
+      "name": "requireFeatureRequestContext",
+      "kind": "value",
+      "signature": "export declare function requireFeatureRequestContext(value: unknown): FeatureRequestContext;"
     },
     {
       "name": "Resolve",

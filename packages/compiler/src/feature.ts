@@ -26,6 +26,19 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     if (transition.permission !== undefined && !transition.permission.trim()) {
       error("feature-governance-drift", `Transition ${transition.name} declares an empty permission.`);
     }
+    if (transition.persistence) {
+      const persistence = transition.persistence;
+      if (persistence.boundary === "database" &&
+        (persistence.optimisticLock !== "required" || !persistence.versionField?.trim() ||
+          persistence.receipt !== "required" || persistence.reconciliation !== "none")) {
+        error("feature-persistence-invalid", `Database transition ${transition.name} requires optimistic locking, a version field, and a receipt, without reconciliation.`);
+      }
+      if (persistence.boundary === "external" &&
+        (persistence.optimisticLock !== "none" || persistence.versionField !== undefined ||
+          persistence.receipt !== "required" || persistence.reconciliation !== "required")) {
+        error("feature-persistence-invalid", `External transition ${transition.name} requires a receipt and reconciliation, without database optimistic locking.`);
+      }
+    }
     if (!module) continue;
     const commands = module.commands.filter((command) =>
       command.className === transition.command || command.name === transition.command);
@@ -40,6 +53,14 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       for (const key of ["permission", "transaction", "idempotency", "audit"] as const) {
         if (transition[key] !== undefined && transition[key] !== command[key]) {
           error("feature-governance-drift", `Transition ${transition.name} ${key} differs from command ${command.className}.`);
+        }
+      }
+      if (transition.persistence) {
+        if (transition.persistence.boundary === "database" && command.transaction !== "required") {
+          error("feature-persistence-drift", `Database transition ${transition.name} requires command ${command.className} to declare transaction: "required".`);
+        }
+        if (command.idempotency !== "required" || !command.audit) {
+          error("feature-persistence-drift", `Persistent transition ${transition.name} requires command ${command.className} to declare idempotency and audit.`);
         }
       }
     }
@@ -75,7 +96,13 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
   }
   const sourceSpec = { name: spec.name, states: spec.states, transitions: Object.fromEntries(transitions.map((transition) => {
     const { name, ...options } = transition;
-    return [name, options];
+    return [name, {
+      ...options,
+      persistence: transition.persistence ?? {
+        boundary: "database", optimisticLock: "required", versionField: "version",
+        receipt: "required", reconciliation: "none",
+      },
+    }];
   })) };
   return [
     'import { Command, defineFeatureSlice, defineFeatureSpec } from "@supacloud/app";',
