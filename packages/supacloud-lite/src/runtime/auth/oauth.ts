@@ -209,7 +209,7 @@ export class OAuthService {
       if (e instanceof OAuthAccountIneligibleError) {
         return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
       }
-      throw e
+      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth callback failed')}`)
     }
 
     // PKCE: hand back an auth code the client exchanges for a session.
@@ -231,7 +231,7 @@ export class OAuthService {
       if (e instanceof OAuthAccountIneligibleError) {
         return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
       }
-      throw e
+      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth callback failed')}`)
     }
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&provider_token=`
     return redirect(`${flow.redirect_to}${hash}`)
