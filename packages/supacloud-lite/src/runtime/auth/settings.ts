@@ -42,6 +42,18 @@ export interface AuthSettings {
   totpEnrollEnabled: boolean
   /** Allow TOTP verification/challenge (auth.mfa.totp.verify_enabled). */
   totpVerifyEnabled: boolean
+  /** Allow recovery-code enrollment and rotation (auth.mfa.recovery_codes.enroll_enabled). */
+  recoveryCodesEnrollEnabled: boolean
+  /** Allow recovery-code verification (auth.mfa.recovery_codes.verify_enabled). */
+  recoveryCodesVerifyEnabled: boolean
+  /** Number of recovery codes issued per set. */
+  recoveryCodesCount: number
+  /** Length of each recovery code before display separators are added. */
+  recoveryCodeLength: number
+  /** Failed recovery-code attempts before temporary lockout. */
+  recoveryCodesMaxVerifyAttempts: number
+  /** Recovery-code lockout duration in seconds. */
+  recoveryCodesLockoutSeconds: number
 }
 
 /** Built-in defaults, matching `supabase start`'s permissive local posture (autoconfirm on, anonymous users on). */
@@ -61,6 +73,12 @@ export const DEFAULT_AUTH_SETTINGS: AuthSettings = {
   maxEnrolledFactors: 10,
   totpEnrollEnabled: true,
   totpVerifyEnabled: true,
+  recoveryCodesEnrollEnabled: true,
+  recoveryCodesVerifyEnabled: true,
+  recoveryCodesCount: 10,
+  recoveryCodeLength: 16,
+  recoveryCodesMaxVerifyAttempts: 5,
+  recoveryCodesLockoutSeconds: 300,
 }
 
 /** Clamp/typecheck a stored or patched settings object into a valid one. */
@@ -102,6 +120,20 @@ function sanitize(raw: Record<string, unknown>): AuthSettings {
   }
   if (typeof raw["totpEnrollEnabled"] === 'boolean') s.totpEnrollEnabled = raw["totpEnrollEnabled"]
   if (typeof raw["totpVerifyEnabled"] === 'boolean') s.totpVerifyEnabled = raw["totpVerifyEnabled"]
+  if (typeof raw["recoveryCodesEnrollEnabled"] === 'boolean') s.recoveryCodesEnrollEnabled = raw["recoveryCodesEnrollEnabled"]
+  if (typeof raw["recoveryCodesVerifyEnabled"] === 'boolean') s.recoveryCodesVerifyEnabled = raw["recoveryCodesVerifyEnabled"]
+  if (typeof raw["recoveryCodesCount"] === 'number' && Number.isFinite(raw["recoveryCodesCount"])) {
+    s.recoveryCodesCount = Math.max(1, Math.min(50, Math.floor(raw["recoveryCodesCount"])))
+  }
+  if (typeof raw["recoveryCodeLength"] === 'number' && Number.isFinite(raw["recoveryCodeLength"])) {
+    s.recoveryCodeLength = Math.max(8, Math.min(64, Math.floor(raw["recoveryCodeLength"])))
+  }
+  if (typeof raw["recoveryCodesMaxVerifyAttempts"] === 'number' && Number.isFinite(raw["recoveryCodesMaxVerifyAttempts"])) {
+    s.recoveryCodesMaxVerifyAttempts = Math.max(1, Math.min(20, Math.floor(raw["recoveryCodesMaxVerifyAttempts"])))
+  }
+  if (typeof raw["recoveryCodesLockoutSeconds"] === 'number' && Number.isFinite(raw["recoveryCodesLockoutSeconds"])) {
+    s.recoveryCodesLockoutSeconds = Math.max(1, Math.min(86_400, Math.floor(raw["recoveryCodesLockoutSeconds"])))
+  }
   return s
 }
 
@@ -146,10 +178,11 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
   const BOOL_KEYS = [
     'disableSignup', 'anonymousUsers', 'autoconfirm', 'requirePasswordReauthentication',
     'smsEnabled', 'smsSignupEnabled',
-    'totpEnrollEnabled', 'totpVerifyEnabled',
+    'totpEnrollEnabled', 'totpVerifyEnabled', 'recoveryCodesEnrollEnabled', 'recoveryCodesVerifyEnabled',
   ]
   const NUMBER_KEYS = [
     'minPasswordLength', 'otpLength', 'otpExpirySeconds', 'smsOtpCooldownSeconds', 'maxEnrolledFactors',
+    'recoveryCodesCount', 'recoveryCodeLength', 'recoveryCodesMaxVerifyAttempts', 'recoveryCodesLockoutSeconds',
   ]
   const KEYS = [...BOOL_KEYS, ...NUMBER_KEYS, 'disabledProviders', 'smsTemplate']
   for (const k of Object.keys(patch)) {
@@ -165,6 +198,10 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
     otpExpirySeconds: { min: 1, max: Number.MAX_SAFE_INTEGER },
     smsOtpCooldownSeconds: { min: 0, max: 86_400 },
     maxEnrolledFactors: { min: 1, max: Number.MAX_SAFE_INTEGER },
+    recoveryCodesCount: { min: 1, max: 50 },
+    recoveryCodeLength: { min: 8, max: 64 },
+    recoveryCodesMaxVerifyAttempts: { min: 1, max: 20 },
+    recoveryCodesLockoutSeconds: { min: 1, max: 86_400 },
   }
   for (const k of NUMBER_KEYS) {
     if (!(k in patch)) continue

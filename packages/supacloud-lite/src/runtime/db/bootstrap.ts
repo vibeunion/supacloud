@@ -141,6 +141,25 @@ create table if not exists auth.mfa_challenges (
   expires_at timestamptz not null
 );
 
+create table if not exists auth.mfa_recovery_code_sets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  mfa_factor_id uuid not null unique,
+  failed_verification_count int not null default 0,
+  verification_locked_until timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (user_id)
+);
+
+create table if not exists auth.mfa_recovery_codes (
+  id uuid primary key default gen_random_uuid(),
+  mfa_recovery_code_set_id uuid not null references auth.mfa_recovery_code_sets(id) on delete cascade,
+  code_hash text not null,
+  consumed_at timestamptz,
+  created_at timestamptz default now()
+);
+
 create table if not exists auth.audit_log_entries (
   id uuid primary key default gen_random_uuid(),
   payload jsonb,
@@ -451,6 +470,25 @@ create table if not exists auth.mfa_challenges (
   verified_at timestamptz,
   created_at timestamptz default now(),
   expires_at timestamptz not null
+);
+
+create table if not exists auth.mfa_recovery_code_sets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  mfa_factor_id uuid not null unique references auth.mfa_factors(id) on delete cascade,
+  failed_verification_count int not null default 0,
+  verification_locked_until timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (user_id)
+);
+
+create table if not exists auth.mfa_recovery_codes (
+  id uuid primary key default gen_random_uuid(),
+  mfa_recovery_code_set_id uuid not null references auth.mfa_recovery_code_sets(id) on delete cascade,
+  code_hash text not null,
+  consumed_at timestamptz,
+  created_at timestamptz default now()
 );
 
 -- append-only security audit trail (GoTrue-compatible shape)

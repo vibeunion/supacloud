@@ -202,6 +202,7 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   const sms = tableAt(root, 'auth.sms')
   const mfa = tableAt(root, 'auth.mfa')
   const mfaTotp = tableAt(root, 'auth.mfa.totp')
+  const recoveryCodes = tableAt(root, 'auth.mfa.recovery_codes')
   const out: Partial<AuthSettings> = {}
 
   // Signups: [auth].disable_signup (legacy) or enable_signup at [auth]/[auth.email].
@@ -245,6 +246,18 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   if (totpEnroll !== undefined) out.totpEnrollEnabled = totpEnroll
   const totpVerify = getBool(mfaTotp, 'verify_enabled')
   if (totpVerify !== undefined) out.totpVerifyEnabled = totpVerify
+  const recoveryEnroll = getBool(recoveryCodes, 'enroll_enabled')
+  if (recoveryEnroll !== undefined) out.recoveryCodesEnrollEnabled = recoveryEnroll
+  const recoveryVerify = getBool(recoveryCodes, 'verify_enabled')
+  if (recoveryVerify !== undefined) out.recoveryCodesVerifyEnabled = recoveryVerify
+  const recoveryCount = getInt(recoveryCodes, 'count')
+  if (recoveryCount !== undefined) out.recoveryCodesCount = recoveryCount
+  const recoveryLength = getInt(recoveryCodes, 'code_length')
+  if (recoveryLength !== undefined) out.recoveryCodeLength = recoveryLength
+  const recoveryAttempts = getInt(recoveryCodes, 'max_verify_attempts')
+  if (recoveryAttempts !== undefined) out.recoveryCodesMaxVerifyAttempts = recoveryAttempts
+  const recoveryLockout = getDurationSeconds(recoveryCodes, 'lockout_duration')
+  if (recoveryLockout !== undefined) out.recoveryCodesLockoutSeconds = recoveryLockout
 
   return out
 }
