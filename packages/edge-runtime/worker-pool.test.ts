@@ -5,7 +5,12 @@ import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { resolveProjectWorkerCacheOptions, resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
+import {
+  resolveMaxBodySizeBytes,
+  resolveProjectWorkerCacheOptions,
+  resolveWorkerReplacementBudget,
+  WorkerPool,
+} from "./worker-pool";
 import { createMemoryPressureMonitor } from "./memory-pressure";
 import { functionBytecodeCache } from "./function-bytecode";
 import { benchmarkProjectWorkers } from "./worker-project-benchmark";
@@ -4444,50 +4449,9 @@ describe("WorkerPool body size limit", () => {
     }
   });
 
-  test("falls back to default limit for invalid EDGE_MAX_BODY_SIZE_MB", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-invalid-env-"));
-    const functionPath = join(projectRoot, "fn.ts");
-    await Bun.write(functionPath, `
-      export default {
-        async fetch() {
-          return new Response("should not reach", { status: 200 });
-        }
-      }
-    `);
-
-    const previousLimit = process.env.EDGE_MAX_BODY_SIZE_MB;
-    process.env.EDGE_MAX_BODY_SIZE_MB = "Infinity";
-
-    const { WorkerPool: FreshPool } = await import("./worker-pool?" + Date.now());
-    const pool = new FreshPool({ size: 1, requestTimeout: 2_000 });
-    pools.push(pool);
-
-    try {
-      const req = new Request("http://edge.local/functions/v1/test", {
-        method: "POST",
-        headers: { "content-length": String(31 * 1024 * 1024) },
-        body: "x".repeat(100),
-      });
-
-      const res = await pool.dispatch({
-        functionId: "test_body_invalid_env",
-        projectRef: "test-project",
-        functionPath,
-        projectRoot,
-        env: {},
-        request: req,
-      });
-
-      expect(res.status).toBe(413);
-      const body = await res.json();
-      expect(body.error).toContain("500MB");
-    } finally {
-      if (previousLimit === undefined) {
-        delete process.env.EDGE_MAX_BODY_SIZE_MB;
-      } else {
-        process.env.EDGE_MAX_BODY_SIZE_MB = previousLimit;
-      }
-      await rm(projectRoot, { recursive: true, force: true });
-    }
+  test("falls back to default limit for invalid EDGE_MAX_BODY_SIZE_MB", () => {
+    expect(resolveMaxBodySizeBytes("Infinity")).toBe(500 * 1024 * 1024);
+    expect(resolveMaxBodySizeBytes("invalid")).toBe(500 * 1024 * 1024);
+    expect(resolveMaxBodySizeBytes("0")).toBe(500 * 1024 * 1024);
   });
 });
