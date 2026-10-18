@@ -20,7 +20,7 @@ second engine, database schema, hand-maintained client or transport abstraction.
 | Outcome | This iteration | Remaining evidence |
 | --- | --- | --- |
 | Golden business slice and four-stack comparison | Approval scope and common acceptance below; recorded-agent evaluator has a bounded `create-feature-slice` task | NestJS, Spring, a named Go stack, and SupaCloud implementations and comparable measured trials |
-| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, routes, explicit query invalidation tags, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
+| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, receipt and job-status routes, explicit query invalidation tags, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
 | Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Durable authorization, version checks, audit, outbox and result recovery in the chosen customer flow |
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
 
@@ -137,7 +137,8 @@ authorization, idempotency, state transitions, audit or outbox behavior.
 
 1. Bind this recipe to one approved xigu-fa operation using its existing RPC and
    source-of-truth tables; keep authorization and state rules in that application.
-2. Connect the compiler-generated client and existing query adapter, configure
+2. Connect the compiler-generated client and existing query adapter, bind the
+   generated job-status port to the existing Workflow/Queue read path, configure
    the generated E2E environment, then run authenticated negative, concurrency,
    crash and recovery acceptance.
 3. Verify the published dependency tuple and test-environment deployment/upgrade.
