@@ -25,7 +25,9 @@ export interface ContractManifest {
     className: string;
     module: string;
     input?: string;
+    inputKind?: "opaque" | "declared";
     output?: string;
+    outputKind?: "opaque" | "declared";
     mode?: "task" | "workflow";
     idempotency?: "required" | "none";
     tenantScope?: "required" | "none";
@@ -49,7 +51,9 @@ export interface ContractManifest {
         name: string;
         className: string;
         input?: string;
+        inputKind?: "opaque" | "declared";
         output?: string;
+        outputKind?: "opaque" | "declared";
         mode?: "task" | "workflow";
         idempotency?: "required" | "none";
         tenantScope?: "required" | "none";
@@ -130,7 +134,9 @@ export function buildContractManifest(
         className: job.className,
         module: module.name,
         ...(job.input === undefined ? {} : { input: job.input }),
+        ...(job.schemaKinds?.input === undefined ? {} : { inputKind: job.schemaKinds.input }),
         ...(job.output === undefined ? {} : { output: job.output }),
+        ...(job.schemaKinds?.output === undefined ? {} : { outputKind: job.schemaKinds.output }),
         ...(job.mode === undefined ? {} : { mode: job.mode }),
         ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
         ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),
@@ -160,7 +166,9 @@ export function buildContractManifest(
                 name: job.name,
                 className: job.className,
                 ...(job.input === undefined ? {} : { input: job.input }),
+                ...(job.schemaKinds?.input === undefined ? {} : { inputKind: job.schemaKinds.input }),
                 ...(job.output === undefined ? {} : { output: job.output }),
+                ...(job.schemaKinds?.output === undefined ? {} : { outputKind: job.schemaKinds.output }),
                 ...(job.mode === undefined ? {} : { mode: job.mode }),
                 ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
                 ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),

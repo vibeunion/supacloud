@@ -149,7 +149,8 @@ test("migration assessment accepts transition Job bindings by class name", async
     version: 1, commands: [], queries: [], routes: [], permissions: [],
     jobs: [{
       name: "case.refresh", className: "RefreshCaseJob", module: "case",
-      input: "RefreshCaseInput", mode: "task", idempotency: "required", tenantScope: "required",
+      input: "RefreshCaseInput", inputKind: "declared",
+      mode: "task", idempotency: "required", tenantScope: "required",
     }],
     features: [{
       name: "case", states: ["draft", "approved"],
@@ -157,7 +158,7 @@ test("migration assessment accepts transition Job bindings by class name", async
         name: "approve", from: "draft", to: "approved", job: "RefreshCaseJob",
         jobDetails: {
           name: "case.refresh", className: "RefreshCaseJob",
-          input: "RefreshCaseInput",
+          input: "RefreshCaseInput", inputKind: "declared",
           mode: "task", idempotency: "required", tenantScope: "required",
         },
         command: "ApproveCase",

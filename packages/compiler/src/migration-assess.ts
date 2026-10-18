@@ -151,12 +151,13 @@ function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value 
       const inventory = jobs.find((candidate) =>
         isRecord(candidate) && (candidate["name"] === job || candidate["className"] === job),
       );
-      const contractFields = ["input", "output", "mode", "idempotency", "tenantScope"] as const;
+      const contractFields = ["input", "inputKind", "output", "outputKind", "mode", "idempotency", "tenantScope"] as const;
       return typeof job === "string" && job.trim() !== ""
         && isRecord(details)
         && isRecord(inventory)
         && (details["name"] === job || details["className"] === job)
         && typeof details["className"] === "string" && details["className"].trim() !== ""
+        && details["inputKind"] === "declared"
         && (details["mode"] === "task" || details["mode"] === "workflow")
         && details["idempotency"] === "required"
         && details["tenantScope"] === "required"
@@ -172,7 +173,9 @@ function validJobInventory(value: unknown): value is unknown[] {
       || typeof job["className"] !== "string" || job["className"].trim() === ""
       || typeof job["module"] !== "string" || job["module"].trim() === "") return false;
     if (job["input"] !== undefined && (typeof job["input"] !== "string" || job["input"].trim() === "")) return false;
+    if (job["inputKind"] !== undefined && job["inputKind"] !== "opaque" && job["inputKind"] !== "declared") return false;
     if (job["output"] !== undefined && (typeof job["output"] !== "string" || job["output"].trim() === "")) return false;
+    if (job["outputKind"] !== undefined && job["outputKind"] !== "opaque" && job["outputKind"] !== "declared") return false;
     if (job["mode"] !== undefined && job["mode"] !== "task" && job["mode"] !== "workflow") return false;
     if (job["idempotency"] !== undefined && job["idempotency"] !== "required" && job["idempotency"] !== "none") return false;
     return job["tenantScope"] === undefined || job["tenantScope"] === "required" || job["tenantScope"] === "none";

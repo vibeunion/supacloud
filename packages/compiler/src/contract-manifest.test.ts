@@ -98,6 +98,7 @@ test("contract manifest publishes the complete feature state machine and persist
       jobs: [{
         className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
         scope: "job", input: "RefreshCaseInput", output: "RefreshCaseOutput",
+        schemaKinds: { input: "declared", output: "declared" },
         mode: "workflow", idempotency: "required", tenantScope: "required",
       }],
       featureSpec: {
@@ -142,7 +143,9 @@ test("contract manifest publishes the complete feature state machine and persist
             name: "case.refresh",
             className: "RefreshCaseJob",
             input: "RefreshCaseInput",
+            inputKind: "declared",
             output: "RefreshCaseOutput",
+            outputKind: "declared",
             mode: "workflow",
             idempotency: "required",
             tenantScope: "required",
