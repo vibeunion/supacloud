@@ -23,8 +23,10 @@ create table if not exists auth.users (
   email text unique,
   encrypted_password text,
   email_confirmed_at timestamptz,
+  email_change_token_new text default '',
   email_change text,
   email_change_sent_at timestamptz,
+  email_change_token_current text default '',
   email_change_confirm_status smallint default 0,
   last_sign_in_at timestamptz,
   raw_app_meta_data jsonb default '{}'::jsonb,
@@ -34,6 +36,9 @@ create table if not exists auth.users (
   updated_at timestamptz default now(),
   phone text unique,
   phone_confirmed_at timestamptz,
+  phone_change text default '',
+  phone_change_token text default '',
+  phone_change_sent_at timestamptz,
   banned_until timestamptz,
   deleted_at timestamptz,
   is_anonymous boolean default false
@@ -41,7 +46,12 @@ create table if not exists auth.users (
 
 alter table auth.users add column if not exists email_change text;
 alter table auth.users add column if not exists email_change_sent_at timestamptz;
+alter table auth.users add column if not exists email_change_token_new text default '';
+alter table auth.users add column if not exists email_change_token_current text default '';
 alter table auth.users add column if not exists email_change_confirm_status smallint default 0;
+alter table auth.users add column if not exists phone_change text default '';
+alter table auth.users add column if not exists phone_change_token text default '';
+alter table auth.users add column if not exists phone_change_sent_at timestamptz;
 
 create table if not exists auth.refresh_tokens (
   id bigserial primary key,
@@ -111,6 +121,7 @@ create table if not exists auth.flow_state (
   created_at timestamptz default now(),
   expires_at timestamptz not null
 );
+alter table auth.flow_state add column if not exists link_user_id uuid;
 
 create table if not exists auth.mfa_factors (
   id uuid primary key default gen_random_uuid(),
@@ -129,6 +140,25 @@ create table if not exists auth.mfa_challenges (
   verified_at timestamptz,
   created_at timestamptz default now(),
   expires_at timestamptz not null
+);
+
+create table if not exists auth.mfa_recovery_code_sets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  mfa_factor_id uuid not null unique,
+  failed_verification_count int not null default 0,
+  verification_locked_until timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (user_id)
+);
+
+create table if not exists auth.mfa_recovery_codes (
+  id uuid primary key default gen_random_uuid(),
+  mfa_recovery_code_set_id uuid not null references auth.mfa_recovery_code_sets(id) on delete cascade,
+  code_hash text not null,
+  consumed_at timestamptz,
+  created_at timestamptz default now()
 );
 
 create table if not exists auth.audit_log_entries (
@@ -339,6 +369,8 @@ create table if not exists auth.users (
 
 alter table auth.users add column if not exists email_change text;
 alter table auth.users add column if not exists email_change_sent_at timestamptz;
+alter table auth.users add column if not exists email_change_token_new text default '';
+alter table auth.users add column if not exists email_change_token_current text default '';
 alter table auth.users add column if not exists email_change_confirm_status smallint default 0;
 
 create table if not exists auth.refresh_tokens (
@@ -421,6 +453,7 @@ create table if not exists auth.flow_state (
   created_at timestamptz default now(),
   expires_at timestamptz not null
 );
+alter table auth.flow_state add column if not exists link_user_id uuid;
 
 create table if not exists auth.mfa_factors (
   id uuid primary key default gen_random_uuid(),
@@ -439,6 +472,25 @@ create table if not exists auth.mfa_challenges (
   verified_at timestamptz,
   created_at timestamptz default now(),
   expires_at timestamptz not null
+);
+
+create table if not exists auth.mfa_recovery_code_sets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  mfa_factor_id uuid not null unique references auth.mfa_factors(id) on delete cascade,
+  failed_verification_count int not null default 0,
+  verification_locked_until timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (user_id)
+);
+
+create table if not exists auth.mfa_recovery_codes (
+  id uuid primary key default gen_random_uuid(),
+  mfa_recovery_code_set_id uuid not null references auth.mfa_recovery_code_sets(id) on delete cascade,
+  code_hash text not null,
+  consumed_at timestamptz,
+  created_at timestamptz default now()
 );
 
 -- append-only security audit trail (GoTrue-compatible shape)

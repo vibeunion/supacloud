@@ -6,13 +6,14 @@ import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
 import type { Mailer, RequestContext, SmsMessage, SmsSender } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
-import { OAuthAccountIneligibleError, OAuthService, type OAuthProviderConfig } from './oauth.js'
+import { OAuthAccountIneligibleError, OAuthIdentityLinkError, OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { qrSvgDataUri } from './qr.js'
 import { DEFAULT_AUTH_SETTINGS, type AuthSettings } from './settings.js'
 import { resolveRedirect } from './redirect.js'
 import { RateLimiter } from './rate-limit.js'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js'
+import { verifySolanaSignIn } from './web3.js'
 
 /** Construction-time config for {@link AuthHandler}. */
 export interface AuthConfig {
@@ -69,8 +70,11 @@ interface UserRow {
   email: string | null
   encrypted_password: string | null
   email_confirmed_at: Date | string | null
+  email_change_token_new: string | null
   email_change: string | null
   email_change_sent_at: Date | string | null
+  email_change_token_current: string | null
+  email_change_confirm_status: number | null
   last_sign_in_at: Date | string | null
   raw_app_meta_data: Record<string, unknown> | null
   raw_user_meta_data: Record<string, unknown> | null
@@ -78,6 +82,11 @@ interface UserRow {
   updated_at: Date | string | null
   phone: string | null
   phone_confirmed_at: Date | string | null
+  phone_change: string | null
+  phone_change_token: string | null
+  phone_change_sent_at: Date | string | null
+  reauthentication_token: string | null
+  reauthentication_sent_at: Date | string | null
   is_anonymous: boolean | null
   banned_until: Date | string | null
   deleted_at: Date | string | null
@@ -124,6 +133,8 @@ interface EmailChangePreparation {
   code: string
   redirectTo: string
 }
+
+type EmailChangeClaim = UserRow | 'pending' | null
 
 interface PhoneOtpIssueRequest {
   phone: string
@@ -186,10 +197,41 @@ function normalizePhone(value: unknown): string | null {
   return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null
 }
 
+function banDurationSeconds(value: unknown): number | null | undefined {
+  if (value === 'none') return null
+  if (typeof value !== 'string') return undefined
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)$/)
+  if (!match) return undefined
+  const amount = Number(match[1])
+  const multipliers: Record<string, number> = { ns: 1e-9, us: 1e-6, 'µs': 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 }
+  const multiplier = multipliers[match[2]]
+  const seconds = amount * multiplier
+  return Number.isFinite(seconds) ? seconds : undefined
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {}
+}
+
+const RECOVERY_CODE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567'
+
+function normalizeRecoveryCode(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/[\s-]/g, '').toLowerCase() : ''
+}
+
+function randomRecoveryCode(length: number): string {
+  let code = ''
+  while (code.length < length) {
+    const bytes = crypto.getRandomValues(new Uint8Array(Math.max(16, length - code.length)))
+    for (const byte of bytes) {
+      if (byte >= 224) continue
+      code += RECOVERY_CODE_ALPHABET[byte % RECOVERY_CODE_ALPHABET.length]
+      if (code.length === length) break
+    }
+  }
+  return code
 }
 
 function databaseDiagnosticCode(error: unknown): string {
@@ -223,10 +265,10 @@ async function sendSmsUntilAbort(sender: SmsSender, message: SmsMessage, signal:
   }
 }
 
-function json(status: number, body: unknown): Response {
+function json(status: number, body: unknown, extraHeaders: HeadersInit = {}): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { 'content-type': 'application/json; charset=utf-8', ...extraHeaders },
   })
 }
 
@@ -350,6 +392,10 @@ export class AuthHandler {
       if (path === 'token' && method === 'POST') return this.limit('token', req) ?? (await this.token(req, url))
       if (path === 'user' && method === 'GET') return await this.getUser(req)
       if (path === 'user' && method === 'PUT') return await this.updateUser(req)
+      if (/^user\/identities\/[^/]+$/.test(path) && method === 'DELETE') {
+        return await this.unlinkIdentity(req, decodeURIComponent(path.split('/')[2]))
+      }
+      if (path === 'reauthenticate' && (method === 'GET' || method === 'POST')) return await this.reauthenticate(req)
       if (path === 'logout' && method === 'POST') return await this.logout(req, url)
       if (path === 'otp' && method === 'POST') return await this.sendOtp(req)
       if (path === 'recover' && method === 'POST') return this.limit('recover', req) ?? (await this.sendRecovery(req))
@@ -357,13 +403,33 @@ export class AuthHandler {
       if (path === 'resend' && method === 'POST') return await this.sendOtp(req, true)
       if (path === 'verify' && method === 'POST') return this.limit('verify', req) ?? (await this.verifyToken(req))
       if (path === 'verify' && method === 'GET') return await this.verifyLink(url)
+      if (path === 'invite' && method === 'POST') {
+        if (ctx.role !== 'service_role') {
+          return authError(403, 'insufficient_permissions', 'Admin endpoints require the service_role key')
+        }
+        return await this.generateAdminMagicLink(req, true, 'invite')
+      }
       if (path === 'factors' && method === 'POST') return await this.enrollFactor(req)
+      if (path === 'factors/recovery-codes' && method === 'GET') return await this.recoveryCodesStatus(req)
+      if (path === 'factors/recovery-codes' && method === 'POST') return await this.generateRecoveryCodes(req)
+      if (path === 'factors/recovery-codes' && method === 'DELETE') return await this.deleteRecoveryCodes(req)
+      if (path === 'factors/recovery-codes/verify' && method === 'POST') return await this.verifyRecoveryCode(req)
+      if (path === 'factors/recovery-codes/regenerate' && method === 'POST') return await this.regenerateRecoveryCodes(req)
       if (/^factors\/[^/]+\/challenge$/.test(path) && method === 'POST')
         return await this.challengeFactor(req, path.split('/')[1])
       if (/^factors\/[^/]+\/verify$/.test(path) && method === 'POST')
         return await this.verifyFactor(req, path.split('/')[1])
       if (/^factors\/[^/]+$/.test(path) && method === 'DELETE')
         return await this.unenrollFactor(req, path.split('/')[1])
+      if (path === 'user/identities/authorize' && method === 'GET') {
+        const user = await this.userFromBearer(req)
+        if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
+        const provider = url.searchParams.get('provider') ?? ''
+        if (provider && this.settings.disabledProviders.includes(provider)) {
+          return authError(422, 'provider_disabled', `Sign-ins with ${provider} are disabled`)
+        }
+        return await this.oauth.authorize(url, user.id)
+      }
       if (path === 'authorize' && method === 'GET') {
         const provider = url.searchParams.get('provider') ?? ''
         if (provider && this.settings.disabledProviders.includes(provider)) {
@@ -495,18 +561,25 @@ export class AuthHandler {
     const body = (await req.json().catch(() => ({}))) as Record<string, string>
 
     if (grantType === 'password') {
-      const email = (body.email ?? '').toLowerCase().trim()
+      const email = body.email === undefined ? null : normalizeEmailInput(body.email)
+      if (body.email !== undefined && !email) return authError(400, 'validation_failed', 'email must not be empty')
+      const phone = body.phone === undefined ? null : normalizePhone(body.phone)
+      if (body.phone !== undefined && !phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      if (!email && !phone) return authError(400, 'validation_failed', 'email or phone is required')
       const res = await this.db.query<UserRow & { is_banned: boolean }>(
         `select *, coalesce(banned_until > now(), false) as is_banned
-         from auth.users where lower(email) = $1 and deleted_at is null`,
-        [email],
+         from auth.users
+         where (($1::text is not null and lower(email) = $1)
+            or ($2::text is not null and phone = $2))
+           and deleted_at is null`,
+        [email, phone],
       )
       const user = res.rows[0]
       if (user?.encrypted_password && user.is_banned) {
         return authError(400, 'user_banned', 'User is banned')
       }
       if (!user || !user.encrypted_password || !(await verifyPassword(body.password ?? '', user.encrypted_password))) {
-        await this.audit('login_failed', { actorEmail: email, traits: { grant_type: 'password' } })
+        await this.audit('login_failed', { actorEmail: email ?? phone, traits: { grant_type: 'password' } })
         return authError(400, 'invalid_credentials', 'Invalid login credentials')
       }
       const response = await this.db.transaction(async (query) => {
@@ -520,7 +593,9 @@ export class AuthHandler {
           !current
           || current.deleted_at !== null
           || !current.encrypted_password
-          || current.email?.toLowerCase().trim() !== email
+          || (email
+            ? current.email?.toLowerCase().trim() !== email
+            : current.phone !== phone)
         ) {
           return authError(400, 'invalid_credentials', 'Invalid login credentials')
         }
@@ -531,7 +606,10 @@ export class AuthHandler {
         if (current.encrypted_password !== user.encrypted_password) {
           return authError(400, 'invalid_credentials', 'Invalid login credentials')
         }
-        if (!this.settings.autoconfirm && !current.email_confirmed_at) {
+        if (phone && !current.phone_confirmed_at) {
+          return authError(400, 'phone_not_confirmed', 'Phone not confirmed')
+        }
+        if (email && !this.settings.autoconfirm && !current.email_confirmed_at) {
           return authError(400, 'email_not_confirmed', 'Email not confirmed')
         }
         const signedIn = await query<UserRow>(
@@ -545,7 +623,7 @@ export class AuthHandler {
         return json(200, await this.sessionFor(updated, undefined, undefined, query))
       })
       if (response.ok) {
-        await this.audit('login', { actorId: user.id, actorEmail: email, traits: { grant_type: 'password' } })
+        await this.audit('login', { actorId: user.id, actorEmail: user.email ?? user.phone, traits: { grant_type: 'password' } })
       }
       return response
     }
@@ -569,6 +647,64 @@ export class AuthHandler {
       return json(200, await this.sessionForOAuth(userId))
     }
 
+    if (grantType === 'id_token') {
+      const provider = typeof body.provider === 'string' ? body.provider.toLowerCase() : ''
+      const idToken = body.id_token
+      if (!provider || !idToken) return authError(400, 'validation_failed', 'provider and id_token required')
+      if (String(body.link_identity) === 'true' || body.link_identity === '1') {
+        const current = await this.userFromBearer(req)
+        if (!current) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+        try {
+          const linked = await this.oauth.linkIdentityWithIdToken(provider, idToken, current.id, body.access_token, body.nonce)
+          if (!linked) return authError(400, 'invalid_credentials', 'Invalid ID token')
+        } catch (error) {
+          if (error instanceof OAuthIdentityLinkError) {
+            return authError(422, error.code, 'Identity is already linked')
+          }
+          throw error
+        }
+        return this.sessionForOAuth(current.id).then((session) => json(200, session))
+      }
+      const userId = await this.oauth.signInWithIdToken(provider, idToken, body.access_token, body.nonce)
+      if (!userId) return authError(400, 'invalid_credentials', 'Invalid ID token')
+      return this.db.transaction(async (query) => {
+        const result = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [userId],
+        )
+        const user = result.rows[0]
+        if (!user) return authError(400, 'invalid_credentials', 'Invalid ID token')
+        return json(200, await this.sessionFor(user, undefined, {
+          amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+        }, query))
+      })
+    }
+
+    if (grantType === 'web3') {
+      if (body.chain !== 'solana' || !body.message || !body.signature) {
+        return authError(400, 'validation_failed', 'chain, message and signature are required')
+      }
+      const wallet = await verifySolanaSignIn(body.message, body.signature)
+      if (!wallet) return authError(400, 'invalid_credentials', 'Invalid Web3 credentials')
+      const userId = await this.oauth.signInWithProfile('solana', {
+        id: wallet.address,
+        metadata: { address: wallet.address, chain: 'solana' },
+      })
+      return this.db.transaction(async (query) => {
+        const result = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [userId],
+        )
+        const user = result.rows[0]
+        if (!user) return authError(400, 'invalid_credentials', 'Invalid Web3 credentials')
+        return json(200, await this.sessionFor(user, undefined, {
+          amr: [{ method: 'web3', timestamp: Math.floor(Date.now() / 1000) }],
+        }, query))
+      })
+    }
+
     return authError(400, 'invalid_grant', `unsupported grant_type: ${grantType}`)
   }
 
@@ -578,12 +714,61 @@ export class AuthHandler {
     return json(200, this.userJson(user, await this.getUserFactors(user.id), await this.getUserIdentities(user.id)))
   }
 
+  private async unlinkIdentity(req: Request, identityId: string): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const identity = (await query<{ id: string }>(
+        `select id from auth.identities where id = $1 and user_id = $2`,
+        [identityId, user.id],
+      )).rows[0]
+      if (!identity) return authError(404, 'identity_not_found', 'Identity not found')
+      const count = await query<{ count: number }>(
+        `select count(*)::int as count from auth.identities where user_id = $1`,
+        [user.id],
+      )
+      if ((count.rows[0]?.count ?? 0) <= 1) {
+        return authError(422, 'cannot_unlink_identity', 'Cannot unlink the only identity')
+      }
+      await query(`delete from auth.identities where id = $1 and user_id = $2`, [identity.id, user.id])
+      await query(
+        `update auth.users
+         set raw_app_meta_data = jsonb_set(
+           coalesce(raw_app_meta_data, '{}'::jsonb),
+           '{providers}',
+           (
+             select jsonb_agg(provider order by provider)
+             from (
+               select distinct provider
+               from auth.identities
+               where user_id = $1
+             ) as providers
+           ),
+           true
+         ),
+         updated_at = now()
+         where id = $1`,
+        [user.id],
+      )
+      return json(200, {})
+    })
+  }
+
   private async updateUser(req: Request): Promise<Response> {
+    const claims = await this.claimsFromBearer(req)
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
     const body = (await req.json().catch(() => ({}))) as {
       email?: string
+      phone?: string
       password?: string
+      nonce?: string
       data?: Record<string, unknown>
       code_challenge?: string | null
       code_challenge_method?: string | null
@@ -594,6 +779,16 @@ export class AuthHandler {
     if (body.email !== undefined && !requestedEmail) {
       return authError(400, 'validation_failed', 'email must not be empty')
     }
+    if (body.phone !== undefined) {
+      if (requestedEmail !== undefined) return authError(400, 'validation_failed', 'email and phone cannot be updated together')
+      const phone = normalizePhone(body.phone)
+      if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      return this.requestPhoneChange(req, user, phone)
+    }
+    const requiresReauthentication =
+      Boolean(body.password)
+      && this.settings.requirePasswordReauthentication
+      && await this.sessionRequiresReauthentication(claims)
     if (requestedEmail && !this.settings.autoconfirm) {
       return this.requestEmailChange(req, user, requestedEmail, body)
     }
@@ -621,6 +816,14 @@ export class AuthHandler {
 
         const transactionSets = [...sets]
         const transactionParams = [...params]
+        if (requiresReauthentication) {
+          if (!body.nonce) {
+            return authError(400, 'reauthentication_needed', 'Password update requires reauthentication')
+          }
+          if (!(await this.consumeReauthentication(query, current, body.nonce))) {
+            return authError(422, 'reauthentication_not_valid', 'Nonce has expired or is invalid')
+          }
+        }
         const upgradingAnon = (current.is_anonymous ?? false) && requestedEmail !== undefined
         if (requestedEmail) {
           const email = requestedEmail
@@ -645,7 +848,7 @@ export class AuthHandler {
         )
         const updated = updatedResult.rows[0]
         if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
-        if (requestedEmail) await this.ensureEmailIdentity(updated, query)
+        if (requestedEmail) await this.ensureEmailIdentity(updated, query, upgradingAnon)
         return json(200, await this.userJsonWithRelations(updated, query))
       })
     } catch (error) {
@@ -655,6 +858,154 @@ export class AuthHandler {
       throw error
     }
     return response
+  }
+
+  private async reauthenticate(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
+
+    const prepared = await this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+
+      const email = current.email_confirmed_at && current.email ? current.email : null
+      const phone = !email && current.phone_confirmed_at && current.phone ? current.phone : null
+      if (!email && !phone) {
+        if (current.email && !current.email_confirmed_at) {
+          return authError(422, 'email_not_confirmed', 'Please verify your email first.')
+        }
+        if (current.phone && !current.phone_confirmed_at) {
+          return authError(422, 'phone_not_confirmed', 'Please verify your phone first.')
+        }
+        return authError(400, 'validation_failed', 'Reauthentication requires the user to have an email or a phone number')
+      }
+
+      const contact = email ?? phone!
+      const sender = this.config.smsSender
+      if (!email && !sender) {
+        return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+      }
+      const limited = email
+        ? this.limit('otp', req)
+        : this.limitKey(
+            'sms',
+            `phone:${await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', contact)}`
+          ) ?? this.limit('sms', req)
+      if (limited) return limited
+
+      const code = randomOtp(this.settings.otpLength)
+      const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+        this.config.jwtSecret,
+        'supacloud-lite:reauthentication-otp:v1',
+        `${contact}\0${code}`
+      )}`
+      const issuanceId = crypto.randomUUID()
+      await query(`delete from auth.one_time_tokens where user_id = $1 and token_type = 'reauthentication'`, [current.id])
+      await query(
+        `insert into auth.one_time_tokens (id, user_id, email, phone, token_type, token, expires_at)
+         values ($1, $2, $3, $4, 'reauthentication', $5, now() + $6::interval)`,
+        [issuanceId, current.id, email, phone, tokenDigest, `${this.settings.otpExpirySeconds} seconds`],
+      )
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set reauthentication_token = $1, reauthentication_sent_at = now(), updated_at = now()
+         where id = $2 returning *`,
+        [tokenDigest, current.id],
+      )).rows[0]
+      return updated ? { user: updated, email, phone, code, issuanceId, tokenDigest } : null
+    })
+
+    if (prepared instanceof Response) return prepared
+    if (!prepared) return authError(401, 'no_authorization', 'Invalid or expired token')
+    try {
+      if (prepared.email) {
+        await this.config.mailer.send({
+          to: prepared.email,
+          subject: 'Your reauthentication code',
+          text: `Your reauthentication code is ${prepared.code}`,
+        })
+      } else {
+        const smsSender = this.config.smsSender
+        if (!smsSender || !prepared.phone) return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+        await this.sendPhoneOtp(smsSender, prepared.phone, this.settings.smsTemplate.replace(/\{\{\s*\.Code\s*\}\}/g, prepared.code))
+      }
+    } catch {
+      await this.db.query(
+        `delete from auth.one_time_tokens where id = $1 and token = $2`,
+        [prepared.issuanceId, prepared.tokenDigest],
+      )
+      await this.db.query(
+        `update auth.users
+         set reauthentication_token = '', reauthentication_sent_at = null
+         where id = $1 and reauthentication_token = $2`,
+        [prepared.user.id, prepared.tokenDigest],
+      )
+      return authError(502, prepared.email ? 'email_provider_failed' : 'sms_provider_failed', 'Unable to send the verification code')
+    }
+    return json(200, {})
+  }
+
+  private async sessionRequiresReauthentication(claims: JwtClaims | null): Promise<boolean> {
+    if (!claims?.sub || typeof claims.session_id !== 'string' || !claims.session_id) return true
+    const result = await this.db.query<{ started_at: Date | string | null }>(
+      `select min(created_at) as started_at
+       from auth.refresh_tokens where session_id = $1 and user_id = $2`,
+      [claims.session_id, claims.sub],
+    )
+    const startedAt = timestampMs(result.rows[0]?.started_at ?? null)
+    return startedAt === null || Date.now() - startedAt >= 24 * 60 * 60 * 1000
+  }
+
+  private async consumeReauthentication(query: Querier, user: UserRow, nonce: string): Promise<boolean> {
+    const email = user.email_confirmed_at && user.email ? user.email : null
+    const phone = !email && user.phone_confirmed_at && user.phone ? user.phone : null
+    const contact = email ?? phone
+    if (!contact || !nonce) return false
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:reauthentication-otp:v1',
+      `${contact}\0${nonce}`
+    )}`
+    const candidate = await query<{ id: string }>(
+      `select id from auth.one_time_tokens
+       where user_id = $1 and token_type = 'reauthentication'
+         and token = $2 and expires_at > now() and attempts < $3
+       limit 1`,
+      [user.id, tokenDigest, AuthHandler.MAX_OTP_ATTEMPTS],
+    )
+    if (candidate.rows.length === 0) {
+      await query(
+        `update auth.one_time_tokens set attempts = attempts + 1
+         where user_id = $1 and token_type = 'reauthentication' and expires_at > now()`,
+        [user.id],
+      )
+      await query(
+        `delete from auth.one_time_tokens
+         where user_id = $1 and token_type = 'reauthentication' and attempts >= $2`,
+        [user.id, AuthHandler.MAX_OTP_ATTEMPTS],
+      )
+      return false
+    }
+    const claimed = await query(
+      `delete from auth.one_time_tokens
+       where id = $1 and user_id = $2 and token = $3 and expires_at > now()
+       returning id`,
+      [candidate.rows[0].id, user.id, tokenDigest],
+    )
+    if (claimed.rows.length === 0) return false
+    const cleared = await query(
+      `update auth.users
+       set reauthentication_token = '', reauthentication_sent_at = null
+       where id = $1 and reauthentication_token = $2
+       returning id`,
+      [user.id, tokenDigest],
+    )
+    return cleared.rows.length > 0
   }
 
   private async requestEmailChange(
@@ -885,6 +1236,11 @@ export class AuthHandler {
       }
       const phone = normalizePhone(body.phone)
       if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      if (resend && body.type === 'phone_change') {
+        const user = await this.userFromBearer(req)
+        if (!user || user.phone_change !== phone) return json(200, {})
+        return this.requestPhoneChange(req, user, phone)
+      }
       return this.limit('sms', req) ?? this.issuePhoneToken(phone, body.create_user !== false, recordValue(body.data))
     }
     const email = normalizeEmailInput(body.email)
@@ -919,6 +1275,62 @@ export class AuthHandler {
     const user = result.rows[0]
     if (!user) return json(200, {})
     return this.requestEmailChange(req, user, newEmail, body)
+  }
+
+  private async requestPhoneChange(req: Request, user: UserRow, newPhone: string): Promise<Response> {
+    const sender = this.config.smsSender
+    if (!this.settings.smsEnabled || !sender) {
+      return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+    }
+    const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', newPhone)
+    const limited = this.limitKey('sms', `phone:${fingerprint}`) ?? this.limit('sms', req)
+    if (limited) return limited
+    const token = randomOtp(this.settings.otpLength)
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:phone-otp:v1',
+      `${newPhone}\0${token}`
+    )}`
+    const issuanceId = crypto.randomUUID()
+    const prepared = await this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return null
+      if (current.phone === newPhone) return { user: current, unchanged: true } as const
+      const clash = await query(`select id from auth.users where phone = $1 and id <> $2`, [newPhone, current.id])
+      if (clash.rows.length > 0) return { conflict: true } as const
+      await query(`delete from auth.one_time_tokens where user_id = $1 and token_type = 'phone_change'`, [current.id])
+      await query(
+        `insert into auth.one_time_tokens (id, user_id, phone, token_type, token, expires_at)
+         values ($1, $2, $3, 'phone_change', $4, now() + $5::interval)`,
+        [issuanceId, current.id, newPhone, tokenDigest, `${this.settings.otpExpirySeconds} seconds`],
+      )
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set phone_change = $1, phone_change_token = $2, phone_change_sent_at = now(), updated_at = now()
+         where id = $3 returning *`,
+        [newPhone, tokenDigest, current.id],
+      )).rows[0]
+      return updated ? { user: updated, unchanged: false } as const : null
+    })
+    if (!prepared) return authError(401, 'no_authorization', 'Invalid or expired token')
+    if ('conflict' in prepared) return authError(422, 'phone_exists', 'A user with this phone number has already been registered')
+    if (prepared.unchanged) return json(200, await this.userJsonWithRelations(prepared.user))
+    try {
+      await this.sendPhoneOtp(sender, newPhone, this.settings.smsTemplate.replace(/\{\{\s*\.Code\s*\}\}/g, token))
+    } catch {
+      await this.db.query(`delete from auth.one_time_tokens where id = $1 and token = $2`, [issuanceId, tokenDigest])
+      await this.db.query(
+        `update auth.users set phone_change = null, phone_change_token = '', phone_change_sent_at = null where id = $1`,
+        [user.id],
+      )
+      return authError(502, 'sms_provider_failed', 'Unable to send the verification code')
+    }
+    return json(200, await this.userJsonWithRelations(prepared.user))
   }
 
   private async issuePhoneToken(
@@ -990,7 +1402,7 @@ export class AuthHandler {
 
         const resolved = await this.phoneUser(query, request)
         if (resolved === 'unknown' || resolved === 'signup_disabled') return { state: resolved }
-        await this.createPhoneIdentity(query, resolved)
+        await this.ensurePhoneIdentity(resolved, query)
         await query(`delete from auth.one_time_tokens where phone = $1 and token_type = 'sms'`, [request.phone])
         await query(
           `insert into auth.one_time_tokens (id, user_id, phone, token_type, token, expires_at)
@@ -1040,15 +1452,6 @@ export class AuthHandler {
       [phone]
     )
     return users.rows[0]
-  }
-
-  private createPhoneIdentity(query: Querier, user: UserRow): Promise<unknown> {
-    return query(
-      `insert into auth.identities (user_id, provider, provider_id, identity_data)
-       values ($1, 'phone', $2, $3::jsonb)
-       on conflict (provider, provider_id) do nothing`,
-      [user.id, user.phone, JSON.stringify({ sub: user.id, phone: user.phone, phone_verified: user.phone_confirmed_at != null })]
-    )
   }
 
   private async deliverPhoneOtp(
@@ -1256,6 +1659,18 @@ export class AuthHandler {
     }
     const token = body.token ?? body.token_hash
     if (!token) return authError(400, 'validation_failed', 'token or token_hash is required')
+    if (body.type === 'phone_change') {
+      const phone = normalizePhone(body.phone)
+      if (!phone || !body.token || !/^\d{6,10}$/.test(body.token)) {
+        return authError(400, 'validation_failed', 'phone, token, and type=phone_change are required')
+      }
+      const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', phone)
+      const limited = this.limitKey('verify', `phone:${fingerprint}`)
+      if (limited) return limited
+      const session = await this.redeemPhoneChange(phone, body.token)
+      if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+      return json(200, session)
+    }
     if (body.type === 'sms' || body.phone !== undefined) {
       const phone = normalizePhone(body.phone)
       if (body.type !== 'sms' || !phone || !body.token || !/^\d{6,10}$/.test(body.token)) {
@@ -1278,10 +1693,15 @@ export class AuthHandler {
     // explicitly - never fold it into the default set, or a guessed login OTP
     // could mint a recovery session.
     if (body.type === 'email_change') {
-      if (!body.token?.trim()) return authError(400, 'validation_failed', 'token is required')
-      const session = await this.redeemEmailChange(body.token, body.email)
-      if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
-      return json(200, session)
+      const result = await this.redeemEmailChange(token, body.email)
+      if (!result) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+      if ('pending' in result) {
+        return json(200, {
+          msg: 'Confirmation link accepted. Please proceed to confirm link sent to the other email',
+          code: '200',
+        })
+      }
+      return json(200, result)
     }
     const types =
       body.type === 'recovery'
@@ -1359,15 +1779,65 @@ export class AuthHandler {
       )
       const user = users.rows[0]
       if (!user) return null
+      await this.ensurePhoneIdentity(user, query)
       await query(
-        `insert into auth.identities (user_id, provider, provider_id, identity_data, last_sign_in_at)
-         values ($1, 'phone', $2, $3::jsonb, now())
-         on conflict (provider, provider_id) do update
-         set identity_data = excluded.identity_data, last_sign_in_at = now(), updated_at = now()`,
-        [user.id, phone, JSON.stringify({ sub: user.id, phone, phone_verified: true })]
+        `update auth.identities
+         set last_sign_in_at = now(), updated_at = now()
+         where user_id = $1 and provider = 'phone' and provider_id = $2`,
+        [user.id, phone],
       )
       return this.sessionFor(
         user,
+        undefined,
+        { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
+        query
+      )
+    })
+  }
+
+  private async redeemPhoneChange(phone: string, code: string): Promise<Record<string, unknown> | null> {
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:phone-otp:v1',
+      `${phone}\0${code}`
+    )}`
+    return this.db.transaction(async (query) => {
+      const candidate = (await query<{ id: string; user_id: string }>(
+        `select id, user_id from auth.one_time_tokens
+         where phone = $1 and token_type = 'phone_change' and token = $2 and expires_at > now()
+         limit 1`,
+        [phone, tokenDigest],
+      )).rows[0]
+      if (!candidate) return null
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and phone_change = $2 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [candidate.user_id, phone],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return null
+      const clash = await query(`select id from auth.users where phone = $1 and id <> $2`, [phone, current.id])
+      if (clash.rows.length > 0) return null
+      const claimed = await query(
+        `delete from auth.one_time_tokens where id = $1 and token = $2 returning id`,
+        [candidate.id, tokenDigest],
+      )
+      if (claimed.rows.length === 0) return null
+      await query(`delete from auth.identities where user_id = $1 and provider = 'phone'`, [current.id])
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set phone = $1, phone_confirmed_at = now(),
+             phone_change = null, phone_change_token = '', phone_change_sent_at = null,
+             updated_at = now()
+         where id = $2 and deleted_at is null
+           and (banned_until is null or banned_until <= now())
+         returning *`,
+        [phone, current.id],
+      )).rows[0]
+      if (!updated) return null
+      await this.ensurePhoneIdentity(updated, query)
+      return this.sessionFor(
+        updated,
         undefined,
         { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
         query
@@ -1394,37 +1864,49 @@ export class AuthHandler {
          and provider_state = $1 and auth_code is null and expires_at > now()`,
       [token],
     )).rows[0]
-    const errorRedirect = new Response(null, {
-      status: 303,
-      headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` },
-    })
-    const amr = { method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }
-    // Without a PKCE flow the link must claim the token and mint the session in
-    // one transaction so a failed session insert cannot consume the token.
-    if (!flow && type !== 'email_change') {
-      const session = await this.redeem(token, [type], undefined, { amr: [amr] })
-      if (!session) return errorRedirect
-      const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
-      return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
-    }
-    const user = type === 'email_change'
+    const emailChange = type === 'email_change'
       ? await this.redeemEmailChangeUser(token)
-      : await this.redeemUser(token, [type])
-    if (!user) return errorRedirect
-    if (flow) {
-      const authCode = randomToken(24)
-      const claimed = await this.db.query<{ redirect_to: string | null }>(
-        `update auth.flow_state
-         set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
-         where id = $3 and auth_code is null and expires_at > now()
-         returning redirect_to`,
-        [authCode, user.id, flow.id],
-      )
-      const target = claimed.rows[0]?.redirect_to
-      if (target) return redirectWithQuery(target, { code: authCode })
+      : null
+    if (emailChange === 'pending') {
+      return redirectWithQuery(redirectTo, {
+        message: 'Confirmation link accepted. Please proceed to confirm link sent to the other email',
+      })
     }
-    const session = await this.sessionFor(user, undefined, { amr: [amr] })
-    const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
+    let user: UserRow | null = null
+    let session: Record<string, unknown> | null = null
+    if (type === 'email_change') {
+      user = emailChange
+    } else if (flow) {
+      user = await this.redeemUser(token, [type])
+    } else {
+      session = await this.redeem(token, [type], undefined, {
+        amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      })
+    }
+    if (type === 'email_change' || flow) {
+      if (!user) {
+        return new Response(null, { status: 303, headers: { location: redirectTo + '#error=access_denied&error_code=otp_expired' } })
+      }
+      if (flow) {
+        const authCode = randomToken(24)
+        const claimed = await this.db.query<{ redirect_to: string | null }>(
+          `update auth.flow_state
+           set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
+           where id = $3 and auth_code is null and expires_at > now()
+           returning redirect_to`,
+          [authCode, user.id, flow.id],
+        )
+        const target = claimed.rows[0]?.redirect_to
+        if (target) return redirectWithQuery(target, { code: authCode })
+      }
+      session = await this.sessionFor(user, undefined, {
+        amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      })
+    }
+    if (!session) {
+      return new Response(null, { status: 303, headers: { location: redirectTo + '#error=access_denied&error_code=otp_expired' } })
+    }
+        const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
   }
 
@@ -1455,48 +1937,91 @@ export class AuthHandler {
     })
   }
 
-  private async redeemEmailChangeUser(token: string, email?: string): Promise<UserRow | null> {
+  private async redeemEmailChangeUser(token: string, email?: string): Promise<EmailChangeClaim> {
     return this.db.transaction((query) => this.claimEmailChange(query, token, email))
   }
 
-  private async redeemEmailChange(token: string, email?: string): Promise<Record<string, unknown> | null> {
+  private async redeemEmailChange(
+    token: string,
+    email?: string
+  ): Promise<Record<string, unknown> | { pending: true } | null> {
     return this.db.transaction(async (query) => {
       const user = await this.claimEmailChange(query, token, email)
+      if (user === 'pending') return { pending: true }
       return user ? this.sessionFor(user, undefined, {
         amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }],
       }, query) : null
     })
   }
 
-  private async claimEmailChange(query: Querier, token: string, email?: string): Promise<UserRow | null> {
-    const candidate = (await query<{ id: string; user_id: string; email: string }>(
-      `select id, user_id, email from auth.one_time_tokens
-       where token = $1 and token_type = 'email_change' and expires_at > now()
+  private async claimEmailChange(query: Querier, token: string, email?: string): Promise<EmailChangeClaim> {
+    const candidate = (await query<{
+      id: string
+      user_id: string
+      email: string
+      token_type: string
+    }>(
+      `select id, user_id, email, token_type from auth.one_time_tokens
+       where token = $1 and token_type in ('email_change', 'email_change_current', 'email_change_new')
+         and expires_at > now()
          and ($2::text is null or lower(email) = lower($2))
        limit 1`,
       [token, email?.toLowerCase().trim() ?? null],
     )).rows[0]
     if (!candidate) return null
     const currentResult = await query<UserRow>(
-      `select * from auth.users where id = $1 and email_change = $2 and deleted_at is null
+      `select * from auth.users where id = $1 and email_change is not null and deleted_at is null
          and (banned_until is null or banned_until <= now()) for update`,
-      [candidate.user_id, candidate.email],
+      [candidate.user_id],
     )
-    if (!currentResult.rows[0]) return null
+    const current = currentResult.rows[0]
+    if (!current) return null
+    if (
+      candidate.token_type === 'email_change'
+        ? current.email_change?.toLowerCase() !== candidate.email.toLowerCase()
+        : candidate.token_type === 'email_change_current'
+          ? current.email?.toLowerCase() !== candidate.email.toLowerCase()
+          : current.email_change?.toLowerCase() !== candidate.email.toLowerCase()
+    ) return null
+    const targetEmail = candidate.token_type === 'email_change_current' ? current.email_change : candidate.email
+    if (!targetEmail) return null
     const clash = await query(
       `select id from auth.users where lower(email) = lower($1) and id <> $2`,
-      [candidate.email, candidate.user_id],
+      [targetEmail, candidate.user_id],
     )
     if (clash.rows.length > 0) return null
+    const needsSecondConfirmation = candidate.token_type !== 'email_change'
+    if (needsSecondConfirmation && (current.email_change_confirm_status ?? 0) === 0) {
+      const deleted = await query(
+        `delete from auth.one_time_tokens
+         where user_id = $1 and token_type = $2 returning id`,
+        [candidate.user_id, candidate.token_type],
+      )
+      if (deleted.rows.length === 0) return null
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set email_change_confirm_status = 1,
+             email_change_token_current = case when $1 = 'email_change_current' then '' else email_change_token_current end,
+             email_change_token_new = case when $1 = 'email_change_new' then '' else email_change_token_new end,
+             updated_at = now()
+         where id = $2
+         returning *`,
+        [candidate.token_type, candidate.user_id],
+      )).rows[0]
+      return updated ? 'pending' : null
+    }
     const deleted = await query(
-      `delete from auth.one_time_tokens where id = $1 and token = $2 returning id`,
-      [candidate.id, token],
+      `delete from auth.one_time_tokens where user_id = $1
+       and token_type = $2 returning id`,
+      [candidate.user_id, candidate.token_type],
     )
     if (deleted.rows.length === 0) return null
     const updated = (await query<UserRow>(
       `update auth.users
          set email = $1, email_confirmed_at = now(),
-           email_change = null, email_change_sent_at = null, email_change_confirm_status = 0,
+           email_change = null, email_change_sent_at = null,
+           email_change_token_current = '', email_change_token_new = '',
+           email_change_confirm_status = 0,
              is_anonymous = false,
              raw_app_meta_data = case when is_anonymous
                then coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb
@@ -1504,7 +2029,7 @@ export class AuthHandler {
            updated_at = now()
        where id = $2
        returning *`,
-      [candidate.email, candidate.user_id],
+      [targetEmail, candidate.user_id],
     )).rows[0]
     if (!updated) return null
     await this.ensureEmailIdentity(updated, query)
@@ -1572,46 +2097,120 @@ export class AuthHandler {
     }
 
     if (path === 'admin/users' && method === 'GET') {
-      const res = await this.db.query(`select * from auth.users order by created_at desc limit 1000`)
-      return json(200, { users: (res.rows as UserRow[]).map((user) => this.userJson(user)), aud: 'authenticated' })
+      const requestUrl = new URL(req.url)
+      const pageValue = requestUrl.searchParams.get('page')
+      const perPageValue = requestUrl.searchParams.get('per_page')
+      const page = pageValue === null ? 1 : Number(pageValue)
+      const perPage = perPageValue === null ? 50 : Number(perPageValue)
+      if (!Number.isInteger(page) || page < 1 || !Number.isInteger(perPage) || perPage < 1 || perPage > 1000) {
+        return authError(400, 'validation_failed', 'page must be a positive integer and per_page must be between 1 and 1000')
+      }
+      const total = Number((await this.db.query<{ count: number }>(
+        `select count(*)::int as count from auth.users`,
+      )).rows[0]?.count ?? 0)
+      const res = await this.db.query(
+        `select * from auth.users order by created_at desc, id desc limit $1 offset $2`,
+        [perPage, (page - 1) * perPage],
+      )
+      const lastPage = Math.max(1, Math.ceil(total / perPage))
+      const linkUrl = (targetPage: number): string => {
+        const target = new URL(requestUrl)
+        target.searchParams.set('page', String(targetPage))
+        target.searchParams.set('per_page', String(perPage))
+        return target.toString()
+      }
+      const links = [
+        `<${linkUrl(1)}>; rel="first"`,
+        `<${linkUrl(lastPage)}>; rel="last"`,
+        ...(page > 1 ? [`<${linkUrl(page - 1)}>; rel="prev"`] : []),
+        ...(page < lastPage ? [`<${linkUrl(page + 1)}>; rel="next"`] : []),
+      ]
+      return json(
+        200,
+        { users: (res.rows as UserRow[]).map((user) => this.userJson(user)), aud: 'authenticated' },
+        { 'x-total-count': String(total), link: links.join(', ') },
+      )
     }
     if (path === 'admin/users' && method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as {
         email?: string
         password?: string
         email_confirm?: boolean
+        phone?: string
+        phone_confirm?: boolean
+        ban_duration?: string
         user_metadata?: Record<string, unknown>
         app_metadata?: Record<string, unknown>
       }
       const email = normalizeEmailInput(body.email)
-      if (!email) return authError(400, 'validation_failed', 'email is required')
+      if (body.email !== undefined && !email) return authError(400, 'validation_failed', 'email must not be empty')
+      const phone = body.phone === undefined ? null : normalizePhone(body.phone)
+      if (body.phone !== undefined && !phone) {
+        return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      }
+      if (!email && !phone) return authError(400, 'validation_failed', 'email or phone is required')
+      if (body.phone_confirm !== undefined && typeof body.phone_confirm !== 'boolean') {
+        return authError(400, 'validation_failed', 'phone_confirm must be a boolean')
+      }
+      const banSeconds = body.ban_duration === undefined ? null : banDurationSeconds(body.ban_duration)
+      if (banSeconds === undefined) return authError(400, 'validation_failed', 'ban_duration is invalid')
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
-        const existing = await query(
-          `select id from auth.users where lower(email) = $1 for update`,
-          [email.toLowerCase().trim()],
-        )
-        if (existing.rows.length > 0) return null
+        if (email) {
+          const existing = await query(
+            `select id from auth.users where lower(email) = $1 for update`,
+            [email],
+          )
+          if (existing.rows.length > 0) return { error: 'email_exists' as const }
+        }
+        if (phone) {
+          const phoneExisting = await query(
+            `select id from auth.users where phone = $1 for update`,
+            [phone],
+          )
+          if (phoneExisting.rows.length > 0) return { error: 'phone_exists' as const }
+        }
         const res = await query<UserRow>(
           `insert into auth.users
-             (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-           values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
-           on conflict (email) do nothing
+             (aud, role, email, encrypted_password, email_confirmed_at, phone, phone_confirmed_at,
+              banned_until, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end,
+                   $4, case when $5 then now() else null end,
+                   case when $6::double precision is null then null
+                     else now() + ($6::double precision * interval '1 second') end, $7, $8)
+           on conflict do nothing
            returning *`,
           [
-            email.toLowerCase().trim(),
+            email,
             hashed,
-            body.email_confirm ?? true,
-            JSON.stringify({ provider: 'email', providers: ['email'], ...(body.app_metadata ?? {}) }),
+            body.email_confirm ?? false,
+            phone,
+            body.phone_confirm === true,
+            banSeconds,
+            JSON.stringify({
+              provider: email ? 'email' : 'phone',
+              providers: email && phone ? ['email', 'phone'] : [email ? 'email' : 'phone'],
+              ...(body.app_metadata ?? {}),
+            }),
             JSON.stringify(body.user_metadata ?? {}),
           ]
         )
         const user = res.rows[0]
         if (!user) return null
-        await this.ensureEmailIdentity(user, query)
+        if (email) await this.ensureEmailIdentity(user, query)
+        if (phone) await this.ensurePhoneIdentity(user, query)
         return this.userJsonWithRelations(user, query)
       })
       if (!created) return authError(422, 'email_exists', 'A user with this email address has already been registered')
+      if ('error' in created) {
+        return authError(
+          422,
+          created.error as string,
+          created.error === 'email_exists'
+            ? 'A user with this email address has already been registered'
+            : 'A user with this phone number has already been registered'
+        )
+      }
       return json(200, created)
     }
     if (idMatch && method === 'GET') {
@@ -1633,6 +2232,29 @@ export class AuthHandler {
         params.push(await hashPassword(body.password))
         sets.push(`encrypted_password = $${params.length}`)
       }
+      const requestedPhone = body.phone === undefined ? undefined : normalizePhone(body.phone)
+      if (body.phone !== undefined && !requestedPhone) {
+        return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      }
+      if (body.phone_confirm !== undefined && typeof body.phone_confirm !== 'boolean') {
+        return authError(400, 'validation_failed', 'phone_confirm must be a boolean')
+      }
+      if (body.ban_duration !== undefined) {
+        const seconds = banDurationSeconds(body.ban_duration)
+        if (seconds === undefined) return authError(400, 'validation_failed', 'ban_duration is invalid')
+        if (seconds === null) {
+          sets.push('banned_until = null')
+        } else {
+          params.push(seconds)
+          sets.push(`banned_until = now() + ($${params.length} * interval '1 second')`)
+        }
+      }
+      if (requestedPhone) {
+        params.push(requestedPhone)
+        sets.push(`phone = $${params.length}`)
+      }
+      if (body.phone_confirm === true) sets.push('phone_confirmed_at = now()')
+      if (body.phone_confirm === false) sets.push('phone_confirmed_at = null')
       if (body.user_metadata) {
         params.push(JSON.stringify(body.user_metadata))
         sets.push(`raw_user_meta_data = $${params.length}::jsonb`)
@@ -1641,11 +2263,13 @@ export class AuthHandler {
         params.push(JSON.stringify(body.app_metadata))
         sets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || $${params.length}::jsonb`)
       }
-      if (body.email_confirm === true) sets.push(`email_confirmed_at = now()`)
+      if (body.email_confirm === true) sets.push('email_confirmed_at = now()')
+      if (body.email_confirm === false) sets.push('email_confirmed_at = null')
       if (sets.length === 0) return authError(400, 'validation_failed', 'nothing to update')
       params.push(idMatch[1])
       let updated: Record<string, unknown> | null
       let emailConflict = false
+      let phoneConflict = false
       try {
         updated = await this.db.transaction(async (query) => {
           if (requestedEmail) {
@@ -1658,6 +2282,16 @@ export class AuthHandler {
               return null
             }
           }
+          if (requestedPhone) {
+            const clash = await query(
+              `select id from auth.users where phone = $1 and id <> $2`,
+              [requestedPhone, idMatch[1]],
+            )
+            if (clash.rows.length > 0) {
+              phoneConflict = true
+              return null
+            }
+          }
           const res = await query<UserRow>(
             `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
             params
@@ -1665,37 +2299,58 @@ export class AuthHandler {
           const user = res.rows[0]
           if (!user) return null
           if (requestedEmail) await this.ensureEmailIdentity(user, query)
+          if (requestedPhone || body.phone_confirm !== undefined) {
+            if (requestedPhone) {
+              await query(
+                `delete from auth.identities
+                 where user_id = $1 and provider = 'phone' and provider_id <> $2`,
+                [user.id, requestedPhone],
+              )
+            }
+            await this.ensurePhoneIdentity(user, query)
+          }
           return this.userJsonWithRelations(user, query)
         })
       } catch (error) {
         if (databaseDiagnosticCode(error) === '23505' && requestedEmail) {
           return authError(422, 'email_exists', 'A user with this email address has already been registered')
         }
+        if (databaseDiagnosticCode(error) === '23505' && requestedPhone) {
+          return authError(422, 'phone_exists', 'A user with this phone number has already been registered')
+        }
         throw error
       }
       if (emailConflict) return authError(422, 'email_exists', 'A user with this email address has already been registered')
+      if (phoneConflict) return authError(422, 'phone_exists', 'A user with this phone number has already been registered')
       if (!updated) return authError(404, 'user_not_found', 'User not found')
       return json(200, updated)
     }
     if (idMatch && method === 'DELETE') {
-      return await this.eraseUser(idMatch[1])
+      return await this.eraseUser(idMatch[1], req)
     }
     return authError(404, 'not_found', `unknown admin endpoint`)
   }
 
-  private async generateAdminMagicLink(req: Request): Promise<Response> {
+  private async generateAdminMagicLink(req: Request, sendEmail = false, forcedType?: 'invite'): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as {
       type?: string
       email?: string
+      new_email?: string
       password?: string
       redirect_to?: string
       data?: Record<string, unknown>
     }
-    if (!['signup', 'invite', 'magiclink', 'recovery'].includes(body.type ?? '')) {
-      return authError(422, 'unsupported_link_type', 'Only signup, invite, magiclink, and recovery link generation are supported')
+    if (forcedType) body.type = forcedType
+    if (!['signup', 'invite', 'magiclink', 'recovery', 'email_change_current', 'email_change_new'].includes(body.type ?? '')) {
+      return authError(422, 'unsupported_link_type', 'Unsupported email action link type')
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
+    const newEmail = body.new_email === undefined ? null : normalizeEmailInput(body.new_email)
+    if (body.type === 'email_change_current' || body.type === 'email_change_new') {
+      if (!newEmail) return authError(400, 'validation_failed', 'new_email is required')
+      if (newEmail === email) return authError(422, 'validation_failed', 'new_email must differ from email')
+    }
     if (body.type === 'signup') {
       if (!body.password) {
         return authError(400, 'validation_failed', 'password is required for signup links')
@@ -1722,13 +2377,43 @@ export class AuthHandler {
       const existing = await query<UserRow>(
         `select * from auth.users where lower(email) = $1 for update`,
         [email],
+
       )
       let linkedUser = existing.rows[0]
-      if (!linkedUser && body.type === 'recovery') {
+      if (!linkedUser && (body.type === 'recovery' || body.type === 'email_change_current' || body.type === 'email_change_new')) {
         return null
       }
       if (linkedUser && (body.type === 'signup' || body.type === 'invite')) {
         return { error: 'email_exists' as const }
+      }
+      if (linkedUser && (body.type === 'email_change_current' || body.type === 'email_change_new')) {
+        const duplicate = await query(
+          `select id from auth.users where lower(email) = $1 and id <> $2`,
+          [newEmail, linkedUser.id],
+        )
+        if (duplicate.rows.length > 0) return { error: 'email_exists' as const }
+        const tokenType = body.type
+        await query(
+          `delete from auth.one_time_tokens where user_id = $1 and token_type = $2`,
+          [linkedUser.id, tokenType],
+        )
+        await query(
+          `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
+           values ($1, $2, $3, $4, now() + $5::interval),
+                  ($1, $2, $3, $6, now() + $5::interval)`,
+          [linkedUser.id, tokenType === 'email_change_current' ? email : newEmail, tokenType, emailOtp, expiry, hashedToken],
+        )
+        const tokenColumn = tokenType === 'email_change_current'
+          ? 'email_change_token_current'
+          : 'email_change_token_new'
+        await query(
+          `update auth.users
+           set email_change = $1, email_change_sent_at = now(), email_change_confirm_status = 0,
+               ${tokenColumn} = $2, updated_at = now()
+           where id = $3`,
+          [newEmail, hashedToken, linkedUser.id],
+        )
+        return (await query<UserRow>(`select * from auth.users where id = $1`, [linkedUser.id])).rows[0]
       }
       if (!linkedUser) {
         const result = await query<UserRow>(
@@ -1742,12 +2427,7 @@ export class AuthHandler {
         )
         linkedUser = result.rows[0]
       }
-      await query(
-        `insert into auth.identities (user_id, provider, provider_id, identity_data)
-         values ($1::uuid, 'email', $1::text, $2::jsonb)
-         on conflict (provider, provider_id) do nothing`,
-        [linkedUser.id, JSON.stringify({ sub: linkedUser.id, email })]
-      )
+      await this.ensureEmailIdentity(linkedUser, query)
       await query(
         `delete from auth.one_time_tokens
          where lower(email) = $1 and token_type = any($2::text[])`,
@@ -1774,12 +2454,25 @@ export class AuthHandler {
 
     const actionUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
     actionUrl.searchParams.set('token', hashedToken)
-    actionUrl.searchParams.set('type', body.type!)
+    actionUrl.searchParams.set(
+      'type',
+      body.type === 'email_change_current' || body.type === 'email_change_new' ? 'email_change' : body.type!
+    )
     actionUrl.searchParams.set('redirect_to', redirectTo)
+    if (sendEmail) {
+      await this.audit('user_invited', { actorId: user.id, actorEmail: email, type: 'admin' })
+      await this.config.mailer.send({
+        to: email,
+        subject: 'You have been invited',
+        text: `Accept your invitation with this link: ${actionUrl}`,
+      })
+      return json(200, { user: this.userJson(user, [], await this.getUserIdentities(user.id)) })
+    }
     const auditAction =
       body.type === 'invite' ? 'user_invited'
         : body.type === 'signup' ? 'user_signedup'
           : body.type === 'recovery' ? 'user_recovery_requested'
+            : body.type === 'email_change_current' || body.type === 'email_change_new' ? 'user_email_change_requested'
             : 'user_magiclink_requested'
     await this.audit(
       auditAction,
@@ -1881,7 +2574,12 @@ export class AuthHandler {
    * owned by the user are not removed here - see COMPLIANCE.md for the
    * storage-erasure step the operator must run.
    */
-  private async eraseUser(userId: string): Promise<Response> {
+  private async eraseUser(userId: string, req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => ({}))) as { should_soft_delete?: boolean }
+    const shouldSoftDelete = body.should_soft_delete === true
+    const userResult = await this.db.query<UserRow>(`select * from auth.users where id = $1`, [userId])
+    const user = userResult.rows[0]
+    if (!user) return authError(404, 'user_not_found', 'User not found')
     const before = await this.db.query<{ identities: number; sessions: number; factors: number }>(
       `select
          (select count(*) from auth.identities where user_id = $1)::int as identities,
@@ -1889,11 +2587,35 @@ export class AuthHandler {
          (select count(*) from auth.mfa_factors where user_id = $1)::int as factors`,
       [userId]
     )
+    if (shouldSoftDelete) {
+      const deleted = await this.db.transaction(async (query) => {
+        const updated = await query<UserRow>(
+          `update auth.users set deleted_at = coalesce(deleted_at, now()), updated_at = now()
+           where id = $1 returning *`,
+          [userId],
+        )
+        if (updated.rows.length === 0) return null
+        await query(`update auth.refresh_tokens set revoked = true, updated_at = now() where user_id = $1`, [userId])
+        await query(`delete from auth.one_time_tokens where user_id = $1`, [userId])
+        await query(`delete from auth.flow_state where user_id = $1`, [userId])
+        return updated.rows[0]
+      })
+      if (!deleted) return authError(404, 'user_not_found', 'User not found')
+      await this.audit('user_deleted', { actorId: userId, type: 'admin', traits: { erased: false, soft_deleted: true } })
+      const c = before.rows[0]
+      return json(200, {
+        user: this.userJson(deleted),
+        erased: false,
+        user_id: userId,
+        cascaded: { identities: c.identities, sessions: c.sessions, mfa_factors: c.factors },
+      })
+    }
     const del = await this.db.query(`delete from auth.users where id = $1 returning id`, [userId])
     if (del.rows.length === 0) return authError(404, 'user_not_found', 'User not found')
     const c = before.rows[0]
     await this.audit('user_deleted', { actorId: userId, type: 'admin', traits: { erased: true } })
     return json(200, {
+      user: this.userJson(user),
       erased: true,
       user_id: userId,
       cascaded: { identities: c.identities, sessions: c.sessions, mfa_factors: c.factors },
@@ -1982,8 +2704,14 @@ export class AuthHandler {
         [user.id],
       )
       if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
-      const fr = await query(`select id from auth.mfa_factors where id = $1 and user_id = $2`, [factorId, user.id])
+      const fr = await query<{ id: string; factor_type: string }>(
+        `select id, factor_type from auth.mfa_factors where id = $1 and user_id = $2`,
+        [factorId, user.id],
+      )
       if (fr.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      if (fr.rows[0].factor_type === 'recovery_code') {
+        return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+      }
       const ins = await query(
         `insert into auth.mfa_challenges (factor_id, expires_at) values ($1, $2) returning id, expires_at`,
         [factorId, expiresAt]
@@ -2005,11 +2733,14 @@ export class AuthHandler {
     }
     const body = (await req.json().catch(() => ({}))) as { challenge_id?: string; code?: string }
     const fr = await this.db.query(
-      `select id, secret, status from auth.mfa_factors where id = $1 and user_id = $2`,
+      `select id, secret, status, factor_type from auth.mfa_factors where id = $1 and user_id = $2`,
       [factorId, user.id]
     )
-    const factor = fr.rows[0] as { id: string; secret: string; status: string } | undefined
+    const factor = fr.rows[0] as { id: string; secret: string; status: string; factor_type: string } | undefined
     if (!factor) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+    if (factor.factor_type === 'recovery_code') {
+      return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+    }
     const cr = await this.db.query(
       `select id, expires_at, verified_at from auth.mfa_challenges where id = $1 and factor_id = $2`,
       [body.challenge_id ?? '', factorId]
@@ -2035,12 +2766,16 @@ export class AuthHandler {
       const currentUser = currentUsers.rows[0]
       if (!currentUser) return null
       const currentFactors = await query<{ id: string; secret: string; status: string; factor_type: string }>(
-        `select id, secret, status from auth.mfa_factors
+        `select id, secret, status, factor_type from auth.mfa_factors
          where id = $1 and user_id = $2 for update`,
         [factorId, user.id],
       )
       const currentFactor = currentFactors.rows[0]
-      if (!currentFactor || !(await verifyTotp(currentFactor.secret, body.code ?? ''))) return null
+      if (
+        !currentFactor
+        || currentFactor.factor_type === 'recovery_code'
+        || !(await verifyTotp(currentFactor.secret, body.code ?? ''))
+      ) return null
       const claimed = await query(
         `update auth.mfa_challenges set verified_at = now()
          where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
@@ -2065,9 +2800,244 @@ export class AuthHandler {
     return json(200, session)
   }
 
+  private async recoveryCodesStatus(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    const result = await this.db.query<{ id: string; total: number; remaining: number }>(
+      `select f.id, count(c.id)::int as total,
+              count(c.id) filter (where c.consumed_at is null)::int as remaining
+       from auth.mfa_recovery_code_sets s
+       join auth.mfa_factors f on f.id = s.mfa_factor_id
+       left join auth.mfa_recovery_codes c on c.mfa_recovery_code_set_id = s.id
+       where s.user_id = $1
+       group by f.id`,
+      [user.id],
+    )
+    const row = result.rows[0]
+    if (!row) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+    return json(200, { id: row.id, type: 'recovery_code', total: row.total, remaining: row.remaining })
+  }
+
+  private async generateRecoveryCodes(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.recoveryCodesEnrollEnabled) {
+      return authError(422, 'mfa_recovery_codes_enroll_not_enabled', 'MFA enroll is disabled for recovery codes')
+    }
+    if (!(await this.requireAal2(req))) return authError(403, 'insufficient_aal', 'AAL2 required to generate recovery codes')
+    const body = (await req.json().catch(() => ({}))) as { friendly_name?: string }
+    const friendlyName = typeof body.friendly_name === 'string' && body.friendly_name.trim()
+      ? body.friendly_name.trim().slice(0, 255)
+      : 'Recovery codes'
+    const codes = Array.from({ length: this.settings.recoveryCodesCount }, () => randomRecoveryCode(this.settings.recoveryCodeLength))
+    const hashes = await Promise.all(codes.map((code) => hashPassword(code)))
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const existing = await query(`select 1 from auth.mfa_recovery_code_sets where user_id = $1`, [user.id])
+      if (existing.rows.length > 0) {
+        return authError(422, 'mfa_verified_factor_exists', 'Recovery codes are already enrolled for this user, use regenerate to rotate them')
+      }
+      const verified = await query<{ count: number }>(
+        `select count(*)::int as count from auth.mfa_factors
+         where user_id = $1 and status = 'verified' and factor_type <> 'recovery_code'`,
+        [user.id],
+      )
+      if ((verified.rows[0]?.count ?? 0) < 1) {
+        return authError(422, 'mfa_recovery_codes_sole_factor', 'At least one other verified factor is required to generate recovery codes')
+      }
+      const duplicate = await query(
+        `select 1 from auth.mfa_factors where user_id = $1 and friendly_name = $2`,
+        [user.id, friendlyName],
+      )
+      if (duplicate.rows.length > 0) {
+        return authError(422, 'mfa_factor_name_conflict', 'A factor with this friendly name already exists')
+      }
+      const factors = await query<{ count: number }>(
+        `select count(*)::int as count from auth.mfa_factors where user_id = $1`,
+        [user.id],
+      )
+      if ((factors.rows[0]?.count ?? 0) >= this.settings.maxEnrolledFactors) {
+        return authError(422, 'too_many_enrolled_mfa_factors', 'Maximum number of enrolled MFA factors reached')
+      }
+      const factor = (await query<{ id: string }>(
+        `insert into auth.mfa_factors (user_id, friendly_name, factor_type, status)
+         values ($1, $2, 'recovery_code', 'verified') returning id`,
+        [user.id, friendlyName],
+      )).rows[0]
+      const set = (await query<{ id: string }>(
+        `insert into auth.mfa_recovery_code_sets (user_id, mfa_factor_id) values ($1, $2) returning id`,
+        [user.id, factor.id],
+      )).rows[0]
+      for (const hash of hashes) {
+        await query(
+          `insert into auth.mfa_recovery_codes (mfa_recovery_code_set_id, code_hash) values ($1, $2)`,
+          [set.id, hash],
+        )
+      }
+      return json(200, {
+        id: factor.id, type: 'recovery_code', friendly_name: friendlyName,
+        total: codes.length, codes,
+      })
+    })
+  }
+
+  private async regenerateRecoveryCodes(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.recoveryCodesEnrollEnabled) {
+      return authError(422, 'mfa_recovery_codes_enroll_not_enabled', 'MFA enroll is disabled for recovery codes')
+    }
+    if (!(await this.requireAal2(req))) return authError(403, 'insufficient_aal', 'AAL2 required to regenerate recovery codes')
+    const codes = Array.from({ length: this.settings.recoveryCodesCount }, () => randomRecoveryCode(this.settings.recoveryCodeLength))
+    const hashes = await Promise.all(codes.map((code) => hashPassword(code)))
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const set = (await query<{ id: string; mfa_factor_id: string }>(
+        `select id, mfa_factor_id from auth.mfa_recovery_code_sets where user_id = $1 for update`,
+        [user.id],
+      )).rows[0]
+      if (!set) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+      const factor = (await query<{ id: string; friendly_name: string | null }>(
+        `select id, friendly_name from auth.mfa_factors where id = $1 and user_id = $2`,
+        [set.mfa_factor_id, user.id],
+      )).rows[0]
+      if (!factor) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+      await query(`delete from auth.mfa_recovery_codes where mfa_recovery_code_set_id = $1`, [set.id])
+      for (const hash of hashes) {
+        await query(
+          `insert into auth.mfa_recovery_codes (mfa_recovery_code_set_id, code_hash) values ($1, $2)`,
+          [set.id, hash],
+        )
+      }
+      await query(
+        `update auth.mfa_recovery_code_sets
+         set failed_verification_count = 0, verification_locked_until = null, updated_at = now()
+         where id = $1`,
+        [set.id],
+      )
+      return json(200, {
+        id: factor.id, type: 'recovery_code', friendly_name: factor.friendly_name ?? 'Recovery codes',
+        total: codes.length, codes,
+      })
+    })
+  }
+
+  private async deleteRecoveryCodes(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!(await this.requireAal2(req))) return authError(403, 'insufficient_aal', 'AAL2 required to delete recovery codes')
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const factor = (await query<{ id: string }>(
+        `select mfa_factor_id as id from auth.mfa_recovery_code_sets where user_id = $1 for update`,
+        [user.id],
+      )).rows[0]
+      if (!factor) return authError(404, 'mfa_factor_not_found', 'The user has not enrolled recovery codes')
+      await query(
+        `delete from auth.mfa_recovery_codes
+         where mfa_recovery_code_set_id in (select id from auth.mfa_recovery_code_sets where user_id = $1)`,
+        [user.id],
+      )
+      await query(`delete from auth.mfa_recovery_code_sets where user_id = $1`, [user.id])
+      await query(`delete from auth.mfa_factors where id = $1 and user_id = $2`, [factor.id, user.id])
+      return json(200, { id: factor.id })
+    })
+  }
+
+  private async verifyRecoveryCode(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    if (!this.settings.recoveryCodesVerifyEnabled) {
+      return authError(422, 'mfa_recovery_codes_verify_not_enabled', 'MFA verification is disabled for recovery codes')
+    }
+    const body = (await req.json().catch(() => ({}))) as { code?: string }
+    const code = normalizeRecoveryCode(body.code)
+    if (!code) return authError(400, 'validation_failed', 'Code needs to be non-empty')
+    return this.db.transaction(async (query) => {
+      const current = (await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )).rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const set = (await query<{ id: string; failed_verification_count: number; verification_locked_until: Date | string | null }>(
+        `select id, failed_verification_count, verification_locked_until
+         from auth.mfa_recovery_code_sets where user_id = $1 for update`,
+        [user.id],
+      )).rows[0]
+      if (!set) return authError(422, 'mfa_verification_failed', 'Invalid recovery code entered')
+      if (set.verification_locked_until && new Date(set.verification_locked_until).getTime() > Date.now()) {
+        return authError(429, 'mfa_recovery_codes_locked', 'Too many failed verification attempts, try again later')
+      }
+      const entries = await query<{ id: string; code_hash: string }>(
+        `select id, code_hash from auth.mfa_recovery_codes
+         where mfa_recovery_code_set_id = $1 and consumed_at is null`,
+        [set.id],
+      )
+      let matched: string | null = null
+      for (const entry of entries.rows) {
+        if (await verifyPassword(code, entry.code_hash) && matched === null) matched = entry.id
+      }
+      if (!matched) {
+        const failures = set.failed_verification_count + 1
+        await query(
+          `update auth.mfa_recovery_code_sets
+           set failed_verification_count = $1::int,
+               verification_locked_until = case when $1::int >= $2::int
+                 then now() + $3::interval else verification_locked_until end,
+               updated_at = now()
+           where id = $4::uuid`,
+          [failures, this.settings.recoveryCodesMaxVerifyAttempts, `${this.settings.recoveryCodesLockoutSeconds} seconds`, set.id],
+        )
+        return authError(422, 'mfa_verification_failed', 'Invalid recovery code entered')
+      }
+      const consumed = await query(
+        `update auth.mfa_recovery_codes set consumed_at = now()
+         where id = $1 and consumed_at is null returning id`,
+        [matched],
+      )
+      if (consumed.rows.length === 0) return authError(422, 'mfa_verification_failed', 'Invalid recovery code entered')
+      await query(
+        `update auth.mfa_recovery_code_sets
+         set failed_verification_count = 0, verification_locked_until = null, updated_at = now()
+         where id = $1`,
+        [set.id],
+      )
+      const session = await this.sessionFor(current, undefined, {
+        aal: 'aal2',
+        amr: [
+          { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
+          { method: 'mfa/recovery_code', timestamp: Math.floor(Date.now() / 1000) },
+        ],
+      }, query)
+      return json(200, session)
+    })
+  }
+
+  private async requireAal2(req: Request): Promise<boolean> {
+    const claims = await this.claimsFromBearer(req)
+    return claims?.aal === 'aal2'
+  }
+
   private async unenrollFactor(req: Request, factorId: string): Promise<Response> {
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
+    const hasAal2 = await this.requireAal2(req)
     return this.db.transaction(async (query) => {
       const currentResult = await query<UserRow>(
         `select * from auth.users where id = $1 and deleted_at is null
@@ -2075,11 +3045,21 @@ export class AuthHandler {
         [user.id],
       )
       if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const factor = await query<{ id: string; factor_type: string; status: string }>(
+        `select id, factor_type, status from auth.mfa_factors where id = $1 and user_id = $2 for update`,
+        [factorId, user.id],
+      )
+      if (factor.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      if (factor.rows[0].factor_type === 'recovery_code') {
+        return authError(422, 'validation_failed', 'Recovery code factors use the recovery-codes API')
+      }
+      if (factor.rows[0].status === 'verified' && !hasAal2) {
+        return authError(403, 'insufficient_aal', 'AAL2 required to unenroll a verified MFA factor')
+      }
       const del = await query(
         `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
-        [factorId, user.id]
+        [factorId, user.id],
       )
-      if (del.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
       return json(200, { id: factorId })
     })
   }
@@ -2127,7 +3107,8 @@ export class AuthHandler {
 
   private async ensureEmailIdentity(
     user: UserRow,
-    query: Querier = (sql, params) => this.db.query(sql, params)
+    query: Querier = (sql, params) => this.db.query(sql, params),
+    syncProviders = true,
   ): Promise<void> {
     if (!user.email) return
     await query(
@@ -2137,6 +3118,49 @@ export class AuthHandler {
        set identity_data = excluded.identity_data, updated_at = now()`,
       [user.id, JSON.stringify({ sub: user.id, email: user.email })]
     )
+    if (syncProviders) await this.syncUserProviders(user, query)
+  }
+
+  private async ensurePhoneIdentity(
+    user: UserRow,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<void> {
+    if (!user.phone) return
+    await query(
+      `insert into auth.identities (user_id, provider, provider_id, identity_data)
+       values ($1::uuid, 'phone', $2, $3::jsonb)
+       on conflict (provider, provider_id) do update
+       set identity_data = excluded.identity_data, updated_at = now()`,
+      [user.id, user.phone, JSON.stringify({ sub: user.id, phone: user.phone, phone_verified: Boolean(user.phone_confirmed_at) })]
+    )
+    await this.syncUserProviders(user, query)
+  }
+
+  private async syncUserProviders(
+    user: UserRow,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<void> {
+    const updated = (await query<UserRow>(
+      `update auth.users
+       set raw_app_meta_data = jsonb_set(
+         coalesce(raw_app_meta_data, '{}'::jsonb),
+         '{providers}',
+         (
+           select jsonb_agg(provider order by provider)
+           from (
+             select distinct provider
+             from auth.identities
+             where user_id = $1
+           ) as providers
+         ),
+         true
+       ),
+       updated_at = now()
+       where id = $1
+       returning *`,
+      [user.id],
+    )).rows[0]
+    if (updated) Object.assign(user, updated)
   }
 
   private async userJsonWithRelations(
@@ -2271,6 +3295,10 @@ export class AuthHandler {
       ...(u.email_change ? {
         new_email: u.email_change,
         email_change_sent_at: iso(u.email_change_sent_at),
+      } : {}),
+      ...(u.phone_change ? {
+        new_phone: u.phone_change,
+        phone_change_sent_at: iso(u.phone_change_sent_at),
       } : {}),
       last_sign_in_at: iso(u.last_sign_in_at),
       app_metadata: u.raw_app_meta_data ?? {},
