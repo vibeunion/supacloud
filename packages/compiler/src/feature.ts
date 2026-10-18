@@ -29,9 +29,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     if (transition.persistence) {
       const persistence = transition.persistence;
       if (persistence.boundary === "database" &&
-        (persistence.optimisticLock !== "required" || !persistence.versionField?.trim() ||
+        (persistence.optimisticLock !== "required" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(persistence.versionField ?? "") ||
           persistence.receipt !== "required" || persistence.reconciliation !== "none")) {
-        error("feature-persistence-invalid", `Database transition ${transition.name} requires optimistic locking, a version field, and a receipt, without reconciliation.`);
+        error("feature-persistence-invalid", `Database transition ${transition.name} requires a safe version field, optimistic locking, and a receipt, without reconciliation.`);
       }
       if (persistence.boundary === "external" &&
         (persistence.optimisticLock !== "none" || persistence.versionField !== undefined ||

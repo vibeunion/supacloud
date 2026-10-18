@@ -103,6 +103,23 @@ describe("feature specs", () => {
       .toContain("feature-persistence-invalid");
   });
 
+  test("rejects dynamic-looking version field names", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "case.version",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    expect(validateFeatureSpec(spec).map((diagnostic) => diagnostic.code))
+      .toContain("feature-persistence-invalid");
+  });
+
   test("generates an explicit command slice scaffold", () => {
     const spec: FeatureSpecNode = {
       name: "case",
