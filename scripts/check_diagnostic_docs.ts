@@ -499,7 +499,7 @@ export const value: number = "wrong";`,
     approve: { from: "draft", to: "approved", job: "case.refresh" },
   },
 });
-// @Job({ name: "case.refresh", input: undefined }) has no typed input contract.`,
+// @Job({ name: "case.refresh", input: undefined }) has no non-opaque typed input contract.`,
   SC6121: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

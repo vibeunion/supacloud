@@ -117,8 +117,8 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         if (job.mode === undefined) {
           error("feature-job-mode", `Job ${job.className} in Feature ${spec.name} must declare mode: "task" or "workflow".`);
         }
-        if (job.input === undefined) {
-          error("feature-job-contract", `Job ${job.className} in Feature ${spec.name} must declare an input schema.`);
+        if (job.input === undefined || job.schemaKinds?.input !== "declared") {
+          error("feature-job-contract", `Job ${job.className} in Feature ${spec.name} must declare a non-opaque input schema.`);
         }
         const provider = module.providers.find((candidate) =>
           candidate.token === job.className || candidate.useClass === job.className,

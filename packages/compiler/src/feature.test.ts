@@ -302,6 +302,24 @@ describe("feature specs", () => {
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-job-context");
   });
 
+  test("rejects opaque transition Job input contracts", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", input: "RefreshCaseInput", schemaKinds: { input: "opaque" },
+        tenantScope: "required", idempotency: "required", mode: "task",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-job-contract");
+  });
+
   test("requires a reconciliation Job for external transitions", () => {
     const spec: FeatureSpecNode = {
       name: "case",
