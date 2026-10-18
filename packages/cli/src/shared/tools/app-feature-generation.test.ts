@@ -133,6 +133,10 @@ test("the generated approval compiles only with the explicit persistent capabili
         .toContain('tenantScope: "required"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("requireFeatureRequestContext(this.jobContext)");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain("input: CaseApprovalRefreshInput");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain("export const CaseApprovalRefreshInput = t.Object");
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);

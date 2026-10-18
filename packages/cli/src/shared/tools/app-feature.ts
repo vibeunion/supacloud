@@ -28,6 +28,10 @@ export const ${className}Row = t.Object({
     version: t.Integer({ minimum: 1 }),
 });
 export const ${className}ListResponse = t.Array(${className}Row);
+export const ${className}RefreshInput = t.Object({
+    id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
+    version: t.Integer({ minimum: 1 }),
+});
 `,
         [`${name}.model.ts`]: `import {
     InjectionToken, type FeatureRequestContext,
@@ -36,6 +40,7 @@ import type {
     ${className}ApproveBody,
     ${className}ListQuery,
     ${className}Row,
+    ${className}RefreshInput,
 } from "./${name}.contracts";
 import type { StaticDecode } from "typebox";
 
@@ -43,6 +48,7 @@ export type ${className}ListInput = StaticDecode<typeof ${className}ListQuery>;
 export type ${className}ApproveInput = StaticDecode<typeof ${className}ApproveBody>;
 export type ${className}ApproveCommand = ${className}ApproveInput & { id: string };
 export type ${className}Result = StaticDecode<typeof ${className}Row>;
+export type ${className}RefreshJobInput = StaticDecode<typeof ${className}RefreshInput>;
 
 export interface ${className}ReadPort {
     list(context: FeatureRequestContext, input: ${className}ListInput): Promise<${className}Result[]>;
@@ -112,10 +118,16 @@ import {
     ${className}ListQuery,
     ${className}ListResponse,
     ${className}Params,
+    ${className}RefreshInput,
     ${className}Row,
 } from "./${name}.contracts";
 import { ${className}Service } from "./${name}.service";
-import type { ${className}ApproveInput, ${className}ListInput, ${className}Result } from "./${name}.model";
+import type {
+    ${className}ApproveInput,
+    ${className}ListInput,
+    ${className}RefreshJobInput,
+    ${className}Result,
+} from "./${name}.model";
 
 export const featureSpec = defineFeatureSpec({
     name: ${JSON.stringify(name)},
@@ -165,6 +177,7 @@ export class Approve${className}Command {
 
 @Job({
     name: ${JSON.stringify(`${name}.refresh`)},
+    input: ${className}RefreshInput,
     mode: "task",
     idempotency: "required",
     tenantScope: "required",
@@ -172,7 +185,7 @@ export class Approve${className}Command {
 export class Refresh${className}Job {
     constructor(@Inject(JOB_CONTEXT) private readonly jobContext: unknown) {}
 
-    run(_input: { id: string; version: number }): Promise<void> {
+    run(_input: ${className}RefreshJobInput): Promise<void> {
         const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
         void context;
         throw new Error("Bind the existing Workflow/Queue adapter before dispatching ${name}.refresh");
