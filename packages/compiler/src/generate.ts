@@ -779,7 +779,10 @@ class ModuleGenerator {
       const routes = controller.routes.map((route) => {
         const command = route.command === undefined ? undefined
           : this.module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
-        const idempotency = route.idempotency ?? command?.idempotency;
+        const featureTransition = featureTransitionForRoute(this.module, controller, route);
+        const idempotency = route.idempotency
+          ?? command?.idempotency
+          ?? featureTransition?.idempotency;
         const responseEntries = normalizedResponseEntries(route.responses);
         const hasResponseMap = responseEntries.length > 0;
         const fields: string[] = [
@@ -2244,8 +2247,17 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
         const operationBase = pascalName(`${module.name}_${controller.className}_${route.handler}`);
         const operationId = uniqueName(operationBase, operationIds);
         const command = route.command ? commandByClass.get(route.command) : undefined;
-        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
-        const requiresAuth = (route.guards?.length ?? 0) > 0 || command !== undefined;
+        const featureTransition = featureTransitionForRoute(module, controller, route);
+        const featureCommand = featureTransition?.command === undefined
+          ? undefined
+          : commandByClass.get(featureTransition.command);
+        const governedCommand = command ?? featureCommand;
+        const idempotencyMode = route.idempotency
+          ?? command?.idempotency
+          ?? featureTransition?.idempotency
+          ?? "none";
+        const permission = governedCommand?.permission ?? featureTransition?.permission;
+        const requiresAuth = (route.guards?.length ?? 0) > 0 || permission !== undefined || governedCommand !== undefined;
         const responseKind = route.contract?.response;
         const responseContentType = responseKind === "binary" || responseKind === "stream"
           ? "application/octet-stream"
@@ -2290,8 +2302,9 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
           module: module.name,
           controller: controller.className,
           handler: route.handler,
-          ...(route.command === undefined ? {} : { command: route.command }),
-          ...(command?.permission === undefined ? {} : { permission: command.permission }),
+          ...(route.command === undefined && featureTransition?.command === undefined
+            ? {} : { command: route.command ?? featureTransition?.command }),
+          ...(permission === undefined ? {} : { permission }),
           ...(route.guards && route.guards.length > 0 ? { guards: route.guards } : {}),
           ...(route.canMatch && route.canMatch.length > 0 ? { canMatch: route.canMatch } : {}),
           ...(route.canDeactivate && route.canDeactivate.length > 0 ? { canDeactivate: route.canDeactivate } : {}),
@@ -2718,21 +2731,26 @@ export function renderPermissions(graph: ApplicationGraph): string {
     }
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
-        let perm: string | undefined;
-        if (route.command) {
-          const cmd = module.commands.find((c) => c.className === route.command);
-          perm = cmd?.permission;
-        }
+        const featureTransition = featureTransitionForRoute(module, controller, route);
         const command = route.command === undefined ? undefined
           : module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
-        const idempotency = route.idempotency ?? command?.idempotency;
+        const featureCommand = featureTransition?.command === undefined
+          ? undefined
+          : module.commands.find((candidate) =>
+            candidate.className === featureTransition.command || candidate.name === featureTransition.command);
+        const governedCommand = command ?? featureCommand;
+        const effectiveCommand = route.command ?? featureTransition?.command;
+        const perm = governedCommand?.permission ?? featureTransition?.permission;
+        const idempotency = route.idempotency
+          ?? command?.idempotency
+          ?? featureTransition?.idempotency;
         if (perm) permissions.add(perm);
         bindings.push({
           method: route.method,
           path: joinRoutePaths(controller.path, route.path),
           controller: controller.className,
           handler: route.handler,
-          ...(route.command === undefined ? {} : { command: route.command }),
+          ...(effectiveCommand === undefined ? {} : { command: effectiveCommand }),
           ...(perm === undefined ? {} : { permission: perm }),
           ...(idempotency === undefined ? {} : { idempotency }),
         });

@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
-import { renderClient, renderOpenApi } from "./generate";
+import { renderApplication, renderClient, renderOpenApi, renderPermissions } from "./generate";
 import { buildContractManifest } from "./contract-manifest";
 import { createApplicationDevelopmentContext } from "./application-development";
+import { createDeliveryPlan } from "./delivery-plan";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
@@ -175,7 +176,7 @@ test("feature transition route bindings carry command governance into generated 
   const featureGraph: ApplicationGraph = {
     externalTokens: [],
     modules: [{
-      name: "cases", className: "CasesModule", file: "cases.ts", line: 0,
+      name: "cases", className: "CasesModule", file: "cases.ts", line: 1,
       imports: [], providers: [], queries: [], exports: [],
       commands: [{
         className: "ApproveCaseCommand",
@@ -194,6 +195,7 @@ test("feature transition route bindings carry command governance into generated 
           command: "ApproveCaseCommand",
           permission: "case.approve",
           route: "POST /cases/:id/approve",
+          routeBinding: "controller",
           idempotency: "required",
         }],
       },
@@ -241,6 +243,16 @@ test("feature transition route bindings carry command governance into generated 
         command: "case.approve",
         idempotency: "required",
       })]);
+    expect(renderApplication(featureGraph, { rootDir: ".", outDir: "." }).applicationCode)
+      .toContain('idempotency: "required"');
+    expect(renderOpenApi(featureGraph)).toContain('"idempotency": "required"');
+    expect(renderPermissions(featureGraph)).toContain('"idempotency": "required"');
+    const delivery = createDeliveryPlan(featureGraph);
+    expect(delivery.ok).toBe(true);
+    expect(delivery.plan?.targets[0]?.routes).toEqual([expect.objectContaining({
+      command: "ApproveCaseCommand",
+      idempotency: "required",
+    })]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
