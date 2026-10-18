@@ -2210,6 +2210,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
         const operationBase = pascalName(`${module.name}_${controller.className}_${route.handler}`);
         const operationId = uniqueName(operationBase, operationIds);
         const command = route.command ? commandByClass.get(route.command) : undefined;
+        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const requiresAuth = (route.guards?.length ?? 0) > 0 || command !== undefined;
         const responseKind = route.contract?.response;
         const responseContentType = responseKind === "binary" || responseKind === "stream"
@@ -2251,7 +2252,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
           responseKind: responseKind ?? (route.nativeResponse ? "native-response" : undefined),
           ...(route.parse === undefined ? {} : { parse: route.parse }),
           ...(route.allowDeleteBody === undefined ? {} : { allowDeleteBody: route.allowDeleteBody }),
-          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+          ...(idempotencyMode === "none" ? {} : { idempotency: idempotencyMode }),
           module: module.name,
           controller: controller.className,
           handler: route.handler,
@@ -2688,6 +2689,9 @@ export function renderPermissions(graph: ApplicationGraph): string {
           const cmd = module.commands.find((c) => c.className === route.command);
           perm = cmd?.permission;
         }
+        const command = route.command === undefined ? undefined
+          : module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
+        const idempotency = route.idempotency ?? command?.idempotency;
         if (perm) permissions.add(perm);
         bindings.push({
           method: route.method,
@@ -2696,7 +2700,7 @@ export function renderPermissions(graph: ApplicationGraph): string {
           handler: route.handler,
           ...(route.command === undefined ? {} : { command: route.command }),
           ...(perm === undefined ? {} : { permission: perm }),
-          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+          ...(idempotency === undefined ? {} : { idempotency }),
         });
       }
     }
@@ -2724,6 +2728,7 @@ export function renderPermissions(graph: ApplicationGraph): string {
     "  handler: string;",
     "  command?: string;",
     "  permission?: string;",
+    "  idempotency?: \"required\" | \"none\";",
     "}",
     "",
     "export const RoutePermissions: RoutePermissionBinding[] = " + JSON.stringify(bindings, null, 2) + ";",
