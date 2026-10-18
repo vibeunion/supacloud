@@ -40,7 +40,7 @@ const ContextSchema = Type.Object({
   }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.modules }),
   routes: Type.Array(Type.Object({
     module: text, method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE"), Type.Literal("HEAD"), Type.Literal("OPTIONS")]),
-    path: text, controller: text, handler: text, command: Type.Optional(text), aspects: texts,
+    path: text, controller: text, handler: text, command: Type.Optional(text), idempotency: Type.Optional(mode), aspects: texts,
     schemaKinds: Type.Optional(Type.Object({
       body: schemaKind, params: schemaKind, query: schemaKind, headers: schemaKind, cookie: schemaKind, response: schemaKind,
     }, closed)),
