@@ -105,6 +105,35 @@ test("migration assessment rejects malformed Feature Slice transitions", async (
   expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
+test("migration assessment rejects downgraded transition Job metadata", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-job-details-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1, commands: [], queries: [], routes: [], permissions: [],
+    features: [{
+      name: "case", states: ["draft", "approved"],
+      transitions: [{
+        name: "approve", from: "draft", to: "approved", job: "case.refresh",
+        jobDetails: {
+          name: "case.refresh", className: "RefreshCaseJob",
+          mode: "task", idempotency: "none", tenantScope: "required",
+        },
+      }],
+    }],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
+});
+
 test("CLI exposes the read-only assessment with an explicit non-SSR boundary", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-cli-"));
   const child = Bun.spawn([

@@ -99,10 +99,22 @@ function validFeatureInventory(value: unknown): value is unknown[] {
       || states.some((state) => typeof state !== "string" || state.trim() === "")
       || new Set(states).size !== states.length
       || !Array.isArray(transitions)) return false;
-    return transitions.every((transition) => isRecord(transition)
-      && typeof transition["name"] === "string" && transition["name"].trim() !== ""
-      && typeof transition["from"] === "string" && states.includes(transition["from"])
-      && typeof transition["to"] === "string" && states.includes(transition["to"]));
+    return transitions.every((transition) => {
+      if (!isRecord(transition)
+        || typeof transition["name"] !== "string" || transition["name"].trim() === ""
+        || typeof transition["from"] !== "string" || !states.includes(transition["from"])
+        || typeof transition["to"] !== "string" || !states.includes(transition["to"])) return false;
+      const job = transition["job"];
+      if (job === undefined) return true;
+      const details = transition["jobDetails"];
+      return typeof job === "string" && job.trim() !== ""
+        && isRecord(details)
+        && details["name"] === job
+        && typeof details["className"] === "string" && details["className"].trim() !== ""
+        && (details["mode"] === "task" || details["mode"] === "workflow")
+        && details["idempotency"] === "required"
+        && details["tenantScope"] === "required";
+    });
   });
 }
 
