@@ -52,6 +52,38 @@ test("explicit DELETE bodies retain framework validation", async () => {
   expect(calls).toBe(1);
 });
 
+test("route-level idempotency is enforced before an unbound write handler", async () => {
+  let calls = 0;
+  const app = createModulePlugin(moduleFor({
+    method: "POST", path: "/submit", handler: "submit", idempotency: "required",
+  }), {
+    controller: { submit: () => { calls++; return { ok: true }; } },
+  });
+
+  const missing = await app.handle(new Request("http://localhost/submit", { method: "POST" }));
+  expect(missing.status).toBe(400);
+  expect(await missing.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+  expect(calls).toBe(0);
+
+  const accepted = await app.handle(new Request("http://localhost/submit", {
+    method: "POST", headers: { "idempotency-key": "submit-1" },
+  }));
+  expect(accepted.status).toBe(200);
+  expect(await accepted.json()).toEqual({ ok: true });
+  expect(calls).toBe(1);
+});
+
+test("route-level none does not add an HTTP idempotency requirement", async () => {
+  const app = createModulePlugin(moduleFor({
+    method: "POST", path: "/preview", handler: "preview", idempotency: "none",
+  }), {
+    controller: { preview: () => ({ ok: true }) },
+  });
+  const response = await app.handle(new Request("http://localhost/preview", { method: "POST" }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true });
+});
+
 test("JavaScript descriptors cannot bypass the raw parsing contract", () => {
   for (const route of [
     { method: "POST" as const, path: "/", handler: "raw", parse: "none" as const },
