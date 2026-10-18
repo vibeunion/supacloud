@@ -231,6 +231,8 @@ export type ResolveFn<T = unknown, TContext = import("./route_pipeline").RoutePi
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {
+  /** Require an idempotency key for this HTTP mutation even when no route command is bound. */
+  idempotency?: "required" | "none";
   /** Leave the original Request body unread for domain-owned parsing. */
   parse?: "none";
   /** Explicit compatibility opt-in for existing DELETE endpoints with a body. */
