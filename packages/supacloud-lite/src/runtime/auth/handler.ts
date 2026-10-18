@@ -1395,23 +1395,7 @@ export class AuthHandler {
     if (!this.settings.totpEnrollEnabled) {
       return authError(422, 'mfa_totp_enroll_disabled', 'TOTP enrollment is disabled')
     }
-    const enrolled = await this.db.query(
-      `select count(*)::int as n from auth.mfa_factors where user_id = $1`,
-      [user.id]
-    )
-    if ((enrolled.rows[0] as { n: number }).n >= this.settings.maxEnrolledFactors) {
-      return authError(422, 'too_many_enrolled_mfa_factors', 'Maximum number of enrolled MFA factors reached')
-    }
     const friendlyName = body.friendly_name ?? null
-    if (friendlyName) {
-      const dup = await this.db.query(
-        `select 1 from auth.mfa_factors where user_id = $1 and friendly_name = $2`,
-        [user.id, friendlyName]
-      )
-      if (dup.rows.length > 0) {
-        return authError(422, 'mfa_factor_name_conflict', 'A factor with this friendly name already exists')
-      }
-    }
     const secret = generateTotpSecret()
     let issuer = body.issuer
     if (!issuer) {
@@ -1421,19 +1405,44 @@ export class AuthHandler {
         issuer = 'supacloud-lite'
       }
     }
-    const uri = otpauthUri({ secret, account: user.email || user.id, issuer })
-    const ins = await this.db.query(
-      `insert into auth.mfa_factors (user_id, friendly_name, factor_type, status, secret)
-       values ($1, $2, 'totp', 'unverified', $3) returning id`,
-      [user.id, friendlyName, secret]
-    )
-    const id = (ins.rows[0] as { id: string }).id
-    return json(200, {
-      id,
-      type: 'totp',
-      friendly_name: friendlyName,
-      status: 'unverified',
-      totp: { qr_code: qrSvgDataUri(uri), secret, uri },
+    return this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const uri = otpauthUri({ secret, account: current.email || current.id, issuer })
+      const enrolled = await query(
+        `select count(*)::int as n from auth.mfa_factors where user_id = $1`,
+        [current.id]
+      )
+      if ((enrolled.rows[0] as { n: number }).n >= this.settings.maxEnrolledFactors) {
+        return authError(422, 'too_many_enrolled_mfa_factors', 'Maximum number of enrolled MFA factors reached')
+      }
+      if (friendlyName) {
+        const dup = await query(
+          `select 1 from auth.mfa_factors where user_id = $1 and friendly_name = $2`,
+          [current.id, friendlyName]
+        )
+        if (dup.rows.length > 0) {
+          return authError(422, 'mfa_factor_name_conflict', 'A factor with this friendly name already exists')
+        }
+      }
+      const ins = await query(
+        `insert into auth.mfa_factors (user_id, friendly_name, factor_type, status, secret)
+         values ($1, $2, 'totp', 'unverified', $3) returning id`,
+        [current.id, friendlyName, secret]
+      )
+      const id = (ins.rows[0] as { id: string }).id
+      return json(200, {
+        id,
+        type: 'totp',
+        friendly_name: friendlyName,
+        status: 'unverified',
+        totp: { qr_code: qrSvgDataUri(uri), secret, uri },
+      })
     })
   }
 
@@ -1443,18 +1452,26 @@ export class AuthHandler {
     if (!this.settings.totpVerifyEnabled) {
       return authError(422, 'mfa_totp_verify_disabled', 'TOTP verification is disabled')
     }
-    const fr = await this.db.query(`select id from auth.mfa_factors where id = $1 and user_id = $2`, [factorId, user.id])
-    if (fr.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
     const expiresAt = new Date(Date.now() + 300_000).toISOString()
-    const ins = await this.db.query(
-      `insert into auth.mfa_challenges (factor_id, expires_at) values ($1, $2) returning id, expires_at`,
-      [factorId, expiresAt]
-    )
-    const c = ins.rows[0] as { id: string; expires_at: string | Date }
-    return json(200, {
-      id: c.id,
-      type: 'totp',
-      expires_at: Math.floor(new Date(c.expires_at).getTime() / 1000),
+    return this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const fr = await query(`select id from auth.mfa_factors where id = $1 and user_id = $2`, [factorId, user.id])
+      if (fr.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      const ins = await query(
+        `insert into auth.mfa_challenges (factor_id, expires_at) values ($1, $2) returning id, expires_at`,
+        [factorId, expiresAt]
+      )
+      const c = ins.rows[0] as { id: string; expires_at: string | Date }
+      return json(200, {
+        id: c.id,
+        type: 'totp',
+        expires_at: Math.floor(new Date(c.expires_at).getTime() / 1000),
+      })
     })
   }
 
@@ -1522,12 +1539,20 @@ export class AuthHandler {
   private async unenrollFactor(req: Request, factorId: string): Promise<Response> {
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
-    const del = await this.db.query(
-      `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
-      [factorId, user.id]
-    )
-    if (del.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
-    return json(200, { id: factorId })
+    return this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const del = await query(
+        `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
+        [factorId, user.id]
+      )
+      if (del.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      return json(200, { id: factorId })
+    })
   }
 
   private async getUserFactors(
