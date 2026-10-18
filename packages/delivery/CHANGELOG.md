@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.4](https://github.com/vibeunion/supacloud/compare/delivery-v0.19.3...delivery-v0.19.4) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+
 ## [0.19.3](https://github.com/vibeunion/supacloud/compare/delivery-v0.19.2...delivery-v0.19.3) (2026-10-17)
 
 

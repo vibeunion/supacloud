@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.120.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.120.2...management-api-v0.120.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+
 ## [0.120.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.120.1...management-api-v0.120.2) (2026-10-17)
 
 
