@@ -223,6 +223,7 @@ export class ${className}Controller {
         body: ${className}ApproveBody,
         responses: { 200: ${className}Row },
         command: Approve${className}Command,
+        idempotency: "required",
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
     approve(

@@ -33,6 +33,7 @@ export const DeliveryBuildManifestSchema = Type.Object({
   // This preserves public method/path contracts; it is not an applied gateway config.
   routes: Type.Array(Type.Object({
     method: Type.String(), path: Type.String(), target: Type.String(),
+    idempotency: Type.Optional(Type.Union([Type.Literal("required"), Type.Literal("none")])),
   }, closed)),
   jobs: Type.Array(Type.Object({ name: Type.String(), target: Type.String() }, closed)),
 }, closed);
@@ -104,7 +105,12 @@ export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifes
     }
   }
   const routes = value.plan.targets.flatMap((target) => target.routes.map((route) =>
-    ({ method: route.method, path: route.path, target: target.name })));
+    ({
+      method: route.method,
+      path: route.path,
+      target: target.name,
+      ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+    })));
   const jobs = value.plan.targets.flatMap((target) => target.jobs.map((job) => ({ name: job.name, target: target.name })));
   if (canonical(value.routes) !== canonical(routes) || canonical(value.jobs) !== canonical(jobs)) {
     throw new Error("Delivery mappings do not match planned ownership.");
