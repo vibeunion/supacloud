@@ -50,6 +50,13 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       }
     }
     if (!module) continue;
+    if (transition.persistence?.boundary === "database") {
+      for (const query of module.queries) {
+        if (query.tenantScope !== "required") {
+          error("feature-query-tenant-boundary", `Query ${query.className} in Feature ${spec.name} must declare tenantScope: "required".`);
+        }
+      }
+    }
     const commands = module.commands.filter((command) =>
       command.className === transition.command || command.name === transition.command);
     const command = commands[0];

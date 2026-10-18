@@ -361,6 +361,7 @@ export interface JobNode {
 export interface QueryNode {
   className: string;
   name: string;
+  tenantScope?: "required" | "none";
 }
 
 export interface FeatureTransitionNode {

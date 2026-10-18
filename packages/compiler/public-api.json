@@ -951,7 +951,7 @@
     {
       "name": "QueryNode",
       "kind": "type",
-      "signature": "export interface QueryNode {\n    className: string;\n    name: string;\n}"
+      "signature": "export interface QueryNode {\n    className: string;\n    name: string;\n    tenantScope?: \"required\" | \"none\";\n}"
     },
     {
       "name": "readApplicationDevelopmentContext",

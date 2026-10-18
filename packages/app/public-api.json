@@ -1231,7 +1231,7 @@
     {
       "name": "QueryOptions",
       "kind": "type",
-      "signature": "export interface QueryOptions {\n    name: string;\n}"
+      "signature": "export interface QueryOptions {\n    name: string;\n    tenantScope?: \"required\" | \"none\";\n}"
     },
     {
       "name": "RedirectCommand",

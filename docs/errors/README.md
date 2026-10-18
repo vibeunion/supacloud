@@ -134,6 +134,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC6111](SC6111.md) | `feature-persistence-drift` | compiler |
 | [SC6112](SC6112.md) | `feature-tenant-boundary-invalid` | compiler |
 | [SC6113](SC6113.md) | `feature-tenant-boundary-drift` | compiler |
+| [SC6114](SC6114.md) | `feature-query-tenant-boundary` | compiler |
 | [SC8101](SC8101.md) | `duplicate-resource` | compiler |
 | [SC8102](SC8102.md) | `unknown-resource` | compiler |
 | [SC8103](SC8103.md) | `undeclared-resource-use` | compiler |

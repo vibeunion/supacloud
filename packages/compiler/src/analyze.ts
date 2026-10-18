@@ -981,6 +981,9 @@ function parseModule(
         queries.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
+          ...(commandModeProp(meta, "tenantScope") === undefined ? {} : {
+            tenantScope: commandModeProp(meta, "tenantScope"),
+          }),
         });
       }
     }

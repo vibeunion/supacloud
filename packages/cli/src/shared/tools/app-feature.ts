@@ -136,7 +136,7 @@ export const featureSpec = defineFeatureSpec({
 export type ${className}State = FeatureState<typeof featureSpec>;
 
 @Injectable({ scope: "request" })
-@Query({ name: "${name}.list" })
+@Query({ name: "${name}.list", tenantScope: "required" })
 export class List${className}Query {
     constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
     execute(input: ${className}ListInput): Promise<${className}Result[]> {

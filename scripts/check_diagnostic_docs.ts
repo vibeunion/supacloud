@@ -406,6 +406,27 @@ export const value: number = "wrong";`,
     },
   },
 });`,
+  SC6114: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      command: "ApproveCase",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "tenant_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});
+// @Query({ name: "case.list" }) has no tenantScope declaration.`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

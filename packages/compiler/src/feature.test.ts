@@ -147,6 +147,28 @@ describe("feature specs", () => {
       .toContain("feature-persistence-invalid");
   });
 
+  test("requires tenant-scoped queries for database features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      queries: [{ className: "ListCaseQuery", name: "case.list" }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-tenant-boundary");
+  });
+
   test("generates an explicit command slice scaffold", () => {
     const spec: FeatureSpecNode = {
       name: "case",
