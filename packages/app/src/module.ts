@@ -11,6 +11,8 @@ export interface FeatureTransitionOptions<State extends string = string> {
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;
+  /** Job that continues the transition after the durable write is committed. */
+  job?: string;
   persistence?: FeaturePersistenceOptions;
 }
 

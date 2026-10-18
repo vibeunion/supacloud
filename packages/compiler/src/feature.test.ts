@@ -37,7 +37,7 @@ describe("feature specs", () => {
     await writeFile(join(root, "feature.ts"), [
       "const spec = defineFeatureSpec({",
       '  name: "case", states: ["draft", "accepted"],',
-      '  transitions: { accept: { from: "draft", to: "accepted" } },',
+      '  transitions: { accept: { from: "draft", to: "accepted", job: "case.refresh" } },',
       "});",
       "const CaseFeature = defineFeatureSlice({ name: \"case\", spec, tags: [\"type:feature\"] });",
       "",
@@ -46,6 +46,7 @@ describe("feature specs", () => {
     expect(graph.modules).toHaveLength(1);
     expect(graph.modules[0]?.tags).toEqual(["type:feature"]);
     expect(graph.modules[0]?.featureSpec?.transitions[0]?.to).toBe("accepted");
+    expect(graph.modules[0]?.featureSpec?.transitions[0]?.job).toBe("case.refresh");
   });
 
   test("detects state and governance drift", () => {
@@ -218,6 +219,42 @@ describe("feature specs", () => {
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code))
       .toContain("feature-job-tenant-boundary");
+  });
+
+  test("binds transition jobs and requires durable replay governance", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", job: "case.refresh",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", tenantScope: "required", idempotency: "none",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-idempotency");
+  });
+
+  test("rejects a transition Job that is not registered in its Feature module", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.missing" }],
+    };
+    expect(validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-unresolved");
   });
 
   test("requires tenant-scoped commands for database features", () => {

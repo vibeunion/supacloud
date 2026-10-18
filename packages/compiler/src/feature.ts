@@ -98,6 +98,21 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         }
       }
     }
+    if (transition.job) {
+      const jobs = (module.jobs ?? []).filter((job) =>
+        job.className === transition.job || job.name === transition.job);
+      if (jobs.length !== 1) {
+        error("feature-job-unresolved", `Transition ${transition.name} must reference exactly one Job in module ${module.name}.`);
+      } else {
+        const job = jobs[0]!;
+        if (job.tenantScope !== "required") {
+          error("feature-job-tenant-boundary", `Job ${job.className} in Feature ${spec.name} must declare tenantScope: "required".`);
+        }
+        if (job.idempotency !== "required") {
+          error("feature-job-idempotency", `Job ${job.className} in Feature ${spec.name} must declare idempotency: "required".`);
+        }
+      }
+    }
     if (transition.route) {
       const routes = module.controllers.flatMap((controller) => controller.routes.filter((route) =>
         `${route.method} ${joinRoutePaths(controller.path, route.path)}` === transition.route));

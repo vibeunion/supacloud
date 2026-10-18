@@ -102,6 +102,7 @@ test("contract manifest publishes the complete feature state machine and persist
         transitions: [{
           name: "approve", from: "draft", to: "approved",
           permission: "case.approve", command: "ApproveCase",
+          job: "case.refresh",
           transaction: "required", idempotency: "required", audit: "case.approved",
           persistence: {
             boundary: "database", optimisticLock: "required",
@@ -121,6 +122,7 @@ test("contract manifest publishes the complete feature state machine and persist
         tenantField: "tenant_id",
         transitions: [{
           name: "approve",
+          job: "case.refresh",
           persistence: {
             boundary: "database",
             versionField: "version",

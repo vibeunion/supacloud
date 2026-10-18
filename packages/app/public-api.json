@@ -521,7 +521,7 @@
     {
       "name": "FeatureTransitionOptions",
       "kind": "type",
-      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    persistence?: FeaturePersistenceOptions;\n}"
+      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    job?: string;\n    persistence?: FeaturePersistenceOptions;\n}"
     },
     {
       "name": "flattenProviders",

@@ -376,6 +376,8 @@ export interface FeatureTransitionNode {
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;
+  /** Job that continues the transition after the durable write is committed. */
+  job?: string;
   persistence?: FeaturePersistenceNode;
 }
 

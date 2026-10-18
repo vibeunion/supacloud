@@ -468,6 +468,22 @@ export const value: number = "wrong";`,
   },
 });
 // @Command({ name: "case.approve", tenantScope: undefined }) has no tenant scope.`,
+  SC6117: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.missing" },
+  },
+});
+// No matching @Job({ name: "case.missing" }) exists in the Feature module.`,
+  SC6118: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// @Job({ name: "case.refresh", idempotency: "none" }) cannot safely replay.`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

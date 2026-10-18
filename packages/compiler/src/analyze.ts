@@ -1071,7 +1071,7 @@ function parseFeatureSpec(
     const from = stringLiteralProp(options, "from");
     const to = stringLiteralProp(options, "to");
     if (!from || !to || options.properties.some((prop) => !ts.isPropertyAssignment(prop)) ||
-      ["permission", "command", "route", "audit"].some((key) => getProp(options, key) && !stringLiteralProp(options, key)) ||
+      ["permission", "command", "route", "audit", "job"].some((key) => getProp(options, key) && !stringLiteralProp(options, key)) ||
       ["transaction", "idempotency"].some((key) => getProp(options, key) && !commandModeProp(options, key))) {
       return invalid();
     }
@@ -1081,6 +1081,7 @@ function parseFeatureSpec(
     const transaction = commandModeProp(options, "transaction");
     const idempotency = commandModeProp(options, "idempotency");
     const audit = stringLiteralProp(options, "audit");
+    const job = stringLiteralProp(options, "job");
     const persistenceExpr = getProp(options, "persistence");
     const persistence = persistenceExpr && ts.isObjectLiteralExpression(persistenceExpr)
       ? parseFeaturePersistence(persistenceExpr)
@@ -1094,6 +1095,7 @@ function parseFeatureSpec(
       ...(transaction === undefined ? {} : { transaction }),
       ...(idempotency === undefined ? {} : { idempotency }),
       ...(audit === undefined ? {} : { audit }),
+      ...(job === undefined ? {} : { job }),
       ...(persistence === undefined ? {} : { persistence }),
     });
   }

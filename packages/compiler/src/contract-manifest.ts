@@ -34,6 +34,7 @@ export interface ContractManifest {
       transaction?: "required" | "none";
       idempotency?: "required" | "none";
       audit?: string;
+      job?: string;
       persistence?: FeaturePersistenceNode;
     }>;
   }>;
@@ -118,6 +119,7 @@ export function buildContractManifest(
           ...(transition.transaction === undefined ? {} : { transaction: transition.transaction }),
           ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
           ...(transition.audit === undefined ? {} : { audit: transition.audit }),
+          ...(transition.job === undefined ? {} : { job: transition.job }),
           ...(transition.persistence === undefined ? {} : { persistence: transition.persistence }),
         })),
       });
