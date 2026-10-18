@@ -499,6 +499,11 @@
       "signature": "export interface FeatureSliceOptions extends ModuleOptions {\n    spec?: FeatureSpecOptions;\n}"
     },
     {
+      "name": "FeaturePersistenceOptions",
+      "kind": "type",
+      "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
+    },
+    {
       "name": "FeatureSpecOptions",
       "kind": "type",
       "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
@@ -511,7 +516,7 @@
     {
       "name": "FeatureTransitionOptions",
       "kind": "type",
-      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n}"
+      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    persistence?: FeaturePersistenceOptions;\n}"
     },
     {
       "name": "flattenProviders",
