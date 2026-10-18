@@ -484,6 +484,14 @@ export const value: number = "wrong";`,
   },
 });
 // @Job({ name: "case.refresh", idempotency: "none" }) cannot safely replay.`,
+  SC6119: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// @Job({ name: "case.refresh", mode: undefined }) has no execution adapter mode.`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

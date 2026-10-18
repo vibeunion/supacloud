@@ -48,6 +48,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
           persistence.receipt !== "required" || persistence.reconciliation !== "required")) {
         error("feature-persistence-invalid", `External transition ${transition.name} requires a receipt and reconciliation, without database optimistic locking.`);
       }
+      if (persistence.boundary === "external" && !transition.job) {
+        error("feature-job-unresolved", `External transition ${transition.name} must bind a reconciliation Job.`);
+      }
       if (!transition.command) {
         error("feature-command-unresolved", `Persistent transition ${transition.name} must reference a command.`);
       }
@@ -110,6 +113,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         }
         if (job.idempotency !== "required") {
           error("feature-job-idempotency", `Job ${job.className} in Feature ${spec.name} must declare idempotency: "required".`);
+        }
+        if (job.mode === undefined) {
+          error("feature-job-mode", `Job ${job.className} in Feature ${spec.name} must declare mode: "task" or "workflow".`);
         }
       }
     }

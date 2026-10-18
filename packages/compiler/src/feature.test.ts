@@ -239,11 +239,45 @@ describe("feature specs", () => {
       ...baseModule(spec),
       jobs: [{
         className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
-        scope: "job", tenantScope: "required", idempotency: "none",
+        scope: "job", tenantScope: "required", idempotency: "none", mode: "task",
       }],
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code))
       .toContain("feature-job-idempotency");
+  });
+
+  test("requires an explicit execution mode for transition jobs", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", tenantScope: "required", idempotency: "required",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-job-mode");
+  });
+
+  test("requires a reconciliation Job for external transitions", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    expect(validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-unresolved");
   });
 
   test("rejects a transition Job that is not registered in its Feature module", () => {
