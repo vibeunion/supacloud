@@ -424,7 +424,7 @@ same `delivery: { target, objectId }`.
 Archive the matching manifest alongside its `objects` directory. A mismatched
 identity, missing snapshot, changed file, extra file or symlink fails closed;
 there is no fallback to the current graph. The reader is bounded to 1 MiB JSON,
-1,024 artifact files, 64 MiB per file and 128 MiB total, with the existing 32 KiB
+1,024 artifact files, 500 MiB per file and 500 MiB total, with the existing 32 KiB
 context output limit.
 
 `artifactVerified: true` establishes local content consistency only. The selected

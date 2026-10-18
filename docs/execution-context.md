@@ -186,7 +186,7 @@ Do not apply its repair readiness to an unrelated checkout. Select the matching
 source version and run the current compiler checks and reviewed repair preview.
 
 Manifest, snapshot and observation JSON are limited to 1 MiB each. Artifact
-verification accepts at most 1,024 files, 64 MiB per file and 128 MiB total.
+verification accepts at most 1,024 files, 500 MiB per file and 500 MiB total.
 The existing event/count/output limits still apply, including the delivery
 identity in the 32 KiB output budget. Failures use fixed error codes without
 echoing paths, file contents or rejected metadata. Verification assumes no
