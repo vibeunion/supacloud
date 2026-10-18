@@ -1023,8 +1023,8 @@ export function requireIdempotencyKey(invocation: CommandInvocation): string {
   const context = isRecord(invocation.requestContext) ? invocation.requestContext : {};
   const key = (typeof context.idempotencyKey === "string" ? context.idempotencyKey : undefined)
     ?? safeHeaderValue(invocation.request.headers.get(IDEMPOTENCY_KEY_HEADER), 512);
-  if (!key) {
-    throw new ApplicationError("Idempotency-Key header is required", {
+  if (!key || !idempotencyKeyPattern.test(key)) {
+    throw new ApplicationError("A valid Idempotency-Key header is required", {
       status: 400,
       code: "IDEMPOTENCY_KEY_REQUIRED",
     });
