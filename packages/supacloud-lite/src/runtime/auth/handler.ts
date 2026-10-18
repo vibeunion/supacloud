@@ -186,6 +186,18 @@ function normalizePhone(value: unknown): string | null {
   return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null
 }
 
+function banDurationSeconds(value: unknown): number | null | undefined {
+  if (value === 'none') return null
+  if (typeof value !== 'string') return undefined
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)$/)
+  if (!match) return undefined
+  const amount = Number(match[1])
+  const multipliers: Record<string, number> = { ns: 1e-9, us: 1e-6, 'µs': 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 }
+  const multiplier = multipliers[match[2]]
+  const seconds = amount * multiplier
+  return Number.isFinite(seconds) ? seconds : undefined
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -1629,6 +1641,29 @@ export class AuthHandler {
         params.push(await hashPassword(body.password))
         sets.push(`encrypted_password = $${params.length}`)
       }
+      const requestedPhone = body.phone === undefined ? undefined : normalizePhone(body.phone)
+      if (body.phone !== undefined && !requestedPhone) {
+        return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      }
+      if (body.phone_confirm !== undefined && typeof body.phone_confirm !== 'boolean') {
+        return authError(400, 'validation_failed', 'phone_confirm must be a boolean')
+      }
+      if (body.ban_duration !== undefined) {
+        const seconds = banDurationSeconds(body.ban_duration)
+        if (seconds === undefined) return authError(400, 'validation_failed', 'ban_duration is invalid')
+        if (seconds === null) {
+          sets.push('banned_until = null')
+        } else {
+          params.push(seconds)
+          sets.push(`banned_until = now() + ($${params.length} * interval '1 second')`)
+        }
+      }
+      if (requestedPhone) {
+        params.push(requestedPhone)
+        sets.push(`phone = $${params.length}`)
+      }
+      if (body.phone_confirm === true) sets.push('phone_confirmed_at = now()')
+      if (body.phone_confirm === false) sets.push('phone_confirmed_at = null')
       if (body.user_metadata) {
         params.push(JSON.stringify(body.user_metadata))
         sets.push(`raw_user_meta_data = $${params.length}::jsonb`)
@@ -1637,11 +1672,13 @@ export class AuthHandler {
         params.push(JSON.stringify(body.app_metadata))
         sets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || $${params.length}::jsonb`)
       }
-      if (body.email_confirm === true) sets.push(`email_confirmed_at = now()`)
+      if (body.email_confirm === true) sets.push('email_confirmed_at = now()')
+      if (body.email_confirm === false) sets.push('email_confirmed_at = null')
       if (sets.length === 0) return authError(400, 'validation_failed', 'nothing to update')
       params.push(idMatch[1])
       let updated: Record<string, unknown> | null
       let emailConflict = false
+      let phoneConflict = false
       try {
         updated = await this.db.transaction(async (query) => {
           if (requestedEmail) {
@@ -1654,6 +1691,16 @@ export class AuthHandler {
               return null
             }
           }
+          if (requestedPhone) {
+            const clash = await query(
+              `select id from auth.users where phone = $1 and id <> $2`,
+              [requestedPhone, idMatch[1]],
+            )
+            if (clash.rows.length > 0) {
+              phoneConflict = true
+              return null
+            }
+          }
           const res = await query<UserRow>(
             `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
             params
@@ -1661,15 +1708,20 @@ export class AuthHandler {
           const user = res.rows[0]
           if (!user) return null
           if (requestedEmail) await this.ensureEmailIdentity(user, query)
+          if (requestedPhone) await this.ensurePhoneIdentity(user, query)
           return this.userJsonWithRelations(user, query)
         })
       } catch (error) {
         if (databaseDiagnosticCode(error) === '23505' && requestedEmail) {
           return authError(422, 'email_exists', 'A user with this email address has already been registered')
         }
+        if (databaseDiagnosticCode(error) === '23505' && requestedPhone) {
+          return authError(422, 'phone_exists', 'A user with this phone number has already been registered')
+        }
         throw error
       }
       if (emailConflict) return authError(422, 'email_exists', 'A user with this email address has already been registered')
+      if (phoneConflict) return authError(422, 'phone_exists', 'A user with this phone number has already been registered')
       if (!updated) return authError(404, 'user_not_found', 'User not found')
       return json(200, updated)
     }
@@ -2139,6 +2191,20 @@ export class AuthHandler {
        on conflict (provider, provider_id) do update
        set identity_data = excluded.identity_data, updated_at = now()`,
       [user.id, JSON.stringify({ sub: user.id, email: user.email })]
+    )
+  }
+
+  private async ensurePhoneIdentity(
+    user: UserRow,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<void> {
+    if (!user.phone) return
+    await query(
+      `insert into auth.identities (user_id, provider, provider_id, identity_data)
+       values ($1::uuid, 'phone', $2, $3::jsonb)
+       on conflict (provider, provider_id) do update
+       set identity_data = excluded.identity_data, updated_at = now()`,
+      [user.id, user.phone, JSON.stringify({ sub: user.id, phone: user.phone, phone_verified: Boolean(user.phone_confirmed_at) })]
     )
   }
 
