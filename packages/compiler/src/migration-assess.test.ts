@@ -146,7 +146,7 @@ test("migration assessment accepts transition Job bindings by class name", async
   const { compileProject } = await import("./compile");
   await compileProject({ rootDir, outDir });
   await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
-    version: 1, commands: [], queries: [], routes: [], permissions: [],
+    version: 1, queries: [], routes: [], permissions: [],
     jobs: [{
       name: "case.refresh", className: "RefreshCaseJob", module: "case",
       input: "RefreshCaseInput", inputKind: "declared",
