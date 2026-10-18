@@ -198,9 +198,8 @@ export class OAuthService {
     try {
       const token = await this.exchangeCode(provider, code)
       profile = await this.fetchProfile(provider, token)
-    } catch (e) {
-      const msg = encodeURIComponent(e instanceof Error ? e.message : 'oauth_error')
-      return redirect(`${flow.redirect_to}#error=server_error&error_description=${msg}`)
+    } catch {
+      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth provider request failed')}`)
     }
 
     let userId: string
@@ -210,7 +209,7 @@ export class OAuthService {
       if (e instanceof OAuthAccountIneligibleError) {
         return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
       }
-      throw e
+      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth callback failed')}`)
     }
 
     // PKCE: hand back an auth code the client exchanges for a session.
@@ -232,7 +231,7 @@ export class OAuthService {
       if (e instanceof OAuthAccountIneligibleError) {
         return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
       }
-      throw e
+      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth callback failed')}`)
     }
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&provider_token=`
     return redirect(`${flow.redirect_to}${hash}`)
@@ -241,7 +240,7 @@ export class OAuthService {
   /** POST /token?grant_type=pkce - exchange an auth code + verifier for a session. */
   async exchangePkce(authCode: string, verifier: string): Promise<string | null> {
     const res = await this.db.query<FlowRow>(
-      `delete from auth.flow_state where auth_code = $1 and expires_at > now() returning *`,
+      `select * from auth.flow_state where auth_code = $1 and expires_at > now()`,
       [authCode]
     )
     const flow = res.rows[0]
@@ -253,7 +252,14 @@ export class OAuthService {
     } else if (flow.code_challenge && flow.code_challenge !== verifier) {
       return null // plain method
     }
-    return flow.user_id
+    const claimed = await this.db.transaction(async (query) => {
+      const consumed = await query<FlowRow>(
+        `delete from auth.flow_state where auth_code = $1 and expires_at > now() returning *`,
+        [authCode]
+      )
+      return consumed.rows[0] ?? null
+    })
+    return claimed?.user_id ?? null
   }
 
   private async exchangeCode(provider: ResolvedProvider, code: string): Promise<string> {
@@ -311,26 +317,29 @@ export class OAuthService {
     // provider account with a victim's unverified email and take over their
     // account. Unverified → fall through and create a separate user.
     let userId: string | undefined
-    const email = profile.email?.toLowerCase() ?? null
+    const email = profile.email?.toLowerCase().trim() ?? null
     const verified = !!profile.email && profile.emailVerified === true
     if (email && verified) {
-      const byEmail = await query<{ id: string }>(`select id from auth.users where email = $1`, [email])
+      const byEmail = await query<{ id: string }>(`select id from auth.users where lower(email) = $1`, [email])
       userId = byEmail.rows[0]?.id
       if (userId) await this.assertUserEligible(query, userId)
     }
+    let createdUserId: string | undefined
     if (!userId) {
       // Only claim the email on the new user when the provider verified it AND
       // it isn't already owned by another account. An unverified or taken email
       // is left null so it can't collide with (or hijack) an existing user.
       let userEmail: string | null = verified ? email : null
       if (userEmail) {
-        const taken = await query(`select 1 from auth.users where email = $1`, [userEmail])
+        const taken = await query(`select 1 from auth.users where lower(email) = $1`, [userEmail])
         if (taken.rows.length > 0) userEmail = null
       }
       const created = await query<{ id: string }>(
         `insert into auth.users (aud, role, email, email_confirmed_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data)
          values ('authenticated','authenticated',$1, $2, now(),
-                 $3::jsonb, $4::jsonb) returning id`,
+                 $3::jsonb, $4::jsonb)
+         on conflict (email) do nothing
+         returning id`,
         [
           userEmail,
           userEmail ? new Date().toISOString() : null,
@@ -339,16 +348,48 @@ export class OAuthService {
         ]
       )
       const user = created.rows[0]
-      if (!user) throw new Error('OAuth user creation returned no row')
-      userId = user.id
+      if (user) {
+        userId = user.id
+        createdUserId = user.id
+      } else if (userEmail) {
+        const existingEmail = await query<{ id: string }>(
+          `select id from auth.users where lower(email) = $1 for update`,
+          [userEmail],
+        )
+        userId = existingEmail.rows[0]?.id
+        if (!userId) throw new Error('OAuth email conflict has no winner')
+        await this.assertUserEligible(query, userId)
+      } else {
+        throw new Error('OAuth user creation returned no row')
+      }
     }
-    await query(
+    const identityData = JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })
+    const linked = await query<{ user_id: string }>(
       `insert into auth.identities (user_id, provider, provider_id, identity_data)
-       values ($1, $2, $3, $4::jsonb)`,
-      [userId, provider, profile.id, JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })]
+       values ($1, $2, $3, $4::jsonb)
+       on conflict (provider, provider_id) do nothing
+       returning user_id`,
+      [userId, provider, profile.id, identityData]
     )
-    if (!userId) throw new Error('OAuth identity has no user ID')
-    return userId
+    if (linked.rows[0]) return linked.rows[0].user_id
+
+    const raced = await query<{ user_id: string }>(
+      `select user_id from auth.identities where provider = $1 and provider_id = $2`,
+      [provider, profile.id]
+    )
+    const racedUserId = raced.rows[0]?.user_id
+    if (!racedUserId) throw new Error('OAuth identity conflict has no winner')
+    if (createdUserId && createdUserId !== racedUserId) {
+      await query(`delete from auth.users where id = $1`, [createdUserId])
+    }
+    await this.assertUserEligible(query, racedUserId)
+    await query(
+      `update auth.identities set last_sign_in_at = now(), identity_data = $3
+       where provider = $1 and provider_id = $2`,
+      [provider, profile.id, identityData]
+    )
+    await query(`update auth.users set last_sign_in_at = now() where id = $1`, [racedUserId])
+    return racedUserId
   }
 
   private async assertUserEligible(query: Querier, userId: string): Promise<void> {
