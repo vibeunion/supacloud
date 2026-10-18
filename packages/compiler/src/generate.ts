@@ -774,6 +774,9 @@ class ModuleGenerator {
     if (this.module.controllers.length === 0) return "[]";
     const items = this.module.controllers.map((controller) => {
       const routes = controller.routes.map((route) => {
+        const command = route.command === undefined ? undefined
+          : this.module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
+        const idempotency = route.idempotency ?? command?.idempotency;
         const responseEntries = normalizedResponseEntries(route.responses);
         const hasResponseMap = responseEntries.length > 0;
         const fields: string[] = [
@@ -799,8 +802,8 @@ class ModuleGenerator {
         if (route.effect !== undefined) {
           fields.push(`effect: ${JSON.stringify(route.effect)}`);
         }
-        if (route.idempotency !== undefined) {
-          fields.push(`idempotency: ${JSON.stringify(route.idempotency)}`);
+        if (idempotency !== undefined) {
+          fields.push(`idempotency: ${JSON.stringify(idempotency)}`);
         }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
         if (route.guards && route.guards.length > 0) {
