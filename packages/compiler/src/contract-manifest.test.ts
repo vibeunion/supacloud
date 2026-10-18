@@ -26,6 +26,7 @@ test("contract manifest preserves status-aware response schemas without removing
           method: "POST",
           path: "/",
           handler: "create",
+          idempotency: "required",
           response: "CreatedOrder",
           responses: {
             "201": "CreatedOrder",
@@ -38,6 +39,7 @@ test("contract manifest preserves status-aware response schemas without removing
 
   const manifest = buildContractManifest(graph, { client: true, openapi: true, permissions: true });
   expect(manifest.routes).toEqual([expect.objectContaining({
+    idempotency: "required",
     responseSchema: "CreatedOrder",
     responseSchemas: {
       "201": "CreatedOrder",
