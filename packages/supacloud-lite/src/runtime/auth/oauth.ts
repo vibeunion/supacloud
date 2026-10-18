@@ -306,7 +306,19 @@ export class OAuthService {
       scope: scopes,
       state: providerState,
     })
-    const reserved = new Set(['provider', 'redirect_to', 'scopes', 'code_challenge', 'code_challenge_method', 'skip_http_redirect'])
+    const reserved = new Set([
+      'provider',
+      'redirect_to',
+      'scopes',
+      'code_challenge',
+      'code_challenge_method',
+      'skip_http_redirect',
+      'client_id',
+      'redirect_uri',
+      'response_type',
+      'scope',
+      'state',
+    ])
     for (const [key, value] of url.searchParams) {
       if (!reserved.has(key)) p.append(key, value)
     }
