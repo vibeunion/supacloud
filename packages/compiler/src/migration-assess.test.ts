@@ -47,6 +47,7 @@ test("migration assessment is read-only and does not require SSR", async () => {
   expect(result.writesPerformed).toBe(false);
   expect(result.rendering).toMatchObject({ selected: "browser", ssrRequired: false });
   expect(result.rendering.supportedModes).toContain("ssr");
+  expect(result.artifacts.contractsManifest.features).toBe(0);
 });
 
 test("migration assessment reports missing evidence without prescribing SSR", async () => {
@@ -63,6 +64,25 @@ test("migration assessment reports missing evidence without prescribing SSR", as
   expect(result.ok).toBe(false);
   expect(result.rendering.ssrRequired).toBe(false);
   expect(result.findings.map((finding) => finding.code)).toContain("openapi-baseline-not-proven");
+});
+
+test("migration assessment rejects a contract manifest without Feature Slice inventory", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-feature-manifest-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1, commands: [], queries: [], routes: [], permissions: [],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
 test("CLI exposes the read-only assessment with an explicit non-SSR boundary", async () => {

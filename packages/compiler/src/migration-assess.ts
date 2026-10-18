@@ -61,6 +61,7 @@ export interface MigrationAssessmentResult {
       commands?: number;
       routes?: number;
       permissions?: number;
+      features?: number;
     };
     openApi?: {
       baselinePath: string;
@@ -164,10 +165,13 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
   };
   try {
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
-    if (!isRecord(parsed) || parsed["version"] !== 1) throw new Error("invalid manifest");
+    if (!isRecord(parsed) || parsed["version"] !== 1 || !Array.isArray(parsed["features"])) {
+      throw new Error("invalid manifest");
+    }
     const commands = arrayLength(parsed["commands"]);
     const routes = arrayLength(parsed["routes"]);
     const permissions = arrayLength(parsed["permissions"]);
+    const features = arrayLength(parsed["features"]);
     contractsManifest = {
       path: contractsManifestPath,
       present: true,
@@ -176,6 +180,7 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
       ...(commands === undefined ? {} : { commands }),
       ...(routes === undefined ? {} : { routes }),
       ...(permissions === undefined ? {} : { permissions }),
+      ...(features === undefined ? {} : { features }),
     };
   } catch {
     findings.push({
