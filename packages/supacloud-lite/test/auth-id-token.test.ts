@@ -84,8 +84,17 @@ describe('OIDC ID token sign-in', () => {
   test('verifies the token and creates the provider identity and session', async () => {
     const response = await request({ provider: 'google', id_token: await idToken() })
     expect(response.status).toBe(200)
-    const body = await response.json() as { access_token: string; user: { email: string; identities: Array<{ provider: string }> } }
-    expect(body.user).toMatchObject({ email: 'oidc@example.test', identities: [{ provider: 'google' }] })
+    const body = await response.json() as {
+      access_token: string
+      user: { email: string; identities: Array<{ provider: string; identity_data: Record<string, unknown> }> }
+    }
+    expect(body.user).toMatchObject({
+      email: 'oidc@example.test',
+      identities: [{
+        provider: 'google',
+        identity_data: { email_verified: true },
+      }],
+    })
     expect(await verifyJwt(body.access_token, jwtSecret)).toMatchObject({ email: 'oidc@example.test' })
   })
 

@@ -91,7 +91,11 @@ const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       emailVerified: r['email_verified'] === true,
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
-      metadata: { avatar_url: r['picture'], full_name: r['name'] },
+      metadata: {
+        avatar_url: r['picture'],
+        full_name: r['name'],
+        email_verified: r['email_verified'] === true,
+      },
     }),
   },
   apple: {
@@ -106,6 +110,9 @@ const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       emailVerified: r['email_verified'] === true || r['email_verified'] === 'true',
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
+      metadata: {
+        email_verified: r['email_verified'] === true || r['email_verified'] === 'true',
+      },
     }),
   },
   github: {
