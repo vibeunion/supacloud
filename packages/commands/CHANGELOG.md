@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.7](https://github.com/vibeunion/supacloud/compare/commands-v0.9.6...commands-v0.9.7) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+
 ## [0.9.6](https://github.com/vibeunion/supacloud/compare/commands-v0.9.5...commands-v0.9.6) (2026-10-17)
 
 
