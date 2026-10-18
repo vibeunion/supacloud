@@ -1350,7 +1350,10 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   const allRoutes: Array<Record<string, unknown>> = [];
   const allProcedures: Array<Record<string, unknown>> = [];
   const commandByClassName = new Map(
-    graph.modules.flatMap((module) => module.commands.map((command) => [command.className, command] as const)),
+    graph.modules.flatMap((module) => module.commands.flatMap((command) => [
+      [command.className, command] as const,
+      [command.name, command] as const,
+    ])),
   );
   const featureInvalidationTags = new Map<string, string[]>();
   for (const module of graph.modules) {
@@ -2221,7 +2224,10 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
   };
 
   const commandByClass = new Map(
-    graph.modules.flatMap((module) => module.commands.map((command) => [command.className, command] as const)),
+    graph.modules.flatMap((module) => module.commands.flatMap((command) => [
+      [command.className, command] as const,
+      [command.name, command] as const,
+    ])),
   );
 
   for (const module of graph.modules) {
