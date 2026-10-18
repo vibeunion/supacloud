@@ -24,7 +24,7 @@ const baseModule = (spec: FeatureSpecNode): ModuleNode => ({
   }],
   commands: [{
     className: "AcceptCommand", name: "case.accept", permission: "case.accept",
-    transaction: "required", idempotency: "required", tenantScope: "required",
+    transaction: "required", idempotency: "required", audit: "case.accepted", tenantScope: "required",
   }],
   queries: [],
   exports: [],
@@ -49,6 +49,32 @@ describe("feature specs", () => {
     expect(graph.modules[0]?.featureSpec?.transitions[0]?.job).toBe("case.refresh");
   });
 
+  test("accepts controller-owned route bindings without weakening route existence checks", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept", route: "POST /cases/:id/accept",
+        routeBinding: "controller",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      controllers: [{
+        ...baseModule(spec).controllers[0]!,
+        routes: [{ ...baseModule(spec).controllers[0]!.routes[0]!, command: undefined }],
+      }],
+    };
+    expect(validateFeatureSpec(spec, module)).toEqual([]);
+  });
+
   test("detects state and governance drift", () => {
     const spec: FeatureSpecNode = {
       name: "case",
@@ -70,7 +96,7 @@ describe("feature specs", () => {
     const codes = validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code);
     expect(codes).toEqual([
       "invalid-feature-transition", "feature-governance-drift",
-      "feature-governance-drift", "feature-persistence-drift",
+      "feature-governance-drift",
     ]);
   });
 

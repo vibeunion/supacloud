@@ -1071,13 +1071,15 @@ function parseFeatureSpec(
     const from = stringLiteralProp(options, "from");
     const to = stringLiteralProp(options, "to");
     if (!from || !to || options.properties.some((prop) => !ts.isPropertyAssignment(prop)) ||
-      ["permission", "command", "route", "audit", "job"].some((key) => getProp(options, key) && !stringLiteralProp(options, key)) ||
+      ["permission", "command", "route", "routeBinding", "audit", "job"].some((key) => getProp(options, key) && !stringLiteralProp(options, key)) ||
       ["transaction", "idempotency"].some((key) => getProp(options, key) && !commandModeProp(options, key))) {
       return invalid();
     }
     const permission = stringLiteralProp(options, "permission");
     const command = stringLiteralProp(options, "command");
     const route = stringLiteralProp(options, "route");
+    const routeBinding = stringLiteralProp(options, "routeBinding");
+    if (routeBinding !== undefined && routeBinding !== "command" && routeBinding !== "controller") return invalid();
     const transaction = commandModeProp(options, "transaction");
     const idempotency = commandModeProp(options, "idempotency");
     const audit = stringLiteralProp(options, "audit");
@@ -1092,6 +1094,7 @@ function parseFeatureSpec(
       ...(permission === undefined ? {} : { permission }),
       ...(command === undefined ? {} : { command }),
       ...(route === undefined ? {} : { route }),
+      ...(routeBinding === undefined ? {} : { routeBinding }),
       ...(transaction === undefined ? {} : { transaction }),
       ...(idempotency === undefined ? {} : { idempotency }),
       ...(audit === undefined ? {} : { audit }),

@@ -8,6 +8,8 @@ export interface FeatureTransitionOptions<State extends string = string> {
   permission?: string;
   command?: string;
   route?: string;
+  /** Route binding mode: framework command binding or an explicit controller invocation. */
+  routeBinding?: "command" | "controller";
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;

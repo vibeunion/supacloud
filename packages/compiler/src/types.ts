@@ -373,6 +373,7 @@ export interface FeatureTransitionNode {
   permission?: string;
   command?: string;
   route?: string;
+  routeBinding?: "command" | "controller";
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;

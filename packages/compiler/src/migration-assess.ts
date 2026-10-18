@@ -201,10 +201,17 @@ function validFeatureInventory(
         }
       }
       const routeName = transition["route"];
+      const routeBinding = transition["routeBinding"];
+      if (routeBinding !== undefined && routeBinding !== "command" && routeBinding !== "controller") return false;
       if (routeName !== undefined) {
         const route = routes.find((candidate) => isRecord(candidate)
           && `${candidate["method"]} ${candidate["path"]}` === routeName);
-        if (!isRecord(route) || route["command"] !== commandName) return false;
+        if (!isRecord(route)) return false;
+        if (routeBinding === "controller") {
+          if (route["command"] !== undefined) return false;
+        } else if (route["command"] !== commandName) {
+          return false;
+        }
       }
       const job = transition["job"];
       if (job === undefined) return true;

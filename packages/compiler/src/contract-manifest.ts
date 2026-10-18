@@ -43,6 +43,7 @@ export interface ContractManifest {
       permission?: string;
       command?: string;
       route?: string;
+      routeBinding?: "command" | "controller";
       transaction?: "required" | "none";
       idempotency?: "required" | "none";
       audit?: string;
@@ -157,6 +158,7 @@ export function buildContractManifest(
             ...(transition.permission === undefined ? {} : { permission: transition.permission }),
             ...(transition.command === undefined ? {} : { command: transition.command }),
             ...(transition.route === undefined ? {} : { route: transition.route }),
+            ...(transition.routeBinding === undefined ? {} : { routeBinding: transition.routeBinding }),
             ...(transition.transaction === undefined ? {} : { transaction: transition.transaction }),
             ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
             ...(transition.audit === undefined ? {} : { audit: transition.audit }),
