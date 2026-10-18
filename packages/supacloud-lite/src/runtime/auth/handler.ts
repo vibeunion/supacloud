@@ -1394,12 +1394,23 @@ export class AuthHandler {
          and provider_state = $1 and auth_code is null and expires_at > now()`,
       [token],
     )).rows[0]
+    const errorRedirect = new Response(null, {
+      status: 303,
+      headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` },
+    })
+    const amr = { method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }
+    // Without a PKCE flow the link must claim the token and mint the session in
+    // one transaction so a failed session insert cannot consume the token.
+    if (!flow && type !== 'email_change') {
+      const session = await this.redeem(token, [type], undefined, { amr: [amr] })
+      if (!session) return errorRedirect
+      const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
+      return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
+    }
     const user = type === 'email_change'
       ? await this.redeemEmailChangeUser(token)
       : await this.redeemUser(token, [type])
-    if (!user) {
-      return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
-    }
+    if (!user) return errorRedirect
     if (flow) {
       const authCode = randomToken(24)
       const claimed = await this.db.query<{ redirect_to: string | null }>(
@@ -1412,9 +1423,7 @@ export class AuthHandler {
       const target = claimed.rows[0]?.redirect_to
       if (target) return redirectWithQuery(target, { code: authCode })
     }
-    const session = await this.sessionFor(user, undefined, {
-      amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
-    })
+    const session = await this.sessionFor(user, undefined, { amr: [amr] })
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
   }
