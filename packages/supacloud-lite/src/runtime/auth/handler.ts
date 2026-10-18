@@ -685,8 +685,11 @@ export class AuthHandler {
            '{providers}',
            (
              select jsonb_agg(provider order by provider)
-             from auth.identities
-             where user_id = $1
+             from (
+               select distinct provider
+               from auth.identities
+               where user_id = $1
+             ) as providers
            ),
            true
          ),
