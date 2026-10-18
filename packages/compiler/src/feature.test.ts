@@ -159,6 +159,7 @@ describe("feature specs", () => {
     const spec: FeatureSpecNode = {
       name: "case",
       states: ["draft", "accepted"],
+      tenantField: "tenant_id",
       transitions: [{
         name: "accept", from: "draft", to: "accepted",
         persistence: {
@@ -274,7 +275,15 @@ describe("feature specs", () => {
     const spec: FeatureSpecNode = {
       name: "case",
       states: ["draft", "accepted"],
-      transitions: [{ name: "accept", from: "draft", to: "accepted", permission: "case.accept" }],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", permission: "case.accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
     };
     const source = generateFeatureSource(spec);
     expect(source).toContain("defineFeatureSlice");

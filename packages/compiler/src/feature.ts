@@ -116,8 +116,6 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
  * execute() fails closed until the application's persistence logic is supplied.
  */
 export function generateFeatureSource(spec: FeatureSpecNode): string {
-  const errors = validateFeatureSpec(spec);
-  if (errors.length) throw new Error(errors.map((error) => error.message).join("\n"));
   if (spec.transitions.some((transition) => !transition.permission)) {
     throw new Error("Spec-to-Code requires an explicit permission for every transition.");
   }
@@ -125,6 +123,8 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
     ...transition,
     command: `Transition${index + 1}Command`,
   }));
+  const errors = validateFeatureSpec({ ...spec, transitions });
+  if (errors.length) throw new Error(errors.map((error) => error.message).join("\n"));
   if (transitions.some((transition) => transition.route)) {
     throw new Error("Generate the command slice first; existing HTTP routes require explicit schema and handler implementations.");
   }
