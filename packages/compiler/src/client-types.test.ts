@@ -9,6 +9,7 @@ import { buildContractManifest } from "./contract-manifest";
 import { createApplicationDevelopmentContext } from "./application-development";
 import { createDeliveryPlan } from "./delivery-plan";
 import { createExecutionPlans } from "./inspect";
+import { validateGraph } from "./validate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
@@ -247,6 +248,25 @@ test("feature transition route bindings carry command governance into generated 
     expect(createExecutionPlans(featureGraph)[0]).toEqual(expect.objectContaining({
       command: "case.approve",
     }));
+    const invalidFeatureRoute: ApplicationGraph = {
+      ...featureGraph,
+      modules: featureGraph.modules.map((module) => ({
+        ...module,
+        featureSpec: module.featureSpec === undefined ? undefined : {
+          ...module.featureSpec,
+          transitions: module.featureSpec.transitions.map((transition) => ({
+            ...transition,
+            route: transition.route?.replace("POST ", "GET "),
+          })),
+        },
+        controllers: module.controllers.map((controller) => ({
+          ...controller,
+          routes: controller.routes.map((route) => ({ ...route, method: "GET" })),
+        })),
+      })),
+    };
+    expect(validateGraph(invalidFeatureRoute).map((diagnostic) => diagnostic.code))
+      .toContain("invalid-route-idempotency");
     expect(renderApplication(featureGraph, { rootDir: ".", outDir: "." }).applicationCode)
       .toContain('idempotency: "required"');
     expect(renderOpenApi(featureGraph)).toContain('"idempotency": "required"');

@@ -12,7 +12,7 @@ import type {
 import { dirname, relative, sep } from "node:path";
 import { resolveModuleBoundaries } from "./profiles";
 import { findClosestMatch } from "./util";
-import { validateFeatureSpec } from "./feature";
+import { featureTransitionForRoute, validateFeatureSpec } from "./feature";
 
 const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
   application: 0,
@@ -400,6 +400,12 @@ export function validateGraph(
           method: route.method, path: route.path, fullPath, rawFullPath, controller, module, handler: route.handler,
           ...(route.redirectTo === undefined ? {} : { redirectTo: route.redirectTo }),
         });
+        const featureTransition = featureTransitionForRoute(module, controller, route);
+        const effectiveCommandRef = route.command ?? featureTransition?.command;
+        const effectiveCommand = effectiveCommandRef === undefined ? undefined
+          : module.commands.find((command) =>
+            command.className === effectiveCommandRef || command.name === effectiveCommandRef);
+        const effectiveIdempotency = route.idempotency ?? featureTransition?.idempotency;
 
         if (route.command && !module.commands.some((command) => command.className === route.command)) {
           error(
@@ -410,12 +416,12 @@ export function validateGraph(
         }
 
         // Command transaction safety on safe HTTP methods (SC4006, Angular CQRS style)
-        if ((route.method === "GET" || route.method === "HEAD") && route.command) {
-          const boundCommand = module.commands.find((c) => c.className === route.command);
+        if ((route.method === "GET" || route.method === "HEAD") && effectiveCommand) {
+          const boundCommand = effectiveCommand;
           if (boundCommand && boundCommand.transaction === "required") {
             error(
               "command-transaction-readonly",
-              `GET route '${route.path}' in '${controller.className}.${route.handler}' binds mutating command '${route.command}' with transaction: 'required'. Mutating transactions are not permitted on read-only HTTP GET requests.`,
+              `GET route '${route.path}' in '${controller.className}.${route.handler}' binds mutating command '${boundCommand.name}' with transaction: 'required'. Mutating transactions are not permitted on read-only HTTP GET requests.`,
               controller.file,
               undefined,
               `Use POST, PUT, or PATCH for mutating command routes, or set transaction: 'none'.`,
@@ -572,7 +578,7 @@ export function validateGraph(
             `Route ${controller.className}.${route.handler} allowDeleteBody requires DELETE and an explicit body schema.`,
             controller.file);
         }
-        if (route.idempotency === "required"
+        if (effectiveIdempotency === "required"
           && (route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS")) {
           error("invalid-route-idempotency",
             `Route ${controller.className}.${route.handler} cannot require idempotency on HTTP ${route.method}.`,
