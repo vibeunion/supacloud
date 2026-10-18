@@ -171,7 +171,7 @@ test("request contract changes flow into the write port and diagnose stale adapt
     await writeFile(contractPath, changed);
     await writeFile(join(directory, "business-adapter.ts"), `import type { CaseApprovalWritePort } from "./case-approval.model";
 export const writer: CaseApprovalWritePort = {
-    async approve(input) {
+    async approve(_context, input) {
         const reference: string | undefined = input.reference;
         void reference;
         return { id: input.id, state: "approved", version: input.expectedVersion + 1 };
