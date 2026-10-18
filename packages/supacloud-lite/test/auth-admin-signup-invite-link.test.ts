@@ -35,11 +35,11 @@ describe('Auth admin signup and invite links', () => {
       expect(generated.data.properties?.verification_type).toBe('signup')
       expect(generated.data.properties?.action_link).toContain('type=signup')
       expect(generated.data.user?.user_metadata).toEqual({ source: 'admin' })
-      expect((await backend.db.query(
+      expect((await backend.db.query<{ email_confirmed_at: string | null; encrypted_password: string | null }>(
         `select email_confirmed_at, encrypted_password from auth.users where email = $1`,
         ['admin-signup@example.com'],
       )).rows[0]).toMatchObject({ email_confirmed_at: null })
-      expect((await backend.db.query(
+      expect((await backend.db.query<{ encrypted_password: string | null }>(
         `select encrypted_password from auth.users where email = $1`,
         ['admin-signup@example.com'],
       )).rows[0].encrypted_password).toMatch(/^\$2[aby]\$[0-9]{2}\$/)
@@ -90,11 +90,11 @@ describe('Auth admin signup and invite links', () => {
       expect(generated.error).toBeNull()
       expect(generated.data.properties?.verification_type).toBe('invite')
       expect(generated.data.user?.user_metadata).toEqual({ team: 'platform' })
-      expect((await backend.db.query(
+      expect((await backend.db.query<{ invited_at: string | null; email_confirmed_at: string | null }>(
         `select invited_at, email_confirmed_at from auth.users where email = $1`,
         ['admin-invite@example.com'],
       )).rows[0]).toMatchObject({ email_confirmed_at: null })
-      expect((await backend.db.query(
+      expect((await backend.db.query<{ invited_at: string | null }>(
         `select invited_at from auth.users where email = $1`,
         ['admin-invite@example.com'],
       )).rows[0].invited_at).toBeTruthy()

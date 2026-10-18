@@ -1278,6 +1278,7 @@ export class AuthHandler {
     // explicitly - never fold it into the default set, or a guessed login OTP
     // could mint a recovery session.
     if (body.type === 'email_change') {
+      if (!body.token?.trim()) return authError(400, 'validation_failed', 'token is required')
       const session = await this.redeemEmailChange(body.token, body.email)
       if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
       return json(200, session)
@@ -1686,11 +1687,13 @@ export class AuthHandler {
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
-    if (body.type === 'signup' && !body.password) {
-      return authError(400, 'validation_failed', 'password is required for signup links')
-    }
-    if (body.type === 'signup' && body.password.length < this.settings.minPasswordLength) {
-      return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
+    if (body.type === 'signup') {
+      if (!body.password) {
+        return authError(400, 'validation_failed', 'password is required for signup links')
+      }
+      if (body.password.length < this.settings.minPasswordLength) {
+        return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
+      }
     }
 
     const emailOtp = randomOtp(this.settings.otpLength)
