@@ -46,3 +46,24 @@ The larger processing limit increases peak memory and temporary I/O risk.
 Operators should size worker memory, concurrency and admission controls for
 the selected workload. The default is expressed in MiB (`500 * 1024 * 1024`);
 image rejection messages report the effective limit in bytes.
+
+## Hosted Edge Runtime Requests
+
+The hosted Edge Runtime defaults to a 500 MiB request-body limit. Set
+`EDGE_MAX_BODY_SIZE_MB=500` on the runtime service to configure it, or use the
+installer's `edge_max_body_size_mb` option. Despite the environment variable's
+name, units are MiB (1024 * 1024 bytes). Restart the runtime after a change.
+
+An explicit positive setting is preserved. Omitted or invalid settings retain
+the existing fallback behavior, now falling back to 500 MiB instead of 30 MiB.
+To retain the previous default on upgrade, set `EDGE_MAX_BODY_SIZE_MB=30`.
+The HTTP listener uses the greater of 128 MiB and the effective runtime limit;
+the worker still enforces the runtime limit and any smaller function-level
+`max_request_body_bytes`. This change does not alter Lite strict-mode limits,
+function-level overrides, response limits, or external reverse-proxy limits.
+
+This is a whole-request limit, not a file-payload allowance: multipart encoding
+adds bytes, so a 500 MiB file needs a larger configured request-body limit.
+Large bodies are buffered by the worker; review memory and concurrency before
+restarting with the larger default. No database or existing bucket settings are
+rewritten.
