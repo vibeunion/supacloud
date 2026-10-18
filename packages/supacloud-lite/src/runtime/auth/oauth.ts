@@ -151,7 +151,10 @@ export class OAuthService {
     const providerName = url.searchParams.get('provider') ?? ''
     const provider = this.providers.get(providerName)
     if (!provider) {
-      return redirect(`${this.siteUrl}#error=provider_not_enabled&error_description=${encodeURIComponent(`provider ${providerName} is not configured`)}`)
+      return redirectWithFragment(this.siteUrl, {
+        error: 'provider_not_enabled',
+        error_description: `provider ${providerName} is not configured`,
+      })
     }
     const providerState = randomToken(16)
     const scopes = url.searchParams.get('scopes') || provider.scopes
@@ -183,23 +186,26 @@ export class OAuthService {
   async callback(url: URL, createSession: (userId: string) => Promise<OAuthSession>): Promise<Response> {
     const code = url.searchParams.get('code')
     const state = url.searchParams.get('state')
-    if (!code || !state) return redirect(`${this.siteUrl}#error=invalid_request`)
+    if (!code || !state) return redirectWithFragment(this.siteUrl, { error: 'invalid_request' })
 
     const res = await this.db.query<FlowRow>(
       `delete from auth.flow_state where provider_state = $1 and expires_at > now() returning *`,
       [state]
     )
     const flow = res.rows[0]
-    if (!flow) return redirect(`${this.siteUrl}#error=invalid_state`)
+    if (!flow) return redirectWithFragment(this.siteUrl, { error: 'invalid_state' })
     const provider = this.providers.get(flow.provider)
-    if (!provider) return redirect(`${flow.redirect_to}#error=provider_not_enabled`)
+    if (!provider) return redirectWithFragment(flow.redirect_to, { error: 'provider_not_enabled' })
 
     let profile: OAuthProfile
     try {
       const token = await this.exchangeCode(provider, code)
       profile = await this.fetchProfile(provider, token)
     } catch {
-      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth provider request failed')}`)
+      return redirectWithFragment(flow.redirect_to, {
+        error: 'server_error',
+        error_description: 'OAuth provider request failed',
+      })
     }
 
     let userId: string
@@ -207,9 +213,12 @@ export class OAuthService {
       userId = await this.upsertUser(provider.name, profile)
     } catch (e) {
       if (e instanceof OAuthAccountIneligibleError) {
-        return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
+        return redirectWithFragment(flow.redirect_to, { error: 'access_denied', error_code: e.code })
       }
-      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth callback failed')}`)
+      return redirectWithFragment(flow.redirect_to, {
+        error: 'server_error',
+        error_description: 'OAuth callback failed',
+      })
     }
 
     // PKCE: hand back an auth code the client exchanges for a session.
@@ -220,7 +229,7 @@ export class OAuthService {
          values ($1, $2, $3, $4, $5, $6, $7, now() + interval '5 minutes')`,
         [flow.provider, randomToken(16), flow.redirect_to, flow.code_challenge, flow.code_challenge_method, authCode, userId]
       )
-      return redirect(`${flow.redirect_to}?code=${authCode}`)
+      return redirectWithQuery(flow.redirect_to, { code: authCode })
     }
 
     // implicit: tokens in the URL fragment
@@ -229,12 +238,20 @@ export class OAuthService {
       session = await createSession(userId)
     } catch (e) {
       if (e instanceof OAuthAccountIneligibleError) {
-        return redirect(`${flow.redirect_to}#error=access_denied&error_code=${e.code}`)
+        return redirectWithFragment(flow.redirect_to, { error: 'access_denied', error_code: e.code })
       }
-      return redirect(`${flow.redirect_to}#error=server_error&error_description=${encodeURIComponent('OAuth callback failed')}`)
+      return redirectWithFragment(flow.redirect_to, {
+        error: 'server_error',
+        error_description: 'OAuth callback failed',
+      })
     }
-    const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&provider_token=`
-    return redirect(`${flow.redirect_to}${hash}`)
+    return redirectWithFragment(flow.redirect_to, {
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      expires_in: String(session.expires_in),
+      token_type: 'bearer',
+      provider_token: '',
+    })
   }
 
   /** POST /token?grant_type=pkce - exchange an auth code + verifier for a session. */
@@ -317,8 +334,8 @@ export class OAuthService {
     // provider account with a victim's unverified email and take over their
     // account. Unverified → fall through and create a separate user.
     let userId: string | undefined
-    const email = profile.email?.toLowerCase().trim() ?? null
-    const verified = !!profile.email && profile.emailVerified === true
+    const email = typeof profile.email === 'string' ? profile.email.toLowerCase().trim() || null : null
+    const verified = email !== null && profile.emailVerified === true
     if (email && verified) {
       const byEmail = await query<{ id: string }>(`select id from auth.users where lower(email) = $1`, [email])
       userId = byEmail.rows[0]?.id
@@ -426,6 +443,18 @@ interface FlowRow {
 
 function redirect(location: string): Response {
   return new Response(null, { status: 303, headers: { location } })
+}
+
+function redirectWithQuery(location: string, params: Record<string, string>): Response {
+  const target = new URL(location)
+  for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value)
+  return redirect(target.toString())
+}
+
+function redirectWithFragment(location: string, params: Record<string, string>): Response {
+  const target = new URL(location)
+  target.hash = new URLSearchParams(params).toString()
+  return redirect(target.toString())
 }
 
 function base64url(bytes: Uint8Array): string {
