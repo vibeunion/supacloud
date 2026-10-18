@@ -2236,12 +2236,14 @@ export class AuthHandler {
           const user = res.rows[0]
           if (!user) return null
           if (requestedEmail) await this.ensureEmailIdentity(user, query)
-          if (requestedPhone) {
-            await query(
-              `delete from auth.identities
-               where user_id = $1 and provider = 'phone' and provider_id <> $2`,
-              [user.id, requestedPhone],
-            )
+          if (requestedPhone || body.phone_confirm !== undefined) {
+            if (requestedPhone) {
+              await query(
+                `delete from auth.identities
+                 where user_id = $1 and provider = 'phone' and provider_id <> $2`,
+                [user.id, requestedPhone],
+              )
+            }
             await this.ensurePhoneIdentity(user, query)
           }
           return this.userJsonWithRelations(user, query)

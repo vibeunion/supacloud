@@ -73,6 +73,10 @@ describe('Auth admin user controls', () => {
         `select banned_until, phone_confirmed_at from auth.users where id = $1`,
         [userId],
       )).rows).toEqual([{ banned_until: null, phone_confirmed_at: null }])
+      expect((await backend.db.query<{ identity_data: Record<string, unknown> }>(
+        `select identity_data from auth.identities where user_id = $1 and provider = 'phone'`,
+        [userId],
+      )).rows).toEqual([{ identity_data: expect.objectContaining({ phone_verified: false }) }])
     } finally {
       await backend.close()
     }
