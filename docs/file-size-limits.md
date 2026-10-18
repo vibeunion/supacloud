@@ -46,3 +46,7 @@ The larger processing limit increases peak memory and temporary I/O risk.
 Operators should size worker memory, concurrency and admission controls for
 the selected workload. The default is expressed in MiB (`500 * 1024 * 1024`);
 image rejection messages report the effective limit in bytes.
+
+Application and frontend release uploads also use a 500 MiB default archive and
+artifact ceiling. Frontend archives may contain at most 10,000 files; these
+file-count and format protections remain independent of the byte limit.
