@@ -447,6 +447,27 @@ export const value: number = "wrong";`,
   },
 });
 // @Job({ name: "case.refresh" }) has no tenantScope declaration.`,
+  SC6116: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      command: "ApproveCase",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "tenant_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});
+// @Command({ name: "case.approve", tenantScope: undefined }) has no tenant scope.`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

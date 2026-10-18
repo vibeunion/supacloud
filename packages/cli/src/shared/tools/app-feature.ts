@@ -151,6 +151,7 @@ export class List${className}Query {
     transaction: "required",
     audit: ${JSON.stringify(`${name}.approved`)},
     idempotency: "required",
+    tenantScope: "required",
     rpc: ${JSON.stringify(rpc)},
 })
 export class Approve${className}Command {

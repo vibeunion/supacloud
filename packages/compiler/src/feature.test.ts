@@ -22,7 +22,10 @@ const baseModule = (spec: FeatureSpecNode): ModuleNode => ({
     file: "case.controller.ts",
     importPath: "case.controller",
   }],
-  commands: [{ className: "AcceptCommand", name: "case.accept", permission: "case.accept", transaction: "required", idempotency: "required" }],
+  commands: [{
+    className: "AcceptCommand", name: "case.accept", permission: "case.accept",
+    transaction: "required", idempotency: "required", tenantScope: "required",
+  }],
   queries: [],
   exports: [],
   featureSpec: spec,
@@ -88,7 +91,10 @@ describe("feature specs", () => {
     };
     const diagnostics = validateFeatureSpec(spec, {
       ...baseModule(spec),
-      commands: [{ className: "AcceptCommand", name: "case.accept", permission: "case.accept", transaction: "none", idempotency: "none" }],
+      commands: [{
+        className: "AcceptCommand", name: "case.accept", permission: "case.accept",
+        transaction: "none", idempotency: "none", tenantScope: "required",
+      }],
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-persistence-drift");
   });
@@ -194,6 +200,31 @@ describe("feature specs", () => {
       .toContain("feature-job-tenant-boundary");
   });
 
+  test("requires tenant-scoped commands for database features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      commands: [{
+        className: "AcceptCommand", name: "case.accept", permission: "case.accept",
+        transaction: "required", idempotency: "required", tenantScope: "none",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-command-tenant-boundary");
+  });
+
   test("generates an explicit command slice scaffold", () => {
     const spec: FeatureSpecNode = {
       name: "case",
@@ -204,5 +235,6 @@ describe("feature specs", () => {
     expect(source).toContain("defineFeatureSlice");
     expect(source).toContain("Transition1Command");
     expect(source).toContain("Implement case.accept");
+    expect(source).toContain('"tenantScope":"required"');
   });
 });

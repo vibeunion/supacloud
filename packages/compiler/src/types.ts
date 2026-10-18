@@ -324,6 +324,7 @@ export interface CommandNode {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  tenantScope?: "required" | "none";
   /** Automatically registered without manual module declaration. */
   standalone?: boolean;
   /** Infrastructure resources this command uses, with the declared operations. */

@@ -161,7 +161,7 @@
     {
       "name": "CommandNode",
       "kind": "type",
-      "signature": "export interface CommandNode {\n    rpc?: string;\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
+      "signature": "export interface CommandNode {\n    rpc?: string;\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
       "name": "CompileOptions",

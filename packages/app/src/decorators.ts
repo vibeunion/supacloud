@@ -130,6 +130,7 @@ export interface CommandOptions {
   audit?: string;
   /** Idempotency strategy, e.g. "required". */
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none";
   /** Automatically discover and register without manual module declaration. */
   standalone?: boolean;
   /** Infrastructure resources this command uses, with the operations it performs. */

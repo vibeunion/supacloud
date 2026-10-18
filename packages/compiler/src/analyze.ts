@@ -921,6 +921,9 @@ function parseModule(
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
+          ...(commandModeProp(meta, "tenantScope") === undefined ? {} : {
+            tenantScope: commandModeProp(meta, "tenantScope"),
+          }),
           ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
           ...(uses.length > 0 ? { uses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),

@@ -156,7 +156,7 @@
     {
       "name": "CommandOptions",
       "kind": "type",
-      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
+      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
     },
     {
       "name": "CommandOutcome",
