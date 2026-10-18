@@ -90,6 +90,22 @@ function arrayLength(value: unknown): number | undefined {
   return Array.isArray(value) ? value.length : undefined;
 }
 
+function validFeatureInventory(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.every((feature) => {
+    if (!isRecord(feature) || typeof feature["name"] !== "string" || feature["name"].trim() === "") return false;
+    const states = feature["states"];
+    const transitions = feature["transitions"];
+    if (!Array.isArray(states) || states.length === 0
+      || states.some((state) => typeof state !== "string" || state.trim() === "")
+      || new Set(states).size !== states.length
+      || !Array.isArray(transitions)) return false;
+    return transitions.every((transition) => isRecord(transition)
+      && typeof transition["name"] === "string" && transition["name"].trim() !== ""
+      && typeof transition["from"] === "string" && states.includes(transition["from"])
+      && typeof transition["to"] === "string" && states.includes(transition["to"]));
+  });
+}
+
 async function sha256(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
@@ -165,7 +181,7 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
   };
   try {
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
-    if (!isRecord(parsed) || parsed["version"] !== 1 || !Array.isArray(parsed["features"])) {
+    if (!isRecord(parsed) || parsed["version"] !== 1 || !validFeatureInventory(parsed["features"])) {
       throw new Error("invalid manifest");
     }
     const commands = arrayLength(parsed["commands"]);
