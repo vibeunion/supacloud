@@ -13,6 +13,7 @@ import { DEFAULT_AUTH_SETTINGS, type AuthSettings } from './settings.js'
 import { resolveRedirect } from './redirect.js'
 import { RateLimiter } from './rate-limit.js'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js'
+import { verifySolanaSignIn } from './web3.js'
 
 /** Construction-time config for {@link AuthHandler}. */
 export interface AuthConfig {
@@ -676,6 +677,30 @@ export class AuthHandler {
         if (!user) return authError(400, 'invalid_credentials', 'Invalid ID token')
         return json(200, await this.sessionFor(user, undefined, {
           amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+        }, query))
+      })
+    }
+
+    if (grantType === 'web3') {
+      if (body.chain !== 'solana' || !body.message || !body.signature) {
+        return authError(400, 'validation_failed', 'chain, message and signature are required')
+      }
+      const wallet = await verifySolanaSignIn(body.message, body.signature)
+      if (!wallet) return authError(400, 'invalid_credentials', 'Invalid Web3 credentials')
+      const userId = await this.oauth.signInWithProfile('solana', {
+        id: wallet.address,
+        metadata: { address: wallet.address, chain: 'solana' },
+      })
+      return this.db.transaction(async (query) => {
+        const result = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [userId],
+        )
+        const user = result.rows[0]
+        if (!user) return authError(400, 'invalid_credentials', 'Invalid Web3 credentials')
+        return json(200, await this.sessionFor(user, undefined, {
+          amr: [{ method: 'web3', timestamp: Math.floor(Date.now() / 1000) }],
         }, query))
       })
     }

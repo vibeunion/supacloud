@@ -214,6 +214,11 @@ export class OAuthService {
     return true
   }
 
+  /** Upsert an already verified non-OAuth identity through the shared path. */
+  async signInWithProfile(provider: string, profile: OAuthProfile): Promise<string> {
+    return this.upsertUser(provider, profile)
+  }
+
   private async verifyIdToken(
     providerName: string,
     token: string,
