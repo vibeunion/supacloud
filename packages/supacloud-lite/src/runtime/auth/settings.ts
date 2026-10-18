@@ -20,6 +20,8 @@ export interface AuthSettings {
   autoconfirm: boolean
   /** Minimum accepted password length (signup, updateUser, admin create). */
   minPasswordLength: number
+  /** Require a recent email/phone OTP before changing an existing password. */
+  requirePasswordReauthentication: boolean
   /** Configured OAuth providers the operator has switched off at runtime. */
   disabledProviders: string[]
   /** Digits in emailed OTP codes (config.toml auth.email.otp_length; 6-10). */
@@ -48,6 +50,7 @@ export const DEFAULT_AUTH_SETTINGS: AuthSettings = {
   anonymousUsers: true,
   autoconfirm: true,
   minPasswordLength: 6,
+  requirePasswordReauthentication: false,
   disabledProviders: [],
   otpLength: 6,
   otpExpirySeconds: 3600,
@@ -68,6 +71,9 @@ function sanitize(raw: Record<string, unknown>): AuthSettings {
   if (typeof raw["autoconfirm"] === 'boolean') s.autoconfirm = raw["autoconfirm"]
   if (typeof raw["minPasswordLength"] === 'number' && Number.isFinite(raw["minPasswordLength"])) {
     s.minPasswordLength = Math.max(4, Math.min(72, Math.floor(raw["minPasswordLength"])))
+  }
+  if (typeof raw["requirePasswordReauthentication"] === 'boolean') {
+    s.requirePasswordReauthentication = raw["requirePasswordReauthentication"]
   }
   if (Array.isArray(raw["disabledProviders"])) {
     s.disabledProviders = raw["disabledProviders"].filter((p: unknown): p is string => typeof p === 'string').slice(0, 50)
@@ -138,7 +144,8 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
   // Every AuthSettings key is patchable; unknown keys are rejected so a typo
   // fails loudly instead of being silently dropped by sanitize().
   const BOOL_KEYS = [
-    'disableSignup', 'anonymousUsers', 'autoconfirm', 'smsEnabled', 'smsSignupEnabled',
+    'disableSignup', 'anonymousUsers', 'autoconfirm', 'requirePasswordReauthentication',
+    'smsEnabled', 'smsSignupEnabled',
     'totpEnrollEnabled', 'totpVerifyEnabled',
   ]
   const NUMBER_KEYS = [

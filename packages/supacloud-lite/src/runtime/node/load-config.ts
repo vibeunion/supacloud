@@ -220,6 +220,10 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
 
   const minLen = getInt(auth, 'minimum_password_length')
   if (minLen !== undefined) out.minPasswordLength = minLen
+  const requireReauthentication =
+    getBool(auth, 'security_update_password_require_reauthentication')
+    ?? getBool(auth, 'password_require_reauthentication')
+  if (requireReauthentication !== undefined) out.requirePasswordReauthentication = requireReauthentication
 
   const otpLength = getInt(email, 'otp_length')
   if (otpLength !== undefined) out.otpLength = otpLength
