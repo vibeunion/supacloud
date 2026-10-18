@@ -212,6 +212,13 @@ function validFeatureInventory(
         } else if (route["command"] !== commandName) {
           return false;
         }
+        if (transition["permission"] !== undefined
+          && route["permission"] !== transition["permission"]) return false;
+        if (transition["idempotency"] !== undefined
+          && route["idempotency"] !== transition["idempotency"]) return false;
+        if (persistence !== undefined && route["idempotency"] !== "required") return false;
+        if (route["idempotency"] === "required"
+          && (route["method"] === "GET" || route["method"] === "HEAD" || route["method"] === "OPTIONS")) return false;
       }
       const job = transition["job"];
       if (job === undefined) return true;
