@@ -391,6 +391,8 @@ export interface FeatureTransitionNode {
   audit?: string;
   /** Job that continues the transition after the durable write is committed. */
   job?: string;
+  /** Explicit query tags invalidated after the transition succeeds. */
+  invalidateTags?: string[];
   persistence?: FeaturePersistenceNode;
 }
 

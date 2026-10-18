@@ -56,6 +56,7 @@ export interface ContractManifest {
       idempotency?: "required" | "none";
       audit?: string;
       job?: string;
+      invalidateTags?: string[];
       jobDetails?: {
         name: string;
         className: string;
@@ -78,6 +79,7 @@ export interface ContractManifest {
     handler: string;
     command?: string;
     permission?: string;
+    idempotency?: "required" | "none";
     requestSchemas: Partial<Record<"body" | "params" | "query" | "headers" | "cookie", string>>;
     responseSchema?: string;
     /** Status-aware response schemas; legacy responseSchema remains for compatibility. */
@@ -187,6 +189,7 @@ export function buildContractManifest(
             ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
             ...(transition.audit === undefined ? {} : { audit: transition.audit }),
             ...(transition.job === undefined ? {} : { job: transition.job }),
+            ...(transition.invalidateTags === undefined ? {} : { invalidateTags: [...transition.invalidateTags] }),
             ...(job === undefined ? {} : {
               jobDetails: {
                 name: job.name,
@@ -210,6 +213,7 @@ export function buildContractManifest(
         const command = route.command
           ? module.commands.find((candidate) => candidate.className === route.command)
           : undefined;
+        const idempotency = route.idempotency ?? command?.idempotency;
         if (command?.permission) permissions.add(command.permission);
         if (route.contract?.evidence) fixtures.add(route.contract.evidence);
         routes.push({
@@ -220,6 +224,7 @@ export function buildContractManifest(
           handler: route.handler,
           ...(route.command === undefined ? {} : { command: route.command }),
           ...(command?.permission === undefined ? {} : { permission: command.permission }),
+          ...(idempotency === undefined ? {} : { idempotency }),
           requestSchemas: Object.fromEntries(
             (["body", "params", "query", "headers", "cookie"] as const)
               .flatMap((key) => route[key] === undefined ? [] : [[key, route[key]] as const]),

@@ -139,6 +139,21 @@ describe("deterministic workload placement", () => {
     expect(formatDeliveryPlan(createDeliveryPlan(graph()))).toContain("not a build hash");
   });
 
+  test("preserves route idempotency contracts in the delivery topology", () => {
+    const module = http("orders");
+    module.controllers[0]!.routes[0] = {
+      ...module.controllers[0]!.routes[0]!,
+      method: "POST",
+      idempotency: "required",
+    };
+    const plan = successful(createDeliveryPlan(graph(module)));
+    expect(plan.targets[0]?.routes).toContainEqual(expect.objectContaining({
+      method: "POST", path: "/orders", idempotency: "required",
+    }));
+    expect(parseDeliveryPlanResult({ ok: true, plan, written: [], diagnostics: [] }))
+      .toMatchObject({ ok: true, plan });
+  });
+
   test("import closure does not expose dependency routes in the importing target", () => {
     const fixture = graph(http("orders", ["shared"]), http("shared", ["storage"]), module("storage"));
     const plan = successful(createDeliveryPlan(fixture, {

@@ -618,6 +618,26 @@ describe("SupaCloud request context", () => {
       services: {},
     })).toThrow("Idempotency-Key header is required");
   });
+
+  test("rejects invalid idempotency keys before command adapters run", async () => {
+    const request = new Request("https://example.test/cases", {
+      headers: { "idempotency-key": "contains spaces" },
+    });
+    const requestContext = await createSupaCloudRequestContext(request);
+    expect(() => requireIdempotencyKey({
+      command: {
+        className: "CreateCaseCommand",
+        name: "case.create",
+        permission: "case.create",
+        transaction: "required",
+        idempotency: "required",
+      },
+      input: { body: {}, params: {}, query: {} },
+      request,
+      requestContext,
+      services: {},
+    })).toThrow("A valid Idempotency-Key header is required");
+  });
 });
 
 describe("defaultErrorResponse", () => {

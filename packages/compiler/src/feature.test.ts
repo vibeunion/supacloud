@@ -100,6 +100,21 @@ describe("feature specs", () => {
     ]);
   });
 
+  test("rejects empty and duplicate query invalidation tags", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept",
+        invalidateTags: ["case.list", "case.list", " "],
+      }],
+    };
+    expect(validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code))
+      .toContain("feature-invalidation-tags-invalid");
+  });
+
   test("requires truthful persistence governance for feature transitions", () => {
     const spec: FeatureSpecNode = {
       name: "case",
