@@ -51,6 +51,8 @@ export interface OAuthProviderConfig {
   idTokenJwksUrl?: string
   /** Additional audience accepted for OIDC ID tokens. Defaults to the OAuth client id. */
   idTokenAudience?: string | string[]
+  /** Email domains that may resolve this provider through POST /sso. */
+  ssoDomains?: string[]
 }
 
 /** Normalized profile extracted from a provider's userinfo response. */
