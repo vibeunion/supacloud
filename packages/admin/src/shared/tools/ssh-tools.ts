@@ -1189,7 +1189,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
             postgres_password: optional(secretSchema("postgres_password"), "[install] DB password (auto-generated if empty)"),
             dashboard_password: optional(secretSchema("dashboard_password"), "[install] Console password"),
             edge_runtime: optional(stringEnum(["bun"]), "[install] Runtime (default: bun)"),
-            edge_max_body_size_mb: optional(Type.Integer({ minimum: 1, maximum: 10240 }), "[install] Max Edge Runtime upload / request body size in MB (default: 30)"),
+            edge_max_body_size_mb: optional(Type.Integer({ minimum: 1, maximum: 10240 }), "[install] Max Edge Runtime upload / request body size in MiB (default: 500)"),
             storage_type: optional(stringEnum(["juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
             transaction_id: optional(Type.String(), "[upgrade_status] UUID v4 transaction ID of a retained local-artifact upgrade"),
             version: optional(Type.String(), "[upgrade] Specific version"),
