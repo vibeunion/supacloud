@@ -24,6 +24,7 @@ import {
     buildImagorRequest,
     checkImagorHealth,
     imagorOutputContentType,
+    resolveImagorMaxBytes,
     runImagor,
     runImagorWithRequest,
 } from "../services/imagor.service";
@@ -103,7 +104,7 @@ async function runProjectVectorOperation(ref: string, operation: string, body: R
     }
 }
 
-const MAX_TRANSFORM_SOURCE_BYTES = 64 * 1024 * 1024;
+const MAX_TRANSFORM_SOURCE_BYTES = resolveImagorMaxBytes();
 
 function isValidBucketName(bucket: string): boolean {
     return /^[a-zA-Z0-9._-]+$/.test(bucket);
