@@ -53,10 +53,36 @@ describe("feature specs", () => {
         name: "accept", from: "draft", to: "missing", command: "AcceptCommand",
         permission: "case.wrong", transaction: "none",
         route: "POST /cases/:id/accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          receipt: "required", reconciliation: "none",
+        },
       }],
     };
     const codes = validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code);
-    expect(codes).toEqual(["invalid-feature-transition", "feature-governance-drift", "feature-governance-drift"]);
+    expect(codes).toEqual([
+      "invalid-feature-transition", "feature-governance-drift",
+      "feature-governance-drift", "feature-persistence-drift",
+    ]);
+  });
+
+  test("requires truthful persistence governance for feature transitions", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      commands: [{ className: "AcceptCommand", name: "case.accept", permission: "case.accept", transaction: "none", idempotency: "none" }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-persistence-drift");
   });
 
   test("generates an explicit command slice scaffold", () => {

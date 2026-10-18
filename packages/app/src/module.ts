@@ -11,6 +11,14 @@ export interface FeatureTransitionOptions<State extends string = string> {
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;
+  persistence?: FeaturePersistenceOptions;
+}
+
+export interface FeaturePersistenceOptions {
+  boundary: "database" | "external";
+  optimisticLock: "required" | "none";
+  receipt: "required" | "none";
+  reconciliation: "required" | "none";
 }
 
 export interface FeatureSpecOptions {
