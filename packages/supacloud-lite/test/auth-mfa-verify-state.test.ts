@@ -88,7 +88,7 @@ describe('Auth MFA verification state binding', () => {
     const body: { access_token: string } = await response.json()
     expect(await verifyJwt(body.access_token, jwtSecret)).toMatchObject({ sub: userId, aal: 'aal2' })
     expect((await db!.query('select status from auth.mfa_factors')).rows).toEqual([{ status: 'verified' }])
-    expect((await db!.query('select verified_at from auth.mfa_challenges')).rows[0]?.verified_at).not.toBeNull()
+    expect((await db!.query<{ verified_at: string | null }>('select verified_at from auth.mfa_challenges')).rows[0]?.verified_at).not.toBeNull()
     expect((await db!.query('select token from auth.refresh_tokens')).rows).toHaveLength(1)
   })
 })
