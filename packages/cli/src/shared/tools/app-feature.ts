@@ -185,7 +185,7 @@ export class Approve${className}Command {
 export class Refresh${className}Job {
     constructor(@Inject(JOB_CONTEXT) private readonly jobContext: unknown) {}
 
-    run(_input: ${className}RefreshJobInput): Promise<void> {
+    async run(_input: ${className}RefreshJobInput): Promise<void> {
         const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
         void context;
         throw new Error("Bind the existing Workflow/Queue adapter before dispatching ${name}.refresh");
@@ -243,6 +243,7 @@ export const ${className}Feature = defineFeatureSlice({
 });
 `,
         [`${name}.feature.test.ts`]: `import { expect, test } from "bun:test";
+import { Refresh${className}Job } from "./${name}.feature";
 import { ${className}Service } from "./${name}.service";
 
 const context = {
@@ -259,6 +260,11 @@ test("${name} rejects missing trusted tenant context before adapter execution", 
     });
     await expect(service.list({})).rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
     expect(calls).toBe(0);
+});
+
+test("${name} rejects missing trusted job context before dispatch", async () => {
+    const job = new Refresh${className}Job({});
+    await expect(job.run({ id: "example", version: 1 })).rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
 });
 
 test("${name} fails closed until verified read and durable write ports are bound", async () => {
