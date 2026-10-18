@@ -99,6 +99,25 @@ describe("feature specs", () => {
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-persistence-drift");
   });
 
+  test("requires command and permission bindings for persistent transitions", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const codes = validateFeatureSpec(spec).map((diagnostic) => diagnostic.code);
+    expect(codes).toContain("feature-command-unresolved");
+    expect(codes).toContain("feature-governance-drift");
+  });
+
   test("rejects a database lock without a version field", () => {
     const spec: FeatureSpecNode = {
       name: "case",
@@ -235,6 +254,9 @@ describe("feature specs", () => {
     expect(source).toContain("defineFeatureSlice");
     expect(source).toContain("Transition1Command");
     expect(source).toContain("Implement case.accept");
+    expect(source).toContain('"transaction":"required"');
+    expect(source).toContain('"idempotency":"required"');
+    expect(source).toContain('"audit":"case.accept"');
     expect(source).toContain('"tenantScope":"required"');
   });
 });

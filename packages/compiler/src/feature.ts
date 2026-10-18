@@ -48,6 +48,12 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
           persistence.receipt !== "required" || persistence.reconciliation !== "required")) {
         error("feature-persistence-invalid", `External transition ${transition.name} requires a receipt and reconciliation, without database optimistic locking.`);
       }
+      if (!transition.command) {
+        error("feature-command-unresolved", `Persistent transition ${transition.name} must reference a command.`);
+      }
+      if (!transition.permission?.trim()) {
+        error("feature-governance-drift", `Persistent transition ${transition.name} must declare a permission.`);
+      }
     }
     if (!module) continue;
     if (transition.persistence?.boundary === "database") {
@@ -123,12 +129,13 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
     name: spec.name, states: spec.states, tenantField: spec.tenantField ?? "tenant_id",
     transitions: Object.fromEntries(transitions.map((transition) => {
     const { name, ...options } = transition;
+    const persistence = transition.persistence ?? {
+      boundary: "database" as const, optimisticLock: "required" as const, versionField: "version",
+      tenantField: "tenant_id", stateField: "state", receipt: "required" as const, reconciliation: "none" as const,
+    };
     return [name, {
       ...options,
-      persistence: transition.persistence ?? {
-        boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",
-        receipt: "required", reconciliation: "none",
-      },
+      persistence,
     }];
     })),
   };
@@ -141,7 +148,9 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
     ...transitions.flatMap((transition) => [
       `@Command(${JSON.stringify({
         name: `${spec.name}.${transition.name}`, permission: transition.permission,
-        transaction: transition.transaction ?? "none", idempotency: transition.idempotency ?? "none", audit: transition.audit,
+        transaction: transition.transaction ?? (transition.persistence?.boundary === "external" ? "none" : "required"),
+        idempotency: transition.idempotency ?? "required",
+        audit: transition.audit ?? `${spec.name}.${transition.name}`,
         tenantScope: "required",
       })})`,
       `export class ${transition.command} {`,
