@@ -150,6 +150,7 @@ export interface CompiledRoute {
 
 export interface CompiledCommand {
   rpc?: string;
+  branches?: readonly CompiledCommandBranch[];
   className: string;
   name: string;
   permission?: string;
@@ -159,6 +160,15 @@ export interface CompiledCommand {
   /** Statically generated command aspects. */
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
+}
+
+export interface CompiledCommandBranch {
+  when: string;
+  rpc: string;
+  transaction?: "required" | "none" | string;
+  audit?: string;
+  idempotency?: "required" | "none" | string;
+  boundary?: "database" | "external";
 }
 
 export interface CompiledJob {
@@ -764,6 +774,49 @@ function missingGovernanceAdapter(
   );
 }
 
+function selectCommandBranch(command: CompiledCommand, input: CommandInvocation["input"]): CompiledCommand {
+  if (!command.branches || command.branches.length === 0) return command;
+  if (command.rpc !== undefined) {
+    throw new ApplicationError(`Command "${command.name}" declares both rpc and branches`, {
+      code: "COMMAND_BRANCHES_CONFLICT",
+    });
+  }
+  for (const branch of command.branches) {
+    const match = /^(?:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*))\s*===\s*(["'])(.*)\2$/.exec(branch.when);
+    if (!match) {
+      throw new ApplicationError(`Command "${command.name}" has an invalid branch selector`, {
+        code: "COMMAND_BRANCH_SELECTOR_INVALID",
+      });
+    }
+    const path = match[1] ?? "";
+    const parts = path.split(".");
+    const root = parts[0];
+    let value: unknown = root === "body" || root === "params" || root === "query"
+      ? input[root]
+      : input.body;
+    for (const part of root === "body" || root === "params" || root === "query" ? parts.slice(1) : parts) {
+      if (!isRecord(value)) {
+        value = undefined;
+        break;
+      }
+      value = value[part];
+    }
+    if (value === match[3]) {
+      return {
+        ...command,
+        rpc: branch.rpc,
+        transaction: branch.transaction ?? "none",
+        audit: branch.audit,
+        idempotency: branch.idempotency ?? "none",
+      };
+    }
+  }
+  throw new ApplicationError(`Command "${command.name}" has no matching RPC branch`, {
+    status: 422,
+    code: "COMMAND_BRANCH_UNMATCHED",
+  });
+}
+
 /**
  * Compose the standard command governance order:
  * authorization -> idempotency -> transaction -> audit -> handler.
@@ -774,7 +827,8 @@ export function createCommandExecutor(
   observer?: ExecutionObserver,
 ): CommandExecutor {
   return async (invocation, next) => {
-    const { command } = invocation;
+    const command = selectCommandBranch(invocation.command, invocation.input);
+    const selectedInvocation = command === invocation.command ? invocation : { ...invocation, command };
     for (const mode of [command.transaction, command.idempotency]) {
       if (mode !== undefined && mode !== "required" && mode !== "none") {
         throw new ApplicationError("Invalid command governance mode", { code: "COMMAND_MODE_INVALID" });
@@ -789,9 +843,9 @@ export function createCommandExecutor(
       }
       const event = { kind: "command" as const, operation: command.name,
         ...executionTrace(invocation.requestContext) };
-      await observeExecution(observer, { ...event, stage: "authorize" }, () => governance.authorize(invocation));
+      await observeExecution(observer, { ...event, stage: "authorize" }, () => governance.authorize(selectedInvocation));
       return observeExecution(observer, { ...event, stage: `rpc:${command.rpc}` },
-        () => adapter.execute(invocation, once(next)));
+        () => adapter.execute(selectedInvocation, once(next)));
     }
     const audit = command.audit ? governance.audit : undefined;
     const transaction = command.transaction === "required"
@@ -817,26 +871,26 @@ export function createCommandExecutor(
           kind: "command", operation: command.name, stage,
           ...executionTrace(invocation.requestContext),
         }, next);
-      await observe("authorize", () => governance.authorize(invocation));
+      await observe("authorize", () => governance.authorize(selectedInvocation));
       let execute = async () => {
         const result = await observe("handler", invokeOnce);
-        if (audit) await observe("audit", () => audit.succeeded.call(audit, invocation, result));
+        if (audit) await observe("audit", () => audit.succeeded.call(audit, selectedInvocation, result));
         return result;
       };
       const invokeOnce = once(next);
       if (command.transaction === "required") {
         if (!transaction) throw missingGovernanceAdapter(command, "transaction");
         const inner = execute;
-        execute = () => observe("transaction", () => transaction.call(governance, invocation, once(inner)));
+        execute = () => observe("transaction", () => transaction.call(governance, selectedInvocation, once(inner)));
       }
       if (command.idempotency === "required") {
         if (!idempotency) throw missingGovernanceAdapter(command, "idempotency");
         const inner = execute;
-        execute = () => observe("idempotency", () => idempotency.call(governance, invocation, once(inner)));
+        execute = () => observe("idempotency", () => idempotency.call(governance, selectedInvocation, once(inner)));
       }
       return await execute();
     } catch (error) {
-      if (audit) await audit.failed.call(audit, invocation, error);
+      if (audit) await audit.failed.call(audit, selectedInvocation, error);
       throw error;
     }
   };
@@ -982,6 +1036,39 @@ function assertCommandGovernanceReady(
     });
   }
   for (const command of compiled.commands ?? []) {
+    if (command.rpc !== undefined && command.branches !== undefined) {
+      throw new ApplicationError(`Command "${command.name}" declares both rpc and branches`, {
+        code: "COMMAND_BRANCHES_CONFLICT",
+      });
+    }
+    for (const branch of command.branches ?? []) {
+      const adapter = Object.hasOwn(governance.rpc ?? {}, branch.rpc) ? governance.rpc?.[branch.rpc] : undefined;
+      if (!adapter || typeof adapter.execute !== "function" || !isRecord(adapter.capabilities)) {
+        throw new ApplicationError(`Command "${command.name}" branch "${branch.when}" has no RPC governance adapter`, {
+          code: "COMMAND_RPC_UNCONFIGURED",
+        });
+      }
+      if (branch.audit && adapter.capabilities.audit !== true) {
+        throw new ApplicationError(`Command "${command.name}" branch "${branch.when}" has no audit capability`, {
+          code: "COMMAND_AUDIT_UNCONFIGURED",
+        });
+      }
+      if (branch.idempotency === "required" && adapter.capabilities.idempotency !== true) {
+        throw new ApplicationError(`Command "${command.name}" branch "${branch.when}" has no idempotency capability`, {
+          code: "COMMAND_IDEMPOTENCY_UNCONFIGURED",
+        });
+      }
+      if (branch.transaction === "required" && adapter.capabilities.transaction !== true) {
+        throw new ApplicationError(`Command "${command.name}" branch "${branch.when}" has no transaction capability`, {
+          code: "COMMAND_TRANSACTION_UNCONFIGURED",
+        });
+      }
+      if (branch.boundary === "external" && (branch.transaction === "required" || adapter.capabilities.transaction === true)) {
+        throw new ApplicationError(`Command "${command.name}" branch "${branch.when}" claims an external transaction`, {
+          code: "COMMAND_EXTERNAL_TRANSACTION",
+        });
+      }
+    }
     if (command.audit && command.rpc === undefined
       && (typeof governance.audit?.succeeded !== "function" || typeof governance.audit?.failed !== "function")) {
       throw new ApplicationError(`Command "${command.name}" has no audit adapter`, {
