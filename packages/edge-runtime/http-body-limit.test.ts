@@ -8,8 +8,8 @@ const mebibyte = 1024 * 1024;
 
 test("default and invalid settings preserve worker and listener limits", () => {
   for (const value of ["", "invalid", "0", "-1", "Infinity"]) {
-    expect(resolveMaxBodySizeBytes(value)).toBe(30 * mebibyte);
-    expect(resolveMaxHttpBodySizeBytes(value)).toBe(128 * mebibyte);
+    expect(resolveMaxBodySizeBytes(value)).toBe(500 * mebibyte);
+    expect(resolveMaxHttpBodySizeBytes(value)).toBe(500 * mebibyte);
   }
   expect(resolveMaxBodySizeBytes("16")).toBe(16 * mebibyte);
   expect(resolveMaxHttpBodySizeBytes("16")).toBe(128 * mebibyte);
@@ -53,6 +53,20 @@ test("real HTTP listener accepts large headers through 501 MiB and rejects one b
       expect(await probe(port, size)).toEqual({ status: 401, body: "application gate reached" });
     }
     expect((await probe(port, 501 * mebibyte + 1)).status).toBe(413);
+  } finally {
+    await app.stop(true);
+  }
+});
+
+test("default HTTP listener accepts 500 MiB headers and rejects one byte over", async () => {
+  const app = new Elysia()
+    .post("/upload", { parse: "none" }, () => new Response("application gate reached", { status: 401 }))
+    .listen({ hostname: "127.0.0.1", port: 0, maxRequestBodySize: resolveMaxHttpBodySizeBytes("") });
+  try {
+    const port = app.server?.port;
+    if (!port) throw new Error("missing test listener");
+    expect(await probe(port, 500 * mebibyte)).toEqual({ status: 401, body: "application gate reached" });
+    expect((await probe(port, 500 * mebibyte + 1)).status).toBe(413);
   } finally {
     await app.stop(true);
   }
