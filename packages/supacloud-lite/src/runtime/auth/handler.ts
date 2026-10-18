@@ -363,7 +363,7 @@ export class AuthHandler {
       data?: Record<string, unknown>
     }
 
-    if (!body.email && !body.password) {
+    if (!('email' in body) && !('password' in body)) {
       // supabase.auth.signInAnonymously()
       if (!this.settings.anonymousUsers) {
         return authError(422, 'anonymous_provider_disabled', 'Anonymous sign-ins are disabled')
