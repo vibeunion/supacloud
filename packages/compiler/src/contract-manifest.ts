@@ -211,6 +211,7 @@ export function buildContractManifest(
         const command = route.command
           ? module.commands.find((candidate) => candidate.className === route.command)
           : undefined;
+        const idempotency = route.idempotency ?? command?.idempotency;
         if (command?.permission) permissions.add(command.permission);
         if (route.contract?.evidence) fixtures.add(route.contract.evidence);
         routes.push({
@@ -221,7 +222,7 @@ export function buildContractManifest(
           handler: route.handler,
           ...(route.command === undefined ? {} : { command: route.command }),
           ...(command?.permission === undefined ? {} : { permission: command.permission }),
-          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+          ...(idempotency === undefined ? {} : { idempotency }),
           requestSchemas: Object.fromEntries(
             (["body", "params", "query", "headers", "cookie"] as const)
               .flatMap((key) => route[key] === undefined ? [] : [[key, route[key]] as const]),

@@ -126,12 +126,15 @@ export function createDeliveryPlan(
             "Give public routes unambiguous method/path contracts before splitting targets.");
         }
         publicRoutes.set(key, target.name);
+        const command = route.command === undefined ? undefined
+          : module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
+        const idempotency = route.idempotency ?? command?.idempotency;
         target.roots.push(module.name);
         target.routes.push({
           module: module.name, controller: controller.className, handler: route.handler,
           method: route.method, path,
           ...(route.command === undefined ? {} : { command: route.command }),
-          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
+          ...(idempotency === undefined ? {} : { idempotency }),
           reason: owner === undefined ? "default-http" : "explicit-module",
         });
       }
