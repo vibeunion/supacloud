@@ -2360,12 +2360,7 @@ export class AuthHandler {
         )
         linkedUser = result.rows[0]
       }
-      await query(
-        `insert into auth.identities (user_id, provider, provider_id, identity_data)
-         values ($1::uuid, 'email', $1::text, $2::jsonb)
-         on conflict (provider, provider_id) do nothing`,
-        [linkedUser.id, JSON.stringify({ sub: linkedUser.id, email })]
-      )
+      await this.ensureEmailIdentity(linkedUser, query)
       await query(
         `delete from auth.one_time_tokens
          where lower(email) = $1 and token_type = any($2::text[])`,
