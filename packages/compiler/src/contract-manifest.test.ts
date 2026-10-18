@@ -80,3 +80,54 @@ test("contract manifest preserves tenant boundaries for commands and queries", (
       queries: [{ name: "case.list", tenantScope: "required" }],
     });
 });
+
+test("contract manifest publishes the complete feature state machine and persistence policy", () => {
+  const graph: ApplicationGraph = {
+    externalTokens: [],
+    modules: [{
+      name: "cases",
+      className: "CasesModule",
+      file: "src/cases.module.ts",
+      line: 1,
+      imports: [],
+      providers: [],
+      commands: [],
+      queries: [],
+      exports: [],
+      controllers: [],
+      featureSpec: {
+        name: "case",
+        states: ["draft", "approved"],
+        tenantField: "tenant_id",
+        transitions: [{
+          name: "approve", from: "draft", to: "approved",
+          permission: "case.approve", command: "ApproveCase",
+          transaction: "required", idempotency: "required", audit: "case.approved",
+          persistence: {
+            boundary: "database", optimisticLock: "required",
+            versionField: "version", tenantField: "tenant_id", stateField: "state",
+            receipt: "required", reconciliation: "none",
+          },
+        }],
+      },
+    }],
+  };
+
+  expect(buildContractManifest(graph, { client: false, openapi: false, permissions: false }))
+    .toMatchObject({
+      features: [{
+        name: "case",
+        states: ["draft", "approved"],
+        tenantField: "tenant_id",
+        transitions: [{
+          name: "approve",
+          persistence: {
+            boundary: "database",
+            versionField: "version",
+            tenantField: "tenant_id",
+            stateField: "state",
+          },
+        }],
+      }],
+    });
+});

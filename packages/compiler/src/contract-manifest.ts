@@ -1,4 +1,4 @@
-import type { ApplicationGraph } from "./types";
+import type { ApplicationGraph, FeaturePersistenceNode } from "./types";
 import { joinRoutePaths } from "./util";
 
 export interface ContractManifest {
@@ -19,6 +19,23 @@ export interface ContractManifest {
     className: string;
     module: string;
     tenantScope?: "required" | "none";
+  }>;
+  features: Array<{
+    name: string;
+    states: string[];
+    tenantField?: string;
+    transitions: Array<{
+      name: string;
+      from: string;
+      to: string;
+      permission?: string;
+      command?: string;
+      route?: string;
+      transaction?: "required" | "none";
+      idempotency?: "required" | "none";
+      audit?: string;
+      persistence?: FeaturePersistenceNode;
+    }>;
   }>;
   routes: Array<{
     method: string;
@@ -56,6 +73,7 @@ export function buildContractManifest(
 ): ContractManifest {
   const commands: ContractManifest["commands"] = [];
   const queries: ContractManifest["queries"] = [];
+  const features: ContractManifest["features"] = [];
   const routes: ContractManifest["routes"] = [];
   const permissions = new Set<string>();
   const rpc: ContractManifest["rpc"] = [];
@@ -83,6 +101,25 @@ export function buildContractManifest(
       queries.push({
         name: query.name, className: query.className, module: module.name,
         ...(query.tenantScope === undefined ? {} : { tenantScope: query.tenantScope }),
+      });
+    }
+    if (module.featureSpec) {
+      features.push({
+        name: module.featureSpec.name,
+        states: [...module.featureSpec.states],
+        ...(module.featureSpec.tenantField === undefined ? {} : { tenantField: module.featureSpec.tenantField }),
+        transitions: module.featureSpec.transitions.map((transition) => ({
+          name: transition.name,
+          from: transition.from,
+          to: transition.to,
+          ...(transition.permission === undefined ? {} : { permission: transition.permission }),
+          ...(transition.command === undefined ? {} : { command: transition.command }),
+          ...(transition.route === undefined ? {} : { route: transition.route }),
+          ...(transition.transaction === undefined ? {} : { transaction: transition.transaction }),
+          ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
+          ...(transition.audit === undefined ? {} : { audit: transition.audit }),
+          ...(transition.persistence === undefined ? {} : { persistence: transition.persistence }),
+        })),
       });
     }
     for (const controller of module.controllers) {
@@ -120,6 +157,7 @@ export function buildContractManifest(
 
   commands.sort((left, right) => left.name.localeCompare(right.name));
   queries.sort((left, right) => left.name.localeCompare(right.name));
+  features.sort((left, right) => left.name.localeCompare(right.name));
   routes.sort((left, right) => `${left.method} ${left.path}`.localeCompare(`${right.method} ${right.path}`));
   rpc.sort((left, right) => left.command.localeCompare(right.command));
   events.sort((left, right) => left.name.localeCompare(right.name));
@@ -128,6 +166,7 @@ export function buildContractManifest(
     version: 1,
     commands,
     queries,
+    features,
     routes,
     permissions: [...permissions].sort(),
     rpc,
