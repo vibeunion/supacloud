@@ -65,7 +65,7 @@ type QueuedDispatch = {
   reject: (error: unknown) => void;
 };
 
-const DEFAULT_MAX_BODY_SIZE_MB = 500;
+const DEFAULT_MAX_BODY_SIZE_MB = 30;
 const FUNCTION_VERSION_HEADER = "x-supacloud-function-version";
 
 export function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
