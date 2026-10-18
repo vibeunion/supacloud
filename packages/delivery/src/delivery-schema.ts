@@ -7,6 +7,7 @@ const reference = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z
 const references = Type.Array(reference, { uniqueItems: true });
 const kind = Type.Union([Type.Literal("api"), Type.Literal("jobs"), Type.Literal("webhook"), Type.Literal("function")]);
 const isolation = Type.Union([Type.Literal("shared"), Type.Literal("process")]);
+const mode = Type.Union([Type.Literal("required"), Type.Literal("none")]);
 export const DeliveryFilePathSchema = Type.String({
   maxLength: 512,
   pattern: "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$",
@@ -82,6 +83,7 @@ const routeSchema = Type.Object({
   ]),
   path: Type.String(),
   command: Type.Optional(Type.String()),
+  idempotency: Type.Optional(mode),
   reason: Type.Union([Type.Literal("default-http"), Type.Literal("explicit-module")]),
 }, objectOptions);
 
