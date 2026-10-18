@@ -114,6 +114,10 @@ test("migration assessment rejects downgraded transition Job metadata", async ()
   await compileProject({ rootDir, outDir });
   await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
     version: 1, commands: [], queries: [], routes: [], permissions: [],
+    jobs: [{
+      name: "case.refresh", className: "RefreshCaseJob", module: "case",
+      input: "RefreshCaseInput", mode: "task", idempotency: "none", tenantScope: "required",
+    }],
     features: [{
       name: "case", states: ["draft", "approved"],
       transitions: [{

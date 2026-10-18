@@ -91,7 +91,7 @@ function arrayLength(value: unknown): number | undefined {
   return Array.isArray(value) ? value.length : undefined;
 }
 
-function validFeatureInventory(value: unknown): value is unknown[] {
+function validFeatureInventory(value: unknown, jobs: readonly unknown[]): value is unknown[] {
   return Array.isArray(value) && value.every((feature) => {
     if (!isRecord(feature) || typeof feature["name"] !== "string" || feature["name"].trim() === "") return false;
     const states = feature["states"];
@@ -108,13 +108,19 @@ function validFeatureInventory(value: unknown): value is unknown[] {
       const job = transition["job"];
       if (job === undefined) return true;
       const details = transition["jobDetails"];
+      const inventory = jobs.find((candidate) =>
+        isRecord(candidate) && candidate["name"] === job,
+      );
+      const contractFields = ["input", "output", "mode", "idempotency", "tenantScope"] as const;
       return typeof job === "string" && job.trim() !== ""
         && isRecord(details)
+        && isRecord(inventory)
         && details["name"] === job
         && typeof details["className"] === "string" && details["className"].trim() !== ""
         && (details["mode"] === "task" || details["mode"] === "workflow")
         && details["idempotency"] === "required"
-        && details["tenantScope"] === "required";
+        && details["tenantScope"] === "required"
+        && contractFields.every((field) => details[field] === inventory[field]);
     });
   });
 }
@@ -210,7 +216,7 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
     if (!isRecord(parsed) || parsed["version"] !== 1
       || !validJobInventory(parsed["jobs"])
-      || !validFeatureInventory(parsed["features"])) {
+      || !validFeatureInventory(parsed["features"], parsed["jobs"])) {
       throw new Error("invalid manifest");
     }
     const commands = arrayLength(parsed["commands"]);
