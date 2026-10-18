@@ -948,7 +948,10 @@ export class AuthHandler {
        where id = $1 returning *`,
       [claimedToken.user_id]
     )
-    return users.rows[0] ?? null
+    const user = users.rows[0]
+    if (!user) return null
+    await this.ensureEmailIdentity(user, query)
+    return user
   }
 
   private async findEmailTokenCandidate(
