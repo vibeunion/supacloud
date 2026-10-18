@@ -435,7 +435,7 @@ export class AuthHandler {
     await this.audit('user_signedup', { actorId: newUser.id, actorEmail: email })
     if (!autoconfirm) {
       // confirmation required: email a verification link/code; no session yet
-      await this.issueToken(email, 'otp', false, 'confirm')
+      await this.issueToken(email, 'otp', false, 'confirm', {}, new URL(req.url).searchParams.get('redirect_to'))
       return json(200, this.userJson(newUser))
     }
     return json(200, await this.sessionFor(newUser))
@@ -635,7 +635,8 @@ export class AuthHandler {
     tokenType: 'otp' | 'recovery',
     createUser: boolean,
     flavor: 'login' | 'confirm' = 'login',
-    metadata: Record<string, unknown> = {}
+    metadata: Record<string, unknown> = {},
+    requestedRedirect?: string | null
   ): Promise<Response> {
     const normalized = email.toLowerCase().trim()
     const expiry = `${this.settings.otpExpirySeconds} seconds`
@@ -684,7 +685,21 @@ export class AuthHandler {
     }
     const { user, code, linkToken } = prepared
     const kind = tokenType === 'otp' ? 'magiclink' : tokenType
-    const link = `${this.config.apiUrl}/auth/v1/verify?token=${linkToken}&type=${kind}`
+    const linkUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
+    linkUrl.searchParams.set('token', linkToken)
+    linkUrl.searchParams.set('type', kind)
+    if (requestedRedirect) {
+      linkUrl.searchParams.set(
+        'redirect_to',
+        resolveRedirect(
+          requestedRedirect,
+          this.config.siteUrl,
+          this.config.uriAllowList,
+          this.config.enforceRedirectAllowList
+        )
+      )
+    }
+    const link = linkUrl.toString()
     await this.config.mailer.send({
       to: normalized,
       subject: tokenType === 'recovery' ? 'Reset your password' : flavor === 'confirm' ? 'Confirm your email' : 'Your login code',
@@ -717,7 +732,14 @@ export class AuthHandler {
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email or phone is required')
-    return this.limit('otp', req) ?? this.issueToken(email, 'otp', body.create_user !== false, 'login', recordValue(body.data))
+    return this.limit('otp', req) ?? this.issueToken(
+      email,
+      'otp',
+      body.create_user !== false,
+      'login',
+      recordValue(body.data),
+      new URL(req.url).searchParams.get('redirect_to')
+    )
   }
 
   private async issuePhoneToken(
@@ -923,7 +945,7 @@ export class AuthHandler {
     const body = (await req.json().catch(() => ({}))) as { email?: string }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
-    return this.issueToken(email, 'recovery', false)
+    return this.issueToken(email, 'recovery', false, 'login', {}, new URL(req.url).searchParams.get('redirect_to'))
   }
 
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
