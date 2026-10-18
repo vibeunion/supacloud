@@ -373,6 +373,15 @@ export interface FeatureTransitionNode {
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;
+  persistence?: FeaturePersistenceNode;
+}
+
+export interface FeaturePersistenceNode {
+  boundary: "database" | "external";
+  optimisticLock: "required" | "none";
+  versionField?: string;
+  receipt: "required" | "none";
+  reconciliation: "required" | "none";
 }
 
 export interface FeatureSpecNode {
