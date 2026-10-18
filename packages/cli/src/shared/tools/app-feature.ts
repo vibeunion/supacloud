@@ -119,6 +119,7 @@ import type { ${className}ApproveInput, ${className}ListInput, ${className}Resul
 export const featureSpec = defineFeatureSpec({
     name: ${JSON.stringify(name)},
     states: ["draft", "approved"],
+    tenantField: "tenant_id",
     transitions: {
         approve: {
             from: "draft", to: "approved", command: "Approve${className}Command",

@@ -49,6 +49,7 @@ describe("feature specs", () => {
     const spec: FeatureSpecNode = {
       name: "case",
       states: ["draft", "accepted"],
+      tenantField: "tenant_id",
       transitions: [{
         name: "accept", from: "draft", to: "missing", command: "AcceptCommand",
         permission: "case.wrong", transaction: "none",
@@ -73,6 +74,7 @@ describe("feature specs", () => {
     const spec: FeatureSpecNode = {
       name: "case",
       states: ["draft", "accepted"],
+      tenantField: "tenant_id",
       transitions: [{
         name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
         persistence: {
@@ -95,6 +97,7 @@ describe("feature specs", () => {
     const spec: FeatureSpecNode = {
       name: "case",
       states: ["draft", "accepted"],
+      tenantField: "tenant_id",
       transitions: [{
         name: "accept", from: "draft", to: "accepted",
         persistence: {
@@ -111,6 +114,7 @@ describe("feature specs", () => {
     const spec: FeatureSpecNode = {
       name: "case",
       states: ["draft", "accepted"],
+      tenantField: "tenant_id",
       transitions: [{
         name: "accept", from: "draft", to: "accepted",
         persistence: {

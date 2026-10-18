@@ -381,6 +381,31 @@ export const value: number = "wrong";`,
     },
   },
 });`,
+  SC6112: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant.id",
+  transitions: {},
+});`,
+  SC6113: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "account_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

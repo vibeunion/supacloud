@@ -1040,6 +1040,7 @@ function parseFeatureSpec(
   };
   if (!ts.isObjectLiteralExpression(input)) return invalid();
   const name = stringLiteralProp(input, "name");
+  const tenantField = stringLiteralProp(input, "tenantField");
   const statesExpr = getProp(input, "states");
   const transitionObject = getProp(input, "transitions");
   if (!name || !statesExpr || !ts.isArrayLiteralExpression(statesExpr) ||
@@ -1087,7 +1088,12 @@ function parseFeatureSpec(
       ...(persistence === undefined ? {} : { persistence }),
     });
   }
-  return { name, states, transitions, file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input) };
+  return {
+    name, states,
+    ...(tenantField === undefined ? {} : { tenantField }),
+    transitions,
+    file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input),
+  };
 }
 
 function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersistenceNode | undefined {

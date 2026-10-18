@@ -14,6 +14,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     spec.states.some((state) => !state.trim()) || new Set(spec.states).size !== spec.states.length) {
     error("invalid-feature-states", "Feature name and states must be non-empty; states must be unique.");
   }
+  if (spec.tenantField !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(spec.tenantField)) {
+    error("feature-tenant-boundary-invalid", `Feature ${spec.name} declares an unsafe tenant field.`);
+  }
   const names = new Set<string>();
   for (const transition of spec.transitions) {
     if (!transition.name.trim() || names.has(transition.name)) {
@@ -35,6 +38,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
           new Set([persistence.tenantField, persistence.versionField, persistence.stateField]).size !== 3 ||
           persistence.receipt !== "required" || persistence.reconciliation !== "none")) {
         error("feature-persistence-invalid", `Database transition ${transition.name} requires distinct safe tenant/version/state fields, optimistic locking, and a receipt, without reconciliation.`);
+      }
+      if (persistence.boundary === "database" && spec.tenantField !== persistence.tenantField) {
+        error("feature-tenant-boundary-drift", `Database transition ${transition.name} tenant field must match Feature ${spec.name} tenantField.`);
       }
       if (persistence.boundary === "external" &&
         (persistence.optimisticLock !== "none" || persistence.versionField !== undefined || persistence.tenantField !== undefined ||
@@ -98,7 +104,9 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
   if (transitions.some((transition) => transition.route)) {
     throw new Error("Generate the command slice first; existing HTTP routes require explicit schema and handler implementations.");
   }
-  const sourceSpec = { name: spec.name, states: spec.states, transitions: Object.fromEntries(transitions.map((transition) => {
+  const sourceSpec = {
+    name: spec.name, states: spec.states, tenantField: spec.tenantField ?? "tenant_id",
+    transitions: Object.fromEntries(transitions.map((transition) => {
     const { name, ...options } = transition;
     return [name, {
       ...options,
@@ -107,7 +115,8 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
         receipt: "required", reconciliation: "none",
       },
     }];
-  })) };
+    })),
+  };
   return [
     'import { Command, defineFeatureSlice, defineFeatureSpec } from "@supacloud/app";',
     "",

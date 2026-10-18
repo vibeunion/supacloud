@@ -576,7 +576,7 @@
     {
       "name": "FeatureSpecNode",
       "kind": "type",
-      "signature": "export interface FeatureSpecNode {\n    name: string;\n    states: string[];\n    transitions: FeatureTransitionNode[];\n    file?: string;\n    line?: number;\n}"
+      "signature": "export interface FeatureSpecNode {\n    name: string;\n    states: string[];\n    tenantField?: string;\n    transitions: FeatureTransitionNode[];\n    file?: string;\n    line?: number;\n}"
     },
     {
       "name": "FeatureTransitionNode",

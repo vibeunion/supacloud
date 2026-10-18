@@ -389,6 +389,7 @@ export interface FeaturePersistenceNode {
 export interface FeatureSpecNode {
   name: string;
   states: string[];
+  tenantField?: string;
   transitions: FeatureTransitionNode[];
   file?: string;
   line?: number;

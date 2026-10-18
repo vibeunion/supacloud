@@ -27,6 +27,7 @@ export interface FeaturePersistenceOptions {
 export interface FeatureSpecOptions {
   name: string;
   states: readonly string[];
+  tenantField?: string;
   transitions: Readonly<Record<string, FeatureTransitionOptions>>;
 }
 
