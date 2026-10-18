@@ -522,6 +522,16 @@ reached, and no workspace files were injected. The missing template must be
 released normally before that exact-version gate can pass; a safe source merge
 and completed installed-customer acceptance are separate decisions.
 
+On 2026-10-18 the exact published consumer gate passed with CLI `0.103.7` and
+Lite `0.31.3`. Registry and frozen-offline installation, generated contracts,
+consumer types, both installed execution-context entry points, read-only and
+malformed-input rejection, client state behavior, durable approval, restart and
+replay, permission denial, attachment upload and worker processing, and
+read-only receipt recovery all passed against native PostgreSQL. The report
+records `workspaceOverrides: false` and `livePlatformAcceptance: false`; the
+identity is a local signed fixture, not live SupAuth, and deployment or
+full-platform recovery remains outside this gate.
+
 ### Post-merge publication ordering repair (2026-10-16)
 
 PR #1950 merged as `aa1737a68`; this does not prove npm publication.
