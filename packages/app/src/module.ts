@@ -17,6 +17,7 @@ export interface FeatureTransitionOptions<State extends string = string> {
 export interface FeaturePersistenceOptions {
   boundary: "database" | "external";
   optimisticLock: "required" | "none";
+  versionField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }

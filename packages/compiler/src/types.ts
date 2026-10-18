@@ -379,6 +379,7 @@ export interface FeatureTransitionNode {
 export interface FeaturePersistenceNode {
   boundary: "database" | "external";
   optimisticLock: "required" | "none";
+  versionField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }

@@ -501,7 +501,7 @@
     {
       "name": "FeaturePersistenceOptions",
       "kind": "type",
-      "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
+      "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
     },
     {
       "name": "FeatureSpecOptions",
