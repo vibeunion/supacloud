@@ -92,6 +92,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "command-transaction-unsupported": { code: "SC4026", docsUrl: "https://supacloud.dev/errors/SC4026" },
   "command-reconcile-required": { code: "SC4028", docsUrl: "https://supacloud.dev/errors/SC4028" },
   "invalid-route-contract": { code: "SC3020", docsUrl: "https://supacloud.dev/errors/SC3020" },
+  "invalid-route-idempotency": { code: "SC3028", docsUrl: "https://supacloud.dev/errors/SC3028" },
   "route-contract-required": { code: "SC3021", docsUrl: "https://supacloud.dev/errors/SC3021" },
   "route-contract-unverified": { code: "SC3022", docsUrl: "https://supacloud.dev/errors/SC3022" },
   "route-contract-evidence-required": { code: "SC3023", docsUrl: "https://supacloud.dev/errors/SC3023" },
@@ -570,6 +571,14 @@ export function validateGraph(
           error("invalid-delete-body-opt-in",
             `Route ${controller.className}.${route.handler} allowDeleteBody requires DELETE and an explicit body schema.`,
             controller.file);
+        }
+        if (route.idempotency === "required"
+          && (route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS")) {
+          error("invalid-route-idempotency",
+            `Route ${controller.className}.${route.handler} cannot require idempotency on HTTP ${route.method}.`,
+            controller.file,
+            undefined,
+            `Use idempotency: "required" only on a mutation route.`);
         }
         if (route.parse === "none" && (route.body || route.hasBodyBinding || route.contract?.body !== "domain" || !route.contract.evidence?.trim())) {
           error("invalid-raw-body-contract",
