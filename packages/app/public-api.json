@@ -156,7 +156,7 @@
     {
       "name": "CommandOptions",
       "kind": "type",
-      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
+      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    branches?: CommandBranchOptions[];\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
     },
     {
       "name": "CommandOutcome",
@@ -186,7 +186,7 @@
     {
       "name": "CommandRuntimeDescriptor",
       "kind": "type",
-      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n    readonly tenantScope?: CommandRuntimeMode | string;\n}"
+      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly branches?: readonly CommandRuntimeBranch[];\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n    readonly tenantScope?: CommandRuntimeMode | string;\n}"
     },
     {
       "name": "CommandRuntimeGovernance",

@@ -37,8 +37,8 @@ test("persistent command profile accepts database and external adapters with tru
 test("compiler defaults require persistent command governance", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-default-governance-"));
   try {
-    await writeFixtureProject(root, { "command.ts": `
-import { Module, Command } from "@supacloud/app";
+    await writeFixtureProject(root, { "runtime.ts": RUNTIME_SOURCE, "command.ts": `
+import { Module, Command } from "./runtime";
 @Command({ name: "unsafe.run", permission: "unsafe:run" })
 export class UnsafeCommand {}
 @Module({ name: "unsafe", commands: [UnsafeCommand] })
@@ -56,6 +56,47 @@ test("external effects cannot acquire transaction guarantees from metadata", () 
   } });
   expect(diagnostics.some((item) => item.code === "command-external-transaction"
     && item.errorCode === "SC4021" && item.severity === "error")).toBe(true);
+});
+
+test("conditional command branches preserve independent adapters and governance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-command-branches-"));
+  try {
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"),
+      process.platform === "win32" ? "junction" : "dir");
+    await writeFixtureProject(root, { "runtime.ts": RUNTIME_SOURCE, "command.ts": `
+import { Module, Command } from "./runtime";
+@Command({
+  name: "config.resource.save",
+  permission: "config.save",
+  branches: [
+    { when: 'resource === "a"', rpc: "save_a", transaction: "required", audit: "config.a.saved", idempotency: "required", boundary: "database" },
+    { when: 'resource === "b"', rpc: "save_b", transaction: "none", audit: "config.b.saved", idempotency: "required", boundary: "external" },
+  ],
+})
+export class SaveConfig {}
+@Module({ name: "config", commands: [SaveConfig] })
+export class ConfigModule {}
+` });
+    const options = {
+      rootDir: root, outDir: join(root, "generated"),
+      commandCapabilities: {
+        requirePersistentAdapters: true, permission: true,
+        rpc: {
+          save_a: { boundary: "database" as const, audit: true, transaction: true, idempotency: true },
+          save_b: { boundary: "external" as const, audit: true, transaction: false, idempotency: true, reconcile: true },
+        },
+      },
+    };
+    const result = await compileProject(options);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(result.graph.modules[0]?.commands[0]?.branches).toEqual([
+      expect.objectContaining({ when: 'resource === "a"', rpc: "save_a", transaction: "required" }),
+      expect.objectContaining({ when: 'resource === "b"', rpc: "save_b", boundary: "external" }),
+    ]);
+    const generated = await Bun.file(join(root, "generated/application.ts")).text();
+    expect(generated).toContain('"rpc":"save_a"');
+    expect(generated).toContain('"rpc":"save_b"');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("persistent profile rejects unproven adapters and weak command policy", () => {

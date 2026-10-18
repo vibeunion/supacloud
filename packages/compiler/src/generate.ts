@@ -104,6 +104,7 @@ const INTERFACES = `export interface CompiledRoute {
 
 export interface CompiledCommand {
   rpc?: string;
+  branches?: readonly CompiledCommandBranch[];
   className: string;
   name: string;
   permission: string;
@@ -114,6 +115,15 @@ export interface CompiledCommand {
   standalone?: boolean;
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
+}
+
+export interface CompiledCommandBranch {
+  when: string;
+  rpc: string;
+  transaction?: "required" | "none" | string;
+  audit?: string;
+  idempotency?: "required" | "none" | string;
+  boundary?: "database" | "external";
 }
 
 export interface CompiledJob {
@@ -431,6 +441,7 @@ export function renderApplication(
     name: command.name,
     permission: command.permission ?? null,
     rpc: command.rpc ?? null,
+    branches: command.branches ?? [],
     transaction: command.transaction ?? null,
     audit: command.audit ?? null,
     idempotency: command.idempotency ?? null,
@@ -911,6 +922,9 @@ class ModuleGenerator {
         `idempotency: ${JSON.stringify(command.idempotency)}`,
         ...(command.tenantScope ? [`tenantScope: ${JSON.stringify(command.tenantScope)}`] : []),
         ...(command.rpc ? [`rpc: ${JSON.stringify(command.rpc)}`] : []),
+        ...(command.branches && command.branches.length > 0
+          ? [`branches: ${JSON.stringify(command.branches)}`]
+          : []),
         ...(command.standalone ? ["standalone: true"] : []),
         ...(command.aspects && command.aspects.length > 0
           ? [`aspects: ${this.renderAspects(command.aspects)}`, `aspectPipeline: ${this.renderAspectPipeline(command.aspects)}`]

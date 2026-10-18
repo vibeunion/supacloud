@@ -7,6 +7,7 @@ import type {
   AspectRefNode,
   CachedModuleEntry,
   CommandNode,
+  CommandBranchNode,
   ControllerNode,
   DependencyGraphCache,
   Diagnostic,
@@ -497,6 +498,7 @@ export async function analyzeProject(
         if (meta && booleanProp(meta, "standalone")) {
           const permission = stringLiteralProp(meta, "permission");
           const rpc = checkedRpc(meta, ctx);
+          const branches = checkedBranches(meta, ctx);
           const audit = stringLiteralProp(meta, "audit");
           const standaloneName = stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name;
           const standaloneUses = parseInfraResourceUseRefs(
@@ -513,6 +515,7 @@ export async function analyzeProject(
             name: standaloneName,
             ...(permission === undefined ? {} : { permission }),
             ...(rpc === undefined ? {} : { rpc }),
+            ...(branches === undefined ? {} : { branches }),
             transaction: checkedCommandMode(meta, "transaction", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             ...(audit === undefined ? {} : { audit }),
             idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
@@ -903,6 +906,7 @@ function parseModule(
         );
         const permission = stringLiteralProp(meta, "permission");
         const rpc = checkedRpc(meta, ctx);
+        const branches = checkedBranches(meta, ctx);
         const audit = stringLiteralProp(meta, "audit");
         const commandName = stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>";
         const uses = parseInfraResourceUseRefs(
@@ -919,6 +923,7 @@ function parseModule(
           name: commandName,
           ...(permission === undefined ? {} : { permission }),
           ...(rpc === undefined ? {} : { rpc }),
+          ...(branches === undefined ? {} : { branches }),
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
@@ -2779,6 +2784,74 @@ function checkedRpc(meta: ObjectLiteralExpression, ctx: AnalysisContext): string
     message: "Command rpc must be a non-empty string literal identifying a configured adapter.",
     suggestion: "Declare a named RPC adapter and its tested persistence capabilities." });
   return undefined;
+}
+
+function checkedBranches(meta: ObjectLiteralExpression, ctx: AnalysisContext): CommandBranchNode[] | undefined {
+  const expression = getProp(meta, "branches");
+  if (!expression) return undefined;
+  if (!ts.isArrayLiteralExpression(expression)) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "invalid-command-branches",
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+      message: "Command branches must be an explicit object array.",
+      suggestion: "Declare each branch as { when, rpc, transaction, audit, idempotency, boundary }.",
+    });
+    return undefined;
+  }
+  const branches: CommandBranchNode[] = [];
+  for (const item of expression.elements) {
+    if (!ts.isObjectLiteralExpression(item)) {
+      ctx.diagnostics.push({
+        severity: "error",
+        code: "invalid-command-branches",
+        file: sourcePath(ctx.rootDir, item.getSourceFile().fileName),
+        line: lineOf(item),
+        message: "Command branches entries must be object literals.",
+      });
+      continue;
+    }
+    const when = stringLiteralProp(item, "when");
+    const rpc = stringLiteralProp(item, "rpc");
+    const transaction = checkedCommandMode(item, "transaction", ctx, "command branch") ?? "none";
+    const audit = stringLiteralProp(item, "audit");
+    const idempotency = checkedCommandMode(item, "idempotency", ctx, "command branch") ?? "none";
+    const boundary = stringLiteralProp(item, "boundary");
+    const validBoundary = boundary === undefined || boundary === "database" || boundary === "external";
+    const validWhen = when !== undefined && /^(?:[A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)*\s*===\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')$/.test(when);
+    if (!when || !validWhen || !rpc?.trim() || !validBoundary) {
+      ctx.diagnostics.push({
+        severity: "error",
+        code: "invalid-command-branches",
+        file: sourcePath(ctx.rootDir, item.getSourceFile().fileName),
+        line: lineOf(item),
+        message: "Command branches require a restricted equality selector, a non-empty rpc, and a valid boundary.",
+        suggestion: "Use when: 'resource === \"value\"' (or body.resource/params.resource/query.resource), plus a named RPC adapter.",
+      });
+      continue;
+    }
+    branches.push({
+      when,
+      rpc,
+      transaction,
+      ...(audit === undefined ? {} : { audit }),
+      idempotency,
+      ...(boundary === undefined ? {} : { boundary }),
+    });
+  }
+  if (branches.length === 0) return [];
+  if (new Set(branches.map((branch) => branch.when)).size !== branches.length) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "duplicate-command-branch",
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+      message: "Command branches must use distinct selectors.",
+      suggestion: "Make each branch selector mutually distinct.",
+    });
+  }
+  return branches;
 }
 
 /**

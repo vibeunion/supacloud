@@ -318,6 +318,7 @@ export interface ControllerNode {
 
 export interface CommandNode {
   rpc?: string;
+  branches?: CommandBranchNode[];
   className: string;
   name: string;
   permission?: string;
@@ -331,6 +332,15 @@ export interface CommandNode {
   uses?: InfraResourceUseRef[];
   /** Explicit aspects applied around this command. */
   aspects?: AspectRefNode[];
+}
+
+export interface CommandBranchNode {
+  when: string;
+  rpc: string;
+  transaction: "required" | "none";
+  audit?: string;
+  idempotency: "required" | "none";
+  boundary?: "database" | "external";
 }
 
 export interface JobNode {

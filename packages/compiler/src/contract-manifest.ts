@@ -9,6 +9,14 @@ export interface ContractManifest {
     module: string;
     permission?: string;
     rpc?: string;
+    branches?: Array<{
+      when: string;
+      adapter: string;
+      transaction: "required" | "none";
+      idempotency: "required" | "none";
+      auditEvent?: string;
+      boundary?: "database" | "external";
+    }>;
     transaction: "required" | "none";
     idempotency: "required" | "none";
     tenantScope?: "required" | "none";
@@ -110,13 +118,29 @@ export function buildContractManifest(
     for (const command of module.commands) {
       if (command.permission) permissions.add(command.permission);
       if (command.rpc) rpc.push({ command: command.name, adapter: command.rpc });
+      for (const branch of command.branches ?? []) {
+        rpc.push({ command: `${command.name} [${branch.when}]`, adapter: branch.rpc });
+      }
       if (command.audit) events.push({ name: command.audit, source: "command.audit", command: command.name });
+      for (const branch of command.branches ?? []) {
+        if (branch.audit) events.push({ name: branch.audit, source: "command.branch.audit", command: command.name });
+      }
       commands.push({
         name: command.name,
         className: command.className,
         module: module.name,
         ...(command.permission === undefined ? {} : { permission: command.permission }),
         ...(command.rpc === undefined ? {} : { rpc: command.rpc }),
+        ...(command.branches === undefined ? {} : {
+          branches: command.branches.map((branch) => ({
+            when: branch.when,
+            adapter: branch.rpc,
+            transaction: branch.transaction,
+            idempotency: branch.idempotency,
+            ...(branch.audit === undefined ? {} : { auditEvent: branch.audit }),
+            ...(branch.boundary === undefined ? {} : { boundary: branch.boundary }),
+          })),
+        }),
         transaction: command.transaction,
         idempotency: command.idempotency,
         ...(command.tenantScope === undefined ? {} : { tenantScope: command.tenantScope }),
