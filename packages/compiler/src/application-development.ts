@@ -201,6 +201,7 @@ export function createApplicationDevelopmentContext(
         const candidates = module.commands.filter(command => command.className === route.command || command.name === route.command);
         const commandNode = candidates.length === 1 ? candidates[0] : undefined;
         const command = commandNode?.name;
+        const idempotency = route.idempotency ?? commandNode?.idempotency;
         const kinds = schemaKinds(route);
         routes.push({
           module: module.name,
@@ -209,8 +210,7 @@ export function createApplicationDevelopmentContext(
           controller: controller.className,
           handler: route.handler,
           ...(command === undefined ? {} : { command }),
-          ...(route.idempotency ?? commandNode?.idempotency) === undefined
-            ? {} : { idempotency: route.idempotency ?? commandNode?.idempotency },
+          ...(idempotency === undefined ? {} : { idempotency }),
           aspects: (route.aspects ?? []).map((aspect) => aspect.name),
           ...(kinds === undefined ? {} : { schemaKinds: kinds }),
         });
