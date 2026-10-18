@@ -20,6 +20,16 @@ export interface ContractManifest {
     module: string;
     tenantScope?: "required" | "none";
   }>;
+  jobs: Array<{
+    name: string;
+    className: string;
+    module: string;
+    input?: string;
+    output?: string;
+    mode?: "task" | "workflow";
+    idempotency?: "required" | "none";
+    tenantScope?: "required" | "none";
+  }>;
   features: Array<{
     name: string;
     states: string[];
@@ -83,6 +93,7 @@ export function buildContractManifest(
 ): ContractManifest {
   const commands: ContractManifest["commands"] = [];
   const queries: ContractManifest["queries"] = [];
+  const jobs: ContractManifest["jobs"] = [];
   const features: ContractManifest["features"] = [];
   const routes: ContractManifest["routes"] = [];
   const permissions = new Set<string>();
@@ -111,6 +122,18 @@ export function buildContractManifest(
       queries.push({
         name: query.name, className: query.className, module: module.name,
         ...(query.tenantScope === undefined ? {} : { tenantScope: query.tenantScope }),
+      });
+    }
+    for (const job of module.jobs ?? []) {
+      jobs.push({
+        name: job.name,
+        className: job.className,
+        module: module.name,
+        ...(job.input === undefined ? {} : { input: job.input }),
+        ...(job.output === undefined ? {} : { output: job.output }),
+        ...(job.mode === undefined ? {} : { mode: job.mode }),
+        ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
+        ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),
       });
     }
     if (module.featureSpec) {
@@ -183,6 +206,7 @@ export function buildContractManifest(
 
   commands.sort((left, right) => left.name.localeCompare(right.name));
   queries.sort((left, right) => left.name.localeCompare(right.name));
+  jobs.sort((left, right) => left.name.localeCompare(right.name));
   features.sort((left, right) => left.name.localeCompare(right.name));
   routes.sort((left, right) => `${left.method} ${left.path}`.localeCompare(`${right.method} ${right.path}`));
   rpc.sort((left, right) => left.command.localeCompare(right.command));
@@ -192,6 +216,7 @@ export function buildContractManifest(
     version: 1,
     commands,
     queries,
+    jobs,
     features,
     routes,
     permissions: [...permissions].sort(),

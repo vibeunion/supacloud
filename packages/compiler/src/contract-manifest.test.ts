@@ -121,6 +121,16 @@ test("contract manifest publishes the complete feature state machine and persist
 
   expect(buildContractManifest(graph, { client: false, openapi: false, permissions: false }))
     .toMatchObject({
+      jobs: [{
+        name: "case.refresh",
+        className: "RefreshCaseJob",
+        module: "cases",
+        input: "RefreshCaseInput",
+        output: "RefreshCaseOutput",
+        mode: "workflow",
+        idempotency: "required",
+        tenantScope: "required",
+      }],
       features: [{
         name: "case",
         states: ["draft", "approved"],

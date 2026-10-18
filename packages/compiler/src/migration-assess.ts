@@ -59,6 +59,7 @@ export interface MigrationAssessmentResult {
       sha256?: string;
       version?: number;
       commands?: number;
+      jobs?: number;
       routes?: number;
       permissions?: number;
       features?: number;
@@ -115,6 +116,20 @@ function validFeatureInventory(value: unknown): value is unknown[] {
         && details["idempotency"] === "required"
         && details["tenantScope"] === "required";
     });
+  });
+}
+
+function validJobInventory(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.every((job) => {
+    if (!isRecord(job)
+      || typeof job["name"] !== "string" || job["name"].trim() === ""
+      || typeof job["className"] !== "string" || job["className"].trim() === ""
+      || typeof job["module"] !== "string" || job["module"].trim() === "") return false;
+    if (job["input"] !== undefined && (typeof job["input"] !== "string" || job["input"].trim() === "")) return false;
+    if (job["output"] !== undefined && (typeof job["output"] !== "string" || job["output"].trim() === "")) return false;
+    if (job["mode"] !== undefined && job["mode"] !== "task" && job["mode"] !== "workflow") return false;
+    if (job["idempotency"] !== undefined && job["idempotency"] !== "required" && job["idempotency"] !== "none") return false;
+    return job["tenantScope"] === undefined || job["tenantScope"] === "required" || job["tenantScope"] === "none";
   });
 }
 
@@ -193,10 +208,13 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
   };
   try {
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
-    if (!isRecord(parsed) || parsed["version"] !== 1 || !validFeatureInventory(parsed["features"])) {
+    if (!isRecord(parsed) || parsed["version"] !== 1
+      || !validJobInventory(parsed["jobs"])
+      || !validFeatureInventory(parsed["features"])) {
       throw new Error("invalid manifest");
     }
     const commands = arrayLength(parsed["commands"]);
+    const jobs = arrayLength(parsed["jobs"]);
     const routes = arrayLength(parsed["routes"]);
     const permissions = arrayLength(parsed["permissions"]);
     const features = arrayLength(parsed["features"]);
@@ -206,6 +224,7 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
       sha256: await sha256(contractsManifestPath),
       version: 1,
       ...(commands === undefined ? {} : { commands }),
+      ...(jobs === undefined ? {} : { jobs }),
       ...(routes === undefined ? {} : { routes }),
       ...(permissions === undefined ? {} : { permissions }),
       ...(features === undefined ? {} : { features }),

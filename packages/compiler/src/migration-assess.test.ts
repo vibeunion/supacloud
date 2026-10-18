@@ -48,6 +48,7 @@ test("migration assessment is read-only and does not require SSR", async () => {
   expect(result.rendering).toMatchObject({ selected: "browser", ssrRequired: false });
   expect(result.rendering.supportedModes).toContain("ssr");
   expect(result.artifacts.contractsManifest.features).toBe(0);
+  expect(result.artifacts.contractsManifest.jobs).toBe(0);
 });
 
 test("migration assessment reports missing evidence without prescribing SSR", async () => {
