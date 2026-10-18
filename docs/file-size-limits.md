@@ -52,3 +52,9 @@ source and `max_bytes` output filtering. Set
 `SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES` to a positive byte count up to
 524288000 to lower that limit for the service, then restart it. This is an
 operator limit; URL parameters cannot raise it.
+
+Management API standard Storage uploads also advertise and enforce a 500 MiB
+default. `STORAGE_UPLOAD_MAX_BYTES` can lower it; the effective value is never
+higher than `MANAGEMENT_API_MAX_REQUEST_BODY_SIZE`, because the HTTP listener
+must be able to receive the request. TUS uploads use the separate
+`TUS_MAX_SIZE` setting, whose default is also 500 MiB.

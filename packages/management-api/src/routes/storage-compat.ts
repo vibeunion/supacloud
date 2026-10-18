@@ -61,7 +61,14 @@ import {
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 const DEFAULT_TUS_MAX_SIZE_BYTES = 500 * 1024 * 1024;
-const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
+const DEFAULT_STORAGE_UPLOAD_MAX_BYTES = 500 * 1024 * 1024;
+const configuredStorageUploadMax = Number(process.env.STORAGE_UPLOAD_MAX_BYTES);
+const STORAGE_UPLOAD_MAX_BYTES = Math.min(
+    config.maxRequestBodySize,
+    Number.isSafeInteger(configuredStorageUploadMax) && configuredStorageUploadMax > 0
+        ? configuredStorageUploadMax
+        : DEFAULT_STORAGE_UPLOAD_MAX_BYTES,
+);
 const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || DEFAULT_TUS_MAX_SIZE_BYTES);
 const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS_MAX_SIZE, 16 * 1024 * 1024));
 const STORAGE_BATCH_CONCURRENCY = Math.max(1, Number(process.env.STORAGE_BATCH_CONCURRENCY || 12));
