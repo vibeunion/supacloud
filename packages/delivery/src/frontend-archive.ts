@@ -4,9 +4,9 @@ export const FRONTEND_ARCHIVE_FORMAT = "tar.zst" as const;
 export const FRONTEND_ARCHIVE_RELEASE_SCHEMA = "supacloud.frontend-release.v2" as const;
 export const FRONTEND_ARCHIVE_CONTENT_TYPE = "application/vnd.supacloud.frontend.tar+zstd";
 export const FRONTEND_ARCHIVE_FILENAME = "archive.tar.zst";
-export const FRONTEND_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
+export const FRONTEND_ARCHIVE_MAX_BYTES = 500 * 1024 * 1024;
 export const FRONTEND_ARCHIVE_MAX_FILES = 10_000;
-export const FRONTEND_ARCHIVE_MAX_SOURCE_BYTES = 300 * 1024 * 1024;
+export const FRONTEND_ARCHIVE_MAX_SOURCE_BYTES = 500 * 1024 * 1024;
 export const FRONTEND_ARCHIVE_MAX_TAR_BYTES = FRONTEND_ARCHIVE_MAX_SOURCE_BYTES + FRONTEND_ARCHIVE_MAX_FILES * 2048 + 1024;
 
 export interface FrontendArchiveEntry {

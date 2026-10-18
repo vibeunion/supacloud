@@ -182,6 +182,18 @@ describe("portable command governance", () => {
     await assert.rejects(Promise.resolve(run(invocation({ transaction: "auto" }), () => 0)), code("COMMAND_MODE_INVALID"));
   });
 
+  test("tenant-scoped commands fail before authorization without trusted feature context", async () => {
+    let authorized = false;
+    const run = createCommandPipeline({
+      authorize: () => { authorized = true; },
+    });
+    await assert.rejects(
+      Promise.resolve(run(invocation({ tenantScope: "required" }), () => 0)),
+      code("COMMAND_TENANT_CONTEXT_REQUIRED"),
+    );
+    assert.equal(authorized, false);
+  });
+
   test("success audit is inside rollback and failure audit follows", async () => {
     const trace: string[] = [];
     const failure = new Error("audit unavailable");
