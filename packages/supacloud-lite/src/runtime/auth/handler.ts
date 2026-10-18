@@ -1619,11 +1619,23 @@ export class AuthHandler {
         email?: string
         password?: string
         email_confirm?: boolean
+        phone?: string
+        phone_confirm?: boolean
+        ban_duration?: string
         user_metadata?: Record<string, unknown>
         app_metadata?: Record<string, unknown>
       }
       const email = normalizeEmailInput(body.email)
       if (!email) return authError(400, 'validation_failed', 'email is required')
+      const phone = body.phone === undefined ? null : normalizePhone(body.phone)
+      if (body.phone !== undefined && !phone) {
+        return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      }
+      if (body.phone_confirm !== undefined && typeof body.phone_confirm !== 'boolean') {
+        return authError(400, 'validation_failed', 'phone_confirm must be a boolean')
+      }
+      const banSeconds = body.ban_duration === undefined ? null : banDurationSeconds(body.ban_duration)
+      if (banSeconds === undefined) return authError(400, 'validation_failed', 'ban_duration is invalid')
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
         const existing = await query(
@@ -1631,16 +1643,30 @@ export class AuthHandler {
           [email.toLowerCase().trim()],
         )
         if (existing.rows.length > 0) return null
+        if (phone) {
+          const phoneExisting = await query(
+            `select id from auth.users where phone = $1 for update`,
+            [phone],
+          )
+          if (phoneExisting.rows.length > 0) return { error: 'phone_exists' as const }
+        }
         const res = await query<UserRow>(
           `insert into auth.users
-             (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-           values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
+             (aud, role, email, encrypted_password, email_confirmed_at, phone, phone_confirmed_at,
+              banned_until, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end,
+                   $4, case when $5 then now() else null end,
+                   case when $6::double precision is null then null
+                     else now() + ($6::double precision * interval '1 second') end, $7, $8)
            on conflict (email) do nothing
            returning *`,
           [
             email.toLowerCase().trim(),
             hashed,
-            body.email_confirm ?? true,
+            body.email_confirm ?? false,
+            phone,
+            body.phone_confirm === true,
+            banSeconds,
             JSON.stringify({ provider: 'email', providers: ['email'], ...(body.app_metadata ?? {}) }),
             JSON.stringify(body.user_metadata ?? {}),
           ]
@@ -1648,9 +1674,11 @@ export class AuthHandler {
         const user = res.rows[0]
         if (!user) return null
         await this.ensureEmailIdentity(user, query)
+        if (phone) await this.ensurePhoneIdentity(user, query)
         return this.userJsonWithRelations(user, query)
       })
       if (!created) return authError(422, 'email_exists', 'A user with this email address has already been registered')
+      if ('error' in created) return authError(422, created.error, 'A user with this phone number has already been registered')
       return json(200, created)
     }
     if (idMatch && method === 'GET') {
