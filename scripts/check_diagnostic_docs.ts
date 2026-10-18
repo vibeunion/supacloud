@@ -260,6 +260,8 @@ accept(): Promise<{ ok: boolean }> {
 }`,
   SC3027: `@Get("/items", { responses: { "4XX": ItemResponse, "4xx": ItemResponse } })
 list() {}`,
+  SC3028: `@Post("/items", { idempotency: "sometimes" })
+create() {}`,
   SC5001: `@Injectable({ providedIn: "root" })
 class UnusedService {}`,
   SC8101: `@InfraResource({ name: "orders-db", kind: "database" })
