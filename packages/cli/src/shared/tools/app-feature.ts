@@ -39,6 +39,14 @@ export const ${className}Receipt = t.Object({
     state: t.String(),
     version: t.Integer({ minimum: 1 }),
 });
+export const ${className}JobStatus = t.Object({
+    operationId: t.String({ minLength: 1, maxLength: 512 }),
+    status: t.Union([
+        t.Literal("queued"), t.Literal("running"), t.Literal("completed"),
+        t.Literal("failed"), t.Literal("cancelled"), t.Literal("unknown"),
+    ]),
+    errorCode: t.Optional(t.String({ minLength: 1, maxLength: 128 })),
+});
 /** Query tags are explicit cache contracts; use them with @supacloud/query. */
 export const ${className}QueryTags = {
     list: ${JSON.stringify(`${name}.list`)},
@@ -64,6 +72,7 @@ import type {
     ${className}ListQuery,
     ${className}Receipt,
     ${className}ReceiptParams,
+    ${className}JobStatus,
     ${className}Row,
     ${className}RefreshInput,
 } from "./${name}.contracts";
@@ -75,6 +84,7 @@ export type ${className}ApproveCommand = ${className}ApproveInput & { id: string
 export type ${className}Result = StaticDecode<typeof ${className}Row>;
 export type ${className}ReceiptResult = StaticDecode<typeof ${className}Receipt>;
 export type ${className}RefreshJobInput = StaticDecode<typeof ${className}RefreshInput>;
+export type ${className}JobStatusResult = StaticDecode<typeof ${className}JobStatus>;
 
 export interface ${className}ReadPort {
     list(context: FeatureRequestContext, input: ${className}ListInput): Promise<${className}Result[]>;
@@ -89,6 +99,10 @@ export interface ${className}ReceiptPort {
     lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}ReceiptResult>;
 }
 
+export interface ${className}JobStatusPort {
+    lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}JobStatusResult>;
+}
+
 export const ${className}Reader = new InjectionToken<${className}ReadPort>(
     "${name}.reader", { scope: "request" },
 );
@@ -98,6 +112,9 @@ export const ${className}Writer = new InjectionToken<${className}WritePort>(
 export const ${className}Receipts = new InjectionToken<${className}ReceiptPort>(
     "${name}.receipts", { scope: "request" },
 );
+export const ${className}JobStatuses = new InjectionToken<${className}JobStatusPort>(
+    "${name}.job-statuses", { scope: "request" },
+);
 `,
         [`${name}.service.ts`]: `import {
     Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureRequestContext,
@@ -105,12 +122,15 @@ export const ${className}Receipts = new InjectionToken<${className}ReceiptPort>(
 } from "@supacloud/app/core";
 import {
     ${className}Reader,
+    ${className}JobStatuses,
     ${className}Receipts,
     ${className}Writer,
     type ${className}ApproveInput,
     type ${className}ReadPort,
     type ${className}Result,
     type ${className}ReceiptPort,
+    type ${className}JobStatusPort,
+    type ${className}JobStatusResult,
     type ${className}WritePort,
 } from "./${name}.model";
 
@@ -121,6 +141,7 @@ export class ${className}Service {
         @Inject(${className}Reader) @Optional() private readonly reader?: ${className}ReadPort,
         @Inject(${className}Writer) @Optional() private readonly writer?: ${className}WritePort,
         @Inject(${className}Receipts) @Optional() private readonly receipts?: ${className}ReceiptPort,
+        @Inject(${className}JobStatuses) @Optional() private readonly jobStatuses?: ${className}JobStatusPort,
     ) {}
 
     private context(): FeatureRequestContext {
@@ -146,6 +167,11 @@ export class ${className}Service {
         if (!this.receipts) throw new Error("Bind ${className}Receipts with durable receipt lookup");
         return this.receipts.lookup(this.context(), { id, operationId });
     }
+
+    async jobStatus(id: string, operationId: string): Promise<${className}JobStatusResult> {
+        if (!this.jobStatuses) throw new Error("Bind ${className}JobStatuses with the existing Workflow/Queue status adapter");
+        return this.jobStatuses.lookup(this.context(), { id, operationId });
+    }
 }
 `,
         [`${name}.feature.ts`]: `import { Effect } from "effect";
@@ -159,6 +185,7 @@ import {
     ${className}ListQuery,
     ${className}Receipt,
     ${className}ReceiptParams,
+    ${className}JobStatus,
     ${className}ListResponse,
     ${className}Params,
     ${className}RefreshInput,
@@ -169,6 +196,7 @@ import type {
     ${className}ApproveInput,
     ${className}ListInput,
     ${className}ReceiptResult,
+    ${className}JobStatusResult,
     ${className}RefreshJobInput,
     ${className}Result,
 } from "./${name}.model";
@@ -293,6 +321,18 @@ export class ${className}Controller {
     ): Effect.Effect<${className}ReceiptResult, never, never> {
         return Effect.promise(() => this.service.receipt(id, operationId));
     }
+
+    @Get("/:id/operations/:operationId/status", {
+        params: ${className}ReceiptParams,
+        responses: { 200: ${className}JobStatus },
+        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+    })
+    jobStatus(
+        @Param("id") id: string,
+        @Param("operationId") operationId: string,
+    ): Effect.Effect<${className}JobStatusResult, never, never> {
+        return Effect.promise(() => this.service.jobStatus(id, operationId));
+    }
 }
 
 export const ${className}Feature = defineFeatureSlice({
@@ -329,6 +369,7 @@ test("${name} fails closed until verified read and durable write ports are bound
     await expect(service.list({})).rejects.toThrow("Bind ${className}Reader");
     await expect(service.detail("example")).rejects.toThrow("Bind ${className}Reader");
     await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("Bind ${className}Writer");
+    await expect(service.jobStatus("example", "operation-example")).rejects.toThrow("Bind ${className}JobStatuses");
 });
 
 test("${name} preserves denied reads and rejected writes without fallback or retry", async () => {
@@ -449,6 +490,12 @@ test.skipIf(!enabled)("${name} authenticated list/detail/approval E2E", async ()
     expect(recovered.ok).toBe(true);
     const recoveredBody = await json(recovered);
     expect(recoveredBody).toMatchObject({ operationId: config.idempotencyKey });
+    const jobStatus = await fetch(
+        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/operations/" + encodeURIComponent(config.idempotencyKey) + "/status", config.baseUrl),
+        { headers },
+    );
+    expect(jobStatus.ok).toBe(true);
+    expect(await json(jobStatus)).toMatchObject({ operationId: config.idempotencyKey });
 
     // Replaying an identical command may return the original success or a
     // domain conflict, but it must never create a second successful transition.
@@ -511,6 +558,8 @@ test.skipIf(!tenantIsolationEnabled)("${name} rejects cross-tenant access", asyn
 - [ ] Verify RLS, permission denial, stale version, identical replay and conflicting replay.
 - [ ] Verify receipt lookup recovers a lost response without resubmitting the Command.
 - [ ] Pass \`${className}ApproveInvalidateTags\` to the generated mutation's \`invalidateTags\` option.
+- [ ] Bind \`${className}JobStatuses\` to the existing Workflow/Queue status read path.
+- [ ] Verify status lookup is tenant-scoped and distinguishes queued, running, completed, failed and cancelled.
 - [ ] Verify the refresh job uses the existing Workflow/Queue delivery path.
 - [ ] Run the generated client contract and authenticated E2E test.
 - [ ] Run \`supacloud app check --format json\`, package tests and the selected deployment receipt.
@@ -537,7 +586,9 @@ used by the request-scoped Writer, or own the complete command instead; never ex
 both paths. Lock/check the version and state, reauthorize replays, and commit the
 business write, receipt, audit and outbox together. Do not put a network side effect
 inside this transaction. The refresh Job is an explicit unimplemented integration
-point, not an automatically scheduled workflow.
+point, not an automatically scheduled workflow. The generated status route is also
+an explicit read adapter boundary; it does not treat a queue message ID or current
+business row as proof of task completion.
 
 Compile the routes with the existing client generator and use @supacloud/query for
 identity-scoped caching/invalidation. Use the generated \`${className}ApproveInvalidateTags\`

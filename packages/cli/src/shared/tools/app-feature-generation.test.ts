@@ -140,10 +140,16 @@ test("the generated approval compiles only with the explicit persistent capabili
         .toContain('invalidateTags: [\n                "case-approval.list",');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('"/:id/operations/:operationId"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('"/:id/operations/:operationId/status"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.model.ts"), "utf8"))
         .toContain("export interface CaseApprovalReceiptPort");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.model.ts"), "utf8"))
+        .toContain("export interface CaseApprovalJobStatusPort");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalReceipt =");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain("export const CaseApprovalJobStatus =");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalApproveInvalidateTags");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
