@@ -2164,8 +2164,6 @@ function parseController(
         }
         const tags = checkedRouteTags(tagsPolicy.value, ctx, route.handler);
         if (tags !== undefined) route.tags = tags;
-        const tags = checkedRouteTags(tagsPolicy.value, ctx, route.handler);
-        if (tags !== undefined) route.tags = tags;
         const parse = parsePolicy.value;
         if (parse) {
           if (ts.isStringLiteral(parse) && parse.text === "none") route.parse = "none";
