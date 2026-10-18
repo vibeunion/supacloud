@@ -1175,6 +1175,7 @@ export class AuthHandler {
           `insert into auth.users
              (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
            values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
+           on conflict (email) do nothing
            returning *`,
           [
             email.toLowerCase().trim(),
@@ -1185,9 +1186,11 @@ export class AuthHandler {
           ]
         )
         const user = res.rows[0]
+        if (!user) return null
         await this.ensureEmailIdentity(user, query)
         return this.userJsonWithRelations(user, query)
       })
+      if (!created) return authError(422, 'email_exists', 'A user with this email address has already been registered')
       return json(200, created)
     }
     if (idMatch && method === 'GET') {
