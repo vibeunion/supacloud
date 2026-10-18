@@ -116,7 +116,7 @@ export const featureSpec = defineFeatureSpec({
             permission: ${JSON.stringify(permission)}, transaction: "required",
             idempotency: "required", audit: ${JSON.stringify(`${name}.approved`)},
             persistence: {
-                boundary: "database", optimisticLock: "required", versionField: "version",
+                boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id",
                 receipt: "required", reconciliation: "none",
             },
             route: "POST /${name}/:id/approve",

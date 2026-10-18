@@ -380,6 +380,7 @@ export interface FeaturePersistenceNode {
   boundary: "database" | "external";
   optimisticLock: "required" | "none";
   versionField?: string;
+  tenantField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }

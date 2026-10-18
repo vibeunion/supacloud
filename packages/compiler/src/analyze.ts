@@ -1095,6 +1095,7 @@ function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersist
   const boundary = stringLiteralProp(input, "boundary");
   const optimisticLock = commandModeProp(input, "optimisticLock");
   const versionField = stringLiteralProp(input, "versionField");
+  const tenantField = stringLiteralProp(input, "tenantField");
   const receipt = commandModeProp(input, "receipt");
   const reconciliation = commandModeProp(input, "reconciliation");
   if ((boundary !== "database" && boundary !== "external")
@@ -1104,6 +1105,7 @@ function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersist
   return {
     boundary, optimisticLock,
     ...(versionField === undefined ? {} : { versionField }),
+    ...(tenantField === undefined ? {} : { tenantField }),
     receipt, reconciliation,
   };
 }

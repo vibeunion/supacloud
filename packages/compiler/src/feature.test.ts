@@ -56,6 +56,7 @@ describe("feature specs", () => {
         persistence: {
           boundary: "database", optimisticLock: "required",
           versionField: "version",
+          tenantField: "tenant_id",
           receipt: "required", reconciliation: "none",
         },
       }],
@@ -76,6 +77,7 @@ describe("feature specs", () => {
         persistence: {
           boundary: "database", optimisticLock: "required",
           versionField: "version",
+          tenantField: "tenant_id",
           receipt: "required", reconciliation: "none",
         },
       }],
@@ -112,7 +114,24 @@ describe("feature specs", () => {
         persistence: {
           boundary: "database", optimisticLock: "required",
           versionField: "case.version",
+          tenantField: "tenant_id",
           receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    expect(validateFeatureSpec(spec).map((diagnostic) => diagnostic.code))
+      .toContain("feature-persistence-invalid");
+  });
+
+  test("rejects a database transition without a tenant field", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", receipt: "required", reconciliation: "none",
         },
       }],
     };
