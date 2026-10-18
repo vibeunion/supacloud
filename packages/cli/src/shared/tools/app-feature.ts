@@ -326,9 +326,11 @@ import { ${className}Fixture } from "./${name}.fixture";
 
 const baseUrl = process.env.SUPACLOUD_FEATURE_E2E_URL;
 const authorization = process.env.SUPACLOUD_FEATURE_E2E_AUTHORIZATION;
+const otherAuthorization = process.env.SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION;
 const fixtureId = process.env.SUPACLOUD_FEATURE_E2E_ID ?? ${className}Fixture.id;
 const idempotencyKey = process.env.SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY;
 const enabled = Boolean(baseUrl && authorization && idempotencyKey);
+const tenantIsolationEnabled = Boolean(enabled && otherAuthorization);
 
 function requireConfig(): { baseUrl: string; authorization: string; idempotencyKey: string } {
     if (!baseUrl || !authorization || !idempotencyKey) {
@@ -348,6 +350,10 @@ async function json(response: Response): Promise<unknown> {
     } catch {
         return text;
     }
+}
+
+function containsFixture(value: unknown): boolean {
+    return JSON.stringify(value).includes(fixtureId);
 }
 
 test.skipIf(!enabled)("${name} authenticated list/detail/approval E2E", async () => {
@@ -396,6 +402,34 @@ test.skipIf(!enabled)("${name} authenticated list/detail/approval E2E", async ()
     expect([raceA.status, raceB.status].filter((status) => status >= 200 && status < 300).length)
         .toBeLessThanOrEqual(1);
 });
+
+test.skipIf(!tenantIsolationEnabled)("${name} rejects cross-tenant access", async () => {
+    const config = requireConfig();
+    if (!otherAuthorization) throw new Error("Missing SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION");
+    const headers = {
+        authorization: otherAuthorization,
+        "content-type": "application/json",
+    };
+    const list = await fetch(new URL("/${name}", config.baseUrl), { headers });
+    expect(list.ok).toBe(true);
+    expect(containsFixture(await json(list))).toBe(false);
+
+    const detail = await fetch(
+        new URL("/${name}/" + encodeURIComponent(fixtureId), config.baseUrl),
+        { headers },
+    );
+    expect([403, 404]).toContain(detail.status);
+
+    const approval = await fetch(
+        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/approve", config.baseUrl),
+        {
+            method: "POST",
+            headers: { ...headers, "idempotency-key": config.idempotencyKey + "-other-tenant" },
+            body: JSON.stringify(${className}Fixture.approve),
+        },
+    );
+    expect([403, 404]).toContain(approval.status);
+});
 `,
         [`${name}.deployment.md`]: `# ${className} feature delivery checklist
 
@@ -418,6 +452,11 @@ The Writer input is derived from the approval body contract plus the route ID.
 Add request fields in the contract, not a second handwritten Writer interface.
 Typecheck application adapters after changing a field type; the derived Port
 must expose incompatible assumptions in business code.
+
+For authenticated tenant-isolation acceptance, also provide
+\`SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION\` for a principal from another tenant.
+The generated E2E then verifies that the fixture is absent from list results and that
+cross-tenant detail and approval are rejected.
 
 The named RPC adapter must invoke the continuation in the same database transaction
 used by the request-scoped Writer, or own the complete command instead; never execute

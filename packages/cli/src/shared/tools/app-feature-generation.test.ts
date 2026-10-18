@@ -168,6 +168,9 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(generatedE2E).toContain('expect(replayBody).toEqual(firstBody)');
     expect(generatedE2E).toContain('conflicting replay');
     expect(generatedE2E).toContain('Promise.all');
+    expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION');
+    expect(generatedE2E).toContain('test.skipIf(!tenantIsolationEnabled)');
+    expect(generatedE2E).toContain('cross-tenant access');
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);
