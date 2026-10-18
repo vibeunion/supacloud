@@ -56,6 +56,7 @@ export interface ContractManifest {
       idempotency?: "required" | "none";
       audit?: string;
       job?: string;
+      invalidateTags?: string[];
       jobDetails?: {
         name: string;
         className: string;
@@ -188,6 +189,7 @@ export function buildContractManifest(
             ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
             ...(transition.audit === undefined ? {} : { audit: transition.audit }),
             ...(transition.job === undefined ? {} : { job: transition.job }),
+            ...(transition.invalidateTags === undefined ? {} : { invalidateTags: [...transition.invalidateTags] }),
             ...(job === undefined ? {} : {
               jobDetails: {
                 name: job.name,

@@ -39,6 +39,17 @@ export const ${className}Receipt = t.Object({
     state: t.String(),
     version: t.Integer({ minimum: 1 }),
 });
+/** Query tags are explicit cache contracts; use them with @supacloud/query. */
+export const ${className}QueryTags = {
+    list: ${JSON.stringify(`${name}.list`)},
+    detail: ${JSON.stringify(`${name}.detail`)},
+    receipt: ${JSON.stringify(`${name}.receipt`)},
+} as const;
+export const ${className}ApproveInvalidateTags = [
+    ${className}QueryTags.list,
+    ${className}QueryTags.detail,
+    ${className}QueryTags.receipt,
+] as const;
 export const ${className}ListResponse = t.Array(${className}Row);
 export const ${className}RefreshInput = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
@@ -172,6 +183,11 @@ export const featureSpec = defineFeatureSpec({
             permission: ${JSON.stringify(permission)}, transaction: "required",
             idempotency: "required", audit: ${JSON.stringify(`${name}.approved`)},
             job: ${JSON.stringify(`${name}.refresh`)},
+            invalidateTags: [
+                ${JSON.stringify(`${name}.list`)},
+                ${JSON.stringify(`${name}.detail`)},
+                ${JSON.stringify(`${name}.receipt`)},
+            ],
             persistence: {
                 boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",
                 receipt: "required", reconciliation: "none",
@@ -494,6 +510,7 @@ test.skipIf(!tenantIsolationEnabled)("${name} rejects cross-tenant access", asyn
 - [ ] Register the \`${rpc}\` compiler and runtime RPC capability.
 - [ ] Verify RLS, permission denial, stale version, identical replay and conflicting replay.
 - [ ] Verify receipt lookup recovers a lost response without resubmitting the Command.
+- [ ] Pass \`${className}ApproveInvalidateTags\` to the generated mutation's \`invalidateTags\` option.
 - [ ] Verify the refresh job uses the existing Workflow/Queue delivery path.
 - [ ] Run the generated client contract and authenticated E2E test.
 - [ ] Run \`supacloud app check --format json\`, package tests and the selected deployment receipt.
@@ -523,7 +540,9 @@ inside this transaction. The refresh Job is an explicit unimplemented integratio
 point, not an automatically scheduled workflow.
 
 Compile the routes with the existing client generator and use @supacloud/query for
-identity-scoped caching/invalidation. There is deliberately no second hand-maintained
+identity-scoped caching/invalidation. Use the generated \`${className}ApproveInvalidateTags\`
+constant for the approval mutation; tags are explicit and never inferred from route names.
+There is deliberately no second hand-maintained
 HTTP client. A committed approval followed by a failed refresh is still committed;
 recover its receipt instead of resending. Use the host's standard error translation
 and requestId propagation; the scaffold does not claim to implement those adapters.
