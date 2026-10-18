@@ -1124,7 +1124,12 @@ export class AuthHandler {
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
   private static readonly MAX_OTP_ATTEMPTS = 5
 
-  private async redeem(token: string, types: string[], email?: string): Promise<Record<string, unknown> | null> {
+  private async redeem(
+    token: string,
+    types: string[],
+    email?: string,
+    sessionOptions?: { amr: { method: string; timestamp: number }[] }
+  ): Promise<Record<string, unknown> | null> {
     const redemption: EmailTokenRedemption = {
       token,
       tokenTypes: `{${types.join(',')}}`,
@@ -1132,7 +1137,7 @@ export class AuthHandler {
     }
     return this.db.transaction(async (query) => {
       const user = await this.claimEmailToken(query, redemption)
-      return user ? this.sessionFor(user, undefined, undefined, query) : null
+      return user ? this.sessionFor(user, undefined, sessionOptions, query) : null
     })
   }
 
@@ -1260,7 +1265,9 @@ export class AuthHandler {
     }
     const types =
       body.type === 'recovery' ? ['recovery'] : body.type === 'magiclink' ? ['magiclink'] : ['otp', 'magiclink']
-    const session = await this.redeem(token, types, body.email)
+    const session = await this.redeem(token, types, body.email, {
+      amr: [{ method: body.type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+    })
     if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
     return json(200, session)
   }
