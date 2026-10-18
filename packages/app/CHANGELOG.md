@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/app-v0.28.3...app-v0.29.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+* **compiler:** enforce feature persistence boundaries ([#2062](https://github.com/vibeunion/supacloud/issues/2062)) ([aeaa158](https://github.com/vibeunion/supacloud/commit/aeaa158bb452cf44d0122b321e3fc12777c11543))
+* govern conditional command adapters ([#2120](https://github.com/vibeunion/supacloud/issues/2120)) ([bf3258f](https://github.com/vibeunion/supacloud/commit/bf3258f050c79a9148e8be3872055ee0f7999f46))
+
+
+### Bug Fixes
+
+* **compiler:** export FeaturePersistenceNode ([#2063](https://github.com/vibeunion/supacloud/issues/2063)) ([20937d4](https://github.com/vibeunion/supacloud/commit/20937d4fc17df43d8df7b8c3e66d37b1b271e511))
+
 ## [0.28.3](https://github.com/vibeunion/supacloud/compare/app-v0.28.2...app-v0.28.3) (2026-10-17)
 
 

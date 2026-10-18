@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.121.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.120.3...management-api-v0.121.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
+
+### Bug Fixes
+
+* **delivery:** align release upload limits at 500 MiB ([#2075](https://github.com/vibeunion/supacloud/issues/2075)) ([14f25d4](https://github.com/vibeunion/supacloud/commit/14f25d4aee7cb41118f6849ca0a36373b3e14bcf))
+* **storage:** align management image limit ([#2070](https://github.com/vibeunion/supacloud/issues/2070)) ([bb3cfa5](https://github.com/vibeunion/supacloud/commit/bb3cfa5540f277f32e093ffc04b93464a86abb10))
+* **storage:** align standard upload limit ([#2072](https://github.com/vibeunion/supacloud/issues/2072)) ([5948ba3](https://github.com/vibeunion/supacloud/commit/5948ba3df9acfbf368012fc37ceffa53c7643fb0))
+
 ## [0.120.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.120.2...management-api-v0.120.3) (2026-10-17)
 
 

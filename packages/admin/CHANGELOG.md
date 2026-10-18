@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/admin-v0.28.4...admin-v0.29.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
+
+### Bug Fixes
+
+* **edge:** align default request body limit ([#2054](https://github.com/vibeunion/supacloud/issues/2054)) ([a48b112](https://github.com/vibeunion/supacloud/commit/a48b112beaf5f2e848b7dc65617e131db576b27f))
+* restore 500 MiB body limit defaults ([#2066](https://github.com/vibeunion/supacloud/issues/2066)) ([3290f26](https://github.com/vibeunion/supacloud/commit/3290f26cc70a090904d2b80042ca1d57da6319fe))
+* **storage:** align standard upload limit ([#2072](https://github.com/vibeunion/supacloud/issues/2072)) ([5948ba3](https://github.com/vibeunion/supacloud/commit/5948ba3df9acfbf368012fc37ceffa53c7643fb0))
+
 ## [0.28.4](https://github.com/vibeunion/supacloud/compare/admin-v0.28.3...admin-v0.28.4) (2026-10-17)
 
 
