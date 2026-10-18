@@ -768,6 +768,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
       path: "/cases/:caseId/accept",
       controller: "CaseController",
       handler: "accept",
+      idempotency: "required",
     });
 
     const permissionsModule = await import(pathToFileURL(join(fullOut, "permissions.ts")).href);

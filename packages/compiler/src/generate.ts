@@ -1435,6 +1435,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
 
         routeTypes.push(`export type ${requestTypeName} = ${requestType};`);
         routeTypes.push(`export type ${responseTypeName} = ${responseType === "never" ? "unknown" : responseType};`);
+        const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
+        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const routeFields = [
           `method: ${JSON.stringify(route.method)}`,
           `path: ${JSON.stringify(fullPath)}`,
@@ -1457,7 +1459,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["data", route.data],
           ["parse", route.parse],
           ["allowDeleteBody", route.allowDeleteBody],
-          ["idempotency", route.idempotency],
+          ["idempotency", idempotencyMode === "none" ? undefined : idempotencyMode],
         ] as const) {
           if (value !== undefined) routeFields.push(`${key}: ${JSON.stringify(value)}`);
         }
@@ -1495,9 +1497,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `{ ${responseSchemaEntries.map(([status, local]) => `${JSON.stringify(status)}: ${local}`).join(", ")} }`
           : "undefined";
         const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
-        const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
         const procedureKind = route.method === "GET" || route.method === "HEAD" ? "query" : "mutation";
-        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const procedureMetadata = {
           key: `${controller.className}.${route.handler}`,
           method: route.method,
