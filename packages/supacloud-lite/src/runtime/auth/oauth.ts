@@ -331,7 +331,9 @@ export class OAuthService {
       const created = await query<{ id: string }>(
         `insert into auth.users (aud, role, email, email_confirmed_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data)
          values ('authenticated','authenticated',$1, $2, now(),
-                 $3::jsonb, $4::jsonb) returning id`,
+                 $3::jsonb, $4::jsonb)
+         on conflict (email) do nothing
+         returning id`,
         [
           userEmail,
           userEmail ? new Date().toISOString() : null,
@@ -340,9 +342,20 @@ export class OAuthService {
         ]
       )
       const user = created.rows[0]
-      if (!user) throw new Error('OAuth user creation returned no row')
-      userId = user.id
-      createdUserId = user.id
+      if (user) {
+        userId = user.id
+        createdUserId = user.id
+      } else if (userEmail) {
+        const existingEmail = await query<{ id: string }>(
+          `select id from auth.users where email = $1 for update`,
+          [userEmail],
+        )
+        userId = existingEmail.rows[0]?.id
+        if (!userId) throw new Error('OAuth email conflict has no winner')
+        await this.assertUserEligible(query, userId)
+      } else {
+        throw new Error('OAuth user creation returned no row')
+      }
     }
     const identityData = JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })
     const linked = await query<{ user_id: string }>(
