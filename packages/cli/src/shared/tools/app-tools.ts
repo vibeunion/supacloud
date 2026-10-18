@@ -499,7 +499,12 @@ interface ProjectContextPack {
     modules: ModuleNode[];
     externalTokens: string[];
     diagnostics: Diagnostic[];
-    allowedDependencies: { dependencies: string[]; devDependencies: string[] };
+    allowedDependencies: {
+        dependencies: string[];
+        devDependencies: string[];
+        optionalDependencies: string[];
+        peerDependencies: string[];
+    };
     commands: Record<string, string>;
     defaults: {
         readTransport: "postgrest-supabase-js";
@@ -511,20 +516,31 @@ interface ProjectContextPack {
 }
 
 /** Declared package dependencies, so an agent can tell allowed imports from new packages. */
-async function readAllowedDependencies(root: string): Promise<{ dependencies: string[]; devDependencies: string[] }> {
+async function readAllowedDependencies(root: string): Promise<{
+    dependencies: string[];
+    devDependencies: string[];
+    optionalDependencies: string[];
+    peerDependencies: string[];
+}> {
     const path = join(root, "package.json");
-    if (!existsSync(path)) return { dependencies: [], devDependencies: [] };
+    if (!existsSync(path)) {
+        return { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] };
+    }
     try {
         const parsed = JSON.parse(await readFile(path, "utf8")) as {
             dependencies?: Record<string, string>;
             devDependencies?: Record<string, string>;
+            optionalDependencies?: Record<string, string>;
+            peerDependencies?: Record<string, string>;
         };
         return {
             dependencies: Object.keys(parsed.dependencies ?? {}).sort(),
             devDependencies: Object.keys(parsed.devDependencies ?? {}).sort(),
+            optionalDependencies: Object.keys(parsed.optionalDependencies ?? {}).sort(),
+            peerDependencies: Object.keys(parsed.peerDependencies ?? {}).sort(),
         };
     } catch {
-        return { dependencies: [], devDependencies: [] };
+        return { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] };
     }
 }
 
@@ -634,6 +650,9 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         `  modules: ${project.modules.map((module) => module.name).join(", ") || "-"}`,
         `  external tokens: ${project.externalTokens.join(", ") || "-"}`,
         `  dependencies: ${project.allowedDependencies.dependencies.join(", ") || "-"}`,
+        `  dev dependencies: ${project.allowedDependencies.devDependencies.join(", ") || "-"}`,
+        `  optional dependencies: ${project.allowedDependencies.optionalDependencies.join(", ") || "-"}`,
+        `  peer dependencies: ${project.allowedDependencies.peerDependencies.join(", ") || "-"}`,
         ...project.diagnostics.map(formatDiagnostic),
     ].join("\n"));
 }
