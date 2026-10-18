@@ -1184,6 +1184,11 @@ export class AuthHandler {
       const email = body.email
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
+        const existing = await query(
+          `select id from auth.users where lower(email) = $1 for update`,
+          [email.toLowerCase().trim()],
+        )
+        if (existing.rows.length > 0) return null
         const res = await query<UserRow>(
           `insert into auth.users
              (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
@@ -1235,8 +1240,19 @@ export class AuthHandler {
       if (sets.length === 0) return authError(400, 'validation_failed', 'nothing to update')
       params.push(idMatch[1])
       let updated: Record<string, unknown> | null
+      let emailConflict = false
       try {
         updated = await this.db.transaction(async (query) => {
+          if (typeof body.email === 'string') {
+            const clash = await query(
+              `select id from auth.users where lower(email) = $1 and id <> $2`,
+              [body.email.toLowerCase().trim(), idMatch[1]],
+            )
+            if (clash.rows.length > 0) {
+              emailConflict = true
+              return null
+            }
+          }
           const res = await query<UserRow>(
             `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
             params
@@ -1252,6 +1268,7 @@ export class AuthHandler {
         }
         throw error
       }
+      if (emailConflict) return authError(422, 'email_exists', 'A user with this email address has already been registered')
       if (!updated) return authError(404, 'user_not_found', 'User not found')
       return json(200, updated)
     }
@@ -1286,15 +1303,22 @@ export class AuthHandler {
     )
 
     const user = await this.db.transaction(async (query) => {
-      const result = await query<UserRow>(
-        `insert into auth.users
-           (aud, role, email, raw_app_meta_data, raw_user_meta_data)
-         values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
-         on conflict (email) do update set email = excluded.email
-         returning *`,
-        [email, JSON.stringify(body.data ?? {})]
+      const existing = await query<UserRow>(
+        `select * from auth.users where lower(email) = $1 for update`,
+        [email],
       )
-      const linkedUser = result.rows[0]
+      let linkedUser = existing.rows[0]
+      if (!linkedUser) {
+        const result = await query<UserRow>(
+          `insert into auth.users
+             (aud, role, email, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
+           on conflict (email) do update set email = excluded.email
+           returning *`,
+          [email, JSON.stringify(body.data ?? {})]
+        )
+        linkedUser = result.rows[0]
+      }
       await query(
         `insert into auth.identities (user_id, provider, provider_id, identity_data)
          values ($1::uuid, 'email', $1::text, $2::jsonb)
@@ -1303,7 +1327,7 @@ export class AuthHandler {
       )
       await query(
         `delete from auth.one_time_tokens
-         where email = $1 and token_type = any($2::text[])`,
+         where lower(email) = $1 and token_type = any($2::text[])`,
         [email, '{otp,magiclink}']
       )
       await query(
