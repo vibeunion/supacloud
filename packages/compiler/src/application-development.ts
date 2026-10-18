@@ -7,8 +7,8 @@ import type { ApplicationGraph } from "./types";
 import { createExecutionPlans, type ExecutionPlan } from "./inspect";
 import { createDiagnosticRepairPlan } from "./repair-plan";
 import { executionSourceFile } from "./execution-snapshot";
-import { joinRoutePaths } from "./util";
 import { featureTransitionForRoute } from "./feature";
+import { joinRoutePaths } from "./util";
 
 /**
  * A stable, read-only projection of the current application graph for developer
@@ -53,7 +53,6 @@ export interface ApplicationDevelopmentRoute {
   controller: string;
   handler: string;
   command?: string;
-  idempotency?: "required" | "none";
   aspects: string[];
   schemaKinds?: Record<string, DevelopmentSchemaKind>;
 }
@@ -199,17 +198,11 @@ export function createApplicationDevelopmentContext(
 
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
-        const candidates = module.commands.filter(command => command.className === route.command || command.name === route.command);
-        const commandNode = candidates.length === 1 ? candidates[0] : undefined;
         const featureTransition = featureTransitionForRoute(module, controller, route);
-        const featureCommandNode = featureTransition?.command === undefined
-          ? undefined
-          : module.commands.find((candidate) =>
-            candidate.className === featureTransition.command || candidate.name === featureTransition.command);
-        const command = commandNode?.name ?? featureCommandNode?.name;
-        const idempotency = route.idempotency
-          ?? commandNode?.idempotency
-          ?? featureTransition?.idempotency;
+        const commandRef = route.command ?? featureTransition?.command;
+        const candidates = module.commands.filter(command =>
+          command.className === commandRef || command.name === commandRef);
+        const command = candidates.length === 1 ? candidates[0]?.name : undefined;
         const kinds = schemaKinds(route);
         routes.push({
           module: module.name,
@@ -218,7 +211,6 @@ export function createApplicationDevelopmentContext(
           controller: controller.className,
           handler: route.handler,
           ...(command === undefined ? {} : { command }),
-          ...(idempotency === undefined ? {} : { idempotency }),
           aspects: (route.aspects ?? []).map((aspect) => aspect.name),
           ...(kinds === undefined ? {} : { schemaKinds: kinds }),
         });

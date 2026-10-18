@@ -28,6 +28,46 @@ test("development routes expose the same full path and canonical command as exec
   }
 });
 
+test("development routes expose Feature command bindings for controller-owned transitions", () => {
+  const source = graph();
+  const featureModule = source.modules[0]!;
+  featureModule.controllers[0]!.routes[0] = {
+    ...featureModule.controllers[0]!.routes[0]!,
+    command: undefined,
+  };
+  featureModule.featureSpec = {
+    name: "orders",
+    states: ["draft", "approved"],
+    tenantField: "tenant_id",
+    transitions: [{
+      name: "approve",
+      from: "draft",
+      to: "approved",
+      command: "orders.create",
+      permission: "orders.approve",
+      route: "POST /orders",
+      routeBinding: "controller",
+      transaction: "required",
+      idempotency: "required",
+      audit: "orders.approved",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "tenant_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    }],
+  };
+  const context = createApplicationDevelopmentContext(source);
+  const route = context.routes.find(item => item.method === "POST");
+  expect(route).toMatchObject({ path: "/orders", command: "orders.create" });
+  expect(context.executionPlans.find(item => item.kind === "route" && item.name === "POST /orders")?.command)
+    .toBe(route?.command);
+});
+
 test("resource use ordering and module inventories are stable under input permutation", () => {
   const first = graph();
   const m = first.modules[0]!;
