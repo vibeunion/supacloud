@@ -168,6 +168,7 @@ export interface JobOptions<
   maxAttempts?: number;
   /** Whether the adapter must require an idempotency key for submission. */
   idempotency?: JobIdempotency;
+  tenantScope?: "required" | "none";
   /** Explicit static aspects applied around this job invocation. */
   aspects?: Aspect[];
   /** Infrastructure resources this job uses, with the operations it performs. */

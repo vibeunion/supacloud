@@ -169,6 +169,31 @@ describe("feature specs", () => {
       .toContain("feature-query-tenant-boundary");
   });
 
+  test("requires tenant-scoped jobs for database features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", tenantScope: "none",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-tenant-boundary");
+  });
+
   test("generates an explicit command slice scaffold", () => {
     const spec: FeatureSpecNode = {
       name: "case",

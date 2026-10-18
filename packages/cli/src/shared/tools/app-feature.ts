@@ -164,6 +164,7 @@ export class Approve${className}Command {
     name: ${JSON.stringify(`${name}.refresh`)},
     mode: "task",
     idempotency: "required",
+    tenantScope: "required",
 })
 export class Refresh${className}Job {
     run(_input: { id: string; version: number }): Promise<void> {

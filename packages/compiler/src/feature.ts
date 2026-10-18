@@ -56,6 +56,11 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
           error("feature-query-tenant-boundary", `Query ${query.className} in Feature ${spec.name} must declare tenantScope: "required".`);
         }
       }
+      for (const job of module.jobs ?? []) {
+        if (job.tenantScope !== "required") {
+          error("feature-job-tenant-boundary", `Job ${job.className} in Feature ${spec.name} must declare tenantScope: "required".`);
+        }
+      }
     }
     const commands = module.commands.filter((command) =>
       command.className === transition.command || command.name === transition.command);

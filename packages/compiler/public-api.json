@@ -731,7 +731,7 @@
     {
       "name": "JobNode",
       "kind": "type",
-      "signature": "export interface JobNode {\n    className: string;\n    name: string;\n    serviceKey: string;\n    scope: Scope;\n    input?: string;\n    output?: string;\n    schemaKinds?: Partial<Record<\"input\" | \"output\", JobSchemaKind>>;\n    schemaImports?: Record<string, string>;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
+      "signature": "export interface JobNode {\n    className: string;\n    name: string;\n    serviceKey: string;\n    scope: Scope;\n    input?: string;\n    output?: string;\n    schemaKinds?: Partial<Record<\"input\" | \"output\", JobSchemaKind>>;\n    schemaImports?: Record<string, string>;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    tenantScope?: \"required\" | \"none\";\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
       "name": "loadGeneratedOpenApiDocument",

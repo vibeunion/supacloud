@@ -986,7 +986,7 @@
     {
       "name": "JobOptions",
       "kind": "type",
-      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: Aspect[];\n    uses?: InfraResourceUse[];\n}"
+      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    tenantScope?: \"required\" | \"none\";\n    aspects?: Aspect[];\n    uses?: InfraResourceUse[];\n}"
     },
     {
       "name": "JobOutput",

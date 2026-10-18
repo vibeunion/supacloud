@@ -969,6 +969,9 @@ function parseModule(
           serviceKey: camelName(provider?.token ?? className),
           scope,
           ...contract,
+          ...(commandModeProp(meta, "tenantScope") === undefined ? {} : {
+            tenantScope: commandModeProp(meta, "tenantScope"),
+          }),
           ...(jobUses.length > 0 ? { uses: jobUses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
         });

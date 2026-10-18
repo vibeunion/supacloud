@@ -353,6 +353,7 @@ export interface JobNode {
   maxAttempts?: number;
   /** Adapter-owned idempotency requirement. */
   idempotency?: JobIdempotency;
+  tenantScope?: "required" | "none";
   /** Infrastructure resources this job uses, with the declared operations. */
   uses?: InfraResourceUseRef[];
   aspects?: AspectRefNode[];
