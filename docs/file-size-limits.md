@@ -46,3 +46,9 @@ The larger processing limit increases peak memory and temporary I/O risk.
 Operators should size worker memory, concurrency and admission controls for
 the selected workload. The default is expressed in MiB (`500 * 1024 * 1024`);
 image rejection messages report the effective limit in bytes.
+
+Management API standard Storage uploads also advertise and enforce a 500 MiB
+default. `STORAGE_UPLOAD_MAX_BYTES` can lower it; the effective value is never
+higher than `MANAGEMENT_API_MAX_REQUEST_BODY_SIZE`, because the HTTP listener
+must be able to receive the request. TUS uploads use the separate
+`TUS_MAX_SIZE` setting, whose default is also 500 MiB.
