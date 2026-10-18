@@ -31,6 +31,12 @@ await mutation.mutationFn({
 });
 ```
 
+Generated clients can carry explicit route and Feature Slice cache metadata.
+When present, query options use the generated route `tags` by default and
+mutation success uses the Feature transition `invalidateTags` by default.
+Passing `tags` or `invalidateTags` remains an explicit per-call override; no
+tags are inferred from controller or procedure names.
+
 Inputs retain explicit `params`, `query`, `body`, `headers`, and `cookie`
 sections. Required parameters and idempotency keys are checked by TypeScript.
 No flat-input guessing, Supabase private-field inspection, or automatic mutation

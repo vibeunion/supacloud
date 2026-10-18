@@ -25,8 +25,10 @@ second engine, database schema, hand-maintained client or transport abstraction.
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
 
 Invalidation tags are explicit transition metadata and are preserved in the
-contract manifest. The generated approval recipe exports the list/detail/receipt
-tags for `@supacloud/query`; it never infers tags from route or procedure names.
+contract manifest and generated procedure metadata. The generated approval
+recipe exports the list/detail/receipt tags for `@supacloud/query`; query
+options and mutation success handlers consume that metadata by default and
+never infer tags from route or procedure names.
 
 The platform can remain usable without the application framework while the
 framework is treated as a first-class product. Do not require all platform users
@@ -137,8 +139,9 @@ authorization, idempotency, state transitions, audit or outbox behavior.
 
 1. Bind this recipe to one approved xigu-fa operation using its existing RPC and
    source-of-truth tables; keep authorization and state rules in that application.
-2. Connect the compiler-generated client and existing query adapter, bind the
-   generated job-status port to the existing Workflow/Queue read path, configure
+2. Connect the compiler-generated client and existing query adapter in the
+   browser, bind the generated job-status port to the existing Workflow/Queue
+   read path, configure
    the generated E2E environment, then run authenticated negative, concurrency,
    crash and recovery acceptance.
 3. Verify the published dependency tuple and test-environment deployment/upgrade.

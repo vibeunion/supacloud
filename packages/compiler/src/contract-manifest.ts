@@ -80,6 +80,7 @@ export interface ContractManifest {
     command?: string;
     permission?: string;
     idempotency?: "required" | "none";
+    tags?: string[];
     requestSchemas: Partial<Record<"body" | "params" | "query" | "headers" | "cookie", string>>;
     responseSchema?: string;
     /** Status-aware response schemas; legacy responseSchema remains for compatibility. */
@@ -225,6 +226,7 @@ export function buildContractManifest(
           ...(route.command === undefined ? {} : { command: route.command }),
           ...(command?.permission === undefined ? {} : { permission: command.permission }),
           ...(idempotency === undefined ? {} : { idempotency }),
+          ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
           requestSchemas: Object.fromEntries(
             (["body", "params", "query", "headers", "cookie"] as const)
               .flatMap((key) => route[key] === undefined ? [] : [[key, route[key]] as const]),

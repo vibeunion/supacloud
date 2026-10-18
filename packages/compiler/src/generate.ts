@@ -1346,6 +1346,14 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   const commandByClassName = new Map(
     graph.modules.flatMap((module) => module.commands.map((command) => [command.className, command] as const)),
   );
+  const featureInvalidationTags = new Map<string, string[]>();
+  for (const module of graph.modules) {
+    for (const transition of module.featureSpec?.transitions ?? []) {
+      if (transition.route && transition.invalidateTags) {
+        featureInvalidationTags.set(`${module.name}:${transition.route}`, [...transition.invalidateTags]);
+      }
+    }
+  }
   let usesStatic = false;
   let usesValue = false;
 
@@ -1437,6 +1445,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
         routeTypes.push(`export type ${responseTypeName} = ${responseType === "never" ? "unknown" : responseType};`);
         const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
         const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
+        const transitionRoute = `${route.method} ${fullPath}`;
+        const invalidationTags = featureInvalidationTags.get(`${module.name}:${transitionRoute}`);
         const routeFields = [
           `method: ${JSON.stringify(route.method)}`,
           `path: ${JSON.stringify(fullPath)}`,
@@ -1460,6 +1470,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["parse", route.parse],
           ["allowDeleteBody", route.allowDeleteBody],
           ["idempotency", idempotencyMode === "none" ? undefined : idempotencyMode],
+          ["tags", route.tags],
+          ["invalidateTags", invalidationTags],
         ] as const) {
           if (value !== undefined) routeFields.push(`${key}: ${JSON.stringify(value)}`);
         }
@@ -1506,6 +1518,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           handler: route.handler,
           kind: procedureKind,
           idempotency: idempotencyMode,
+          ...(route.tags === undefined ? {} : { tags: route.tags }),
+          ...(invalidationTags === undefined ? {} : { invalidateTags: invalidationTags }),
         };
         allProcedures.push({
           method: route.method,
@@ -1516,6 +1530,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ...(command?.name === undefined ? {} : { command: command.name }),
           ...(command?.permission === undefined ? {} : { permission: command.permission }),
           idempotency: idempotencyMode,
+          ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
+          ...(invalidationTags === undefined ? {} : { invalidateTags: [...invalidationTags] }),
         });
         routeMethods.push(`
     ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}, ${JSON.stringify(procedureKind)}, ${JSON.stringify(idempotencyMode)}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}, ${JSON.stringify(procedureKind)}, ${JSON.stringify(idempotencyMode)}, ${JSON.stringify(procedureMetadata)}),`);
@@ -1568,6 +1584,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  handler: string;",
     "  kind: Kind;",
     "  idempotency: Idempotency;",
+    "  tags?: readonly string[];",
+    "  invalidateTags?: readonly string[];",
     "}",
     "",
     "export interface ProcedureExecutionOptions {",
@@ -1673,6 +1691,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  command?: string;",
     "  permission?: string;",
     "  idempotency: IdempotencyMode;",
+    "  tags?: readonly string[];",
+    "  invalidateTags?: readonly string[];",
     "}",
     "",
     ...routeTypes,
