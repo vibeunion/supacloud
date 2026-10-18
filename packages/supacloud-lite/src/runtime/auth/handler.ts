@@ -385,11 +385,13 @@ export class AuthHandler {
       }
       const res = await this.db.query(
         `insert into auth.users (aud, role, raw_app_meta_data, raw_user_meta_data, is_anonymous, last_sign_in_at)
-         values ('authenticated', 'authenticated', '{}', $1, true, now())
+         values ('authenticated', 'authenticated', '{"provider":"anonymous","providers":["anonymous"]}', $1, true, now())
          returning *`,
         [JSON.stringify(body.data ?? {})]
       )
-      return json(200, await this.sessionFor(res.rows[0] as UserRow))
+      return json(200, await this.sessionFor(res.rows[0] as UserRow, undefined, {
+        amr: [{ method: 'anonymous', timestamp: Math.floor(Date.now() / 1000) }],
+      }))
     }
 
     if (this.settings.disableSignup) {
