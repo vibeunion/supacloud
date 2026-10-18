@@ -176,6 +176,7 @@ export interface CompiledJob {
   timeoutSec?: number;
   maxAttempts?: number;
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none" | string;
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
 }
@@ -1485,6 +1486,15 @@ export async function executeJob(
 ): Promise<unknown> {
   // Validate before creating a job scope so malformed input cannot construct
   // providers or perform any application work.
+  if (job.tenantScope === "required") {
+    try {
+      requireFeatureRequestContext(requestContext);
+    } catch {
+      throw new ApplicationError("Feature request context is required for this job", {
+        status: 401, code: "JOB_TENANT_CONTEXT_REQUIRED",
+      });
+    }
+  }
   const decodedInput = decodeJobContract(job.input, input, "input");
   const jobScope = job.scope === "job" && compiled.createJobScope
     ? await compiled.createJobScope(services, requestContext, imported)

@@ -523,6 +523,7 @@ export class LifecycleController {
           timeoutSec: 120,
           maxAttempts: 7,
           idempotency: "required",
+          tenantScope: "required",
         }],
         exports: [],
       }],
@@ -533,7 +534,7 @@ export class LifecycleController {
       'import { JobInput, JobOutput } from "../src/contracts";',
     );
     expect(rendered.applicationCode).toContain(
-      'jobs: [{ className: "AcceptJob", name: "case.accept", serviceKey: "acceptJob", scope: "job", input: JobInput, output: JobOutput, mode: "workflow", timeoutSec: 120, maxAttempts: 7, idempotency: "required", }]',
+      'jobs: [{ className: "AcceptJob", name: "case.accept", serviceKey: "acceptJob", scope: "job", input: JobInput, output: JobOutput, mode: "workflow", timeoutSec: 120, maxAttempts: 7, idempotency: "required", tenantScope: "required", }]',
     );
   });
 

@@ -127,6 +127,7 @@ export interface CompiledJob {
   timeoutSec?: number;
   maxAttempts?: number;
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none";
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
 }
@@ -940,6 +941,7 @@ class ModuleGenerator {
       if (job.timeoutSec !== undefined) fields.push(`timeoutSec: ${job.timeoutSec}`);
       if (job.maxAttempts !== undefined) fields.push(`maxAttempts: ${job.maxAttempts}`);
       if (job.idempotency !== undefined) fields.push(`idempotency: ${JSON.stringify(job.idempotency)}`);
+      if (job.tenantScope !== undefined) fields.push(`tenantScope: ${JSON.stringify(job.tenantScope)}`);
       if (job.aspects && job.aspects.length > 0) {
         fields.push(`aspects: ${this.renderAspects(job.aspects)}`);
         fields.push(`aspectPipeline: ${this.renderAspectPipeline(job.aspects)}`);

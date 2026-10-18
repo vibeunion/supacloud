@@ -43,6 +43,22 @@ test("tenant-scoped commands fail before authorization without trusted feature c
   expect(authorized).toBe(false);
 });
 
+test("tenant-scoped jobs fail before creating a job scope without trusted feature context", async () => {
+  let created = false;
+  const module: CompiledModule = {
+    name: "review",
+    createJobScope: async () => { created = true; return {}; },
+    commands: [],
+    jobs: [{
+      className: "RefreshReview", name: "review.refresh", serviceKey: "refreshReview",
+      scope: "job", tenantScope: "required",
+    }],
+  };
+  await expect(executeJob(module, {}, module.jobs[0]!, {}, {}))
+    .rejects.toMatchObject({ code: "JOB_TENANT_CONTEXT_REQUIRED", status: 401 });
+  expect(created).toBe(false);
+});
+
 test("trace shows exact governance order without credentials, input, results or error causes", async () => {
   const events: ExecutionEvent[] = [];
   const executor = createCommandExecutor({
