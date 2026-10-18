@@ -324,11 +324,11 @@ export const ${className}RequestEnvelope = {
         [`${name}.e2e.test.ts`]: `import { expect, test } from "bun:test";
 import { ${className}Fixture } from "./${name}.fixture";
 
-const baseUrl = process.env.SUPACLOUD_FEATURE_E2E_URL;
-const authorization = process.env.SUPACLOUD_FEATURE_E2E_AUTHORIZATION;
-const otherAuthorization = process.env.SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION;
-const fixtureId = process.env.SUPACLOUD_FEATURE_E2E_ID ?? ${className}Fixture.id;
-const idempotencyKey = process.env.SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY;
+const baseUrl = process.env["SUPACLOUD_FEATURE_E2E_URL"];
+const authorization = process.env["SUPACLOUD_FEATURE_E2E_AUTHORIZATION"];
+const otherAuthorization = process.env["SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION"];
+const fixtureId = process.env["SUPACLOUD_FEATURE_E2E_ID"] ?? ${className}Fixture.id;
+const idempotencyKey = process.env["SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY"];
 const enabled = Boolean(baseUrl && authorization && idempotencyKey);
 const tenantIsolationEnabled = Boolean(enabled && otherAuthorization);
 
