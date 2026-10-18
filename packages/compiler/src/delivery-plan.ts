@@ -131,6 +131,7 @@ export function createDeliveryPlan(
           module: module.name, controller: controller.className, handler: route.handler,
           method: route.method, path,
           ...(route.command === undefined ? {} : { command: route.command }),
+          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
           reason: owner === undefined ? "default-http" : "explicit-module",
         });
       }
