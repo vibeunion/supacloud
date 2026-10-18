@@ -383,31 +383,33 @@ export class AuthHandler {
       return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
     }
     const email = body.email.toLowerCase().trim()
-    const existing = await this.db.query(`select id from auth.users where email = $1`, [email])
-    if (existing.rows.length > 0) {
-      return authError(422, 'user_already_exists', 'User already registered')
-    }
     const hashed = await hashPassword(body.password)
     const autoconfirm = this.settings.autoconfirm
-    const res = await this.db.query(
-      `insert into auth.users
-         (aud, role, email, encrypted_password, email_confirmed_at, last_sign_in_at,
-          raw_app_meta_data, raw_user_meta_data)
-       values ('authenticated', 'authenticated', $1, $2, case when $4 then now() else null end, now(),
-               '{"provider":"email","providers":["email"]}', $3)
-       returning *`,
-      [email, hashed, JSON.stringify(body.data ?? {}), autoconfirm]
-    )
-    const newUser = res.rows[0] as UserRow
-    // GoTrue records an `email` identity at signup, so user.identities reflects
-    // the email provider (getUser returned [] before this). Mirrors the shape
-    // written on anonymous-to-email upgrade.
-    await this.db.query(
-      `insert into auth.identities (user_id, provider, provider_id, identity_data)
-       values ($1, 'email', $2, $3)
-       on conflict (provider, provider_id) do nothing`,
-      [newUser.id, newUser.id, JSON.stringify({ sub: newUser.id, email: newUser.email })]
-    )
+    const newUser = await this.db.transaction(async (query) => {
+      const res = await query<UserRow>(
+        `insert into auth.users
+           (aud, role, email, encrypted_password, email_confirmed_at, last_sign_in_at,
+            raw_app_meta_data, raw_user_meta_data)
+         values ('authenticated', 'authenticated', $1, $2, case when $4 then now() else null end, now(),
+                 '{"provider":"email","providers":["email"]}', $3)
+         on conflict (email) do nothing
+         returning *`,
+        [email, hashed, JSON.stringify(body.data ?? {}), autoconfirm]
+      )
+      const user = res.rows[0]
+      if (!user) return null
+      // GoTrue records an `email` identity at signup, so user.identities reflects
+      // the email provider (getUser returned [] before this). Mirrors the shape
+      // written on anonymous-to-email upgrade.
+      await query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1, 'email', $2, $3)
+         on conflict (provider, provider_id) do nothing`,
+        [user.id, user.id, JSON.stringify({ sub: user.id, email: user.email })]
+      )
+      return user
+    })
+    if (!newUser) return authError(422, 'user_already_exists', 'User already registered')
     await this.audit('user_signedup', { actorId: newUser.id, actorEmail: email })
     if (!autoconfirm) {
       // confirmation required: email a verification link/code; no session yet
