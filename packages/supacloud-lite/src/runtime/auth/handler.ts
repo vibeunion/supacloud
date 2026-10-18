@@ -646,6 +646,26 @@ export class AuthHandler {
       return json(200, await this.sessionForOAuth(userId))
     }
 
+    if (grantType === 'id_token') {
+      const provider = typeof body.provider === 'string' ? body.provider.toLowerCase() : ''
+      const idToken = body.id_token
+      if (!provider || !idToken) return authError(400, 'validation_failed', 'provider and id_token required')
+      const userId = await this.oauth.signInWithIdToken(provider, idToken, body.access_token, body.nonce)
+      if (!userId) return authError(400, 'invalid_credentials', 'Invalid ID token')
+      return this.db.transaction(async (query) => {
+        const result = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [userId],
+        )
+        const user = result.rows[0]
+        if (!user) return authError(400, 'invalid_credentials', 'Invalid ID token')
+        return json(200, await this.sessionFor(user, undefined, {
+          amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+        }, query))
+      })
+    }
+
     return authError(400, 'invalid_grant', `unsupported grant_type: ${grantType}`)
   }
 

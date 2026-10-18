@@ -13,6 +13,7 @@
 import type { Database, Querier } from '../db/database.js'
 import { randomToken } from '../jwt.js'
 import { resolveRedirect } from './redirect.js'
+import { createRemoteJWKSet, customFetch, jwtVerify, type JWTPayload } from 'jose'
 
 type OAuthRawProfile = Record<string, unknown>
 
@@ -44,6 +45,12 @@ export interface OAuthProviderConfig {
   scopes?: string
   /** Map the provider's raw userinfo JSON to a normalized profile. */
   profileMap?: (raw: OAuthRawProfile) => OAuthProfile
+  /** Exact issuer accepted for OIDC ID tokens. Defaults to a known provider preset. */
+  idTokenIssuer?: string
+  /** JWKS URL used to verify OIDC ID token signatures. Defaults to a known provider preset. */
+  idTokenJwksUrl?: string
+  /** Additional audience accepted for OIDC ID tokens. Defaults to the OAuth client id. */
+  idTokenAudience?: string | string[]
 }
 
 /** Normalized profile extracted from a provider's userinfo response. */
@@ -60,8 +67,12 @@ export interface OAuthProfile {
   metadata?: Record<string, unknown>
 }
 
-interface ResolvedProvider extends Required<Omit<OAuthProviderConfig, 'profileMap'>> {
+interface ResolvedProvider extends OAuthProviderConfig {
   name: string
+  authorizeUrl: string
+  tokenUrl: string
+  userInfoUrl: string
+  scopes: string
   profileMap: (raw: OAuthRawProfile) => OAuthProfile
 }
 
@@ -71,12 +82,28 @@ const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
     tokenUrl: 'https://oauth2.googleapis.com/token',
     userInfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
     scopes: 'openid email profile',
+    idTokenIssuer: 'https://accounts.google.com',
+    idTokenJwksUrl: 'https://www.googleapis.com/oauth2/v3/certs',
     profileMap: (r: OAuthRawProfile) => ({
       id: typeof r['sub'] === 'string' ? r['sub'] : '',
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       emailVerified: r['email_verified'] === true,
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
       metadata: { avatar_url: r['picture'], full_name: r['name'] },
+    }),
+  },
+  apple: {
+    authorizeUrl: 'https://appleid.apple.com/auth/authorize',
+    tokenUrl: 'https://appleid.apple.com/auth/token',
+    userInfoUrl: 'https://appleid.apple.com/auth/userinfo',
+    scopes: 'name email',
+    idTokenIssuer: 'https://appleid.apple.com',
+    idTokenJwksUrl: 'https://appleid.apple.com/auth/keys',
+    profileMap: (r: OAuthRawProfile) => ({
+      id: typeof r['sub'] === 'string' ? r['sub'] : '',
+      ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
+      emailVerified: r['email_verified'] === true || r['email_verified'] === 'true',
+      ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
     }),
   },
   github: {
@@ -122,12 +149,16 @@ export function resolveProvider(name: string, cfg: OAuthProviderConfig): Resolve
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
     })),
+    idTokenIssuer: cfg.idTokenIssuer ?? preset.idTokenIssuer,
+    idTokenJwksUrl: cfg.idTokenJwksUrl ?? preset.idTokenJwksUrl,
+    idTokenAudience: cfg.idTokenAudience ?? preset.idTokenAudience,
   }
 }
 
 /** Drives the OAuth authorize/callback/PKCE flows against the configured providers. */
 export class OAuthService {
   private providers = new Map<string, ResolvedProvider>()
+  private idTokenKeySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
 
   constructor(
     private db: Database,
@@ -139,13 +170,70 @@ export class OAuthService {
     private enforceRedirectAllowList = false
   ) {
     for (const [name, cfg] of Object.entries(configs)) {
-      this.providers.set(name, resolveProvider(name, cfg))
+      const provider = resolveProvider(name, cfg)
+      this.providers.set(name, provider)
+      if (provider.idTokenJwksUrl) {
+        this.idTokenKeySets.set(name, createRemoteJWKSet(new URL(provider.idTokenJwksUrl), {
+          timeoutDuration: 5_000,
+          cooldownDuration: 30_000,
+          cacheMaxAge: 10 * 60_000,
+          [customFetch]: async (url, options) => this.fetchImpl(url, options),
+        }))
+      }
     }
   }
 
   /** Whether a provider by this name is configured. */
   has(name: string): boolean {
     return this.providers.has(name)
+  }
+
+  /** Verify an OIDC ID token and reuse the normal OAuth identity upsert path. */
+  async signInWithIdToken(
+    providerName: string,
+    token: string,
+    accessToken?: string,
+    nonce?: string
+  ): Promise<string | null> {
+    const provider = this.providers.get(providerName)
+    const keySet = this.idTokenKeySets.get(providerName)
+    if (!provider?.idTokenIssuer || !keySet || !token) return null
+
+    let payload: JWTPayload
+    let algorithm: string
+    try {
+      const verified = await jwtVerify(token, keySet, {
+        issuer: provider.idTokenIssuer,
+        audience: provider.idTokenAudience ?? provider.clientId,
+        algorithms: ['RS256', 'ES256'],
+      })
+      payload = verified.payload
+      algorithm = verified.protectedHeader.alg ?? ''
+    } catch {
+      return null
+    }
+
+    if (typeof payload.sub !== 'string' || payload.sub.length === 0) return null
+    if (payload.nonce !== undefined && (typeof payload.nonce !== 'string' || payload.nonce !== nonce)) return null
+    const acceptedAudiences = provider.idTokenAudience ?? provider.clientId
+    if (
+      Array.isArray(payload.aud)
+      && payload.aud.length > 1
+      && (typeof payload.azp !== 'string'
+        || (Array.isArray(acceptedAudiences) ? !acceptedAudiences.includes(payload.azp) : payload.azp !== acceptedAudiences))
+    ) return null
+    if (typeof payload.at_hash === 'string') {
+      if (!accessToken || (await oidcAtHash(accessToken, algorithm)) !== payload.at_hash) return null
+    }
+
+    let profile: OAuthProfile
+    try {
+      profile = provider.profileMap(payload as OAuthRawProfile)
+    } catch {
+      return null
+    }
+    if (!profile.id) return null
+    return this.upsertUser(providerName, profile)
   }
 
   private callbackUrl(): string {
@@ -484,6 +572,13 @@ export class OAuthService {
     if (!user || user.is_deleted) throw new OAuthAccountIneligibleError('user_not_found')
     if (user.is_banned) throw new OAuthAccountIneligibleError('user_banned')
   }
+}
+
+async function oidcAtHash(accessToken: string, algorithm: string): Promise<string | null> {
+  const hash = algorithm === 'RS256' || algorithm === 'ES256' ? 'SHA-256' : null
+  if (!hash) return null
+  const digest = new Uint8Array(await crypto.subtle.digest(hash, new TextEncoder().encode(accessToken)))
+  return base64url(digest.subarray(0, digest.length / 2))
 }
 
 /** The minimal session the callback puts in the redirect fragment for the implicit flow. */

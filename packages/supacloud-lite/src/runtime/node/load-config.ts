@@ -312,6 +312,9 @@ function readOAuthProviders(root: ConfigTable, env: Environment): Record<string,
         tokenUrl: getString(t, 'token_url') ?? (url ? `${url}/token` : undefined),
         userInfoUrl: getString(t, 'userinfo_url') ?? (url ? `${url}/userinfo` : undefined),
         scopes: getString(t, 'scopes'),
+        idTokenIssuer: getString(t, 'id_token_issuer') ?? getString(t, 'issuer'),
+        idTokenJwksUrl: getString(t, 'id_token_jwks_url') ?? getString(t, 'jwks_url'),
+        idTokenAudience: getString(t, 'id_token_audience') ?? clientId,
       }
     }
   }
@@ -349,6 +352,9 @@ function collectEnvProviders(
       tokenUrl: g('TOKEN_URL'),
       userInfoUrl: g('USERINFO_URL'),
       scopes: g('SCOPES'),
+      idTokenIssuer: g('ID_TOKEN_ISSUER') ?? g('ISSUER'),
+      idTokenJwksUrl: g('ID_TOKEN_JWKS_URL') ?? g('JWKS_URL'),
+      idTokenAudience: g('ID_TOKEN_AUDIENCE') ?? clientId,
     }
   }
 }
