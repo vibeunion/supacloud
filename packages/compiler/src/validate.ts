@@ -407,10 +407,10 @@ export function validateGraph(
             command.className === effectiveCommandRef || command.name === effectiveCommandRef);
         const effectiveIdempotency = route.idempotency ?? featureTransition?.idempotency;
 
-        if (route.command && !module.commands.some((command) => command.className === route.command)) {
+        if (route.command && !effectiveCommand) {
           error(
             "route-command-unresolved",
-            `路由 ${key} 绑定的 command 类 ${route.command} 未在模块 ${module.name} 声明`,
+            `路由 ${key} 绑定的 command ${route.command} 未在模块 ${module.name} 声明`,
             controller.file,
           );
         }
