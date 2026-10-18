@@ -296,6 +296,46 @@ test("migration assessment rejects downgraded Feature command governance", async
   expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
+test("migration assessment rejects Feature transition governance drift", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-transition-governance-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1,
+    commands: [{
+      name: "ApproveCase", className: "ApproveCase", module: "case",
+      rpc: "approve_case", permission: "case.approve",
+      transaction: "required", idempotency: "required", tenantScope: "required",
+      auditEvent: "case.approved",
+    }],
+    queries: [], permissions: [], jobs: [],
+    rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
+    features: [{
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
+      transitions: [{
+        name: "approve", from: "draft", to: "approved",
+        command: "ApproveCase", permission: "case.approve",
+        transaction: "none", idempotency: "required", audit: "case.approved",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    }],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
+});
+
 test("migration assessment rejects duplicate Job inventory identities", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-job-duplicates-"));
   await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);

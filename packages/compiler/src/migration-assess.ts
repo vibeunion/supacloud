@@ -161,6 +161,9 @@ function validFeatureInventory(
         );
         if (!isRecord(command)) return false;
         if (transition["permission"] !== undefined && command["permission"] !== transition["permission"]) return false;
+        if (transition["transaction"] !== undefined && command["transaction"] !== transition["transaction"]) return false;
+        if (transition["idempotency"] !== undefined && command["idempotency"] !== transition["idempotency"]) return false;
+        if (transition["audit"] !== undefined && command["auditEvent"] !== transition["audit"]) return false;
         if (persistence !== undefined) {
           const adapter = command["rpc"];
           if (typeof adapter !== "string" || adapter.trim() === ""
