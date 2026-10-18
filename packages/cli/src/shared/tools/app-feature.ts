@@ -245,12 +245,7 @@ export const ${className}Feature = defineFeatureSlice({
         [`${name}.feature.test.ts`]: `import { expect, test } from "bun:test";
 import { Refresh${className}Job } from "./${name}.feature";
 import { ${className}Service } from "./${name}.service";
-
-const context = {
-    requestId: "request-example",
-    identity: { authenticated: true, subject: "reviewer-example" },
-    access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}] },
-};
+import { ${className}Fixture, ${className}RequestContext, ${className}RequestEnvelope } from "./${name}.fixture";
 
 test("${name} rejects missing trusted tenant context before adapter execution", async () => {
     let calls = 0;
@@ -268,7 +263,7 @@ test("${name} rejects missing trusted job context before dispatch", async () => 
 });
 
 test("${name} fails closed until verified read and durable write ports are bound", async () => {
-    const service = new ${className}Service(context);
+    const service = new ${className}Service(${className}RequestEnvelope);
     await expect(service.list({})).rejects.toThrow("Bind ${className}Reader");
     await expect(service.detail("example")).rejects.toThrow("Bind ${className}Reader");
     await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("Bind ${className}Writer");
@@ -277,7 +272,7 @@ test("${name} fails closed until verified read and durable write ports are bound
 test("${name} preserves denied reads and rejected writes without fallback or retry", async () => {
     const denied = new Error("denied");
     let attempts = 0;
-    const service = new ${className}Service(context, {
+    const service = new ${className}Service(${className}RequestEnvelope, {
         list: async () => { throw denied; },
         detail: async () => { throw denied; },
     }, {
@@ -290,19 +285,73 @@ test("${name} preserves denied reads and rejected writes without fallback or ret
 });
 
 test("${name} forwards the authoritative version and result without inventing persistence", async () => {
-    const row = { id: "example", state: "approved", version: 2 };
-    const service = new ${className}Service(context, undefined, {
+    const row = { id: ${className}Fixture.id, state: "approved", version: 2 };
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, {
         async approve(requestContext, input) {
-            expect(requestContext).toMatchObject({
-                requestId: "request-example",
-                tenantId: "tenant-example",
-                actorId: "reviewer-example",
-            });
-            expect(input).toEqual({ id: "example", expectedVersion: 1, reason: "reviewed" });
+            expect(requestContext).toMatchObject(${className}RequestContext);
+            expect(input).toEqual({ id: ${className}Fixture.id, ...${className}Fixture.approve });
             return row;
         },
     });
-    expect(await service.approve("example", { expectedVersion: 1, reason: "reviewed" })).toBe(row);
+    expect(await service.approve(${className}Fixture.id, ${className}Fixture.approve)).toBe(row);
+});
+`,
+        [`${name}.fixture.ts`]: `import type { ${className}ApproveInput, ${className}Result } from "./${name}.model";
+
+/**
+ * Test data only. Production adapters must load authoritative rows and
+ * identity from the database/authentication boundary.
+ */
+export const ${className}Fixture = {
+    id: "example",
+    approve: { expectedVersion: 1, reason: "reviewed" } satisfies ${className}ApproveInput,
+    row: { id: "example", state: "draft", version: 1 } satisfies ${className}Result,
+} as const;
+
+export const ${className}RequestContext = {
+    requestId: "request-example",
+    tenantId: "tenant-example",
+    actorId: "reviewer-example",
+    permissions: [${JSON.stringify(permission)}],
+} as const;
+
+export const ${className}RequestEnvelope = {
+    ...${className}RequestContext,
+    identity: { authenticated: true, subject: "reviewer-example" },
+    access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}] },
+} as const satisfies Record<string, unknown>;
+`,
+        [`${name}.e2e.test.ts`]: `import { expect, test } from "bun:test";
+import { ${className}Fixture } from "./${name}.fixture";
+
+const baseUrl = process.env.SUPACLOUD_FEATURE_E2E_URL;
+const authorization = process.env.SUPACLOUD_FEATURE_E2E_AUTHORIZATION;
+const idempotencyKey = process.env.SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY;
+
+test("${name} authenticated list/detail/approval E2E", async () => {
+    if (!baseUrl || !authorization || !idempotencyKey) {
+        throw new Error(
+            "Set SUPACLOUD_FEATURE_E2E_URL, SUPACLOUD_FEATURE_E2E_AUTHORIZATION and " +
+            "SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY before running this generated E2E test.",
+        );
+    }
+    const headers = { authorization, "content-type": "application/json" };
+    const list = await fetch(new URL("/${name}", baseUrl), { headers });
+    expect(list.ok).toBe(true);
+    const detail = await fetch(
+        new URL("/${name}/" + encodeURIComponent(${className}Fixture.id), baseUrl),
+        { headers },
+    );
+    expect(detail.ok).toBe(true);
+    const approval = await fetch(
+        new URL("/${name}/" + encodeURIComponent(${className}Fixture.id) + "/approve", baseUrl),
+        {
+            method: "POST",
+            headers: { ...headers, "idempotency-key": idempotencyKey },
+            body: JSON.stringify(${className}Fixture.approve),
+        },
+    );
+    expect([200, 409, 422]).toContain(approval.status);
 });
 `,
         [`${name}.deployment.md`]: `# ${className} feature delivery checklist

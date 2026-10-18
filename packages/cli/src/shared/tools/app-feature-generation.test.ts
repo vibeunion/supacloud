@@ -29,7 +29,7 @@ test("feature preview and apply share a complete, non-overwriting plan", async (
     const root = await fixture();
     const preview = data(await runAppTool({ ...feature, root, dry_run: true }));
     expect(preview).toMatchObject({ ok: true, written: false });
-    expect(preview.changes).toHaveLength(6);
+    expect(preview.changes).toHaveLength(8);
     expect(await readdir(root)).toEqual([]);
     const applied = data(await runAppTool({ ...feature, root }));
     expect(applied).toMatchObject({ ok: true, written: true });
