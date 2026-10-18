@@ -1696,6 +1696,7 @@ export class AuthHandler {
       }
     }
 
+
     const emailOtp = randomOtp(this.settings.otpLength)
     const hashedToken = await sha256Hex(randomToken(32))
     const expiry = `${this.settings.otpExpirySeconds} seconds`
