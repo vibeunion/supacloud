@@ -7,6 +7,7 @@ import type {
   CommandRuntimeInvocation,
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
+import { requireFeatureRequestContext } from "@supacloud/app";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
 import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
@@ -157,6 +158,7 @@ export interface CompiledCommand {
   transaction?: "required" | "none" | string;
   audit?: string;
   idempotency?: "required" | "none" | string;
+  tenantScope?: "required" | "none" | string;
   /** Statically generated command aspects. */
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
@@ -184,6 +186,7 @@ export interface CompiledJob {
   timeoutSec?: number;
   maxAttempts?: number;
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none" | string;
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
 }
@@ -833,9 +836,18 @@ export function createCommandExecutor(
   return async (invocation, next) => {
     const command = selectCommandBranch(invocation.command, invocation.input);
     const selectedInvocation = command === invocation.command ? invocation : { ...invocation, command };
-    for (const mode of [command.transaction, command.idempotency]) {
+    for (const mode of [command.transaction, command.idempotency, command.tenantScope]) {
       if (mode !== undefined && mode !== "required" && mode !== "none") {
         throw new ApplicationError("Invalid command governance mode", { code: "COMMAND_MODE_INVALID" });
+      }
+    }
+    if (command.tenantScope === "required") {
+      try {
+        requireFeatureRequestContext(invocation.requestContext);
+      } catch {
+        throw new ApplicationError("Feature request context is required for this command", {
+          status: 401, code: "COMMAND_TENANT_CONTEXT_REQUIRED",
+        });
       }
     }
     if (command.rpc !== undefined) {
@@ -1570,6 +1582,15 @@ export async function executeJob(
 ): Promise<unknown> {
   // Validate before creating a job scope so malformed input cannot construct
   // providers or perform any application work.
+  if (job.tenantScope === "required") {
+    try {
+      requireFeatureRequestContext(requestContext);
+    } catch {
+      throw new ApplicationError("Feature request context is required for this job", {
+        status: 401, code: "JOB_TENANT_CONTEXT_REQUIRED",
+      });
+    }
+  }
   const decodedInput = decodeJobContract(job.input, input, "input");
   const jobScope = job.scope === "job" && compiled.createJobScope
     ? await compiled.createJobScope(services, requestContext, imported)

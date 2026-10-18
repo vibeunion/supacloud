@@ -8,9 +8,13 @@ export interface FeatureTransitionOptions<State extends string = string> {
   permission?: string;
   command?: string;
   route?: string;
+  /** Route binding mode: framework command binding or an explicit controller invocation. */
+  routeBinding?: "command" | "controller";
   transaction?: "required" | "none";
   idempotency?: "required" | "none";
   audit?: string;
+  /** Job that continues the transition after the durable write is committed. */
+  job?: string;
   persistence?: FeaturePersistenceOptions;
 }
 
@@ -18,6 +22,8 @@ export interface FeaturePersistenceOptions {
   boundary: "database" | "external";
   optimisticLock: "required" | "none";
   versionField?: string;
+  tenantField?: string;
+  stateField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
 }
@@ -25,6 +31,7 @@ export interface FeaturePersistenceOptions {
 export interface FeatureSpecOptions {
   name: string;
   states: readonly string[];
+  tenantField?: string;
   transitions: Readonly<Record<string, FeatureTransitionOptions>>;
 }
 

@@ -458,6 +458,7 @@ export class LifecycleController {
           permission: "aspect.run",
           transaction: "none",
           idempotency: "none",
+          tenantScope: "required",
           aspects: [{
             name: "commandAspect",
             expression: "commandAspect",
@@ -486,6 +487,7 @@ export class LifecycleController {
     );
     expect(rendered.applicationCode).toContain("aspects: [routeAspect]");
     expect(rendered.applicationCode).toContain("aspects: [commandAspect]");
+    expect(rendered.applicationCode).toContain('tenantScope: "required"');
     expect(rendered.applicationCode).toContain("aspects: [moduleAspect]");
     expect(rendered.applicationCode).toContain(
       'jobs: [{ className: "RebuildJob", name: "aspect.rebuild", serviceKey: "rebuildJob", scope: "job", }]',
@@ -521,6 +523,7 @@ export class LifecycleController {
           timeoutSec: 120,
           maxAttempts: 7,
           idempotency: "required",
+          tenantScope: "required",
         }],
         exports: [],
       }],
@@ -531,7 +534,7 @@ export class LifecycleController {
       'import { JobInput, JobOutput } from "../src/contracts";',
     );
     expect(rendered.applicationCode).toContain(
-      'jobs: [{ className: "AcceptJob", name: "case.accept", serviceKey: "acceptJob", scope: "job", input: JobInput, output: JobOutput, mode: "workflow", timeoutSec: 120, maxAttempts: 7, idempotency: "required", }]',
+      'jobs: [{ className: "AcceptJob", name: "case.accept", serviceKey: "acceptJob", scope: "job", input: JobInput, output: JobOutput, mode: "workflow", timeoutSec: 120, maxAttempts: 7, idempotency: "required", tenantScope: "required", }]',
     );
   });
 

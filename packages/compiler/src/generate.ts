@@ -111,6 +111,7 @@ export interface CompiledCommand {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  tenantScope?: "required" | "none";
   standalone?: boolean;
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
@@ -136,6 +137,7 @@ export interface CompiledJob {
   timeoutSec?: number;
   maxAttempts?: number;
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none";
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
 }
@@ -918,6 +920,7 @@ class ModuleGenerator {
         `transaction: ${JSON.stringify(command.transaction)}`,
         ...(command.audit ? [`audit: ${JSON.stringify(command.audit)}`] : []),
         `idempotency: ${JSON.stringify(command.idempotency)}`,
+        ...(command.tenantScope ? [`tenantScope: ${JSON.stringify(command.tenantScope)}`] : []),
         ...(command.rpc ? [`rpc: ${JSON.stringify(command.rpc)}`] : []),
         ...(command.branches && command.branches.length > 0
           ? [`branches: ${JSON.stringify(command.branches)}`]
@@ -952,6 +955,7 @@ class ModuleGenerator {
       if (job.timeoutSec !== undefined) fields.push(`timeoutSec: ${job.timeoutSec}`);
       if (job.maxAttempts !== undefined) fields.push(`maxAttempts: ${job.maxAttempts}`);
       if (job.idempotency !== undefined) fields.push(`idempotency: ${JSON.stringify(job.idempotency)}`);
+      if (job.tenantScope !== undefined) fields.push(`tenantScope: ${JSON.stringify(job.tenantScope)}`);
       if (job.aspects && job.aspects.length > 0) {
         fields.push(`aspects: ${this.renderAspects(job.aspects)}`);
         fields.push(`aspectPipeline: ${this.renderAspectPipeline(job.aspects)}`);
