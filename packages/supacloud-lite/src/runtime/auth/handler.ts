@@ -1512,6 +1512,13 @@ export class AuthHandler {
       )
       const currentUser = currentUsers.rows[0]
       if (!currentUser) return null
+      const currentFactors = await query<{ id: string; secret: string; status: string }>(
+        `select id, secret, status from auth.mfa_factors
+         where id = $1 and user_id = $2 for update`,
+        [factorId, user.id],
+      )
+      const currentFactor = currentFactors.rows[0]
+      if (!currentFactor || !(await verifyTotp(currentFactor.secret, body.code ?? ''))) return null
       const claimed = await query(
         `update auth.mfa_challenges set verified_at = now()
          where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
@@ -1519,7 +1526,7 @@ export class AuthHandler {
         [challenge.id, factorId]
       )
       if (claimed.rows.length === 0) return null
-      if (factor.status !== 'verified') {
+      if (currentFactor.status !== 'verified') {
         await query(`update auth.mfa_factors set status = 'verified', updated_at = now() where id = $1`, [factorId])
       }
       return this.sessionFor(currentUser, undefined, {
