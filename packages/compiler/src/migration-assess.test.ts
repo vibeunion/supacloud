@@ -154,9 +154,11 @@ test("migration assessment accepts transition Job bindings by class name", async
     }],
     commands: [{
       name: "ApproveCase", className: "ApproveCase", module: "case",
+      rpc: "approve_case",
       permission: "case.approve", transaction: "required", idempotency: "required",
       tenantScope: "required",
     }],
+    rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
     features: [{
       name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
       transitions: [{
@@ -227,10 +229,11 @@ test("migration assessment rejects Feature routes bound to another command", asy
     version: 1,
     commands: [{
       name: "ApproveCase", className: "ApproveCase", module: "case",
+      rpc: "approve_case",
       permission: "case.approve", transaction: "required", idempotency: "required",
       tenantScope: "required",
     }],
-    queries: [], permissions: [], jobs: [],
+    queries: [], permissions: [], jobs: [], rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
     routes: [{ method: "POST", path: "/cases/:id/approve", command: "OtherCommand" }],
     features: [{
       name: "case", states: ["draft", "approved"], tenantField: "tenant_id",

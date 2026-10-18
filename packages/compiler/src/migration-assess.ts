@@ -124,6 +124,7 @@ function validFeatureInventory(
   jobs: readonly unknown[],
   commands: readonly unknown[],
   routes: readonly unknown[],
+  rpc: readonly unknown[],
 ): value is unknown[] {
   const featureNames = new Set<string>();
   return Array.isArray(value) && value.every((feature) => {
@@ -160,6 +161,12 @@ function validFeatureInventory(
         );
         if (!isRecord(command)) return false;
         if (transition["permission"] !== undefined && command["permission"] !== transition["permission"]) return false;
+        if (persistence !== undefined) {
+          const adapter = command["rpc"];
+          if (typeof adapter !== "string" || adapter.trim() === ""
+            || !rpc.some((candidate) => isRecord(candidate)
+              && candidate["command"] === command["name"] && candidate["adapter"] === adapter)) return false;
+        }
       }
       const routeName = transition["route"];
       if (routeName !== undefined) {
@@ -288,7 +295,8 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
       || !validJobInventory(parsed["jobs"])
       || !Array.isArray(parsed["commands"])
       || !Array.isArray(parsed["routes"])
-      || !validFeatureInventory(parsed["features"], parsed["jobs"], parsed["commands"], parsed["routes"])) {
+      || !Array.isArray(parsed["rpc"])
+      || !validFeatureInventory(parsed["features"], parsed["jobs"], parsed["commands"], parsed["routes"], parsed["rpc"])) {
       throw new Error("invalid manifest");
     }
     const commands = arrayLength(parsed["commands"]);
