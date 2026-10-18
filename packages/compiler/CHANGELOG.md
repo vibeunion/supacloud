@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.3](https://github.com/vibeunion/supacloud/compare/compiler-v0.47.2...compiler-v0.47.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* **cli:** align verification target resolution ([#2052](https://github.com/vibeunion/supacloud/issues/2052)) ([3cfcc36](https://github.com/vibeunion/supacloud/commit/3cfcc362f87ecdaf82a4df303f5af436875fb36e))
+* **compiler:** include feature specs in context files ([#2045](https://github.com/vibeunion/supacloud/issues/2045)) ([56d4db3](https://github.com/vibeunion/supacloud/commit/56d4db3fb87c13c0d0d4a1331c5dfc7ef0c697cf))
+
 ## [0.47.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.47.1...compiler-v0.47.2) (2026-10-17)
 
 
