@@ -1,11 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compileProject } from "@supacloud/compiler";
 import { registerAppAliases, registerAppTools, runAppTool, type ToolResult } from "./app-tools";
 
 const roots: string[] = [];
+const require = createRequire(import.meta.url);
+const { compileProject } = require("../../../../compiler/dist/index.js") as typeof import("@supacloud/compiler");
 const feature = {
     action: "generate", kind: "feature", name: "case-approval",
     permission: "cases:approve", rpc: "approveCase", format: "json",
@@ -124,7 +126,8 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
     const featureModule = compiled.graph.modules.find(module => module.featureSpec);
     expect(featureModule?.featureSpec?.transitions[0]?.permission).toBe("cases:approve");
-    expect(featureModule?.featureSpec?.transitions[0]?.job).toBe("case-approval.refresh");
+    expect((featureModule?.featureSpec?.transitions[0] as { job?: string } | undefined)?.job)
+        .toBe("case-approval.refresh");
     expect(featureModule?.commands[0]?.rpc).toBe("approveCase");
     expect(featureModule?.queries).toHaveLength(1);
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))

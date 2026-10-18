@@ -47,6 +47,8 @@ test("tenant-scoped jobs fail before creating a job scope without trusted featur
   let created = false;
   const module: CompiledModule = {
     name: "review",
+    createServices: () => ({}),
+    controllers: [],
     createJobScope: async () => { created = true; return {}; },
     commands: [],
     jobs: [{
@@ -54,7 +56,7 @@ test("tenant-scoped jobs fail before creating a job scope without trusted featur
       scope: "job", tenantScope: "required",
     }],
   };
-  await expect(executeJob(module, {}, module.jobs[0]!, {}, {}))
+  await expect(executeJob(module, {}, module.jobs?.[0]!, {}, {}))
     .rejects.toMatchObject({ code: "JOB_TENANT_CONTEXT_REQUIRED", status: 401 });
   expect(created).toBe(false);
 });
