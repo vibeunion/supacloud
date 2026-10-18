@@ -123,7 +123,7 @@ background = true                         # capabilities.background
 
 `EdgeRuntime.waitUntil(promise)` 注册跨响应的后台任务：响应照常返回，任务在响应后等待 allSettled（上限 `wait_until_timeout_ms`），任务中再次调用 `waitUntil` 的嵌套任务同样被追踪。Lite 面向本地开发默认**允许** `waitUntil`（向后兼容）；生产 Edge Runtime 需要声明 `background` capability。`backend.close()` 不等待仍在漂移的后台任务。
 
-与生产的差异：Lite 面向本地开发，未声明时默认**不限制**（不包 fetch、env 全量可见）；生产 Edge Runtime 有 900s 超时与 30MB 请求体的默认上限。OPTIONS 预检与正常请求走同一路径、受同一组限制约束。
+与生产的差异：Lite 面向本地开发，未声明时默认**不限制**（不包 fetch、env 全量可见）；生产 Edge Runtime 有 900s 超时与 500 MiB 请求体的默认上限。OPTIONS 预检与正常请求走同一路径、受同一组限制约束。
 
 #### Auth 运行方式
 

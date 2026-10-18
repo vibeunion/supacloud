@@ -42,7 +42,7 @@ export type FunctionHandler = EdgeFunction | FrameworkObjectHandler
  * Per-invocation resource limits, aligned with the Edge Runtime Manifest v2
  * `limits` block (timeout_ms / max_request_body_bytes /
  * max_response_body_bytes / wait_until_timeout_ms). Lite defaults to no
- * limit when undeclared; production caps at 900s / 30MB.
+ * limit when undeclared; production caps at 900s / 500 MiB.
  */
 export interface FunctionLimits {
   /** limits.timeout_ms: max wall time per invocation; on expiry the request is aborted and a 504 returned. */

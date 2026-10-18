@@ -4316,7 +4316,7 @@ describe("WorkerPool body size limit", () => {
     }
   });
 
-  test("rejects request with content-length exceeding default limit (30MB)", async () => {
+  test("rejects request with content-length exceeding default limit (500 MiB)", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-limit-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -4331,7 +4331,7 @@ describe("WorkerPool body size limit", () => {
     pools.push(pool);
 
     try {
-      const oversizedLength = 31 * 1024 * 1024;
+      const oversizedLength = 500 * 1024 * 1024 + 1;
       const req = new Request("http://edge.local/functions/v1/test", {
         method: "POST",
         headers: { "content-length": String(oversizedLength) },
@@ -4352,13 +4352,13 @@ describe("WorkerPool body size limit", () => {
       expect(res.headers.has("x-supacloud-function-version")).toBe(false);
       const body = await res.json();
       expect(body.error).toContain("Request body too large");
-      expect(body.error).toContain("30MB");
+      expect(body.error).toContain("500MB");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("rejects request when actual body exceeds default limit", async () => {
+  test("rejects request when actual body exceeds a lower function limit", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-actual-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -4373,7 +4373,7 @@ describe("WorkerPool body size limit", () => {
     pools.push(pool);
 
     try {
-      const oversizedBody = "x".repeat(31 * 1024 * 1024);
+      const oversizedBody = "x".repeat(1025);
       const req = new Request("http://edge.local/functions/v1/test", {
         method: "POST",
         body: oversizedBody,
@@ -4381,6 +4381,7 @@ describe("WorkerPool body size limit", () => {
 
       const res = await pool.dispatch({
         functionId: "test_body_actual",
+        limits: { max_request_body_bytes: 1024 },
         projectRef: "test-project",
         functionPath,
         projectRoot,
@@ -4479,7 +4480,7 @@ describe("WorkerPool body size limit", () => {
 
       expect(res.status).toBe(413);
       const body = await res.json();
-      expect(body.error).toContain("30MB");
+      expect(body.error).toContain("500MB");
     } finally {
       if (previousLimit === undefined) {
         delete process.env.EDGE_MAX_BODY_SIZE_MB;
