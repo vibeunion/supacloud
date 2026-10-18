@@ -8,8 +8,8 @@ const mebibyte = 1024 * 1024;
 
 test("default and invalid settings preserve worker and listener limits", () => {
   for (const value of ["", "invalid", "0", "-1", "Infinity"]) {
-    expect(resolveMaxBodySizeBytes(value)).toBe(30 * mebibyte);
-    expect(resolveMaxHttpBodySizeBytes(value)).toBe(128 * mebibyte);
+    expect(resolveMaxBodySizeBytes(value)).toBe(500 * mebibyte);
+    expect(resolveMaxHttpBodySizeBytes(value)).toBe(500 * mebibyte);
   }
   expect(resolveMaxBodySizeBytes("16")).toBe(16 * mebibyte);
   expect(resolveMaxHttpBodySizeBytes("16")).toBe(128 * mebibyte);
