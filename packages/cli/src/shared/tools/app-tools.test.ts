@@ -63,7 +63,14 @@ export function Post(_path: string, _options?: Record<string, unknown>): MethodD
 
 const FIXTURE_FILES: Record<string, string> = {
     "tsconfig.json": FIXTURE_TSCONFIG,
-    "package.json": `{\n  "name": "fixture",\n  "dependencies": { "@supacloud/app": "0.0.0", "@supacloud/elysia": "0.0.0", "elysia": "1.4.30" }\n}\n`,
+    "package.json": `{
+  "name": "fixture",
+  "dependencies": { "@supacloud/app": "0.0.0", "@supacloud/elysia": "0.0.0", "elysia": "1.4.30" },
+  "devDependencies": { "bun-types": "1.3.0" },
+  "optionalDependencies": { "sharp": "0.34.0" },
+  "peerDependencies": { "react": "19.0.0" }
+}
+`,
     "src/runtime.ts": RUNTIME_SOURCE,
     "src/effect.ts": `export type Effect<A, E, R> = { readonly _effect: A; readonly _error?: E; readonly _requirements?: R };\n`,
     "src/elysia.ts": `export const t = {
@@ -464,6 +471,9 @@ describe("app tools", () => {
             .toEqual(expect.arrayContaining(["audit", "case"]));
         expect(pack.externalTokens).toContain("DB_CLIENT");
         expect(pack.allowedDependencies.dependencies).toEqual(expect.arrayContaining(["@supacloud/app", "@supacloud/elysia"]));
+        expect(pack.allowedDependencies.devDependencies).toEqual(["bun-types"]);
+        expect(pack.allowedDependencies.optionalDependencies).toEqual(["sharp"]);
+        expect(pack.allowedDependencies.peerDependencies).toEqual(["react"]);
         expect(pack.commands.doctor).toContain("app doctor");
         expect(pack.commands.fix).toBe("supacloud app fix --fix <fix.json>");
 
