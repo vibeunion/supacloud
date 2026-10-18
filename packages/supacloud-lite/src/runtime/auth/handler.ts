@@ -623,7 +623,8 @@ export class AuthHandler {
     email: string,
     tokenType: 'otp' | 'recovery',
     createUser: boolean,
-    flavor: 'login' | 'confirm' = 'login'
+    flavor: 'login' | 'confirm' = 'login',
+    metadata: Record<string, unknown> = {}
   ): Promise<Response> {
     const normalized = email.toLowerCase().trim()
     const expiry = `${this.settings.otpExpirySeconds} seconds`
@@ -637,10 +638,10 @@ export class AuthHandler {
         if (this.settings.disableSignup) return { kind: 'signup_disabled' } as const
         const inserted = await query<UserRow>(
           `insert into auth.users (aud, role, email, raw_app_meta_data, raw_user_meta_data)
-           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', '{}')
+           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
            on conflict (email) do nothing
            returning *`,
-          [normalized]
+          [normalized, JSON.stringify(metadata)]
         )
         user = inserted.rows[0]
         if (!user) {
@@ -705,7 +706,7 @@ export class AuthHandler {
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email or phone is required')
-    return this.limit('otp', req) ?? this.issueToken(email, 'otp', body.create_user !== false)
+    return this.limit('otp', req) ?? this.issueToken(email, 'otp', body.create_user !== false, 'login', recordValue(body.data))
   }
 
   private async issuePhoneToken(
