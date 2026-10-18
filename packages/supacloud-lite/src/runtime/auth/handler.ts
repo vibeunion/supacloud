@@ -1283,7 +1283,13 @@ export class AuthHandler {
       return json(200, session)
     }
     const types =
-      body.type === 'recovery' ? ['recovery'] : body.type === 'magiclink' ? ['magiclink'] : ['otp', 'magiclink']
+      body.type === 'recovery'
+        ? ['recovery']
+        : body.type === 'magiclink'
+          ? ['magiclink']
+          : body.type === 'signup' || body.type === 'invite'
+            ? [body.type]
+            : ['otp', 'magiclink']
     const session = await this.redeem(token, types, body.email, {
       amr: [{ method: body.type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
     })
@@ -1671,18 +1677,26 @@ export class AuthHandler {
     const body = (await req.json().catch(() => ({}))) as {
       type?: string
       email?: string
+      password?: string
       redirect_to?: string
       data?: Record<string, unknown>
     }
-    if (body.type !== 'magiclink' && body.type !== 'recovery') {
-      return authError(422, 'unsupported_link_type', 'Only magiclink and recovery link generation are supported')
+    if (!['signup', 'invite', 'magiclink', 'recovery'].includes(body.type ?? '')) {
+      return authError(422, 'unsupported_link_type', 'Only signup, invite, magiclink, and recovery link generation are supported')
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
+    if (body.type === 'signup' && !body.password) {
+      return authError(400, 'validation_failed', 'password is required for signup links')
+    }
+    if (body.type === 'signup' && body.password.length < this.settings.minPasswordLength) {
+      return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
+    }
 
     const emailOtp = randomOtp(this.settings.otpLength)
     const hashedToken = await sha256Hex(randomToken(32))
     const expiry = `${this.settings.otpExpirySeconds} seconds`
+    const passwordHash = body.type === 'signup' ? await hashPassword(body.password!) : null
     const requestUrl = new URL(req.url)
     const redirectTo = resolveRedirect(
       requestUrl.searchParams.get('redirect_to') ?? body.redirect_to,
@@ -1700,14 +1714,18 @@ export class AuthHandler {
       if (!linkedUser && body.type === 'recovery') {
         return null
       }
+      if (linkedUser && (body.type === 'signup' || body.type === 'invite')) {
+        return { error: 'email_exists' as const }
+      }
       if (!linkedUser) {
         const result = await query<UserRow>(
           `insert into auth.users
-             (aud, role, email, raw_app_meta_data, raw_user_meta_data)
-           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
+             (aud, role, email, encrypted_password, invited_at, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end,
+                   '{"provider":"email","providers":["email"]}', $4::jsonb)
            on conflict (email) do update set email = excluded.email
            returning *`,
-          [email, JSON.stringify(body.data ?? {})]
+          [email, passwordHash, body.type === 'invite', JSON.stringify(body.data ?? {})]
         )
         linkedUser = result.rows[0]
       }
@@ -1720,7 +1738,7 @@ export class AuthHandler {
       await query(
         `delete from auth.one_time_tokens
          where lower(email) = $1 and token_type = any($2::text[])`,
-        [email, body.type === 'recovery' ? '{recovery}' : '{otp,magiclink}']
+        [email, body.type === 'magiclink' ? '{otp,magiclink}' : `{${body.type}}`]
       )
       await query(
         `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
@@ -1729,9 +1747,9 @@ export class AuthHandler {
         [
           linkedUser.id,
           email,
-          body.type === 'recovery' ? 'recovery' : 'otp',
+          body.type === 'magiclink' ? 'otp' : body.type,
           emailOtp,
-          body.type === 'recovery' ? 'recovery' : 'magiclink',
+          body.type === 'magiclink' ? 'magiclink' : body.type,
           hashedToken,
           expiry,
         ]
@@ -1739,13 +1757,19 @@ export class AuthHandler {
       return linkedUser
     })
     if (!user) return authError(404, 'user_not_found', 'User not found')
+    if ('error' in user) return authError(422, user.error, 'A user with this email address has already been registered')
 
     const actionUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
     actionUrl.searchParams.set('token', hashedToken)
     actionUrl.searchParams.set('type', body.type!)
     actionUrl.searchParams.set('redirect_to', redirectTo)
+    const auditAction =
+      body.type === 'invite' ? 'user_invited'
+        : body.type === 'signup' ? 'user_signedup'
+          : body.type === 'recovery' ? 'user_recovery_requested'
+            : 'user_magiclink_requested'
     await this.audit(
-      body.type === 'recovery' ? 'user_recovery_requested' : 'user_magiclink_requested',
+      auditAction,
       { actorId: user.id, actorEmail: email, type: 'admin' }
     )
     return json(200, {
