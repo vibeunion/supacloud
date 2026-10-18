@@ -162,7 +162,7 @@ describe('Auth admin link compatibility', () => {
       const unsupported = await backend.fetch('http://local/auth/v1/admin/generate_link', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ type: 'recovery', email: 'unsupported@example.com' }),
+        body: JSON.stringify({ type: 'signup', email: 'unsupported@example.com' }),
       })
       expect(unsupported.status).toBe(422)
       expect(await unsupported.json()).toMatchObject({ error_code: 'unsupported_link_type' })
