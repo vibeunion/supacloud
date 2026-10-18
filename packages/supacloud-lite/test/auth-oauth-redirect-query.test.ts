@@ -63,4 +63,20 @@ describe('Auth OAuth redirect URL construction', () => {
     expect(location.searchParams.get('source')).toBe('oauth')
     expect(location.searchParams.get('code')).toBeString()
   })
+
+  test('forwards client OAuth query parameters to the provider', async () => {
+    const authorizeUrl = new URL('http://lite.local/auth/v1/authorize?provider=google')
+    authorizeUrl.searchParams.set('query_param', 'from-client')
+    authorizeUrl.searchParams.set('prompt', 'consent')
+    authorizeUrl.searchParams.set('access_type', 'offline')
+    authorizeUrl.searchParams.set('client_id', 'attacker-value')
+
+    const authorized = await auth!.handle(new Request(authorizeUrl), { role: 'anon', claims: null }, authorizeUrl)
+    const location = new URL(authorized.headers.get('location')!)
+
+    expect(location.searchParams.get('query_param')).toBe('from-client')
+    expect(location.searchParams.get('prompt')).toBe('consent')
+    expect(location.searchParams.get('access_type')).toBe('offline')
+    expect(location.searchParams.get('client_id')).toBe('client-id')
+  })
 })
