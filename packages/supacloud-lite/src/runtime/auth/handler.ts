@@ -124,6 +124,12 @@ function authError(status: number, errorCode: string, msg: string): Response {
   return json(status, { code: status, error_code: errorCode, msg })
 }
 
+function normalizeEmailInput(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const email = value.trim().toLowerCase()
+  return email || null
+}
+
 /** A cryptographically-random numeric OTP of `length` digits (6-10). */
 function randomOtp(length: number): string {
   const n = Math.max(6, Math.min(10, Math.floor(length)))
@@ -380,13 +386,13 @@ export class AuthHandler {
     if (this.settings.disableSignup) {
       return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
     }
-    if (!body.email || !body.password) {
+    const email = normalizeEmailInput(body.email)
+    if (!email || !body.password) {
       return authError(400, 'validation_failed', 'Signup requires a valid email and password')
     }
     if (body.password.length < this.settings.minPasswordLength) {
       return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
     }
-    const email = body.email.toLowerCase().trim()
     const hashed = await hashPassword(body.password)
     const autoconfirm = this.settings.autoconfirm
     const newUser = await this.db.transaction(async (query) => {
@@ -518,7 +524,11 @@ export class AuthHandler {
     }
     const sets: string[] = []
     const params: unknown[] = []
-    if (body.email && !this.settings.autoconfirm) {
+    const requestedEmail = body.email === undefined ? undefined : normalizeEmailInput(body.email)
+    if (body.email !== undefined && !requestedEmail) {
+      return authError(400, 'validation_failed', 'email must not be empty')
+    }
+    if (requestedEmail && !this.settings.autoconfirm) {
       return authError(
         501,
         'email_change_confirmation_not_supported',
@@ -549,9 +559,9 @@ export class AuthHandler {
 
         const transactionSets = [...sets]
         const transactionParams = [...params]
-        const upgradingAnon = (current.is_anonymous ?? false) && !!body.email
-        if (body.email) {
-          const email = body.email.toLowerCase().trim()
+        const upgradingAnon = (current.is_anonymous ?? false) && requestedEmail !== undefined
+        if (requestedEmail) {
+          const email = requestedEmail
           const clash = await query(`select id from auth.users where lower(email) = $1 and id <> $2`, [email, current.id])
           if (clash.rows.length > 0) {
             return authError(422, 'email_exists', 'A user with this email address has already been registered')
@@ -573,11 +583,11 @@ export class AuthHandler {
         )
         const updated = updatedResult.rows[0]
         if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
-        if (body.email) await this.ensureEmailIdentity(updated, query)
+        if (requestedEmail) await this.ensureEmailIdentity(updated, query)
         return json(200, await this.userJsonWithRelations(updated, query))
       })
     } catch (error) {
-      if (databaseDiagnosticCode(error) === '23505' && body.email) {
+      if (databaseDiagnosticCode(error) === '23505' && requestedEmail) {
         return authError(422, 'email_exists', 'A user with this email address has already been registered')
       }
       throw error
@@ -693,8 +703,9 @@ export class AuthHandler {
       if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
       return this.limit('sms', req) ?? this.issuePhoneToken(phone, body.create_user !== false, recordValue(body.data))
     }
-    if (!body.email) return authError(400, 'validation_failed', 'email or phone is required')
-    return this.limit('otp', req) ?? this.issueToken(body.email, 'otp', body.create_user !== false)
+    const email = normalizeEmailInput(body.email)
+    if (!email) return authError(400, 'validation_failed', 'email or phone is required')
+    return this.limit('otp', req) ?? this.issueToken(email, 'otp', body.create_user !== false)
   }
 
   private async issuePhoneToken(
@@ -898,8 +909,9 @@ export class AuthHandler {
 
   private async sendRecovery(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as { email?: string }
-    if (!body.email) return authError(400, 'validation_failed', 'email is required')
-    return this.issueToken(body.email, 'recovery', false)
+    const email = normalizeEmailInput(body.email)
+    if (!email) return authError(400, 'validation_failed', 'email is required')
+    return this.issueToken(email, 'recovery', false)
   }
 
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
@@ -1180,8 +1192,8 @@ export class AuthHandler {
         user_metadata?: Record<string, unknown>
         app_metadata?: Record<string, unknown>
       }
-      if (!body.email) return authError(400, 'validation_failed', 'email is required')
-      const email = body.email
+      const email = normalizeEmailInput(body.email)
+      if (!email) return authError(400, 'validation_failed', 'email is required')
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
         const existing = await query(
@@ -1220,8 +1232,10 @@ export class AuthHandler {
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
       const sets: string[] = []
       const params: unknown[] = []
-      if (typeof body.email === 'string') {
-        params.push(body.email.toLowerCase().trim())
+      const requestedEmail = body.email === undefined ? undefined : normalizeEmailInput(body.email)
+      if (body.email !== undefined && !requestedEmail) return authError(400, 'validation_failed', 'email must not be empty')
+      if (requestedEmail) {
+        params.push(requestedEmail)
         sets.push(`email = $${params.length}`)
       }
       if (typeof body.password === 'string') {
@@ -1243,10 +1257,10 @@ export class AuthHandler {
       let emailConflict = false
       try {
         updated = await this.db.transaction(async (query) => {
-          if (typeof body.email === 'string') {
+          if (requestedEmail) {
             const clash = await query(
               `select id from auth.users where lower(email) = $1 and id <> $2`,
-              [body.email.toLowerCase().trim(), idMatch[1]],
+              [requestedEmail, idMatch[1]],
             )
             if (clash.rows.length > 0) {
               emailConflict = true
@@ -1259,11 +1273,11 @@ export class AuthHandler {
           )
           const user = res.rows[0]
           if (!user) return null
-          if (typeof body.email === 'string') await this.ensureEmailIdentity(user, query)
+          if (requestedEmail) await this.ensureEmailIdentity(user, query)
           return this.userJsonWithRelations(user, query)
         })
       } catch (error) {
-        if (databaseDiagnosticCode(error) === '23505' && typeof body.email === 'string') {
+        if (databaseDiagnosticCode(error) === '23505' && requestedEmail) {
           return authError(422, 'email_exists', 'A user with this email address has already been registered')
         }
         throw error
@@ -1288,9 +1302,9 @@ export class AuthHandler {
     if (body.type !== 'magiclink') {
       return authError(422, 'unsupported_link_type', 'Only magiclink generation is supported')
     }
-    if (!body.email) return authError(400, 'validation_failed', 'email is required')
+    const email = normalizeEmailInput(body.email)
+    if (!email) return authError(400, 'validation_failed', 'email is required')
 
-    const email = body.email.toLowerCase().trim()
     const emailOtp = randomOtp(this.settings.otpLength)
     const hashedToken = await sha256Hex(randomToken(32))
     const expiry = `${this.settings.otpExpirySeconds} seconds`
