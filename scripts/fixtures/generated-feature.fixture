@@ -44,7 +44,13 @@ const approvalRequest = (expectedVersion = 1) => new Request("http://localhost/c
     body: JSON.stringify({ expectedVersion, reason: "reviewed" }),
 });
 
-const unbound = createApp({ deps: {}, requestContext: () => ({}), commandGovernance: governance });
+const trustedContext = () => ({
+    requestId: "fixture-request",
+    identity: { authenticated: true, subject: "fixture-reviewer" },
+    access: { tenantId: "fixture-tenant", permissions: ["cases:approve"] },
+    idempotencyKey: "fixture-approval",
+});
+const unbound = createApp({ deps: {}, requestContext: trustedContext, commandGovernance: governance });
 for (const path of ["/case-approval", "/case-approval/example"]) {
     const response = await unbound.handle(new Request("http://localhost" + path));
     assert.equal(response.status, 500);
@@ -59,7 +65,7 @@ rpcCalls = 0;
 
 const app = createApp({
     deps: { caseApprovalReader: reader, caseApprovalWriter: writer },
-    requestContext: () => ({}),
+    requestContext: trustedContext,
     commandGovernance: governance,
 });
 const list = await app.handle(new Request("http://localhost/case-approval?state=approved"));
