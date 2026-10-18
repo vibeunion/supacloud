@@ -84,6 +84,8 @@ interface UserRow {
   phone_change: string | null
   phone_change_token: string | null
   phone_change_sent_at: Date | string | null
+  reauthentication_token: string | null
+  reauthentication_sent_at: Date | string | null
   is_anonymous: boolean | null
   banned_until: Date | string | null
   deleted_at: Date | string | null
@@ -370,6 +372,7 @@ export class AuthHandler {
       if (path === 'token' && method === 'POST') return this.limit('token', req) ?? (await this.token(req, url))
       if (path === 'user' && method === 'GET') return await this.getUser(req)
       if (path === 'user' && method === 'PUT') return await this.updateUser(req)
+      if (path === 'reauthenticate' && (method === 'GET' || method === 'POST')) return await this.reauthenticate(req)
       if (path === 'logout' && method === 'POST') return await this.logout(req, url)
       if (path === 'otp' && method === 'POST') return await this.sendOtp(req)
       if (path === 'recover' && method === 'POST') return this.limit('recover', req) ?? (await this.sendRecovery(req))
@@ -617,12 +620,14 @@ export class AuthHandler {
   }
 
   private async updateUser(req: Request): Promise<Response> {
+    const claims = await this.claimsFromBearer(req)
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
     const body = (await req.json().catch(() => ({}))) as {
       email?: string
       phone?: string
       password?: string
+      nonce?: string
       data?: Record<string, unknown>
       code_challenge?: string | null
       code_challenge_method?: string | null
@@ -639,6 +644,10 @@ export class AuthHandler {
       if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
       return this.requestPhoneChange(req, user, phone)
     }
+    const requiresReauthentication =
+      Boolean(body.password)
+      && this.settings.requirePasswordReauthentication
+      && await this.sessionRequiresReauthentication(claims)
     if (requestedEmail && !this.settings.autoconfirm) {
       return this.requestEmailChange(req, user, requestedEmail, body)
     }
@@ -666,6 +675,14 @@ export class AuthHandler {
 
         const transactionSets = [...sets]
         const transactionParams = [...params]
+        if (requiresReauthentication) {
+          if (!body.nonce) {
+            return authError(400, 'reauthentication_needed', 'Password update requires reauthentication')
+          }
+          if (!(await this.consumeReauthentication(query, current, body.nonce))) {
+            return authError(422, 'reauthentication_not_valid', 'Nonce has expired or is invalid')
+          }
+        }
         const upgradingAnon = (current.is_anonymous ?? false) && requestedEmail !== undefined
         if (requestedEmail) {
           const email = requestedEmail
@@ -700,6 +717,154 @@ export class AuthHandler {
       throw error
     }
     return response
+  }
+
+  private async reauthenticate(req: Request): Promise<Response> {
+    const user = await this.userFromBearer(req)
+    if (!user) return authError(401, 'no_authorization', 'Invalid or expired token')
+
+    const prepared = await this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+
+      const email = current.email_confirmed_at && current.email ? current.email : null
+      const phone = !email && current.phone_confirmed_at && current.phone ? current.phone : null
+      if (!email && !phone) {
+        if (current.email && !current.email_confirmed_at) {
+          return authError(422, 'email_not_confirmed', 'Please verify your email first.')
+        }
+        if (current.phone && !current.phone_confirmed_at) {
+          return authError(422, 'phone_not_confirmed', 'Please verify your phone first.')
+        }
+        return authError(400, 'validation_failed', 'Reauthentication requires the user to have an email or a phone number')
+      }
+
+      const contact = email ?? phone!
+      const sender = this.config.smsSender
+      if (!email && !sender) {
+        return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+      }
+      const limited = email
+        ? this.limit('otp', req)
+        : this.limitKey(
+            'sms',
+            `phone:${await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', contact)}`
+          ) ?? this.limit('sms', req)
+      if (limited) return limited
+
+      const code = randomOtp(this.settings.otpLength)
+      const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+        this.config.jwtSecret,
+        'supacloud-lite:reauthentication-otp:v1',
+        `${contact}\0${code}`
+      )}`
+      const issuanceId = crypto.randomUUID()
+      await query(`delete from auth.one_time_tokens where user_id = $1 and token_type = 'reauthentication'`, [current.id])
+      await query(
+        `insert into auth.one_time_tokens (id, user_id, email, phone, token_type, token, expires_at)
+         values ($1, $2, $3, $4, 'reauthentication', $5, now() + $6::interval)`,
+        [issuanceId, current.id, email, phone, tokenDigest, `${this.settings.otpExpirySeconds} seconds`],
+      )
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set reauthentication_token = $1, reauthentication_sent_at = now(), updated_at = now()
+         where id = $2 returning *`,
+        [tokenDigest, current.id],
+      )).rows[0]
+      return updated ? { user: updated, email, phone, code, issuanceId, tokenDigest } : null
+    })
+
+    if (prepared instanceof Response) return prepared
+    if (!prepared) return authError(401, 'no_authorization', 'Invalid or expired token')
+    try {
+      if (prepared.email) {
+        await this.config.mailer.send({
+          to: prepared.email,
+          subject: 'Your reauthentication code',
+          text: `Your reauthentication code is ${prepared.code}`,
+        })
+      } else {
+        const smsSender = this.config.smsSender
+        if (!smsSender || !prepared.phone) return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+        await this.sendPhoneOtp(smsSender, prepared.phone, this.settings.smsTemplate.replace(/\{\{\s*\.Code\s*\}\}/g, prepared.code))
+      }
+    } catch {
+      await this.db.query(
+        `delete from auth.one_time_tokens where id = $1 and token = $2`,
+        [prepared.issuanceId, prepared.tokenDigest],
+      )
+      await this.db.query(
+        `update auth.users
+         set reauthentication_token = '', reauthentication_sent_at = null
+         where id = $1 and reauthentication_token = $2`,
+        [prepared.user.id, prepared.tokenDigest],
+      )
+      return authError(502, prepared.email ? 'email_provider_failed' : 'sms_provider_failed', 'Unable to send the verification code')
+    }
+    return json(200, {})
+  }
+
+  private async sessionRequiresReauthentication(claims: JwtClaims | null): Promise<boolean> {
+    if (!claims?.sub || typeof claims.session_id !== 'string' || !claims.session_id) return true
+    const result = await this.db.query<{ started_at: Date | string | null }>(
+      `select min(created_at) as started_at
+       from auth.refresh_tokens where session_id = $1 and user_id = $2`,
+      [claims.session_id, claims.sub],
+    )
+    const startedAt = timestampMs(result.rows[0]?.started_at ?? null)
+    return startedAt === null || Date.now() - startedAt >= 24 * 60 * 60 * 1000
+  }
+
+  private async consumeReauthentication(query: Querier, user: UserRow, nonce: string): Promise<boolean> {
+    const email = user.email_confirmed_at && user.email ? user.email : null
+    const phone = !email && user.phone_confirmed_at && user.phone ? user.phone : null
+    const contact = email ?? phone
+    if (!contact || !nonce) return false
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:reauthentication-otp:v1',
+      `${contact}\0${nonce}`
+    )}`
+    const candidate = await query<{ id: string }>(
+      `select id from auth.one_time_tokens
+       where user_id = $1 and token_type = 'reauthentication'
+         and token = $2 and expires_at > now() and attempts < $3
+       limit 1`,
+      [user.id, tokenDigest, AuthHandler.MAX_OTP_ATTEMPTS],
+    )
+    if (candidate.rows.length === 0) {
+      await query(
+        `update auth.one_time_tokens set attempts = attempts + 1
+         where user_id = $1 and token_type = 'reauthentication' and expires_at > now()`,
+        [user.id],
+      )
+      await query(
+        `delete from auth.one_time_tokens
+         where user_id = $1 and token_type = 'reauthentication' and attempts >= $2`,
+        [user.id, AuthHandler.MAX_OTP_ATTEMPTS],
+      )
+      return false
+    }
+    const claimed = await query(
+      `delete from auth.one_time_tokens
+       where id = $1 and user_id = $2 and token = $3 and expires_at > now()
+       returning id`,
+      [candidate.rows[0].id, user.id, tokenDigest],
+    )
+    if (claimed.rows.length === 0) return false
+    const cleared = await query(
+      `update auth.users
+       set reauthentication_token = '', reauthentication_sent_at = null
+       where id = $1 and reauthentication_token = $2
+       returning id`,
+      [user.id, tokenDigest],
+    )
+    return cleared.rows.length > 0
   }
 
   private async requestEmailChange(
