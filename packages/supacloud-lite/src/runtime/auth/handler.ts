@@ -103,6 +103,19 @@ interface EmailTokenCandidate {
   email: string
 }
 
+interface EmailPkceFlow {
+  id: string
+  provider: 'email' | 'email-recovery'
+  redirect_to: string | null
+  code_challenge: string
+  code_challenge_method: string | null
+}
+
+interface EmailPkceClaim {
+  userId: string
+  provider: EmailPkceFlow['provider']
+}
+
 interface PhoneOtpIssueRequest {
   phone: string
   createUser: boolean
@@ -128,6 +141,12 @@ function normalizeEmailInput(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const email = value.trim().toLowerCase()
   return email || null
+}
+
+function base64url(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 /** A cryptographically-random numeric OTP of `length` digits (6-10). */
@@ -200,6 +219,16 @@ function json(status: number, body: unknown): Response {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   })
+}
+
+function redirect(location: string): Response {
+  return new Response(null, { status: 303, headers: { location } })
+}
+
+function redirectWithQuery(location: string, params: Record<string, string>): Response {
+  const target = new URL(location)
+  for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value)
+  return redirect(target.toString())
 }
 
 function iso(v: Date | string | null): string | null {
@@ -367,6 +396,8 @@ export class AuthHandler {
       email?: string
       password?: string
       data?: Record<string, unknown>
+      code_challenge?: string | null
+      code_challenge_method?: string | null
     }
     try {
       const parsed: unknown = await req.json()
@@ -435,7 +466,16 @@ export class AuthHandler {
     await this.audit('user_signedup', { actorId: newUser.id, actorEmail: email })
     if (!autoconfirm) {
       // confirmation required: email a verification link/code; no session yet
-      await this.issueToken(email, 'otp', false, 'confirm', {}, new URL(req.url).searchParams.get('redirect_to'))
+      await this.issueToken(
+        email,
+        'otp',
+        false,
+        'confirm',
+        {},
+        new URL(req.url).searchParams.get('redirect_to'),
+        body.code_challenge,
+        body.code_challenge_method
+      )
       return json(200, this.userJson(newUser))
     }
     return json(200, await this.sessionFor(newUser))
@@ -511,6 +551,10 @@ export class AuthHandler {
       const authCode = body.auth_code
       const verifier = body.code_verifier
       if (!authCode || !verifier) return authError(400, 'validation_failed', 'auth_code and code_verifier required')
+      const emailClaim = await this.exchangeEmailPkce(authCode, verifier)
+      if (emailClaim) {
+        return json(200, await this.sessionForEmailPkce(emailClaim.userId, emailClaim.provider))
+      }
       const userId = await this.oauth.exchangePkce(authCode, verifier)
       if (!userId) return authError(403, 'flow_state_not_found', 'invalid or expired auth code')
       return json(200, await this.sessionForOAuth(userId))
@@ -636,10 +680,22 @@ export class AuthHandler {
     createUser: boolean,
     flavor: 'login' | 'confirm' = 'login',
     metadata: Record<string, unknown> = {},
-    requestedRedirect?: string | null
+    requestedRedirect?: string | null,
+    codeChallenge?: string | null,
+    codeChallengeMethod?: string | null
   ): Promise<Response> {
     const normalized = email.toLowerCase().trim()
     const expiry = `${this.settings.otpExpirySeconds} seconds`
+    const normalizedChallenge = typeof codeChallenge === 'string' && codeChallenge ? codeChallenge : null
+    const normalizedChallengeMethod = normalizedChallenge
+      ? (codeChallengeMethod?.toLowerCase() || 's256')
+      : null
+    const resolvedRedirect = resolveRedirect(
+      requestedRedirect,
+      this.config.siteUrl,
+      this.config.uriAllowList,
+      this.config.enforceRedirectAllowList
+    )
     const prepared = await this.db.transaction(async (query) => {
       let user = (await query<UserRow>(
         `select * from auth.users where lower(email) = $1 for update`,
@@ -677,6 +733,26 @@ export class AuthHandler {
          values ($1, $2, $3, $4, now() + $7::interval), ($1, $2, $5, $6, now() + $7::interval)`,
         [user.id, normalized, tokenType, code, tokenType === 'otp' ? 'magiclink' : tokenType, linkToken, expiry]
       )
+      if (normalizedChallenge) {
+        await query(
+          `delete from auth.flow_state
+           where provider in ('email', 'email-recovery') and user_id = $1 and auth_code is null`,
+          [user.id]
+        )
+        await query(
+          `insert into auth.flow_state
+             (provider, provider_state, redirect_to, code_challenge, code_challenge_method, user_id, expires_at)
+           values ($1, $2, $3, $4, $5, $6, now() + interval '10 minutes')`,
+          [
+            tokenType === 'recovery' ? 'email-recovery' : 'email',
+            linkToken,
+            resolvedRedirect,
+            normalizedChallenge,
+            normalizedChallengeMethod,
+            user.id,
+          ]
+        )
+      }
       return { kind: 'issued', user, code, linkToken } as const
     })
     if (prepared.kind === 'unknown') return json(200, {})
@@ -689,15 +765,7 @@ export class AuthHandler {
     linkUrl.searchParams.set('token', linkToken)
     linkUrl.searchParams.set('type', kind)
     if (requestedRedirect) {
-      linkUrl.searchParams.set(
-        'redirect_to',
-        resolveRedirect(
-          requestedRedirect,
-          this.config.siteUrl,
-          this.config.uriAllowList,
-          this.config.enforceRedirectAllowList
-        )
-      )
+      linkUrl.searchParams.set('redirect_to', resolvedRedirect)
     }
     const link = linkUrl.toString()
     await this.config.mailer.send({
@@ -721,6 +789,8 @@ export class AuthHandler {
       channel?: string
       type?: string
       data?: Record<string, unknown>
+      code_challenge?: string | null
+      code_challenge_method?: string | null
     }
     if (body.email && body.phone) return authError(400, 'validation_failed', 'email and phone are mutually exclusive')
     if (body.phone !== undefined) {
@@ -740,7 +810,9 @@ export class AuthHandler {
       signupResend ? false : body.create_user !== false,
       signupResend ? 'confirm' : 'login',
       recordValue(body.data),
-      new URL(req.url).searchParams.get('redirect_to')
+      new URL(req.url).searchParams.get('redirect_to'),
+      body.code_challenge,
+      body.code_challenge_method
     )
   }
 
@@ -944,10 +1016,23 @@ export class AuthHandler {
   }
 
   private async sendRecovery(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { email?: string }
+    const body = (await req.json().catch(() => ({}))) as {
+      email?: string
+      code_challenge?: string | null
+      code_challenge_method?: string | null
+    }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
-    return this.issueToken(email, 'recovery', false, 'login', {}, new URL(req.url).searchParams.get('redirect_to'))
+    return this.issueToken(
+      email,
+      'recovery',
+      false,
+      'login',
+      {},
+      new URL(req.url).searchParams.get('redirect_to'),
+      body.code_challenge,
+      body.code_challenge_method
+    )
   }
 
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
@@ -962,6 +1047,18 @@ export class AuthHandler {
     return this.db.transaction(async (query) => {
       const user = await this.claimEmailToken(query, redemption)
       return user ? this.sessionFor(user, undefined, undefined, query) : null
+    })
+  }
+
+  private async redeemUser(token: string, types: string[], email?: string): Promise<UserRow | null> {
+    const redemption: EmailTokenRedemption = {
+      token,
+      tokenTypes: `{${types.join(',')}}`,
+      email: email?.toLowerCase().trim() ?? null,
+    }
+    return this.db.transaction(async (query) => {
+      const user = await this.claimEmailToken(query, redemption)
+      return user
     })
   }
 
@@ -1166,12 +1263,79 @@ export class AuthHandler {
       this.config.uriAllowList,
       this.config.enforceRedirectAllowList
     )
-    const session = await this.redeem(token, [type])
-    if (!session) {
+    const flow = (await this.db.query<EmailPkceFlow>(
+      `select id, provider, redirect_to, code_challenge, code_challenge_method
+       from auth.flow_state
+       where provider in ('email', 'email-recovery')
+         and provider_state = $1 and auth_code is null and expires_at > now()`,
+      [token],
+    )).rows[0]
+    const user = await this.redeemUser(token, [type])
+    if (!user) {
       return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
     }
+    if (flow) {
+      const authCode = randomToken(24)
+      const claimed = await this.db.query<{ redirect_to: string | null }>(
+        `update auth.flow_state
+         set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
+         where id = $3 and auth_code is null and expires_at > now()
+         returning redirect_to`,
+        [authCode, user.id, flow.id],
+      )
+      const target = claimed.rows[0]?.redirect_to
+      if (target) return redirectWithQuery(target, { code: authCode })
+    }
+    const session = await this.sessionFor(user, undefined, {
+      amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+    })
     const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
+  }
+
+  private async exchangeEmailPkce(authCode: string, verifier: string): Promise<EmailPkceClaim | null> {
+    return this.db.transaction(async (query) => {
+      const flow = (await query<EmailPkceFlow>(
+        `select id, provider, redirect_to, code_challenge, code_challenge_method
+         from auth.flow_state
+         where provider in ('email', 'email-recovery')
+           and auth_code = $1 and expires_at > now()`,
+        [authCode],
+      )).rows[0]
+      if (!flow) return null
+      if (flow.code_challenge_method === 's256' || flow.code_challenge_method === 'S256') {
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
+        const challenge = base64url(new Uint8Array(digest))
+        if (challenge !== flow.code_challenge) return null
+      } else if (flow.code_challenge !== verifier) {
+        return null
+      }
+      const claimed = await query<{ user_id: string }>(
+        `delete from auth.flow_state where id = $1 and auth_code = $2 and expires_at > now()
+         returning user_id`,
+        [flow.id, authCode],
+      )
+      const userId = claimed.rows[0]?.user_id
+      return userId ? { userId, provider: flow.provider } : null
+    })
+  }
+
+  private async sessionForEmailPkce(
+    userId: string,
+    provider: EmailPkceFlow['provider']
+  ): Promise<Record<string, unknown>> {
+    return this.db.transaction(async (query) => {
+      const result = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [userId],
+      )
+      const user = result.rows[0]
+      if (!user) throw new OAuthAccountIneligibleError('user_not_found')
+      return this.sessionFor(user, undefined, {
+        amr: [{ method: provider === 'email-recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      }, query)
+    })
   }
 
   // ── admin ─────────────────────────────────────────────────────────────
