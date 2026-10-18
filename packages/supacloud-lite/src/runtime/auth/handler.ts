@@ -526,44 +526,52 @@ export class AuthHandler {
       params.push(JSON.stringify(body.data))
       sets.push(`raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || $${params.length}::jsonb`)
     }
-    const response = await this.db.transaction(async (query) => {
-      const currentResult = await query<UserRow>(
-        `select * from auth.users where id = $1 and deleted_at is null
-           and (banned_until is null or banned_until <= now()) for update`,
-        [user.id],
-      )
-      const current = currentResult.rows[0]
-      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+    let response: Response
+    try {
+      response = await this.db.transaction(async (query) => {
+        const currentResult = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [user.id],
+        )
+        const current = currentResult.rows[0]
+        if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
 
-      const transactionSets = [...sets]
-      const transactionParams = [...params]
-      const upgradingAnon = (current.is_anonymous ?? false) && !!body.email
-      if (body.email) {
-        const email = body.email.toLowerCase().trim()
-        const clash = await query(`select id from auth.users where email = $1 and id <> $2`, [email, current.id])
-        if (clash.rows.length > 0) {
-          return authError(422, 'email_exists', 'A user with this email address has already been registered')
+        const transactionSets = [...sets]
+        const transactionParams = [...params]
+        const upgradingAnon = (current.is_anonymous ?? false) && !!body.email
+        if (body.email) {
+          const email = body.email.toLowerCase().trim()
+          const clash = await query(`select id from auth.users where email = $1 and id <> $2`, [email, current.id])
+          if (clash.rows.length > 0) {
+            return authError(422, 'email_exists', 'A user with this email address has already been registered')
+          }
+          transactionParams.push(email)
+          transactionSets.push(`email = $${transactionParams.length}, email_confirmed_at = now()`)
         }
-        transactionParams.push(email)
-        transactionSets.push(`email = $${transactionParams.length}, email_confirmed_at = now()`)
+        if (upgradingAnon) {
+          transactionSets.push(`is_anonymous = false`)
+          transactionSets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
+        }
+        if (transactionSets.length === 0) {
+          return json(200, await this.userJsonWithRelations(current, query))
+        }
+        transactionParams.push(current.id)
+        const updatedResult = await query<UserRow>(
+          `update auth.users set ${transactionSets.join(', ')}, updated_at = now() where id = $${transactionParams.length} returning *`,
+          transactionParams
+        )
+        const updated = updatedResult.rows[0]
+        if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
+        if (body.email) await this.ensureEmailIdentity(updated, query)
+        return json(200, await this.userJsonWithRelations(updated, query))
+      })
+    } catch (error) {
+      if (databaseDiagnosticCode(error) === '23505' && body.email) {
+        return authError(422, 'email_exists', 'A user with this email address has already been registered')
       }
-      if (upgradingAnon) {
-        transactionSets.push(`is_anonymous = false`)
-        transactionSets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
-      }
-      if (transactionSets.length === 0) {
-        return json(200, await this.userJsonWithRelations(current, query))
-      }
-      transactionParams.push(current.id)
-      const updatedResult = await query<UserRow>(
-        `update auth.users set ${transactionSets.join(', ')}, updated_at = now() where id = $${transactionParams.length} returning *`,
-        transactionParams
-      )
-      const updated = updatedResult.rows[0]
-      if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
-      if (body.email) await this.ensureEmailIdentity(updated, query)
-      return json(200, await this.userJsonWithRelations(updated, query))
-    })
+      throw error
+    }
     return response
   }
 
