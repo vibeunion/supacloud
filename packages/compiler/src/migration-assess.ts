@@ -209,8 +209,12 @@ function validFeatureInventory(
         if (!isRecord(route)) return false;
         if (routeBinding === "controller") {
           if (route["command"] !== undefined) return false;
-        } else if (route["command"] !== commandName) {
-          return false;
+        } else {
+          if (typeof route["command"] !== "string") return false;
+          const routeCommand = commands.find((candidate) => isRecord(candidate)
+            && (candidate["name"] === route["command"] || candidate["className"] === route["command"]));
+          if (!isRecord(routeCommand) || !isRecord(command)
+            || routeCommand["name"] !== command["name"]) return false;
         }
         if (transition["permission"] !== undefined
           && route["permission"] !== transition["permission"]) return false;
