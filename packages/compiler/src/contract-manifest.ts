@@ -11,9 +11,15 @@ export interface ContractManifest {
     rpc?: string;
     transaction: "required" | "none";
     idempotency: "required" | "none";
+    tenantScope?: "required" | "none";
     auditEvent?: string;
   }>;
-  queries: Array<{ name: string; className: string; module: string }>;
+  queries: Array<{
+    name: string;
+    className: string;
+    module: string;
+    tenantScope?: "required" | "none";
+  }>;
   routes: Array<{
     method: string;
     path: string;
@@ -69,11 +75,15 @@ export function buildContractManifest(
         ...(command.rpc === undefined ? {} : { rpc: command.rpc }),
         transaction: command.transaction,
         idempotency: command.idempotency,
+        ...(command.tenantScope === undefined ? {} : { tenantScope: command.tenantScope }),
         ...(command.audit === undefined ? {} : { auditEvent: command.audit }),
       });
     }
     for (const query of module.queries) {
-      queries.push({ name: query.name, className: query.className, module: module.name });
+      queries.push({
+        name: query.name, className: query.className, module: module.name,
+        ...(query.tenantScope === undefined ? {} : { tenantScope: query.tenantScope }),
+      });
     }
     for (const controller of module.controllers) {
       for (const route of controller.routes) {

@@ -45,3 +45,38 @@ test("contract manifest preserves status-aware response schemas without removing
     },
   })]);
 });
+
+test("contract manifest preserves tenant boundaries for commands and queries", () => {
+  const graph: ApplicationGraph = {
+    externalTokens: [],
+    modules: [{
+      name: "cases",
+      className: "CasesModule",
+      file: "src/cases.module.ts",
+      line: 1,
+      imports: [],
+      providers: [],
+      commands: [{
+        className: "ApproveCase",
+        name: "case.approve",
+        permission: "case.approve",
+        transaction: "required",
+        idempotency: "required",
+        tenantScope: "required",
+      }],
+      queries: [{
+        className: "ListCases",
+        name: "case.list",
+        tenantScope: "required",
+      }],
+      exports: [],
+      controllers: [],
+    }],
+  };
+
+  expect(buildContractManifest(graph, { client: false, openapi: false, permissions: false }))
+    .toMatchObject({
+      commands: [{ name: "case.approve", tenantScope: "required" }],
+      queries: [{ name: "case.list", tenantScope: "required" }],
+    });
+});
