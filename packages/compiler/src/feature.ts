@@ -1,5 +1,5 @@
 import type { Diagnostic, FeatureSpecNode, ModuleNode } from "./types";
-import { joinRoutePaths } from "./util";
+import { isJobContextToken, joinRoutePaths } from "./util";
 
 /** Validate the declaration itself and its bindings within the owning module. */
 export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode): Diagnostic[] {
@@ -119,6 +119,13 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         }
         if (job.input === undefined) {
           error("feature-job-contract", `Job ${job.className} in Feature ${spec.name} must declare an input schema.`);
+        }
+        const provider = module.providers.find((candidate) =>
+          candidate.token === job.className || candidate.useClass === job.className,
+        );
+        if (job.tenantScope === "required" && provider
+          && !provider.deps.some((token) => isJobContextToken(token))) {
+          error("feature-job-context", `Job ${job.className} in Feature ${spec.name} must inject JOB_CONTEXT for trusted tenant execution.`);
         }
       }
     }

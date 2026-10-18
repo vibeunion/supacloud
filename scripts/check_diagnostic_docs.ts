@@ -500,6 +500,14 @@ export const value: number = "wrong";`,
   },
 });
 // @Job({ name: "case.refresh", input: undefined }) has no typed input contract.`,
+  SC6121: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// A tenant-scoped @Job must inject JOB_CONTEXT.`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

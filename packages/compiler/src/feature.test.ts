@@ -280,6 +280,28 @@ describe("feature specs", () => {
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-job-contract");
   });
 
+  test("requires trusted job context injection for tenant-scoped transition jobs", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      providers: [{
+        token: "RefreshCaseJob", tokenKind: "class", kind: "class", useClass: "RefreshCaseJob",
+        scope: "job", deps: [], exported: false, file: "case.feature.ts", line: 1,
+      }],
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", input: "RefreshCaseInput", tenantScope: "required",
+        idempotency: "required", mode: "task",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain("feature-job-context");
+  });
+
   test("requires a reconciliation Job for external transitions", () => {
     const spec: FeatureSpecNode = {
       name: "case",
