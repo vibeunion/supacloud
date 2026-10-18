@@ -28,6 +28,21 @@ test("transaction and idempotency adapters cannot invoke a business operation tw
   }
 });
 
+test("tenant-scoped commands fail before authorization without trusted feature context", async () => {
+  let authorized = false;
+  const executor = createCommandExecutor({
+    authorize: () => { authorized = true; },
+  });
+  await expect(executor({
+    ...invocation,
+    command: { ...invocation.command, tenantScope: "required" },
+  }, () => "unreachable")).rejects.toMatchObject({
+    code: "COMMAND_TENANT_CONTEXT_REQUIRED",
+    status: 401,
+  });
+  expect(authorized).toBe(false);
+});
+
 test("trace shows exact governance order without credentials, input, results or error causes", async () => {
   const events: ExecutionEvent[] = [];
   const executor = createCommandExecutor({

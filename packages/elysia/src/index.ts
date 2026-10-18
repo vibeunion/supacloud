@@ -8,6 +8,7 @@ import type {
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
+import { requireFeatureRequestContext } from "@supacloud/app";
 import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { compileHttpPolicies, type HttpPolicyRegistry } from "./http-policy";
@@ -156,6 +157,7 @@ export interface CompiledCommand {
   transaction?: "required" | "none" | string;
   audit?: string;
   idempotency?: "required" | "none" | string;
+  tenantScope?: "required" | "none" | string;
   /** Statically generated command aspects. */
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
@@ -775,9 +777,18 @@ export function createCommandExecutor(
 ): CommandExecutor {
   return async (invocation, next) => {
     const { command } = invocation;
-    for (const mode of [command.transaction, command.idempotency]) {
+    for (const mode of [command.transaction, command.idempotency, command.tenantScope]) {
       if (mode !== undefined && mode !== "required" && mode !== "none") {
         throw new ApplicationError("Invalid command governance mode", { code: "COMMAND_MODE_INVALID" });
+      }
+    }
+    if (command.tenantScope === "required") {
+      try {
+        requireFeatureRequestContext(invocation.requestContext);
+      } catch {
+        throw new ApplicationError("Feature request context is required for this command", {
+          status: 401, code: "COMMAND_TENANT_CONTEXT_REQUIRED",
+        });
       }
     }
     if (command.rpc !== undefined) {

@@ -458,6 +458,7 @@ export class LifecycleController {
           permission: "aspect.run",
           transaction: "none",
           idempotency: "none",
+          tenantScope: "required",
           aspects: [{
             name: "commandAspect",
             expression: "commandAspect",
@@ -486,6 +487,7 @@ export class LifecycleController {
     );
     expect(rendered.applicationCode).toContain("aspects: [routeAspect]");
     expect(rendered.applicationCode).toContain("aspects: [commandAspect]");
+    expect(rendered.applicationCode).toContain('tenantScope: "required"');
     expect(rendered.applicationCode).toContain("aspects: [moduleAspect]");
     expect(rendered.applicationCode).toContain(
       'jobs: [{ className: "RebuildJob", name: "aspect.rebuild", serviceKey: "rebuildJob", scope: "job", }]',

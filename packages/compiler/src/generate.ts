@@ -110,6 +110,7 @@ export interface CompiledCommand {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  tenantScope?: "required" | "none";
   standalone?: boolean;
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
@@ -907,6 +908,7 @@ class ModuleGenerator {
         `transaction: ${JSON.stringify(command.transaction)}`,
         ...(command.audit ? [`audit: ${JSON.stringify(command.audit)}`] : []),
         `idempotency: ${JSON.stringify(command.idempotency)}`,
+        ...(command.tenantScope ? [`tenantScope: ${JSON.stringify(command.tenantScope)}`] : []),
         ...(command.rpc ? [`rpc: ${JSON.stringify(command.rpc)}`] : []),
         ...(command.standalone ? ["standalone: true"] : []),
         ...(command.aspects && command.aspects.length > 0

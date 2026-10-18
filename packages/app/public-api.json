@@ -186,7 +186,7 @@
     {
       "name": "CommandRuntimeDescriptor",
       "kind": "type",
-      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n}"
+      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n    readonly tenantScope?: CommandRuntimeMode | string;\n}"
     },
     {
       "name": "CommandRuntimeGovernance",
