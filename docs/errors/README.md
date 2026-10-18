@@ -65,6 +65,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC3025](SC3025.md) | `invalid-route-response-selector` | compiler |
 | [SC3026](SC3026.md) | `conflicting-route-response-schema` | compiler |
 | [SC3027](SC3027.md) | `duplicate-route-response-selector` | compiler |
+| [SC3028](SC3028.md) | `invalid-route-idempotency` | compiler |
 | [SC3030](SC3030.md) | `invalid-effect-contract` | compiler |
 | [SC3031](SC3031.md) | `invalid-effect-retry` | compiler |
 | [SC3032](SC3032.md) | `invalid-effect-timeout` | compiler |
