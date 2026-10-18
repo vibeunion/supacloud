@@ -8,6 +8,7 @@ import { renderApplication, renderClient, renderOpenApi, renderPermissions } fro
 import { buildContractManifest } from "./contract-manifest";
 import { createApplicationDevelopmentContext } from "./application-development";
 import { createDeliveryPlan } from "./delivery-plan";
+import { createExecutionPlans } from "./inspect";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
@@ -243,6 +244,9 @@ test("feature transition route bindings carry command governance into generated 
         command: "case.approve",
         idempotency: "required",
       })]);
+    expect(createExecutionPlans(featureGraph)[0]).toEqual(expect.objectContaining({
+      command: "case.approve",
+    }));
     expect(renderApplication(featureGraph, { rootDir: ".", outDir: "." }).applicationCode)
       .toContain('idempotency: "required"');
     expect(renderOpenApi(featureGraph)).toContain('"idempotency": "required"');

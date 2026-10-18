@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import type { ApplicationGraph, AspectRefNode, Diagnostic, ModuleNode, ProviderNode } from "./types";
 import { inspectRouteContracts } from "./route-contracts";
+import { featureTransitionForRoute } from "./feature";
 
 export interface ExecutionPlan {
   module: string;
@@ -260,7 +261,10 @@ export function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[] {
     refs.map((ref, index) => `${boundary}.aspect[${index}]:${ref.name}`);
   return graph.modules.flatMap((module): ExecutionPlan[] => [
     ...module.controllers.flatMap((controller) => controller.routes.map((route): ExecutionPlan => {
-      const command = module.commands.find((item) => item.className === route.command);
+      const featureTransition = featureTransitionForRoute(module, controller, route);
+      const commandRef = route.command ?? featureTransition?.command;
+      const command = module.commands.find((item) =>
+        item.className === commandRef || item.name === commandRef);
       const path = `${controller.path}/${route.path}`.replace(/\/+/g, "/");
       return {
         module: module.name,
