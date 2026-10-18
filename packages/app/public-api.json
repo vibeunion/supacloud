@@ -145,8 +145,8 @@
     },
     {
       "name": "CommandContract",
-      "kind": "value",
-      "signature": ""
+      "kind": "type",
+      "signature": "export interface CommandContract<Input, Result> {\n    input: ContractDecoder<Input>;\n    result: ContractDecoder<Result>;\n}"
     },
     {
       "name": "CommandMeta",
@@ -160,8 +160,8 @@
     },
     {
       "name": "CommandOutcome",
-      "kind": "value",
-      "signature": ""
+      "kind": "type",
+      "signature": "export type CommandOutcome<Result> = {\n    status: \"confirmed\";\n    result: Result;\n    source: \"response\" | \"lookup\";\n} | {\n    status: \"unknown\";\n};"
     },
     {
       "name": "CommandRuntimeAdapter",
@@ -230,8 +230,8 @@
     },
     {
       "name": "ContractDecoder",
-      "kind": "value",
-      "signature": ""
+      "kind": "type",
+      "signature": "export type ContractDecoder<T> = (value: unknown) => T;"
     },
     {
       "name": "Controller",
@@ -276,7 +276,7 @@
     {
       "name": "createContractCommandClient",
       "kind": "value",
-      "signature": ""
+      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input): Promise<unknown>;\n    lookup?(input: Input): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    isDefinitiveFailure?(error: unknown): boolean;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
     },
     {
       "name": "createDestroyRef",
@@ -326,7 +326,7 @@
     {
       "name": "decodeHttpContract",
       "kind": "value",
-      "signature": ""
+      "signature": "export declare function decodeHttpContract<T>(decode: ContractDecoder<T>, value: unknown, boundary: \"request\" | \"response\"): T;"
     },
     {
       "name": "DEFAULT_SCOPE",
@@ -720,13 +720,13 @@
     },
     {
       "name": "HttpContract",
-      "kind": "value",
-      "signature": ""
+      "kind": "type",
+      "signature": "export interface HttpContract<Input, Result> {\n    input: ContractDecoder<Input>;\n    result: ContractDecoder<Result>;\n    request: (input: Input) => {\n        method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\";\n        url: string;\n        body?: unknown;\n    };\n}"
     },
     {
       "name": "HttpContractError",
-      "kind": "value",
-      "signature": ""
+      "kind": "both",
+      "signature": "export declare class HttpContractError extends Error {\n    readonly boundary: \"request\" | \"response\";\n    readonly code = \"HTTP_CONTRACT_INVALID\";\n    constructor(boundary: \"request\" | \"response\");\n}"
     },
     {
       "name": "HttpErrorResponse",
@@ -760,13 +760,13 @@
     },
     {
       "name": "HttpReplayError",
-      "kind": "value",
-      "signature": ""
+      "kind": "both",
+      "signature": "export declare class HttpReplayError extends Error {\n    readonly code = \"HTTP_REPLAY_BLOCKED\";\n    constructor();\n}"
     },
     {
       "name": "HttpReplayPolicy",
-      "kind": "value",
-      "signature": ""
+      "kind": "type",
+      "signature": "export type HttpReplayPolicy = {\n    mode: \"never\";\n} | {\n    mode: \"idempotent\";\n    idempotencyKey: string;\n};"
     },
     {
       "name": "HttpRequestOptions",
