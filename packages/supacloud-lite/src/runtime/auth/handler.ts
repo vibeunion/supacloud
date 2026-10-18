@@ -124,6 +124,12 @@ function authError(status: number, errorCode: string, msg: string): Response {
   return json(status, { code: status, error_code: errorCode, msg })
 }
 
+function normalizeEmailInput(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const email = value.trim().toLowerCase()
+  return email || null
+}
+
 /** A cryptographically-random numeric OTP of `length` digits (6-10). */
 function randomOtp(length: number): string {
   const n = Math.max(6, Math.min(10, Math.floor(length)))
@@ -335,8 +341,12 @@ export class AuthHandler {
       return authError(404, 'not_found', `unknown auth endpoint: ${path}`)
     } catch (e) {
       if (e instanceof OAuthAccountIneligibleError) return authError(400, e.code, e.message)
-      const msg = e instanceof Error ? e.message : String(e)
-      return authError(500, 'unexpected_failure', msg)
+      try {
+        this.config.log?.(`[auth] request_failed code=${databaseDiagnosticCode(e)}`)
+      } catch {
+        // A broken diagnostic sink must not change the sanitized auth response.
+      }
+      return authError(500, 'unexpected_failure', 'Unable to complete authentication request')
     }
   }
 
@@ -359,7 +369,7 @@ export class AuthHandler {
       data?: Record<string, unknown>
     }
 
-    if (!body.email && !body.password) {
+    if (!('email' in body) && !('password' in body)) {
       // supabase.auth.signInAnonymously()
       if (!this.settings.anonymousUsers) {
         return authError(422, 'anonymous_provider_disabled', 'Anonymous sign-ins are disabled')
@@ -376,38 +386,41 @@ export class AuthHandler {
     if (this.settings.disableSignup) {
       return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
     }
-    if (!body.email || !body.password) {
+    const email = normalizeEmailInput(body.email)
+    if (!email || !body.password) {
       return authError(400, 'validation_failed', 'Signup requires a valid email and password')
     }
     if (body.password.length < this.settings.minPasswordLength) {
       return authError(422, 'weak_password', `Password should be at least ${this.settings.minPasswordLength} characters.`)
     }
-    const email = body.email.toLowerCase().trim()
-    const existing = await this.db.query(`select id from auth.users where email = $1`, [email])
-    if (existing.rows.length > 0) {
-      return authError(422, 'user_already_exists', 'User already registered')
-    }
     const hashed = await hashPassword(body.password)
     const autoconfirm = this.settings.autoconfirm
-    const res = await this.db.query(
-      `insert into auth.users
-         (aud, role, email, encrypted_password, email_confirmed_at, last_sign_in_at,
-          raw_app_meta_data, raw_user_meta_data)
-       values ('authenticated', 'authenticated', $1, $2, case when $4 then now() else null end, now(),
-               '{"provider":"email","providers":["email"]}', $3)
-       returning *`,
-      [email, hashed, JSON.stringify(body.data ?? {}), autoconfirm]
-    )
-    const newUser = res.rows[0] as UserRow
-    // GoTrue records an `email` identity at signup, so user.identities reflects
-    // the email provider (getUser returned [] before this). Mirrors the shape
-    // written on anonymous-to-email upgrade.
-    await this.db.query(
-      `insert into auth.identities (user_id, provider, provider_id, identity_data)
-       values ($1, 'email', $2, $3)
-       on conflict (provider, provider_id) do nothing`,
-      [newUser.id, newUser.id, JSON.stringify({ sub: newUser.id, email: newUser.email })]
-    )
+    const newUser = await this.db.transaction(async (query) => {
+      const res = await query<UserRow>(
+        `insert into auth.users
+           (aud, role, email, encrypted_password, email_confirmed_at, last_sign_in_at,
+            raw_app_meta_data, raw_user_meta_data)
+         values ('authenticated', 'authenticated', $1, $2, case when $4 then now() else null end,
+                 case when $4 then now() else null end,
+                 '{"provider":"email","providers":["email"]}', $3)
+         on conflict (email) do nothing
+         returning *`,
+        [email, hashed, JSON.stringify(body.data ?? {}), autoconfirm]
+      )
+      const user = res.rows[0]
+      if (!user) return null
+      // GoTrue records an `email` identity at signup, so user.identities reflects
+      // the email provider (getUser returned [] before this). Mirrors the shape
+      // written on anonymous-to-email upgrade.
+      await query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1, 'email', $2, $3)
+         on conflict (provider, provider_id) do nothing`,
+        [user.id, user.id, JSON.stringify({ sub: user.id, email: user.email })]
+      )
+      return user
+    })
+    if (!newUser) return authError(422, 'user_already_exists', 'User already registered')
     await this.audit('user_signedup', { actorId: newUser.id, actorEmail: email })
     if (!autoconfirm) {
       // confirmation required: email a verification link/code; no session yet
@@ -425,7 +438,7 @@ export class AuthHandler {
       const email = (body.email ?? '').toLowerCase().trim()
       const res = await this.db.query<UserRow & { is_banned: boolean }>(
         `select *, coalesce(banned_until > now(), false) as is_banned
-         from auth.users where email = $1 and deleted_at is null`,
+         from auth.users where lower(email) = $1 and deleted_at is null`,
         [email],
       )
       const user = res.rows[0]
@@ -443,7 +456,12 @@ export class AuthHandler {
           [user.id],
         )
         const current = currentResult.rows[0]
-        if (!current || current.deleted_at !== null || !current.encrypted_password || current.email !== email) {
+        if (
+          !current
+          || current.deleted_at !== null
+          || !current.encrypted_password
+          || current.email?.toLowerCase().trim() !== email
+        ) {
           return authError(400, 'invalid_credentials', 'Invalid login credentials')
         }
         if (current.is_banned) {
@@ -506,7 +524,11 @@ export class AuthHandler {
     }
     const sets: string[] = []
     const params: unknown[] = []
-    if (body.email && !this.settings.autoconfirm) {
+    const requestedEmail = body.email === undefined ? undefined : normalizeEmailInput(body.email)
+    if (body.email !== undefined && !requestedEmail) {
+      return authError(400, 'validation_failed', 'email must not be empty')
+    }
+    if (requestedEmail && !this.settings.autoconfirm) {
       return authError(
         501,
         'email_change_confirmation_not_supported',
@@ -524,44 +546,52 @@ export class AuthHandler {
       params.push(JSON.stringify(body.data))
       sets.push(`raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || $${params.length}::jsonb`)
     }
-    const response = await this.db.transaction(async (query) => {
-      const currentResult = await query<UserRow>(
-        `select * from auth.users where id = $1 and deleted_at is null
-           and (banned_until is null or banned_until <= now()) for update`,
-        [user.id],
-      )
-      const current = currentResult.rows[0]
-      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+    let response: Response
+    try {
+      response = await this.db.transaction(async (query) => {
+        const currentResult = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [user.id],
+        )
+        const current = currentResult.rows[0]
+        if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
 
-      const transactionSets = [...sets]
-      const transactionParams = [...params]
-      const upgradingAnon = (current.is_anonymous ?? false) && !!body.email
-      if (body.email) {
-        const email = body.email.toLowerCase().trim()
-        const clash = await query(`select id from auth.users where email = $1 and id <> $2`, [email, current.id])
-        if (clash.rows.length > 0) {
-          return authError(422, 'email_exists', 'A user with this email address has already been registered')
+        const transactionSets = [...sets]
+        const transactionParams = [...params]
+        const upgradingAnon = (current.is_anonymous ?? false) && requestedEmail !== undefined
+        if (requestedEmail) {
+          const email = requestedEmail
+          const clash = await query(`select id from auth.users where lower(email) = $1 and id <> $2`, [email, current.id])
+          if (clash.rows.length > 0) {
+            return authError(422, 'email_exists', 'A user with this email address has already been registered')
+          }
+          transactionParams.push(email)
+          transactionSets.push(`email = $${transactionParams.length}, email_confirmed_at = now()`)
         }
-        transactionParams.push(email)
-        transactionSets.push(`email = $${transactionParams.length}, email_confirmed_at = now()`)
+        if (upgradingAnon) {
+          transactionSets.push(`is_anonymous = false`)
+          transactionSets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
+        }
+        if (transactionSets.length === 0) {
+          return json(200, await this.userJsonWithRelations(current, query))
+        }
+        transactionParams.push(current.id)
+        const updatedResult = await query<UserRow>(
+          `update auth.users set ${transactionSets.join(', ')}, updated_at = now() where id = $${transactionParams.length} returning *`,
+          transactionParams
+        )
+        const updated = updatedResult.rows[0]
+        if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
+        if (requestedEmail) await this.ensureEmailIdentity(updated, query)
+        return json(200, await this.userJsonWithRelations(updated, query))
+      })
+    } catch (error) {
+      if (databaseDiagnosticCode(error) === '23505' && requestedEmail) {
+        return authError(422, 'email_exists', 'A user with this email address has already been registered')
       }
-      if (upgradingAnon) {
-        transactionSets.push(`is_anonymous = false`)
-        transactionSets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
-      }
-      if (transactionSets.length === 0) {
-        return json(200, await this.userJsonWithRelations(current, query))
-      }
-      transactionParams.push(current.id)
-      const updatedResult = await query<UserRow>(
-        `update auth.users set ${transactionSets.join(', ')}, updated_at = now() where id = $${transactionParams.length} returning *`,
-        transactionParams
-      )
-      const updated = updatedResult.rows[0]
-      if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
-      if (body.email) await this.ensureEmailIdentity(updated, query)
-      return json(200, await this.userJsonWithRelations(updated, query))
-    })
+      throw error
+    }
     return response
   }
 
@@ -596,28 +626,51 @@ export class AuthHandler {
     flavor: 'login' | 'confirm' = 'login'
   ): Promise<Response> {
     const normalized = email.toLowerCase().trim()
-    let res = await this.db.query(`select * from auth.users where email = $1`, [normalized])
-    let user = res.rows[0] as UserRow | undefined
-    if (!user) {
-      if (!createUser) return json(200, {})
-      if (this.settings.disableSignup) return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
-      res = await this.db.query(
-        `insert into auth.users (aud, role, email, raw_app_meta_data, raw_user_meta_data)
-         values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', '{}')
-         returning *`,
-        [normalized]
-      )
-      user = res.rows[0] as UserRow
-    }
-    const code = randomOtp(this.settings.otpLength)
-    const linkToken = randomToken(24)
     const expiry = `${this.settings.otpExpirySeconds} seconds`
-    await this.db.query(`delete from auth.one_time_tokens where email = $1 and token_type = $2`, [normalized, tokenType])
-    await this.db.query(
-      `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
-       values ($1, $2, $3, $4, now() + $7::interval), ($1, $2, $5, $6, now() + $7::interval)`,
-      [user.id, normalized, tokenType, code, tokenType === 'otp' ? 'magiclink' : tokenType, linkToken, expiry]
-    )
+    const prepared = await this.db.transaction(async (query) => {
+      let user = (await query<UserRow>(
+        `select * from auth.users where lower(email) = $1 for update`,
+        [normalized],
+      )).rows[0]
+      if (!user) {
+        if (!createUser) return { kind: 'unknown' } as const
+        if (this.settings.disableSignup) return { kind: 'signup_disabled' } as const
+        const inserted = await query<UserRow>(
+          `insert into auth.users (aud, role, email, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', '{}')
+           on conflict (email) do nothing
+           returning *`,
+          [normalized]
+        )
+        user = inserted.rows[0]
+        if (!user) {
+          user = (await query<UserRow>(
+            `select * from auth.users where lower(email) = $1 for update`,
+            [normalized],
+          )).rows[0]
+        }
+      }
+      if (!user) return { kind: 'unknown' } as const
+
+      const code = randomOtp(this.settings.otpLength)
+      const linkToken = randomToken(24)
+      const tokenTypes = tokenType === 'otp' ? ['otp', 'magiclink'] : [tokenType]
+      await query(
+        `delete from auth.one_time_tokens where lower(email) = $1 and token_type = any($2::text[])`,
+        [normalized, tokenTypes],
+      )
+      await query(
+        `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
+         values ($1, $2, $3, $4, now() + $7::interval), ($1, $2, $5, $6, now() + $7::interval)`,
+        [user.id, normalized, tokenType, code, tokenType === 'otp' ? 'magiclink' : tokenType, linkToken, expiry]
+      )
+      return { kind: 'issued', user, code, linkToken } as const
+    })
+    if (prepared.kind === 'unknown') return json(200, {})
+    if (prepared.kind === 'signup_disabled') {
+      return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
+    }
+    const { user, code, linkToken } = prepared
     const kind = tokenType === 'otp' ? 'magiclink' : tokenType
     const link = `${this.config.apiUrl}/auth/v1/verify?token=${linkToken}&type=${kind}`
     await this.config.mailer.send({
@@ -650,8 +703,9 @@ export class AuthHandler {
       if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
       return this.limit('sms', req) ?? this.issuePhoneToken(phone, body.create_user !== false, recordValue(body.data))
     }
-    if (!body.email) return authError(400, 'validation_failed', 'email or phone is required')
-    return this.limit('otp', req) ?? this.issueToken(body.email, 'otp', body.create_user !== false)
+    const email = normalizeEmailInput(body.email)
+    if (!email) return authError(400, 'validation_failed', 'email or phone is required')
+    return this.limit('otp', req) ?? this.issueToken(email, 'otp', body.create_user !== false)
   }
 
   private async issuePhoneToken(
@@ -855,8 +909,9 @@ export class AuthHandler {
 
   private async sendRecovery(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as { email?: string }
-    if (!body.email) return authError(400, 'validation_failed', 'email is required')
-    return this.issueToken(body.email, 'recovery', false)
+    const email = normalizeEmailInput(body.email)
+    if (!email) return authError(400, 'validation_failed', 'email is required')
+    return this.issueToken(email, 'recovery', false)
   }
 
   /** Max wrong guesses for a one-time code before its tokens are invalidated. */
@@ -909,13 +964,16 @@ export class AuthHandler {
   }
 
   private async confirmEmailTokenUser(query: Querier, claimedToken: EmailTokenCandidate): Promise<UserRow | null> {
-    await query(`delete from auth.one_time_tokens where email = $1`, [claimedToken.email])
+    await query(`delete from auth.one_time_tokens where lower(email) = lower($1)`, [claimedToken.email])
     const users = await query<UserRow>(
       `update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()), last_sign_in_at = now()
        where id = $1 returning *`,
       [claimedToken.user_id]
     )
-    return users.rows[0] ?? null
+    const user = users.rows[0]
+    if (!user) return null
+    await this.ensureEmailIdentity(user, query)
+    return user
   }
 
   private async findEmailTokenCandidate(
@@ -925,7 +983,7 @@ export class AuthHandler {
     const candidates = await query<EmailTokenCandidate>(
       `select id, user_id, email from auth.one_time_tokens
        where token = $1 and token_type = any($2::text[])
-         and ($3::text is null or email = $3) and expires_at > now()
+         and ($3::text is null or lower(email) = lower($3)) and expires_at > now()
          and attempts < $4`,
       [redemption.token, redemption.tokenTypes, redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
     )
@@ -936,11 +994,11 @@ export class AuthHandler {
     if (!redemption.email) return
     await query(
       `update auth.one_time_tokens set attempts = attempts + 1
-       where email = $1 and token_type = any($2::text[]) and expires_at > now()`,
+       where lower(email) = lower($1) and token_type = any($2::text[]) and expires_at > now()`,
       [redemption.email, redemption.tokenTypes]
     )
     await query(
-      `delete from auth.one_time_tokens where email = $1 and attempts >= $2`,
+      `delete from auth.one_time_tokens where lower(email) = lower($1) and attempts >= $2`,
       [redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
     )
   }
@@ -1134,14 +1192,20 @@ export class AuthHandler {
         user_metadata?: Record<string, unknown>
         app_metadata?: Record<string, unknown>
       }
-      if (!body.email) return authError(400, 'validation_failed', 'email is required')
-      const email = body.email
+      const email = normalizeEmailInput(body.email)
+      if (!email) return authError(400, 'validation_failed', 'email is required')
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
+        const existing = await query(
+          `select id from auth.users where lower(email) = $1 for update`,
+          [email.toLowerCase().trim()],
+        )
+        if (existing.rows.length > 0) return null
         const res = await query<UserRow>(
           `insert into auth.users
              (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
            values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
+           on conflict (email) do nothing
            returning *`,
           [
             email.toLowerCase().trim(),
@@ -1152,9 +1216,11 @@ export class AuthHandler {
           ]
         )
         const user = res.rows[0]
+        if (!user) return null
         await this.ensureEmailIdentity(user, query)
         return this.userJsonWithRelations(user, query)
       })
+      if (!created) return authError(422, 'email_exists', 'A user with this email address has already been registered')
       return json(200, created)
     }
     if (idMatch && method === 'GET') {
@@ -1166,8 +1232,10 @@ export class AuthHandler {
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
       const sets: string[] = []
       const params: unknown[] = []
-      if (typeof body.email === 'string') {
-        params.push(body.email.toLowerCase().trim())
+      const requestedEmail = body.email === undefined ? undefined : normalizeEmailInput(body.email)
+      if (body.email !== undefined && !requestedEmail) return authError(400, 'validation_failed', 'email must not be empty')
+      if (requestedEmail) {
+        params.push(requestedEmail)
         sets.push(`email = $${params.length}`)
       }
       if (typeof body.password === 'string') {
@@ -1185,16 +1253,36 @@ export class AuthHandler {
       if (body.email_confirm === true) sets.push(`email_confirmed_at = now()`)
       if (sets.length === 0) return authError(400, 'validation_failed', 'nothing to update')
       params.push(idMatch[1])
-      const updated = await this.db.transaction(async (query) => {
-        const res = await query<UserRow>(
-          `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
-          params
-        )
-        const user = res.rows[0]
-        if (!user) return null
-        if (typeof body.email === 'string') await this.ensureEmailIdentity(user, query)
-        return this.userJsonWithRelations(user, query)
-      })
+      let updated: Record<string, unknown> | null
+      let emailConflict = false
+      try {
+        updated = await this.db.transaction(async (query) => {
+          if (requestedEmail) {
+            const clash = await query(
+              `select id from auth.users where lower(email) = $1 and id <> $2`,
+              [requestedEmail, idMatch[1]],
+            )
+            if (clash.rows.length > 0) {
+              emailConflict = true
+              return null
+            }
+          }
+          const res = await query<UserRow>(
+            `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
+            params
+          )
+          const user = res.rows[0]
+          if (!user) return null
+          if (requestedEmail) await this.ensureEmailIdentity(user, query)
+          return this.userJsonWithRelations(user, query)
+        })
+      } catch (error) {
+        if (databaseDiagnosticCode(error) === '23505' && requestedEmail) {
+          return authError(422, 'email_exists', 'A user with this email address has already been registered')
+        }
+        throw error
+      }
+      if (emailConflict) return authError(422, 'email_exists', 'A user with this email address has already been registered')
       if (!updated) return authError(404, 'user_not_found', 'User not found')
       return json(200, updated)
     }
@@ -1214,9 +1302,9 @@ export class AuthHandler {
     if (body.type !== 'magiclink') {
       return authError(422, 'unsupported_link_type', 'Only magiclink generation is supported')
     }
-    if (!body.email) return authError(400, 'validation_failed', 'email is required')
+    const email = normalizeEmailInput(body.email)
+    if (!email) return authError(400, 'validation_failed', 'email is required')
 
-    const email = body.email.toLowerCase().trim()
     const emailOtp = randomOtp(this.settings.otpLength)
     const hashedToken = await sha256Hex(randomToken(32))
     const expiry = `${this.settings.otpExpirySeconds} seconds`
@@ -1229,15 +1317,22 @@ export class AuthHandler {
     )
 
     const user = await this.db.transaction(async (query) => {
-      const result = await query<UserRow>(
-        `insert into auth.users
-           (aud, role, email, raw_app_meta_data, raw_user_meta_data)
-         values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
-         on conflict (email) do update set email = excluded.email
-         returning *`,
-        [email, JSON.stringify(body.data ?? {})]
+      const existing = await query<UserRow>(
+        `select * from auth.users where lower(email) = $1 for update`,
+        [email],
       )
-      const linkedUser = result.rows[0]
+      let linkedUser = existing.rows[0]
+      if (!linkedUser) {
+        const result = await query<UserRow>(
+          `insert into auth.users
+             (aud, role, email, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
+           on conflict (email) do update set email = excluded.email
+           returning *`,
+          [email, JSON.stringify(body.data ?? {})]
+        )
+        linkedUser = result.rows[0]
+      }
       await query(
         `insert into auth.identities (user_id, provider, provider_id, identity_data)
          values ($1::uuid, 'email', $1::text, $2::jsonb)
@@ -1246,7 +1341,7 @@ export class AuthHandler {
       )
       await query(
         `delete from auth.one_time_tokens
-         where email = $1 and token_type = any($2::text[])`,
+         where lower(email) = $1 and token_type = any($2::text[])`,
         [email, '{otp,magiclink}']
       )
       await query(
@@ -1395,23 +1490,7 @@ export class AuthHandler {
     if (!this.settings.totpEnrollEnabled) {
       return authError(422, 'mfa_totp_enroll_disabled', 'TOTP enrollment is disabled')
     }
-    const enrolled = await this.db.query(
-      `select count(*)::int as n from auth.mfa_factors where user_id = $1`,
-      [user.id]
-    )
-    if ((enrolled.rows[0] as { n: number }).n >= this.settings.maxEnrolledFactors) {
-      return authError(422, 'too_many_enrolled_mfa_factors', 'Maximum number of enrolled MFA factors reached')
-    }
     const friendlyName = body.friendly_name ?? null
-    if (friendlyName) {
-      const dup = await this.db.query(
-        `select 1 from auth.mfa_factors where user_id = $1 and friendly_name = $2`,
-        [user.id, friendlyName]
-      )
-      if (dup.rows.length > 0) {
-        return authError(422, 'mfa_factor_name_conflict', 'A factor with this friendly name already exists')
-      }
-    }
     const secret = generateTotpSecret()
     let issuer = body.issuer
     if (!issuer) {
@@ -1421,19 +1500,44 @@ export class AuthHandler {
         issuer = 'supacloud-lite'
       }
     }
-    const uri = otpauthUri({ secret, account: user.email || user.id, issuer })
-    const ins = await this.db.query(
-      `insert into auth.mfa_factors (user_id, friendly_name, factor_type, status, secret)
-       values ($1, $2, 'totp', 'unverified', $3) returning id`,
-      [user.id, friendlyName, secret]
-    )
-    const id = (ins.rows[0] as { id: string }).id
-    return json(200, {
-      id,
-      type: 'totp',
-      friendly_name: friendlyName,
-      status: 'unverified',
-      totp: { qr_code: qrSvgDataUri(uri), secret, uri },
+    return this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      const current = currentResult.rows[0]
+      if (!current) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const uri = otpauthUri({ secret, account: current.email || current.id, issuer })
+      const enrolled = await query(
+        `select count(*)::int as n from auth.mfa_factors where user_id = $1`,
+        [current.id]
+      )
+      if ((enrolled.rows[0] as { n: number }).n >= this.settings.maxEnrolledFactors) {
+        return authError(422, 'too_many_enrolled_mfa_factors', 'Maximum number of enrolled MFA factors reached')
+      }
+      if (friendlyName) {
+        const dup = await query(
+          `select 1 from auth.mfa_factors where user_id = $1 and friendly_name = $2`,
+          [current.id, friendlyName]
+        )
+        if (dup.rows.length > 0) {
+          return authError(422, 'mfa_factor_name_conflict', 'A factor with this friendly name already exists')
+        }
+      }
+      const ins = await query(
+        `insert into auth.mfa_factors (user_id, friendly_name, factor_type, status, secret)
+         values ($1, $2, 'totp', 'unverified', $3) returning id`,
+        [current.id, friendlyName, secret]
+      )
+      const id = (ins.rows[0] as { id: string }).id
+      return json(200, {
+        id,
+        type: 'totp',
+        friendly_name: friendlyName,
+        status: 'unverified',
+        totp: { qr_code: qrSvgDataUri(uri), secret, uri },
+      })
     })
   }
 
@@ -1443,18 +1547,26 @@ export class AuthHandler {
     if (!this.settings.totpVerifyEnabled) {
       return authError(422, 'mfa_totp_verify_disabled', 'TOTP verification is disabled')
     }
-    const fr = await this.db.query(`select id from auth.mfa_factors where id = $1 and user_id = $2`, [factorId, user.id])
-    if (fr.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
     const expiresAt = new Date(Date.now() + 300_000).toISOString()
-    const ins = await this.db.query(
-      `insert into auth.mfa_challenges (factor_id, expires_at) values ($1, $2) returning id, expires_at`,
-      [factorId, expiresAt]
-    )
-    const c = ins.rows[0] as { id: string; expires_at: string | Date }
-    return json(200, {
-      id: c.id,
-      type: 'totp',
-      expires_at: Math.floor(new Date(c.expires_at).getTime() / 1000),
+    return this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const fr = await query(`select id from auth.mfa_factors where id = $1 and user_id = $2`, [factorId, user.id])
+      if (fr.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      const ins = await query(
+        `insert into auth.mfa_challenges (factor_id, expires_at) values ($1, $2) returning id, expires_at`,
+        [factorId, expiresAt]
+      )
+      const c = ins.rows[0] as { id: string; expires_at: string | Date }
+      return json(200, {
+        id: c.id,
+        type: 'totp',
+        expires_at: Math.floor(new Date(c.expires_at).getTime() / 1000),
+      })
     })
   }
 
@@ -1495,6 +1607,13 @@ export class AuthHandler {
       )
       const currentUser = currentUsers.rows[0]
       if (!currentUser) return null
+      const currentFactors = await query<{ id: string; secret: string; status: string }>(
+        `select id, secret, status from auth.mfa_factors
+         where id = $1 and user_id = $2 for update`,
+        [factorId, user.id],
+      )
+      const currentFactor = currentFactors.rows[0]
+      if (!currentFactor || !(await verifyTotp(currentFactor.secret, body.code ?? ''))) return null
       const claimed = await query(
         `update auth.mfa_challenges set verified_at = now()
          where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
@@ -1502,7 +1621,7 @@ export class AuthHandler {
         [challenge.id, factorId]
       )
       if (claimed.rows.length === 0) return null
-      if (factor.status !== 'verified') {
+      if (currentFactor.status !== 'verified') {
         await query(`update auth.mfa_factors set status = 'verified', updated_at = now() where id = $1`, [factorId])
       }
       return this.sessionFor(currentUser, undefined, {
@@ -1522,12 +1641,20 @@ export class AuthHandler {
   private async unenrollFactor(req: Request, factorId: string): Promise<Response> {
     const user = await this.userFromBearer(req)
     if (!user) return authError(401, 'no_authorization', 'This endpoint requires a Bearer token')
-    const del = await this.db.query(
-      `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
-      [factorId, user.id]
-    )
-    if (del.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
-    return json(200, { id: factorId })
+    return this.db.transaction(async (query) => {
+      const currentResult = await query<UserRow>(
+        `select * from auth.users where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now()) for update`,
+        [user.id],
+      )
+      if (!currentResult.rows[0]) return authError(401, 'no_authorization', 'Invalid or expired token')
+      const del = await query(
+        `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
+        [factorId, user.id]
+      )
+      if (del.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      return json(200, { id: factorId })
+    })
   }
 
   private async getUserFactors(
