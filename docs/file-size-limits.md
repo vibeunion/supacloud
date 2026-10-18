@@ -47,6 +47,29 @@ Operators should size worker memory, concurrency and admission controls for
 the selected workload. The default is expressed in MiB (`500 * 1024 * 1024`);
 image rejection messages report the effective limit in bytes.
 
+Application and frontend release uploads also use a 500 MiB default archive and
+artifact ceiling. Frontend archives may contain at most 10,000 files; these
+file-count and format protections remain independent of the byte limit.
+
+## Hosted Edge Runtime Requests
+
+The hosted Edge Runtime defaults to a 500 MiB request-body limit. Set
+`EDGE_MAX_BODY_SIZE_MB=500` on the runtime service to configure it, or use the
+installer's `edge_max_body_size_mb` option. Despite the environment variable's
+name, units are MiB (`1024 * 1024` bytes). Restart the runtime after a change.
+
+An explicit positive setting is preserved. Omitted or invalid settings fall
+back to 500 MiB. To retain the previous default on upgrade, set
+`EDGE_MAX_BODY_SIZE_MB=30`. The worker still enforces any smaller
+function-level `max_request_body_bytes`; external reverse proxies may impose
+their own lower limit.
+
+This is a whole-request limit, not a file-payload allowance: multipart encoding
+adds bytes, so a 500 MiB file needs a larger configured request-body limit.
+Large bodies are buffered by the worker; review memory and concurrency before
+restarting with the larger default. No database or existing bucket settings are
+rewritten.
+
 Management API project-scoped image transforms use the same 500 MiB default for
 source and `max_bytes` output filtering. Set
 `SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES` to a positive byte count up to
