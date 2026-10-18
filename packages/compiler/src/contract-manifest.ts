@@ -35,6 +35,13 @@ export interface ContractManifest {
       idempotency?: "required" | "none";
       audit?: string;
       job?: string;
+      jobDetails?: {
+        name: string;
+        className: string;
+        mode?: "task" | "workflow";
+        idempotency?: "required" | "none";
+        tenantScope?: "required" | "none";
+      };
       persistence?: FeaturePersistenceNode;
     }>;
   }>;
@@ -109,19 +116,32 @@ export function buildContractManifest(
         name: module.featureSpec.name,
         states: [...module.featureSpec.states],
         ...(module.featureSpec.tenantField === undefined ? {} : { tenantField: module.featureSpec.tenantField }),
-        transitions: module.featureSpec.transitions.map((transition) => ({
-          name: transition.name,
-          from: transition.from,
-          to: transition.to,
-          ...(transition.permission === undefined ? {} : { permission: transition.permission }),
-          ...(transition.command === undefined ? {} : { command: transition.command }),
-          ...(transition.route === undefined ? {} : { route: transition.route }),
-          ...(transition.transaction === undefined ? {} : { transaction: transition.transaction }),
-          ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
-          ...(transition.audit === undefined ? {} : { audit: transition.audit }),
-          ...(transition.job === undefined ? {} : { job: transition.job }),
-          ...(transition.persistence === undefined ? {} : { persistence: transition.persistence }),
-        })),
+        transitions: module.featureSpec.transitions.map((transition) => {
+          const job = transition.job === undefined ? undefined
+            : (module.jobs ?? []).find((candidate) => candidate.className === transition.job || candidate.name === transition.job);
+          return {
+            name: transition.name,
+            from: transition.from,
+            to: transition.to,
+            ...(transition.permission === undefined ? {} : { permission: transition.permission }),
+            ...(transition.command === undefined ? {} : { command: transition.command }),
+            ...(transition.route === undefined ? {} : { route: transition.route }),
+            ...(transition.transaction === undefined ? {} : { transaction: transition.transaction }),
+            ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
+            ...(transition.audit === undefined ? {} : { audit: transition.audit }),
+            ...(transition.job === undefined ? {} : { job: transition.job }),
+            ...(job === undefined ? {} : {
+              jobDetails: {
+                name: job.name,
+                className: job.className,
+                ...(job.mode === undefined ? {} : { mode: job.mode }),
+                ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
+                ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),
+              },
+            }),
+            ...(transition.persistence === undefined ? {} : { persistence: transition.persistence }),
+          };
+        }),
       });
     }
     for (const controller of module.controllers) {

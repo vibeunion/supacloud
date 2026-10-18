@@ -95,6 +95,10 @@ test("contract manifest publishes the complete feature state machine and persist
       queries: [],
       exports: [],
       controllers: [],
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", mode: "workflow", idempotency: "required", tenantScope: "required",
+      }],
       featureSpec: {
         name: "case",
         states: ["draft", "approved"],
@@ -123,6 +127,13 @@ test("contract manifest publishes the complete feature state machine and persist
         transitions: [{
           name: "approve",
           job: "case.refresh",
+          jobDetails: {
+            name: "case.refresh",
+            className: "RefreshCaseJob",
+            mode: "workflow",
+            idempotency: "required",
+            tenantScope: "required",
+          },
           persistence: {
             boundary: "database",
             versionField: "version",
