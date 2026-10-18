@@ -103,8 +103,9 @@ export class ${className}Service {
 `,
         [`${name}.feature.ts`]: `import { Effect } from "effect";
 import {
-    Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, Get, Inject,
-    Injectable, Job, Param, Post, Query, type FeatureState,
+    Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, Get, Inject, JOB_CONTEXT,
+    Injectable, Job, Param, Post, Query, requireFeatureRequestContext, type FeatureRequestContext,
+    type FeatureState,
 } from "@supacloud/app/core";
 import {
     ${className}ApproveBody,
@@ -169,7 +170,11 @@ export class Approve${className}Command {
     tenantScope: "required",
 })
 export class Refresh${className}Job {
+    constructor(@Inject(JOB_CONTEXT) private readonly jobContext: unknown) {}
+
     run(_input: { id: string; version: number }): Promise<void> {
+        const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
+        void context;
         throw new Error("Bind the existing Workflow/Queue adapter before dispatching ${name}.refresh");
     }
 }
