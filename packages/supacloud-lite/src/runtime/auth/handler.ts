@@ -69,8 +69,11 @@ interface UserRow {
   email: string | null
   encrypted_password: string | null
   email_confirmed_at: Date | string | null
+  email_change_token_new: string | null
   email_change: string | null
   email_change_sent_at: Date | string | null
+  email_change_token_current: string | null
+  email_change_confirm_status: number | null
   last_sign_in_at: Date | string | null
   raw_app_meta_data: Record<string, unknown> | null
   raw_user_meta_data: Record<string, unknown> | null
@@ -124,6 +127,8 @@ interface EmailChangePreparation {
   code: string
   redirectTo: string
 }
+
+type EmailChangeClaim = UserRow | 'pending' | null
 
 interface PhoneOtpIssueRequest {
   phone: string
@@ -1308,9 +1313,15 @@ export class AuthHandler {
     // explicitly - never fold it into the default set, or a guessed login OTP
     // could mint a recovery session.
     if (body.type === 'email_change') {
-      const session = await this.redeemEmailChange(body.token, body.email)
-      if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
-      return json(200, session)
+      const result = await this.redeemEmailChange(token, body.email)
+      if (!result) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+      if ('pending' in result) {
+        return json(200, {
+          msg: 'Confirmation link accepted. Please proceed to confirm link sent to the other email',
+          code: '200',
+        })
+      }
+      return json(200, result)
     }
     const types =
       body.type === 'recovery'
@@ -1423,8 +1434,16 @@ export class AuthHandler {
          and provider_state = $1 and auth_code is null and expires_at > now()`,
       [token],
     )).rows[0]
-    const user = type === 'email_change'
+    const emailChange = type === 'email_change'
       ? await this.redeemEmailChangeUser(token)
+      : null
+    if (emailChange === 'pending') {
+      return redirectWithQuery(redirectTo, {
+        message: 'Confirmation link accepted. Please proceed to confirm link sent to the other email',
+      })
+    }
+    const user = type === 'email_change'
+      ? emailChange
       : await this.redeemUser(token, [type])
     if (!user) {
       return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
@@ -1475,48 +1494,91 @@ export class AuthHandler {
     })
   }
 
-  private async redeemEmailChangeUser(token: string, email?: string): Promise<UserRow | null> {
+  private async redeemEmailChangeUser(token: string, email?: string): Promise<EmailChangeClaim> {
     return this.db.transaction((query) => this.claimEmailChange(query, token, email))
   }
 
-  private async redeemEmailChange(token: string, email?: string): Promise<Record<string, unknown> | null> {
+  private async redeemEmailChange(
+    token: string,
+    email?: string
+  ): Promise<Record<string, unknown> | { pending: true } | null> {
     return this.db.transaction(async (query) => {
       const user = await this.claimEmailChange(query, token, email)
+      if (user === 'pending') return { pending: true }
       return user ? this.sessionFor(user, undefined, {
         amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }],
       }, query) : null
     })
   }
 
-  private async claimEmailChange(query: Querier, token: string, email?: string): Promise<UserRow | null> {
-    const candidate = (await query<{ id: string; user_id: string; email: string }>(
-      `select id, user_id, email from auth.one_time_tokens
-       where token = $1 and token_type = 'email_change' and expires_at > now()
+  private async claimEmailChange(query: Querier, token: string, email?: string): Promise<EmailChangeClaim> {
+    const candidate = (await query<{
+      id: string
+      user_id: string
+      email: string
+      token_type: string
+    }>(
+      `select id, user_id, email, token_type from auth.one_time_tokens
+       where token = $1 and token_type in ('email_change', 'email_change_current', 'email_change_new')
+         and expires_at > now()
          and ($2::text is null or lower(email) = lower($2))
        limit 1`,
       [token, email?.toLowerCase().trim() ?? null],
     )).rows[0]
     if (!candidate) return null
     const currentResult = await query<UserRow>(
-      `select * from auth.users where id = $1 and email_change = $2 and deleted_at is null
+      `select * from auth.users where id = $1 and email_change is not null and deleted_at is null
          and (banned_until is null or banned_until <= now()) for update`,
-      [candidate.user_id, candidate.email],
+      [candidate.user_id],
     )
-    if (!currentResult.rows[0]) return null
+    const current = currentResult.rows[0]
+    if (!current) return null
+    if (
+      candidate.token_type === 'email_change'
+        ? current.email_change?.toLowerCase() !== candidate.email.toLowerCase()
+        : candidate.token_type === 'email_change_current'
+          ? current.email?.toLowerCase() !== candidate.email.toLowerCase()
+          : current.email_change?.toLowerCase() !== candidate.email.toLowerCase()
+    ) return null
+    const targetEmail = candidate.token_type === 'email_change_current' ? current.email_change : candidate.email
+    if (!targetEmail) return null
     const clash = await query(
       `select id from auth.users where lower(email) = lower($1) and id <> $2`,
-      [candidate.email, candidate.user_id],
+      [targetEmail, candidate.user_id],
     )
     if (clash.rows.length > 0) return null
+    const needsSecondConfirmation = candidate.token_type !== 'email_change'
+    if (needsSecondConfirmation && (current.email_change_confirm_status ?? 0) === 0) {
+      const deleted = await query(
+        `delete from auth.one_time_tokens
+         where user_id = $1 and token_type = $2 returning id`,
+        [candidate.user_id, candidate.token_type],
+      )
+      if (deleted.rows.length === 0) return null
+      const updated = (await query<UserRow>(
+        `update auth.users
+         set email_change_confirm_status = 1,
+             email_change_token_current = case when $1 = 'email_change_current' then '' else email_change_token_current end,
+             email_change_token_new = case when $1 = 'email_change_new' then '' else email_change_token_new end,
+             updated_at = now()
+         where id = $2
+         returning *`,
+        [candidate.token_type, candidate.user_id],
+      )).rows[0]
+      return updated ? 'pending' : null
+    }
     const deleted = await query(
-      `delete from auth.one_time_tokens where id = $1 and token = $2 returning id`,
-      [candidate.id, token],
+      `delete from auth.one_time_tokens where user_id = $1
+       and token_type = $2 returning id`,
+      [candidate.user_id, candidate.token_type],
     )
     if (deleted.rows.length === 0) return null
     const updated = (await query<UserRow>(
       `update auth.users
          set email = $1, email_confirmed_at = now(),
-           email_change = null, email_change_sent_at = null, email_change_confirm_status = 0,
+           email_change = null, email_change_sent_at = null,
+           email_change_token_current = '', email_change_token_new = '',
+           email_change_confirm_status = 0,
              is_anonymous = false,
              raw_app_meta_data = case when is_anonymous
                then coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb
@@ -1524,7 +1586,7 @@ export class AuthHandler {
            updated_at = now()
        where id = $2
        returning *`,
-      [candidate.email, candidate.user_id],
+      [targetEmail, candidate.user_id],
     )).rows[0]
     if (!updated) return null
     await this.ensureEmailIdentity(updated, query)
@@ -1821,16 +1883,22 @@ export class AuthHandler {
     const body = (await req.json().catch(() => ({}))) as {
       type?: string
       email?: string
+      new_email?: string
       password?: string
       redirect_to?: string
       data?: Record<string, unknown>
     }
     if (forcedType) body.type = forcedType
-    if (!['signup', 'invite', 'magiclink', 'recovery'].includes(body.type ?? '')) {
-      return authError(422, 'unsupported_link_type', 'Only signup, invite, magiclink, and recovery link generation are supported')
+    if (!['signup', 'invite', 'magiclink', 'recovery', 'email_change_current', 'email_change_new'].includes(body.type ?? '')) {
+      return authError(422, 'unsupported_link_type', 'Unsupported email action link type')
     }
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
+    const newEmail = body.new_email === undefined ? null : normalizeEmailInput(body.new_email)
+    if (body.type === 'email_change_current' || body.type === 'email_change_new') {
+      if (!newEmail) return authError(400, 'validation_failed', 'new_email is required')
+      if (newEmail === email) return authError(422, 'validation_failed', 'new_email must differ from email')
+    }
     if (body.type === 'signup' && !body.password) {
       return authError(400, 'validation_failed', 'password is required for signup links')
     }
@@ -1856,11 +1924,40 @@ export class AuthHandler {
         [email],
       )
       let linkedUser = existing.rows[0]
-      if (!linkedUser && body.type === 'recovery') {
+      if (!linkedUser && (body.type === 'recovery' || body.type === 'email_change_current' || body.type === 'email_change_new')) {
         return null
       }
       if (linkedUser && (body.type === 'signup' || body.type === 'invite')) {
         return { error: 'email_exists' as const }
+      }
+      if (linkedUser && (body.type === 'email_change_current' || body.type === 'email_change_new')) {
+        const duplicate = await query(
+          `select id from auth.users where lower(email) = $1 and id <> $2`,
+          [newEmail, linkedUser.id],
+        )
+        if (duplicate.rows.length > 0) return { error: 'email_exists' as const }
+        const tokenType = body.type
+        await query(
+          `delete from auth.one_time_tokens where user_id = $1 and token_type = $2`,
+          [linkedUser.id, tokenType],
+        )
+        await query(
+          `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
+           values ($1, $2, $3, $4, now() + $5::interval),
+                  ($1, $2, $3, $6, now() + $5::interval)`,
+          [linkedUser.id, tokenType === 'email_change_current' ? email : newEmail, tokenType, emailOtp, expiry, hashedToken],
+        )
+        const tokenColumn = tokenType === 'email_change_current'
+          ? 'email_change_token_current'
+          : 'email_change_token_new'
+        await query(
+          `update auth.users
+           set email_change = $1, email_change_sent_at = now(), email_change_confirm_status = 0,
+               ${tokenColumn} = $2, updated_at = now()
+           where id = $3`,
+          [newEmail, hashedToken, linkedUser.id],
+        )
+        return (await query<UserRow>(`select * from auth.users where id = $1`, [linkedUser.id])).rows[0]
       }
       if (!linkedUser) {
         const result = await query<UserRow>(
@@ -1906,7 +2003,10 @@ export class AuthHandler {
 
     const actionUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
     actionUrl.searchParams.set('token', hashedToken)
-    actionUrl.searchParams.set('type', body.type!)
+    actionUrl.searchParams.set(
+      'type',
+      body.type === 'email_change_current' || body.type === 'email_change_new' ? 'email_change' : body.type!
+    )
     actionUrl.searchParams.set('redirect_to', redirectTo)
     if (sendEmail) {
       await this.audit('user_invited', { actorId: user.id, actorEmail: email, type: 'admin' })
@@ -1921,6 +2021,7 @@ export class AuthHandler {
       body.type === 'invite' ? 'user_invited'
         : body.type === 'signup' ? 'user_signedup'
           : body.type === 'recovery' ? 'user_recovery_requested'
+            : body.type === 'email_change_current' || body.type === 'email_change_new' ? 'user_email_change_requested'
             : 'user_magiclink_requested'
     await this.audit(
       auditAction,

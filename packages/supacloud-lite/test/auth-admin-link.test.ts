@@ -136,7 +136,7 @@ describe('Auth admin link compatibility', () => {
     }
   })
 
-  test('requires service role and rejects unsupported link requests', async () => {
+  test('requires service role and validates link requests', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64),
       vaultKey: 'y'.repeat(64),
@@ -159,13 +159,13 @@ describe('Auth admin link compatibility', () => {
         authorization: `Bearer ${backend.serviceRoleKey}`,
         'content-type': 'application/json',
       }
-      const unsupported = await backend.fetch('http://local/auth/v1/admin/generate_link', {
+      const supported = await backend.fetch('http://local/auth/v1/admin/generate_link', {
         method: 'POST',
         headers,
         body: JSON.stringify({ type: 'email_change_current', email: 'unsupported@example.com' }),
       })
-      expect(unsupported.status).toBe(422)
-      expect(await unsupported.json()).toMatchObject({ error_code: 'unsupported_link_type' })
+      expect(supported.status).toBe(400)
+      expect(await supported.json()).toMatchObject({ error_code: 'validation_failed' })
 
       const missingEmail = await backend.fetch('http://local/auth/v1/admin/generate_link', {
         method: 'POST',
@@ -174,6 +174,74 @@ describe('Auth admin link compatibility', () => {
       })
       expect(missingEmail.status).toBe(400)
       expect(await missingEmail.json()).toMatchObject({ error_code: 'validation_failed' })
+    } finally {
+      await backend.close()
+    }
+  })
+
+  test('supports secure email-change current and new links with OTP and token hashes', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      apiUrl: 'http://local',
+      siteUrl: 'http://app.local',
+      log: () => {},
+    })
+    const serviceClient = createClient('http://local', backend.serviceRoleKey, {
+      ...clientOptions,
+      global: { fetch: backend.fetch },
+    })
+    const anonClient = createClient('http://local', backend.anonKey, {
+      ...clientOptions,
+      global: { fetch: backend.fetch },
+    })
+
+    try {
+      const created = await serviceClient.auth.admin.createUser({
+        email: 'current@example.com',
+        password: 'correct-horse-battery-staple',
+        email_confirm: true,
+      })
+      expect(created.error).toBeNull()
+
+      const current = await serviceClient.auth.admin.generateLink({
+        type: 'email_change_current',
+        email: 'current@example.com',
+        newEmail: 'new@example.com',
+      })
+      expect(current.error).toBeNull()
+      expect(current.data.properties?.verification_type).toBe('email_change_current')
+      expect(new URL(current.data.properties!.action_link).searchParams.get('type')).toBe('email_change')
+
+      const next = await serviceClient.auth.admin.generateLink({
+        type: 'email_change_new',
+        email: 'current@example.com',
+        newEmail: 'new@example.com',
+      })
+      expect(next.error).toBeNull()
+      expect(next.data.properties?.verification_type).toBe('email_change_new')
+
+      const newConfirmed = await anonClient.auth.verifyOtp({
+        type: 'email_change',
+        email: 'new@example.com',
+        token: next.data.properties!.email_otp,
+      })
+      expect(newConfirmed.error).toBeNull()
+      expect(newConfirmed.data.session).toBeNull()
+
+      const changed = await anonClient.auth.verifyOtp({
+        type: 'email_change',
+        token_hash: current.data.properties!.hashed_token,
+      })
+      expect(changed.error).toBeNull()
+      expect(changed.data.user?.email).toBe('new@example.com')
+
+      const replayed = await anonClient.auth.verifyOtp({
+        type: 'email_change',
+        token_hash: next.data.properties!.hashed_token,
+      })
+      expect(replayed.error).not.toBeNull()
+      expect(replayed.data.session).toBeNull()
     } finally {
       await backend.close()
     }
