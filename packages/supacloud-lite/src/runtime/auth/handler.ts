@@ -235,10 +235,10 @@ async function sendSmsUntilAbort(sender: SmsSender, message: SmsMessage, signal:
   }
 }
 
-function json(status: number, body: unknown): Response {
+function json(status: number, body: unknown, extraHeaders: HeadersInit = {}): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { 'content-type': 'application/json; charset=utf-8', ...extraHeaders },
   })
 }
 
@@ -1580,8 +1580,39 @@ export class AuthHandler {
     }
 
     if (path === 'admin/users' && method === 'GET') {
-      const res = await this.db.query(`select * from auth.users order by created_at desc limit 1000`)
-      return json(200, { users: (res.rows as UserRow[]).map((user) => this.userJson(user)), aud: 'authenticated' })
+      const requestUrl = new URL(req.url)
+      const pageValue = requestUrl.searchParams.get('page')
+      const perPageValue = requestUrl.searchParams.get('per_page')
+      const page = pageValue === null ? 1 : Number(pageValue)
+      const perPage = perPageValue === null ? 50 : Number(perPageValue)
+      if (!Number.isInteger(page) || page < 1 || !Number.isInteger(perPage) || perPage < 1 || perPage > 1000) {
+        return authError(400, 'validation_failed', 'page must be a positive integer and per_page must be between 1 and 1000')
+      }
+      const total = Number((await this.db.query<{ count: number }>(
+        `select count(*)::int as count from auth.users`,
+      )).rows[0]?.count ?? 0)
+      const res = await this.db.query(
+        `select * from auth.users order by created_at desc, id desc limit $1 offset $2`,
+        [perPage, (page - 1) * perPage],
+      )
+      const lastPage = Math.max(1, Math.ceil(total / perPage))
+      const linkUrl = (targetPage: number): string => {
+        const target = new URL(requestUrl)
+        target.searchParams.set('page', String(targetPage))
+        target.searchParams.set('per_page', String(perPage))
+        return target.toString()
+      }
+      const links = [
+        `<${linkUrl(1)}>; rel="first"`,
+        `<${linkUrl(lastPage)}>; rel="last"`,
+        ...(page > 1 ? [`<${linkUrl(page - 1)}>; rel="prev"`] : []),
+        ...(page < lastPage ? [`<${linkUrl(page + 1)}>; rel="next"`] : []),
+      ]
+      return json(
+        200,
+        { users: (res.rows as UserRow[]).map((user) => this.userJson(user)), aud: 'authenticated' },
+        { 'x-total-count': String(total), link: links.join(', ') },
+      )
     }
     if (path === 'admin/users' && method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as {
