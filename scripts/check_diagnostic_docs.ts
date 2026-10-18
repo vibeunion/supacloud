@@ -349,6 +349,165 @@ export const value: number = "wrong";`,
   transitions: { approve: { from: "draft", to: "approved", route: "GET /cases/:id" } },
 });`,
   SC6108: `defineFeatureSpec(loadFeatureSpecAtRuntime());`,
+  SC6110: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});`,
+  SC6111: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      command: "ApproveCase",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});`,
+  SC6112: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant.id",
+  transitions: {},
+});`,
+  SC6113: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "account_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});`,
+  SC6114: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      command: "ApproveCase",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "tenant_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});
+// @Query({ name: "case.list" }) has no tenantScope declaration.`,
+  SC6115: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "tenant_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});
+// @Job({ name: "case.refresh" }) has no tenantScope declaration.`,
+  SC6116: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "tenant_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      command: "ApproveCase",
+      persistence: {
+        boundary: "database",
+        optimisticLock: "required",
+        versionField: "version",
+        tenantField: "tenant_id",
+        stateField: "state",
+        receipt: "required",
+        reconciliation: "none",
+      },
+    },
+  },
+});
+// @Command({ name: "case.approve", tenantScope: undefined }) has no tenant scope.`,
+  SC6117: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.missing" },
+  },
+});
+// No matching @Job({ name: "case.missing" }) exists in the Feature module.`,
+  SC6118: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// @Job({ name: "case.refresh", idempotency: "none" }) cannot safely replay.`,
+  SC6119: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// @Job({ name: "case.refresh", mode: undefined }) has no execution adapter mode.`,
+  SC6120: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// @Job({ name: "case.refresh", input: undefined }) has no non-opaque typed input contract.`,
+  SC6121: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: { from: "draft", to: "approved", job: "case.refresh" },
+  },
+});
+// A tenant-scoped @Job must inject JOB_CONTEXT.`,
 };
 
 const ROOT = resolve(import.meta.dir, "..");

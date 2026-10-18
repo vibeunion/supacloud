@@ -1,11 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compileProject } from "@supacloud/compiler";
 import { registerAppAliases, registerAppTools, runAppTool, type ToolResult } from "./app-tools";
 
 const roots: string[] = [];
+const require = createRequire(import.meta.url);
+const { compileProject } = require("../../../../compiler/dist/index.js") as typeof import("@supacloud/compiler");
 const feature = {
     action: "generate", kind: "feature", name: "case-approval",
     permission: "cases:approve", rpc: "approveCase", format: "json",
@@ -27,7 +29,7 @@ test("feature preview and apply share a complete, non-overwriting plan", async (
     const root = await fixture();
     const preview = data(await runAppTool({ ...feature, root, dry_run: true }));
     expect(preview).toMatchObject({ ok: true, written: false });
-    expect(preview.changes).toHaveLength(6);
+    expect(preview.changes).toHaveLength(8);
     expect(await readdir(root)).toEqual([]);
     const applied = data(await runAppTool({ ...feature, root }));
     expect(applied).toMatchObject({ ok: true, written: true });
@@ -122,9 +124,53 @@ test("the generated approval compiles only with the explicit persistent capabili
         },
     });
     expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
-    expect(compiled.graph.modules[0]?.featureSpec?.transitions[0]?.permission).toBe("cases:approve");
-    expect(compiled.graph.modules[0]?.commands[0]?.rpc).toBe("approveCase");
-    expect(compiled.graph.modules[0]?.queries).toHaveLength(1);
+    const featureModule = compiled.graph.modules.find(module => module.featureSpec);
+    expect(featureModule?.featureSpec?.transitions[0]?.permission).toBe("cases:approve");
+    expect((featureModule?.featureSpec?.transitions[0] as { job?: string } | undefined)?.job)
+        .toBe("case-approval.refresh");
+    expect(featureModule?.commands[0]?.rpc).toBe("approveCase");
+    expect(featureModule?.queries).toHaveLength(1);
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('tenantField: "tenant_id"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('tenantScope: "required"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain("requireFeatureRequestContext(this.jobContext)");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain("input: CaseApprovalRefreshInput");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain("export const CaseApprovalRefreshInput = t.Object");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain('t.Union([t.Literal("draft"), t.Literal("approved")])');
+    const contractsManifest = JSON.parse(
+        await readFile(join(root, "generated/contracts.manifest.json"), "utf8"),
+    ) as {
+        features?: Array<{ transitions?: Array<{ jobDetails?: { input?: string } }> }>;
+    };
+    expect(contractsManifest.features?.[0]?.transitions?.[0]?.jobDetails?.input)
+        .toBe("CaseApprovalRefreshInput");
+    const clientCompilation = await compileProject({
+        ...options,
+        generateClient: true,
+        commandCapabilities: {
+            requirePersistentAdapters: true, permission: true,
+            rpc: { approveCase: { boundary: "database", transaction: true, idempotency: true, audit: true } },
+        },
+    });
+    expect(clientCompilation.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+    const generatedClient = await readFile(join(root, "generated/client.ts"), "utf8");
+    expect(generatedClient).toContain("/case-approval/:id/approve");
+    expect(generatedClient).toContain("/case-approval/");
+    expect(generatedClient).toContain("/case-approval");
+    const generatedE2E = await readFile(join(root, "src/features/case-approval/case-approval.e2e.test.ts"), "utf8");
+    expect(generatedE2E).toContain('test.skipIf(!enabled)');
+    expect(generatedE2E).toContain('expect(replay.status).toBe(first.status)');
+    expect(generatedE2E).toContain('expect(replayBody).toEqual(firstBody)');
+    expect(generatedE2E).toContain('conflicting replay');
+    expect(generatedE2E).toContain('Promise.all');
+    expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION');
+    expect(generatedE2E).toContain('test.skipIf(!tenantIsolationEnabled)');
+    expect(generatedE2E).toContain('cross-tenant access');
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);
@@ -171,7 +217,7 @@ test("request contract changes flow into the write port and diagnose stale adapt
     await writeFile(contractPath, changed);
     await writeFile(join(directory, "business-adapter.ts"), `import type { CaseApprovalWritePort } from "./case-approval.model";
 export const writer: CaseApprovalWritePort = {
-    async approve(input) {
+    async approve(_context, input) {
         const reference: string | undefined = input.reference;
         void reference;
         return { id: input.id, state: "approved", version: input.expectedVersion + 1 };

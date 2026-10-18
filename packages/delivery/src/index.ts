@@ -1,4 +1,8 @@
-import { readDeliveryManifest, readVerifiedDeliveryFiles } from "./delivery-artifact";
+import {
+  DELIVERY_ARTIFACT_MAX_FILE_BYTES, DELIVERY_ARTIFACT_MAX_TOTAL_BYTES,
+  readDeliveryManifest, readVerifiedDeliveryFiles,
+} from "./delivery-artifact";
+export { DELIVERY_ARTIFACT_MAX_FILE_BYTES, DELIVERY_ARTIFACT_MAX_TOTAL_BYTES } from "./delivery-artifact";
 import type { DeliveryBuildManifest, DeliveryObject } from "./delivery-build-schema";
 export {
   WorkerExecutionGroupSchema, WorkerExecutionSchema, parseWorkerExecutionGroup,
@@ -110,7 +114,7 @@ export async function readDeliveryExecutableArchive(manifestPath: string): Promi
   if (manifest.objects.length === 0 || manifest.objects.length > 32
     || manifest.objects.some(object => object.entryKind === "compiled-module-factory")
     || manifest.objects.reduce((total, object) =>
-      total + object.files.reduce((bytes, file) => bytes + file.bytes, 0), 0) > 128 * 1024 * 1024) {
+      total + object.files.reduce((bytes, file) => bytes + file.bytes, 0), 0) > DELIVERY_ARTIFACT_MAX_TOTAL_BYTES) {
     throw new Error("Invalid executable delivery inventory.");
   }
   const objects: VerifiedDeliveryExecutableArchive["objects"] = [];

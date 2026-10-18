@@ -178,10 +178,13 @@ export { defineFeatureSlice, defineFeatureSpec, defineModule } from "./module";
 export type {
   FeatureEvent,
   FeatureSliceOptions,
+  FeaturePersistenceOptions,
   FeatureSpecOptions,
   FeatureState,
   FeatureTransitionOptions,
 } from "./module";
+export { requireFeatureRequestContext } from "./feature_context";
+export type { FeatureRequestContext } from "./feature_context";
 export {
   APP_INITIALIZER,
   APP_LIFECYCLE,

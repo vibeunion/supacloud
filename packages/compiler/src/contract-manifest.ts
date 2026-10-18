@@ -1,4 +1,4 @@
-import type { ApplicationGraph } from "./types";
+import type { ApplicationGraph, FeaturePersistenceNode } from "./types";
 import { joinRoutePaths } from "./util";
 
 export interface ContractManifest {
@@ -9,11 +9,67 @@ export interface ContractManifest {
     module: string;
     permission?: string;
     rpc?: string;
+    branches?: Array<{
+      when: string;
+      adapter: string;
+      transaction: "required" | "none";
+      idempotency: "required" | "none";
+      auditEvent?: string;
+      boundary?: "database" | "external";
+    }>;
     transaction: "required" | "none";
     idempotency: "required" | "none";
+    tenantScope?: "required" | "none";
     auditEvent?: string;
   }>;
-  queries: Array<{ name: string; className: string; module: string }>;
+  queries: Array<{
+    name: string;
+    className: string;
+    module: string;
+    tenantScope?: "required" | "none";
+  }>;
+  jobs: Array<{
+    name: string;
+    className: string;
+    module: string;
+    input?: string;
+    inputKind?: "opaque" | "declared";
+    output?: string;
+    outputKind?: "opaque" | "declared";
+    mode?: "task" | "workflow";
+    idempotency?: "required" | "none";
+    tenantScope?: "required" | "none";
+  }>;
+  features: Array<{
+    name: string;
+    states: string[];
+    tenantField?: string;
+    transitions: Array<{
+      name: string;
+      from: string;
+      to: string;
+      permission?: string;
+      command?: string;
+      route?: string;
+      routeBinding?: "command" | "controller";
+      transaction?: "required" | "none";
+      idempotency?: "required" | "none";
+      audit?: string;
+      job?: string;
+      jobDetails?: {
+        name: string;
+        className: string;
+        input?: string;
+        inputKind?: "opaque" | "declared";
+        output?: string;
+        outputKind?: "opaque" | "declared";
+        mode?: "task" | "workflow";
+        idempotency?: "required" | "none";
+        tenantScope?: "required" | "none";
+      };
+      persistence?: FeaturePersistenceNode;
+    }>;
+  }>;
   routes: Array<{
     method: string;
     path: string;
@@ -50,6 +106,8 @@ export function buildContractManifest(
 ): ContractManifest {
   const commands: ContractManifest["commands"] = [];
   const queries: ContractManifest["queries"] = [];
+  const jobs: ContractManifest["jobs"] = [];
+  const features: ContractManifest["features"] = [];
   const routes: ContractManifest["routes"] = [];
   const permissions = new Set<string>();
   const rpc: ContractManifest["rpc"] = [];
@@ -60,20 +118,92 @@ export function buildContractManifest(
     for (const command of module.commands) {
       if (command.permission) permissions.add(command.permission);
       if (command.rpc) rpc.push({ command: command.name, adapter: command.rpc });
+      for (const branch of command.branches ?? []) {
+        rpc.push({ command: `${command.name} [${branch.when}]`, adapter: branch.rpc });
+      }
       if (command.audit) events.push({ name: command.audit, source: "command.audit", command: command.name });
+      for (const branch of command.branches ?? []) {
+        if (branch.audit) events.push({ name: branch.audit, source: "command.branch.audit", command: command.name });
+      }
       commands.push({
         name: command.name,
         className: command.className,
         module: module.name,
         ...(command.permission === undefined ? {} : { permission: command.permission }),
         ...(command.rpc === undefined ? {} : { rpc: command.rpc }),
+        ...(command.branches === undefined ? {} : {
+          branches: command.branches.map((branch) => ({
+            when: branch.when,
+            adapter: branch.rpc,
+            transaction: branch.transaction,
+            idempotency: branch.idempotency,
+            ...(branch.audit === undefined ? {} : { auditEvent: branch.audit }),
+            ...(branch.boundary === undefined ? {} : { boundary: branch.boundary }),
+          })),
+        }),
         transaction: command.transaction,
         idempotency: command.idempotency,
+        ...(command.tenantScope === undefined ? {} : { tenantScope: command.tenantScope }),
         ...(command.audit === undefined ? {} : { auditEvent: command.audit }),
       });
     }
     for (const query of module.queries) {
-      queries.push({ name: query.name, className: query.className, module: module.name });
+      queries.push({
+        name: query.name, className: query.className, module: module.name,
+        ...(query.tenantScope === undefined ? {} : { tenantScope: query.tenantScope }),
+      });
+    }
+    for (const job of module.jobs ?? []) {
+      jobs.push({
+        name: job.name,
+        className: job.className,
+        module: module.name,
+        ...(job.input === undefined ? {} : { input: job.input }),
+        ...(job.schemaKinds?.input === undefined ? {} : { inputKind: job.schemaKinds.input }),
+        ...(job.output === undefined ? {} : { output: job.output }),
+        ...(job.schemaKinds?.output === undefined ? {} : { outputKind: job.schemaKinds.output }),
+        ...(job.mode === undefined ? {} : { mode: job.mode }),
+        ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
+        ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),
+      });
+    }
+    if (module.featureSpec) {
+      features.push({
+        name: module.featureSpec.name,
+        states: [...module.featureSpec.states],
+        ...(module.featureSpec.tenantField === undefined ? {} : { tenantField: module.featureSpec.tenantField }),
+        transitions: module.featureSpec.transitions.map((transition) => {
+          const job = transition.job === undefined ? undefined
+            : (module.jobs ?? []).find((candidate) => candidate.className === transition.job || candidate.name === transition.job);
+          return {
+            name: transition.name,
+            from: transition.from,
+            to: transition.to,
+            ...(transition.permission === undefined ? {} : { permission: transition.permission }),
+            ...(transition.command === undefined ? {} : { command: transition.command }),
+            ...(transition.route === undefined ? {} : { route: transition.route }),
+            ...(transition.routeBinding === undefined ? {} : { routeBinding: transition.routeBinding }),
+            ...(transition.transaction === undefined ? {} : { transaction: transition.transaction }),
+            ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
+            ...(transition.audit === undefined ? {} : { audit: transition.audit }),
+            ...(transition.job === undefined ? {} : { job: transition.job }),
+            ...(job === undefined ? {} : {
+              jobDetails: {
+                name: job.name,
+                className: job.className,
+                ...(job.input === undefined ? {} : { input: job.input }),
+                ...(job.schemaKinds?.input === undefined ? {} : { inputKind: job.schemaKinds.input }),
+                ...(job.output === undefined ? {} : { output: job.output }),
+                ...(job.schemaKinds?.output === undefined ? {} : { outputKind: job.schemaKinds.output }),
+                ...(job.mode === undefined ? {} : { mode: job.mode }),
+                ...(job.idempotency === undefined ? {} : { idempotency: job.idempotency }),
+                ...(job.tenantScope === undefined ? {} : { tenantScope: job.tenantScope }),
+              },
+            }),
+            ...(transition.persistence === undefined ? {} : { persistence: transition.persistence }),
+          };
+        }),
+      });
     }
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
@@ -110,6 +240,8 @@ export function buildContractManifest(
 
   commands.sort((left, right) => left.name.localeCompare(right.name));
   queries.sort((left, right) => left.name.localeCompare(right.name));
+  jobs.sort((left, right) => left.name.localeCompare(right.name));
+  features.sort((left, right) => left.name.localeCompare(right.name));
   routes.sort((left, right) => `${left.method} ${left.path}`.localeCompare(`${right.method} ${right.path}`));
   rpc.sort((left, right) => left.command.localeCompare(right.command));
   events.sort((left, right) => left.name.localeCompare(right.name));
@@ -118,6 +250,8 @@ export function buildContractManifest(
     version: 1,
     commands,
     queries,
+    jobs,
+    features,
     routes,
     permissions: [...permissions].sort(),
     rpc,
