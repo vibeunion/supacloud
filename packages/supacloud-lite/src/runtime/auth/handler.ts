@@ -1729,12 +1729,12 @@ export class AuthHandler {
       )
       const user = users.rows[0]
       if (!user) return null
+      await this.ensurePhoneIdentity(user, query)
       await query(
-        `insert into auth.identities (user_id, provider, provider_id, identity_data, last_sign_in_at)
-         values ($1, 'phone', $2, $3::jsonb, now())
-         on conflict (provider, provider_id) do update
-         set identity_data = excluded.identity_data, last_sign_in_at = now(), updated_at = now()`,
-        [user.id, phone, JSON.stringify({ sub: user.id, phone, phone_verified: true })]
+        `update auth.identities
+         set last_sign_in_at = now(), updated_at = now()
+         where user_id = $1 and provider = 'phone' and provider_id = $2`,
+        [user.id, phone],
       )
       return this.sessionFor(
         user,
