@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.11.5...contracts-v0.12.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
 ## [0.11.5](https://github.com/vibeunion/supacloud/compare/contracts-v0.11.4...contracts-v0.11.5) (2026-10-17)
 
 

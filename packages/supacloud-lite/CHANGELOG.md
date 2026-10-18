@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.31.3...supacloud-lite-v0.32.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
+
+### Bug Fixes
+
+* restore 500 MiB body limit defaults ([#2066](https://github.com/vibeunion/supacloud/issues/2066)) ([3290f26](https://github.com/vibeunion/supacloud/commit/3290f26cc70a090904d2b80042ca1d57da6319fe))
+* **storage:** align standard upload limit ([#2072](https://github.com/vibeunion/supacloud/issues/2072)) ([5948ba3](https://github.com/vibeunion/supacloud/commit/5948ba3df9acfbf368012fc37ceffa53c7643fb0))
+
 ## [0.31.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.31.2...supacloud-lite-v0.31.3) (2026-10-17)
 
 
