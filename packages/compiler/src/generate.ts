@@ -799,6 +799,9 @@ class ModuleGenerator {
         if (route.effect !== undefined) {
           fields.push(`effect: ${JSON.stringify(route.effect)}`);
         }
+        if (route.idempotency !== undefined) {
+          fields.push(`idempotency: ${JSON.stringify(route.idempotency)}`);
+        }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
         if (route.guards && route.guards.length > 0) {
           fields.push(`guards: ${JSON.stringify(route.guards)}`);
@@ -1451,6 +1454,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["data", route.data],
           ["parse", route.parse],
           ["allowDeleteBody", route.allowDeleteBody],
+          ["idempotency", route.idempotency],
         ] as const) {
           if (value !== undefined) routeFields.push(`${key}: ${JSON.stringify(value)}`);
         }
@@ -1490,7 +1494,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
         const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
         const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
         const procedureKind = route.method === "GET" || route.method === "HEAD" ? "query" : "mutation";
-        const idempotencyMode = command?.idempotency ?? "none";
+        const idempotencyMode = route.idempotency ?? command?.idempotency ?? "none";
         const procedureMetadata = {
           key: `${controller.className}.${route.handler}`,
           method: route.method,
@@ -2247,6 +2251,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
           responseKind: responseKind ?? (route.nativeResponse ? "native-response" : undefined),
           ...(route.parse === undefined ? {} : { parse: route.parse }),
           ...(route.allowDeleteBody === undefined ? {} : { allowDeleteBody: route.allowDeleteBody }),
+          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
           module: module.name,
           controller: controller.className,
           handler: route.handler,
@@ -2685,6 +2690,7 @@ export function renderPermissions(graph: ApplicationGraph): string {
           handler: route.handler,
           ...(route.command === undefined ? {} : { command: route.command }),
           ...(perm === undefined ? {} : { permission: perm }),
+          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
         });
       }
     }

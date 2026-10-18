@@ -37,6 +37,46 @@ export const ConflictResult = { type: "object", properties: { conflict: { type: 
   }
 });
 
+test("analyzes explicit route idempotency without requiring a command binding", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-route-idempotency-"));
+  try {
+    const controller = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
+      .replace(
+        '@Post("/:caseId/accept", {',
+        '@Post("/:caseId/accept", { idempotency: "required",',
+      )
+      .replace(/command: AcceptCaseCommand,\n\s*/g, "");
+    await writeFixtureProject(root, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/case.controller.ts": controller,
+    });
+    const graph = await analyzeProject(root);
+    const route = graph.modules.find((module) => module.name === "case")?.controllers[0]?.routes[0];
+    expect(route).toMatchObject({ idempotency: "required" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects non-literal route idempotency policies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-route-idempotency-invalid-"));
+  try {
+    const controller = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
+      .replace(
+        '@Post("/:caseId/accept", {',
+        '@Post("/:caseId/accept", { idempotency: "sometimes",',
+      );
+    await writeFixtureProject(root, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/case.controller.ts": controller,
+    });
+    const graph = await analyzeProject(root);
+    expect((graph.diagnostics ?? []).some((diagnostic) => diagnostic.code === "invalid-route-idempotency")).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("resolves reusable defineRouteContract values passed to decorators", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-route-contract-reference-"));
   try {
