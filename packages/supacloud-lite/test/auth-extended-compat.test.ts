@@ -86,6 +86,55 @@ describe('Auth extended GoTrue compatibility', () => {
     }
   })
 
+  test('synchronizes OAuth providers when a verified email matches an existing user', async () => {
+    const backend = await backendForTest({
+      siteUrl: 'http://app.local/callback',
+      oauthProviders: {
+        google: {
+          clientId: 'client-id', clientSecret: 'client-secret',
+          authorizeUrl: 'http://provider.local/authorize', tokenUrl: 'http://provider.local/token',
+          userInfoUrl: 'http://provider.local/userinfo',
+        },
+      },
+      oauthFetch: (async (input) => {
+        const url = new URL(String(input))
+        if (url.pathname === '/token') return Response.json({ access_token: 'provider-token' })
+        if (url.pathname === '/userinfo') {
+          return Response.json({ sub: 'existing-user-provider', email: 'existing-oauth@example.test', email_verified: true })
+        }
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch,
+    })
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'existing-oauth@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+      const userId = signedUp.data.user?.id
+      if (!userId) throw new Error('Expected a signed-up user')
+
+      const authorized = await authorize(backend, { provider: 'google', redirect_to: 'http://app.local/callback' })
+      const state = new URL(authorized.headers.get('location')!).searchParams.get('state')!
+      const callback = await backend.fetch(`http://local/auth/v1/callback?code=provider-code&state=${state}`, {
+        headers: apiHeaders(backend.anonKey),
+      })
+      expect(callback.status).toBe(303)
+      expect((await backend.db.query('select id from auth.users')).rows).toHaveLength(1)
+      expect((await backend.db.query<{ id: string }>(
+        `select id from auth.identities where user_id = $1 and provider = 'google'`,
+        [userId],
+      )).rows).toHaveLength(1)
+
+      const user = await client.auth.getUser()
+      expect(user.error).toBeNull()
+      expect(user.data.user?.app_metadata.providers).toEqual(['email', 'google'])
+    } finally {
+      await backend.close()
+    }
+  })
+
   test('allows only one concurrent verification of a TOTP challenge', async () => {
     const backend = await backendForTest()
     const client = anonClient(backend)

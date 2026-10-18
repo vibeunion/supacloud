@@ -345,22 +345,7 @@ export class OAuthService {
       if (inserted.rows.length === 0) {
         throw new OAuthIdentityLinkError('identity_already_exists')
       }
-      await query(
-        `update auth.users
-         set raw_app_meta_data = jsonb_set(
-           coalesce(raw_app_meta_data, '{}'::jsonb),
-           '{providers}',
-           (
-             select jsonb_agg(provider order by provider)
-             from auth.identities
-             where user_id = $1
-           ),
-           true
-         ),
-         updated_at = now()
-         where id = $1`,
-        [userId],
-      )
+      await this.syncUserProviders(query, userId)
     })
   }
 
@@ -378,6 +363,7 @@ export class OAuthService {
         JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata }),
       ])
       await query(`update auth.users set last_sign_in_at = now() where id = $1`, [existing.rows[0].user_id])
+      await this.syncUserProviders(query, existing.rows[0].user_id)
       return existing.rows[0].user_id
     }
 
@@ -440,7 +426,10 @@ export class OAuthService {
        returning user_id`,
       [userId, provider, profile.id, identityData]
     )
-    if (linked.rows[0]) return linked.rows[0].user_id
+    if (linked.rows[0]) {
+      await this.syncUserProviders(query, linked.rows[0].user_id)
+      return linked.rows[0].user_id
+    }
 
     const raced = await query<{ user_id: string }>(
       `select user_id from auth.identities where provider = $1 and provider_id = $2`,
@@ -458,7 +447,30 @@ export class OAuthService {
       [provider, profile.id, identityData]
     )
     await query(`update auth.users set last_sign_in_at = now() where id = $1`, [racedUserId])
+    await this.syncUserProviders(query, racedUserId)
     return racedUserId
+  }
+
+  private async syncUserProviders(query: Querier, userId: string): Promise<void> {
+    await query(
+      `update auth.users
+       set raw_app_meta_data = jsonb_set(
+         coalesce(raw_app_meta_data, '{}'::jsonb),
+         '{providers}',
+         (
+           select jsonb_agg(provider order by provider)
+           from (
+             select distinct provider
+             from auth.identities
+             where user_id = $1
+           ) as providers
+         ),
+         true
+       ),
+       updated_at = now()
+       where id = $1`,
+      [userId],
+    )
   }
 
   private async assertUserEligible(query: Querier, userId: string): Promise<void> {
