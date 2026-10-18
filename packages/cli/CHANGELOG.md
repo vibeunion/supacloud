@@ -14,6 +14,22 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.104.0](https://github.com/vibeunion/supacloud/compare/cli-v0.103.7...cli-v0.104.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+* **compiler:** enforce feature persistence boundaries ([#2062](https://github.com/vibeunion/supacloud/issues/2062)) ([aeaa158](https://github.com/vibeunion/supacloud/commit/aeaa158bb452cf44d0122b321e3fc12777c11543))
+
+
+### Bug Fixes
+
+* **cli:** expose all declared dependency boundaries ([#2067](https://github.com/vibeunion/supacloud/issues/2067)) ([42ea609](https://github.com/vibeunion/supacloud/commit/42ea6091dc52819a2507a35dba702b23bb9a6d1e))
+* **cli:** sync published compiler dependency ([#2060](https://github.com/vibeunion/supacloud/issues/2060)) ([780fdf8](https://github.com/vibeunion/supacloud/commit/780fdf8455961c456f74bf90098887dd24c9c337))
+* **cli:** validate verification source files ([#2055](https://github.com/vibeunion/supacloud/issues/2055)) ([ae4c91d](https://github.com/vibeunion/supacloud/commit/ae4c91d084f9663088cc6e77eca95b189f9315bb))
+* **compiler:** export FeaturePersistenceNode ([#2063](https://github.com/vibeunion/supacloud/issues/2063)) ([20937d4](https://github.com/vibeunion/supacloud/commit/20937d4fc17df43d8df7b8c3e66d37b1b271e511))
+
 ## [0.103.7](https://github.com/vibeunion/supacloud/compare/cli-v0.103.6...cli-v0.103.7) (2026-10-17)
 
 
