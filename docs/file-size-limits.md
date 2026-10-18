@@ -69,3 +69,9 @@ adds bytes, so a 500 MiB file needs a larger configured request-body limit.
 Large bodies are buffered by the worker; review memory and concurrency before
 restarting with the larger default. No database or existing bucket settings are
 rewritten.
+
+Management API standard Storage uploads also advertise and enforce a 500 MiB
+default. `STORAGE_UPLOAD_MAX_BYTES` can lower it; the effective value is never
+higher than `MANAGEMENT_API_MAX_REQUEST_BODY_SIZE`, because the HTTP listener
+must be able to receive the request. TUS uploads use the separate
+`TUS_MAX_SIZE` setting, whose default is also 500 MiB.

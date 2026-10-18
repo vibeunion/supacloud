@@ -1106,8 +1106,8 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.max_upload_size_bytes).toBeGreaterThan(0);
-    expect(body.max_upload_size_mb).toBeGreaterThan(0);
+    expect(body.max_upload_size_bytes).toBe(500 * 1024 * 1024);
+    expect(body.max_upload_size_mb).toBe(500);
     expect(body.tus_max_size_bytes).toBeGreaterThan(0);
     expect(body.tus_chunk_max_size_bytes).toBeGreaterThan(0);
     expect(body.streaming_upload_supported).toBe(true);

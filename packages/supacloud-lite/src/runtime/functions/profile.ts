@@ -1,7 +1,6 @@
 import type { LoadedFunction } from './handler.js'
 
 export type RuntimeMode = 'development' | 'strict'
-const STRICT_BODY_LIMIT = 500 * 1024 * 1024
 
 export function runtimeMode(value: unknown): RuntimeMode {
   if (value === undefined) return 'development'
@@ -12,13 +11,13 @@ export function runtimeMode(value: unknown): RuntimeMode {
 export function strictFunction(entry: LoadedFunction): LoadedFunction {
   const limits = {
     timeoutMs: 900_000,
-    maxRequestBodyBytes: STRICT_BODY_LIMIT,
-    maxResponseBodyBytes: STRICT_BODY_LIMIT,
+    maxRequestBodyBytes: 30 * 1024 * 1024,
+    maxResponseBodyBytes: 30 * 1024 * 1024,
     waitUntilTimeoutMs: 300_000,
     ...entry.limits,
   }
   for (const [name, value] of Object.entries(limits)) {
-    const maximum = name.includes('Body') ? STRICT_BODY_LIMIT : name === 'waitUntilTimeoutMs' ? 300_000 : 900_000
+    const maximum = name.includes('Body') ? 30 * 1024 * 1024 : name === 'waitUntilTimeoutMs' ? 300_000 : 900_000
     if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) {
       throw new Error(`invalid strict function limit: ${name}`)
     }

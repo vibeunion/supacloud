@@ -133,7 +133,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --studio <domain>  Specify Supabase Studio domain"
             echo "  --s3 <type>        Specify storage type (minio | juicefs)"
             echo "  --edge-max-body-size-mb <mb>"
-            echo "                     Specify Edge Runtime max request body size in MiB (default: 500)"
+            echo "                     Specify Edge Runtime max request body size in MB"
             echo "  --password <pass>  Set unified password for DB and dashboard"
             echo "  --migrate-legacy-supabase-compose"
             echo "                      Clean old Pigsty Supabase compose residues explicitly"
