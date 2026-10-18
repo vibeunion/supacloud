@@ -59,8 +59,10 @@ export interface MigrationAssessmentResult {
       sha256?: string;
       version?: number;
       commands?: number;
+      jobs?: number;
       routes?: number;
       permissions?: number;
+      features?: number;
     };
     openApi?: {
       baselinePath: string;
@@ -87,6 +89,192 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function arrayLength(value: unknown): number | undefined {
   return Array.isArray(value) ? value.length : undefined;
+}
+
+function safeField(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+}
+
+function validFeaturePersistence(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const boundary = value["boundary"];
+  const receipt = value["receipt"];
+  const reconciliation = value["reconciliation"];
+  if (boundary === "database") {
+    const fields = [value["tenantField"], value["versionField"], value["stateField"]];
+    return value["optimisticLock"] === "required"
+      && fields.every(safeField)
+      && new Set(fields).size === 3
+      && receipt === "required"
+      && reconciliation === "none";
+  }
+  if (boundary === "external") {
+    return value["optimisticLock"] === "none"
+      && value["versionField"] === undefined
+      && value["tenantField"] === undefined
+      && value["stateField"] === undefined
+      && receipt === "required"
+      && reconciliation === "required";
+  }
+  return false;
+}
+
+function validCommandInventory(value: unknown): value is unknown[] {
+  const names = new Set<string>();
+  const classes = new Set<string>();
+  return Array.isArray(value) && value.every((command) => {
+    if (!isRecord(command)
+      || typeof command["name"] !== "string" || command["name"].trim() === ""
+      || typeof command["className"] !== "string" || command["className"].trim() === ""
+      || typeof command["module"] !== "string" || command["module"].trim() === ""
+      || typeof command["permission"] !== "string" || command["permission"].trim() === ""
+      || (command["transaction"] !== "required" && command["transaction"] !== "none")
+      || (command["idempotency"] !== "required" && command["idempotency"] !== "none")
+      || (command["tenantScope"] !== undefined
+        && command["tenantScope"] !== "required" && command["tenantScope"] !== "none")) return false;
+    if (names.has(command["name"]) || classes.has(command["className"])) return false;
+    if (command["rpc"] !== undefined
+      && (typeof command["rpc"] !== "string" || command["rpc"].trim() === "")) return false;
+    if (command["auditEvent"] !== undefined
+      && (typeof command["auditEvent"] !== "string" || command["auditEvent"].trim() === "")) return false;
+    names.add(command["name"]);
+    classes.add(command["className"]);
+    return true;
+  });
+}
+
+function validFeatureInventory(
+  value: unknown,
+  jobs: readonly unknown[],
+  commands: readonly unknown[],
+  routes: readonly unknown[],
+  rpc: readonly unknown[],
+): value is unknown[] {
+  const featureNames = new Set<string>();
+  return Array.isArray(value) && value.every((feature) => {
+    if (!isRecord(feature) || typeof feature["name"] !== "string" || feature["name"].trim() === "") return false;
+    if (featureNames.has(feature["name"])) return false;
+    featureNames.add(feature["name"]);
+    if (feature["tenantField"] !== undefined && !safeField(feature["tenantField"])) return false;
+    const states = feature["states"];
+    const transitions = feature["transitions"];
+    if (!Array.isArray(states) || states.length === 0
+      || states.some((state) => typeof state !== "string" || state.trim() === "")
+      || new Set(states).size !== states.length
+      || !Array.isArray(transitions)) return false;
+    const transitionNames = new Set<string>();
+    return transitions.every((transition) => {
+      if (!isRecord(transition)
+        || typeof transition["name"] !== "string" || transition["name"].trim() === ""
+        || typeof transition["from"] !== "string" || !states.includes(transition["from"])
+        || typeof transition["to"] !== "string" || !states.includes(transition["to"])) return false;
+      if (transitionNames.has(transition["name"])) return false;
+      transitionNames.add(transition["name"]);
+      const persistence = transition["persistence"];
+      if (persistence !== undefined) {
+        if (!isRecord(persistence) || !validFeaturePersistence(persistence)) return false;
+        if (typeof transition["command"] !== "string" || transition["command"].trim() === ""
+          || typeof transition["permission"] !== "string" || transition["permission"].trim() === "") return false;
+        if (persistence["boundary"] === "database"
+          && feature["tenantField"] !== persistence["tenantField"]) return false;
+      }
+      const commandName = transition["command"];
+      if (commandName !== undefined) {
+        const command = commands.find((candidate) =>
+          isRecord(candidate) && (candidate["name"] === commandName || candidate["className"] === commandName),
+        );
+        if (!isRecord(command)) return false;
+        if (transition["permission"] !== undefined && command["permission"] !== transition["permission"]) return false;
+        if (transition["transaction"] !== undefined && command["transaction"] !== transition["transaction"]) return false;
+        if (transition["idempotency"] !== undefined && command["idempotency"] !== transition["idempotency"]) return false;
+        if (transition["audit"] !== undefined && command["auditEvent"] !== transition["audit"]) return false;
+        if (persistence !== undefined) {
+          const adapter = command["rpc"];
+          if (typeof adapter !== "string" || adapter.trim() === ""
+            || !rpc.some((candidate) => isRecord(candidate)
+              && candidate["command"] === command["name"] && candidate["adapter"] === adapter)
+            || command["idempotency"] !== "required"
+            || command["tenantScope"] !== "required"
+            || typeof command["auditEvent"] !== "string" || command["auditEvent"].trim() === "") return false;
+          const expectedTransaction = persistence["boundary"] === "database" ? "required" : "none";
+          if (command["transaction"] !== expectedTransaction) return false;
+        }
+      }
+      const routeName = transition["route"];
+      const routeBinding = transition["routeBinding"];
+      if (routeBinding !== undefined && routeBinding !== "command" && routeBinding !== "controller") return false;
+      if (routeName !== undefined) {
+        const route = routes.find((candidate) => isRecord(candidate)
+          && `${candidate["method"]} ${candidate["path"]}` === routeName);
+        if (!isRecord(route)) return false;
+        if (routeBinding === "controller") {
+          if (route["command"] !== undefined) return false;
+        } else if (route["command"] !== commandName) {
+          return false;
+        }
+      }
+      const job = transition["job"];
+      if (job === undefined) return true;
+      const details = transition["jobDetails"];
+      const inventory = jobs.find((candidate) =>
+        isRecord(candidate) && (candidate["name"] === job || candidate["className"] === job),
+      );
+      const contractFields = ["input", "inputKind", "output", "outputKind", "mode", "idempotency", "tenantScope"] as const;
+      return typeof job === "string" && job.trim() !== ""
+        && isRecord(details)
+        && isRecord(inventory)
+        && (details["name"] === job || details["className"] === job)
+        && typeof details["className"] === "string" && details["className"].trim() !== ""
+        && details["inputKind"] === "declared"
+        && (details["mode"] === "task" || details["mode"] === "workflow")
+        && details["idempotency"] === "required"
+        && details["tenantScope"] === "required"
+        && contractFields.every((field) => details[field] === inventory[field]);
+    });
+  });
+}
+
+function validJobInventory(value: unknown): value is unknown[] {
+  const names = new Set<string>();
+  const classes = new Set<string>();
+  return Array.isArray(value) && value.every((job) => {
+    if (!isRecord(job)
+      || typeof job["name"] !== "string" || job["name"].trim() === ""
+      || typeof job["className"] !== "string" || job["className"].trim() === ""
+      || typeof job["module"] !== "string" || job["module"].trim() === "") return false;
+    if (names.has(job["name"]) || classes.has(job["className"])) return false;
+    names.add(job["name"]);
+    classes.add(job["className"]);
+    if (job["input"] !== undefined && (typeof job["input"] !== "string" || job["input"].trim() === "")) return false;
+    if (job["inputKind"] !== undefined && job["inputKind"] !== "opaque" && job["inputKind"] !== "declared") return false;
+    if (job["output"] !== undefined && (typeof job["output"] !== "string" || job["output"].trim() === "")) return false;
+    if (job["outputKind"] !== undefined && job["outputKind"] !== "opaque" && job["outputKind"] !== "declared") return false;
+    if (job["mode"] !== undefined && job["mode"] !== "task" && job["mode"] !== "workflow") return false;
+    if (job["idempotency"] !== undefined && job["idempotency"] !== "required" && job["idempotency"] !== "none") return false;
+    return job["tenantScope"] === undefined || job["tenantScope"] === "required" || job["tenantScope"] === "none";
+  });
+}
+
+function validRpcInventory(value: unknown, commandInventory: readonly unknown[]): value is unknown[] {
+  const commandNames = new Set<string>();
+  const adapters = new Set<string>();
+  return Array.isArray(value) && value.every((rpc) => {
+    if (!isRecord(rpc)
+      || typeof rpc["command"] !== "string" || rpc["command"].trim() === ""
+      || typeof rpc["adapter"] !== "string" || rpc["adapter"].trim() === "") return false;
+    if (commandNames.has(rpc["command"]) || adapters.has(rpc["adapter"])) return false;
+    const command = commandInventory.find((candidate) =>
+      isRecord(candidate) && candidate["name"] === rpc["command"] && candidate["rpc"] === rpc["adapter"],
+    );
+    if (!isRecord(command)) return false;
+    commandNames.add(rpc["command"]);
+    adapters.add(rpc["adapter"]);
+    return true;
+  }) && commandInventory.every((command) => {
+    if (!isRecord(command) || command["rpc"] === undefined) return true;
+    return value.some((rpc) => isRecord(rpc)
+      && rpc["command"] === command["name"] && rpc["adapter"] === command["rpc"]);
+  });
 }
 
 async function sha256(path: string): Promise<string> {
@@ -164,18 +352,29 @@ export async function assessMigration(options: MigrationAssessmentOptions): Prom
   };
   try {
     const parsed: unknown = JSON.parse(await readFile(contractsManifestPath, "utf8"));
-    if (!isRecord(parsed) || parsed["version"] !== 1) throw new Error("invalid manifest");
+    if (!isRecord(parsed) || parsed["version"] !== 1
+      || !validJobInventory(parsed["jobs"])
+      || !validCommandInventory(parsed["commands"])
+      || !Array.isArray(parsed["routes"])
+      || !validRpcInventory(parsed["rpc"], parsed["commands"])
+      || !validFeatureInventory(parsed["features"], parsed["jobs"], parsed["commands"], parsed["routes"], parsed["rpc"])) {
+      throw new Error("invalid manifest");
+    }
     const commands = arrayLength(parsed["commands"]);
+    const jobs = arrayLength(parsed["jobs"]);
     const routes = arrayLength(parsed["routes"]);
     const permissions = arrayLength(parsed["permissions"]);
+    const features = arrayLength(parsed["features"]);
     contractsManifest = {
       path: contractsManifestPath,
       present: true,
       sha256: await sha256(contractsManifestPath),
       version: 1,
       ...(commands === undefined ? {} : { commands }),
+      ...(jobs === undefined ? {} : { jobs }),
       ...(routes === undefined ? {} : { routes }),
       ...(permissions === undefined ? {} : { permissions }),
+      ...(features === undefined ? {} : { features }),
     };
   } catch {
     findings.push({

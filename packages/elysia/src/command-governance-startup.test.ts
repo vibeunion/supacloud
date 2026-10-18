@@ -125,4 +125,19 @@ describe("command governance startup validation", () => {
     const module = { ...moduleWith(), commands: [] };
     expect(() => createApplication({ modules: [module] })).not.toThrow();
   });
+
+  it("validates every branch adapter at startup", () => {
+    expectStartupFailure(() => boot({
+      ...complete,
+      rpc: { update_case: rpcAdapter },
+    }, {
+      ...command,
+      rpc: undefined,
+      audit: undefined,
+      branches: [
+        { when: 'resource === "a"', rpc: "update_case", transaction: "required", idempotency: "required", audit: "updated" },
+        { when: 'resource === "b"', rpc: "missing", transaction: "none", idempotency: "none" },
+      ],
+    }), "COMMAND_RPC_UNCONFIGURED");
+  });
 });

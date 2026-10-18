@@ -156,7 +156,7 @@
     {
       "name": "CommandOptions",
       "kind": "type",
-      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
+      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    branches?: CommandBranchOptions[];\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
     },
     {
       "name": "CommandOutcome",
@@ -186,7 +186,7 @@
     {
       "name": "CommandRuntimeDescriptor",
       "kind": "type",
-      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n}"
+      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly branches?: readonly CommandRuntimeBranch[];\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n    readonly tenantScope?: CommandRuntimeMode | string;\n}"
     },
     {
       "name": "CommandRuntimeGovernance",
@@ -494,6 +494,16 @@
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
     },
     {
+      "name": "FeaturePersistenceOptions",
+      "kind": "type",
+      "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
+    },
+    {
+      "name": "FeatureRequestContext",
+      "kind": "type",
+      "signature": "export interface FeatureRequestContext {\n    readonly requestId: string;\n    readonly tenantId: string;\n    readonly actorId: string;\n    readonly permissions: readonly string[];\n    readonly idempotencyKey?: string;\n}"
+    },
+    {
       "name": "FeatureSliceOptions",
       "kind": "type",
       "signature": "export interface FeatureSliceOptions extends ModuleOptions {\n    spec?: FeatureSpecOptions;\n}"
@@ -501,7 +511,7 @@
     {
       "name": "FeatureSpecOptions",
       "kind": "type",
-      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
+      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    tenantField?: string;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
     },
     {
       "name": "FeatureState",
@@ -511,7 +521,7 @@
     {
       "name": "FeatureTransitionOptions",
       "kind": "type",
-      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n}"
+      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    routeBinding?: \"command\" | \"controller\";\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    job?: string;\n    persistence?: FeaturePersistenceOptions;\n}"
     },
     {
       "name": "flattenProviders",
@@ -976,7 +986,7 @@
     {
       "name": "JobOptions",
       "kind": "type",
-      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: Aspect[];\n    uses?: InfraResourceUse[];\n}"
+      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    tenantScope?: \"required\" | \"none\";\n    aspects?: Aspect[];\n    uses?: InfraResourceUse[];\n}"
     },
     {
       "name": "JobOutput",
@@ -1221,7 +1231,7 @@
     {
       "name": "QueryOptions",
       "kind": "type",
-      "signature": "export interface QueryOptions {\n    name: string;\n}"
+      "signature": "export interface QueryOptions {\n    name: string;\n    tenantScope?: \"required\" | \"none\";\n}"
     },
     {
       "name": "RedirectCommand",
@@ -1232,6 +1242,11 @@
       "name": "REQUEST_CONTEXT",
       "kind": "value",
       "signature": "export declare const REQUEST_CONTEXT: any;"
+    },
+    {
+      "name": "requireFeatureRequestContext",
+      "kind": "value",
+      "signature": "export declare function requireFeatureRequestContext(value: unknown): FeatureRequestContext;"
     },
     {
       "name": "Resolve",
