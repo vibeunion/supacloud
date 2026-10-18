@@ -642,6 +642,15 @@ export interface ApplicationLifecycle {
   waitForIdle(options?: { timeoutMs?: number; includeBackground?: boolean }): Promise<void>;
 }
 
+function resolveCompiledCommand(
+  module: Pick<CompiledModule, "commands">,
+  reference: string,
+): CompiledCommand | undefined {
+  const matches = (module.commands ?? []).filter((command) =>
+    command.className === reference || command.name === reference);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export interface JobInvocation {
   job: CompiledJob;
   input: unknown;
@@ -929,10 +938,8 @@ export async function executeCompiledCommand<Input, Result>(options: {
   handler: (input: Input) => Result | Promise<Result>;
   decode: (value: unknown) => Result;
 }): Promise<Result> {
-  const matches = options.module.commands?.filter((item) => item.className === options.command) ?? [];
-  if (matches.length !== 1) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
-  const command = matches[0];
-  if (!command) throw new Error(`Command not found: ${options.command}`);
+  const command = resolveCompiledCommand(options.module, options.command);
+  if (!command) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
   const invocation: CommandInvocation = {
     command, input: { body: options.input, params: {}, query: {} },
     request: options.request, requestContext: options.requestContext,
@@ -963,10 +970,8 @@ export async function previewCompiledCommand<Input>(options: {
   governance: CommandGovernance;
   preview: (input: Input) => unknown;
 }): Promise<CommandPreview> {
-  const matches = options.module.commands?.filter((item) => item.className === options.command) ?? [];
-  if (matches.length !== 1) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
-  const command = matches[0];
-  if (!command) throw new Error(`Command not found: ${options.command}`);
+  const command = resolveCompiledCommand(options.module, options.command);
+  if (!command) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
   const invocation: CommandInvocation = {
     command, input: { body: options.input, params: {}, query: {} },
     request: options.request, requestContext: options.requestContext,
@@ -1275,18 +1280,15 @@ export function createModulePlugin<
     );
   }
   assertCommandGovernanceReady(compiled, options.commandGovernance, options.commandExecutor);
-  const commandsByClassName = new Map(
-    (compiled.commands ?? []).map((command) => [command.className, command]),
-  );
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
-      if (route.command && !commandsByClassName.has(route.command)) {
+      const command = route.command === undefined ? undefined : resolveCompiledCommand(compiled, route.command);
+      if (route.command && !command) {
         throw new ApplicationError(`Command "${route.command}" is not registered`, {
           code: "COMMAND_NOT_REGISTERED",
         });
       }
       if (route.effect?.retry === "explicit" && route.command) {
-        const command = commandsByClassName.get(route.command);
         if (command && command.idempotency !== "required") {
           throw new ApplicationError(
             `Effect retry is not allowed for non-idempotent command "${command.name}"`,
@@ -1516,9 +1518,7 @@ export function createModulePlugin<
             services,
             metadata: route,
           };
-          const command = route.command
-            ? commandsByClassName.get(route.command)
-            : undefined;
+          const command = route.command === undefined ? undefined : resolveCompiledCommand(compiled, route.command);
           const commandContext: ApplicationAspectContext = {
             kind: "command",
             name: command?.name ?? route.command ?? `${route.method} ${path}`,
