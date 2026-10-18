@@ -165,7 +165,12 @@ function validFeatureInventory(
           const adapter = command["rpc"];
           if (typeof adapter !== "string" || adapter.trim() === ""
             || !rpc.some((candidate) => isRecord(candidate)
-              && candidate["command"] === command["name"] && candidate["adapter"] === adapter)) return false;
+              && candidate["command"] === command["name"] && candidate["adapter"] === adapter)
+            || command["idempotency"] !== "required"
+            || command["tenantScope"] !== "required"
+            || typeof command["auditEvent"] !== "string" || command["auditEvent"].trim() === "") return false;
+          const expectedTransaction = persistence["boundary"] === "database" ? "required" : "none";
+          if (command["transaction"] !== expectedTransaction) return false;
         }
       }
       const routeName = transition["route"];

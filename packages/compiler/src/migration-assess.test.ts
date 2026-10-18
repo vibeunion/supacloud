@@ -156,7 +156,7 @@ test("migration assessment accepts transition Job bindings by class name", async
       name: "ApproveCase", className: "ApproveCase", module: "case",
       rpc: "approve_case",
       permission: "case.approve", transaction: "required", idempotency: "required",
-      tenantScope: "required",
+      tenantScope: "required", auditEvent: "case.approved",
     }],
     rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
     features: [{
@@ -231,7 +231,7 @@ test("migration assessment rejects Feature routes bound to another command", asy
       name: "ApproveCase", className: "ApproveCase", module: "case",
       rpc: "approve_case",
       permission: "case.approve", transaction: "required", idempotency: "required",
-      tenantScope: "required",
+      tenantScope: "required", auditEvent: "case.approved",
     }],
     queries: [], permissions: [], jobs: [], rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
     routes: [{ method: "POST", path: "/cases/:id/approve", command: "OtherCommand" }],
@@ -240,6 +240,44 @@ test("migration assessment rejects Feature routes bound to another command", asy
       transitions: [{
         name: "approve", from: "draft", to: "approved",
         command: "ApproveCase", permission: "case.approve", route: "POST /cases/:id/approve",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    }],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
+});
+
+test("migration assessment rejects downgraded Feature command governance", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-command-governance-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1,
+    commands: [{
+      name: "ApproveCase", className: "ApproveCase", module: "case",
+      rpc: "approve_case", permission: "case.approve",
+      transaction: "none", idempotency: "none", tenantScope: "none",
+    }],
+    queries: [], permissions: [], jobs: [],
+    rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
+    features: [{
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
+      transitions: [{
+        name: "approve", from: "draft", to: "approved",
+        command: "ApproveCase", permission: "case.approve",
         persistence: {
           boundary: "database", optimisticLock: "required",
           versionField: "version", tenantField: "tenant_id", stateField: "state",
