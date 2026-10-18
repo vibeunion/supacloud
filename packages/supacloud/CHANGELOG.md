@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.22...supacloud-v0.17.0) (2026-10-18)
+
+
+### Features
+
+* **app:** enforce trusted feature request context ([#2056](https://github.com/vibeunion/supacloud/issues/2056)) ([214909b](https://github.com/vibeunion/supacloud/commit/214909bc1daefe8682cb7bd857396d95b13418a3))
+
+
+### Bug Fixes
+
+* **compiler:** export FeaturePersistenceNode ([#2063](https://github.com/vibeunion/supacloud/issues/2063)) ([20937d4](https://github.com/vibeunion/supacloud/commit/20937d4fc17df43d8df7b8c3e66d37b1b271e511))
+* **supacloud:** sync published CLI dependencies ([#2059](https://github.com/vibeunion/supacloud/issues/2059)) ([b3e40a3](https://github.com/vibeunion/supacloud/commit/b3e40a39b0073531b51fcb2919edbd8de1b93f16))
+
 ## [0.16.22](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.21...supacloud-v0.16.22) (2026-10-17)
 
 
