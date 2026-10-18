@@ -276,7 +276,7 @@
     {
       "name": "createContractCommandClient",
       "kind": "value",
-      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input): Promise<unknown>;\n    lookup?(input: Input): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    isDefinitiveFailure?(error: unknown): boolean;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
+      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input, signal?: AbortSignal): Promise<unknown>;\n    lookup?(input: Input, signal?: AbortSignal): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    failureMetadata?(error: unknown): unknown;\n    isDefinitiveFailure?(error: unknown): boolean;\n}, options?: {\n    timeoutMs?: number;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
     },
     {
       "name": "createDestroyRef",
