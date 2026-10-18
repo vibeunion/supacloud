@@ -64,6 +64,7 @@ const graph: ApplicationGraph = {
         body: "CreateOrderBody",
         response: "OrderResponse",
         command: "CreateOrderCommand",
+        idempotency: "required",
         guards: ["requirePrincipal"],
         title: "Create order",
         data: { area: "orders" },
@@ -164,7 +165,7 @@ export const OrderResponse = {
       expect(operation.operationId).toBe("OrdersOrdersControllerCreate");
       expect(operation.summary).toBe("Create order");
       const parameters = list(operation.parameters).map(record);
-      expect(parameters).toHaveLength(3);
+      expect(parameters).toHaveLength(4);
       expect(parameters[0]).toMatchObject({
         name: "tenantId", in: "path", required: true,
         schema: { type: "string" },
@@ -177,11 +178,18 @@ export const OrderResponse = {
         name: "includeHistory", in: "query", required: false,
         schema: { type: "boolean", default: false },
       });
+      expect(parameters[3]).toMatchObject({
+        name: "Idempotency-Key", in: "header", required: true,
+        schema: { type: "string", minLength: 1, maxLength: 512 },
+      });
       expect(operation.requestBody).toEqual({
         required: true,
         content: { "application/json": { schema: { $ref: "#/components/schemas/CreateOrderBody" } } },
       });
       const responses = record(operation.responses);
+      expect(responses["400"]).toMatchObject({
+        description: "Idempotency-Key is missing or invalid",
+      });
       expect(responses["200"]).toEqual({
         description: "Successful response",
         content: { "application/json": { schema: { $ref: "#/components/schemas/OrderResponse" } } },
@@ -193,6 +201,7 @@ export const OrderResponse = {
         handler: "create",
         command: "CreateOrderCommand",
         permission: "orders.create",
+        idempotency: "required",
         guards: ["requirePrincipal"],
         contract: { body: "framework", response: "framework", evidence: "orders.http.test.ts" },
         data: { area: "orders" },
