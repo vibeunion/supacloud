@@ -234,14 +234,14 @@ describe('Auth extended GoTrue compatibility', () => {
 
       const identities = await client.auth.getUserIdentities()
       expect(identities.error).toBeNull()
-      const github = identities.data.identities.find((identity) => identity.provider === 'github')
+      const github = identities.data!.identities.find((identity) => identity.provider === 'github')
       if (!github) throw new Error('Expected the secondary identity')
 
       expect((await client.auth.getUser()).data.user?.app_metadata.providers).toEqual(['email'])
       expect((await client.auth.unlinkIdentity(github)).error).toBeNull()
-      expect((await client.auth.getUserIdentities()).data.identities).toHaveLength(1)
+      expect((await client.auth.getUserIdentities()).data!.identities).toHaveLength(1)
       expect((await client.auth.getUser()).data.user?.app_metadata.providers).toEqual(['email'])
-      const remaining = (await client.auth.getUserIdentities()).data.identities[0]
+      const remaining = (await client.auth.getUserIdentities()).data!.identities[0]
       expect((await client.auth.unlinkIdentity(remaining)).error?.code).toBe('cannot_unlink_identity')
     } finally {
       await backend.close()
@@ -294,7 +294,7 @@ describe('Auth extended GoTrue compatibility', () => {
       const users = await backend.db.query<{ id: string }>('select id from auth.users order by created_at')
       expect(users.rows).toHaveLength(1)
       expect(users.rows[0].id).toBe(userId)
-      expect((await client.auth.getUserIdentities()).data.identities).toEqual([
+      expect((await client.auth.getUserIdentities()).data!.identities).toEqual([
         expect.objectContaining({ provider: 'email' }),
         expect.objectContaining({ provider: 'google' }),
       ])

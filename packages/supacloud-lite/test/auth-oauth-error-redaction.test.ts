@@ -31,7 +31,7 @@ describe('Auth OAuth error responses', () => {
       },
       oauthFetch: (async () => {
         throw new Error('provider credentials must remain private')
-      }) as typeof fetch,
+      }) as unknown as typeof fetch,
     })
 
     const authorizeUrl = new URL('http://lite.local/auth/v1/authorize?provider=google')
