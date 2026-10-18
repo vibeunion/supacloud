@@ -494,14 +494,14 @@
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
     },
     {
-      "name": "FeatureSliceOptions",
-      "kind": "type",
-      "signature": "export interface FeatureSliceOptions extends ModuleOptions {\n    spec?: FeatureSpecOptions;\n}"
-    },
-    {
       "name": "FeaturePersistenceOptions",
       "kind": "type",
       "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
+    },
+    {
+      "name": "FeatureSliceOptions",
+      "kind": "type",
+      "signature": "export interface FeatureSliceOptions extends ModuleOptions {\n    spec?: FeatureSpecOptions;\n}"
     },
     {
       "name": "FeatureSpecOptions",
