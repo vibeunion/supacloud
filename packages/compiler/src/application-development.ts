@@ -52,6 +52,7 @@ export interface ApplicationDevelopmentRoute {
   controller: string;
   handler: string;
   command?: string;
+  idempotency?: "required" | "none";
   aspects: string[];
   schemaKinds?: Record<string, DevelopmentSchemaKind>;
 }
@@ -207,6 +208,7 @@ export function createApplicationDevelopmentContext(
           controller: controller.className,
           handler: route.handler,
           ...(command === undefined ? {} : { command }),
+          ...(route.idempotency === undefined ? {} : { idempotency: route.idempotency }),
           aspects: (route.aspects ?? []).map((aspect) => aspect.name),
           ...(kinds === undefined ? {} : { schemaKinds: kinds }),
         });
