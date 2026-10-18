@@ -47,6 +47,9 @@ describe('Auth admin user controls', () => {
         expect.objectContaining({ provider: 'phone', id: '+14155550123' }),
       ]))
       expect(updated.data.user?.app_metadata.providers).toEqual(['email', 'phone'])
+      expect(updated.data.user?.identities).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ provider: 'phone', id: '+14155550120' }),
+      ]))
       expect((await backend.db.query(
         `select phone, phone_confirmed_at, banned_until > now() as banned from auth.users where id = $1`,
         [userId],
