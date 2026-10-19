@@ -93,7 +93,9 @@ export function requireFeatureRequestContext(value: unknown): FeatureRequestCont
     || normalizedPermissions.length !== permissionValues.length
     || (idempotencyKey !== undefined && !nonEmptyString(idempotencyKey))
   ) {
-    throw new Error("FEATURE_CONTEXT_REQUIRED");
+    throw Object.assign(new Error("FEATURE_CONTEXT_REQUIRED"), {
+      _tag: "FEATURE_CONTEXT_REQUIRED" as const,
+    });
   }
   return Object.freeze({
     requestId,
