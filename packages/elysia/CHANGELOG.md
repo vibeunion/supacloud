@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.35.1...elysia-v0.35.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **compiler:** govern external feature cache invalidation ([#2184](https://github.com/vibeunion/supacloud/issues/2184)) ([905ca9c](https://github.com/vibeunion/supacloud/commit/905ca9c123b0ce3451839fbf09fd5c66501d8e06))
+
 ## [0.35.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.35.0...elysia-v0.35.1) (2026-10-19)
 
 
