@@ -153,6 +153,22 @@ describe('Bearer Auth endpoint account eligibility', () => {
     expect((await db!.query('select token from auth.refresh_tokens')).rows).toHaveLength(1)
   })
 
+  test('requires an AAL2 token to unenroll a verified factor', async () => {
+    await db!.query('update auth.mfa_factors set status = $1 where id = $2', ['verified', factorId])
+    const before = await snapshot()
+    const rejected = await invoke('unenroll')
+    expect(rejected.status).toBe(403)
+    expect(await rejected.json()).toMatchObject({ error_code: 'insufficient_aal' })
+    expect(await snapshot()).toEqual(before)
+
+    const aal2Token = await signJwt({
+      sub: userId, role: 'authenticated', aal: 'aal2',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }, jwtSecret)
+    expect((await invoke('unenroll', aal2Token)).status).toBe(200)
+    expect((await db!.query('select id from auth.mfa_factors')).rows).toEqual([])
+  })
+
   for (const change of [
     "update auth.users set banned_until = now() + interval '1 hour' where id = $1",
     "update auth.users set banned_until = 'infinity' where id = $1",

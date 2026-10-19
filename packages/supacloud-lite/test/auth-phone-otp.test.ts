@@ -127,6 +127,44 @@ describe('phone OTP compatibility', () => {
     expect(second.data.user?.user_metadata).toEqual({ display_name: 'first' })
   })
 
+  test('synchronizes providers when an imported phone user redeems an OTP', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      authSettings: { smsOtpCooldownSeconds: 0 },
+      log: () => {},
+    } as Parameters<typeof createLiteBackend>[0])
+    backends.push(backend)
+    const admin = createClient('http://local', backend.serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: backend.fetch },
+    })
+    const client = clientFor(backend)
+    const created = await admin.auth.admin.createUser({
+      phone: '+8613710137100',
+      phone_confirm: true,
+    })
+    expect(created.error).toBeNull()
+    await backend.db.query(
+      `update auth.users set raw_app_meta_data = '{}'::jsonb where id = $1`,
+      [created.data.user!.id],
+    )
+
+    expect((await client.auth.signInWithOtp({ phone: '+8613710137100' })).error).toBeNull()
+    expect((await admin.auth.admin.getUserById(created.data.user!.id)).data.user?.app_metadata.providers).toEqual(['phone'])
+    const verified = await client.auth.verifyOtp({
+      phone: '+8613710137100',
+      token: smsCode(backend),
+      type: 'sms',
+    })
+    expect(verified.error).toBeNull()
+    expect(verified.data.user?.app_metadata.providers).toEqual(['phone'])
+    expect((await backend.db.query<{ identity_data: Record<string, unknown> }>(
+      `select identity_data from auth.identities where user_id = $1 and provider = 'phone'`,
+      [created.data.user!.id],
+    )).rows).toEqual([{ identity_data: expect.objectContaining({ phone_verified: true }) }])
+  })
+
   test.each([
     ['banned', '+8613700237000', `banned_until = now() + interval '1 hour'`],
     ['soft-deleted', '+8613700337000', 'deleted_at = now()'],
