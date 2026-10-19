@@ -134,6 +134,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "feature-governance-drift": { code: "SC6105", docsUrl: "https://supacloud.dev/errors/SC6105" },
   "feature-persistence-invalid": { code: "SC6110", docsUrl: "https://supacloud.dev/errors/SC6110" },
   "feature-persistence-drift": { code: "SC6111", docsUrl: "https://supacloud.dev/errors/SC6111" },
+  "feature-invalidation-tag-unresolved": { code: "SC6113", docsUrl: "https://supacloud.dev/errors/SC6113" },
   "feature-tenant-boundary-invalid": { code: "SC6112", docsUrl: "https://supacloud.dev/errors/SC6112" },
   "feature-tenant-boundary-drift": { code: "SC6113", docsUrl: "https://supacloud.dev/errors/SC6113" },
   "feature-query-tenant-boundary": { code: "SC6114", docsUrl: "https://supacloud.dev/errors/SC6114" },

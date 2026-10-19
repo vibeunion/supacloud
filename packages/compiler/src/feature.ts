@@ -174,6 +174,18 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       } else if (transition.routeBinding === "controller" && routes[0]?.command !== undefined) {
         error("feature-route-drift", `Controller-bound route ${transition.route} must not also declare a framework command binding.`);
       }
+      if (transition.invalidateTags !== undefined) {
+        const declaredTags = new Set(module.controllers.flatMap((controller) =>
+          controller.routes.flatMap((route) => route.tags ?? [])));
+        if (declaredTags.size > 0) {
+          for (const tag of transition.invalidateTags) {
+            if (!declaredTags.has(tag)) {
+              error("feature-invalidation-tag-unresolved",
+                `Transition ${transition.name} invalidates '${tag}', but Feature ${spec.name} does not declare that query tag.`);
+            }
+          }
+        }
+      }
     }
   }
   return diagnostics;

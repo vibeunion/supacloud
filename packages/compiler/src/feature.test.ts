@@ -178,6 +178,31 @@ describe("feature specs", () => {
       .toContain("feature-invalidation-tags-invalid");
   });
 
+  test("rejects invalidation tags that are absent from the module query surface", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept", route: "POST /cases/:id/accept",
+        invalidateTags: ["case.list", "case.typo"],
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      controllers: [{
+        ...baseModule(spec).controllers[0]!,
+        routes: [{
+          ...baseModule(spec).controllers[0]!.routes[0]!,
+          tags: ["case.list"],
+        }],
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-invalidation-tag-unresolved");
+  });
+
   test("requires truthful persistence governance for feature transitions", () => {
     const spec: FeatureSpecNode = {
       name: "case",
