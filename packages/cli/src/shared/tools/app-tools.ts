@@ -1856,7 +1856,6 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
             read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
-            read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
             rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
             database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
             database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),
