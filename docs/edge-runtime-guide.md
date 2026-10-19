@@ -272,10 +272,14 @@ twice the CPU count, 20 workers, and `floor(memoryHighMb * 0.75 / 512)`, with a
 minimum of one. The 512 MiB estimate is a sizing heuristic, leaving 25% of the
 high limit for the parent process and background pool; it does not enforce
 per-worker memory limits. Explicit `SUPACLOUD_EDGE_WORKER_POOL_SIZE` or
-`WORKER_POOL_SIZE` settings still override this estimate. Later systemd
-drop-ins and environment-file overrides must be reconciled by the operator.
-Validate capacity using the actual function workload, including module
-preheating and long-running requests, before increasing worker counts.
+`WORKER_POOL_SIZE` settings still override this estimate. SupaCloud writes its
+managed capacity policy as the late
+`99-supacloud-edge-runtime-capacity.conf` drop-in, so stale lower-numbered
+systemd capacity drop-ins from earlier releases cannot override the
+memory-bounded defaults. Use the explicit environment settings for a
+workload-specific override and validate capacity using the actual function
+workload, including module preheating and long-running requests, before
+increasing worker counts.
 
 On cgroup v2 hosts, the runtime resolves its membership from `/proc/self/cgroup`
 and `/proc/self/mountinfo`. It samples `memory.current`, `memory.high`, and

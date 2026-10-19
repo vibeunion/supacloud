@@ -62,6 +62,7 @@ import {
     prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
+    resolveEdgeRuntimeCapacityDropInPath,
     resolveGithubEndpointPrefixes,
     resolvePersistedEdgeRuntimePort,
     resolvePersistedEdgeRuntimeMode,
@@ -2115,6 +2116,15 @@ describe("embedded Edge Runtime source access", () => {
 });
 
 describe("upgrade edge-runtime capacity defaults", () => {
+  test("writes managed capacity after legacy and operator drop-ins", () => {
+    expect(resolveEdgeRuntimeCapacityDropInPath({})).toBe(
+      "/etc/systemd/system/supacloud-edge-runtime.service.d/99-supacloud-edge-runtime-capacity.conf",
+    );
+    expect(resolveEdgeRuntimeCapacityDropInPath({
+      SUPACLOUD_EDGE_RUNTIME_CAPACITY_DROPIN: "/tmp/custom-capacity.conf",
+    })).toBe("/tmp/custom-capacity.conf");
+  });
+
   test("keeps privilege-drop capabilities in the canonical unit and embedded drop-in", () => {
     const managementUnit = readFileSync(
       join(import.meta.dir, "../../../..", "infrastructure/systemd/supacloud.service"),
