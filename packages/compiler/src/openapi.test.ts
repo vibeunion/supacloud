@@ -64,6 +64,7 @@ const graph: ApplicationGraph = {
         body: "CreateOrderBody",
         response: "OrderResponse",
         command: "CreateOrderCommand",
+        idempotency: "required",
         guards: ["requirePrincipal"],
         title: "Create order",
         data: { area: "orders" },
@@ -164,7 +165,7 @@ export const OrderResponse = {
       expect(operation.operationId).toBe("OrdersOrdersControllerCreate");
       expect(operation.summary).toBe("Create order");
       const parameters = list(operation.parameters).map(record);
-      expect(parameters).toHaveLength(3);
+      expect(parameters).toHaveLength(4);
       expect(parameters[0]).toMatchObject({
         name: "tenantId", in: "path", required: true,
         schema: { type: "string" },
@@ -177,11 +178,18 @@ export const OrderResponse = {
         name: "includeHistory", in: "query", required: false,
         schema: { type: "boolean", default: false },
       });
+      expect(parameters[3]).toMatchObject({
+        name: "Idempotency-Key", in: "header", required: true,
+        schema: { type: "string", minLength: 1, maxLength: 512 },
+      });
       expect(operation.requestBody).toEqual({
         required: true,
         content: { "application/json": { schema: { $ref: "#/components/schemas/CreateOrderBody" } } },
       });
       const responses = record(operation.responses);
+      expect(responses["400"]).toMatchObject({
+        description: "Idempotency-Key is missing or invalid",
+      });
       expect(responses["200"]).toEqual({
         description: "Successful response",
         content: { "application/json": { schema: { $ref: "#/components/schemas/OrderResponse" } } },
@@ -193,6 +201,7 @@ export const OrderResponse = {
         handler: "create",
         command: "CreateOrderCommand",
         permission: "orders.create",
+        idempotency: "required",
         guards: ["requirePrincipal"],
         contract: { body: "framework", response: "framework", evidence: "orders.http.test.ts" },
         data: { area: "orders" },
@@ -445,4 +454,114 @@ export const OrderResponse = {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("preserves declared error responses for idempotency-required routes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-idempotency-responses-"));
+    try {
+      const responseGraph: ApplicationGraph = {
+        ...graph,
+        modules: graph.modules.map((module) => ({
+          ...module,
+          controllers: module.controllers.map((controller): typeof controller => ({
+            ...controller,
+            path: "/idempotency",
+            schemaImports: { Result: "src/contracts", DomainError: "src/contracts" },
+            routes: [
+              { method: "POST", path: "/exact", handler: "exact", idempotency: "required", responses: { "200": "Result", "400": "DomainError", "422": "DomainError", "500": "DomainError" } },
+              { method: "POST", path: "/family", handler: "family", idempotency: "required", responses: { "200": "Result", "4xx": "DomainError" } },
+              { method: "POST", path: "/default", handler: "default", idempotency: "required", responses: { "200": "Result", default: "DomainError" } },
+              { method: "POST", path: "/missing", handler: "missing", idempotency: "required", responses: { "200": "Result" } },
+              { method: "POST", path: "/none", handler: "none", idempotency: "none", responses: { "200": "Result" } },
+            ],
+          })),
+        })),
+      };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          'export const Result = { type: "object", properties: { ok: { type: "boolean" } } };',
+          'export const DomainError = { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] };',
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(responseGraph, { rootDir: root, outDir: join(root, "generated") }),
+      });
+      const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
+      const paths = record(record(generated.OPENAPI_DOCUMENT).paths);
+      const responsesFor = (path: string) => record(record(record(paths[path]).post).responses);
+      const domainContent = { "application/json": { schema: { $ref: "#/components/schemas/DomainError" } } };
+      const exact = responsesFor("/idempotency/exact");
+      for (const status of ["400", "422", "500"]) expect(record(exact[status]).content).toEqual(domainContent);
+      const family = responsesFor("/idempotency/family");
+      expect(record(family["4XX"]).content).toEqual(domainContent);
+      expect(family["400"]).toBeUndefined();
+      expect(family["422"]).toBeUndefined();
+      expect(record(family["500"]).description).toBe("Internal server error");
+      const fallback = responsesFor("/idempotency/default");
+      expect(record(fallback.default).content).toEqual(domainContent);
+      for (const status of ["400", "422", "500"]) expect(fallback[status]).toBeUndefined();
+      const missing = responsesFor("/idempotency/missing");
+      expect(missing["400"]).toEqual({
+        description: "Idempotency-Key is missing or invalid",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } },
+      });
+      expect(record(missing["422"]).description).toBe("Request validation failed");
+      expect(record(missing["500"]).description).toBe("Internal server error");
+      expect(responsesFor("/idempotency/none")["400"]).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("merges declared idempotency headers case-insensitively without losing constraints", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-idempotency-headers-"));
+    try {
+      const headerGraph: ApplicationGraph = {
+        ...graph,
+        modules: graph.modules.map((module) => ({
+          ...module,
+          controllers: module.controllers.map((controller): typeof controller => ({
+            ...controller,
+            path: "/idempotency",
+            schemaImports: { ExactHeaders: "src/contracts", LowercaseHeaders: "src/contracts", DuplicateHeaders: "src/contracts" },
+            routes: [
+              { method: "POST", path: "/exact", handler: "exact", idempotency: "required", headers: "ExactHeaders" },
+              { method: "POST", path: "/lowercase", handler: "lowercase", idempotency: "required", headers: "LowercaseHeaders" },
+              { method: "POST", path: "/duplicates", handler: "duplicates", idempotency: "required", headers: "DuplicateHeaders" },
+              { method: "POST", path: "/missing", handler: "missing", idempotency: "required" },
+            ],
+          })),
+        })),
+      };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          'const Key = { type: "string", minLength: 8, maxLength: 32, pattern: "^domain-" };',
+          'export const ExactHeaders = { type: "object", properties: { "Idempotency-Key": Key } };',
+          'export const LowercaseHeaders = { type: "object", properties: { "idempotency-key": Key } };',
+          'export const DuplicateHeaders = { type: "object", properties: { "Idempotency-Key": Key, "IDEMPOTENCY-KEY": { type: "string", enum: ["domain-fixed"] } } };',
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(headerGraph, { rootDir: root, outDir: join(root, "generated") }),
+      });
+      const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
+      const paths = record(record(generated.OPENAPI_DOCUMENT).paths);
+      const keySchema = { type: "string", minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]{1,512}$" };
+      const declaredSchema = { type: "string", minLength: 8, maxLength: 32, pattern: "^domain-" };
+      for (const path of ["exact", "lowercase", "duplicates", "missing"]) {
+        const operation = record(record(paths[`/idempotency/${path}`]).post);
+        const headers = list(operation.parameters).map(record).filter((parameter) =>
+          parameter.in === "header" && String(parameter.name).toLowerCase() === "idempotency-key");
+        expect(headers).toHaveLength(1);
+        expect(headers[0]?.required).toBe(true);
+        if (path === "missing") {
+          expect(headers[0]?.schema).toEqual(keySchema);
+        } else {
+          const constraints = list(record(headers[0]?.schema).allOf);
+          expect(constraints).toContainEqual(declaredSchema);
+          expect(constraints).toContainEqual(keySchema);
+          expect(constraints).toHaveLength(path === "duplicates" ? 3 : 2);
+          if (path === "duplicates") expect(constraints).toContainEqual({ type: "string", enum: ["domain-fixed"] });
+        }
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 });

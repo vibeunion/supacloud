@@ -481,7 +481,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
                   method: "POST",
                   path: "",
                   handler: "create",
-                  command: "CreateCaseCommand",
+                  command: "case.create",
                 },
               ],
             },

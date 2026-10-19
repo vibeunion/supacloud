@@ -30,7 +30,7 @@ function readOptions<Raw>(read: (signal?: AbortSignal) => Promise<Raw>, tenant =
       __supacloudInput: undefined as Record<string, never> | undefined,
       __supacloudProcedure: {
         key: "Items.detail", kind: "query" as const, method: "GET",
-        path: "/items", idempotency: "none" as const,
+        path: "/items", idempotency: "none" as const, tags: ["items"] as const,
       },
     },
   );
@@ -45,14 +45,20 @@ function fixture() {
     return { id: input.params.id };
   }, {
     __supacloudInput: undefined as { params: { id: string } } | undefined,
-    __supacloudProcedure: { key: "Items.get", kind: "query" as const, method: "GET", path: "/items/:id", idempotency: "none" as const },
+    __supacloudProcedure: {
+      key: "Items.get", kind: "query" as const, method: "GET", path: "/items/:id",
+      idempotency: "none" as const, tags: ["items"] as const,
+    },
   });
   const mutate = Object.assign(async (input: { body: { id: string } }, execution: { idempotencyKey: string }) => {
     calls.push({ input, execution });
     return { id: input.body.id };
   }, {
     __supacloudInput: undefined as { body: { id: string } } | undefined,
-    __supacloudProcedure: { key: "Items.save", kind: "mutation" as const, method: "POST", path: "/items", idempotency: "required" as const },
+    __supacloudProcedure: {
+      key: "Items.save", kind: "mutation" as const, method: "POST", path: "/items",
+      idempotency: "required" as const, invalidateTags: ["items"] as const,
+    },
   });
   return { calls, client: { procedureClient: { items: { get: { query }, save: { mutate } } } } };
 }
@@ -101,6 +107,21 @@ test("tag invalidation is scoped and still runs with a custom onSuccess", async 
   expect(notified).toBe(true);
   expect(cache.getQueryState(a.items.get.queryKey(input))?.isInvalidated).toBe(true);
   expect(cache.getQueryState(b.items.get.queryKey(input))?.isInvalidated).toBe(false);
+  cache.clear();
+});
+
+test("generated metadata supplies query tags and mutation invalidation defaults", async () => {
+  const { client } = fixture();
+  const cache = new QueryClient();
+  const adapter = createQueryAdapter(client, { keyPrefix: ["tenant"], queryClient: cache });
+  const query = adapter.items.get.queryOptions({ params: { id: "1" } });
+  expect(query.meta.tags).toEqual(["items"]);
+  await cache.fetchQuery(query);
+  const mutation = adapter.items.save.mutationOptions();
+  const variables = { input: { body: { id: "1" } }, execution: { idempotencyKey: "attempt-default" } };
+  const result = await mutation.mutationFn(variables);
+  await mutation.onSuccess(result, variables, undefined);
+  expect(cache.getQueryState(query.queryKey)?.isInvalidated).toBe(true);
   cache.clear();
 });
 

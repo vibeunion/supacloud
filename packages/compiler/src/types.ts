@@ -231,6 +231,8 @@ export interface EffectRouteNode {
 export interface RouteNode {
   /** Transport-level idempotency contract, independent of route command binding. */
   idempotency?: "required" | "none";
+  /** Explicit query cache tags exposed to generated clients. */
+  tags?: string[];
   parse?: "none";
   allowDeleteBody?: true;
   contract?: {
@@ -391,6 +393,8 @@ export interface FeatureTransitionNode {
   audit?: string;
   /** Job that continues the transition after the durable write is committed. */
   job?: string;
+  /** Explicit query tags invalidated after the transition succeeds. */
+  invalidateTags?: string[];
   persistence?: FeaturePersistenceNode;
 }
 

@@ -1,5 +1,6 @@
 import type { ApplicationGraph, FeaturePersistenceNode } from "./types";
 import { joinRoutePaths } from "./util";
+import { featureTransitionForRoute } from "./feature";
 
 export interface ContractManifest {
   version: 1;
@@ -56,6 +57,7 @@ export interface ContractManifest {
       idempotency?: "required" | "none";
       audit?: string;
       job?: string;
+      invalidateTags?: string[];
       jobDetails?: {
         name: string;
         className: string;
@@ -78,6 +80,8 @@ export interface ContractManifest {
     handler: string;
     command?: string;
     permission?: string;
+    idempotency?: "required" | "none";
+    tags?: string[];
     requestSchemas: Partial<Record<"body" | "params" | "query" | "headers" | "cookie", string>>;
     responseSchema?: string;
     /** Status-aware response schemas; legacy responseSchema remains for compatibility. */
@@ -187,6 +191,7 @@ export function buildContractManifest(
             ...(transition.idempotency === undefined ? {} : { idempotency: transition.idempotency }),
             ...(transition.audit === undefined ? {} : { audit: transition.audit }),
             ...(transition.job === undefined ? {} : { job: transition.job }),
+            ...(transition.invalidateTags === undefined ? {} : { invalidateTags: [...transition.invalidateTags] }),
             ...(job === undefined ? {} : {
               jobDetails: {
                 name: job.name,
@@ -208,9 +213,20 @@ export function buildContractManifest(
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const command = route.command
-          ? module.commands.find((candidate) => candidate.className === route.command)
+          ? module.commands.find((candidate) =>
+            candidate.className === route.command || candidate.name === route.command)
           : undefined;
-        if (command?.permission) permissions.add(command.permission);
+        const featureTransition = featureTransitionForRoute(module, controller, route);
+        const featureCommand = featureTransition?.command === undefined
+          ? undefined
+          : module.commands.find((candidate) =>
+            candidate.className === featureTransition.command || candidate.name === featureTransition.command);
+        const governedCommand = command ?? featureCommand;
+        const effectiveCommand = route.command ?? featureTransition?.command;
+        const idempotency = route.idempotency
+          ?? command?.idempotency
+          ?? featureTransition?.idempotency;
+        if (governedCommand?.permission) permissions.add(governedCommand.permission);
         if (route.contract?.evidence) fixtures.add(route.contract.evidence);
         routes.push({
           method: route.method,
@@ -218,8 +234,10 @@ export function buildContractManifest(
           module: module.name,
           controller: controller.className,
           handler: route.handler,
-          ...(route.command === undefined ? {} : { command: route.command }),
-          ...(command?.permission === undefined ? {} : { permission: command.permission }),
+          ...(effectiveCommand === undefined ? {} : { command: effectiveCommand }),
+          ...(governedCommand?.permission === undefined ? {} : { permission: governedCommand.permission }),
+          ...(idempotency === undefined ? {} : { idempotency }),
+          ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
           requestSchemas: Object.fromEntries(
             (["body", "params", "query", "headers", "cookie"] as const)
               .flatMap((key) => route[key] === undefined ? [] : [[key, route[key]] as const]),

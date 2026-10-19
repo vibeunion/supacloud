@@ -1,5 +1,14 @@
-import type { Diagnostic, FeatureSpecNode, ModuleNode } from "./types";
+import type { ControllerNode, Diagnostic, FeatureSpecNode, ModuleNode, RouteNode } from "./types";
 import { isJobContextToken, joinRoutePaths } from "./util";
+
+export function featureTransitionForRoute(
+  module: ModuleNode,
+  controller: ControllerNode,
+  route: RouteNode,
+): FeatureSpecNode["transitions"][number] | undefined {
+  const routePath = `${route.method} ${joinRoutePaths(controller.path, route.path)}`;
+  return module.featureSpec?.transitions.find((transition) => transition.route === routePath);
+}
 
 /** Validate the declaration itself and its bindings within the owning module. */
 export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode): Diagnostic[] {
@@ -28,6 +37,13 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     }
     if (transition.permission !== undefined && !transition.permission.trim()) {
       error("feature-governance-drift", `Transition ${transition.name} declares an empty permission.`);
+    }
+    if (transition.invalidateTags !== undefined) {
+      if (transition.invalidateTags.length === 0
+        || transition.invalidateTags.some((tag) => !tag.trim())
+        || new Set(transition.invalidateTags).size !== transition.invalidateTags.length) {
+        error("feature-invalidation-tags-invalid", `Transition ${transition.name} must declare unique, non-empty invalidateTags.`);
+      }
     }
     if (transition.persistence) {
       const persistence = transition.persistence;
@@ -134,7 +150,8 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         `${route.method} ${joinRoutePaths(controller.path, route.path)}` === transition.route));
       if (routes.length !== 1) {
         error("feature-route-unresolved", `Transition ${transition.name} must reference exactly one route '${transition.route}' in module ${module.name}.`);
-      } else if (command && transition.routeBinding !== "controller" && routes[0]?.command !== command.className) {
+      } else if (command && transition.routeBinding !== "controller"
+        && routes[0]?.command !== command.className && routes[0]?.command !== command.name) {
         error("feature-route-drift", `Route ${transition.route} is not bound to ${command.className}.`);
       } else if (transition.routeBinding === "controller" && routes[0]?.command !== undefined) {
         error("feature-route-drift", `Controller-bound route ${transition.route} must not also declare a framework command binding.`);

@@ -144,6 +144,8 @@ export interface CompiledRoute {
   ) => Promise<unknown> | unknown;
   /** Class name of the @Command explicitly bound to this route. */
   command?: string;
+  /** Transport-level idempotency contract, independent of route command binding. */
+  idempotency?: "required" | "none";
   /** Statically generated route aspects. */
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
@@ -244,6 +246,7 @@ export type { SupAuthIdentity, SupAuthAccess, SupAuthRequestContext, SupAuthCont
 export const VERIFIED_JWT_SUBJECT_HEADER = "x-supacloud-jwt-sub";
 export const EXECUTION_ID_HEADER = "x-sb-execution-id";
 export const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{1,512}$/;
 
 export interface TrustedRequestIdentity {
   authenticated: boolean;
@@ -639,6 +642,15 @@ export interface ApplicationLifecycle {
   waitForIdle(options?: { timeoutMs?: number; includeBackground?: boolean }): Promise<void>;
 }
 
+function resolveCompiledCommand(
+  module: Pick<CompiledModule, "commands">,
+  reference: string,
+): CompiledCommand | undefined {
+  const matches = (module.commands ?? []).filter((command) =>
+    command.className === reference || command.name === reference);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export interface JobInvocation {
   job: CompiledJob;
   input: unknown;
@@ -926,10 +938,8 @@ export async function executeCompiledCommand<Input, Result>(options: {
   handler: (input: Input) => Result | Promise<Result>;
   decode: (value: unknown) => Result;
 }): Promise<Result> {
-  const matches = options.module.commands?.filter((item) => item.className === options.command) ?? [];
-  if (matches.length !== 1) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
-  const command = matches[0];
-  if (!command) throw new Error(`Command not found: ${options.command}`);
+  const command = resolveCompiledCommand(options.module, options.command);
+  if (!command) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
   const invocation: CommandInvocation = {
     command, input: { body: options.input, params: {}, query: {} },
     request: options.request, requestContext: options.requestContext,
@@ -960,10 +970,8 @@ export async function previewCompiledCommand<Input>(options: {
   governance: CommandGovernance;
   preview: (input: Input) => unknown;
 }): Promise<CommandPreview> {
-  const matches = options.module.commands?.filter((item) => item.className === options.command) ?? [];
-  if (matches.length !== 1) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
-  const command = matches[0];
-  if (!command) throw new Error(`Command not found: ${options.command}`);
+  const command = resolveCompiledCommand(options.module, options.command);
+  if (!command) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
   const invocation: CommandInvocation = {
     command, input: { body: options.input, params: {}, query: {} },
     request: options.request, requestContext: options.requestContext,
@@ -1020,8 +1028,19 @@ export function requireIdempotencyKey(invocation: CommandInvocation): string {
   const context = isRecord(invocation.requestContext) ? invocation.requestContext : {};
   const key = (typeof context.idempotencyKey === "string" ? context.idempotencyKey : undefined)
     ?? safeHeaderValue(invocation.request.headers.get(IDEMPOTENCY_KEY_HEADER), 512);
-  if (!key) {
-    throw new ApplicationError("Idempotency-Key header is required", {
+  if (!key || !idempotencyKeyPattern.test(key)) {
+    throw new ApplicationError("A valid Idempotency-Key header is required", {
+      status: 400,
+      code: "IDEMPOTENCY_KEY_REQUIRED",
+    });
+  }
+  return key;
+}
+
+function requireRouteIdempotencyKey(request: Request): string {
+  const key = safeHeaderValue(request.headers.get(IDEMPOTENCY_KEY_HEADER), 512);
+  if (!key || !idempotencyKeyPattern.test(key)) {
+    throw new ApplicationError("A valid Idempotency-Key header is required", {
       status: 400,
       code: "IDEMPOTENCY_KEY_REQUIRED",
     });
@@ -1213,6 +1232,7 @@ export function createModulePlugin<
     "effect",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
+    "idempotency",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
     "input", "result", "request",
     "parse", "allowDeleteBody",
@@ -1235,6 +1255,19 @@ export function createModulePlugin<
           { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
         );
       }
+      if (route.idempotency !== undefined
+        && route.idempotency !== "required" && route.idempotency !== "none") {
+        throw new ApplicationError(
+          `Invalid idempotency policy on ${route.method} ${controller.path}${route.path}`,
+          { code: "ROUTE_IDEMPOTENCY_INVALID" },
+        );
+      }
+      if (route.idempotency === "required" && ["GET", "HEAD", "OPTIONS"].includes(route.method)) {
+        throw new ApplicationError(
+          `Route ${route.method} ${controller.path}${route.path} cannot require idempotency`,
+          { code: "ROUTE_IDEMPOTENCY_INVALID" },
+        );
+      }
     }
   }
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -1247,18 +1280,15 @@ export function createModulePlugin<
     );
   }
   assertCommandGovernanceReady(compiled, options.commandGovernance, options.commandExecutor);
-  const commandsByClassName = new Map(
-    (compiled.commands ?? []).map((command) => [command.className, command]),
-  );
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
-      if (route.command && !commandsByClassName.has(route.command)) {
+      const command = route.command === undefined ? undefined : resolveCompiledCommand(compiled, route.command);
+      if (route.command && !command) {
         throw new ApplicationError(`Command "${route.command}" is not registered`, {
           code: "COMMAND_NOT_REGISTERED",
         });
       }
       if (route.effect?.retry === "explicit" && route.command) {
-        const command = commandsByClassName.get(route.command);
         if (command && command.idempotency !== "required") {
           throw new ApplicationError(
             `Effect retry is not allowed for non-idempotent command "${command.name}"`,
@@ -1378,6 +1408,15 @@ export function createModulePlugin<
                 throw new Error("HTTP policies must return Response or undefined");
               }
             }
+            if (route.idempotency === "required") {
+              requireRouteIdempotencyKey(context.request);
+            }
+          },
+        });
+      } else if (route.idempotency === "required") {
+        Object.assign(schema, {
+          beforeHandle: (context: ApplicationHttpContext<Http>) => {
+            requireRouteIdempotencyKey(context.request);
           },
         });
       }
@@ -1479,9 +1518,7 @@ export function createModulePlugin<
             services,
             metadata: route,
           };
-          const command = route.command
-            ? commandsByClassName.get(route.command)
-            : undefined;
+          const command = route.command === undefined ? undefined : resolveCompiledCommand(compiled, route.command);
           const commandContext: ApplicationAspectContext = {
             kind: "command",
             name: command?.name ?? route.command ?? `${route.method} ${path}`,

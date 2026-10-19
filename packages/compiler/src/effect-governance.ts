@@ -1,5 +1,6 @@
 import type { ApplicationGraph, Diagnostic, EffectCompilerOptions, RouteNode } from "./types";
 import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
+import { featureTransitionForRoute } from "./feature";
 
 function diagnostic(
   code: string,
@@ -68,8 +69,11 @@ export function validateEffectPolicies(
             "Declare a positive maxAttempts value including the initial attempt.",
           ));
         }
-        if (route.command && effect.retry === "explicit") {
-          const command = commands.get(route.command);
+        if (effect.retry === "explicit") {
+          const featureTransition = featureTransitionForRoute(module, controller, route);
+          const commandRef = route.command ?? featureTransition?.command;
+          const command = commandRef === undefined ? undefined
+            : commands.get(commandRef) ?? [...commands.values()].find((candidate) => candidate.name === commandRef);
           if (command && command.idempotency !== "required") {
             diagnostics.push(diagnostic(
               "effect-command-retry-forbidden",

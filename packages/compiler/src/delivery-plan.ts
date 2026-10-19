@@ -6,6 +6,7 @@ import {
 } from "./delivery-schema";
 import type { ApplicationGraph, CompileOptions, Diagnostic, ModuleNode, ValidateOptions } from "./types";
 import { joinRoutePaths } from "./util";
+import { featureTransitionForRoute } from "./feature";
 import { validateGraph } from "./validate";
 
 type TargetDeclaration = NonNullable<DeliveryOptions["targets"]>[number];
@@ -126,11 +127,19 @@ export function createDeliveryPlan(
             "Give public routes unambiguous method/path contracts before splitting targets.");
         }
         publicRoutes.set(key, target.name);
+        const command = route.command === undefined ? undefined
+          : module.commands.find((candidate) => candidate.className === route.command || candidate.name === route.command);
+        const featureTransition = featureTransitionForRoute(module, controller, route);
+        const effectiveCommand = route.command ?? featureTransition?.command;
+        const idempotency = route.idempotency
+          ?? command?.idempotency
+          ?? featureTransition?.idempotency;
         target.roots.push(module.name);
         target.routes.push({
           module: module.name, controller: controller.className, handler: route.handler,
           method: route.method, path,
-          ...(route.command === undefined ? {} : { command: route.command }),
+          ...(effectiveCommand === undefined ? {} : { command: effectiveCommand }),
+          ...(idempotency === undefined ? {} : { idempotency }),
           reason: owner === undefined ? "default-http" : "explicit-module",
         });
       }

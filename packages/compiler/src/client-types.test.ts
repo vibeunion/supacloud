@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
-import { renderClient, renderOpenApi } from "./generate";
+import { renderApplication, renderClient, renderOpenApi, renderPermissions } from "./generate";
+import { buildContractManifest } from "./contract-manifest";
+import { createApplicationDevelopmentContext } from "./application-development";
+import { createDeliveryPlan } from "./delivery-plan";
+import { createExecutionPlans } from "./inspect";
+import { validateGraph } from "./validate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
@@ -164,6 +169,114 @@ test("generated client enforces route idempotency without a command binding", as
     });
     expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("feature transition route bindings carry command governance into generated projections", async () => {
+  const featureGraph: ApplicationGraph = {
+    externalTokens: [],
+    modules: [{
+      name: "cases", className: "CasesModule", file: "cases.ts", line: 1,
+      imports: [], providers: [], queries: [], exports: [],
+      commands: [{
+        className: "ApproveCaseCommand",
+        name: "case.approve",
+        permission: "case.approve",
+        transaction: "required",
+        idempotency: "required",
+      }],
+      featureSpec: {
+        name: "case",
+        states: ["draft", "approved"],
+        transitions: [{
+          name: "approve",
+          from: "draft",
+          to: "approved",
+          command: "ApproveCaseCommand",
+          permission: "case.approve",
+          route: "POST /cases/:id/approve",
+          routeBinding: "controller",
+          idempotency: "required",
+        }],
+      },
+      controllers: [{
+        className: "CasesController", path: "/cases", scope: "application",
+        deps: [], file: "cases.ts", importPath: "./cases",
+        routes: [{
+          method: "POST", path: "/:id/approve", handler: "approve",
+          pathParams: ["id"],
+        }],
+      }],
+    }],
+  };
+
+  const root = await mkdtemp(join(tmpdir(), "supacloud-feature-route-governance-"));
+  try {
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(featureGraph),
+      "consumer.ts": [
+        'import { createApiClient } from "./client";',
+        "const client = createApiClient();",
+        'client.cases.approve.mutate({ params: { id: "case-1" } }, { idempotencyKey: "case-1-v1" });',
+        "// @ts-expect-error Feature transition idempotency requires an execution key.",
+        'client.cases.approve.mutate({ params: { id: "case-1" } });',
+      ].join("\n"),
+    });
+    const program = ts.createProgram([join(root, "consumer.ts")], {
+      strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0", baseUrl: root,
+      paths: { typebox: [typeboxPath] },
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+      .toEqual([]);
+
+    expect(buildContractManifest(featureGraph, { client: true, openapi: false, permissions: true }).routes)
+      .toEqual([expect.objectContaining({
+        command: "ApproveCaseCommand",
+        permission: "case.approve",
+        idempotency: "required",
+      })]);
+    expect(createApplicationDevelopmentContext(featureGraph).routes)
+      .toEqual([expect.objectContaining({
+        command: "case.approve",
+        idempotency: "required",
+      })]);
+    expect(createExecutionPlans(featureGraph)[0]).toEqual(expect.objectContaining({
+      command: "case.approve",
+    }));
+    const invalidFeatureRoute: ApplicationGraph = {
+      ...featureGraph,
+      modules: featureGraph.modules.map((module) => ({
+        ...module,
+        featureSpec: module.featureSpec === undefined ? undefined : {
+          ...module.featureSpec,
+          transitions: module.featureSpec.transitions.map((transition) => ({
+            ...transition,
+            route: transition.route?.replace("POST ", "GET "),
+          })),
+        },
+        controllers: module.controllers.map((controller) => ({
+          ...controller,
+          routes: controller.routes.map((route) => ({ ...route, method: "GET" })),
+        })),
+      })),
+    };
+    expect(validateGraph(invalidFeatureRoute).map((diagnostic) => diagnostic.code))
+      .toContain("invalid-route-idempotency");
+    expect(renderApplication(featureGraph, { rootDir: ".", outDir: "." }).applicationCode)
+      .toContain('idempotency: "required"');
+    expect(renderOpenApi(featureGraph)).toContain('"idempotency": "required"');
+    expect(renderPermissions(featureGraph)).toContain('"idempotency": "required"');
+    const delivery = createDeliveryPlan(featureGraph);
+    expect(delivery.ok).toBe(true);
+    expect(delivery.plan?.targets[0]?.routes).toEqual([expect.objectContaining({
+      command: "ApproveCaseCommand",
+      idempotency: "required",
+    })]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

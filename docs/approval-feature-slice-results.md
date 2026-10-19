@@ -20,9 +20,15 @@ second engine, database schema, hand-maintained client or transport abstraction.
 | Outcome | This iteration | Remaining evidence |
 | --- | --- | --- |
 | Golden business slice and four-stack comparison | Approval scope and common acceptance below; recorded-agent evaluator has a bounded `create-feature-slice` task | NestJS, Spring, a named Go stack, and SupaCloud implementations and comparable measured trials |
-| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, routes, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
+| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, receipt and job-status routes, explicit query invalidation tags, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
 | Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Durable authorization, version checks, audit, outbox and result recovery in the chosen customer flow |
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
+
+Invalidation tags are explicit transition metadata and are preserved in the
+contract manifest and generated procedure metadata. The generated approval
+recipe exports the list/detail/receipt tags for `@supacloud/query`; query
+options and mutation success handlers consume that metadata by default and
+never infer tags from route or procedure names.
 
 The platform can remain usable without the application framework while the
 framework is treated as a first-class product. Do not require all platform users
@@ -98,7 +104,8 @@ attestation. No improvement ratio or ecosystem ranking is established here.
 
 - Feature-generator regression: preview/apply, explicit capability requirements,
   parent registration, conflicts, compiler acceptance/rejection and generated
-  fixture/service tests, E2E entry-point generation and type checking.
+  fixture/service tests, explicit invalidation-tag generation, E2E entry-point
+  generation and type checking.
 - Existing app-tool regression: 21 tests passed.
 - Recorded-agent evaluator: 4 tests passed, including cross-feature scope denial.
 - CLI typecheck and build passed.
@@ -132,7 +139,9 @@ authorization, idempotency, state transitions, audit or outbox behavior.
 
 1. Bind this recipe to one approved xigu-fa operation using its existing RPC and
    source-of-truth tables; keep authorization and state rules in that application.
-2. Connect the compiler-generated client and existing query adapter, configure
+2. Connect the compiler-generated client and existing query adapter in the
+   browser, bind the generated job-status port to the existing Workflow/Queue
+   read path, configure
    the generated E2E environment, then run authenticated negative, concurrency,
    crash and recovery acceptance.
 3. Verify the published dependency tuple and test-environment deployment/upgrade.

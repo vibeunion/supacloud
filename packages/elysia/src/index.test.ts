@@ -476,6 +476,45 @@ describe("createApplication", () => {
     expect(events).toEqual(["case.create:case.create"]);
   });
 
+  test("resolves logical command names on HTTP routes", async () => {
+    const app = createTestApp({
+      modules: [{
+        name: "review",
+        createServices: () => ({
+          reviewController: { approve: () => ({ ok: true }) },
+        }),
+        controllers: [{
+          path: "/reviews",
+          serviceKey: "reviewController",
+          scope: "application",
+          routes: [{
+            method: "POST",
+            path: "/:id/approve",
+            handler: "approve",
+            command: "review.approve",
+            params: t.Object({ id: t.String() }),
+          }],
+        }],
+        commands: [{
+          className: "ApproveReviewCommand",
+          name: "review.approve",
+          permission: "review.approve",
+          transaction: "none",
+          idempotency: "none",
+        }],
+      }],
+      commandExecutor: async (invocation, next) => {
+        expect(invocation.command.className).toBe("ApproveReviewCommand");
+        expect(invocation.command.name).toBe("review.approve");
+        return next();
+      },
+    });
+
+    const response = await testRequest(app, "/reviews/review-1/approve", { method: "POST" });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
   test("allows applications to map errors to their public envelope", async () => {
     const app = createApp({}, {
       commandGovernance: {
@@ -617,6 +656,26 @@ describe("SupaCloud request context", () => {
       requestContext,
       services: {},
     })).toThrow("Idempotency-Key header is required");
+  });
+
+  test("rejects invalid idempotency keys before command adapters run", async () => {
+    const request = new Request("https://example.test/cases", {
+      headers: { "idempotency-key": "contains spaces" },
+    });
+    const requestContext = await createSupaCloudRequestContext(request);
+    expect(() => requireIdempotencyKey({
+      command: {
+        className: "CreateCaseCommand",
+        name: "case.create",
+        permission: "case.create",
+        transaction: "required",
+        idempotency: "required",
+      },
+      input: { body: {}, params: {}, query: {} },
+      request,
+      requestContext,
+      services: {},
+    })).toThrow("A valid Idempotency-Key header is required");
   });
 });
 

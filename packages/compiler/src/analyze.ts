@@ -1086,6 +1086,14 @@ function parseFeatureSpec(
     const idempotency = commandModeProp(options, "idempotency");
     const audit = stringLiteralProp(options, "audit");
     const job = stringLiteralProp(options, "job");
+    const invalidateTagsExpr = getProp(options, "invalidateTags");
+    const invalidateTags = invalidateTagsExpr === undefined
+      ? undefined
+      : ts.isArrayLiteralExpression(invalidateTagsExpr)
+        && invalidateTagsExpr.elements.every((element) => ts.isStringLiteral(element) && element.text.trim().length > 0)
+        ? invalidateTagsExpr.elements.map((element) => (element as ts.StringLiteral).text)
+        : undefined;
+    if (invalidateTagsExpr !== undefined && invalidateTags === undefined) return invalid();
     const persistenceExpr = getProp(options, "persistence");
     const persistence = persistenceExpr && ts.isObjectLiteralExpression(persistenceExpr)
       ? parseFeaturePersistence(persistenceExpr)
@@ -1101,6 +1109,7 @@ function parseFeatureSpec(
       ...(idempotency === undefined ? {} : { idempotency }),
       ...(audit === undefined ? {} : { audit }),
       ...(job === undefined ? {} : { job }),
+      ...(invalidateTags === undefined ? {} : { invalidateTags }),
       ...(persistence === undefined ? {} : { persistence }),
     });
   }
@@ -1245,6 +1254,41 @@ function checkedRouteIdempotency(
     });
   }
   return value === "required" || value === "none" ? value : undefined;
+}
+
+function checkedRouteTags(
+  expression: Expression | undefined,
+  ctx: AnalysisContext,
+  route: string,
+): string[] | undefined {
+  if (expression === undefined) return undefined;
+  if (!ts.isArrayLiteralExpression(expression)
+    || expression.elements.some((element) => !ts.isStringLiteral(element) || element.text.trim().length === 0)) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "invalid-route-tags",
+      errorCode: "SC3029",
+      docsUrl: "https://supacloud.dev/errors/SC3029",
+      message: `${route}.tags must be a static array of non-empty string literals.`,
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+      suggestion: "Declare stable cache tags explicitly, for example tags: [\"cases.list\"].",
+    });
+    return undefined;
+  }
+  const tags = expression.elements.map((element) => (element as ts.StringLiteral).text);
+  if (new Set(tags).size !== tags.length) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "duplicate-route-tags",
+      errorCode: "SC3030",
+      docsUrl: "https://supacloud.dev/errors/SC3030",
+      message: `${route}.tags must not contain duplicate values.`,
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+    });
+  }
+  return tags;
 }
 
 function parseProvider(
@@ -2113,10 +2157,13 @@ function parseController(
         const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
         const idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);
         if (idempotency !== undefined) route.idempotency = idempotency;
-        if (parsePolicy.unresolved || deletePolicy.unresolved) {
+        const tagsPolicy = routePolicyProperty(optionsObject, "tags", ctx);
+        if (parsePolicy.unresolved || deletePolicy.unresolved || tagsPolicy.unresolved) {
           ctx.diagnostics.push({ severity: "error", code: "unresolved-route-body-policy", file,
             message: `Route ${route.handler} body policy must be statically resolvable; dynamic spreads, computed keys and shorthand policies are unsupported.` });
         }
+        const tags = checkedRouteTags(tagsPolicy.value, ctx, route.handler);
+        if (tags !== undefined) route.tags = tags;
         const parse = parsePolicy.value;
         if (parse) {
           if (ts.isStringLiteral(parse) && parse.text === "none") route.parse = "none";

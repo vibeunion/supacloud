@@ -10,6 +10,8 @@ type Procedure<Kind extends "query" | "mutation"> = ((...args: never[]) => Promi
     readonly path: string;
     readonly kind: Kind;
     readonly idempotency: "none" | "required";
+    readonly tags?: readonly string[];
+    readonly invalidateTags?: readonly string[];
   };
   readonly __supacloudInput?: unknown;
 };
@@ -138,7 +140,7 @@ export function createQueryAdapter<T extends ProcedureSource>(client: T, options
             return {
               queryKey: Object.freeze([...key, captured]) as QueryOptionsResult<QueryResult<typeof proc>>["queryKey"],
               queryFn: async ({ signal }: { signal?: AbortSignal }) => (await call(proc, captured, { signal })) ?? null,
-              meta: { ...opts?.meta, tags: Object.freeze([...(opts?.tags ?? [])]) },
+              meta: { ...opts?.meta, tags: Object.freeze([...(opts?.tags ?? metadata.tags ?? [])]) },
             };
           },
         };
@@ -159,8 +161,9 @@ export function createQueryAdapter<T extends ProcedureSource>(client: T, options
             meta: { ...opts?.meta },
             onSuccess: async (data: Result<typeof proc>, variables: Variables<typeof proc>, context: unknown) => {
               const target = opts?.queryClient ?? options.queryClient;
-              if (opts?.invalidateTags?.length && target === undefined) throw new Error("No QueryClient provided for invalidation");
-              if (target !== undefined && opts?.invalidateTags?.length) await invalidateByTags(target, opts.invalidateTags, prefix);
+              const invalidateTags = opts?.invalidateTags ?? metadata.invalidateTags;
+              if (invalidateTags?.length && target === undefined) throw new Error("No QueryClient provided for invalidation");
+              if (target !== undefined && invalidateTags?.length) await invalidateByTags(target, invalidateTags, prefix);
               return opts?.onSuccess?.(data, variables, context);
             },
           }),
