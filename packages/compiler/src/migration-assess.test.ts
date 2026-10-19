@@ -298,7 +298,10 @@ test("migration assessment accepts controller-owned Feature route bindings", asy
     }],
     queries: [], permissions: [], jobs: [],
     rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
-    routes: [{ method: "POST", path: "/cases/:id/approve" }],
+    routes: [{
+      method: "POST", path: "/cases/:id/approve",
+      permission: "case.approve", idempotency: "required",
+    }],
     features: [{
       name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
       transitions: [{
@@ -321,6 +324,50 @@ test("migration assessment accepts controller-owned Feature route bindings", asy
   });
 
   expect(result.findings.map((finding) => finding.code)).not.toContain("contract-manifest-not-proven");
+});
+
+test("migration assessment rejects downgraded Feature route governance", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-migration-assess-route-governance-"));
+  await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+  const outDir = join(rootDir, "generated");
+  const { compileProject } = await import("./compile");
+  await compileProject({ rootDir, outDir });
+  await writeFile(join(outDir, "contracts.manifest.json"), JSON.stringify({
+    version: 1,
+    commands: [{
+      name: "ApproveCase", className: "ApproveCase", module: "case",
+      rpc: "approve_case", permission: "case.approve",
+      transaction: "required", idempotency: "required", tenantScope: "required",
+      auditEvent: "case.approved",
+    }],
+    queries: [], permissions: [], jobs: [],
+    rpc: [{ command: "ApproveCase", adapter: "approve_case" }],
+    routes: [{
+      method: "POST", path: "/cases/:id/approve", command: "ApproveCase",
+      permission: "case.approve", idempotency: "none",
+    }],
+    features: [{
+      name: "case", states: ["draft", "approved"], tenantField: "tenant_id",
+      transitions: [{
+        name: "approve", from: "draft", to: "approved",
+        command: "ApproveCase", permission: "case.approve",
+        idempotency: "required", route: "POST /cases/:id/approve",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    }],
+  }), "utf8");
+
+  const result = await assessMigration({
+    projectDir: rootDir,
+    compile: { rootDir, outDir },
+    renderMode: "browser",
+  });
+
+  expect(result.findings.map((finding) => finding.code)).toContain("contract-manifest-not-proven");
 });
 
 test("migration assessment rejects downgraded Feature command governance", async () => {
