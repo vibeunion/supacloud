@@ -36,6 +36,7 @@ export const ${className}Row = t.Object({
     version: t.Integer({ minimum: 1 }),
 });
 export const ${className}Receipt = t.Object({
+    id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     operationId: t.String({ minLength: 1, maxLength: 512 }),
     status: t.Union([
         t.Literal("pending"), t.Literal("confirmed"), t.Literal("failed"), t.Literal("unknown"),
@@ -44,6 +45,7 @@ export const ${className}Receipt = t.Object({
     version: t.Integer({ minimum: 1 }),
 });
 export const ${className}JobStatus = t.Object({
+    id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     operationId: t.String({ minLength: 1, maxLength: 512 }),
     status: t.Union([
         t.Literal("queued"), t.Literal("running"), t.Literal("completed"),
@@ -436,10 +438,10 @@ test("${name} forwards the authoritative version and result without inventing pe
 test("${name} rejects operation lookup results for a different operation", async () => {
     const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
         lookup: async () => ({
-            operationId: "foreign-operation", status: "confirmed", state: "approved", version: 2,
+            id: "example", operationId: "foreign-operation", status: "confirmed", state: "approved", version: 2,
         }),
     }, {
-        lookup: async () => ({ operationId: "foreign-operation", status: "completed" }),
+        lookup: async () => ({ id: "example", operationId: "foreign-operation", status: "completed" }),
     });
     await expect(service.receipt("example", "operation-example"))
         .rejects.toThrow("FEATURE_OPERATION_RESULT_MISMATCH");

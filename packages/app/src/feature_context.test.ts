@@ -39,9 +39,9 @@ test("rejects missing or untrusted tenant context", () => {
 
 test("rejects operation results that do not match the requested operation", () => {
   const input = { id: "case-1", operationId: "operation-1" };
-  expect(requireFeatureOperationResult(input, { operationId: "operation-1", status: "completed" }))
-    .toMatchObject({ operationId: "operation-1" });
-  for (const value of [null, {}, { operationId: "operation-2" }]) {
+  expect(requireFeatureOperationResult(input, { id: "case-1", operationId: "operation-1", status: "completed" }))
+    .toMatchObject({ id: "case-1", operationId: "operation-1" });
+  for (const value of [null, {}, { id: "case-1", operationId: "operation-2" }, { id: "case-2", operationId: "operation-1" }]) {
     expect(() => requireFeatureOperationResult(input, value)).toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
   }
 });

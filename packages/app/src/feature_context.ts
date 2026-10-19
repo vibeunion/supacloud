@@ -20,6 +20,7 @@ export interface FeatureOperationLookupInput {
 }
 
 export interface FeatureOperationResult {
+  readonly id: string;
   readonly operationId: string;
 }
 
@@ -28,6 +29,7 @@ export function requireFeatureOperationResult<T extends FeatureOperationResult>(
   value: unknown,
 ): T {
   if (value === null || typeof value !== "object" || Array.isArray(value)
+    || !("id" in value) || value.id !== input.id
     || !("operationId" in value) || value.operationId !== input.operationId) {
     throw new Error("FEATURE_OPERATION_RESULT_MISMATCH");
   }

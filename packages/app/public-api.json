@@ -516,7 +516,7 @@
     {
       "name": "FeatureOperationResult",
       "kind": "type",
-      "signature": "export interface FeatureOperationResult {\n    readonly operationId: string;\n}"
+      "signature": "export interface FeatureOperationResult {\n    readonly id: string;\n    readonly operationId: string;\n}"
     },
     {
       "name": "FeaturePersistenceOptions",
