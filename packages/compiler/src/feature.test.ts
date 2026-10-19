@@ -488,6 +488,51 @@ describe("feature specs", () => {
       .toContain("feature-job-tenant-boundary");
   });
 
+  test("requires tenant-scoped queries for external features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      queries: [{ className: "ListCaseQuery", name: "case.list", tenantScope: "none" }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-tenant-boundary");
+  });
+
+  test("requires tenant-scoped jobs for external features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted", job: "case.reconcile",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      jobs: [{
+        className: "ReconcileCaseJob", name: "case.reconcile", serviceKey: "reconcileCaseJob",
+        scope: "job", input: "ReconcileCaseInput", tenantScope: "none",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-tenant-boundary");
+  });
+
   test("binds transition jobs and requires durable replay governance", () => {
     const spec: FeatureSpecNode = {
       name: "case",

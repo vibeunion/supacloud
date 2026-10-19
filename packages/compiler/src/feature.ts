@@ -93,7 +93,7 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       }
     }
     if (!module) continue;
-    if (transition.persistence?.boundary === "database") {
+    if (transition.persistence !== undefined) {
       for (const query of module.queries) {
         const queryProvider = module.providers.find((provider) =>
           provider.token === query.className || provider.useClass === query.className);
