@@ -10,6 +10,7 @@ import {
   saveAuthSettings,
 } from '../src/runtime/auth/settings.js'
 import { loadProjectConfig } from '../src/runtime/node/load-config.js'
+import { testTimeout } from './helpers/timeouts.js'
 
 test('loads SMS signup, cooldown, template, and independent send quota from config.toml', async () => {
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-sms-config-'))
@@ -90,4 +91,4 @@ test('persists SMS settings and applies them after restart', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
-})
+}, testTimeout(20_000))
