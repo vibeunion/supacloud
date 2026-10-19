@@ -382,7 +382,15 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
         moduleSymbol = kind === "feature" ? `${pascalName(name)}Feature` : `${pascalName(name)}Module`;
         if (kind === "module") writes.push({ path: modulePath, content: moduleScaffold(name), overwrite: args.force === true });
         else for (const [file, content] of Object.entries(kind === "feature"
-            ? featureScaffold(name, pascalName(name), featureGovernance!)
+            ? featureScaffold(name, pascalName(name), {
+                ...featureGovernance!,
+                databaseImportPath: (() => {
+                    const source = relative(join(root, dir, name), join(root, featureGovernance!.database.source))
+                        .replaceAll("\\", "/")
+                        .replace(/\.(?:[cm]?tsx?|mts|cts)$/, "");
+                    return source.startsWith(".") ? source : `./${source}`;
+                })(),
+            })
             : resourceScaffold(name, pascalName(name)))) {
             writes.push({ path: join(dir, name, file).replaceAll("\\", "/"), content });
         }

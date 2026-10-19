@@ -9,12 +9,17 @@ export function featureScaffold(
         permission: string;
         rpc: string;
         database: { source: string; table: string; rowType: string };
+        databaseImportPath?: string;
     },
 ): Record<string, string> {
     const commandName = `${name}.approve`;
     const { permission, rpc, database } = governance;
+    const databaseImportPath = governance.databaseImportPath
+        ?? `../../../${database.source.replace(/\.(?:[cm]?tsx?|mts|cts)$/, "")}`;
+    const rowTypeRoot = database.rowType.split(".")[0]!;
     return {
         [`${name}.contracts.ts`]: `import { t } from "elysia";
+import type { ${rowTypeRoot} } from "${databaseImportPath}";
 
 export const ${className}Params = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
@@ -30,11 +35,13 @@ export const ${className}ApproveBody = t.Object({
     expectedVersion: t.Integer({ minimum: 1 }),
     reason: t.Optional(t.String({ maxLength: 2000 })),
 });
+/** Transport projection; the business result type is derived from the database source below. */
 export const ${className}Row = t.Object({
     id: t.String(),
     state: t.String(),
     version: t.Integer({ minimum: 1 }),
 });
+export type ${className}DatabaseRow = ${database.rowType};
 export const ${className}Receipt = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     operationId: t.String({ minLength: 1, maxLength: 512 }),
@@ -80,6 +87,7 @@ import type {
     ${className}Receipt,
     ${className}ReceiptParams,
     ${className}JobStatus,
+    ${className}DatabaseRow,
     ${className}Row,
     ${className}RefreshInput,
 } from "./${name}.contracts";
@@ -88,7 +96,7 @@ import type { StaticDecode } from "typebox";
 export type ${className}ListInput = StaticDecode<typeof ${className}ListQuery>;
 export type ${className}ApproveInput = StaticDecode<typeof ${className}ApproveBody>;
 export type ${className}ApproveCommand = ${className}ApproveInput & { id: string };
-export type ${className}Result = StaticDecode<typeof ${className}Row>;
+export type ${className}Result = ${className}DatabaseRow;
 export type ${className}ReceiptResult = StaticDecode<typeof ${className}Receipt>;
 export type ${className}RefreshJobInput = StaticDecode<typeof ${className}RefreshInput>;
 export type ${className}JobStatusResult = StaticDecode<typeof ${className}JobStatus>;

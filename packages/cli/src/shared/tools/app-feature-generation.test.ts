@@ -101,6 +101,8 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
 async function generatedFixture() {
     const root = await fixture();
     expect((await runAppTool({ ...feature, root })).isError).toBe(false);
+    await mkdir(join(root, "db"), { recursive: true });
+    await writeFile(join(root, "db/schema.ts"), "export type ReviewRow = { id: string; state: string; version: number };\n");
     await symlink(join(import.meta.dir, "../../../node_modules"), join(root, "node_modules"), "dir");
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({
         compilerOptions: {
@@ -138,6 +140,10 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureModule?.queries).toHaveLength(1);
     const featureSource = await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8");
     expect(featureSource).toContain('database: {"source":"db/schema.ts","table":"public.reviews","rowType":"ReviewRow"}');
+    const contractsSource = await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8");
+    expect(contractsSource).toContain('import type { ReviewRow } from "../../../db/schema";');
+    expect(contractsSource).toContain("export type CaseApprovalDatabaseRow = ReviewRow;");
+    expect(contractsSource).toContain("Transport projection; the business result type is derived from the database source");
     expect(featureSource).toContain('tenantField: "tenant_id"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
