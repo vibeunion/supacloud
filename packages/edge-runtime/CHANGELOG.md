@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.35.0...edge-runtime-v0.36.0) (2026-10-19)
+
+
+### Features
+
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.34.3...edge-runtime-v0.35.0) (2026-10-18)
 
 

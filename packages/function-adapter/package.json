@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/function-adapter",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Fetch-based adapters for SupaCloud Edge Functions",
   "type": "module",
   "main": "./dist/index.js",

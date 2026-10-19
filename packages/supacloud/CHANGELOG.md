@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/vibeunion/supacloud/compare/supacloud-v0.17.0...supacloud-v0.18.0) (2026-10-19)
+
+
+### Features
+
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2153](https://github.com/vibeunion/supacloud/issues/2153)) ([8dd2d76](https://github.com/vibeunion/supacloud/commit/8dd2d7613acf7e8575d578284e0dc0e4a14986f1))
+
 ## [0.17.0](https://github.com/vibeunion/supacloud/compare/supacloud-v0.16.22...supacloud-v0.17.0) (2026-10-18)
 
 

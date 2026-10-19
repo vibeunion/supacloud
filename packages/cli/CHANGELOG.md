@@ -14,6 +14,19 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.105.0](https://github.com/vibeunion/supacloud/compare/cli-v0.104.0...cli-v0.105.0) (2026-10-19)
+
+
+### Features
+
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2152](https://github.com/vibeunion/supacloud/issues/2152)) ([251e25c](https://github.com/vibeunion/supacloud/commit/251e25cc148f177955d0b7e9e2216f2b2a36c0d0))
+* **compiler:** accept logical names in feature route bindings ([#2155](https://github.com/vibeunion/supacloud/issues/2155)) ([da4e369](https://github.com/vibeunion/supacloud/commit/da4e369b2094912fc72cb314be0633d362ee54ec))
+
 ## [0.104.0](https://github.com/vibeunion/supacloud/compare/cli-v0.103.7...cli-v0.104.0) (2026-10-18)
 
 
