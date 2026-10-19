@@ -154,6 +154,12 @@ export interface AppToolArguments {
     module?: string;
     permission?: string;
     rpc?: string;
+    database_source?: string;
+    database_table?: string;
+    database_type?: string;
+    "database-source"?: string;
+    "database-table"?: string;
+    "database-type"?: string;
     dir?: string;
     force?: boolean;
     dry_run?: boolean;
@@ -242,6 +248,13 @@ function requireIdentifier(value: string | undefined, flag: string): string {
 function requireFeatureCapability(value: string | undefined, flag: string): string {
     if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(value)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", `feature requires an explicit valid --${flag}; capabilities are not inferred`);
+    }
+    return value;
+}
+
+function requireFeatureDatabase(value: string | undefined, flag: string, pattern: RegExp): string {
+    if (typeof value !== "string" || !pattern.test(value)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", `feature requires an explicit valid --${flag}`);
     }
     return value;
 }
@@ -350,6 +363,14 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const featureGovernance = kind === "feature" ? {
         permission: requireFeatureCapability(args.permission, "permission"),
         rpc: requireFeatureCapability(args.rpc, "rpc"),
+        database: {
+            source: requireFeatureDatabase(args.database_source, "database-source",
+                /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/),
+            table: requireFeatureDatabase(args.database_table, "database-table",
+                /^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/),
+            rowType: requireFeatureDatabase(args.database_type, "database-type",
+                /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/),
+        },
     } : undefined;
     const writes: ScaffoldWrite[] = [];
     let modulePath: string | undefined;
@@ -1679,6 +1700,9 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
     if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
         || (request.register_in !== undefined && request["register-in"] !== undefined)
         || (request.database_url !== undefined && request["database-url"] !== undefined)
+        || (request.database_source !== undefined && request["database-source"] !== undefined)
+        || (request.database_table !== undefined && request["database-table"] !== undefined)
+        || (request.database_type !== undefined && request["database-type"] !== undefined)
         || (request.request_id !== undefined && request["request-id"] !== undefined)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
     }
@@ -1687,6 +1711,9 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         ...(request["dry-run"] === undefined ? {} : { dry_run: request["dry-run"] }),
         ...(request["register-in"] === undefined ? {} : { register_in: request["register-in"] }),
         ...(request["database-url"] === undefined ? {} : { database_url: request["database-url"] }),
+        ...(request["database-source"] === undefined ? {} : { database_source: request["database-source"] }),
+        ...(request["database-table"] === undefined ? {} : { database_table: request["database-table"] }),
+        ...(request["database-type"] === undefined ? {} : { database_type: request["database-type"] }),
         ...(request["request-id"] === undefined ? {} : { request_id: request["request-id"] }),
     };
     if (request.events !== undefined || request.request_id !== undefined) {
@@ -1819,6 +1846,12 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
             rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
+            database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
+            database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),
+            database_type: optional(Type.String(), "[generate feature] Exported row type derived from the database source"),
+            "database-source": optional(Type.String(), "[generate feature] CLI alias of database_source"),
+            "database-table": optional(Type.String(), "[generate feature] CLI alias of database_table"),
+            "database-type": optional(Type.String(), "[generate feature] CLI alias of database_type"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
             force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/feature/controller never overwrite"),
             dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
@@ -1862,6 +1895,12 @@ export function registerAppAliases(server: ToolServer): void {
         module: optional(Type.String(), "[generate] Target feature module"),
         permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
         rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
+        database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
+        database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),
+        database_type: optional(Type.String(), "[generate feature] Exported row type derived from the database source"),
+        "database-source": optional(Type.String(), "[generate feature] CLI alias of database_source"),
+        "database-table": optional(Type.String(), "[generate feature] CLI alias of database_table"),
+        "database-type": optional(Type.String(), "[generate feature] CLI alias of database_type"),
         dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
         force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/feature/controller never overwrite"),
         dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
