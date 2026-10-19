@@ -14,6 +14,7 @@ import type {
   EffectErrorMappingNode,
   EffectCompilerOptions,
   EffectRouteNode,
+  FeatureDatabaseSourceNode,
   FeaturePersistenceNode,
   HandlerParamNode,
   FunctionalInjectNode,
@@ -1051,6 +1052,11 @@ function parseFeatureSpec(
   };
   if (!ts.isObjectLiteralExpression(input)) return invalid();
   const name = stringLiteralProp(input, "name");
+  const databaseExpr = getProp(input, "database");
+  const database = databaseExpr && ts.isObjectLiteralExpression(databaseExpr)
+    ? parseFeatureDatabaseSource(databaseExpr)
+    : undefined;
+  if (databaseExpr !== undefined && database === undefined) return invalid();
   const tenantField = stringLiteralProp(input, "tenantField");
   const statesExpr = getProp(input, "states");
   const transitionObject = getProp(input, "transitions");
@@ -1115,10 +1121,24 @@ function parseFeatureSpec(
   }
   return {
     name, states,
+    ...(database === undefined ? {} : { database }),
     ...(tenantField === undefined ? {} : { tenantField }),
     transitions,
     file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input),
   };
+}
+
+function parseFeatureDatabaseSource(input: ObjectLiteralExpression): FeatureDatabaseSourceNode | undefined {
+  if (input.properties.some((property) => !ts.isPropertyAssignment(property))) return undefined;
+  const source = stringLiteralProp(input, "source");
+  const table = stringLiteralProp(input, "table");
+  const rowType = stringLiteralProp(input, "rowType");
+  if (!source || !table || !rowType) return undefined;
+  if (source.startsWith("/") || source.includes("\\") || source.split("/").includes("..")
+    || !/^[A-Za-z0-9._/-]+$/.test(source)) return undefined;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/.test(table)) return undefined;
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(rowType)) return undefined;
+  return { source, table, rowType };
 }
 
 function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersistenceNode | undefined {

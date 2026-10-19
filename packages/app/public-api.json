@@ -489,6 +489,11 @@
       "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: never[]) => T;\n    deps?: ProviderDep[];\n}"
     },
     {
+      "name": "FeatureDatabaseSourceOptions",
+      "kind": "type",
+      "signature": "export interface FeatureDatabaseSourceOptions {\n    source: string;\n    table: string;\n    rowType: string;\n}"
+    },
+    {
       "name": "FeatureEvent",
       "kind": "type",
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
@@ -511,7 +516,7 @@
     {
       "name": "FeatureSpecOptions",
       "kind": "type",
-      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    tenantField?: string;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
+      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    database?: FeatureDatabaseSourceOptions;\n    tenantField?: string;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
     },
     {
       "name": "FeatureState",
