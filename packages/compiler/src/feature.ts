@@ -163,6 +163,23 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         }
       }
     }
+    const declaredTags = module
+      ? new Set(module.controllers.flatMap((controller) =>
+        controller.routes.flatMap((route) => route.tags ?? [])))
+      : new Set<string>();
+    if (transition.persistence?.boundary === "database" && declaredTags.size > 0
+      && transition.invalidateTags === undefined) {
+      error("feature-invalidation-tags-required",
+        `Database transition ${transition.name} must declare invalidateTags when Feature ${spec.name} exposes query tags.`);
+    }
+    if (transition.invalidateTags !== undefined && declaredTags.size > 0) {
+      for (const tag of transition.invalidateTags) {
+        if (!declaredTags.has(tag)) {
+          error("feature-invalidation-tag-unresolved",
+            `Transition ${transition.name} invalidates '${tag}', but Feature ${spec.name} does not declare that query tag.`);
+        }
+      }
+    }
     if (transition.route) {
       const routes = module.controllers.flatMap((controller) => controller.routes.filter((route) =>
         `${route.method} ${joinRoutePaths(controller.path, route.path)}` === transition.route));
@@ -173,18 +190,6 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         error("feature-route-drift", `Route ${transition.route} is not bound to ${command.className}.`);
       } else if (transition.routeBinding === "controller" && routes[0]?.command !== undefined) {
         error("feature-route-drift", `Controller-bound route ${transition.route} must not also declare a framework command binding.`);
-      }
-      if (transition.invalidateTags !== undefined) {
-        const declaredTags = new Set(module.controllers.flatMap((controller) =>
-          controller.routes.flatMap((route) => route.tags ?? [])));
-        if (declaredTags.size > 0) {
-          for (const tag of transition.invalidateTags) {
-            if (!declaredTags.has(tag)) {
-              error("feature-invalidation-tag-unresolved",
-                `Transition ${transition.name} invalidates '${tag}', but Feature ${spec.name} does not declare that query tag.`);
-            }
-          }
-        }
       }
     }
   }
