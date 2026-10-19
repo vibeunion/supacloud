@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.3",
+    "@supabase/supabase-js": "^2.118.0",
     "elysia": "2.0.0-beta.32",
     "es-module-lexer": "3.0.4",
     "exact-mirror": "1.2.6",
