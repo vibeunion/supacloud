@@ -150,6 +150,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC6126](SC6126.md) | `feature-invalidation-tags-required` | compiler |
 | [SC6127](SC6127.md) | `feature-tenant-boundary-drift` | compiler |
 | [SC6129](SC6129.md) | `feature-job-provider-unresolved` | compiler |
+| [SC6130](SC6130.md) | `feature-query-provider-unresolved` | compiler |
 | [SC8101](SC8101.md) | `duplicate-resource` | compiler |
 | [SC8102](SC8102.md) | `unknown-resource` | compiler |
 | [SC8103](SC8103.md) | `undeclared-resource-use` | compiler |

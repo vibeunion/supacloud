@@ -511,6 +511,10 @@ export const value: number = "wrong";`,
 class CaseModule {}
 // The Feature transition references RefreshCaseJob, but the module does not
 // register it as a runtime provider.`,
+  SC6130: `@Module({ name: "case", providers: [] })
+class CaseModule {}
+// The Feature query references ListCaseQuery, but the module does not
+// register it as a runtime provider.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],
