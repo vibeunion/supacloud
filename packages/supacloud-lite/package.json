@@ -39,7 +39,7 @@
     "clean": "bun -e 'import { $ } from \"bun\"; await $`rm -rf dist`'",
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",
-    "test": "bun test --timeout 20000",
+    "test": "bun run scripts/run-tests.ts",
     "test:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun test test/native-engine.test.ts test/qauth-workflow-matrix.test.ts test/maker-checker-workflow.test.ts test/commands-artifacts.test.ts --timeout 180000",
     "test:graphql": "SUPACLOUD_LITE_TEST_GRAPHQL=1 bun test test/graphql-native.test.ts --timeout 180000",
     "benchmark": "bun run scripts/benchmark.ts",
