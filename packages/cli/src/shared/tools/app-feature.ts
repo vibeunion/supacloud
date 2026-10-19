@@ -65,11 +65,13 @@ export const ${className}QueryTags = {
     list: ${JSON.stringify(`${name}.list`)},
     detail: ${JSON.stringify(`${name}.detail`)},
     receipt: ${JSON.stringify(`${name}.receipt`)},
+    jobStatus: ${JSON.stringify(`${name}.job-status`)},
 } as const;
 export const ${className}ApproveInvalidateTags = [
     ${className}QueryTags.list,
     ${className}QueryTags.detail,
     ${className}QueryTags.receipt,
+    ${className}QueryTags.jobStatus,
 ] as const;
 export const ${className}ListResponse = t.Array(${className}Row);
 export const ${className}RefreshInput = t.Object({
@@ -244,6 +246,7 @@ export const featureSpec = defineFeatureSpec({
                 ${JSON.stringify(`${name}.list`)},
                 ${JSON.stringify(`${name}.detail`)},
                 ${JSON.stringify(`${name}.receipt`)},
+                ${JSON.stringify(`${name}.job-status`)},
             ],
             persistence: {
                 boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",

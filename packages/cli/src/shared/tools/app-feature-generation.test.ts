@@ -196,7 +196,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(contractsManifest.features?.[0]?.transitions?.[0]?.jobDetails?.input)
         .toBe("CaseApprovalRefreshInput");
     expect(contractsManifest.features?.[0]?.transitions?.[0]?.invalidateTags)
-        .toEqual(["case-approval.list", "case-approval.detail", "case-approval.receipt"]);
+        .toEqual(["case-approval.list", "case-approval.detail", "case-approval.receipt", "case-approval.job-status"]);
     const clientCompilation = await compileProject({
         ...options,
         generateClient: true,
