@@ -2847,11 +2847,15 @@ function failedDeployResult(
   logger.error("[EdgeFunction] Deploy failed", { ref: request.ref, slug: request.slug, error });
   // 仅保留已类型化的 AppError（如 ServiceUnavailableError）的 HTTP 状态与稳定错误码，
   // 避免把「依赖不可用」等可分类失败统一拍平成 500/"500"；普通 Error 不附加额外字段。
-  return {
+  const result: EdgeFunctionDeployResult = {
     success: false,
     error: error instanceof Error ? error.message : String(error),
-    ...(isAppError(error) ? { error_code: error.code, error_status: error.statusCode } : {}),
   };
+  if (isAppError(error)) {
+    if (error.code !== undefined) result.error_code = error.code;
+    result.error_status = error.statusCode;
+  }
+  return result;
 }
 
 async function deployLatestFunctionRelease(
