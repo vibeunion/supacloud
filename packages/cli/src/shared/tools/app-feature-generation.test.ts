@@ -144,6 +144,14 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('idempotency: "required",\n        effect:');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('code: "COMMAND_IDEMPOTENCY_CONFLICT"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('code: "FEATURE_OPERATION_RESULT_MISMATCH"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain("type CaseApprovalApproveError =");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('Effect.Effect<CaseApprovalResult, CaseApprovalApproveError, never>');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('invalidateTags: [\n                "case-approval.list",');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('"/:id/operations/:operationId"');

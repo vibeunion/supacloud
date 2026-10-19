@@ -239,6 +239,29 @@ export const featureSpec = defineFeatureSpec({
     },
 });
 export type ${className}State = FeatureState<typeof featureSpec>;
+type ${className}ListError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_NOT_FOUND" };
+type ${className}ApproveError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
+    | { readonly _tag: "VERSION_CONFLICT" }
+    | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+type ${className}ReceiptError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_NOT_FOUND" }
+    | { readonly _tag: "COMMAND_RECEIPT_INVALID" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+type ${className}JobStatusError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_NOT_FOUND" }
+    | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
 
 @Injectable({ scope: "request" })
 @Query({ name: "${name}.list", tenantScope: "required" })
@@ -300,9 +323,16 @@ export class ${className}Controller {
         query: ${className}ListQuery,
         tags: [${JSON.stringify(`${name}.list`)}],
         responses: { 200: ${className}ListResponse },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+            ],
+        },
     })
-    list(@Query("state") state?: ${className}State): Effect.Effect<${className}Result[], never, never> {
+    list(@Query("state") state?: ${className}State): Effect.Effect<${className}Result[], ${className}ListError, never> {
         return Effect.promise(() => this.listQuery.execute(state === undefined ? {} : { state }));
     }
 
@@ -310,9 +340,16 @@ export class ${className}Controller {
         params: ${className}Params,
         tags: [${JSON.stringify(`${name}.detail`)}],
         responses: { 200: ${className}Row },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+            ],
+        },
     })
-    detail(@Param("id") id: string): Effect.Effect<${className}Result, never, never> {
+    detail(@Param("id") id: string): Effect.Effect<${className}Result, ${className}ListError, never> {
         return Effect.promise(() => this.service.detail(id));
     }
 
@@ -322,12 +359,22 @@ export class ${className}Controller {
         responses: { 200: ${className}Row },
         command: Approve${className}Command,
         idempotency: "required",
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
+                { tag: "VERSION_CONFLICT", status: 409, code: "VERSION_CONFLICT" },
+                { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+                { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+            ],
+        },
     })
     approve(
         @Param("id") id: string,
         @Body() body: ${className}ApproveInput,
-    ): Effect.Effect<${className}Result, never, never> {
+    ): Effect.Effect<${className}Result, ${className}ApproveError, never> {
         return Effect.promise(() => this.approveCommand.execute(id, body));
     }
 
@@ -335,12 +382,21 @@ export class ${className}Controller {
         params: ${className}ReceiptParams,
         tags: [${JSON.stringify(`${name}.receipt`)}],
         responses: { 200: ${className}Receipt },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "COMMAND_RECEIPT_INVALID", status: 503, code: "COMMAND_RECEIPT_INVALID" },
+                { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+            ],
+        },
     })
     receipt(
         @Param("id") id: string,
         @Param("operationId") operationId: string,
-    ): Effect.Effect<${className}ReceiptResult, never, never> {
+    ): Effect.Effect<${className}ReceiptResult, ${className}ReceiptError, never> {
         return Effect.promise(() => this.service.receipt(id, operationId));
     }
 
@@ -348,12 +404,21 @@ export class ${className}Controller {
         params: ${className}ReceiptParams,
         tags: [${JSON.stringify(`${name}.job-status`)}],
         responses: { 200: ${className}JobStatus },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
+                { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+            ],
+        },
     })
     jobStatus(
         @Param("id") id: string,
         @Param("operationId") operationId: string,
-    ): Effect.Effect<${className}JobStatusResult, never, never> {
+    ): Effect.Effect<${className}JobStatusResult, ${className}JobStatusError, never> {
         return Effect.promise(() => this.service.jobStatus(id, operationId));
     }
 }
