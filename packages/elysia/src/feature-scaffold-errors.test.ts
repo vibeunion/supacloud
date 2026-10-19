@@ -48,7 +48,7 @@ beforeAll(async () => {
     compilerOptions: { experimentalDecorators: true },
   }));
   const files = featureScaffold("case-approval", "CaseApproval", {
-    permission: "cases:approve", rpc: "approveCase",
+    permission: "cases:approve", readPermission: "cases:read", rpc: "approveCase",
     database: { source: "db/schema.ts", table: "public.reviews", rowType: "ReviewRow" },
   });
   for (const suffix of ["contracts", "model", "service", "feature"]) {
