@@ -528,6 +528,20 @@ class CaseModule {}
   SC6134: `@Module({ name: "case", providers: [{ useClass: "ApproveCaseCommand", scope: "application" }] })
 class CaseModule {}
 // Feature Commands must be request-scoped.`,
+  SC6135: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  requiredAdapters: ["CaseReader"],
+  transitions: {},
+});
+// The Feature module must register a provider for every required adapter.`,
+  SC6136: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  requiredAdapters: ["CaseReader", "CaseReader"],
+  transitions: {},
+});
+// Adapter requirements must be unique identifier names.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

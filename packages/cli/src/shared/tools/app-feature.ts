@@ -236,6 +236,13 @@ export const featureSpec = defineFeatureSpec({
     states: ["draft", "approved"],
     database: ${JSON.stringify(database)},
     tenantField: "tenant_id",
+    requiredAdapters: [
+        "${className}Reader",
+        "${className}Writer",
+        "${className}Receipts",
+        "${className}JobStatuses",
+        "${className}Refresher",
+    ],
     transitions: {
         approve: {
             from: "draft", to: "approved", command: "Approve${className}Command",

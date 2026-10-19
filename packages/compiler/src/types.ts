@@ -419,6 +419,7 @@ export interface FeatureSpecNode {
   states: string[];
   database?: FeatureDatabaseSourceNode;
   tenantField?: string;
+  requiredAdapters?: string[];
   transitions: FeatureTransitionNode[];
   file?: string;
   line?: number;

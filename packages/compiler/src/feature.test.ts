@@ -73,6 +73,43 @@ describe("feature specs", () => {
       .toContain("feature-database-source-required");
   });
 
+  test("blocks required Feature adapters that are not registered", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      requiredAdapters: ["CaseReader", "CaseWriter"],
+      transitions: [],
+    };
+    expect(validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code))
+      .toContain("feature-adapter-unresolved");
+  });
+
+  test("accepts required Feature adapters registered by token or implementation", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      requiredAdapters: ["CaseReader", "CaseWriter"],
+      transitions: [],
+    };
+    const module: ModuleNode = {
+      ...baseModule(spec),
+      providers: [
+        ...baseModule(spec).providers,
+        {
+          token: "CaseReader", tokenKind: "injection-token", kind: "class",
+          useClass: "DatabaseCaseReader", scope: "request", deps: [],
+          exported: false, file: "case.adapter.ts", line: 1,
+        },
+        {
+          token: "CaseWriter", tokenKind: "injection-token", kind: "class",
+          useClass: "CaseWriter", scope: "request", deps: [],
+          exported: false, file: "case.adapter.ts", line: 2,
+        },
+      ],
+    };
+    expect(validateFeatureSpec(spec, module)).toEqual([]);
+  });
+
   test("lowers a colocated defineFeatureSlice into the application graph", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-feature-"));
     await writeFile(join(root, "feature.ts"), [

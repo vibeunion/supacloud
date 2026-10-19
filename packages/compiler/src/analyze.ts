@@ -1058,6 +1058,7 @@ function parseFeatureSpec(
     : undefined;
   if (databaseExpr !== undefined && database === undefined) return invalid();
   const tenantField = stringLiteralProp(input, "tenantField");
+  const requiredAdaptersExpr = getProp(input, "requiredAdapters");
   const statesExpr = getProp(input, "states");
   const transitionObject = getProp(input, "transitions");
   if (!name || !statesExpr || !ts.isArrayLiteralExpression(statesExpr) ||
@@ -1066,6 +1067,13 @@ function parseFeatureSpec(
     input.properties.some((property) => !ts.isPropertyAssignment(property))) {
     return invalid();
   }
+  const requiredAdapters = requiredAdaptersExpr === undefined
+    ? undefined
+    : ts.isArrayLiteralExpression(requiredAdaptersExpr)
+      && requiredAdaptersExpr.elements.every((element) => ts.isStringLiteral(element) && element.text.trim().length > 0)
+      ? requiredAdaptersExpr.elements.map((element) => (element as ts.StringLiteral).text)
+      : undefined;
+  if (requiredAdaptersExpr !== undefined && requiredAdapters === undefined) return invalid();
   const states: string[] = [];
   for (const state of statesExpr.elements) {
     if (!ts.isStringLiteral(state)) return invalid();
@@ -1123,6 +1131,7 @@ function parseFeatureSpec(
     name, states,
     ...(database === undefined ? {} : { database }),
     ...(tenantField === undefined ? {} : { tenantField }),
+    ...(requiredAdapters === undefined ? {} : { requiredAdapters }),
     transitions,
     file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input),
   };

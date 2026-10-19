@@ -26,6 +26,13 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
   if (spec.tenantField !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(spec.tenantField)) {
     error("feature-tenant-boundary-invalid", `Feature ${spec.name} declares an unsafe tenant field.`);
   }
+  if (spec.requiredAdapters !== undefined) {
+    if (spec.requiredAdapters.length === 0 || spec.requiredAdapters.some((token) => !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(token))
+      || new Set(spec.requiredAdapters).size !== spec.requiredAdapters.length) {
+      error("feature-adapter-requirements-invalid",
+        `Feature ${spec.name} must declare unique, non-empty adapter token identifiers.`);
+    }
+  }
   const databaseTransition = spec.transitions.some((transition) => transition.persistence?.boundary === "database");
   if (databaseTransition && spec.database === undefined && spec.file !== undefined) {
     error("feature-database-source-required",
@@ -45,6 +52,16 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     }
   }
   const names = new Set<string>();
+  if (module && spec.requiredAdapters !== undefined) {
+    for (const token of spec.requiredAdapters) {
+      const provider = module.providers.find((candidate) =>
+        candidate.token === token || candidate.useClass === token);
+      if (!provider) {
+        error("feature-adapter-unresolved",
+          `Feature ${spec.name} requires adapter ${token}, but module ${module.name} does not register a provider for it.`);
+      }
+    }
+  }
   for (const transition of spec.transitions) {
     if (!transition.name.trim() || names.has(transition.name)) {
       error("duplicate-feature-transition", `Feature ${spec.name} has duplicate/empty transition '${transition.name}'.`);
