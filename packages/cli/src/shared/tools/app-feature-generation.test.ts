@@ -150,6 +150,10 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureSource).toContain('@Query({ name: "case-approval.detail", tenantScope: "required" })');
     expect(featureSource).toContain('@Query({ name: "case-approval.receipt", tenantScope: "required" })');
     expect(featureSource).toContain('@Query({ name: "case-approval.job-status", tenantScope: "required" })');
+    expect(featureSource).toContain("DetailCaseApprovalQuery");
+    expect(featureSource).toContain("ReceiptCaseApprovalQuery");
+    expect(featureSource).toContain("JobStatusCaseApprovalQuery");
+    expect(featureSource).toContain("providers: [");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('idempotency: "required",\n        effect:');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
