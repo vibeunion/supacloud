@@ -179,10 +179,10 @@ function validFeatureInventory(
           && feature["tenantField"] !== persistence["tenantField"]) return false;
       }
       const commandName = transition["command"];
+      const command = commandName === undefined ? undefined : commands.find((candidate) =>
+        isRecord(candidate) && (candidate["name"] === commandName || candidate["className"] === commandName),
+      );
       if (commandName !== undefined) {
-        const command = commands.find((candidate) =>
-          isRecord(candidate) && (candidate["name"] === commandName || candidate["className"] === commandName),
-        );
         if (!isRecord(command)) return false;
         if (transition["permission"] !== undefined && command["permission"] !== transition["permission"]) return false;
         if (transition["transaction"] !== undefined && command["transaction"] !== transition["transaction"]) return false;
