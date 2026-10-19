@@ -514,6 +514,11 @@
       "signature": "export interface FeatureOperationPort<Output> {\n    lookup(context: FeatureRequestContext, input: FeatureOperationLookupInput): Promise<Output>;\n}"
     },
     {
+      "name": "FeatureOperationResult",
+      "kind": "type",
+      "signature": "export interface FeatureOperationResult {\n    readonly operationId: string;\n}"
+    },
+    {
       "name": "FeaturePersistenceOptions",
       "kind": "type",
       "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
@@ -1262,6 +1267,11 @@
       "name": "REQUEST_CONTEXT",
       "kind": "value",
       "signature": "export declare const REQUEST_CONTEXT: any;"
+    },
+    {
+      "name": "requireFeatureOperationResult",
+      "kind": "value",
+      "signature": "export declare function requireFeatureOperationResult<T extends FeatureOperationResult>(input: FeatureOperationLookupInput, value: unknown): T;"
     },
     {
       "name": "requireFeatureRequestContext",

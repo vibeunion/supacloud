@@ -19,6 +19,21 @@ export interface FeatureOperationLookupInput {
   readonly operationId: string;
 }
 
+export interface FeatureOperationResult {
+  readonly operationId: string;
+}
+
+export function requireFeatureOperationResult<T extends FeatureOperationResult>(
+  input: FeatureOperationLookupInput,
+  value: unknown,
+): T {
+  if (value === null || typeof value !== "object" || Array.isArray(value)
+    || !("operationId" in value) || value.operationId !== input.operationId) {
+    throw new Error("FEATURE_OPERATION_RESULT_MISMATCH");
+  }
+  return value as T;
+}
+
 /**
  * Read-only operation state owned by the application's durable command or
  * workflow adapter. The framework supplies the trusted request context.

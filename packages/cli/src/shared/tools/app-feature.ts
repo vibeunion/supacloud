@@ -122,7 +122,8 @@ export const ${className}Refresher = new InjectionToken<${className}RefreshPort>
 );
 `,
         [`${name}.service.ts`]: `import {
-    Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureRequestContext,
+    Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
+    requireFeatureRequestContext,
     type FeatureRequestContext,
 } from "@supacloud/app/core";
 import {
@@ -170,12 +171,14 @@ export class ${className}Service {
 
     async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
         if (!this.receipts) throw new Error("Bind ${className}Receipts with durable receipt lookup");
-        return this.receipts.lookup(this.context(), { id, operationId });
+        const input = { id, operationId };
+        return requireFeatureOperationResult(input, await this.receipts.lookup(this.context(), input));
     }
 
     async jobStatus(id: string, operationId: string): Promise<${className}JobStatusResult> {
         if (!this.jobStatuses) throw new Error("Bind ${className}JobStatuses with the existing Workflow/Queue status adapter");
-        return this.jobStatuses.lookup(this.context(), { id, operationId });
+        const input = { id, operationId };
+        return requireFeatureOperationResult(input, await this.jobStatuses.lookup(this.context(), input));
     }
 }
 `,
@@ -428,6 +431,20 @@ test("${name} forwards the authoritative version and result without inventing pe
         },
     });
     expect(await service.approve(${className}Fixture.id, ${className}Fixture.approve)).toBe(row);
+});
+
+test("${name} rejects operation lookup results for a different operation", async () => {
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
+        lookup: async () => ({
+            operationId: "foreign-operation", status: "confirmed", state: "approved", version: 2,
+        }),
+    }, {
+        lookup: async () => ({ operationId: "foreign-operation", status: "completed" }),
+    });
+    await expect(service.receipt("example", "operation-example"))
+        .rejects.toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
+    await expect(service.jobStatus("example", "operation-example"))
+        .rejects.toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
 });
 `,
         [`${name}.fixture.ts`]: `import type { ${className}ApproveInput, ${className}Result } from "./${name}.model";
