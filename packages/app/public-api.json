@@ -499,6 +499,21 @@
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
     },
     {
+      "name": "FeatureJobPort",
+      "kind": "type",
+      "signature": "export interface FeatureJobPort<Input, Output = void> {\n    run(context: FeatureRequestContext, input: Input): Promise<Output>;\n}"
+    },
+    {
+      "name": "FeatureOperationLookupInput",
+      "kind": "type",
+      "signature": "export interface FeatureOperationLookupInput {\n    readonly id: string;\n    readonly operationId: string;\n}"
+    },
+    {
+      "name": "FeatureOperationPort",
+      "kind": "type",
+      "signature": "export interface FeatureOperationPort<Output> {\n    lookup(context: FeatureRequestContext, input: FeatureOperationLookupInput): Promise<Output>;\n}"
+    },
+    {
       "name": "FeaturePersistenceOptions",
       "kind": "type",
       "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"

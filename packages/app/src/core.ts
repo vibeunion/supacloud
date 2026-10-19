@@ -28,7 +28,9 @@ export type {
   FeatureEvent,
 } from "./module";
 export { requireFeatureRequestContext } from "./feature_context";
-export type { FeatureJobPort, FeatureRequestContext } from "./feature_context";
+export type {
+  FeatureJobPort, FeatureOperationLookupInput, FeatureOperationPort, FeatureRequestContext,
+} from "./feature_context";
 export { JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
 export { defineRouteHandler, defineRouteContract, defineTypedRoute } from "./route_contract";
 export type {

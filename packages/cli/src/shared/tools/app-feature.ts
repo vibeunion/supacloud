@@ -69,7 +69,7 @@ export const ${className}RefreshInput = t.Object({
 });
 `,
         [`${name}.model.ts`]: `import {
-    InjectionToken, type FeatureJobPort, type FeatureRequestContext,
+    InjectionToken, type FeatureJobPort, type FeatureOperationPort, type FeatureRequestContext,
 } from "@supacloud/app/core";
 import type {
     ${className}ApproveBody,
@@ -99,13 +99,9 @@ export interface ${className}WritePort {
     approve(context: FeatureRequestContext, input: ${className}ApproveCommand): Promise<${className}Result>;
 }
 
-export interface ${className}ReceiptPort {
-    lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}ReceiptResult>;
-}
+export interface ${className}ReceiptPort extends FeatureOperationPort<${className}ReceiptResult> {}
 
-export interface ${className}JobStatusPort {
-    lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}JobStatusResult>;
-}
+export interface ${className}JobStatusPort extends FeatureOperationPort<${className}JobStatusResult> {}
 
 export interface ${className}RefreshPort extends FeatureJobPort<${className}RefreshJobInput> {}
 

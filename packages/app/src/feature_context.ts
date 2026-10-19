@@ -14,6 +14,19 @@ export interface FeatureJobPort<Input, Output = void> {
   run(context: FeatureRequestContext, input: Input): Promise<Output>;
 }
 
+export interface FeatureOperationLookupInput {
+  readonly id: string;
+  readonly operationId: string;
+}
+
+/**
+ * Read-only operation state owned by the application's durable command or
+ * workflow adapter. The framework supplies the trusted request context.
+ */
+export interface FeatureOperationPort<Output> {
+  lookup(context: FeatureRequestContext, input: FeatureOperationLookupInput): Promise<Output>;
+}
+
 interface RecordValue {
   readonly [key: string]: unknown;
 }
