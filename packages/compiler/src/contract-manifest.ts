@@ -155,6 +155,7 @@ export function buildContractManifest(
     for (const query of module.queries) {
       queries.push({
         name: query.name, className: query.className, module: module.name,
+        ...(query.permission === undefined ? {} : { permission: query.permission }),
         ...(query.tenantScope === undefined ? {} : { tenantScope: query.tenantScope }),
       });
     }

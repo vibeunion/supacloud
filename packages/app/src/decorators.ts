@@ -201,6 +201,7 @@ export type CommandMeta = Omit<CommandOptions, "transaction" | "idempotency"> & 
 
 export interface QueryOptions {
   name: string;
+  permission?: string;
   tenantScope?: "required" | "none";
 }
 

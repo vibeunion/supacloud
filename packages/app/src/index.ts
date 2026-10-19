@@ -190,7 +190,8 @@ export type {
 } from "./feature_context";
 export {
   FeatureAdapterError, FeatureContextError, FeatureEntityError, FeatureJobOperationError, FeatureOperationError,
-  FeatureTransitionError, FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult,
+  FeaturePermissionError, FeatureTransitionError, FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult,
+  requireFeaturePermission,
   requireFeatureTransitionResult,
 } from "./feature_context";
 export {

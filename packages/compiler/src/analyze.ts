@@ -988,10 +988,12 @@ function parseModule(
     if (queryDec) {
       const meta = decoratorObjectArg(queryDec);
       if (meta) {
+        const permission = stringLiteralProp(meta, "permission");
         const tenantScope = commandModeProp(meta, "tenantScope");
         queries.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
+          ...(permission === undefined ? {} : { permission }),
           ...(tenantScope === undefined ? {} : { tenantScope }),
         });
       }
@@ -1058,6 +1060,7 @@ function parseFeatureSpec(
     : undefined;
   if (databaseExpr !== undefined && database === undefined) return invalid();
   const tenantField = stringLiteralProp(input, "tenantField");
+  const readPermission = stringLiteralProp(input, "readPermission");
   const requiredAdaptersExpr = getProp(input, "requiredAdapters");
   const requiredAdapterScopesExpr = getProp(input, "requiredAdapterScopes");
   const statesExpr = getProp(input, "states");
@@ -1144,6 +1147,7 @@ function parseFeatureSpec(
     name, states,
     ...(database === undefined ? {} : { database }),
     ...(tenantField === undefined ? {} : { tenantField }),
+    ...(readPermission === undefined ? {} : { readPermission }),
     ...(requiredAdapters === undefined ? {} : { requiredAdapters }),
     ...(requiredAdapterScopes === undefined ? {} : { requiredAdapterScopes }),
     transitions,

@@ -377,6 +377,7 @@ export interface JobNode {
 export interface QueryNode {
   className: string;
   name: string;
+  permission?: string;
   tenantScope?: "required" | "none";
 }
 
@@ -403,6 +404,7 @@ export interface FeaturePersistenceNode {
   optimisticLock: "required" | "none";
   versionField?: string;
   tenantField?: string;
+  readPermission?: string;
   stateField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";

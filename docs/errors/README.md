@@ -158,6 +158,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC6135](SC6135.md) | `feature-adapter-unresolved` | compiler |
 | [SC6136](SC6136.md) | `feature-adapter-requirements-invalid` | compiler |
 | [SC6137](SC6137.md) | `feature-adapter-provider-scope` | compiler |
+| [SC6138](SC6138.md) | `feature-query-permission` | compiler |
 | [SC8101](SC8101.md) | `duplicate-resource` | compiler |
 | [SC8102](SC8102.md) | `unknown-resource` | compiler |
 | [SC8103](SC8103.md) | `undeclared-resource-use` | compiler |

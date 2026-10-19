@@ -137,6 +137,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         if (query.tenantScope !== "required") {
           error("feature-query-tenant-boundary", `Query ${query.className} in Feature ${spec.name} must declare tenantScope: "required".`);
         }
+        if (spec.readPermission !== undefined && query.permission !== spec.readPermission) {
+          error("feature-query-permission", `Query ${query.className} in Feature ${spec.name} must declare read permission '${spec.readPermission}'.`);
+        }
       }
       for (const job of module.jobs ?? []) {
         if (job.tenantScope !== "required") {
