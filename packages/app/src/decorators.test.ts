@@ -269,6 +269,18 @@ describe("@Command / @Query", () => {
 });
 
 describe("@Controller and route decorators", () => {
+  test("collects routes when standard decorators pass the method context object", () => {
+    class StandardController {
+      list() {}
+    }
+    const routeDecorator = Get("/", { effect: { required: true } });
+    routeDecorator(StandardController.prototype.list, { kind: "method", name: "list" } as never);
+    Controller("/cases")(StandardController);
+    expect(getRoutes(StandardController)).toEqual([
+      expect.objectContaining({ method: "GET", path: "/", handler: "list", effect: { required: true } }),
+    ]);
+  });
+
   test("accumulates routes in declaration order", () => {
     const CreateCaseInput = { type: "object" };
 
