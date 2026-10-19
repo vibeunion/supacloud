@@ -98,9 +98,35 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
     }
 });
 
-async function generatedFixture() {
+async function generatedFixture(options: { bindAdapters?: boolean } = { bindAdapters: true }) {
     const root = await fixture();
     expect((await runAppTool({ ...feature, root })).isError).toBe(false);
+    if (options.bindAdapters) {
+        const featurePath = join(root, "src/features/case-approval/case-approval.feature.ts");
+        const source = await readFile(featurePath, "utf8");
+        const bound = source
+            .replace(
+                'import { CaseApprovalRefresher } from "./case-approval.model";',
+                [
+                    'import {',
+                    '    CaseApprovalJobStatuses, CaseApprovalReader, CaseApprovalReceipts,',
+                    '    CaseApprovalRefresher, CaseApprovalWriter,',
+                    '} from "./case-approval.model";',
+                ].join("\n"),
+            )
+            .replace(
+                "        CaseApprovalService,",
+                [
+                    "        CaseApprovalService,",
+                    "        { provide: CaseApprovalReader, useValue: {} },",
+                    "        { provide: CaseApprovalWriter, useValue: {} },",
+                    "        { provide: CaseApprovalReceipts, useValue: {} },",
+                    "        { provide: CaseApprovalJobStatuses, useValue: {} },",
+                    "        { provide: CaseApprovalRefresher, useValue: {} },",
+                ].join("\n"),
+            );
+        await writeFile(featurePath, bound);
+    }
     await mkdir(join(root, "db"), { recursive: true });
     await writeFile(join(root, "db/schema.ts"), "export type ReviewRow = { id: string; state: string; version: number };\n");
     await symlink(join(import.meta.dir, "../../../node_modules"), join(root, "node_modules"), "dir");
@@ -145,6 +171,8 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(contractsSource).toContain("export type CaseApprovalDatabaseRow = ReviewRow;");
     expect(contractsSource).toContain("Transport projection; the business result type is derived from the database source");
     expect(featureSource).toContain('tenantField: "tenant_id"');
+    expect(featureSource).toContain('"CaseApprovalReader"');
+    expect(featureSource).toContain('"CaseApprovalRefresher"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
     expect(featureSource).toContain('@Query({ name: "case-approval.detail", tenantScope: "required" })');
@@ -234,6 +262,19 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(missingAdapter.written).toEqual([]);
     expect(await readFile(factoryPath, "utf8")).toBe(before);
 // Three cold compiles on a CI runner can exceed 30s; let the assertions decide.
+}, { timeout: 120_000 });
+
+test("the generated approval blocks missing adapter bindings at compile time", async () => {
+    const root = await generatedFixture({ bindAdapters: false });
+    const result = await compileProject({
+        rootDir: join(root, "src"), outDir: join(root, "generated"), strict: true,
+        commandCapabilities: {
+            requirePersistentAdapters: true, permission: true,
+            rpc: { approveCase: { boundary: "database", transaction: true, idempotency: true, audit: true } },
+        },
+    });
+    expect(result.diagnostics.filter(item => item.code === "feature-adapter-unresolved")).toHaveLength(5);
+    expect(result.written).toEqual([]);
 }, { timeout: 120_000 });
 
 test("the generated approval tests enforce read and write adapter boundaries", async () => {
