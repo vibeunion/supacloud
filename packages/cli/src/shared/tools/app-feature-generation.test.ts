@@ -137,7 +137,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect((featureModule?.featureSpec?.transitions[0] as { job?: string } | undefined)?.job)
         .toBe("case-approval.refresh");
     expect(featureModule?.commands[0]?.rpc).toBe("approveCase");
-    expect(featureModule?.queries).toHaveLength(1);
+    expect(featureModule?.queries).toHaveLength(4);
     const featureSource = await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8");
     expect(featureSource).toContain('database: {"source":"db/schema.ts","table":"public.reviews","rowType":"ReviewRow"}');
     const contractsSource = await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8");
@@ -147,6 +147,13 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureSource).toContain('tenantField: "tenant_id"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
+    expect(featureSource).toContain('@Query({ name: "case-approval.detail", tenantScope: "required" })');
+    expect(featureSource).toContain('@Query({ name: "case-approval.receipt", tenantScope: "required" })');
+    expect(featureSource).toContain('@Query({ name: "case-approval.job-status", tenantScope: "required" })');
+    expect(featureSource).toContain("DetailCaseApprovalQuery");
+    expect(featureSource).toContain("ReceiptCaseApprovalQuery");
+    expect(featureSource).toContain("JobStatusCaseApprovalQuery");
+    expect(featureSource).toContain("providers: [");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('idempotency: "required",\n        effect:');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))

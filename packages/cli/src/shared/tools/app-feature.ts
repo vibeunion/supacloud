@@ -301,6 +301,33 @@ export class List${className}Query {
 }
 
 @Injectable({ scope: "request" })
+@Query({ name: "${name}.detail", tenantScope: "required" })
+export class Detail${className}Query {
+    constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
+    execute(id: string): Promise<${className}Result> {
+        return this.service.detail(id);
+    }
+}
+
+@Injectable({ scope: "request" })
+@Query({ name: "${name}.receipt", tenantScope: "required" })
+export class Receipt${className}Query {
+    constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
+    execute(id: string, operationId: string): Promise<${className}ReceiptResult> {
+        return this.service.receipt(id, operationId);
+    }
+}
+
+@Injectable({ scope: "request" })
+@Query({ name: "${name}.job-status", tenantScope: "required" })
+export class JobStatus${className}Query {
+    constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
+    execute(id: string, operationId: string): Promise<${className}JobStatusResult> {
+        return this.service.jobStatus(id, operationId);
+    }
+}
+
+@Injectable({ scope: "request" })
 @Command({
     name: ${JSON.stringify(commandName)},
     permission: ${JSON.stringify(permission)},
@@ -341,8 +368,10 @@ export class Refresh${className}Job {
 export class ${className}Controller {
     constructor(
         @Inject(List${className}Query) private readonly listQuery: List${className}Query,
+        @Inject(Detail${className}Query) private readonly detailQuery: Detail${className}Query,
+        @Inject(Receipt${className}Query) private readonly receiptQuery: Receipt${className}Query,
+        @Inject(JobStatus${className}Query) private readonly jobStatusQuery: JobStatus${className}Query,
         @Inject(Approve${className}Command) private readonly approveCommand: Approve${className}Command,
-        @Inject(${className}Service) private readonly service: ${className}Service,
     ) {}
 
     @Get("/", {
@@ -380,7 +409,7 @@ export class ${className}Controller {
         },
     })
     detail(@Param("id") id: string): Effect.Effect<${className}Result, ${className}ListError, never> {
-        return Effect.promise(() => this.service.detail(id));
+        return Effect.promise(() => this.detailQuery.execute(id));
     }
 
     @Post("/:id/approve", {
@@ -433,7 +462,7 @@ export class ${className}Controller {
         @Param("id") id: string,
         @Param("operationId") operationId: string,
     ): Effect.Effect<${className}ReceiptResult, ${className}ReceiptError, never> {
-        return Effect.promise(() => this.service.receipt(id, operationId));
+        return Effect.promise(() => this.receiptQuery.execute(id, operationId));
     }
 
     @Get("/:id/operations/:operationId/status", {
@@ -457,7 +486,7 @@ export class ${className}Controller {
         @Param("id") id: string,
         @Param("operationId") operationId: string,
     ): Effect.Effect<${className}JobStatusResult, ${className}JobStatusError, never> {
-        return Effect.promise(() => this.service.jobStatus(id, operationId));
+        return Effect.promise(() => this.jobStatusQuery.execute(id, operationId));
     }
 }
 
@@ -465,7 +494,14 @@ export const ${className}Feature = defineFeatureSlice({
     name: ${JSON.stringify(name)},
     tags: ["type:feature"],
     spec: featureSpec,
-    providers: [${className}Service, List${className}Query, Approve${className}Command],
+    providers: [
+        ${className}Service,
+        List${className}Query,
+        Detail${className}Query,
+        Receipt${className}Query,
+        JobStatus${className}Query,
+        Approve${className}Command,
+    ],
     controllers: [${className}Controller],
     jobs: [Refresh${className}Job],
 });
