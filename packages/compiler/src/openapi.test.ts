@@ -462,7 +462,7 @@ export const OrderResponse = {
         ...graph,
         modules: graph.modules.map((module) => ({
           ...module,
-          controllers: module.controllers.map((controller) => ({
+          controllers: module.controllers.map((controller): typeof controller => ({
             ...controller,
             path: "/idempotency",
             schemaImports: { Result: "src/contracts", DomainError: "src/contracts" },
@@ -517,7 +517,7 @@ export const OrderResponse = {
         ...graph,
         modules: graph.modules.map((module) => ({
           ...module,
-          controllers: module.controllers.map((controller) => ({
+          controllers: module.controllers.map((controller): typeof controller => ({
             ...controller,
             path: "/idempotency",
             schemaImports: { ExactHeaders: "src/contracts", LowercaseHeaders: "src/contracts", DuplicateHeaders: "src/contracts" },
