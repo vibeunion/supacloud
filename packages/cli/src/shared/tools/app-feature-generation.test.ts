@@ -170,7 +170,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalApproveInvalidateTags");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
-        .toContain("requireFeatureRequestContext(this.jobContext)");
+        .toContain("requireFeatureJobContext(this.jobContext, input.operationId)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("input: CaseApprovalRefreshInput");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))

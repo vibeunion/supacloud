@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import {
-  FeatureContextError, FeatureEntityError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
-  requireFeatureOperationResult, requireFeatureRequestContext, requireFeatureTransitionResult,
+  FeatureContextError, FeatureEntityError, FeatureJobOperationError, FeatureOperationError, FeatureTransitionError,
+  FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult, requireFeatureRequestContext,
+  requireFeatureTransitionResult,
 } from "./feature_context";
 
 test("normalizes the trusted identity and tenant context", () => {
@@ -67,4 +68,17 @@ test("requires a committed transition result to advance state and version", () =
   expect(() => requireFeatureTransitionResult("case-1", "approved", 1, {
     state: "approved", version: 1,
   })).toThrow(FeatureEntityError);
+});
+
+test("binds a trusted job context to the submitted operation", () => {
+  const context = {
+    requestId: "request-1",
+    identity: { authenticated: true, subject: "actor-1" },
+    access: { tenantId: "tenant-1", permissions: ["case:approve"] },
+    idempotencyKey: "operation-1",
+  };
+  expect(requireFeatureJobContext(context, "operation-1")).toMatchObject({ idempotencyKey: "operation-1" });
+  expect(() => requireFeatureJobContext(context, "operation-2")).toThrow(FeatureJobOperationError);
+  expect(() => requireFeatureJobContext({ ...context, idempotencyKey: undefined }, "operation-1"))
+    .toThrow(FeatureJobOperationError);
 });

@@ -189,8 +189,9 @@ export type {
   FeatureJobPort, FeatureOperationLookupInput, FeatureOperationPort, FeatureOperationResult, FeatureRequestContext,
 } from "./feature_context";
 export {
-  FeatureAdapterError, FeatureContextError, FeatureEntityError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
-  requireFeatureOperationResult, requireFeatureTransitionResult,
+  FeatureAdapterError, FeatureContextError, FeatureEntityError, FeatureJobOperationError, FeatureOperationError,
+  FeatureTransitionError, FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult,
+  requireFeatureTransitionResult,
 } from "./feature_context";
 export {
   APP_INITIALIZER,

@@ -514,6 +514,11 @@
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
     },
     {
+      "name": "FeatureJobOperationError",
+      "kind": "both",
+      "signature": "export declare class FeatureJobOperationError extends Error {\n    readonly _tag: \"FEATURE_JOB_OPERATION_MISMATCH\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureJobPort",
       "kind": "type",
       "signature": "export interface FeatureJobPort<Input, Output = void> {\n    run(context: FeatureRequestContext, input: Input): Promise<Output>;\n}"
@@ -1297,6 +1302,11 @@
       "name": "REQUEST_CONTEXT",
       "kind": "value",
       "signature": "export declare const REQUEST_CONTEXT: any;"
+    },
+    {
+      "name": "requireFeatureJobContext",
+      "kind": "value",
+      "signature": "export declare function requireFeatureJobContext(value: unknown, operationId: string): FeatureRequestContext;"
     },
     {
       "name": "requireFeatureOperationResult",

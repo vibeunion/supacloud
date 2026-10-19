@@ -195,7 +195,7 @@ export class ${className}Service {
         [`${name}.feature.ts`]: `import { Effect } from "effect";
 import {
     Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, FeatureAdapterError, Get, Inject, JOB_CONTEXT,
-    Injectable, Job, Optional, Param, Post, Query, requireFeatureRequestContext, type FeatureRequestContext,
+    Injectable, Job, Optional, Param, Post, Query, requireFeatureJobContext, type FeatureRequestContext,
     type FeatureState,
 } from "@supacloud/app/core";
 import {
@@ -320,7 +320,7 @@ export class Refresh${className}Job {
     ) {}
 
     async run(input: ${className}RefreshJobInput): Promise<void> {
-        const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
+        const context: FeatureRequestContext = requireFeatureJobContext(this.jobContext, input.operationId);
         if (!this.refresher) throw new FeatureAdapterError("${name}.refresher");
         await this.refresher.run(context, input);
     }
@@ -462,7 +462,9 @@ export const ${className}Feature = defineFeatureSlice({
         [`${name}.feature.test.ts`]: `import { expect, test } from "bun:test";
 import { Refresh${className}Job } from "./${name}.feature";
 import { ${className}Service } from "./${name}.service";
-import { ${className}Fixture, ${className}RequestContext, ${className}RequestEnvelope } from "./${name}.fixture";
+import {
+    ${className}Fixture, ${className}JobRequestEnvelope, ${className}RequestContext, ${className}RequestEnvelope,
+} from "./${name}.fixture";
 
 test("${name} rejects missing trusted tenant context before adapter execution", async () => {
     let calls = 0;
@@ -480,9 +482,18 @@ test("${name} rejects missing trusted job context before dispatch", async () => 
         .rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
 });
 
+test("${name} rejects a job context correlated to a different operation", async () => {
+    const job = new Refresh${className}Job({
+        ...${className}RequestEnvelope,
+        idempotencyKey: "foreign-operation",
+    });
+    await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
+        .rejects.toMatchObject({ _tag: "FEATURE_JOB_OPERATION_MISMATCH" });
+});
+
 test("${name} runs the refresh adapter with trusted tenant context", async () => {
     let received: unknown;
-    const job = new Refresh${className}Job(${className}RequestEnvelope, {
+    const job = new Refresh${className}Job(${className}JobRequestEnvelope, {
         async run(context, input) {
             received = { context, input };
         },
@@ -490,7 +501,7 @@ test("${name} runs the refresh adapter with trusted tenant context", async () =>
     await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
         .resolves.toBeUndefined();
     expect(received).toEqual({
-        context: ${className}RequestContext,
+        context: { ...${className}RequestContext, idempotencyKey: "operation-example" },
         input: { id: "example", version: 1, operationId: "operation-example" },
     });
 });
@@ -626,6 +637,11 @@ export const ${className}RequestEnvelope = {
     ...${className}RequestContext,
     identity: { authenticated: true, subject: "reviewer-example" },
     access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}] },
+} as const satisfies Record<string, unknown>;
+
+export const ${className}JobRequestEnvelope = {
+    ...${className}RequestEnvelope,
+    idempotencyKey: "operation-example",
 } as const satisfies Record<string, unknown>;
 `,
         [`${name}.e2e.test.ts`]: `import { expect, test } from "bun:test";

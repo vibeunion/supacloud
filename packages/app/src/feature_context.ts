@@ -69,6 +69,15 @@ export class FeatureEntityError extends Error {
   }
 }
 
+export class FeatureJobOperationError extends Error {
+  readonly _tag = "FEATURE_JOB_OPERATION_MISMATCH" as const;
+
+  constructor() {
+    super("FEATURE_JOB_OPERATION_MISMATCH");
+    this.name = "FeatureJobOperationError";
+  }
+}
+
 export class FeatureOperationError extends Error {
   readonly _tag = "FEATURE_OPERATION_RESULT_MISMATCH" as const;
 
@@ -110,6 +119,17 @@ export function requireFeatureTransitionResult<
     throw new FeatureVersionError();
   }
   return value as T;
+}
+
+export function requireFeatureJobContext(
+  value: unknown,
+  operationId: string,
+): FeatureRequestContext {
+  const context = requireFeatureRequestContext(value);
+  if (!context.idempotencyKey || context.idempotencyKey !== operationId) {
+    throw new FeatureJobOperationError();
+  }
+  return context;
 }
 
 /**
