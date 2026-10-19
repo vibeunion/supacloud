@@ -31,7 +31,9 @@ export { requireFeatureRequestContext } from "./feature_context";
 export type {
   FeatureJobPort, FeatureOperationLookupInput, FeatureOperationPort, FeatureOperationResult, FeatureRequestContext,
 } from "./feature_context";
-export { FeatureOperationError, requireFeatureOperationResult } from "./feature_context";
+export {
+  FeatureAdapterError, FeatureContextError, FeatureOperationError, requireFeatureOperationResult,
+} from "./feature_context";
 export { JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
 export { defineRouteHandler, defineRouteContract, defineTypedRoute } from "./route_contract";
 export type {

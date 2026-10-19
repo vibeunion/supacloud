@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Context, Effect, Layer } from "effect";
 import { Elysia } from "elysia";
-import { FeatureOperationError } from "@supacloud/app";
+import { FeatureAdapterError, FeatureContextError, FeatureOperationError } from "@supacloud/app";
 import { ApplicationError, createApplication, createModulePlugin } from "./index";
 import { createDefaultEffectRuntime, createEffectRuntimeFromLayer, runCompiledEffect } from "./effect";
 import type { CompiledModule } from "./index";
@@ -43,6 +43,25 @@ test("maps framework Feature operation errors through the declared route contrac
     code: "FEATURE_OPERATION_RESULT_MISMATCH",
     expose: true,
   });
+});
+
+test("maps framework Feature setup errors through the declared route contract", async () => {
+  for (const error of [new FeatureContextError(), new FeatureAdapterError("case-approval.reader")]) {
+    await expect(runCompiledEffect(
+      Effect.fail(error),
+      {
+        required: true,
+        errors: [
+          { tag: "FEATURE_CONTEXT_REQUIRED", status: 500, code: "FEATURE_CONTEXT_REQUIRED" },
+          { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+        ],
+      },
+    )).rejects.toMatchObject({
+      status: error instanceof FeatureContextError ? 500 : 503,
+      code: error._tag,
+      expose: true,
+    });
+  }
 });
 
 test("maps defect failures from the Effect 4 exit cause", async () => {

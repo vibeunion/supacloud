@@ -489,6 +489,16 @@
       "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: never[]) => T;\n    deps?: ProviderDep[];\n}"
     },
     {
+      "name": "FeatureAdapterError",
+      "kind": "both",
+      "signature": "export declare class FeatureAdapterError extends Error {\n    readonly adapter: string;\n    readonly _tag: \"FEATURE_ADAPTER_UNAVAILABLE\";\n    constructor(adapter: string);\n}"
+    },
+    {
+      "name": "FeatureContextError",
+      "kind": "both",
+      "signature": "export declare class FeatureContextError extends Error {\n    readonly _tag: \"FEATURE_CONTEXT_REQUIRED\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureDatabaseSourceOptions",
       "kind": "type",
       "signature": "export interface FeatureDatabaseSourceOptions {\n    source: string;\n    table: string;\n    rowType: string;\n}"

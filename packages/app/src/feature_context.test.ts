@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { FeatureOperationError, requireFeatureOperationResult, requireFeatureRequestContext } from "./feature_context";
+import {
+  FeatureContextError, FeatureOperationError, requireFeatureOperationResult, requireFeatureRequestContext,
+} from "./feature_context";
 
 test("normalizes the trusted identity and tenant context", () => {
   const context = requireFeatureRequestContext({
@@ -33,6 +35,7 @@ test("rejects missing or untrusted tenant context", () => {
       idempotencyKey: 42,
     },
   ]) {
+    expect(() => requireFeatureRequestContext(value)).toThrow(FeatureContextError);
     expect(() => requireFeatureRequestContext(value)).toThrow("FEATURE_CONTEXT_REQUIRED");
   }
 });

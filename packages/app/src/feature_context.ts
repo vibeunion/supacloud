@@ -24,6 +24,24 @@ export interface FeatureOperationResult {
   readonly operationId: string;
 }
 
+export class FeatureContextError extends Error {
+  readonly _tag = "FEATURE_CONTEXT_REQUIRED" as const;
+
+  constructor() {
+    super("FEATURE_CONTEXT_REQUIRED");
+    this.name = "FeatureContextError";
+  }
+}
+
+export class FeatureAdapterError extends Error {
+  readonly _tag = "FEATURE_ADAPTER_UNAVAILABLE" as const;
+
+  constructor(readonly adapter: string) {
+    super(`FEATURE_ADAPTER_UNAVAILABLE:${adapter}`);
+    this.name = "FeatureAdapterError";
+  }
+}
+
 export class FeatureOperationError extends Error {
   readonly _tag = "FEATURE_OPERATION_RESULT_MISMATCH" as const;
 
@@ -93,9 +111,7 @@ export function requireFeatureRequestContext(value: unknown): FeatureRequestCont
     || normalizedPermissions.length !== permissionValues.length
     || (idempotencyKey !== undefined && !nonEmptyString(idempotencyKey))
   ) {
-    throw Object.assign(new Error("FEATURE_CONTEXT_REQUIRED"), {
-      _tag: "FEATURE_CONTEXT_REQUIRED" as const,
-    });
+    throw new FeatureContextError();
   }
   return Object.freeze({
     requestId,

@@ -125,7 +125,7 @@ export const ${className}Refresher = new InjectionToken<${className}RefreshPort>
 );
 `,
         [`${name}.service.ts`]: `import {
-    Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
+    FeatureAdapterError, Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
     requireFeatureRequestContext,
     type FeatureRequestContext,
 } from "@supacloud/app/core";
@@ -158,29 +158,29 @@ export class ${className}Service {
     }
 
     async list(input: Parameters<${className}ReadPort["list"]>[1]): Promise<${className}Result[]> {
-        if (!this.reader) throw new Error("Bind ${className}Reader with verified identity and tenant scope");
+        if (!this.reader) throw new FeatureAdapterError("${name}.reader");
         return this.reader.list(this.context(), input);
     }
 
     async detail(id: string): Promise<${className}Result> {
-        if (!this.reader) throw new Error("Bind ${className}Reader with verified identity and tenant scope");
+        if (!this.reader) throw new FeatureAdapterError("${name}.reader");
         return this.reader.detail(this.context(), id);
     }
 
     async approve(id: string, input: ${className}ApproveInput): Promise<${className}Result> {
-        if (!this.writer) throw new Error("Bind ${className}Writer with durable command governance");
+        if (!this.writer) throw new FeatureAdapterError("${name}.writer");
         return this.writer.approve(this.context(), { ...input, id });
     }
 
     async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
-        if (!this.receipts) throw new Error("Bind ${className}Receipts with durable receipt lookup");
+        if (!this.receipts) throw new FeatureAdapterError("${name}.receipts");
         const input = { id, operationId };
         // Keep the comparison identity separate from mutable adapter arguments.
         return requireFeatureOperationResult(input, await this.receipts.lookup(this.context(), { ...input }));
     }
 
     async jobStatus(id: string, operationId: string): Promise<${className}JobStatusResult> {
-        if (!this.jobStatuses) throw new Error("Bind ${className}JobStatuses with the existing Workflow/Queue status adapter");
+        if (!this.jobStatuses) throw new FeatureAdapterError("${name}.job-statuses");
         const input = { id, operationId };
         // Keep the comparison identity separate from mutable adapter arguments.
         return requireFeatureOperationResult(input, await this.jobStatuses.lookup(this.context(), { ...input }));
@@ -189,7 +189,7 @@ export class ${className}Service {
 `,
         [`${name}.feature.ts`]: `import { Effect } from "effect";
 import {
-    Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, Get, Inject, JOB_CONTEXT,
+    Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, FeatureAdapterError, Get, Inject, JOB_CONTEXT,
     Injectable, Job, Optional, Param, Post, Query, requireFeatureRequestContext, type FeatureRequestContext,
     type FeatureState,
 } from "@supacloud/app/core";
@@ -245,7 +245,8 @@ type ${className}ListError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
     | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
-    | { readonly _tag: "FEATURE_NOT_FOUND" };
+    | { readonly _tag: "FEATURE_NOT_FOUND" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
 type ${className}ApproveError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
     | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
@@ -253,7 +254,8 @@ type ${className}ApproveError =
     | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
     | { readonly _tag: "VERSION_CONFLICT" }
     | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
-    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
 type ${className}ReceiptError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
     | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
@@ -261,14 +263,16 @@ type ${className}ReceiptError =
     | { readonly _tag: "FEATURE_NOT_FOUND" }
     | { readonly _tag: "COMMAND_RECEIPT_INVALID" }
     | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
-    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
 type ${className}JobStatusError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
     | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
     | { readonly _tag: "FEATURE_NOT_FOUND" }
     | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
-    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
 
 @Injectable({ scope: "request" })
 @Query({ name: "${name}.list", tenantScope: "required" })
@@ -311,9 +315,7 @@ export class Refresh${className}Job {
 
     async run(input: ${className}RefreshJobInput): Promise<void> {
         const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
-        if (!this.refresher) {
-            throw new Error("Bind ${className}Refresher with the business refresh adapter");
-        }
+        if (!this.refresher) throw new FeatureAdapterError("${name}.refresher");
         await this.refresher.run(context, input);
     }
 }
@@ -337,6 +339,7 @@ export class ${className}Controller {
                 { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
             ],
         },
     })
@@ -355,6 +358,7 @@ export class ${className}Controller {
                 { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
             ],
         },
     })
@@ -378,6 +382,7 @@ export class ${className}Controller {
                 { tag: "VERSION_CONFLICT", status: 409, code: "VERSION_CONFLICT" },
                 { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
                 { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
             ],
         },
     })
@@ -402,6 +407,7 @@ export class ${className}Controller {
                 { tag: "COMMAND_RECEIPT_INVALID", status: 503, code: "COMMAND_RECEIPT_INVALID" },
                 { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
                 { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
             ],
         },
     })
@@ -425,6 +431,7 @@ export class ${className}Controller {
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
                 { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
                 { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
             ],
         },
     })
