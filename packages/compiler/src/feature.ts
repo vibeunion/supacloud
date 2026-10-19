@@ -95,6 +95,12 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     if (!module) continue;
     if (transition.persistence?.boundary === "database") {
       for (const query of module.queries) {
+        const queryProvider = module.providers.find((provider) =>
+          provider.token === query.className || provider.useClass === query.className);
+        if (!queryProvider) {
+          error("feature-query-provider-unresolved",
+            `Feature query ${query.className} is not registered as a runtime provider in module ${module.name}.`);
+        }
         if (query.tenantScope !== "required") {
           error("feature-query-tenant-boundary", `Query ${query.className} in Feature ${spec.name} must declare tenantScope: "required".`);
         }
