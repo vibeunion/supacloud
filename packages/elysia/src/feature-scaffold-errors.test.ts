@@ -41,6 +41,10 @@ const identity = {
   requestId: "request", identity: { authenticated: true, subject: "actor" },
   access: { tenantId: "tenant", permissions: ["cases:approve", "cases:read"] },
 };
+const writeOnlyIdentity = {
+  requestId: "request", identity: { authenticated: true, subject: "actor" },
+  access: { tenantId: "tenant", permissions: ["cases:approve"] },
+};
 const row = { id: "case-1", state: "approved", version: 2 };
 const input: Input = { id: row.id, operationId: "operation-1" };
 
@@ -94,6 +98,28 @@ for (const method of ["list", "detail", "approve", "receipt", "jobStatus"] as co
     const instance = controller(undefined, async () => { calls++; return {}; }, undefined, () => { calls++; });
     await expect(run(instance, method)).rejects.toMatchObject({ status: 401, code: "AUTHENTICATION_REQUIRED" });
     expect(calls).toBe(0);
+  });
+}
+for (const method of ["list", "detail", "receipt", "jobStatus"] as const) {
+  test(`generated ${method} requires the explicit read permission`, async () => {
+    let calls = 0;
+    const instance = controller(writeOnlyIdentity, async () => { calls++; return row; });
+    await expect(run(instance, method)).rejects.toMatchObject({
+      status: 403,
+      code: "PERMISSION_DENIED",
+      message: "PERMISSION_DENIED",
+    });
+    expect(calls).toBe(0);
+  });
+  test(`generated ${method} accepts the explicit read permission`, async () => {
+    let calls = 0;
+    const instance = controller(identity, async () => { calls++; return method === "list" ? [row] : {
+      ...row,
+      ...input,
+      status: "unknown",
+    }; }, undefined, () => { calls++; });
+    await run(instance, method);
+    expect(calls).toBe(1);
   });
 }
 for (const method of ["receipt", "jobStatus"] as const) {
