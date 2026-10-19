@@ -258,8 +258,8 @@ describe("feature specs", () => {
       }],
       commands: [{
         className: "SubmitCommand", name: "case.submit", permission: "case.submit",
-        transaction: "none", idempotency: "required", audit: "case.submitted",
-        tenantScope: "required",
+        transaction: "none" as const, idempotency: "required" as const, audit: "case.submitted",
+        tenantScope: "required" as const,
       }],
     };
     expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
