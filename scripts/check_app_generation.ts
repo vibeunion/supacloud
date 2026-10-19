@@ -194,6 +194,9 @@ console.log("Built consumer factory: original and generated routes served togeth
 
     // Add the durable slice only after the original HTTP sandbox acceptance:
     // an unbound RPC must never acquire an automatic in-memory fallback.
+    await mkdir(join(project, "db"), { recursive: true });
+    await writeFile(join(project, "db/schema.ts"),
+        "export type ReviewRow = { id: string; state: string; version: number };\n");
     const featureGeneration = [
         cli, "app", "generate", "--kind", "feature", "--name", "case-approval",
         "--permission", "cases:approve", "--rpc", "approveCase",

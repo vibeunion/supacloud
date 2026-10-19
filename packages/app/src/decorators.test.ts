@@ -274,7 +274,9 @@ describe("@Controller and route decorators", () => {
       list() {}
     }
     const routeDecorator = Get("/", { effect: { required: true } });
-    routeDecorator(StandardController.prototype.list, { kind: "method", name: "list" } as never);
+    (routeDecorator as unknown as (value: unknown, context: unknown) => void)(
+      StandardController.prototype.list, { kind: "method", name: "list" },
+    );
     Controller("/cases")(StandardController);
     expect(getRoutes(StandardController)).toEqual([
       expect.objectContaining({ method: "GET", path: "/", handler: "list", effect: { required: true } }),
