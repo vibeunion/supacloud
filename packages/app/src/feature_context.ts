@@ -6,6 +6,14 @@ export interface FeatureRequestContext {
   readonly idempotencyKey?: string;
 }
 
+/**
+ * Business-owned work invoked by a compiler-emitted Feature Job.
+ * Queue leasing, retries, receipts and durable status remain host-owned.
+ */
+export interface FeatureJobPort<Input, Output = void> {
+  run(context: FeatureRequestContext, input: Input): Promise<Output>;
+}
+
 interface RecordValue {
   readonly [key: string]: unknown;
 }
