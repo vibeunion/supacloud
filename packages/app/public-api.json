@@ -559,9 +559,19 @@
       "signature": "export type FeatureState<Spec extends FeatureSpecOptions> = Spec[\"states\"][number];"
     },
     {
+      "name": "FeatureTransitionError",
+      "kind": "both",
+      "signature": "export declare class FeatureTransitionError extends Error {\n    readonly _tag: \"FEATURE_TRANSITION_CONFLICT\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureTransitionOptions",
       "kind": "type",
       "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    routeBinding?: \"command\" | \"controller\";\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    job?: string;\n    invalidateTags?: readonly string[];\n    persistence?: FeaturePersistenceOptions;\n}"
+    },
+    {
+      "name": "FeatureVersionError",
+      "kind": "both",
+      "signature": "export declare class FeatureVersionError extends Error {\n    readonly _tag: \"VERSION_CONFLICT\";\n    constructor();\n}"
     },
     {
       "name": "flattenProviders",
@@ -1292,6 +1302,11 @@
       "name": "requireFeatureRequestContext",
       "kind": "value",
       "signature": "export declare function requireFeatureRequestContext(value: unknown): FeatureRequestContext;"
+    },
+    {
+      "name": "requireFeatureTransitionResult",
+      "kind": "value",
+      "signature": "export declare function requireFeatureTransitionResult<T extends {\n    readonly state: string;\n    readonly version: number;\n}>(expectedState: string, expectedVersion: number, value: unknown): T;"
     },
     {
       "name": "Resolve",

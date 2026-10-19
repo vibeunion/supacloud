@@ -126,7 +126,7 @@ export const ${className}Refresher = new InjectionToken<${className}RefreshPort>
 `,
         [`${name}.service.ts`]: `import {
     FeatureAdapterError, Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
-    requireFeatureRequestContext,
+    requireFeatureRequestContext, requireFeatureTransitionResult,
     type FeatureRequestContext,
 } from "@supacloud/app/core";
 import {
@@ -169,7 +169,11 @@ export class ${className}Service {
 
     async approve(id: string, input: ${className}ApproveInput): Promise<${className}Result> {
         if (!this.writer) throw new FeatureAdapterError("${name}.writer");
-        return this.writer.approve(this.context(), { ...input, id });
+        return requireFeatureTransitionResult(
+            "approved",
+            input.expectedVersion,
+            await this.writer.approve(this.context(), { ...input, id }),
+        );
     }
 
     async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
@@ -522,6 +526,19 @@ test("${name} forwards the authoritative version and result without inventing pe
         },
     });
     expect(await service.approve(${className}Fixture.id, ${className}Fixture.approve)).toBe(row);
+});
+
+test("${name} rejects a writer result that does not prove the declared transition", async () => {
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, {
+        approve: async () => ({ id: "example", state: "draft", version: 2 }),
+    });
+    await expect(service.approve("example", { expectedVersion: 1 }))
+        .rejects.toMatchObject({ _tag: "FEATURE_TRANSITION_CONFLICT" });
+    const stale = new ${className}Service(${className}RequestEnvelope, undefined, {
+        approve: async () => ({ id: "example", state: "approved", version: 1 }),
+    });
+    await expect(stale.approve("example", { expectedVersion: 1 }))
+        .rejects.toMatchObject({ _tag: "VERSION_CONFLICT" });
 });
 
 test("${name} rejects operation lookup results for a different operation", async () => {

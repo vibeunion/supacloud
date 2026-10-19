@@ -42,6 +42,24 @@ export class FeatureAdapterError extends Error {
   }
 }
 
+export class FeatureTransitionError extends Error {
+  readonly _tag = "FEATURE_TRANSITION_CONFLICT" as const;
+
+  constructor() {
+    super("FEATURE_TRANSITION_CONFLICT");
+    this.name = "FeatureTransitionError";
+  }
+}
+
+export class FeatureVersionError extends Error {
+  readonly _tag = "VERSION_CONFLICT" as const;
+
+  constructor() {
+    super("VERSION_CONFLICT");
+    this.name = "FeatureVersionError";
+  }
+}
+
 export class FeatureOperationError extends Error {
   readonly _tag = "FEATURE_OPERATION_RESULT_MISMATCH" as const;
 
@@ -59,6 +77,22 @@ export function requireFeatureOperationResult<T extends FeatureOperationResult>(
     || !("id" in value) || value.id !== input.id
     || !("operationId" in value) || value.operationId !== input.operationId) {
     throw new FeatureOperationError();
+  }
+  return value as T;
+}
+
+export function requireFeatureTransitionResult<T extends { readonly state: string; readonly version: number }>(
+  expectedState: string,
+  expectedVersion: number,
+  value: unknown,
+): T {
+  if (value === null || typeof value !== "object" || Array.isArray(value)
+    || !("state" in value) || value.state !== expectedState) {
+    throw new FeatureTransitionError();
+  }
+  if (!("version" in value) || typeof value.version !== "number"
+    || !Number.isSafeInteger(value.version) || value.version <= expectedVersion) {
+    throw new FeatureVersionError();
   }
   return value as T;
 }

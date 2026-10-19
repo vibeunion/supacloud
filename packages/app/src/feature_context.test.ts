@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
-  FeatureContextError, FeatureOperationError, requireFeatureOperationResult, requireFeatureRequestContext,
+  FeatureContextError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
+  requireFeatureOperationResult, requireFeatureRequestContext, requireFeatureTransitionResult,
 } from "./feature_context";
 
 test("normalizes the trusted identity and tenant context", () => {
@@ -48,4 +49,16 @@ test("rejects operation results that do not match the requested operation", () =
     expect(() => requireFeatureOperationResult(input, value)).toThrow(FeatureOperationError);
     expect(() => requireFeatureOperationResult(input, value)).toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
   }
+});
+
+test("requires a committed transition result to advance state and version", () => {
+  expect(requireFeatureTransitionResult("approved", 1, {
+    id: "case-1", state: "approved", version: 2,
+  })).toMatchObject({ state: "approved", version: 2 });
+  expect(() => requireFeatureTransitionResult("approved", 1, {
+    state: "draft", version: 2,
+  })).toThrow(FeatureTransitionError);
+  expect(() => requireFeatureTransitionResult("approved", 1, {
+    state: "approved", version: 1,
+  })).toThrow(FeatureVersionError);
 });
