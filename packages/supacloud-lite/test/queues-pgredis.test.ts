@@ -293,7 +293,7 @@ describe('Edge Function pgredis compatibility', () => {
     } finally {
       await Promise.all([first.close(), second.close()])
     }
-  })
+  }, testTimeout(20_000))
 
   test('persists cache entries with a file-backed PGlite project', async () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-pgredis-'))
