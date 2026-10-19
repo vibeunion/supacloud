@@ -515,6 +515,12 @@ class CaseModule {}
 class CaseModule {}
 // The Feature query references ListCaseQuery, but the module does not
 // register it as a runtime provider.`,
+  SC6131: `@Module({ name: "case", providers: [{ useClass: "ListCaseQuery", scope: "application" }] })
+class CaseModule {}
+// Feature Queries must be request-scoped.`,
+  SC6132: `@Module({ name: "case", providers: [{ useClass: "RefreshCaseJob", scope: "request" }] })
+class CaseModule {}
+// Feature Jobs must be job-scoped.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

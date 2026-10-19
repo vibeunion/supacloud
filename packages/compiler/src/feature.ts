@@ -100,6 +100,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         if (!queryProvider) {
           error("feature-query-provider-unresolved",
             `Feature query ${query.className} is not registered as a runtime provider in module ${module.name}.`);
+        } else if (queryProvider.scope !== "request") {
+          error("feature-query-provider-scope",
+            `Feature query ${query.className} must use request scope, but module ${module.name} registers it with ${queryProvider.scope} scope.`);
         }
         if (query.tenantScope !== "required") {
           error("feature-query-tenant-boundary", `Query ${query.className} in Feature ${spec.name} must declare tenantScope: "required".`);
@@ -153,6 +156,9 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         if (!jobProvider) {
           error("feature-job-provider-unresolved",
             `Feature transition ${transition.name} references Job ${job.className}, but the Job is not registered as a runtime provider in module ${module.name}.`);
+        } else if (jobProvider.scope !== "job") {
+          error("feature-job-provider-scope",
+            `Feature Job ${job.className} must use job scope, but module ${module.name} registers it with ${jobProvider.scope} scope.`);
         }
         if (job.tenantScope !== "required") {
           error("feature-job-tenant-boundary", `Job ${job.className} in Feature ${spec.name} must declare tenantScope: "required".`);
