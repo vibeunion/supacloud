@@ -569,6 +569,11 @@
       "signature": "export declare function exportGraphMermaid(graph: ApplicationGraph): string;"
     },
     {
+      "name": "FeatureDatabaseSourceNode",
+      "kind": "type",
+      "signature": "export interface FeatureDatabaseSourceNode {\n    source: string;\n    table: string;\n    rowType: string;\n}"
+    },
+    {
       "name": "FeaturePersistenceNode",
       "kind": "type",
       "signature": "export interface FeaturePersistenceNode {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
@@ -576,7 +581,7 @@
     {
       "name": "FeatureSpecNode",
       "kind": "type",
-      "signature": "export interface FeatureSpecNode {\n    name: string;\n    states: string[];\n    tenantField?: string;\n    transitions: FeatureTransitionNode[];\n    file?: string;\n    line?: number;\n}"
+      "signature": "export interface FeatureSpecNode {\n    name: string;\n    states: string[];\n    database?: FeatureDatabaseSourceNode;\n    tenantField?: string;\n    transitions: FeatureTransitionNode[];\n    file?: string;\n    line?: number;\n}"
     },
     {
       "name": "FeatureTransitionNode",
