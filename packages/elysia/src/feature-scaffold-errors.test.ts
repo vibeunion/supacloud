@@ -31,13 +31,15 @@ let ServiceClass: new (
 ) => Service;
 let ControllerClass: new (
   list: { execute(): Promise<unknown> },
+  detail: { execute(id: string): Promise<unknown> },
+  receipts: { execute(id: string, operationId: string): Promise<unknown> },
+  jobStatuses: { execute(id: string, operationId: string): Promise<unknown> },
   command: { execute(id: string, input: { expectedVersion: number }): Promise<unknown> },
-  service: Service,
 ) => Controller;
 let root: string | undefined;
 const identity = {
   requestId: "request", identity: { authenticated: true, subject: "actor" },
-  access: { tenantId: "tenant", permissions: ["cases:approve"] },
+  access: { tenantId: "tenant", permissions: ["cases:approve", "cases:read"] },
 };
 const row = { id: "case-1", state: "approved", version: 2 };
 const input: Input = { id: row.id, operationId: "operation-1" };
@@ -67,9 +69,13 @@ afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }
 function controller(context: unknown, lookup: Lookup["lookup"], failure?: Error, onRead: () => void = () => {}) {
   const call = async () => { onRead(); if (failure) throw failure; return row; };
   const service = new ServiceClass(context, { list: call, detail: call }, { approve: call }, { lookup }, { lookup });
-  return new ControllerClass({ execute: () => service.list({}) }, {
-    execute: (id, body) => service.approve(id, body),
-  }, service);
+  return new ControllerClass(
+    { execute: () => service.list({}) },
+    { execute: (id) => service.detail(id) },
+    { execute: (id, operationId) => service.receipt(id, operationId) },
+    { execute: (id, operationId) => service.jobStatus(id, operationId) },
+    { execute: (id, body) => service.approve(id, body) },
+  );
 }
 function run(instance: Controller, method: Method) {
   const effect = getRoutes(ControllerClass).find(route => route.handler === method)?.effect;
