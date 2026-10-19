@@ -57,7 +57,7 @@ const approvalRequest = (expectedVersion = 1) => new Request("http://localhost/c
 const trustedContext = () => ({
     requestId: "fixture-request",
     identity: { authenticated: true, subject: "fixture-reviewer" },
-    access: { tenantId: "fixture-tenant", permissions: ["cases:approve"] },
+    access: { tenantId: "fixture-tenant", permissions: ["cases:approve", "cases:read"] },
     idempotencyKey: "fixture-approval",
 });
 const unbound = createApp({ deps: {}, requestContext: trustedContext, commandGovernance: governance });

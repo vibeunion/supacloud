@@ -199,12 +199,12 @@ console.log("Built consumer factory: original and generated routes served togeth
         "export type ReviewRow = { id: string; state: string; version: number };\n");
     const featureGeneration = [
         cli, "app", "generate", "--kind", "feature", "--name", "case-approval",
-        "--permission", "cases:approve", "--rpc", "approveCase",
+        "--permission", "cases:approve", "--read-permission", "cases:read", "--rpc", "approveCase",
         "--database-source", "db/schema.ts", "--database-table", "public.reviews", "--database-type", "ReviewRow",
         "--register-in", "src/app.module.ts", "--format", "json",
     ];
     const featureParent = await readFile(join(project, "src/app.module.ts"), "utf8");
-    for (const flag of ["--permission", "--rpc"]) {
+    for (const flag of ["--permission", "--read-permission", "--rpc"]) {
         const missing = featureGeneration.filter((_value, index) => index !== featureGeneration.indexOf(flag)
             && index !== featureGeneration.indexOf(flag) + 1);
         const rejected = JSON.parse(await run(missing, project, false));
