@@ -19,7 +19,7 @@ second engine, database schema, hand-maintained client or transport abstraction.
 | Outcome | This iteration | Remaining evidence |
 | --- | --- | --- |
 | Golden business slice and four-stack comparison | Approval scope and common acceptance below; recorded-agent evaluator has a bounded `create-feature-slice` task | NestJS, Spring, a named Go stack, and SupaCloud implementations and comparable measured trials |
-| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, routes, tests and delivery checklist generated together | Real database bindings, generated browser client adoption, authenticated E2E, fixtures and delivery read-back |
+| Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, explicit Workflow/Queue Job port, routes, tests and delivery checklist generated together | Real database bindings, generated browser client adoption, authenticated E2E, fixtures and delivery read-back |
 | Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Durable authorization, version checks, audit, outbox and result recovery in the chosen customer flow |
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
 

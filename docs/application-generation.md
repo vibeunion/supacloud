@@ -94,10 +94,13 @@ explicit integration. After registering the feature, its original demo test and
 silently weaken governance. The generated feature's isolated service tests can
 run with `bun test src/features/case-approval/case-approval.feature.test.ts`.
 
-The Job intentionally throws until implemented. The state declaration is checked
-for compiler consistency; it does not lock or update database rows. The version
-field is an input contract, not an implemented optimistic lock. The generated tests
-exercise port delegation and refusal only, not authenticated HTTP/database E2E.
+The generated Job delegates through an explicit `RefreshJobPort` bound by the
+application's existing Workflow/Queue adapter. It fails closed when that port is
+missing; generation does not pretend to schedule or persist work. The state
+declaration is checked for compiler consistency; it does not lock or update
+database rows. The version field is an input contract, not an implemented
+optimistic lock. The generated tests verify trusted job context and port
+delegation, not authenticated HTTP/database E2E.
 This template requires matching current framework/compiler/runtime packages
 (including the Effect route contract); CLI generation alone does not attest a
 published-package compatibility tuple.

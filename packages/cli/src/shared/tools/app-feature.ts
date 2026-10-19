@@ -59,11 +59,18 @@ export interface ${className}WritePort {
     approve(context: FeatureRequestContext, input: ${className}ApproveCommand): Promise<${className}Result>;
 }
 
+export interface ${className}RefreshJobPort {
+    run(context: FeatureRequestContext, input: ${className}RefreshJobInput): Promise<void>;
+}
+
 export const ${className}Reader = new InjectionToken<${className}ReadPort>(
     "${name}.reader", { scope: "request" },
 );
 export const ${className}Writer = new InjectionToken<${className}WritePort>(
     "${name}.writer", { scope: "request" },
+);
+export const ${className}RefreshJob = new InjectionToken<${className}RefreshJobPort>(
+    "${name}.refresh-job", { scope: "job" },
 );
 `,
         [`${name}.service.ts`]: `import {
@@ -110,7 +117,7 @@ export class ${className}Service {
         [`${name}.feature.ts`]: `import { Effect } from "effect";
 import {
     Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, Get, Inject, JOB_CONTEXT,
-    Injectable, Job, Param, Post, Query, requireFeatureRequestContext, type FeatureRequestContext,
+    Injectable, Job, Optional, Param, Post, Query, requireFeatureRequestContext, type FeatureRequestContext,
     type FeatureState,
 } from "@supacloud/app/core";
 import {
@@ -121,12 +128,14 @@ import {
     ${className}RefreshInput,
     ${className}Row,
 } from "./${name}.contracts";
+import { ${className}RefreshJob } from "./${name}.model";
 import { ${className}Service } from "./${name}.service";
 import type {
     ${className}ApproveInput,
     ${className}ListInput,
     ${className}RefreshJobInput,
     ${className}Result,
+    ${className}RefreshJobPort,
 } from "./${name}.model";
 
 export const featureSpec = defineFeatureSpec({
@@ -183,12 +192,15 @@ export class Approve${className}Command {
     tenantScope: "required",
 })
 export class Refresh${className}Job {
-    constructor(@Inject(JOB_CONTEXT) private readonly jobContext: unknown) {}
+    constructor(
+        @Inject(JOB_CONTEXT) private readonly jobContext: unknown,
+        @Inject(${className}RefreshJob) @Optional() private readonly port?: ${className}RefreshJobPort,
+    ) {}
 
-    async run(_input: ${className}RefreshJobInput): Promise<void> {
+    async run(input: ${className}RefreshJobInput): Promise<void> {
         const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
-        void context;
-        throw new Error("Bind the existing Workflow/Queue adapter before dispatching ${name}.refresh");
+        if (!this.port) throw new Error("Bind ${className}RefreshJob with the existing Workflow/Queue adapter");
+        return this.port.run(context, input);
     }
 }
 
@@ -245,6 +257,7 @@ export const ${className}Feature = defineFeatureSlice({
         [`${name}.feature.test.ts`]: `import { expect, test } from "bun:test";
 import { Refresh${className}Job } from "./${name}.feature";
 import { ${className}Service } from "./${name}.service";
+import type { ${className}RefreshJobInput } from "./${name}.model";
 
 const context = {
     requestId: "request-example",
@@ -265,6 +278,27 @@ test("${name} rejects missing trusted tenant context before adapter execution", 
 test("${name} rejects missing trusted job context before dispatch", async () => {
     const job = new Refresh${className}Job({});
     await expect(job.run({ id: "example", version: 1 })).rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
+});
+
+test("${name} delegates refresh work through the explicit durable job port", async () => {
+    const calls: Array<{ requestId: string; tenantId: string; input: ${className}RefreshJobInput }> = [];
+    const job = new Refresh${className}Job(context, {
+        async run(requestContext, input) {
+            calls.push({ requestId: requestContext.requestId, tenantId: requestContext.tenantId, input });
+        },
+    });
+    await job.run({ id: "example", version: 1 });
+    expect(calls).toEqual([{
+        requestId: "request-example",
+        tenantId: "tenant-example",
+        input: { id: "example", version: 1 },
+    }]);
+});
+
+test("${name} fails closed when the durable job adapter is not bound", async () => {
+    const job = new Refresh${className}Job(context);
+    await expect(job.run({ id: "example", version: 1 }))
+        .rejects.toThrow("Bind ${className}RefreshJob");
 });
 
 test("${name} fails closed until verified read and durable write ports are bound", async () => {
@@ -331,8 +365,10 @@ The named RPC adapter must invoke the continuation in the same database transact
 used by the request-scoped Writer, or own the complete command instead; never execute
 both paths. Lock/check the version and state, reauthorize replays, and commit the
 business write, receipt, audit and outbox together. Do not put a network side effect
-inside this transaction. The refresh Job is an explicit unimplemented integration
-point, not an automatically scheduled workflow.
+inside this transaction. The refresh Job is an explicit Workflow/Queue integration
+point, not an automatically scheduled workflow. Bind its generated job port to
+the existing durable adapter and keep tenant and actor context derived from
+JOB_CONTEXT.
 
 Compile the routes with the existing client generator and use @supacloud/query for
 identity-scoped caching/invalidation. There is deliberately no second hand-maintained
