@@ -142,6 +142,24 @@ enabled = false
 
 手机号必须是 E.164 格式。短信验证码在数据库中保存为域分离的 keyed-HMAC，单次兑换、最多五次错误、按可信连接 IP/手机号指纹限流，并默认对同一手机号执行 60 秒持久化发送冷却。自定义 sender 的异常只返回净化错误，不记录手机号、验证码、短信正文或供应商响应。
 
+`signInWithSSO()` 可通过已配置的 OAuth/OIDC provider 使用。provider 名称可通过
+`provider_id` 传入，也可以在 `[auth.external.<provider>]` 中配置
+`sso_domains = ["example.com"]` 后按邮箱域名解析：
+
+```toml
+[auth.external.acme]
+enabled = true
+client_id = "acme-client"
+secret = "replace-me"
+authorize_url = "https://idp.example.com/authorize"
+token_url = "https://idp.example.com/token"
+userinfo_url = "https://idp.example.com/userinfo"
+sso_domains = ["acme.example"]
+```
+
+这只提供 GoTrue-compatible 的 SSO 入口并复用 Lite 的 OAuth/PKCE callback；
+它不会实现 SAML assertion、企业 IdP 管理或未配置 provider 的自动发现。
+
 ### 新版应用兼容
 
 Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重复版本和已应用 SQL 的内容漂移；目标绑定复用 `@supacloud/db`，`migrate --json` 可输出不含参数值的校验记录。`--runtime-mode strict` 对齐函数默认限制并拒绝无效配置、缺失函数和未声明的后台任务。
@@ -607,6 +625,25 @@ When disabled, `/auth/v1/*` returns `404`, but this does not turn Lite into a fu
 When bound to loopback, Lite enables a local SMS inbox compatible with `signInWithOtp({ phone })` / `verifyOtp({ type: 'sms' })`; open `/sms-inbox` to inspect codes. The SMS inbox is independent from email, memory-bounded, and never mounted on a network-exposed bind. Embedded network deployments must inject `BackendConfig.smsSender`; there is no production console fallback for OTP bodies.
 
 Phone numbers must use E.164. SMS codes are stored as domain-separated keyed HMACs, are single-use, burn after five wrong attempts, and are limited by trusted connection IP plus a keyed phone fingerprint, with a persistent 60-second per-phone send cooldown by default. Provider failures are sanitized and never log the phone, code, SMS body, or raw provider response.
+
+`signInWithSSO()` can use a configured OAuth/OIDC provider. Pass the provider
+name as `provider_id`, or configure `sso_domains = ["example.com"]` under
+`[auth.external.<provider>]` for domain-based resolution:
+
+```toml
+[auth.external.acme]
+enabled = true
+client_id = "acme-client"
+secret = "replace-me"
+authorize_url = "https://idp.example.com/authorize"
+token_url = "https://idp.example.com/token"
+userinfo_url = "https://idp.example.com/userinfo"
+sso_domains = ["acme.example"]
+```
+
+This provides the GoTrue-compatible SSO entry point and reuses Lite's OAuth/PKCE
+callback. It does not implement SAML assertions, enterprise IdP management, or
+automatic discovery of unconfigured providers.
 
 ### CLI
 

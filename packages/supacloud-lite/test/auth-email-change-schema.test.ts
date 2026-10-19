@@ -12,6 +12,8 @@ describe('Auth email change schema upgrade', () => {
     await db!.exec(`
       alter table auth.users drop column email_change;
       alter table auth.users drop column email_change_sent_at;
+      alter table auth.users drop column email_change_token_new;
+      alter table auth.users drop column email_change_token_current;
       alter table auth.users drop column email_change_confirm_status;
     `)
 
@@ -21,13 +23,21 @@ describe('Auth email change schema upgrade', () => {
       `select column_name
        from information_schema.columns
        where table_schema = 'auth' and table_name = 'users'
-         and column_name in ('email_change', 'email_change_sent_at', 'email_change_confirm_status')
+         and column_name in (
+           'email_change',
+           'email_change_sent_at',
+           'email_change_token_new',
+           'email_change_token_current',
+           'email_change_confirm_status'
+         )
        order by column_name`,
     )
     expect(columns.rows.map((row) => row.column_name)).toEqual([
       'email_change',
       'email_change_confirm_status',
       'email_change_sent_at',
+      'email_change_token_current',
+      'email_change_token_new',
     ])
   })
 })

@@ -86,6 +86,55 @@ describe('Auth extended GoTrue compatibility', () => {
     }
   })
 
+  test('synchronizes OAuth providers when a verified email matches an existing user', async () => {
+    const backend = await backendForTest({
+      siteUrl: 'http://app.local/callback',
+      oauthProviders: {
+        google: {
+          clientId: 'client-id', clientSecret: 'client-secret',
+          authorizeUrl: 'http://provider.local/authorize', tokenUrl: 'http://provider.local/token',
+          userInfoUrl: 'http://provider.local/userinfo',
+        },
+      },
+      oauthFetch: (async (input) => {
+        const url = new URL(String(input))
+        if (url.pathname === '/token') return Response.json({ access_token: 'provider-token' })
+        if (url.pathname === '/userinfo') {
+          return Response.json({ sub: 'existing-user-provider', email: 'existing-oauth@example.test', email_verified: true })
+        }
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch,
+    })
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'existing-oauth@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+      const userId = signedUp.data.user?.id
+      if (!userId) throw new Error('Expected a signed-up user')
+
+      const authorized = await authorize(backend, { provider: 'google', redirect_to: 'http://app.local/callback' })
+      const state = new URL(authorized.headers.get('location')!).searchParams.get('state')!
+      const callback = await backend.fetch(`http://local/auth/v1/callback?code=provider-code&state=${state}`, {
+        headers: apiHeaders(backend.anonKey),
+      })
+      expect(callback.status).toBe(303)
+      expect((await backend.db.query('select id from auth.users')).rows).toHaveLength(1)
+      expect((await backend.db.query<{ id: string }>(
+        `select id from auth.identities where user_id = $1 and provider = 'google'`,
+        [userId],
+      )).rows).toHaveLength(1)
+
+      const user = await client.auth.getUser()
+      expect(user.error).toBeNull()
+      expect(user.data.user?.app_metadata.providers).toEqual(['email', 'google'])
+    } finally {
+      await backend.close()
+    }
+  })
+
   test('allows only one concurrent verification of a TOTP challenge', async () => {
     const backend = await backendForTest()
     const client = anonClient(backend)
@@ -162,6 +211,145 @@ describe('Auth extended GoTrue compatibility', () => {
       expect(refreshed.error).toBeNull()
       expect(jwtPayload(refreshed.data.session!.access_token).email).toBe('after-update@example.test')
       expect(refreshed.data.user?.identities?.[0]?.identity_data?.email).toBe('after-update@example.test')
+    } finally {
+      await backend.close()
+    }
+  })
+
+  test('unlinks a secondary identity without allowing the last identity to be removed', async () => {
+    const backend = await backendForTest()
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'unlink-identity@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+      const userId = signedUp.data.user!.id
+      await backend.db.query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1, 'github', 'github-unlink-user', $2::jsonb)`,
+        [userId, JSON.stringify({ sub: 'github-unlink-user' })],
+      )
+
+      const identities = await client.auth.getUserIdentities()
+      expect(identities.error).toBeNull()
+      const github = identities.data!.identities.find((identity) => identity.provider === 'github')
+      if (!github) throw new Error('Expected the secondary identity')
+
+      expect((await client.auth.getUser()).data.user?.app_metadata.providers).toEqual(['email'])
+      expect((await client.auth.unlinkIdentity(github)).error).toBeNull()
+      expect((await client.auth.getUserIdentities()).data!.identities).toHaveLength(1)
+      expect((await client.auth.getUser()).data.user?.app_metadata.providers).toEqual(['email'])
+      const remaining = (await client.auth.getUserIdentities()).data!.identities[0]
+      expect((await client.auth.unlinkIdentity(remaining)).error?.code).toBe('cannot_unlink_identity')
+    } finally {
+      await backend.close()
+    }
+  })
+
+  test('links an OAuth identity to the signed-in user without creating a second user', async () => {
+    const backend = await backendForTest({
+      siteUrl: 'http://app.local/callback',
+      oauthProviders: {
+        google: {
+          clientId: 'client-id', clientSecret: 'client-secret',
+          authorizeUrl: 'http://provider.local/authorize', tokenUrl: 'http://provider.local/token',
+          userInfoUrl: 'http://provider.local/userinfo',
+        },
+      },
+      oauthFetch: (async (input) => {
+        const url = new URL(String(input))
+        if (url.pathname === '/token') return Response.json({ access_token: 'provider-token' })
+        if (url.pathname === '/userinfo') {
+          return Response.json({ sub: 'linked-provider-user', email: 'linked-oauth@example.test', email_verified: true })
+        }
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch,
+    })
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'link-target@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+      const userId = signedUp.data.user?.id
+      if (!userId) throw new Error('Expected a signed-up user')
+
+      const linked = await client.auth.linkIdentity({
+        provider: 'google',
+        options: { redirectTo: 'http://app.local/callback', skipBrowserRedirect: true },
+      })
+      expect(linked.error).toBeNull()
+      const providerUrl = linked.data.url
+      if (!providerUrl) throw new Error('Expected an OAuth provider URL')
+      const providerParams = new URL(providerUrl).searchParams
+      const callback = await backend.fetch(
+        `http://local/auth/v1/callback?code=provider-code&state=${providerParams.get('state')}`,
+        { headers: apiHeaders(backend.anonKey) },
+      )
+      expect(callback.status).toBe(303)
+
+      const users = await backend.db.query<{ id: string }>('select id from auth.users order by created_at')
+      expect(users.rows).toHaveLength(1)
+      expect(users.rows[0].id).toBe(userId)
+      expect((await client.auth.getUserIdentities()).data!.identities).toEqual([
+        expect.objectContaining({ provider: 'email' }),
+        expect.objectContaining({ provider: 'google' }),
+      ])
+      expect((await backend.db.query<{ user_id: string }>(
+        `select user_id from auth.identities where provider = 'google' and provider_id = 'linked-provider-user'`,
+      )).rows).toEqual([{ user_id: userId }])
+    } finally {
+      await backend.close()
+    }
+  })
+
+  test('returns an identity conflict instead of a server error for concurrent OAuth links', async () => {
+    const backend = await backendForTest({
+      siteUrl: 'http://app.local/callback',
+      oauthProviders: {
+        google: {
+          clientId: 'client-id', clientSecret: 'client-secret',
+          authorizeUrl: 'http://provider.local/authorize', tokenUrl: 'http://provider.local/token',
+          userInfoUrl: 'http://provider.local/userinfo',
+        },
+      },
+      oauthFetch: (async (input) => {
+        const url = new URL(String(input))
+        if (url.pathname === '/token') return Response.json({ access_token: 'provider-token' })
+        if (url.pathname === '/userinfo') return Response.json({ sub: 'concurrent-provider-user' })
+        return new Response('not found', { status: 404 })
+      }) as typeof fetch,
+    })
+    const client = anonClient(backend)
+    try {
+      const signedUp = await client.auth.signUp({
+        email: 'concurrent-link@example.test',
+        password: 'correct-horse-battery-staple',
+      })
+      expect(signedUp.error).toBeNull()
+
+      const starts = await Promise.all([
+        client.auth.linkIdentity({ provider: 'google', options: { redirectTo: 'http://app.local/callback', skipBrowserRedirect: true } }),
+        client.auth.linkIdentity({ provider: 'google', options: { redirectTo: 'http://app.local/callback', skipBrowserRedirect: true } }),
+      ])
+      expect(starts.every((result) => result.error === null && result.data.url !== undefined)).toBe(true)
+
+      const callbacks = await Promise.all(starts.map((result) => {
+        const state = new URL(result.data.url!).searchParams.get('state')
+        return backend.fetch(`http://local/auth/v1/callback?code=provider-code&state=${state}`, {
+          headers: apiHeaders(backend.anonKey),
+        })
+      }))
+      expect(callbacks.map((response) => response.status)).toEqual([303, 303])
+      const locations = callbacks.map((response) => new URL(response.headers.get('location')!))
+      expect(locations.filter((location) => location.hash.includes('access_token='))).toHaveLength(1)
+      expect(locations.filter((location) => location.hash.includes('identity_already_exists'))).toHaveLength(1)
+      expect((await backend.db.query(
+        `select provider_id from auth.identities where provider = 'google'`,
+      )).rows).toEqual([{ provider_id: 'concurrent-provider-user' }])
     } finally {
       await backend.close()
     }

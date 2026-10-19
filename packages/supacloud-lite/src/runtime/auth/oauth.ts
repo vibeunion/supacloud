@@ -13,11 +13,18 @@
 import type { Database, Querier } from '../db/database.js'
 import { randomToken } from '../jwt.js'
 import { resolveRedirect } from './redirect.js'
+import { createRemoteJWKSet, customFetch, jwtVerify, type JWTPayload } from 'jose'
 
 type OAuthRawProfile = Record<string, unknown>
 
 export class OAuthAccountIneligibleError extends Error {
   constructor(public readonly code: 'user_banned' | 'user_not_found') {
+    super(code)
+  }
+}
+
+export class OAuthIdentityLinkError extends Error {
+  constructor(public readonly code: 'identity_already_exists') {
     super(code)
   }
 }
@@ -38,6 +45,14 @@ export interface OAuthProviderConfig {
   scopes?: string
   /** Map the provider's raw userinfo JSON to a normalized profile. */
   profileMap?: (raw: OAuthRawProfile) => OAuthProfile
+  /** Exact issuer accepted for OIDC ID tokens. Defaults to a known provider preset. */
+  idTokenIssuer?: string
+  /** JWKS URL used to verify OIDC ID token signatures. Defaults to a known provider preset. */
+  idTokenJwksUrl?: string
+  /** Additional audience accepted for OIDC ID tokens. Defaults to the OAuth client id. */
+  idTokenAudience?: string | string[]
+  /** Email domains that may resolve this provider through POST /sso. */
+  ssoDomains?: string[]
 }
 
 /** Normalized profile extracted from a provider's userinfo response. */
@@ -54,8 +69,12 @@ export interface OAuthProfile {
   metadata?: Record<string, unknown>
 }
 
-interface ResolvedProvider extends Required<Omit<OAuthProviderConfig, 'profileMap'>> {
+interface ResolvedProvider extends OAuthProviderConfig {
   name: string
+  authorizeUrl: string
+  tokenUrl: string
+  userInfoUrl: string
+  scopes: string
   profileMap: (raw: OAuthRawProfile) => OAuthProfile
 }
 
@@ -65,12 +84,28 @@ const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
     tokenUrl: 'https://oauth2.googleapis.com/token',
     userInfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
     scopes: 'openid email profile',
+    idTokenIssuer: 'https://accounts.google.com',
+    idTokenJwksUrl: 'https://www.googleapis.com/oauth2/v3/certs',
     profileMap: (r: OAuthRawProfile) => ({
       id: typeof r['sub'] === 'string' ? r['sub'] : '',
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       emailVerified: r['email_verified'] === true,
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
       metadata: { avatar_url: r['picture'], full_name: r['name'] },
+    }),
+  },
+  apple: {
+    authorizeUrl: 'https://appleid.apple.com/auth/authorize',
+    tokenUrl: 'https://appleid.apple.com/auth/token',
+    userInfoUrl: 'https://appleid.apple.com/auth/userinfo',
+    scopes: 'name email',
+    idTokenIssuer: 'https://appleid.apple.com',
+    idTokenJwksUrl: 'https://appleid.apple.com/auth/keys',
+    profileMap: (r: OAuthRawProfile) => ({
+      id: typeof r['sub'] === 'string' ? r['sub'] : '',
+      ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
+      emailVerified: r['email_verified'] === true || r['email_verified'] === 'true',
+      ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
     }),
   },
   github: {
@@ -116,12 +151,16 @@ export function resolveProvider(name: string, cfg: OAuthProviderConfig): Resolve
       ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
       ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
     })),
+    ...(cfg.idTokenIssuer ?? preset.idTokenIssuer) === undefined ? {} : { idTokenIssuer: cfg.idTokenIssuer ?? preset.idTokenIssuer },
+    ...(cfg.idTokenJwksUrl ?? preset.idTokenJwksUrl) === undefined ? {} : { idTokenJwksUrl: cfg.idTokenJwksUrl ?? preset.idTokenJwksUrl },
+    ...(cfg.idTokenAudience ?? preset.idTokenAudience) === undefined ? {} : { idTokenAudience: cfg.idTokenAudience ?? preset.idTokenAudience },
   }
 }
 
 /** Drives the OAuth authorize/callback/PKCE flows against the configured providers. */
 export class OAuthService {
   private providers = new Map<string, ResolvedProvider>()
+  private idTokenKeySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
 
   constructor(
     private db: Database,
@@ -133,7 +172,16 @@ export class OAuthService {
     private enforceRedirectAllowList = false
   ) {
     for (const [name, cfg] of Object.entries(configs)) {
-      this.providers.set(name, resolveProvider(name, cfg))
+      const provider = resolveProvider(name, cfg)
+      this.providers.set(name, provider)
+      if (provider.idTokenJwksUrl) {
+        this.idTokenKeySets.set(name, createRemoteJWKSet(new URL(provider.idTokenJwksUrl), {
+          timeoutDuration: 5_000,
+          cooldownDuration: 30_000,
+          cacheMaxAge: 10 * 60_000,
+          [customFetch]: async (url, options) => this.fetchImpl(url, options),
+        }))
+      }
     }
   }
 
@@ -142,12 +190,90 @@ export class OAuthService {
     return this.providers.has(name)
   }
 
+  /** Verify an OIDC ID token and reuse the normal OAuth identity upsert path. */
+  async signInWithIdToken(
+    providerName: string,
+    token: string,
+    accessToken?: string,
+    nonce?: string
+  ): Promise<string | null> {
+    const profile = await this.verifyIdToken(providerName, token, accessToken, nonce)
+    if (!profile) return null
+    return this.upsertUser(providerName, profile)
+  }
+
+  /** Verify an OIDC ID token and attach its identity to an existing user. */
+  async linkIdentityWithIdToken(
+    providerName: string,
+    token: string,
+    userId: string,
+    accessToken?: string,
+    nonce?: string
+  ): Promise<boolean> {
+    const profile = await this.verifyIdToken(providerName, token, accessToken, nonce)
+    if (!profile) return false
+    await this.linkIdentityToUser(providerName, profile, userId)
+    return true
+  }
+
+  /** Upsert an already verified non-OAuth identity through the shared path. */
+  async signInWithProfile(provider: string, profile: OAuthProfile): Promise<string> {
+    return this.upsertUser(provider, profile)
+  }
+
+  private async verifyIdToken(
+    providerName: string,
+    token: string,
+    accessToken?: string,
+    nonce?: string
+  ): Promise<OAuthProfile | null> {
+    const provider = this.providers.get(providerName)
+    const keySet = this.idTokenKeySets.get(providerName)
+    if (!provider?.idTokenIssuer || !keySet || !token) return null
+
+    let payload: JWTPayload
+    let algorithm: string
+    try {
+      const verified = await jwtVerify(token, keySet, {
+        issuer: provider.idTokenIssuer,
+        audience: provider.idTokenAudience ?? provider.clientId,
+        algorithms: ['RS256', 'ES256'],
+      })
+      payload = verified.payload
+      algorithm = verified.protectedHeader.alg ?? ''
+    } catch {
+      return null
+    }
+
+    if (typeof payload.sub !== 'string' || payload.sub.length === 0) return null
+    if (payload['nonce'] !== undefined && (typeof payload['nonce'] !== 'string' || payload['nonce'] !== nonce)) return null
+    const acceptedAudiences = provider.idTokenAudience ?? provider.clientId
+    if (
+      Array.isArray(payload.aud)
+      && payload.aud.length > 1
+      && (typeof payload['azp'] !== 'string'
+        || (Array.isArray(acceptedAudiences) ? !acceptedAudiences.includes(payload['azp']) : payload['azp'] !== acceptedAudiences))
+    ) return null
+    if (typeof payload['at_hash'] === 'string') {
+      if (!accessToken || (await oidcAtHash(accessToken, algorithm)) !== payload['at_hash']) return null
+    }
+
+    let profile: OAuthProfile
+    try {
+      profile = provider.profileMap(payload as OAuthRawProfile)
+    } catch {
+      return null
+    }
+    if (!profile.id) return null
+    return profile
+  }
+
   private callbackUrl(): string {
     return `${this.apiUrl}/auth/v1/callback`
   }
 
   /** GET /authorize - persist state, redirect to the provider. */
-  async authorize(url: URL): Promise<Response> {
+  async authorize(url: URL, linkUserId?: string): Promise<Response> {
     const providerName = url.searchParams.get('provider') ?? ''
     const provider = this.providers.get(providerName)
     if (!provider) {
@@ -162,14 +288,15 @@ export class OAuthService {
     // value - an unallowed target falls back to the site URL.
     const redirectTo = resolveRedirect(url.searchParams.get('redirect_to'), this.siteUrl, this.uriAllowList, this.enforceRedirectAllowList)
     await this.db.query(
-      `insert into auth.flow_state (provider, provider_state, redirect_to, code_challenge, code_challenge_method, expires_at)
-       values ($1, $2, $3, $4, $5, now() + interval '10 minutes')`,
+      `insert into auth.flow_state (provider, provider_state, redirect_to, code_challenge, code_challenge_method, link_user_id, expires_at)
+       values ($1, $2, $3, $4, $5, $6, now() + interval '10 minutes')`,
       [
         providerName,
         providerState,
         redirectTo,
         url.searchParams.get('code_challenge'),
         url.searchParams.get('code_challenge_method'),
+        linkUserId ?? null,
       ]
     )
     const p = new URLSearchParams({
@@ -179,7 +306,27 @@ export class OAuthService {
       scope: scopes,
       state: providerState,
     })
-    return redirect(`${provider.authorizeUrl}?${p}`)
+    const reserved = new Set([
+      'provider',
+      'redirect_to',
+      'scopes',
+      'code_challenge',
+      'code_challenge_method',
+      'skip_http_redirect',
+      'client_id',
+      'redirect_uri',
+      'response_type',
+      'scope',
+      'state',
+    ])
+    for (const [key, value] of url.searchParams) {
+      if (!reserved.has(key)) p.append(key, value)
+    }
+    const providerUrl = `${provider.authorizeUrl}?${p}`
+    if (url.searchParams.get('skip_http_redirect') === 'true') {
+      return Response.json({ url: providerUrl })
+    }
+    return redirect(providerUrl)
   }
 
   /** GET /callback - exchange code, upsert user+identity, redirect back. */
@@ -210,9 +357,17 @@ export class OAuthService {
 
     let userId: string
     try {
-      userId = await this.upsertUser(provider.name, profile)
+      if (flow.link_user_id) {
+        await this.linkIdentityToUser(provider.name, profile, flow.link_user_id)
+        userId = flow.link_user_id
+      } else {
+        userId = await this.upsertUser(provider.name, profile)
+      }
     } catch (e) {
       if (e instanceof OAuthAccountIneligibleError) {
+        return redirectWithFragment(flow.redirect_to, { error: 'access_denied', error_code: e.code })
+      }
+      if (e instanceof OAuthIdentityLinkError) {
         return redirectWithFragment(flow.redirect_to, { error: 'access_denied', error_code: e.code })
       }
       return redirectWithFragment(flow.redirect_to, {
@@ -312,6 +467,24 @@ export class OAuthService {
     return this.db.transaction((query) => this.upsertUserInTransaction(query, provider, profile))
   }
 
+  private async linkIdentityToUser(provider: string, profile: OAuthProfile, userId: string): Promise<void> {
+    await this.db.transaction(async (query) => {
+      await this.assertUserEligible(query, userId)
+      const identityData = JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })
+      const inserted = await query<{ user_id: string }>(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1, $2, $3, $4::jsonb)
+         on conflict (provider, provider_id) do nothing
+         returning user_id`,
+        [userId, provider, profile.id, identityData],
+      )
+      if (inserted.rows.length === 0) {
+        throw new OAuthIdentityLinkError('identity_already_exists')
+      }
+      await this.syncUserProviders(query, userId)
+    })
+  }
+
   private async upsertUserInTransaction(query: Querier, provider: string, profile: OAuthProfile): Promise<string> {
     // existing identity?
     const existing = await query<{ user_id: string }>(
@@ -326,6 +499,7 @@ export class OAuthService {
         JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata }),
       ])
       await query(`update auth.users set last_sign_in_at = now() where id = $1`, [existing.rows[0].user_id])
+      await this.syncUserProviders(query, existing.rows[0].user_id)
       return existing.rows[0].user_id
     }
 
@@ -388,7 +562,10 @@ export class OAuthService {
        returning user_id`,
       [userId, provider, profile.id, identityData]
     )
-    if (linked.rows[0]) return linked.rows[0].user_id
+    if (linked.rows[0]) {
+      await this.syncUserProviders(query, linked.rows[0].user_id)
+      return linked.rows[0].user_id
+    }
 
     const raced = await query<{ user_id: string }>(
       `select user_id from auth.identities where provider = $1 and provider_id = $2`,
@@ -406,7 +583,30 @@ export class OAuthService {
       [provider, profile.id, identityData]
     )
     await query(`update auth.users set last_sign_in_at = now() where id = $1`, [racedUserId])
+    await this.syncUserProviders(query, racedUserId)
     return racedUserId
+  }
+
+  private async syncUserProviders(query: Querier, userId: string): Promise<void> {
+    await query(
+      `update auth.users
+       set raw_app_meta_data = jsonb_set(
+         coalesce(raw_app_meta_data, '{}'::jsonb),
+         '{providers}',
+         (
+           select jsonb_agg(provider order by provider)
+           from (
+             select distinct provider
+             from auth.identities
+             where user_id = $1
+           ) as providers
+         ),
+         true
+       ),
+       updated_at = now()
+       where id = $1`,
+      [userId],
+    )
   }
 
   private async assertUserEligible(query: Querier, userId: string): Promise<void> {
@@ -420,6 +620,13 @@ export class OAuthService {
     if (!user || user.is_deleted) throw new OAuthAccountIneligibleError('user_not_found')
     if (user.is_banned) throw new OAuthAccountIneligibleError('user_banned')
   }
+}
+
+async function oidcAtHash(accessToken: string, algorithm: string): Promise<string | null> {
+  const hash = algorithm === 'RS256' || algorithm === 'ES256' ? 'SHA-256' : null
+  if (!hash) return null
+  const digest = new Uint8Array(await crypto.subtle.digest(hash, new TextEncoder().encode(accessToken)))
+  return base64url(digest.subarray(0, digest.length / 2))
 }
 
 /** The minimal session the callback puts in the redirect fragment for the implicit flow. */
@@ -439,6 +646,7 @@ interface FlowRow {
   code_challenge_method: string | null
   auth_code: string | null
   user_id: string | null
+  link_user_id: string | null
 }
 
 function redirect(location: string): Response {
