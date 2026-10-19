@@ -1,6 +1,6 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { ConflictError, ServiceUnavailableError } from "../utils/errors";
+import { ConflictError, isAppError, ServiceUnavailableError } from "../utils/errors";
 import { mapWithConcurrency } from "../utils/concurrency";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -109,7 +109,8 @@ export interface EdgeFunctionDeployResult {
   external_packages?: string[];
   preheat?: EdgeFunctionPreheatResult;
   config?: EdgeFunctionConfigSnapshot;
-  error_code?: typeof EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE;
+  error_code?: string;
+  error_status?: number;
   expected_active_version?: EdgeFunctionActiveVersion;
   expected_activation_id?: EdgeFunctionActivationId;
   activation_id?: EdgeFunctionActivationId;
@@ -2844,9 +2845,12 @@ function failedDeployResult(
   error: unknown,
 ): EdgeFunctionDeployResult {
   logger.error("[EdgeFunction] Deploy failed", { ref: request.ref, slug: request.slug, error });
+  // 仅保留已类型化的 AppError（如 ServiceUnavailableError）的 HTTP 状态与稳定错误码，
+  // 避免把「依赖不可用」等可分类失败统一拍平成 500/"500"；普通 Error 不附加额外字段。
   return {
     success: false,
     error: error instanceof Error ? error.message : String(error),
+    ...(isAppError(error) ? { error_code: error.code, error_status: error.statusCode } : {}),
   };
 }
 

@@ -668,6 +668,44 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("deploy route preserves a service-unavailable failure instead of flattening it to 500", async () => {
+    const ref = "proj_deploy_service_unavailable";
+    const slug = "deploy-service-unavailable";
+    const { projectFunctionsRoutes } = await import("../../src/routes/project-functions");
+    const { projectService } = await import("../../src/services/project.service");
+    const spy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
+      success: false,
+      error: "Edge Runtime function activation unavailable: runtime activation state is uncertain",
+      error_code: "SERVICE_UNAVAILABLE",
+      error_status: 503,
+    });
+    const app = new Elysia().use(projectFunctionsRoutes);
+    try {
+      const response = await app.handle(new Request(
+        `http://localhost/v1/projects/${ref}/functions/${slug}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer dev-master-token",
+          },
+          body: JSON.stringify({
+            code: "export default { fetch: () => new Response('unreachable') };",
+            expected_active_version: "absent",
+            expected_activation_id: "legacy",
+          }),
+        },
+      ));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        code: "SERVICE_UNAVAILABLE",
+        message: expect.stringContaining("runtime activation state is uncertain"),
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("reads a valid immutable version without traversing corrupt unrelated history", async () => {
     const ref = "proj_version_read_isolation";
     const slug = "isolated-source";
