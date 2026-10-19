@@ -168,6 +168,15 @@ export class List${className}Query {
 }
 
 @Injectable({ scope: "request" })
+@Query({ name: "${name}.detail", tenantScope: "required" })
+export class Detail${className}Query {
+    constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
+    execute(id: string): Promise<${className}Result> {
+        return this.service.detail(id);
+    }
+}
+
+@Injectable({ scope: "request" })
 @Command({
     name: ${JSON.stringify(commandName)},
     permission: ${JSON.stringify(permission)},
@@ -208,8 +217,8 @@ export class Refresh${className}Job {
 export class ${className}Controller {
     constructor(
         @Inject(List${className}Query) private readonly listQuery: List${className}Query,
+        @Inject(Detail${className}Query) private readonly detailQuery: Detail${className}Query,
         @Inject(Approve${className}Command) private readonly approveCommand: Approve${className}Command,
-        @Inject(${className}Service) private readonly service: ${className}Service,
     ) {}
 
     @Get("/", {
@@ -227,7 +236,7 @@ export class ${className}Controller {
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
     detail(@Param("id") id: string): Effect.Effect<${className}Result, never, never> {
-        return Effect.promise(() => this.service.detail(id));
+        return Effect.promise(() => this.detailQuery.execute(id));
     }
 
     @Post("/:id/approve", {
@@ -249,7 +258,7 @@ export const ${className}Feature = defineFeatureSlice({
     name: ${JSON.stringify(name)},
     tags: ["type:feature"],
     spec: featureSpec,
-    providers: [${className}Service, List${className}Query, Approve${className}Command],
+    providers: [${className}Service, List${className}Query, Detail${className}Query, Approve${className}Command],
     controllers: [${className}Controller],
     jobs: [Refresh${className}Job],
 });

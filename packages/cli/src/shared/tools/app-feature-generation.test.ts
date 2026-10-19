@@ -126,11 +126,13 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureModule?.featureSpec?.transitions[0]?.permission).toBe("cases:approve");
     expect(featureModule?.featureSpec?.transitions[0]?.job).toBe("case-approval.refresh");
     expect(featureModule?.commands[0]?.rpc).toBe("approveCase");
-    expect(featureModule?.queries).toHaveLength(1);
+    expect(featureModule?.queries).toHaveLength(2);
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantField: "tenant_id"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('@Query({ name: "case-approval.detail", tenantScope: "required" })');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("requireFeatureRequestContext(this.jobContext)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
