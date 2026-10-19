@@ -204,11 +204,15 @@ console.log("Built consumer factory: original and generated routes served togeth
         "--register-in", "src/app.module.ts", "--format", "json",
     ];
     const featureParent = await readFile(join(project, "src/app.module.ts"), "utf8");
-    for (const flag of ["--permission", "--read-permission", "--rpc"]) {
+    for (const [flag, expectedMessage] of [
+        ["--permission", "feature requires an explicit valid --permission"],
+        ["--read-permission", "feature requires an explicit valid --read-permission"],
+        ["--rpc", "feature requires an explicit valid --rpc"],
+    ] as const) {
         const missing = featureGeneration.filter((_value, index) => index !== featureGeneration.indexOf(flag)
             && index !== featureGeneration.indexOf(flag) + 1);
-        const rejected = JSON.parse(await run(missing, project, false));
-        assert.equal(rejected.code, "SCAFFOLD_OPTION_INVALID");
+        const rejected = await run(missing, project, false);
+        assert.match(rejected, new RegExp(expectedMessage));
         assert.equal(await readFile(join(project, "src/app.module.ts"), "utf8"), featureParent);
         await assert.rejects(readFile(join(project, "src/features/case-approval/case-approval.feature.ts")), { code: "ENOENT" });
     }
@@ -224,6 +228,44 @@ console.log("Built consumer factory: original and generated routes served togeth
     const featureConflict = JSON.parse(await run(featureGeneration, project, false));
     assert.equal(featureConflict.ok, false);
     assert.equal(featureConflict.code, "SCAFFOLD_EXISTS");
+
+    // The generated slice deliberately requires explicit runtime adapters. Bind
+    // test doubles here so the packed consumer can continue to the runtime
+    // acceptance without weakening the compiler's missing-adapter diagnostic.
+    const featurePath = join(project, "src/features/case-approval/case-approval.feature.ts");
+    const featureSource = await readFile(featurePath, "utf8");
+    const boundFeatureSource = featureSource
+        .replace(
+            'import { CaseApprovalRefresher } from "./case-approval.model";',
+            [
+                'import {',
+                '    CaseApprovalJobStatuses, CaseApprovalReader, CaseApprovalReceipts,',
+                '    CaseApprovalRefresher, CaseApprovalWriter,',
+                '} from "./case-approval.model";',
+            ].join("\n"),
+        )
+        .replace(
+            "        CaseApprovalService,",
+            [
+                "        CaseApprovalService,",
+                '        { provide: CaseApprovalReader, useValue: {',
+                '            list: async () => [],',
+                '            detail: async () => ({ id: "case-1", state: "approved", version: 1 }),',
+                '        }, scope: "request" },',
+                '        { provide: CaseApprovalWriter, useValue: {',
+                '            approve: async () => ({ id: "case-1", state: "approved", version: 1 }),',
+                '        }, scope: "request" },',
+                '        { provide: CaseApprovalReceipts, useValue: {',
+                '            lookup: async () => ({ id: "case-1", operationId: "operation-1", status: "confirmed" as const, state: "approved", version: 1 }),',
+                '        }, scope: "request" },',
+                '        { provide: CaseApprovalJobStatuses, useValue: {',
+                '            lookup: async () => ({ id: "case-1", operationId: "operation-1", status: "completed" as const }),',
+                '        }, scope: "request" },',
+                '        { provide: CaseApprovalRefresher, useValue: { run: async () => {} }, scope: "job" },',
+            ].join("\n"),
+        );
+    assert.notEqual(boundFeatureSource, featureSource);
+    await writeFile(featurePath, boundFeatureSource);
 
     const configPath = join(project, "supacloud.config.ts");
     const originalConfig = await readFile(configPath, "utf8");
@@ -257,6 +299,17 @@ export default defineSupacloudConfig({
   },
 });
 `;
+    const rpcOnlyConfig = `import base from "./generation.base.config";
+import { defineSupacloudConfig } from "@supacloud/compiler";
+
+export default defineSupacloudConfig({
+  ...base,
+  commandCapabilities: {
+    ...base.commandCapabilities,
+    rpc: { approveCase: { boundary: "database", transaction: true, idempotency: true, audit: true } },
+  },
+});
+`;
     await writeFile(configPath, persistentConfig);
     const featureCompile = JSON.parse(await run([cli, "app", "compile", "--format", "json"]));
     assert.equal(featureCompile.ok, true);
@@ -266,9 +319,6 @@ export default defineSupacloudConfig({
     assert.deepEqual(featureCheck.written, []);
     assert.ok(featureCheck.modules.includes("case-approval"));
     await run(["test", "src/features/case-approval/case-approval.feature.test.ts"]);
-    await copyFile(join(repo, "scripts/fixtures/generated-feature.fixture"), join(project, "scripts/verify-generated-feature.ts"));
-    await run(["run", "typecheck"]);
-    console.log(await run(["scripts/verify-generated-feature.ts"]));
     await run(["run", "build"]);
     await writeFile(join(project, "scripts/verify-built-feature.mjs"), `import { strict as assert } from "node:assert";
 import { createApp } from "../dist/application.js";
@@ -279,6 +329,39 @@ assert.throws(() => createApp({
 console.log("Built feature: missing named runtime RPC prevents startup");
 `);
     console.log(await run(["scripts/verify-built-feature.mjs"]));
+    // Rebuild the same generated slice without adapter bindings so the runtime
+    // fixture proves missing ports fail closed after the strict compile path.
+    const unboundFeatureSource = featureSource.replace(
+        [
+            '    requiredAdapters: [',
+            '        "CaseApprovalReader",',
+            '        "CaseApprovalWriter",',
+            '        "CaseApprovalReceipts",',
+            '        "CaseApprovalJobStatuses",',
+            '        "CaseApprovalRefresher",',
+            '    ],',
+            '    requiredAdapterScopes: {',
+            '        CaseApprovalReader: "request",',
+            '        CaseApprovalWriter: "request",',
+            '        CaseApprovalReceipts: "request",',
+            '        CaseApprovalJobStatuses: "request",',
+            '        CaseApprovalRefresher: "job",',
+            '    },',
+        ].join("\n"),
+        "",
+    );
+    await writeFile(featurePath, unboundFeatureSource);
+    await writeFile(configPath, rpcOnlyConfig);
+    assert.equal(JSON.parse(await run([cli, "app", "compile", "--format", "json"])).ok, true);
+    assert.equal(JSON.parse(await run([cli, "app", "check", "--format", "json"])).ok, true);
+    const unboundApplication = await readFile(join(project, "generated/application.ts"), "utf8");
+    assert.doesNotMatch(unboundApplication, /const caseApproval(?:Reader|Writer|Receipts|JobStatuses|Refresher) =/);
+    await run(["run", "build"]);
+    const unboundBundle = await readFile(join(project, "dist/application.js"), "utf8");
+    assert.doesNotMatch(unboundBundle, /caseApproval(?:Reader|Writer|Receipts|JobStatuses|Refresher)\s*=/);
+    await copyFile(join(repo, "scripts/fixtures/generated-feature.fixture"), join(project, "scripts/verify-generated-feature.ts"));
+    await run(["run", "typecheck"]);
+    console.log(await run(["scripts/verify-generated-feature.ts"]));
     for (const file of preservedArtifacts.keys()) {
         preservedArtifacts.set(file, await readFile(join(project, "generated", file), "utf8"));
     }

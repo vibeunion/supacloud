@@ -91,11 +91,23 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
     for (const name of ["app", "generate"]) {
         expect(JSON.stringify(schemas[name]?.kind)).toContain("feature");
         expect(schemas[name]).toHaveProperty("permission");
+        expect(schemas[name]).toHaveProperty("read-permission");
         expect(schemas[name]).toHaveProperty("rpc");
         expect(schemas[name]).toHaveProperty("database_source");
         expect(schemas[name]).toHaveProperty("database_table");
         expect(schemas[name]).toHaveProperty("database_type");
     }
+});
+
+test("hyphenated read permission is an equivalent CLI alias", async () => {
+    const root = await fixture();
+    const result = data(await runAppTool({
+        ...feature,
+        root,
+        read_permission: undefined,
+        "read-permission": "cases:read",
+    }));
+    expect(result).toMatchObject({ ok: true, written: true });
 });
 
 async function generatedFixture(options: { bindAdapters?: boolean } = { bindAdapters: true }) {
