@@ -151,6 +151,11 @@ test("contract manifest publishes the complete feature state machine and persist
       featureSpec: {
         name: "case",
         states: ["draft", "approved"],
+        database: {
+          source: "db/schema.ts",
+          table: "public.reviews",
+          rowType: "ReviewRow",
+        },
         tenantField: "tenant_id",
         transitions: [{
           name: "approve", from: "draft", to: "approved",
@@ -182,6 +187,11 @@ test("contract manifest publishes the complete feature state machine and persist
       features: [{
         name: "case",
         states: ["draft", "approved"],
+        database: {
+          source: "db/schema.ts",
+          table: "public.reviews",
+          rowType: "ReviewRow",
+        },
         tenantField: "tenant_id",
         transitions: [{
           name: "approve",
