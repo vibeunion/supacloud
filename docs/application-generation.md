@@ -45,13 +45,13 @@ supacloud app generate --kind feature --name case-approval \
   --register-in src/app.module.ts
 ```
 
-The six-file feature plan creates one feature directory containing HTTP boundary
-schemas, request-scoped read/write ports, list/detail operations, an
+The eight-file feature plan creates one feature directory containing HTTP
+boundary schemas, request-scoped read/write ports, list/detail operations, an
 approval Command with permission/transaction/audit/idempotency/state metadata,
-an existing Workflow/Queue job boundary, HTTP routes, fail-closed unit tests
-and a delivery checklist. `--permission` and `--rpc` are mandatory and are
-never inferred. The RPC must be registered in compiler capabilities and the
-runtime host.
+an existing Workflow/Queue job boundary, HTTP routes, a fixture, fail-closed
+unit tests, an authenticated E2E test template and a delivery checklist.
+`--permission` and `--rpc` are mandatory and are never inferred. The RPC must
+be registered in compiler capabilities and the runtime host.
 
 Generated read/write ports receive `FeatureRequestContext` from the framework.
 It contains the verified request ID, tenant, actor and permissions. Adapters
@@ -149,7 +149,7 @@ add the new Module to an existing composition module using the compiler's
 Registration never guesses a root or instantiates application services. Ambiguous
 module declarations, dynamic import arrays, missing parents, conflicting symbols
 and filesystem conflicts reject the operation before generation writes anything.
-Preview contains the parent edit and all six new files. The conservative symbol
+Preview contains the parent edit and all eight new files. The conservative symbol
 collision check also sees comments; register such cases manually after review.
 
 Individual command, query, controller and job generators retain their existing
