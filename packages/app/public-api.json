@@ -145,8 +145,8 @@
     },
     {
       "name": "CommandContract",
-      "kind": "type",
-      "signature": "export interface CommandContract<Input, Result> {\n    input: ContractDecoder<Input>;\n    result: ContractDecoder<Result>;\n}"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "CommandMeta",
@@ -160,8 +160,8 @@
     },
     {
       "name": "CommandOutcome",
-      "kind": "type",
-      "signature": "export type CommandOutcome<Result> = {\n    status: \"confirmed\";\n    result: Result;\n    source: \"response\" | \"lookup\";\n} | {\n    status: \"unknown\";\n};"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "CommandRuntimeAdapter",
@@ -230,8 +230,8 @@
     },
     {
       "name": "ContractDecoder",
-      "kind": "type",
-      "signature": "export type ContractDecoder<T> = (value: unknown) => T;"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "Controller",
@@ -276,7 +276,7 @@
     {
       "name": "createContractCommandClient",
       "kind": "value",
-      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input, signal?: AbortSignal): Promise<unknown>;\n    lookup?(input: Input, signal?: AbortSignal): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    failureMetadata?(error: unknown): unknown;\n    isDefinitiveFailure?(error: unknown): boolean;\n}, options?: {\n    timeoutMs?: number;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
+      "signature": ""
     },
     {
       "name": "createDestroyRef",
@@ -326,7 +326,7 @@
     {
       "name": "decodeHttpContract",
       "kind": "value",
-      "signature": "export declare function decodeHttpContract<T>(decode: ContractDecoder<T>, value: unknown, boundary: \"request\" | \"response\"): T;"
+      "signature": ""
     },
     {
       "name": "DEFAULT_SCOPE",
@@ -544,6 +544,11 @@
       "signature": "export interface FeatureOperationResult {\n    readonly id: string;\n    readonly operationId: string;\n}"
     },
     {
+      "name": "FeaturePermissionError",
+      "kind": "both",
+      "signature": "export declare class FeaturePermissionError extends Error {\n    readonly permission: string;\n    readonly _tag: \"PERMISSION_DENIED\";\n    constructor(permission: string);\n}"
+    },
+    {
       "name": "FeaturePersistenceOptions",
       "kind": "type",
       "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
@@ -561,7 +566,7 @@
     {
       "name": "FeatureSpecOptions",
       "kind": "type",
-      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    database?: FeatureDatabaseSourceOptions;\n    tenantField?: string;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
+      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    database?: FeatureDatabaseSourceOptions;\n    tenantField?: string;\n    readPermission?: string;\n    requiredAdapters?: readonly string[];\n    requiredAdapterScopes?: Readonly<Record<string, \"application\" | \"request\" | \"job\">>;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
     },
     {
       "name": "FeatureState",
@@ -780,13 +785,13 @@
     },
     {
       "name": "HttpContract",
-      "kind": "type",
-      "signature": "export interface HttpContract<Input, Result> {\n    input: ContractDecoder<Input>;\n    result: ContractDecoder<Result>;\n    request: (input: Input) => {\n        method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\";\n        url: string;\n        body?: unknown;\n    };\n}"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "HttpContractError",
-      "kind": "both",
-      "signature": "export declare class HttpContractError extends Error {\n    readonly boundary: \"request\" | \"response\";\n    readonly code = \"HTTP_CONTRACT_INVALID\";\n    constructor(boundary: \"request\" | \"response\");\n}"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "HttpErrorResponse",
@@ -820,13 +825,13 @@
     },
     {
       "name": "HttpReplayError",
-      "kind": "both",
-      "signature": "export declare class HttpReplayError extends Error {\n    readonly code = \"HTTP_REPLAY_BLOCKED\";\n    constructor();\n}"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "HttpReplayPolicy",
-      "kind": "type",
-      "signature": "export type HttpReplayPolicy = {\n    mode: \"never\";\n} | {\n    mode: \"idempotent\";\n    idempotencyKey: string;\n};"
+      "kind": "value",
+      "signature": ""
     },
     {
       "name": "HttpRequestOptions",
@@ -1291,7 +1296,7 @@
     {
       "name": "QueryOptions",
       "kind": "type",
-      "signature": "export interface QueryOptions {\n    name: string;\n    tenantScope?: \"required\" | \"none\";\n}"
+      "signature": "export interface QueryOptions {\n    name: string;\n    permission?: string;\n    tenantScope?: \"required\" | \"none\";\n}"
     },
     {
       "name": "RedirectCommand",
@@ -1312,6 +1317,11 @@
       "name": "requireFeatureOperationResult",
       "kind": "value",
       "signature": "export declare function requireFeatureOperationResult<T extends FeatureOperationResult>(input: FeatureOperationLookupInput, value: unknown): T;"
+    },
+    {
+      "name": "requireFeaturePermission",
+      "kind": "value",
+      "signature": "export declare function requireFeaturePermission(context: FeatureRequestContext, permission: string): void;"
     },
     {
       "name": "requireFeatureRequestContext",
