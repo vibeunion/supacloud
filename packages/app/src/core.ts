@@ -32,7 +32,7 @@ export type {
   FeatureJobPort, FeatureOperationLookupInput, FeatureOperationPort, FeatureOperationResult, FeatureRequestContext,
 } from "./feature_context";
 export {
-  FeatureAdapterError, FeatureContextError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
+  FeatureAdapterError, FeatureContextError, FeatureEntityError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
   requireFeatureOperationResult, requireFeatureTransitionResult,
 } from "./feature_context";
 export { JOB_CONTEXT, REQUEST_CONTEXT } from "./context";

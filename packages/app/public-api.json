@@ -504,6 +504,11 @@
       "signature": "export interface FeatureDatabaseSourceOptions {\n    source: string;\n    table: string;\n    rowType: string;\n}"
     },
     {
+      "name": "FeatureEntityError",
+      "kind": "both",
+      "signature": "export declare class FeatureEntityError extends Error {\n    readonly _tag: \"FEATURE_ENTITY_RESULT_MISMATCH\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureEvent",
       "kind": "type",
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
@@ -1306,7 +1311,7 @@
     {
       "name": "requireFeatureTransitionResult",
       "kind": "value",
-      "signature": "export declare function requireFeatureTransitionResult<T extends {\n    readonly state: string;\n    readonly version: number;\n}>(expectedState: string, expectedVersion: number, value: unknown): T;"
+      "signature": "export declare function requireFeatureTransitionResult<T extends {\n    readonly id: string;\n    readonly state: string;\n    readonly version: number;\n}>(expectedId: string, expectedState: string, expectedVersion: number, value: unknown): T;"
     },
     {
       "name": "Resolve",

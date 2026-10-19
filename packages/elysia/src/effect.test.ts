@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { Context, Effect, Layer } from "effect";
 import { Elysia } from "elysia";
-import { FeatureAdapterError, FeatureContextError, FeatureOperationError } from "@supacloud/app";
+import {
+  FeatureAdapterError, FeatureContextError, FeatureEntityError, FeatureOperationError,
+} from "@supacloud/app";
 import { ApplicationError, createApplication, createModulePlugin } from "./index";
 import { createDefaultEffectRuntime, createEffectRuntimeFromLayer, runCompiledEffect } from "./effect";
 import type { CompiledModule } from "./index";
@@ -46,7 +48,11 @@ test("maps framework Feature operation errors through the declared route contrac
 });
 
 test("maps framework Feature setup errors through the declared route contract", async () => {
-  for (const error of [new FeatureContextError(), new FeatureAdapterError("case-approval.reader")]) {
+  for (const error of [
+    new FeatureContextError(),
+    new FeatureAdapterError("case-approval.reader"),
+    new FeatureEntityError(),
+  ]) {
     await expect(runCompiledEffect(
       Effect.fail(error),
       {
@@ -54,6 +60,7 @@ test("maps framework Feature setup errors through the declared route contract", 
         errors: [
           { tag: "FEATURE_CONTEXT_REQUIRED", status: 500, code: "FEATURE_CONTEXT_REQUIRED" },
           { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+          { tag: "FEATURE_ENTITY_RESULT_MISMATCH", status: 503, code: "FEATURE_ENTITY_RESULT_MISMATCH" },
         ],
       },
     )).rejects.toMatchObject({

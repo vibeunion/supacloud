@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import {
-  FeatureContextError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
+  FeatureContextError, FeatureEntityError, FeatureOperationError, FeatureTransitionError, FeatureVersionError,
   requireFeatureOperationResult, requireFeatureRequestContext, requireFeatureTransitionResult,
 } from "./feature_context";
 
@@ -52,13 +52,19 @@ test("rejects operation results that do not match the requested operation", () =
 });
 
 test("requires a committed transition result to advance state and version", () => {
-  expect(requireFeatureTransitionResult("approved", 1, {
+  expect(requireFeatureTransitionResult("case-1", "approved", 1, {
     id: "case-1", state: "approved", version: 2,
   })).toMatchObject({ state: "approved", version: 2 });
-  expect(() => requireFeatureTransitionResult("approved", 1, {
-    state: "draft", version: 2,
+  expect(() => requireFeatureTransitionResult("case-1", "approved", 1, {
+    id: "case-2", state: "approved", version: 2,
+  })).toThrow(FeatureEntityError);
+  expect(() => requireFeatureTransitionResult("case-1", "approved", 1, {
+    id: "case-1", state: "draft", version: 2,
   })).toThrow(FeatureTransitionError);
-  expect(() => requireFeatureTransitionResult("approved", 1, {
-    state: "approved", version: 1,
+  expect(() => requireFeatureTransitionResult("case-1", "approved", 1, {
+    id: "case-1", state: "approved", version: 1,
   })).toThrow(FeatureVersionError);
+  expect(() => requireFeatureTransitionResult("case-1", "approved", 1, {
+    state: "approved", version: 1,
+  })).toThrow(FeatureEntityError);
 });

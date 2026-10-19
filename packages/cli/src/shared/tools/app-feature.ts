@@ -170,6 +170,7 @@ export class ${className}Service {
     async approve(id: string, input: ${className}ApproveInput): Promise<${className}Result> {
         if (!this.writer) throw new FeatureAdapterError("${name}.writer");
         return requireFeatureTransitionResult(
+            id,
             "approved",
             input.expectedVersion,
             await this.writer.approve(this.context(), { ...input, id }),
@@ -256,6 +257,7 @@ type ${className}ApproveError =
     | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
     | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
+    | { readonly _tag: "FEATURE_ENTITY_RESULT_MISMATCH" }
     | { readonly _tag: "VERSION_CONFLICT" }
     | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
     | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
@@ -383,6 +385,7 @@ export class ${className}Controller {
                 { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
+                { tag: "FEATURE_ENTITY_RESULT_MISMATCH", status: 503, code: "FEATURE_ENTITY_RESULT_MISMATCH" },
                 { tag: "VERSION_CONFLICT", status: 409, code: "VERSION_CONFLICT" },
                 { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
                 { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
@@ -539,6 +542,11 @@ test("${name} rejects a writer result that does not prove the declared transitio
     });
     await expect(stale.approve("example", { expectedVersion: 1 }))
         .rejects.toMatchObject({ _tag: "VERSION_CONFLICT" });
+    const foreign = new ${className}Service(${className}RequestEnvelope, undefined, {
+        approve: async () => ({ id: "foreign", state: "approved", version: 2 }),
+    });
+    await expect(foreign.approve("example", { expectedVersion: 1 }))
+        .rejects.toMatchObject({ _tag: "FEATURE_ENTITY_RESULT_MISMATCH" });
 });
 
 test("${name} rejects operation lookup results for a different operation", async () => {

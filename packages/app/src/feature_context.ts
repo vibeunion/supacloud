@@ -60,6 +60,15 @@ export class FeatureVersionError extends Error {
   }
 }
 
+export class FeatureEntityError extends Error {
+  readonly _tag = "FEATURE_ENTITY_RESULT_MISMATCH" as const;
+
+  constructor() {
+    super("FEATURE_ENTITY_RESULT_MISMATCH");
+    this.name = "FeatureEntityError";
+  }
+}
+
 export class FeatureOperationError extends Error {
   readonly _tag = "FEATURE_OPERATION_RESULT_MISMATCH" as const;
 
@@ -81,13 +90,19 @@ export function requireFeatureOperationResult<T extends FeatureOperationResult>(
   return value as T;
 }
 
-export function requireFeatureTransitionResult<T extends { readonly state: string; readonly version: number }>(
+export function requireFeatureTransitionResult<
+  T extends { readonly id: string; readonly state: string; readonly version: number },
+>(
+  expectedId: string,
   expectedState: string,
   expectedVersion: number,
   value: unknown,
 ): T {
   if (value === null || typeof value !== "object" || Array.isArray(value)
-    || !("state" in value) || value.state !== expectedState) {
+    || !("id" in value) || value.id !== expectedId) {
+    throw new FeatureEntityError();
+  }
+  if (!("state" in value) || value.state !== expectedState) {
     throw new FeatureTransitionError();
   }
   if (!("version" in value) || typeof value.version !== "number"
