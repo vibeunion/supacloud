@@ -10,7 +10,9 @@ const require = createRequire(import.meta.url);
 const { compileProject } = require("../../../../compiler/dist/index.js") as typeof import("@supacloud/compiler");
 const feature = {
     action: "generate", kind: "feature", name: "case-approval",
-    permission: "cases:approve", rpc: "approveCase", format: "json",
+    permission: "cases:approve", rpc: "approveCase",
+    database_source: "db/schema.ts", database_table: "public.reviews", database_type: "ReviewRow",
+    format: "json",
 } as const;
 type Plan = { ok: boolean; written?: boolean; code?: string; changes: { path: string; content: string }[] };
 function data(result: ToolResult): Plan {
@@ -43,7 +45,8 @@ test("feature preview and apply share a complete, non-overwriting plan", async (
 test("feature generation refuses guessed governance and overwrites", async () => {
     const root = await fixture();
     for (const args of [
-        { permission: undefined }, { rpc: undefined }, { permission: " " },
+        { permission: undefined }, { rpc: undefined }, { database_source: undefined },
+        { database_table: undefined }, { database_type: undefined }, { permission: " " },
         { rpc: "../unsafe" }, { permission: 'bad"permission' }, { force: true }, { module: "existing" },
     ]) {
         expect(data(await runAppTool({ ...feature, root, ...args }))).toMatchObject({
@@ -89,6 +92,9 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
         expect(JSON.stringify(schemas[name]?.kind)).toContain("feature");
         expect(schemas[name]).toHaveProperty("permission");
         expect(schemas[name]).toHaveProperty("rpc");
+        expect(schemas[name]).toHaveProperty("database_source");
+        expect(schemas[name]).toHaveProperty("database_table");
+        expect(schemas[name]).toHaveProperty("database_type");
     }
 });
 
@@ -130,8 +136,9 @@ test("the generated approval compiles only with the explicit persistent capabili
         .toBe("case-approval.refresh");
     expect(featureModule?.commands[0]?.rpc).toBe("approveCase");
     expect(featureModule?.queries).toHaveLength(1);
-    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
-        .toContain('tenantField: "tenant_id"');
+    const featureSource = await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8");
+    expect(featureSource).toContain('database: {"source":"db/schema.ts","table":"public.reviews","rowType":"ReviewRow"}');
+    expect(featureSource).toContain('tenantField: "tenant_id"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))

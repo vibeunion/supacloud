@@ -1,4 +1,4 @@
-import type { ApplicationGraph, FeaturePersistenceNode } from "./types";
+import type { ApplicationGraph, FeatureDatabaseSourceNode, FeaturePersistenceNode } from "./types";
 import { joinRoutePaths } from "./util";
 import { featureTransitionForRoute } from "./feature";
 
@@ -44,6 +44,7 @@ export interface ContractManifest {
   features: Array<{
     name: string;
     states: string[];
+    database?: FeatureDatabaseSourceNode;
     tenantField?: string;
     transitions: Array<{
       name: string;
@@ -175,6 +176,7 @@ export function buildContractManifest(
       features.push({
         name: module.featureSpec.name,
         states: [...module.featureSpec.states],
+        ...(module.featureSpec.database === undefined ? {} : { database: module.featureSpec.database }),
         ...(module.featureSpec.tenantField === undefined ? {} : { tenantField: module.featureSpec.tenantField }),
         transitions: module.featureSpec.transitions.map((transition) => {
           const job = transition.job === undefined ? undefined
