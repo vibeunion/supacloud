@@ -167,10 +167,10 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       ? new Set(module.controllers.flatMap((controller) =>
         controller.routes.flatMap((route) => route.tags ?? [])))
       : new Set<string>();
-    if (transition.persistence?.boundary === "database" && declaredTags.size > 0
+    if (transition.persistence !== undefined && declaredTags.size > 0
       && transition.invalidateTags === undefined) {
       error("feature-invalidation-tags-required",
-        `Database transition ${transition.name} must declare invalidateTags when Feature ${spec.name} exposes query tags.`);
+        `Persistent transition ${transition.name} must declare invalidateTags when Feature ${spec.name} exposes query tags.`);
     }
     if (transition.invalidateTags !== undefined && declaredTags.size > 0) {
       for (const tag of transition.invalidateTags) {
