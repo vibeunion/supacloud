@@ -179,10 +179,10 @@ function validFeatureInventory(
           && feature["tenantField"] !== persistence["tenantField"]) return false;
       }
       const commandName = transition["command"];
+      const command = commandName === undefined ? undefined : commands.find((candidate) =>
+        isRecord(candidate) && (candidate["name"] === commandName || candidate["className"] === commandName),
+      );
       if (commandName !== undefined) {
-        const command = commands.find((candidate) =>
-          isRecord(candidate) && (candidate["name"] === commandName || candidate["className"] === commandName),
-        );
         if (!isRecord(command)) return false;
         if (transition["permission"] !== undefined && command["permission"] !== transition["permission"]) return false;
         if (transition["transaction"] !== undefined && command["transaction"] !== transition["transaction"]) return false;
@@ -209,8 +209,12 @@ function validFeatureInventory(
         if (!isRecord(route)) return false;
         if (routeBinding === "controller") {
           if (route["command"] !== undefined) return false;
-        } else if (route["command"] !== commandName) {
-          return false;
+        } else {
+          if (typeof route["command"] !== "string") return false;
+          const routeCommand = commands.find((candidate) => isRecord(candidate)
+            && (candidate["name"] === route["command"] || candidate["className"] === route["command"]));
+          if (!isRecord(routeCommand) || !isRecord(command)
+            || routeCommand["name"] !== command["name"]) return false;
         }
         if (transition["permission"] !== undefined
           && route["permission"] !== transition["permission"]) return false;
