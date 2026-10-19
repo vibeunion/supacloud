@@ -2744,6 +2744,9 @@ export function renderPermissions(graph: ApplicationGraph): string {
     for (const command of module.commands) {
       if (command.permission) permissions.add(command.permission);
     }
+    for (const query of module.queries) {
+      if (query.permission) permissions.add(query.permission);
+    }
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const featureTransition = featureTransitionForRoute(module, controller, route);

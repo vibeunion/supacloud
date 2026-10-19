@@ -404,7 +404,6 @@ export interface FeaturePersistenceNode {
   optimisticLock: "required" | "none";
   versionField?: string;
   tenantField?: string;
-  readPermission?: string;
   stateField?: string;
   receipt: "required" | "none";
   reconciliation: "required" | "none";
@@ -421,6 +420,7 @@ export interface FeatureSpecNode {
   states: string[];
   database?: FeatureDatabaseSourceNode;
   tenantField?: string;
+  readPermission?: string;
   requiredAdapters?: string[];
   requiredAdapterScopes?: Record<string, Scope>;
   transitions: FeatureTransitionNode[];

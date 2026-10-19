@@ -27,6 +27,7 @@ export interface ContractManifest {
     name: string;
     className: string;
     module: string;
+    permission?: string;
     tenantScope?: "required" | "none";
   }>;
   jobs: Array<{
@@ -153,6 +154,7 @@ export function buildContractManifest(
       });
     }
     for (const query of module.queries) {
+      if (query.permission) permissions.add(query.permission);
       queries.push({
         name: query.name, className: query.className, module: module.name,
         ...(query.permission === undefined ? {} : { permission: query.permission }),
@@ -179,6 +181,7 @@ export function buildContractManifest(
         states: [...module.featureSpec.states],
         ...(module.featureSpec.database === undefined ? {} : { database: module.featureSpec.database }),
         ...(module.featureSpec.tenantField === undefined ? {} : { tenantField: module.featureSpec.tenantField }),
+        ...(module.featureSpec.readPermission === undefined ? {} : { readPermission: module.featureSpec.readPermission }),
         transitions: module.featureSpec.transitions.map((transition) => {
           const job = transition.job === undefined ? undefined
             : (module.jobs ?? []).find((candidate) => candidate.className === transition.job || candidate.name === transition.job);
