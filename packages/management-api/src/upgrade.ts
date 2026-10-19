@@ -115,7 +115,9 @@ const WEB_CONSOLE_MAX_EXTRACTED_BYTES = 256 * 1024 * 1024;
 const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
 const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
 const WEB_CONSOLE_CURRENT_LINK = WEB_CONSOLE_CURRENT_DIR;
-const DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN = "/etc/systemd/system/supacloud-edge-runtime.service.d/50-edge-runtime-capacity.conf";
+// Keep the managed capacity policy after legacy/operator drop-ins so stale
+// worker caps cannot override the memory-bounded upgrade defaults.
+const DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN = "/etc/systemd/system/supacloud-edge-runtime.service.d/99-supacloud-edge-runtime-capacity.conf";
 const DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/40-management-privilege.conf";
 const DEFAULT_EMBEDDED_EDGE_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf";
 const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
@@ -2487,8 +2489,14 @@ export async function ensureEmbeddedEdgeRuntimeSourceAccess(
     await runRequiredHostCommand(["chgrp", "-R", identity.group, sourceDir], "Failed to assign Edge Runtime source group", run);
 }
 
+export function resolveEdgeRuntimeCapacityDropInPath(
+    env: Record<string, string | undefined> = process.env,
+) {
+    return env.SUPACLOUD_EDGE_RUNTIME_CAPACITY_DROPIN || DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN;
+}
+
 function edgeRuntimeCapacityDropIn() {
-    return process.env.SUPACLOUD_EDGE_RUNTIME_CAPACITY_DROPIN || DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN;
+    return resolveEdgeRuntimeCapacityDropInPath();
 }
 
 function embeddedEdgePrivilegeDropIn() {
