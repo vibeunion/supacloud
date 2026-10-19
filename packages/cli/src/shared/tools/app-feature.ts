@@ -7,13 +7,14 @@ export function featureScaffold(
     className: string,
     governance: {
         permission: string;
+        readPermission: string;
         rpc: string;
         database: { source: string; table: string; rowType: string };
         databaseImportPath?: string;
     },
 ): Record<string, string> {
     const commandName = `${name}.approve`;
-    const { permission, rpc, database } = governance;
+    const { permission, readPermission, rpc, database } = governance;
     const databaseImportPath = governance.databaseImportPath
         ?? `../../../${database.source.replace(/\.(?:[cm]?tsx?|mts|cts)$/, "")}`;
     const rowTypeRoot = database.rowType.split(".")[0]!;
@@ -136,6 +137,7 @@ export const ${className}Refresher = new InjectionToken<${className}RefreshPort>
 `,
         [`${name}.service.ts`]: `import {
     FeatureAdapterError, Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
+    requireFeaturePermission,
     requireFeatureRequestContext, requireFeatureTransitionResult,
     type FeatureRequestContext,
 } from "@supacloud/app/core";
@@ -168,13 +170,17 @@ export class ${className}Service {
     }
 
     async list(input: Parameters<${className}ReadPort["list"]>[1]): Promise<${className}Result[]> {
+        const context = this.context();
+        requireFeaturePermission(context, ${JSON.stringify(readPermission)});
         if (!this.reader) throw new FeatureAdapterError("${name}.reader");
-        return this.reader.list(this.context(), input);
+        return this.reader.list(context, input);
     }
 
     async detail(id: string): Promise<${className}Result> {
+        const context = this.context();
+        requireFeaturePermission(context, ${JSON.stringify(readPermission)});
         if (!this.reader) throw new FeatureAdapterError("${name}.reader");
-        return this.reader.detail(this.context(), id);
+        return this.reader.detail(context, id);
     }
 
     async approve(id: string, input: ${className}ApproveInput): Promise<${className}Result> {
@@ -188,17 +194,21 @@ export class ${className}Service {
     }
 
     async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
+        const context = this.context();
+        requireFeaturePermission(context, ${JSON.stringify(readPermission)});
         if (!this.receipts) throw new FeatureAdapterError("${name}.receipts");
         const input = { id, operationId };
         // Keep the comparison identity separate from mutable adapter arguments.
-        return requireFeatureOperationResult(input, await this.receipts.lookup(this.context(), { ...input }));
+        return requireFeatureOperationResult(input, await this.receipts.lookup(context, { ...input }));
     }
 
     async jobStatus(id: string, operationId: string): Promise<${className}JobStatusResult> {
+        const context = this.context();
+        requireFeaturePermission(context, ${JSON.stringify(readPermission)});
         if (!this.jobStatuses) throw new FeatureAdapterError("${name}.job-statuses");
         const input = { id, operationId };
         // Keep the comparison identity separate from mutable adapter arguments.
-        return requireFeatureOperationResult(input, await this.jobStatuses.lookup(this.context(), { ...input }));
+        return requireFeatureOperationResult(input, await this.jobStatuses.lookup(context, { ...input }));
     }
 }
 `,
@@ -236,6 +246,7 @@ export const featureSpec = defineFeatureSpec({
     states: ["draft", "approved"],
     database: ${JSON.stringify(database)},
     tenantField: "tenant_id",
+    readPermission: ${JSON.stringify(readPermission)},
     requiredAdapters: [
         "${className}Reader",
         "${className}Writer",
@@ -306,7 +317,7 @@ type ${className}JobStatusError =
     | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
 
 @Injectable({ scope: "request" })
-@Query({ name: "${name}.list", tenantScope: "required" })
+@Query({ name: "${name}.list", permission: ${JSON.stringify(readPermission)}, tenantScope: "required" })
 export class List${className}Query {
     constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
     execute(input: ${className}ListInput): Promise<${className}Result[]> {
@@ -315,7 +326,7 @@ export class List${className}Query {
 }
 
 @Injectable({ scope: "request" })
-@Query({ name: "${name}.detail", tenantScope: "required" })
+@Query({ name: "${name}.detail", permission: ${JSON.stringify(readPermission)}, tenantScope: "required" })
 export class Detail${className}Query {
     constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
     execute(id: string): Promise<${className}Result> {
@@ -324,7 +335,7 @@ export class Detail${className}Query {
 }
 
 @Injectable({ scope: "request" })
-@Query({ name: "${name}.receipt", tenantScope: "required" })
+@Query({ name: "${name}.receipt", permission: ${JSON.stringify(readPermission)}, tenantScope: "required" })
 export class Receipt${className}Query {
     constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
     execute(id: string, operationId: string): Promise<${className}ReceiptResult> {
@@ -333,7 +344,7 @@ export class Receipt${className}Query {
 }
 
 @Injectable({ scope: "request" })
-@Query({ name: "${name}.job-status", tenantScope: "required" })
+@Query({ name: "${name}.job-status", permission: ${JSON.stringify(readPermission)}, tenantScope: "required" })
 export class JobStatus${className}Query {
     constructor(@Inject(${className}Service) private readonly service: ${className}Service) {}
     execute(id: string, operationId: string): Promise<${className}JobStatusResult> {
@@ -691,13 +702,13 @@ export const ${className}RequestContext = {
     requestId: "request-example",
     tenantId: "tenant-example",
     actorId: "reviewer-example",
-    permissions: [${JSON.stringify(permission)}],
+    permissions: [${JSON.stringify(permission)}, ${JSON.stringify(readPermission)}],
 } as const;
 
 export const ${className}RequestEnvelope = {
     ...${className}RequestContext,
     identity: { authenticated: true, subject: "reviewer-example" },
-    access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}] },
+    access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}, ${JSON.stringify(readPermission)}] },
 } as const satisfies Record<string, unknown>;
 
 export const ${className}JobRequestEnvelope = {

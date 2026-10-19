@@ -42,6 +42,15 @@ export class FeatureAdapterError extends Error {
   }
 }
 
+export class FeaturePermissionError extends Error {
+  readonly _tag = "PERMISSION_DENIED" as const;
+
+  constructor(readonly permission: string) {
+    super(`PERMISSION_DENIED:${permission}`);
+    this.name = "FeaturePermissionError";
+  }
+}
+
 export class FeatureTransitionError extends Error {
   readonly _tag = "FEATURE_TRANSITION_CONFLICT" as const;
 
@@ -189,4 +198,10 @@ export function requireFeatureRequestContext(value: unknown): FeatureRequestCont
     permissions: Object.freeze([...new Set(normalizedPermissions)]),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
   });
+}
+
+export function requireFeaturePermission(context: FeatureRequestContext, permission: string): void {
+  if (!context.permissions.includes(permission) && !context.permissions.includes("*")) {
+    throw new FeaturePermissionError(permission);
+  }
 }

@@ -488,7 +488,7 @@ describe("feature specs", () => {
     };
     const module = {
       ...baseModule(spec),
-      queries: [{ className: "ListCaseQuery", name: "case.list", tenantScope: "required" as const }],
+      queries: [{ className: "ListCaseQuery", name: "case.list", permission: "case.read", tenantScope: "required" as const }],
     };
     expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
       .toContain("feature-query-provider-unresolved");

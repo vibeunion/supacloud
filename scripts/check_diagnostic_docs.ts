@@ -550,6 +550,9 @@ class CaseModule {}
   transitions: {},
 });
 // The registered adapter provider must use the declared scope.`,
+  SC6138: `@Query({ name: "case.list", tenantScope: "required" })
+class ListCaseQuery {}
+// Feature queries must declare an explicit read permission.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

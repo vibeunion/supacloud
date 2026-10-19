@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const { compileProject } = require("../../../../compiler/dist/index.js") as typeof import("@supacloud/compiler");
 const feature = {
     action: "generate", kind: "feature", name: "case-approval",
-    permission: "cases:approve", rpc: "approveCase",
+    permission: "cases:approve", read_permission: "cases:read", rpc: "approveCase",
     database_source: "db/schema.ts", database_table: "public.reviews", database_type: "ReviewRow",
     format: "json",
 } as const;
@@ -45,7 +45,7 @@ test("feature preview and apply share a complete, non-overwriting plan", async (
 test("feature generation refuses guessed governance and overwrites", async () => {
     const root = await fixture();
     for (const args of [
-        { permission: undefined }, { rpc: undefined }, { database_source: undefined },
+        { permission: undefined }, { read_permission: undefined }, { rpc: undefined }, { database_source: undefined },
         { database_table: undefined }, { database_type: undefined }, { permission: " " },
         { rpc: "../unsafe" }, { permission: 'bad"permission' }, { force: true }, { module: "existing" },
     ]) {
@@ -176,9 +176,9 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureSource).toContain('CaseApprovalRefresher: "job"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
-    expect(featureSource).toContain('@Query({ name: "case-approval.detail", tenantScope: "required" })');
-    expect(featureSource).toContain('@Query({ name: "case-approval.receipt", tenantScope: "required" })');
-    expect(featureSource).toContain('@Query({ name: "case-approval.job-status", tenantScope: "required" })');
+    expect(featureSource).toContain('@Query({ name: "case-approval.detail", permission: "cases:read", tenantScope: "required" })');
+    expect(featureSource).toContain('@Query({ name: "case-approval.receipt", permission: "cases:read", tenantScope: "required" })');
+    expect(featureSource).toContain('@Query({ name: "case-approval.job-status", permission: "cases:read", tenantScope: "required" })');
     expect(featureSource).toContain("DetailCaseApprovalQuery");
     expect(featureSource).toContain("ReceiptCaseApprovalQuery");
     expect(featureSource).toContain("JobStatusCaseApprovalQuery");

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import {
   FeatureContextError, FeatureEntityError, FeatureJobOperationError, FeatureOperationError, FeatureTransitionError,
-  FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult, requireFeatureRequestContext,
+  FeaturePermissionError, FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult,
+  requireFeaturePermission, requireFeatureRequestContext,
   requireFeatureTransitionResult,
 } from "./feature_context";
 
@@ -40,6 +41,17 @@ test("rejects missing or untrusted tenant context", () => {
     expect(() => requireFeatureRequestContext(value)).toThrow(FeatureContextError);
     expect(() => requireFeatureRequestContext(value)).toThrow("FEATURE_CONTEXT_REQUIRED");
   }
+});
+
+test("enforces explicit feature permissions before adapter execution", () => {
+  const context = requireFeatureRequestContext({
+    requestId: "request-1",
+    identity: { authenticated: true, subject: "actor-1" },
+    access: { tenantId: "tenant-1", permissions: ["case:read"] },
+  });
+  expect(() => requireFeaturePermission(context, "case:read")).not.toThrow();
+  expect(() => requireFeaturePermission(context, "case:write")).toThrow(FeaturePermissionError);
+  expect(() => requireFeaturePermission({ ...context, permissions: ["*"] }, "case:write")).not.toThrow();
 });
 
 test("rejects operation results that do not match the requested operation", () => {
