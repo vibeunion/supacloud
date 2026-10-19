@@ -490,10 +490,10 @@ test("${name} runs the refresh adapter with trusted tenant context", async () =>
 
 test("${name} fails closed until verified read and durable write ports are bound", async () => {
     const service = new ${className}Service(${className}RequestEnvelope);
-    await expect(service.list({})).rejects.toThrow("Bind ${className}Reader");
-    await expect(service.detail("example")).rejects.toThrow("Bind ${className}Reader");
-    await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("Bind ${className}Writer");
-    await expect(service.jobStatus("example", "operation-example")).rejects.toThrow("Bind ${className}JobStatuses");
+    await expect(service.list({})).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
+    await expect(service.detail("example")).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
+    await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
+    await expect(service.jobStatus("example", "operation-example")).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
 });
 
 test("${name} preserves denied reads and rejected writes without fallback or retry", async () => {
