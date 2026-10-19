@@ -211,9 +211,9 @@ function deploymentFailure(deployment: EdgeFunctionDeployResult) {
       activation_id: deployment.activation_id,
     });
   }
-  return status(500, {
+  return status(deployment.error_status ?? 500, {
     message: deployment.error || "Failed to deploy function",
-    code: "500",
+    code: deployment.error_code ?? "500",
     details: deployment,
   });
 }
