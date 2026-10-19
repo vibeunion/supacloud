@@ -315,6 +315,7 @@ function readOAuthProviders(root: ConfigTable, env: Environment): Record<string,
         idTokenIssuer: getString(t, 'id_token_issuer') ?? getString(t, 'issuer'),
         idTokenJwksUrl: getString(t, 'id_token_jwks_url') ?? getString(t, 'jwks_url'),
         idTokenAudience: getString(t, 'id_token_audience') ?? clientId,
+        ssoDomains: getStringArray(t, 'sso_domains'),
       }
     }
   }
