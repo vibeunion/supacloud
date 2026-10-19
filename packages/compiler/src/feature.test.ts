@@ -410,6 +410,31 @@ describe("feature specs", () => {
       .toContain("feature-query-provider-unresolved");
   });
 
+  test("rejects feature queries with application scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case", states: ["draft", "accepted"], tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      providers: [{
+        token: "ListCaseQuery", tokenKind: "class" as const, kind: "class" as const,
+        useClass: "ListCaseQuery", scope: "application" as const, deps: [],
+        exported: false, file: "case.query.ts", line: 1,
+      }],
+      queries: [{ className: "ListCaseQuery", name: "case.list", tenantScope: "required" as const }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-provider-scope");
+  });
+
   test("requires tenant-scoped jobs for database features", () => {
     const spec: FeatureSpecNode = {
       name: "case",
@@ -579,6 +604,28 @@ describe("feature specs", () => {
     };
     expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
       .toContain("feature-job-provider-unresolved");
+  });
+
+  test("rejects feature Jobs with request scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case", states: ["draft", "accepted"], tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const module = {
+      ...baseModule(spec),
+      providers: [{
+        token: "RefreshCaseJob", tokenKind: "class" as const, kind: "class" as const,
+        useClass: "RefreshCaseJob", scope: "request" as const, deps: [],
+        exported: false, file: "case.job.ts", line: 1,
+      }],
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job" as const, input: "RefreshCaseInput", schemaKinds: { input: "declared" as const },
+        tenantScope: "required" as const, idempotency: "required" as const, mode: "task" as const,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-provider-scope");
   });
 
   test("requires tenant-scoped commands for database features", () => {
