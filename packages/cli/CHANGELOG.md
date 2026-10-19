@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.106.0](https://github.com/vibeunion/supacloud/compare/cli-v0.105.0...cli-v0.106.0) (2026-10-19)
+
+
+### Features
+
+* **cli:** require database provenance for feature generation ([#2167](https://github.com/vibeunion/supacloud/issues/2167)) ([8e1eb5d](https://github.com/vibeunion/supacloud/commit/8e1eb5d500898cf822b79884b4a3012b9f030d09))
+
+
+### Miscellaneous Chores
+
+* **lite:** restore Supabase SDK 2.118.0 ([#2161](https://github.com/vibeunion/supacloud/issues/2161)) ([0c7d4d0](https://github.com/vibeunion/supacloud/commit/0c7d4d08ed10cce4adcf5d30c9e7e473bc7f492a))
+
 ## [0.105.0](https://github.com/vibeunion/supacloud/compare/cli-v0.104.0...cli-v0.105.0) (2026-10-19)
 
 
