@@ -507,6 +507,8 @@ describe("edgeFunctionService activation transaction", () => {
     expect(rejected).toMatchObject({
       success: false,
       error: expect.stringContaining("runtime activation state is uncertain"),
+      error_code: "SERVICE_UNAVAILABLE",
+      error_status: 503,
     });
     expect(runtime.calls.some((path) => path.includes("/preheat/"))).toBe(false);
   });
