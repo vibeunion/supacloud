@@ -24,6 +24,15 @@ export interface FeatureOperationResult {
   readonly operationId: string;
 }
 
+export class FeatureOperationError extends Error {
+  readonly _tag = "FEATURE_OPERATION_RESULT_MISMATCH" as const;
+
+  constructor() {
+    super("FEATURE_OPERATION_RESULT_MISMATCH");
+    this.name = "FeatureOperationError";
+  }
+}
+
 export function requireFeatureOperationResult<T extends FeatureOperationResult>(
   input: FeatureOperationLookupInput,
   value: unknown,
@@ -31,7 +40,7 @@ export function requireFeatureOperationResult<T extends FeatureOperationResult>(
   if (value === null || typeof value !== "object" || Array.isArray(value)
     || !("id" in value) || value.id !== input.id
     || !("operationId" in value) || value.operationId !== input.operationId) {
-    throw new Error("FEATURE_OPERATION_RESULT_MISMATCH");
+    throw new FeatureOperationError();
   }
   return value as T;
 }

@@ -504,6 +504,11 @@
       "signature": "export interface FeatureJobPort<Input, Output = void> {\n    run(context: FeatureRequestContext, input: Input): Promise<Output>;\n}"
     },
     {
+      "name": "FeatureOperationError",
+      "kind": "both",
+      "signature": "export declare class FeatureOperationError extends Error {\n    readonly _tag: \"FEATURE_OPERATION_RESULT_MISMATCH\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureOperationLookupInput",
       "kind": "type",
       "signature": "export interface FeatureOperationLookupInput {\n    readonly id: string;\n    readonly operationId: string;\n}"

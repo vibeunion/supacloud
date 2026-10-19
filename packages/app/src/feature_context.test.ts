@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { requireFeatureOperationResult, requireFeatureRequestContext } from "./feature_context";
+import { FeatureOperationError, requireFeatureOperationResult, requireFeatureRequestContext } from "./feature_context";
 
 test("normalizes the trusted identity and tenant context", () => {
   const context = requireFeatureRequestContext({
@@ -42,6 +42,7 @@ test("rejects operation results that do not match the requested operation", () =
   expect(requireFeatureOperationResult(input, { id: "case-1", operationId: "operation-1", status: "completed" }))
     .toMatchObject({ id: "case-1", operationId: "operation-1" });
   for (const value of [null, {}, { id: "case-1", operationId: "operation-2" }, { id: "case-2", operationId: "operation-1" }]) {
+    expect(() => requireFeatureOperationResult(input, value)).toThrow(FeatureOperationError);
     expect(() => requireFeatureOperationResult(input, value)).toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
   }
 });

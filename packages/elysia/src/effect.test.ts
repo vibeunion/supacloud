@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Context, Effect, Layer } from "effect";
 import { Elysia } from "elysia";
+import { FeatureOperationError } from "@supacloud/app";
 import { ApplicationError, createApplication, createModulePlugin } from "./index";
 import { createDefaultEffectRuntime, createEffectRuntimeFromLayer, runCompiledEffect } from "./effect";
 import type { CompiledModule } from "./index";
@@ -22,6 +23,24 @@ test("maps tagged Effect failures to the declared public error", async () => {
   )).rejects.toMatchObject({
     status: 404,
     code: "ORDER_NOT_FOUND",
+    expose: true,
+  });
+});
+
+test("maps framework Feature operation errors through the declared route contract", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail(new FeatureOperationError()),
+    {
+      required: true,
+      errors: [{
+        tag: "FEATURE_OPERATION_RESULT_MISMATCH",
+        status: 503,
+        code: "FEATURE_OPERATION_RESULT_MISMATCH",
+      }],
+    },
+  )).rejects.toMatchObject({
+    status: 503,
+    code: "FEATURE_OPERATION_RESULT_MISMATCH",
     expose: true,
   });
 });

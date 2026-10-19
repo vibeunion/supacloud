@@ -188,7 +188,7 @@ export { requireFeatureRequestContext } from "./feature_context";
 export type {
   FeatureJobPort, FeatureOperationLookupInput, FeatureOperationPort, FeatureOperationResult, FeatureRequestContext,
 } from "./feature_context";
-export { requireFeatureOperationResult } from "./feature_context";
+export { FeatureOperationError, requireFeatureOperationResult } from "./feature_context";
 export {
   APP_INITIALIZER,
   APP_LIFECYCLE,
