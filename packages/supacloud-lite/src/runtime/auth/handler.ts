@@ -13,6 +13,7 @@ import { DEFAULT_AUTH_SETTINGS, type AuthSettings } from './settings.js'
 import { resolveRedirect } from './redirect.js'
 import { RateLimiter } from './rate-limit.js'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js'
+import { verifySolanaSignIn } from './web3.js'
 
 /** Construction-time config for {@link AuthHandler}. */
 export interface AuthConfig {
@@ -402,6 +403,7 @@ export class AuthHandler {
       if (path === 'resend' && method === 'POST') return await this.sendOtp(req, true)
       if (path === 'verify' && method === 'POST') return this.limit('verify', req) ?? (await this.verifyToken(req))
       if (path === 'verify' && method === 'GET') return await this.verifyLink(url)
+      if (path === 'sso' && method === 'POST') return await this.sso(req)
       if (path === 'invite' && method === 'POST') {
         if (ctx.role !== 'service_role') {
           return authError(403, 'insufficient_permissions', 'Admin endpoints require the service_role key')
@@ -555,6 +557,40 @@ export class AuthHandler {
     return json(200, await this.sessionFor(newUser))
   }
 
+  private async sso(req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => ({}))) as {
+      provider_id?: string
+      domain?: string
+      redirect_to?: string
+      code_challenge?: string
+      code_challenge_method?: string
+      skip_http_redirect?: boolean
+    }
+    const providerId = typeof body.provider_id === 'string' ? body.provider_id.trim().toLowerCase() : ''
+    const domain = typeof body.domain === 'string' ? body.domain.trim().toLowerCase() : ''
+    const providers = this.config.oauthProviders ?? {}
+    const provider = providerId && providers[providerId]
+      ? providerId
+      : Object.entries(providers).find(([, config]) =>
+        domain && (config.ssoDomains ?? []).some((item) => item.toLowerCase() === domain)
+      )?.[0] ?? ''
+    if (!provider) return authError(404, 'sso_provider_not_found', 'SSO provider not found')
+
+    const authorizeUrl = new URL(req.url)
+    authorizeUrl.pathname = authorizeUrl.pathname.replace(/\/sso$/, '/authorize')
+    authorizeUrl.search = ''
+    authorizeUrl.searchParams.set('provider', provider)
+    authorizeUrl.searchParams.set('skip_http_redirect', String(body.skip_http_redirect === true))
+    for (const [key, value] of [
+      ['redirect_to', body.redirect_to],
+      ['code_challenge', body.code_challenge],
+      ['code_challenge_method', body.code_challenge_method],
+    ] as const) {
+      if (value) authorizeUrl.searchParams.set(key, value)
+    }
+    return this.oauth.authorize(authorizeUrl)
+  }
+
   private async token(req: Request, url: URL): Promise<Response> {
     const grantType = url.searchParams.get('grant_type')
     const body = (await req.json().catch(() => ({}))) as Record<string, string>
@@ -676,6 +712,30 @@ export class AuthHandler {
         if (!user) return authError(400, 'invalid_credentials', 'Invalid ID token')
         return json(200, await this.sessionFor(user, undefined, {
           amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+        }, query))
+      })
+    }
+
+    if (grantType === 'web3') {
+      if (body.chain !== 'solana' || !body.message || !body.signature) {
+        return authError(400, 'validation_failed', 'chain, message and signature are required')
+      }
+      const wallet = await verifySolanaSignIn(body.message, body.signature)
+      if (!wallet) return authError(400, 'invalid_credentials', 'Invalid Web3 credentials')
+      const userId = await this.oauth.signInWithProfile('solana', {
+        id: wallet.address,
+        metadata: { address: wallet.address, chain: 'solana' },
+      })
+      return this.db.transaction(async (query) => {
+        const result = await query<UserRow>(
+          `select * from auth.users where id = $1 and deleted_at is null
+             and (banned_until is null or banned_until <= now()) for update`,
+          [userId],
+        )
+        const user = result.rows[0]
+        if (!user) return authError(400, 'invalid_credentials', 'Invalid Web3 credentials')
+        return json(200, await this.sessionFor(user, undefined, {
+          amr: [{ method: 'web3', timestamp: Math.floor(Date.now() / 1000) }],
         }, query))
       })
     }
@@ -823,7 +883,7 @@ export class AuthHandler {
         )
         const updated = updatedResult.rows[0]
         if (!updated) return authError(401, 'no_authorization', 'Invalid or expired token')
-        if (requestedEmail) await this.ensureEmailIdentity(updated, query)
+        if (requestedEmail) await this.ensureEmailIdentity(updated, query, upgradingAnon)
         return json(200, await this.userJsonWithRelations(updated, query))
       })
     } catch (error) {
@@ -1847,28 +1907,41 @@ export class AuthHandler {
         message: 'Confirmation link accepted. Please proceed to confirm link sent to the other email',
       })
     }
-    const user = type === 'email_change'
-      ? emailChange
-      : await this.redeemUser(token, [type])
-    if (!user) {
-      return new Response(null, { status: 303, headers: { location: `${redirectTo}#error=access_denied&error_code=otp_expired` } })
+    let user: UserRow | null = null
+    let session: Record<string, unknown> | null = null
+    if (type === 'email_change') {
+      user = emailChange
+    } else if (flow) {
+      user = await this.redeemUser(token, [type])
+    } else {
+      session = await this.redeem(token, [type], undefined, {
+        amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      })
     }
-    if (flow) {
-      const authCode = randomToken(24)
-      const claimed = await this.db.query<{ redirect_to: string | null }>(
-        `update auth.flow_state
-         set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
-         where id = $3 and auth_code is null and expires_at > now()
-         returning redirect_to`,
-        [authCode, user.id, flow.id],
-      )
-      const target = claimed.rows[0]?.redirect_to
-      if (target) return redirectWithQuery(target, { code: authCode })
+    if (type === 'email_change' || flow) {
+      if (!user) {
+        return new Response(null, { status: 303, headers: { location: redirectTo + '#error=access_denied&error_code=otp_expired' } })
+      }
+      if (flow) {
+        const authCode = randomToken(24)
+        const claimed = await this.db.query<{ redirect_to: string | null }>(
+          `update auth.flow_state
+           set auth_code = $1, user_id = $2, expires_at = now() + interval '5 minutes'
+           where id = $3 and auth_code is null and expires_at > now()
+           returning redirect_to`,
+          [authCode, user.id, flow.id],
+        )
+        const target = claimed.rows[0]?.redirect_to
+        if (target) return redirectWithQuery(target, { code: authCode })
+      }
+      session = await this.sessionFor(user, undefined, {
+        amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      })
     }
-    const session = await this.sessionFor(user, undefined, {
-      amr: [{ method: type === 'recovery' ? 'recovery' : 'otp', timestamp: Math.floor(Date.now() / 1000) }],
-    })
-    const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
+    if (!session) {
+      return new Response(null, { status: 303, headers: { location: redirectTo + '#error=access_denied&error_code=otp_expired' } })
+    }
+        const hash = `#access_token=${session.access_token}&refresh_token=${session.refresh_token}&expires_in=${session.expires_in}&token_type=bearer&type=${type}`
     return new Response(null, { status: 303, headers: { location: `${redirectTo}${hash}` } })
   }
 
@@ -3069,7 +3142,8 @@ export class AuthHandler {
 
   private async ensureEmailIdentity(
     user: UserRow,
-    query: Querier = (sql, params) => this.db.query(sql, params)
+    query: Querier = (sql, params) => this.db.query(sql, params),
+    syncProviders = true,
   ): Promise<void> {
     if (!user.email) return
     await query(
@@ -3079,7 +3153,7 @@ export class AuthHandler {
        set identity_data = excluded.identity_data, updated_at = now()`,
       [user.id, JSON.stringify({ sub: user.id, email: user.email })]
     )
-    await this.syncUserProviders(user, query)
+    if (syncProviders) await this.syncUserProviders(user, query)
   }
 
   private async ensurePhoneIdentity(
