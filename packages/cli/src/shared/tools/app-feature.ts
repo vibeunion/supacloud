@@ -5,10 +5,14 @@
 export function featureScaffold(
     name: string,
     className: string,
-    governance: { permission: string; rpc: string },
+    governance: {
+        permission: string;
+        rpc: string;
+        database: { source: string; table: string; rowType: string };
+    },
 ): Record<string, string> {
     const commandName = `${name}.approve`;
-    const { permission, rpc } = governance;
+    const { permission, rpc, database } = governance;
     return {
         [`${name}.contracts.ts`]: `import { t } from "elysia";
 
@@ -204,6 +208,7 @@ import type {
 export const featureSpec = defineFeatureSpec({
     name: ${JSON.stringify(name)},
     states: ["draft", "approved"],
+    database: ${JSON.stringify(database)},
     tenantField: "tenant_id",
     transitions: {
         approve: {

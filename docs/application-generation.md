@@ -39,19 +39,24 @@ capabilities. This is not a completed database-backed business application:
 ```sh
 supacloud app generate --kind feature --name case-approval \
   --permission cases:approve --rpc approveCase \
+  --database-source db/schema.ts --database-table public.reviews --database-type ReviewRow \
   --register-in src/app.module.ts --dry-run --format json
 supacloud app generate --kind feature --name case-approval \
   --permission cases:approve --rpc approveCase \
+  --database-source db/schema.ts --database-table public.reviews --database-type ReviewRow \
   --register-in src/app.module.ts
 ```
 
-The eight-file feature plan creates one feature directory containing HTTP
-boundary schemas, request-scoped read/write ports, list/detail operations, an
+The eight-file feature plan creates one feature directory containing HTTP boundary
+schemas, request-scoped read/write ports, list/detail operations, an
 approval Command with permission/transaction/audit/idempotency/state metadata,
 an existing Workflow/Queue job boundary, HTTP routes, a fixture, fail-closed
 unit tests, an authenticated E2E test template and a delivery checklist.
-`--permission` and `--rpc` are mandatory and are never inferred. The RPC must
-be registered in compiler capabilities and the runtime host.
+`--permission`, `--rpc`, `--database-source`, `--database-table` and
+`--database-type` are mandatory and are never inferred. The database fields
+reference the existing database source and derived row type; they do not create
+a second schema. The RPC must be registered in compiler capabilities and the
+runtime host.
 
 Generated read/write ports receive `FeatureRequestContext` from the framework.
 It contains the verified request ID, tenant, actor and permissions. Adapters
