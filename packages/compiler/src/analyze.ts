@@ -2200,6 +2200,8 @@ function parseController(
       const optionsArg = args[1];
       const optionsObject = resolveStaticObjectLiteral(optionsArg, ctx);
       if (optionsObject) {
+        const permission = stringLiteralProp(optionsObject, "permission");
+        if (permission !== undefined) route.permission = permission;
         const parsePolicy = routePolicyProperty(optionsObject, "parse", ctx);
         const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
         const idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);

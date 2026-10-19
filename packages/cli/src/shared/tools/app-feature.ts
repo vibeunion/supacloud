@@ -400,6 +400,7 @@ export class ${className}Controller {
     ) {}
 
     @Get("/", {
+        permission: ${JSON.stringify(readPermission)},
         query: ${className}ListQuery,
         tags: [${JSON.stringify(`${name}.list`)}],
         responses: { 200: ${className}ListResponse },
@@ -419,6 +420,7 @@ export class ${className}Controller {
     }
 
     @Get("/:id", {
+        permission: ${JSON.stringify(readPermission)},
         params: ${className}Params,
         tags: [${JSON.stringify(`${name}.detail`)}],
         responses: { 200: ${className}Row },
@@ -466,6 +468,7 @@ export class ${className}Controller {
     }
 
     @Get("/:id/operations/:operationId", {
+        permission: ${JSON.stringify(readPermission)},
         params: ${className}ReceiptParams,
         tags: [${JSON.stringify(`${name}.receipt`)}],
         responses: { 200: ${className}Receipt },
@@ -491,6 +494,7 @@ export class ${className}Controller {
     }
 
     @Get("/:id/operations/:operationId/status", {
+        permission: ${JSON.stringify(readPermission)},
         params: ${className}ReceiptParams,
         tags: [${JSON.stringify(`${name}.job-status`)}],
         responses: { 200: ${className}JobStatus },

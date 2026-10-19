@@ -179,6 +179,8 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureSource).toContain('@Query({ name: "case-approval.detail", permission: "cases:read", tenantScope: "required" })');
     expect(featureSource).toContain('@Query({ name: "case-approval.receipt", permission: "cases:read", tenantScope: "required" })');
     expect(featureSource).toContain('@Query({ name: "case-approval.job-status", permission: "cases:read", tenantScope: "required" })');
+    expect(featureSource).toContain('permission: "cases:read",\n        query: CaseApprovalListQuery');
+    expect(featureSource).toContain('permission: "cases:read",\n        params: CaseApprovalParams');
     expect(featureSource).toContain("DetailCaseApprovalQuery");
     expect(featureSource).toContain("ReceiptCaseApprovalQuery");
     expect(featureSource).toContain("JobStatusCaseApprovalQuery");

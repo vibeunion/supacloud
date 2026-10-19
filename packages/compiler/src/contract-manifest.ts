@@ -232,7 +232,8 @@ export function buildContractManifest(
         const idempotency = route.idempotency
           ?? command?.idempotency
           ?? featureTransition?.idempotency;
-        if (governedCommand?.permission) permissions.add(governedCommand.permission);
+        const permission = route.permission ?? governedCommand?.permission ?? featureTransition?.permission;
+        if (permission) permissions.add(permission);
         if (route.contract?.evidence) fixtures.add(route.contract.evidence);
         routes.push({
           method: route.method,
@@ -241,7 +242,7 @@ export function buildContractManifest(
           controller: controller.className,
           handler: route.handler,
           ...(effectiveCommand === undefined ? {} : { command: effectiveCommand }),
-          ...(governedCommand?.permission === undefined ? {} : { permission: governedCommand.permission }),
+          ...(permission === undefined ? {} : { permission }),
           ...(idempotency === undefined ? {} : { idempotency }),
           ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
           requestSchemas: Object.fromEntries(

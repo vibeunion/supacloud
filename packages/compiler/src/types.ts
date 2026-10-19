@@ -229,6 +229,7 @@ export interface EffectRouteNode {
 }
 
 export interface RouteNode {
+  permission?: string;
   /** Transport-level idempotency contract, independent of route command binding. */
   idempotency?: "required" | "none";
   /** Explicit query cache tags exposed to generated clients. */

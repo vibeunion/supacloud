@@ -232,6 +232,8 @@ export type ResolveFn<T = unknown, TContext = import("./route_pipeline").RoutePi
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {
+  /** Explicit permission required by this route, including read-only routes. */
+  permission?: string;
   /** Require an idempotency key for this HTTP mutation even when no route command is bound. */
   idempotency?: "required" | "none";
   /** Explicit query cache tags exposed to generated clients. */
