@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.122.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.122.2...management-api-v0.122.3) (2026-10-19)
+
+
+### Bug Fixes
+
+* **management-api:** keep edge capacity drop-in authoritative ([#2162](https://github.com/vibeunion/supacloud/issues/2162)) ([984ce1d](https://github.com/vibeunion/supacloud/commit/984ce1d61444bf334e78bc455d821c52f28603b0))
+
 ## [0.122.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.122.1...management-api-v0.122.2) (2026-10-19)
 
 
