@@ -12,7 +12,10 @@ const baseModule = (spec: FeatureSpecNode): ModuleNode => ({
   file: "case.module.ts",
   line: 1,
   imports: [],
-  providers: [],
+  providers: [{
+    token: "AcceptCommand", tokenKind: "class", kind: "class", useClass: "AcceptCommand",
+    scope: "request", deps: [], exported: false, file: "case.command.ts", line: 1,
+  }],
   controllers: [{
     className: "CaseController",
     path: "/cases",
@@ -136,6 +139,31 @@ describe("feature specs", () => {
       }],
     };
     expect(validateFeatureSpec(spec, module)).toEqual([]);
+  });
+
+  test("rejects feature commands with application scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case", states: ["draft", "accepted"], tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      providers: [{
+        token: "AcceptCommand", tokenKind: "class" as const, kind: "class" as const,
+        useClass: "AcceptCommand", scope: "application" as const, deps: [],
+        exported: false, file: "case.command.ts", line: 1,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-command-provider-scope");
   });
 
   test("detects state and governance drift", () => {
