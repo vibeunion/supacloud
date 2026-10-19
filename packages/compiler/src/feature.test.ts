@@ -727,7 +727,7 @@ describe("feature specs", () => {
       ...baseModule(spec),
       jobs: [{
         className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
-        scope: "job", input: "RefreshCaseInput", schemaKinds: { input: "declared" as const },
+        scope: "job" as const, input: "RefreshCaseInput", schemaKinds: { input: "declared" as const },
         tenantScope: "required" as const, idempotency: "required" as const, mode: "task" as const,
       }],
     };
