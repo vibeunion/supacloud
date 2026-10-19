@@ -138,6 +138,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "feature-tenant-boundary-invalid": { code: "SC6112", docsUrl: "https://supacloud.dev/errors/SC6112" },
   "feature-tenant-boundary-drift": { code: "SC6127", docsUrl: "https://supacloud.dev/errors/SC6127" },
   "feature-query-tenant-boundary": { code: "SC6114", docsUrl: "https://supacloud.dev/errors/SC6114" },
+  "feature-query-provider-unresolved": { code: "SC6130", docsUrl: "https://supacloud.dev/errors/SC6130" },
   "feature-job-tenant-boundary": { code: "SC6115", docsUrl: "https://supacloud.dev/errors/SC6115" },
   "feature-command-tenant-boundary": { code: "SC6116", docsUrl: "https://supacloud.dev/errors/SC6116" },
   "feature-job-unresolved": { code: "SC6117", docsUrl: "https://supacloud.dev/errors/SC6117" },

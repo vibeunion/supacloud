@@ -388,6 +388,28 @@ describe("feature specs", () => {
       .toContain("feature-query-tenant-boundary");
   });
 
+  test("rejects feature queries that are not registered as providers", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      queries: [{ className: "ListCaseQuery", name: "case.list", tenantScope: "required" as const }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-provider-unresolved");
+  });
+
   test("requires tenant-scoped jobs for database features", () => {
     const spec: FeatureSpecNode = {
       name: "case",
