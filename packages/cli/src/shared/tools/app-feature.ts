@@ -175,13 +175,15 @@ export class ${className}Service {
     async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
         if (!this.receipts) throw new Error("Bind ${className}Receipts with durable receipt lookup");
         const input = { id, operationId };
-        return requireFeatureOperationResult(input, await this.receipts.lookup(this.context(), input));
+        // Keep the comparison identity separate from mutable adapter arguments.
+        return requireFeatureOperationResult(input, await this.receipts.lookup(this.context(), { ...input }));
     }
 
     async jobStatus(id: string, operationId: string): Promise<${className}JobStatusResult> {
         if (!this.jobStatuses) throw new Error("Bind ${className}JobStatuses with the existing Workflow/Queue status adapter");
         const input = { id, operationId };
-        return requireFeatureOperationResult(input, await this.jobStatuses.lookup(this.context(), input));
+        // Keep the comparison identity separate from mutable adapter arguments.
+        return requireFeatureOperationResult(input, await this.jobStatuses.lookup(this.context(), { ...input }));
     }
 }
 `,
@@ -241,10 +243,12 @@ export const featureSpec = defineFeatureSpec({
 export type ${className}State = FeatureState<typeof featureSpec>;
 type ${className}ListError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
     | { readonly _tag: "FEATURE_NOT_FOUND" };
 type ${className}ApproveError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
     | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
     | { readonly _tag: "VERSION_CONFLICT" }
@@ -252,12 +256,15 @@ type ${className}ApproveError =
     | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
 type ${className}ReceiptError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
     | { readonly _tag: "FEATURE_NOT_FOUND" }
     | { readonly _tag: "COMMAND_RECEIPT_INVALID" }
+    | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
     | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
 type ${className}JobStatusError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
     | { readonly _tag: "PERMISSION_DENIED" }
     | { readonly _tag: "FEATURE_NOT_FOUND" }
     | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
@@ -327,6 +334,7 @@ export class ${className}Controller {
             required: true, dependencies: [], retry: "none",
             errors: [
                 { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
             ],
@@ -344,6 +352,7 @@ export class ${className}Controller {
             required: true, dependencies: [], retry: "none",
             errors: [
                 { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
             ],
@@ -363,6 +372,7 @@ export class ${className}Controller {
             required: true, dependencies: [], retry: "none",
             errors: [
                 { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
                 { tag: "VERSION_CONFLICT", status: 409, code: "VERSION_CONFLICT" },
@@ -386,9 +396,11 @@ export class ${className}Controller {
             required: true, dependencies: [], retry: "none",
             errors: [
                 { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
                 { tag: "COMMAND_RECEIPT_INVALID", status: 503, code: "COMMAND_RECEIPT_INVALID" },
+                { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
                 { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
             ],
         },
@@ -408,6 +420,7 @@ export class ${className}Controller {
             required: true, dependencies: [], retry: "none",
             errors: [
                 { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
                 { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
                 { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
                 { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
@@ -479,14 +492,15 @@ test("${name} fails closed until verified read and durable write ports are bound
 test("${name} preserves denied reads and rejected writes without fallback or retry", async () => {
     const denied = new Error("denied");
     let attempts = 0;
-    const service = new ${className}Service(${className}RequestEnvelope, {
-        list: async () => { throw denied; },
-        detail: async () => { throw denied; },
-    }, {
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, {
         approve: async () => { attempts++; throw denied; },
     });
-    await expect(service.list({})).rejects.toBe(denied);
-    await expect(service.detail("example")).rejects.toBe(denied);
+    const readService = new ${className}Service(${className}RequestEnvelope, {
+        list: async () => { throw denied; },
+        detail: async () => { throw denied; },
+    });
+    await expect(readService.list({})).rejects.toBe(denied);
+    await expect(readService.detail("example")).rejects.toBe(denied);
     await expect(service.approve("example", { expectedVersion: 1 })).rejects.toBe(denied);
     expect(attempts).toBe(1);
 });
@@ -516,6 +530,46 @@ test("${name} rejects operation lookup results for a different operation", async
     await expect(service.jobStatus("example", "operation-example"))
         .rejects.toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
 });
+
+
+for (const field of ["id", "operationId"] as const) {
+    test("${name} isolates lookup identity when an adapter rewrites " + field, async () => {
+        let calls = 0;
+        const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
+            async lookup(_context, input) {
+                calls++;
+                Object.assign(input, { [field]: "foreign" });
+                return { ...input, status: "confirmed", state: "approved", version: 2 };
+            },
+        }, {
+            async lookup(_context, input) {
+                calls++;
+                Object.assign(input, { [field]: "foreign" });
+                return { ...input, status: "completed" };
+            },
+        });
+        await expect(service.receipt("example", "operation-example"))
+            .rejects.toMatchObject({ _tag: "FEATURE_OPERATION_RESULT_MISMATCH" });
+        await expect(service.jobStatus("example", "operation-example"))
+            .rejects.toMatchObject({ _tag: "FEATURE_OPERATION_RESULT_MISMATCH" });
+        expect(calls).toBe(2);
+    });
+}
+
+test("${name} preserves matching lookup results and does not replay failures", async () => {
+    const receipt = { id: "example", operationId: "operation-example", status: "unknown" as const, state: "draft", version: 1 };
+    const status = { id: "example", operationId: "operation-example", status: "queued" as const };
+    let calls = 0;
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
+        async lookup() { calls++; return receipt; },
+    }, {
+        async lookup() { calls++; return status; },
+    });
+    expect(await service.receipt("example", "operation-example")).toBe(receipt);
+    expect(await service.jobStatus("example", "operation-example")).toBe(status);
+    expect(calls).toBe(2);
+});
+
 `,
         [`${name}.fixture.ts`]: `import type { ${className}ApproveInput, ${className}Result } from "./${name}.model";
 
@@ -713,8 +767,12 @@ identity-scoped caching/invalidation. Use the generated \`${className}ApproveInv
 constant for the approval mutation; tags are explicit and never inferred from route names.
 There is deliberately no second hand-maintained
 HTTP client. A committed approval followed by a failed refresh is still committed;
-recover its receipt instead of resending. Use the host's standard error translation
-and requestId propagation; the scaffold does not claim to implement those adapters.
+recover its receipt instead of resending. Host domain errors must carry a stable
+_tag, tag, code or error name matching the declared route mapping; an Error message
+alone is not a machine-readable code. Context failures map to authentication-required,
+and foreign operation results fail with FEATURE_OPERATION_RESULT_MISMATCH on both
+lookup routes. Unknown failures remain generic server errors without exposing messages.
+RequestId propagation and durable adapter implementation remain host responsibilities.
 
 ## Required acceptance (not executed by generation)
 
