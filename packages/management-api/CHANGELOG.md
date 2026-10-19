@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.122.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.122.0...management-api-v0.122.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **management-api:** preserve service-unavailable status for function deploy failures ([#2157](https://github.com/vibeunion/supacloud/issues/2157)) ([db99f5b](https://github.com/vibeunion/supacloud/commit/db99f5b92190d4b7ac8f4403e7f2e91c91c848f8))
+
 ## [0.122.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.121.0...management-api-v0.122.0) (2026-10-19)
 
 
