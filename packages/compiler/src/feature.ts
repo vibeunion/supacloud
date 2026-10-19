@@ -142,6 +142,12 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         error("feature-job-unresolved", `Transition ${transition.name} must reference exactly one Job in module ${module.name}.`);
       } else {
         const job = jobs[0]!;
+        const jobProvider = module.providers.find((provider) =>
+          provider.token === job.className || provider.useClass === job.className);
+        if (!jobProvider) {
+          error("feature-job-provider-unresolved",
+            `Feature transition ${transition.name} references Job ${job.className}, but the Job is not registered as a runtime provider in module ${module.name}.`);
+        }
         if (job.tenantScope !== "required") {
           error("feature-job-tenant-boundary", `Job ${job.className} in Feature ${spec.name} must declare tenantScope: "required".`);
         }

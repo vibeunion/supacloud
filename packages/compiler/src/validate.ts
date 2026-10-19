@@ -141,6 +141,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "feature-job-tenant-boundary": { code: "SC6115", docsUrl: "https://supacloud.dev/errors/SC6115" },
   "feature-command-tenant-boundary": { code: "SC6116", docsUrl: "https://supacloud.dev/errors/SC6116" },
   "feature-job-unresolved": { code: "SC6117", docsUrl: "https://supacloud.dev/errors/SC6117" },
+  "feature-job-provider-unresolved": { code: "SC6129", docsUrl: "https://supacloud.dev/errors/SC6129" },
   "feature-job-idempotency": { code: "SC6118", docsUrl: "https://supacloud.dev/errors/SC6118" },
   "feature-job-mode": { code: "SC6119", docsUrl: "https://supacloud.dev/errors/SC6119" },
   "feature-job-contract": { code: "SC6120", docsUrl: "https://supacloud.dev/errors/SC6120" },
