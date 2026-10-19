@@ -135,6 +135,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "feature-command-provider-scope": { code: "SC6134", docsUrl: "https://supacloud.dev/errors/SC6134" },
   "feature-adapter-unresolved": { code: "SC6135", docsUrl: "https://supacloud.dev/errors/SC6135" },
   "feature-adapter-requirements-invalid": { code: "SC6136", docsUrl: "https://supacloud.dev/errors/SC6136" },
+  "feature-adapter-provider-scope": { code: "SC6137", docsUrl: "https://supacloud.dev/errors/SC6137" },
   "feature-governance-drift": { code: "SC6105", docsUrl: "https://supacloud.dev/errors/SC6105" },
   "feature-persistence-invalid": { code: "SC6110", docsUrl: "https://supacloud.dev/errors/SC6110" },
   "feature-persistence-drift": { code: "SC6111", docsUrl: "https://supacloud.dev/errors/SC6111" },

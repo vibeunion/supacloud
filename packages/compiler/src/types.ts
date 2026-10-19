@@ -420,6 +420,7 @@ export interface FeatureSpecNode {
   database?: FeatureDatabaseSourceNode;
   tenantField?: string;
   requiredAdapters?: string[];
+  requiredAdapterScopes?: Record<string, Scope>;
   transitions: FeatureTransitionNode[];
   file?: string;
   line?: number;

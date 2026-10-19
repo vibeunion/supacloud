@@ -542,6 +542,14 @@ class CaseModule {}
   transitions: {},
 });
 // Adapter requirements must be unique identifier names.`,
+  SC6137: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  requiredAdapters: ["CaseRefresher"],
+  requiredAdapterScopes: { CaseRefresher: "job" },
+  transitions: {},
+});
+// The registered adapter provider must use the declared scope.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],
