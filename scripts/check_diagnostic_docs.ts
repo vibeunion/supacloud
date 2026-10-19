@@ -449,6 +449,34 @@ export const value: number = "wrong";`,
   },
 });
 // @Job({ name: "case.refresh" }) has no tenantScope declaration.`,
+  SC6122: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: { boundary: "database", optimisticLock: "required", receipt: "required", reconciliation: "none" },
+    },
+  },
+});`,
+  SC6123: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  database: { source: "../db/schema.ts", table: "public.reviews", rowType: "ReviewRow" },
+  transitions: {},
+});`,
+  SC6124: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  database: { source: "db/schema.ts", table: "reviews", rowType: "ReviewRow" },
+  transitions: {},
+});`,
+  SC6125: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  database: { source: "db/schema.ts", table: "public.reviews", rowType: "Review Row" },
+  transitions: {},
+});`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

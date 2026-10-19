@@ -197,6 +197,7 @@ console.log("Built consumer factory: original and generated routes served togeth
     const featureGeneration = [
         cli, "app", "generate", "--kind", "feature", "--name", "case-approval",
         "--permission", "cases:approve", "--rpc", "approveCase",
+        "--database-source", "db/schema.ts", "--database-table", "public.reviews", "--database-type", "ReviewRow",
         "--register-in", "src/app.module.ts", "--format", "json",
     ];
     const featureParent = await readFile(join(project, "src/app.module.ts"), "utf8");
