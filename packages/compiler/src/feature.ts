@@ -26,6 +26,24 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
   if (spec.tenantField !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(spec.tenantField)) {
     error("feature-tenant-boundary-invalid", `Feature ${spec.name} declares an unsafe tenant field.`);
   }
+  const databaseTransition = spec.transitions.some((transition) => transition.persistence?.boundary === "database");
+  if (databaseTransition && spec.database === undefined && spec.file !== undefined) {
+    error("feature-database-source-required",
+      `Database Feature ${spec.name} must declare its database source, table and rowType.`);
+  }
+  if (spec.database !== undefined) {
+    if (spec.database.source.startsWith("/") || spec.database.source.includes("\\")
+      || spec.database.source.split("/").includes("..")
+      || !/^[A-Za-z0-9._/-]+$/.test(spec.database.source)) {
+      error("feature-database-source-invalid", `Feature ${spec.name} declares an unsafe database source.`);
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/.test(spec.database.table)) {
+      error("feature-database-table-invalid", `Feature ${spec.name} must use a schema-qualified database table.`);
+    }
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(spec.database.rowType)) {
+      error("feature-database-row-type-invalid", `Feature ${spec.name} declares an unsafe database row type.`);
+    }
+  }
   const names = new Set<string>();
   for (const transition of spec.transitions) {
     if (!transition.name.trim() || names.has(transition.name)) {
@@ -179,7 +197,9 @@ export function generateFeatureSource(spec: FeatureSpecNode): string {
     throw new Error("Generate the command slice first; existing HTTP routes require explicit schema and handler implementations.");
   }
   const sourceSpec = {
-    name: spec.name, states: spec.states, tenantField: spec.tenantField ?? "tenant_id",
+    name: spec.name, states: spec.states,
+    ...(spec.database === undefined ? {} : { database: spec.database }),
+    tenantField: spec.tenantField ?? "tenant_id",
     transitions: Object.fromEntries(transitions.map((transition) => {
     const { name, ...options } = transition;
     const persistence = transition.persistence ?? {

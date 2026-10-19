@@ -20,6 +20,7 @@ export {
 export type { Provider, ProviderDep, Token, Type } from "./provider";
 export { defineModule, defineFeatureSlice, defineFeatureSpec } from "./module";
 export type {
+  FeatureDatabaseSourceOptions,
   FeaturePersistenceOptions,
   FeatureSliceOptions,
   FeatureSpecOptions,
