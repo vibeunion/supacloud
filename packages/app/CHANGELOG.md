@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/app-v0.30.0...app-v0.31.0) (2026-10-19)
+
+
+### Features
+
+* **cli:** require database provenance for feature generation ([#2167](https://github.com/vibeunion/supacloud/issues/2167)) ([8e1eb5d](https://github.com/vibeunion/supacloud/commit/8e1eb5d500898cf822b79884b4a3012b9f030d09))
+
 ## [0.30.0](https://github.com/vibeunion/supacloud/compare/app-v0.29.0...app-v0.30.0) (2026-10-19)
 
 

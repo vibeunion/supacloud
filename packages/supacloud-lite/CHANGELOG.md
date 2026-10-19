@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.33.0...supacloud-lite-v0.33.1) (2026-10-19)
+
+
+### Miscellaneous Chores
+
+* **lite:** restore Supabase SDK 2.118.0 ([#2161](https://github.com/vibeunion/supacloud/issues/2161)) ([0c7d4d0](https://github.com/vibeunion/supacloud/commit/0c7d4d08ed10cce4adcf5d30c9e7e473bc7f492a))
+
 ## [0.33.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.32.0...supacloud-lite-v0.33.0) (2026-10-19)
 
 
