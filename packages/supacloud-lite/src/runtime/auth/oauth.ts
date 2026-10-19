@@ -51,6 +51,8 @@ export interface OAuthProviderConfig {
   idTokenJwksUrl?: string
   /** Additional audience accepted for OIDC ID tokens. Defaults to the OAuth client id. */
   idTokenAudience?: string | string[]
+  /** Email domains that may resolve this provider through POST /sso. */
+  ssoDomains?: string[]
 }
 
 /** Normalized profile extracted from a provider's userinfo response. */
@@ -274,6 +276,22 @@ export class OAuthService {
       scope: scopes,
       state: providerState,
     })
+    const reserved = new Set([
+      'provider',
+      'redirect_to',
+      'scopes',
+      'code_challenge',
+      'code_challenge_method',
+      'skip_http_redirect',
+      'client_id',
+      'redirect_uri',
+      'response_type',
+      'scope',
+      'state',
+    ])
+    for (const [key, value] of url.searchParams) {
+      if (!reserved.has(key)) p.append(key, value)
+    }
     const providerUrl = `${provider.authorizeUrl}?${p}`
     if (url.searchParams.get('skip_http_redirect') === 'true') {
       return Response.json({ url: providerUrl })

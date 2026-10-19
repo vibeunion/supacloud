@@ -402,6 +402,7 @@ export class AuthHandler {
       if (path === 'resend' && method === 'POST') return await this.sendOtp(req, true)
       if (path === 'verify' && method === 'POST') return this.limit('verify', req) ?? (await this.verifyToken(req))
       if (path === 'verify' && method === 'GET') return await this.verifyLink(url)
+      if (path === 'sso' && method === 'POST') return await this.sso(req)
       if (path === 'invite' && method === 'POST') {
         if (ctx.role !== 'service_role') {
           return authError(403, 'insufficient_permissions', 'Admin endpoints require the service_role key')
@@ -553,6 +554,40 @@ export class AuthHandler {
       return json(200, this.userJson(newUser))
     }
     return json(200, await this.sessionFor(newUser))
+  }
+
+  private async sso(req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => ({}))) as {
+      provider_id?: string
+      domain?: string
+      redirect_to?: string
+      code_challenge?: string
+      code_challenge_method?: string
+      skip_http_redirect?: boolean
+    }
+    const providerId = typeof body.provider_id === 'string' ? body.provider_id.trim().toLowerCase() : ''
+    const domain = typeof body.domain === 'string' ? body.domain.trim().toLowerCase() : ''
+    const providers = this.config.oauthProviders ?? {}
+    const provider = providerId && providers[providerId]
+      ? providerId
+      : Object.entries(providers).find(([, config]) =>
+        domain && (config.ssoDomains ?? []).some((item) => item.toLowerCase() === domain)
+      )?.[0] ?? ''
+    if (!provider) return authError(404, 'sso_provider_not_found', 'SSO provider not found')
+
+    const authorizeUrl = new URL(req.url)
+    authorizeUrl.pathname = authorizeUrl.pathname.replace(/\/sso$/, '/authorize')
+    authorizeUrl.search = ''
+    authorizeUrl.searchParams.set('provider', provider)
+    authorizeUrl.searchParams.set('skip_http_redirect', String(body.skip_http_redirect === true))
+    for (const [key, value] of [
+      ['redirect_to', body.redirect_to],
+      ['code_challenge', body.code_challenge],
+      ['code_challenge_method', body.code_challenge_method],
+    ] as const) {
+      if (value) authorizeUrl.searchParams.set(key, value)
+    }
+    return this.oauth.authorize(authorizeUrl)
   }
 
   private async token(req: Request, url: URL): Promise<Response> {
