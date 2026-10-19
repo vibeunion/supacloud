@@ -41,10 +41,6 @@ const identity = {
   requestId: "request", identity: { authenticated: true, subject: "actor" },
   access: { tenantId: "tenant", permissions: ["cases:approve", "cases:read"] },
 };
-const writeOnlyIdentity = {
-  requestId: "request", identity: { authenticated: true, subject: "actor" },
-  access: { tenantId: "tenant", permissions: ["cases:approve"] },
-};
 const row = { id: "case-1", state: "approved", version: 2 };
 const input: Input = { id: row.id, operationId: "operation-1" };
 
@@ -101,24 +97,21 @@ for (const method of ["list", "detail", "approve", "receipt", "jobStatus"] as co
   });
 }
 for (const method of ["list", "detail", "receipt", "jobStatus"] as const) {
-  test(`generated ${method} requires the explicit read permission`, async () => {
-    let calls = 0;
-    const instance = controller(writeOnlyIdentity, async () => { calls++; return row; });
-    await expect(run(instance, method)).rejects.toMatchObject({
-      status: 403,
-      code: "PERMISSION_DENIED",
-      message: "PERMISSION_DENIED",
+  for (const permissions of [[], ["cases:approve"]]) {
+    test(`generated ${method} denies missing read permission with ${JSON.stringify(permissions)} before adapters`, async () => {
+      let calls = 0;
+      const context = { ...identity, access: { ...identity.access, permissions } };
+      const instance = controller(context, async () => { calls++; return {}; }, undefined, () => { calls++; });
+      await expect(run(instance, method)).rejects.toMatchObject({ status: 403, code: "PERMISSION_DENIED" });
+      expect(calls).toBe(0);
     });
-    expect(calls).toBe(0);
-  });
-  test(`generated ${method} accepts the explicit read permission`, async () => {
+  }
+  test(`generated ${method} allows a read-only identity and invokes one adapter`, async () => {
     let calls = 0;
-    const instance = controller(identity, async () => { calls++; return method === "list" ? [row] : {
-      ...row,
-      ...input,
-      status: "unknown",
-    }; }, undefined, () => { calls++; });
-    await run(instance, method);
+    const context = { ...identity, access: { ...identity.access, permissions: ["cases:read"] } };
+    const result = { ...row, ...input, status: "unknown" };
+    const instance = controller(context, async () => { calls++; return result; }, undefined, () => { calls++; });
+    expect(await run(instance, method)).toBe(method === "list" || method === "detail" ? row : result);
     expect(calls).toBe(1);
   });
 }
