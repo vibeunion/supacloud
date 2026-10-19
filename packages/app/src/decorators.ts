@@ -319,6 +319,13 @@ export type RouteDefinition<Schemas extends RouteContractSchemas = RouteContract
   handler: string;
 };
 
+interface StandardMethodDecoratorContext {
+  kind: string;
+  name: string | symbol;
+}
+
+const pendingStandardRoutes = new WeakMap<Function, RouteDefinition[]>();
+
 function defineMetadata(target: object, key: string, value: unknown): void {
   Object.defineProperty(target, key, {
     value,
@@ -649,6 +656,18 @@ export function Controller(pathOrOptions: string | ControllerOptions = "/"): Cla
       ? { path: pathOrOptions }
       : { ...pathOrOptions, path: pathOrOptions.path ?? "/" };
     defineMetadata(target, CONTROLLER_METADATA, meta);
+    const prototype = (target as { prototype?: Record<string, unknown> }).prototype;
+    if (prototype) {
+      const routes = [...(readOwnOrInherited<RouteDefinition[]>(target, ROUTES_METADATA) ?? [])];
+      for (const name of Object.getOwnPropertyNames(prototype)) {
+        const method = prototype[name];
+        if (typeof method !== "function") continue;
+        const pending = pendingStandardRoutes.get(method);
+        if (!pending) continue;
+        routes.push(...pending);
+      }
+      if (routes.length > 0) defineMetadata(target, ROUTES_METADATA, routes);
+    }
   };
 }
 
@@ -661,7 +680,25 @@ function createRouteDecorator(method: HttpMethod) {
     path: string,
     options: RouteOptions<Schemas> = {} as RouteOptions<Schemas>,
   ): MethodDecorator =>
-    (target, propertyKey) => {
+    (targetOrValue, propertyKeyOrContext) => {
+      if (typeof propertyKeyOrContext === "object" && propertyKeyOrContext !== null
+        && "kind" in propertyKeyOrContext) {
+        const context = propertyKeyOrContext as StandardMethodDecoratorContext;
+        if (context.kind !== "method") return;
+        const value = targetOrValue as unknown;
+        if (typeof value !== "function") return;
+        const routes = pendingStandardRoutes.get(value) ?? [];
+        routes.push({
+          method,
+          path,
+          handler: String(context.name),
+          ...options,
+        });
+        pendingStandardRoutes.set(value, routes);
+        return;
+      }
+      const target = targetOrValue as object;
+      const propertyKey = propertyKeyOrContext as string | symbol;
       const cls = (target as { constructor: Type<unknown> }).constructor;
       const titleKey = `${TITLE_METADATA}:${String(propertyKey)}`;
       const dataKey = `${DATA_METADATA}:${String(propertyKey)}`;

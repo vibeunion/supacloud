@@ -63,12 +63,12 @@ const trustedContext = () => ({
 const unbound = createApp({ deps: {}, requestContext: trustedContext, commandGovernance: governance });
 for (const path of ["/case-approval", "/case-approval/example"]) {
     const response = await unbound.handle(new Request("http://localhost" + path));
-    assert.equal(response.status, 500);
+    assert.equal(response.status, 503);
     assert.ok(!(await response.text()).includes("Bind CaseApprovalReader"));
 }
 authorized = true;
 const missingWriter = await unbound.handle(approvalRequest());
-assert.equal(missingWriter.status, 500);
+assert.equal(missingWriter.status, 503);
 assert.ok(!(await missingWriter.text()).includes("Bind CaseApprovalWriter"));
 assert.equal(writes, 0);
 rpcCalls = 0;

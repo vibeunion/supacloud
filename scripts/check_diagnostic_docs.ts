@@ -477,6 +477,36 @@ export const value: number = "wrong";`,
   database: { source: "db/schema.ts", table: "public.reviews", rowType: "Review Row" },
   transitions: {},
 });`,
+  SC6126: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  database: { source: "db/schema.ts", table: "public.reviews", rowType: "ReviewRow" },
+  modules: [{
+    name: "case",
+    controllers: [{ path: "/cases", routes: [{ method: "GET", path: "", tags: ["case.list"] }] }],
+  }],
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: { boundary: "database", optimisticLock: "required", receipt: "required", reconciliation: "none" },
+    },
+  },
+});`,
+  SC6127: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  tenantField: "organization_id",
+  transitions: {
+    approve: {
+      from: "draft", to: "approved",
+      persistence: {
+        boundary: "database", tenantField: "tenant_id",
+        versionField: "version", stateField: "state",
+        optimisticLock: "required", receipt: "required", reconciliation: "none",
+      },
+    },
+  },
+});`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

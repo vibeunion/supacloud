@@ -101,6 +101,8 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
 async function generatedFixture() {
     const root = await fixture();
     expect((await runAppTool({ ...feature, root })).isError).toBe(false);
+    await mkdir(join(root, "db"), { recursive: true });
+    await writeFile(join(root, "db/schema.ts"), "export type ReviewRow = { id: string; state: string; version: number };\n");
     await symlink(join(import.meta.dir, "../../../node_modules"), join(root, "node_modules"), "dir");
     await writeFile(join(root, "tsconfig.json"), JSON.stringify({
         compilerOptions: {
@@ -138,11 +140,23 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureModule?.queries).toHaveLength(1);
     const featureSource = await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8");
     expect(featureSource).toContain('database: {"source":"db/schema.ts","table":"public.reviews","rowType":"ReviewRow"}');
+    const contractsSource = await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8");
+    expect(contractsSource).toContain('import type { ReviewRow } from "../../../db/schema";');
+    expect(contractsSource).toContain("export type CaseApprovalDatabaseRow = ReviewRow;");
+    expect(contractsSource).toContain("Transport projection; the business result type is derived from the database source");
     expect(featureSource).toContain('tenantField: "tenant_id"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('idempotency: "required",\n        effect:');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('code: "COMMAND_IDEMPOTENCY_CONFLICT"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('code: "FEATURE_OPERATION_RESULT_MISMATCH"');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain("type CaseApprovalApproveError =");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
+        .toContain('Effect.Effect<CaseApprovalResult, CaseApprovalApproveError, never>');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('invalidateTags: [\n                "case-approval.list",');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
@@ -162,11 +176,13 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalApproveInvalidateTags");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
-        .toContain("requireFeatureRequestContext(this.jobContext)");
+        .toContain("requireFeatureJobContext(this.jobContext, input.operationId)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("input: CaseApprovalRefreshInput");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalRefreshInput = t.Object");
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain('operationId: t.String({ minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]+$" })');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain('t.Union([t.Literal("draft"), t.Literal("approved")])');
     const contractsManifest = JSON.parse(
@@ -180,7 +196,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(contractsManifest.features?.[0]?.transitions?.[0]?.jobDetails?.input)
         .toBe("CaseApprovalRefreshInput");
     expect(contractsManifest.features?.[0]?.transitions?.[0]?.invalidateTags)
-        .toEqual(["case-approval.list", "case-approval.detail", "case-approval.receipt"]);
+        .toEqual(["case-approval.list", "case-approval.detail", "case-approval.receipt", "case-approval.job-status"]);
     const clientCompilation = await compileProject({
         ...options,
         generateClient: true,

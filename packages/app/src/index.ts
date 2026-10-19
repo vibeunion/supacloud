@@ -185,7 +185,14 @@ export type {
   FeatureTransitionOptions,
 } from "./module";
 export { requireFeatureRequestContext } from "./feature_context";
-export type { FeatureRequestContext } from "./feature_context";
+export type {
+  FeatureJobPort, FeatureOperationLookupInput, FeatureOperationPort, FeatureOperationResult, FeatureRequestContext,
+} from "./feature_context";
+export {
+  FeatureAdapterError, FeatureContextError, FeatureEntityError, FeatureJobOperationError, FeatureOperationError,
+  FeatureTransitionError, FeatureVersionError, requireFeatureJobContext, requireFeatureOperationResult,
+  requireFeatureTransitionResult,
+} from "./feature_context";
 export {
   APP_INITIALIZER,
   APP_LIFECYCLE,

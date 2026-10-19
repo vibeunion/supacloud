@@ -9,12 +9,17 @@ export function featureScaffold(
         permission: string;
         rpc: string;
         database: { source: string; table: string; rowType: string };
+        databaseImportPath?: string;
     },
 ): Record<string, string> {
     const commandName = `${name}.approve`;
     const { permission, rpc, database } = governance;
+    const databaseImportPath = governance.databaseImportPath
+        ?? `../../../${database.source.replace(/\.(?:[cm]?tsx?|mts|cts)$/, "")}`;
+    const rowTypeRoot = database.rowType.split(".")[0]!;
     return {
         [`${name}.contracts.ts`]: `import { t } from "elysia";
+import type { ${rowTypeRoot} } from "${databaseImportPath}";
 
 export const ${className}Params = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
@@ -30,12 +35,15 @@ export const ${className}ApproveBody = t.Object({
     expectedVersion: t.Integer({ minimum: 1 }),
     reason: t.Optional(t.String({ maxLength: 2000 })),
 });
+/** Transport projection; the business result type is derived from the database source below. */
 export const ${className}Row = t.Object({
     id: t.String(),
     state: t.String(),
     version: t.Integer({ minimum: 1 }),
 });
+export type ${className}DatabaseRow = ${database.rowType};
 export const ${className}Receipt = t.Object({
+    id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     operationId: t.String({ minLength: 1, maxLength: 512 }),
     status: t.Union([
         t.Literal("pending"), t.Literal("confirmed"), t.Literal("failed"), t.Literal("unknown"),
@@ -44,6 +52,7 @@ export const ${className}Receipt = t.Object({
     version: t.Integer({ minimum: 1 }),
 });
 export const ${className}JobStatus = t.Object({
+    id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     operationId: t.String({ minLength: 1, maxLength: 512 }),
     status: t.Union([
         t.Literal("queued"), t.Literal("running"), t.Literal("completed"),
@@ -56,20 +65,23 @@ export const ${className}QueryTags = {
     list: ${JSON.stringify(`${name}.list`)},
     detail: ${JSON.stringify(`${name}.detail`)},
     receipt: ${JSON.stringify(`${name}.receipt`)},
+    jobStatus: ${JSON.stringify(`${name}.job-status`)},
 } as const;
 export const ${className}ApproveInvalidateTags = [
     ${className}QueryTags.list,
     ${className}QueryTags.detail,
     ${className}QueryTags.receipt,
+    ${className}QueryTags.jobStatus,
 ] as const;
 export const ${className}ListResponse = t.Array(${className}Row);
 export const ${className}RefreshInput = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     version: t.Integer({ minimum: 1 }),
+    operationId: t.String({ minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]+$" }),
 });
 `,
         [`${name}.model.ts`]: `import {
-    InjectionToken, type FeatureRequestContext,
+    InjectionToken, type FeatureJobPort, type FeatureOperationPort, type FeatureRequestContext,
 } from "@supacloud/app/core";
 import type {
     ${className}ApproveBody,
@@ -77,6 +89,7 @@ import type {
     ${className}Receipt,
     ${className}ReceiptParams,
     ${className}JobStatus,
+    ${className}DatabaseRow,
     ${className}Row,
     ${className}RefreshInput,
 } from "./${name}.contracts";
@@ -85,7 +98,7 @@ import type { StaticDecode } from "typebox";
 export type ${className}ListInput = StaticDecode<typeof ${className}ListQuery>;
 export type ${className}ApproveInput = StaticDecode<typeof ${className}ApproveBody>;
 export type ${className}ApproveCommand = ${className}ApproveInput & { id: string };
-export type ${className}Result = StaticDecode<typeof ${className}Row>;
+export type ${className}Result = ${className}DatabaseRow;
 export type ${className}ReceiptResult = StaticDecode<typeof ${className}Receipt>;
 export type ${className}RefreshJobInput = StaticDecode<typeof ${className}RefreshInput>;
 export type ${className}JobStatusResult = StaticDecode<typeof ${className}JobStatus>;
@@ -99,13 +112,11 @@ export interface ${className}WritePort {
     approve(context: FeatureRequestContext, input: ${className}ApproveCommand): Promise<${className}Result>;
 }
 
-export interface ${className}ReceiptPort {
-    lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}ReceiptResult>;
-}
+export interface ${className}ReceiptPort extends FeatureOperationPort<${className}ReceiptResult> {}
 
-export interface ${className}JobStatusPort {
-    lookup(context: FeatureRequestContext, input: { id: string; operationId: string }): Promise<${className}JobStatusResult>;
-}
+export interface ${className}JobStatusPort extends FeatureOperationPort<${className}JobStatusResult> {}
+
+export interface ${className}RefreshPort extends FeatureJobPort<${className}RefreshJobInput> {}
 
 export const ${className}Reader = new InjectionToken<${className}ReadPort>(
     "${name}.reader", { scope: "request" },
@@ -119,9 +130,13 @@ export const ${className}Receipts = new InjectionToken<${className}ReceiptPort>(
 export const ${className}JobStatuses = new InjectionToken<${className}JobStatusPort>(
     "${name}.job-statuses", { scope: "request" },
 );
+export const ${className}Refresher = new InjectionToken<${className}RefreshPort>(
+    "${name}.refresher", { scope: "job" },
+);
 `,
         [`${name}.service.ts`]: `import {
-    Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureRequestContext,
+    FeatureAdapterError, Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
+    requireFeatureRequestContext, requireFeatureTransitionResult,
     type FeatureRequestContext,
 } from "@supacloud/app/core";
 import {
@@ -153,35 +168,44 @@ export class ${className}Service {
     }
 
     async list(input: Parameters<${className}ReadPort["list"]>[1]): Promise<${className}Result[]> {
-        if (!this.reader) throw new Error("Bind ${className}Reader with verified identity and tenant scope");
+        if (!this.reader) throw new FeatureAdapterError("${name}.reader");
         return this.reader.list(this.context(), input);
     }
 
     async detail(id: string): Promise<${className}Result> {
-        if (!this.reader) throw new Error("Bind ${className}Reader with verified identity and tenant scope");
+        if (!this.reader) throw new FeatureAdapterError("${name}.reader");
         return this.reader.detail(this.context(), id);
     }
 
     async approve(id: string, input: ${className}ApproveInput): Promise<${className}Result> {
-        if (!this.writer) throw new Error("Bind ${className}Writer with durable command governance");
-        return this.writer.approve(this.context(), { ...input, id });
+        if (!this.writer) throw new FeatureAdapterError("${name}.writer");
+        return requireFeatureTransitionResult(
+            id,
+            "approved",
+            input.expectedVersion,
+            await this.writer.approve(this.context(), { ...input, id }),
+        );
     }
 
     async receipt(id: string, operationId: string): Promise<Awaited<ReturnType<${className}ReceiptPort["lookup"]>>> {
-        if (!this.receipts) throw new Error("Bind ${className}Receipts with durable receipt lookup");
-        return this.receipts.lookup(this.context(), { id, operationId });
+        if (!this.receipts) throw new FeatureAdapterError("${name}.receipts");
+        const input = { id, operationId };
+        // Keep the comparison identity separate from mutable adapter arguments.
+        return requireFeatureOperationResult(input, await this.receipts.lookup(this.context(), { ...input }));
     }
 
     async jobStatus(id: string, operationId: string): Promise<${className}JobStatusResult> {
-        if (!this.jobStatuses) throw new Error("Bind ${className}JobStatuses with the existing Workflow/Queue status adapter");
-        return this.jobStatuses.lookup(this.context(), { id, operationId });
+        if (!this.jobStatuses) throw new FeatureAdapterError("${name}.job-statuses");
+        const input = { id, operationId };
+        // Keep the comparison identity separate from mutable adapter arguments.
+        return requireFeatureOperationResult(input, await this.jobStatuses.lookup(this.context(), { ...input }));
     }
 }
 `,
         [`${name}.feature.ts`]: `import { Effect } from "effect";
 import {
-    Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, Get, Inject, JOB_CONTEXT,
-    Injectable, Job, Param, Post, Query, requireFeatureRequestContext, type FeatureRequestContext,
+    Body, Command, Controller, defineFeatureSlice, defineFeatureSpec, FeatureAdapterError, Get, Inject, JOB_CONTEXT,
+    Injectable, Job, Optional, Param, Post, Query, requireFeatureJobContext, type FeatureRequestContext,
     type FeatureState,
 } from "@supacloud/app/core";
 import {
@@ -195,12 +219,14 @@ import {
     ${className}RefreshInput,
     ${className}Row,
 } from "./${name}.contracts";
+import { ${className}Refresher } from "./${name}.model";
 import { ${className}Service } from "./${name}.service";
 import type {
     ${className}ApproveInput,
     ${className}ListInput,
     ${className}ReceiptResult,
     ${className}JobStatusResult,
+    ${className}RefreshPort,
     ${className}RefreshJobInput,
     ${className}Result,
 } from "./${name}.model";
@@ -220,6 +246,7 @@ export const featureSpec = defineFeatureSpec({
                 ${JSON.stringify(`${name}.list`)},
                 ${JSON.stringify(`${name}.detail`)},
                 ${JSON.stringify(`${name}.receipt`)},
+                ${JSON.stringify(`${name}.job-status`)},
             ],
             persistence: {
                 boundary: "database", optimisticLock: "required", versionField: "version", tenantField: "tenant_id", stateField: "state",
@@ -230,6 +257,39 @@ export const featureSpec = defineFeatureSpec({
     },
 });
 export type ${className}State = FeatureState<typeof featureSpec>;
+type ${className}ListError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_NOT_FOUND" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
+type ${className}ApproveError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
+    | { readonly _tag: "FEATURE_ENTITY_RESULT_MISMATCH" }
+    | { readonly _tag: "VERSION_CONFLICT" }
+    | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
+type ${className}ReceiptError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_NOT_FOUND" }
+    | { readonly _tag: "COMMAND_RECEIPT_INVALID" }
+    | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
+type ${className}JobStatusError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "FEATURE_CONTEXT_REQUIRED" }
+    | { readonly _tag: "PERMISSION_DENIED" }
+    | { readonly _tag: "FEATURE_NOT_FOUND" }
+    | { readonly _tag: "FEATURE_OPERATION_RESULT_MISMATCH" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" }
+    | { readonly _tag: "FEATURE_ADAPTER_UNAVAILABLE" };
 
 @Injectable({ scope: "request" })
 @Query({ name: "${name}.list", tenantScope: "required" })
@@ -265,12 +325,15 @@ export class Approve${className}Command {
     tenantScope: "required",
 })
 export class Refresh${className}Job {
-    constructor(@Inject(JOB_CONTEXT) private readonly jobContext: unknown) {}
+    constructor(
+        @Inject(JOB_CONTEXT) private readonly jobContext: unknown,
+        @Inject(${className}Refresher) @Optional() private readonly refresher?: ${className}RefreshPort,
+    ) {}
 
-    async run(_input: ${className}RefreshJobInput): Promise<void> {
-        const context: FeatureRequestContext = requireFeatureRequestContext(this.jobContext);
-        void context;
-        throw new Error("Bind the existing Workflow/Queue adapter before dispatching ${name}.refresh");
+    async run(input: ${className}RefreshJobInput): Promise<void> {
+        const context: FeatureRequestContext = requireFeatureJobContext(this.jobContext, input.operationId);
+        if (!this.refresher) throw new FeatureAdapterError("${name}.refresher");
+        await this.refresher.run(context, input);
     }
 }
 
@@ -286,9 +349,18 @@ export class ${className}Controller {
         query: ${className}ListQuery,
         tags: [${JSON.stringify(`${name}.list`)}],
         responses: { 200: ${className}ListResponse },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+            ],
+        },
     })
-    list(@Query("state") state?: ${className}State): Effect.Effect<${className}Result[], never, never> {
+    list(@Query("state") state?: ${className}State): Effect.Effect<${className}Result[], ${className}ListError, never> {
         return Effect.promise(() => this.listQuery.execute(state === undefined ? {} : { state }));
     }
 
@@ -296,9 +368,18 @@ export class ${className}Controller {
         params: ${className}Params,
         tags: [${JSON.stringify(`${name}.detail`)}],
         responses: { 200: ${className}Row },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+            ],
+        },
     })
-    detail(@Param("id") id: string): Effect.Effect<${className}Result, never, never> {
+    detail(@Param("id") id: string): Effect.Effect<${className}Result, ${className}ListError, never> {
         return Effect.promise(() => this.service.detail(id));
     }
 
@@ -308,12 +389,25 @@ export class ${className}Controller {
         responses: { 200: ${className}Row },
         command: Approve${className}Command,
         idempotency: "required",
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
+                { tag: "FEATURE_ENTITY_RESULT_MISMATCH", status: 503, code: "FEATURE_ENTITY_RESULT_MISMATCH" },
+                { tag: "VERSION_CONFLICT", status: 409, code: "VERSION_CONFLICT" },
+                { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+                { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+            ],
+        },
     })
     approve(
         @Param("id") id: string,
         @Body() body: ${className}ApproveInput,
-    ): Effect.Effect<${className}Result, never, never> {
+    ): Effect.Effect<${className}Result, ${className}ApproveError, never> {
         return Effect.promise(() => this.approveCommand.execute(id, body));
     }
 
@@ -321,12 +415,24 @@ export class ${className}Controller {
         params: ${className}ReceiptParams,
         tags: [${JSON.stringify(`${name}.receipt`)}],
         responses: { 200: ${className}Receipt },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "COMMAND_RECEIPT_INVALID", status: 503, code: "COMMAND_RECEIPT_INVALID" },
+                { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
+                { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+            ],
+        },
     })
     receipt(
         @Param("id") id: string,
         @Param("operationId") operationId: string,
-    ): Effect.Effect<${className}ReceiptResult, never, never> {
+    ): Effect.Effect<${className}ReceiptResult, ${className}ReceiptError, never> {
         return Effect.promise(() => this.service.receipt(id, operationId));
     }
 
@@ -334,12 +440,23 @@ export class ${className}Controller {
         params: ${className}ReceiptParams,
         tags: [${JSON.stringify(`${name}.job-status`)}],
         responses: { 200: ${className}JobStatus },
-        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+        effect: {
+            required: true, dependencies: [], retry: "none",
+            errors: [
+                { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "FEATURE_CONTEXT_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+                { tag: "PERMISSION_DENIED", status: 403, code: "PERMISSION_DENIED" },
+                { tag: "FEATURE_NOT_FOUND", status: 404, code: "FEATURE_NOT_FOUND" },
+                { tag: "FEATURE_OPERATION_RESULT_MISMATCH", status: 503, code: "FEATURE_OPERATION_RESULT_MISMATCH" },
+                { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+                { tag: "FEATURE_ADAPTER_UNAVAILABLE", status: 503, code: "FEATURE_ADAPTER_UNAVAILABLE" },
+            ],
+        },
     })
     jobStatus(
         @Param("id") id: string,
         @Param("operationId") operationId: string,
-    ): Effect.Effect<${className}JobStatusResult, never, never> {
+    ): Effect.Effect<${className}JobStatusResult, ${className}JobStatusError, never> {
         return Effect.promise(() => this.service.jobStatus(id, operationId));
     }
 }
@@ -356,7 +473,9 @@ export const ${className}Feature = defineFeatureSlice({
         [`${name}.feature.test.ts`]: `import { expect, test } from "bun:test";
 import { Refresh${className}Job } from "./${name}.feature";
 import { ${className}Service } from "./${name}.service";
-import { ${className}Fixture, ${className}RequestContext, ${className}RequestEnvelope } from "./${name}.fixture";
+import {
+    ${className}Fixture, ${className}JobRequestEnvelope, ${className}RequestContext, ${className}RequestEnvelope,
+} from "./${name}.fixture";
 
 test("${name} rejects missing trusted tenant context before adapter execution", async () => {
     let calls = 0;
@@ -370,28 +489,54 @@ test("${name} rejects missing trusted tenant context before adapter execution", 
 
 test("${name} rejects missing trusted job context before dispatch", async () => {
     const job = new Refresh${className}Job({});
-    await expect(job.run({ id: "example", version: 1 })).rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
+    await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
+        .rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
+});
+
+test("${name} rejects a job context correlated to a different operation", async () => {
+    const job = new Refresh${className}Job({
+        ...${className}RequestEnvelope,
+        idempotencyKey: "foreign-operation",
+    });
+    await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
+        .rejects.toMatchObject({ _tag: "FEATURE_JOB_OPERATION_MISMATCH" });
+});
+
+test("${name} runs the refresh adapter with trusted tenant context", async () => {
+    let received: unknown;
+    const job = new Refresh${className}Job(${className}JobRequestEnvelope, {
+        async run(context, input) {
+            received = { context, input };
+        },
+    });
+    await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
+        .resolves.toBeUndefined();
+    expect(received).toEqual({
+        context: { ...${className}RequestContext, idempotencyKey: "operation-example" },
+        input: { id: "example", version: 1, operationId: "operation-example" },
+    });
 });
 
 test("${name} fails closed until verified read and durable write ports are bound", async () => {
     const service = new ${className}Service(${className}RequestEnvelope);
-    await expect(service.list({})).rejects.toThrow("Bind ${className}Reader");
-    await expect(service.detail("example")).rejects.toThrow("Bind ${className}Reader");
-    await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("Bind ${className}Writer");
-    await expect(service.jobStatus("example", "operation-example")).rejects.toThrow("Bind ${className}JobStatuses");
+    await expect(service.list({})).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
+    await expect(service.detail("example")).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
+    await expect(service.approve("example", { expectedVersion: 1 })).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
+    await expect(service.jobStatus("example", "operation-example")).rejects.toThrow("FEATURE_ADAPTER_UNAVAILABLE");
 });
 
 test("${name} preserves denied reads and rejected writes without fallback or retry", async () => {
     const denied = new Error("denied");
     let attempts = 0;
-    const service = new ${className}Service(${className}RequestEnvelope, {
-        list: async () => { throw denied; },
-        detail: async () => { throw denied; },
-    }, {
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, {
         approve: async () => { attempts++; throw denied; },
     });
-    await expect(service.list({})).rejects.toBe(denied);
-    await expect(service.detail("example")).rejects.toBe(denied);
+    const readService = new ${className}Service(${className}RequestEnvelope, {
+        list: async () => { throw denied; },
+        detail: async () => { throw denied; },
+    });
+    await expect(readService.list({})).rejects.toBe(denied);
+    await expect(readService.detail("example")).rejects.toBe(denied);
     await expect(service.approve("example", { expectedVersion: 1 })).rejects.toBe(denied);
     expect(attempts).toBe(1);
 });
@@ -407,6 +552,78 @@ test("${name} forwards the authoritative version and result without inventing pe
     });
     expect(await service.approve(${className}Fixture.id, ${className}Fixture.approve)).toBe(row);
 });
+
+test("${name} rejects a writer result that does not prove the declared transition", async () => {
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, {
+        approve: async () => ({ id: "example", state: "draft", version: 2 }),
+    });
+    await expect(service.approve("example", { expectedVersion: 1 }))
+        .rejects.toMatchObject({ _tag: "FEATURE_TRANSITION_CONFLICT" });
+    const stale = new ${className}Service(${className}RequestEnvelope, undefined, {
+        approve: async () => ({ id: "example", state: "approved", version: 1 }),
+    });
+    await expect(stale.approve("example", { expectedVersion: 1 }))
+        .rejects.toMatchObject({ _tag: "VERSION_CONFLICT" });
+    const foreign = new ${className}Service(${className}RequestEnvelope, undefined, {
+        approve: async () => ({ id: "foreign", state: "approved", version: 2 }),
+    });
+    await expect(foreign.approve("example", { expectedVersion: 1 }))
+        .rejects.toMatchObject({ _tag: "FEATURE_ENTITY_RESULT_MISMATCH" });
+});
+
+test("${name} rejects operation lookup results for a different operation", async () => {
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
+        lookup: async () => ({
+            id: "example", operationId: "foreign-operation", status: "confirmed", state: "approved", version: 2,
+        }),
+    }, {
+        lookup: async () => ({ id: "example", operationId: "foreign-operation", status: "completed" }),
+    });
+    await expect(service.receipt("example", "operation-example"))
+        .rejects.toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
+    await expect(service.jobStatus("example", "operation-example"))
+        .rejects.toThrow("FEATURE_OPERATION_RESULT_MISMATCH");
+});
+
+
+for (const field of ["id", "operationId"] as const) {
+    test("${name} isolates lookup identity when an adapter rewrites " + field, async () => {
+        let calls = 0;
+        const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
+            async lookup(_context, input) {
+                calls++;
+                Object.assign(input, { [field]: "foreign" });
+                return { ...input, status: "confirmed", state: "approved", version: 2 };
+            },
+        }, {
+            async lookup(_context, input) {
+                calls++;
+                Object.assign(input, { [field]: "foreign" });
+                return { ...input, status: "completed" };
+            },
+        });
+        await expect(service.receipt("example", "operation-example"))
+            .rejects.toMatchObject({ _tag: "FEATURE_OPERATION_RESULT_MISMATCH" });
+        await expect(service.jobStatus("example", "operation-example"))
+            .rejects.toMatchObject({ _tag: "FEATURE_OPERATION_RESULT_MISMATCH" });
+        expect(calls).toBe(2);
+    });
+}
+
+test("${name} preserves matching lookup results and does not replay failures", async () => {
+    const receipt = { id: "example", operationId: "operation-example", status: "unknown" as const, state: "draft", version: 1 };
+    const status = { id: "example", operationId: "operation-example", status: "queued" as const };
+    let calls = 0;
+    const service = new ${className}Service(${className}RequestEnvelope, undefined, undefined, {
+        async lookup() { calls++; return receipt; },
+    }, {
+        async lookup() { calls++; return status; },
+    });
+    expect(await service.receipt("example", "operation-example")).toBe(receipt);
+    expect(await service.jobStatus("example", "operation-example")).toBe(status);
+    expect(calls).toBe(2);
+});
+
 `,
         [`${name}.fixture.ts`]: `import type { ${className}ApproveInput, ${className}Result } from "./${name}.model";
 
@@ -431,6 +648,11 @@ export const ${className}RequestEnvelope = {
     ...${className}RequestContext,
     identity: { authenticated: true, subject: "reviewer-example" },
     access: { tenantId: "tenant-example", permissions: [${JSON.stringify(permission)}] },
+} as const satisfies Record<string, unknown>;
+
+export const ${className}JobRequestEnvelope = {
+    ...${className}RequestEnvelope,
+    idempotencyKey: "operation-example",
 } as const satisfies Record<string, unknown>;
 `,
         [`${name}.e2e.test.ts`]: `import { expect, test } from "bun:test";
@@ -604,8 +826,12 @@ identity-scoped caching/invalidation. Use the generated \`${className}ApproveInv
 constant for the approval mutation; tags are explicit and never inferred from route names.
 There is deliberately no second hand-maintained
 HTTP client. A committed approval followed by a failed refresh is still committed;
-recover its receipt instead of resending. Use the host's standard error translation
-and requestId propagation; the scaffold does not claim to implement those adapters.
+recover its receipt instead of resending. Host domain errors must carry a stable
+_tag, tag, code or error name matching the declared route mapping; an Error message
+alone is not a machine-readable code. Context failures map to authentication-required,
+and foreign operation results fail with FEATURE_OPERATION_RESULT_MISMATCH on both
+lookup routes. Unknown failures remain generic server errors without exposing messages.
+RequestId propagation and durable adapter implementation remain host responsibilities.
 
 ## Required acceptance (not executed by generation)
 

@@ -489,14 +489,59 @@
       "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: never[]) => T;\n    deps?: ProviderDep[];\n}"
     },
     {
+      "name": "FeatureAdapterError",
+      "kind": "both",
+      "signature": "export declare class FeatureAdapterError extends Error {\n    readonly adapter: string;\n    readonly _tag: \"FEATURE_ADAPTER_UNAVAILABLE\";\n    constructor(adapter: string);\n}"
+    },
+    {
+      "name": "FeatureContextError",
+      "kind": "both",
+      "signature": "export declare class FeatureContextError extends Error {\n    readonly _tag: \"FEATURE_CONTEXT_REQUIRED\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureDatabaseSourceOptions",
       "kind": "type",
       "signature": "export interface FeatureDatabaseSourceOptions {\n    source: string;\n    table: string;\n    rowType: string;\n}"
     },
     {
+      "name": "FeatureEntityError",
+      "kind": "both",
+      "signature": "export declare class FeatureEntityError extends Error {\n    readonly _tag: \"FEATURE_ENTITY_RESULT_MISMATCH\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureEvent",
       "kind": "type",
       "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
+    },
+    {
+      "name": "FeatureJobOperationError",
+      "kind": "both",
+      "signature": "export declare class FeatureJobOperationError extends Error {\n    readonly _tag: \"FEATURE_JOB_OPERATION_MISMATCH\";\n    constructor();\n}"
+    },
+    {
+      "name": "FeatureJobPort",
+      "kind": "type",
+      "signature": "export interface FeatureJobPort<Input, Output = void> {\n    run(context: FeatureRequestContext, input: Input): Promise<Output>;\n}"
+    },
+    {
+      "name": "FeatureOperationError",
+      "kind": "both",
+      "signature": "export declare class FeatureOperationError extends Error {\n    readonly _tag: \"FEATURE_OPERATION_RESULT_MISMATCH\";\n    constructor();\n}"
+    },
+    {
+      "name": "FeatureOperationLookupInput",
+      "kind": "type",
+      "signature": "export interface FeatureOperationLookupInput {\n    readonly id: string;\n    readonly operationId: string;\n}"
+    },
+    {
+      "name": "FeatureOperationPort",
+      "kind": "type",
+      "signature": "export interface FeatureOperationPort<Output> {\n    lookup(context: FeatureRequestContext, input: FeatureOperationLookupInput): Promise<Output>;\n}"
+    },
+    {
+      "name": "FeatureOperationResult",
+      "kind": "type",
+      "signature": "export interface FeatureOperationResult {\n    readonly id: string;\n    readonly operationId: string;\n}"
     },
     {
       "name": "FeaturePersistenceOptions",
@@ -524,9 +569,19 @@
       "signature": "export type FeatureState<Spec extends FeatureSpecOptions> = Spec[\"states\"][number];"
     },
     {
+      "name": "FeatureTransitionError",
+      "kind": "both",
+      "signature": "export declare class FeatureTransitionError extends Error {\n    readonly _tag: \"FEATURE_TRANSITION_CONFLICT\";\n    constructor();\n}"
+    },
+    {
       "name": "FeatureTransitionOptions",
       "kind": "type",
       "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    routeBinding?: \"command\" | \"controller\";\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    job?: string;\n    invalidateTags?: readonly string[];\n    persistence?: FeaturePersistenceOptions;\n}"
+    },
+    {
+      "name": "FeatureVersionError",
+      "kind": "both",
+      "signature": "export declare class FeatureVersionError extends Error {\n    readonly _tag: \"VERSION_CONFLICT\";\n    constructor();\n}"
     },
     {
       "name": "flattenProviders",
@@ -1249,9 +1304,24 @@
       "signature": "export declare const REQUEST_CONTEXT: any;"
     },
     {
+      "name": "requireFeatureJobContext",
+      "kind": "value",
+      "signature": "export declare function requireFeatureJobContext(value: unknown, operationId: string): FeatureRequestContext;"
+    },
+    {
+      "name": "requireFeatureOperationResult",
+      "kind": "value",
+      "signature": "export declare function requireFeatureOperationResult<T extends FeatureOperationResult>(input: FeatureOperationLookupInput, value: unknown): T;"
+    },
+    {
       "name": "requireFeatureRequestContext",
       "kind": "value",
       "signature": "export declare function requireFeatureRequestContext(value: unknown): FeatureRequestContext;"
+    },
+    {
+      "name": "requireFeatureTransitionResult",
+      "kind": "value",
+      "signature": "export declare function requireFeatureTransitionResult<T extends {\n    readonly id: string;\n    readonly state: string;\n    readonly version: number;\n}>(expectedId: string, expectedState: string, expectedVersion: number, value: unknown): T;"
     },
     {
       "name": "Resolve",

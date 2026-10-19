@@ -178,6 +178,94 @@ describe("feature specs", () => {
       .toContain("feature-invalidation-tags-invalid");
   });
 
+  test("rejects invalidation tags that are absent from the module query surface", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept", route: "POST /cases/:id/accept",
+        invalidateTags: ["case.list", "case.typo"],
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      controllers: [{
+        ...baseModule(spec).controllers[0]!,
+        routes: [{
+          ...baseModule(spec).controllers[0]!.routes[0]!,
+          tags: ["case.list"],
+        }],
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-invalidation-tag-unresolved");
+  });
+
+  test("requires invalidation tags for database transitions with a query surface", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept", route: "POST /cases/:id/accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      controllers: [{
+        ...baseModule(spec).controllers[0]!,
+        routes: [{
+          ...baseModule(spec).controllers[0]!.routes[0]!,
+          tags: ["case.list"],
+        }],
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-invalidation-tags-required");
+  });
+
+  test("requires invalidation tags for external transitions with a query surface", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted", command: "SubmitCommand",
+        permission: "case.submit", route: "POST /cases/:id/submit",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      controllers: [{
+        ...baseModule(spec).controllers[0]!,
+        routes: [{
+          ...baseModule(spec).controllers[0]!.routes[0]!,
+          path: "/:id/submit",
+          tags: ["case.list"],
+        }],
+      }],
+      commands: [{
+        className: "SubmitCommand", name: "case.submit", permission: "case.submit",
+        transaction: "none" as const, idempotency: "required" as const, audit: "case.submitted",
+        tenantScope: "required" as const,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-invalidation-tags-required");
+  });
+
   test("requires truthful persistence governance for feature transitions", () => {
     const spec: FeatureSpecNode = {
       name: "case",
