@@ -83,6 +83,51 @@ test("contract manifest preserves tenant boundaries for commands and queries", (
     });
 });
 
+test("contract manifest resolves direct route commands by class name or logical name", () => {
+  const graph: ApplicationGraph = {
+    externalTokens: [],
+    modules: [{
+      name: "cases",
+      className: "CasesModule",
+      file: "src/cases.module.ts",
+      line: 1,
+      imports: [],
+      providers: [],
+      commands: [{
+        className: "ApproveCase",
+        name: "case.approve",
+        permission: "case.approve",
+        transaction: "required",
+        idempotency: "required",
+        tenantScope: "required",
+      }],
+      queries: [],
+      exports: [],
+      controllers: [{
+        className: "CasesController",
+        path: "/cases",
+        scope: "request",
+        deps: [],
+        file: "src/cases.controller.ts",
+        importPath: "src/cases.controller",
+        routes: [{
+          method: "POST",
+          path: "/approve",
+          handler: "approve",
+          command: "case.approve",
+        }],
+      }],
+    }],
+  };
+
+  expect(buildContractManifest(graph, { client: false, openapi: false, permissions: true }).routes)
+    .toEqual([expect.objectContaining({
+      command: "case.approve",
+      permission: "case.approve",
+      idempotency: "required",
+    })]);
+});
+
 test("contract manifest publishes the complete feature state machine and persistence policy", () => {
   const graph: ApplicationGraph = {
     externalTokens: [],

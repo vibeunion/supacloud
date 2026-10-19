@@ -11,9 +11,10 @@ function execute<Input = number>(
   target = module,
   stages: string[] = [],
   input: Input = 4 as Input,
+  command = "Approve",
 ) {
   return executeCompiledCommand({
-    module: target, command: "Approve", input,
+    module: target, command, input,
     request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
     governance, handler, observer: (event) => { if (event.phase === "started") stages.push(event.stage); },
     decode: (value) => { if (typeof value !== "number") throw Error("invalid result"); return value; },
@@ -33,6 +34,35 @@ test("direct command uses descriptor, one RPC adapter and explicit aspects after
   expect(result).toBe(5);
   expect(order).toEqual(["authorize", "rpc", "aspect", "handler"]);
   expect(stages).toContain("rpc:approve_review");
+});
+
+test("direct command resolves logical command names", async () => {
+  await expect(execute({
+    authorize: () => {},
+    rpc: { approve_review: {
+      capabilities: { audit: true, transaction: true, idempotency: true },
+      execute: (_invocation, next) => next(),
+    } },
+  }, async () => 7, module, [], 4, "approve")).resolves.toBe(7);
+  await expect(execute({
+    authorize: () => {},
+    rpc: { approve_review: {
+      capabilities: { audit: true, transaction: true, idempotency: true },
+      execute: (_invocation, next) => next(),
+    } },
+  }, async () => 8, { ...module }, [], 4, "approve")).resolves.toBe(8);
+});
+
+test("command preview resolves logical command names", async () => {
+  await expect(previewCompiledCommand({
+    module,
+    command: "approve",
+    input: 4,
+    request: new Request("https://app.example/"),
+    requestContext: { requestId: "r1" },
+    governance: { authorize: () => {} },
+    preview: () => ({ command: "approve", allowed: true, blockers: [] }),
+  })).resolves.toMatchObject({ command: "approve", allowed: true });
 });
 test("missing RPC, missing capability and denied authorization never execute", async () => {
   let calls = 0;

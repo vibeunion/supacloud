@@ -476,6 +476,45 @@ describe("createApplication", () => {
     expect(events).toEqual(["case.create:case.create"]);
   });
 
+  test("resolves logical command names on HTTP routes", async () => {
+    const app = createTestApp({
+      modules: [{
+        name: "review",
+        createServices: () => ({
+          reviewController: { approve: () => ({ ok: true }) },
+        }),
+        controllers: [{
+          path: "/reviews",
+          serviceKey: "reviewController",
+          scope: "application",
+          routes: [{
+            method: "POST",
+            path: "/:id/approve",
+            handler: "approve",
+            command: "review.approve",
+            params: t.Object({ id: t.String() }),
+          }],
+        }],
+        commands: [{
+          className: "ApproveReviewCommand",
+          name: "review.approve",
+          permission: "review.approve",
+          transaction: "none",
+          idempotency: "none",
+        }],
+      }],
+      commandExecutor: async (invocation, next) => {
+        expect(invocation.command.className).toBe("ApproveReviewCommand");
+        expect(invocation.command.name).toBe("review.approve");
+        return next();
+      },
+    });
+
+    const response = await testRequest(app, "/reviews/review-1/approve", { method: "POST" });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
   test("allows applications to map errors to their public envelope", async () => {
     const app = createApp({}, {
       commandGovernance: {

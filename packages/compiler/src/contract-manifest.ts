@@ -213,7 +213,8 @@ export function buildContractManifest(
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const command = route.command
-          ? module.commands.find((candidate) => candidate.className === route.command)
+          ? module.commands.find((candidate) =>
+            candidate.className === route.command || candidate.name === route.command)
           : undefined;
         const featureTransition = featureTransitionForRoute(module, controller, route);
         const featureCommand = featureTransition?.command === undefined

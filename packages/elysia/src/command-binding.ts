@@ -17,7 +17,7 @@ export interface CompiledCommandCallContext {
 
 export interface CompiledCommandBindingOptions<Input, Result> {
   module: Pick<CompiledModule, "name" | "commands" | "aspects" | "aspectPipeline">;
-  /** Compiled command class name, as required by executeCompiledCommand. */
+  /** Compiled command class name or logical name. */
   command: string;
   governance: CommandGovernance;
   observer?: ExecutionObserver;
