@@ -131,6 +131,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "duplicate-feature-transition": { code: "SC6102", docsUrl: "https://supacloud.dev/errors/SC6102" },
   "invalid-feature-transition": { code: "SC6103", docsUrl: "https://supacloud.dev/errors/SC6103" },
   "feature-command-unresolved": { code: "SC6104", docsUrl: "https://supacloud.dev/errors/SC6104" },
+  "feature-command-provider-unresolved": { code: "SC6128", docsUrl: "https://supacloud.dev/errors/SC6128" },
   "feature-governance-drift": { code: "SC6105", docsUrl: "https://supacloud.dev/errors/SC6105" },
   "feature-persistence-invalid": { code: "SC6110", docsUrl: "https://supacloud.dev/errors/SC6110" },
   "feature-persistence-drift": { code: "SC6111", docsUrl: "https://supacloud.dev/errors/SC6111" },

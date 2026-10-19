@@ -115,6 +115,12 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       error("feature-command-unresolved", `Transition ${transition.name} declares governance without a command binding.`);
     }
     if (command) {
+      const commandProvider = module.providers.find((provider) =>
+        provider.token === command.className || provider.useClass === command.className);
+      if (!commandProvider) {
+        error("feature-command-provider-unresolved",
+          `Feature transition ${transition.name} references command ${command.className}, but the command is not registered as a provider in module ${module.name}.`);
+      }
       for (const key of ["permission", "transaction", "idempotency", "audit"] as const) {
         if (transition[key] !== undefined && transition[key] !== command[key]) {
           error("feature-governance-drift", `Transition ${transition.name} ${key} differs from command ${command.className}.`);

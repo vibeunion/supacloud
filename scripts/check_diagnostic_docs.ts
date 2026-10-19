@@ -507,6 +507,10 @@ export const value: number = "wrong";`,
     },
   },
 });`,
+  SC6128: `@Module({ name: "case", providers: [] })
+class CaseModule {}
+// The Feature transition references AcceptCommand, but the module does not
+// register it as a runtime provider.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],
