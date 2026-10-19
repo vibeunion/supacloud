@@ -540,6 +540,25 @@ describe("feature specs", () => {
       .toContain("feature-job-unresolved");
   });
 
+  test("rejects feature Jobs that are not registered as providers", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const module = {
+      ...baseModule(spec),
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job", input: "RefreshCaseInput", schemaKinds: { input: "declared" as const },
+        tenantScope: "required" as const, idempotency: "required" as const, mode: "task" as const,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-provider-unresolved");
+  });
+
   test("requires tenant-scoped commands for database features", () => {
     const spec: FeatureSpecNode = {
       name: "case",
