@@ -507,6 +507,10 @@ export const value: number = "wrong";`,
     },
   },
 });`,
+  SC6128: `@Module({ name: "case", providers: [] })
+class CaseModule {}
+// The Feature transition references AcceptCommand, but the module does not
+// register it as a runtime provider.`,
   SC6129: `@Module({ name: "case", providers: [] })
 class CaseModule {}
 // The Feature transition references RefreshCaseJob, but the module does not
@@ -521,6 +525,9 @@ class CaseModule {}
   SC6132: `@Module({ name: "case", providers: [{ useClass: "RefreshCaseJob", scope: "request" }] })
 class CaseModule {}
 // Feature Jobs must be job-scoped.`,
+  SC6134: `@Module({ name: "case", providers: [{ useClass: "ApproveCaseCommand", scope: "application" }] })
+class CaseModule {}
+// Feature Commands must be request-scoped.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],
