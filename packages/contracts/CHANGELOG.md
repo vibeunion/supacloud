@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.12.0...contracts-v0.13.0) (2026-10-19)
+
+
+### Features
+
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
 ## [0.12.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.11.5...contracts-v0.12.0) (2026-10-18)
 
 

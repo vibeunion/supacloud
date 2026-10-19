@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.44.0...supacloud-js-v0.45.0) (2026-10-19)
+
+
+### Features
+
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
 ## [0.44.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.43.4...supacloud-js-v0.44.0) (2026-10-18)
 
 

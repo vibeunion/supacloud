@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/vibeunion/supacloud/compare/testing-v0.7.0...testing-v0.8.0) (2026-10-19)
+
+
+### Features
+
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
 ## [0.7.0](https://github.com/vibeunion/supacloud/compare/testing-v0.6.4...testing-v0.7.0) (2026-10-18)
 
 

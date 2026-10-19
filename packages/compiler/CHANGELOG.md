@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.49.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.48.0...compiler-v0.49.0) (2026-10-19)
+
+
+### Features
+
+* **compiler:** support route-level idempotency contracts ([#2145](https://github.com/vibeunion/supacloud/issues/2145)) ([dc8ffe0](https://github.com/vibeunion/supacloud/commit/dc8ffe0c888dcaaf4f98d90b084cfeea7311d944))
+* complete feature slice governance contracts ([#2151](https://github.com/vibeunion/supacloud/issues/2151)) ([025cb54](https://github.com/vibeunion/supacloud/commit/025cb54d8348931f59e74e1bf1157051218eae9d))
+
+
+### Bug Fixes
+
+* **compiler:** accept logical names in feature route bindings ([#2155](https://github.com/vibeunion/supacloud/issues/2155)) ([da4e369](https://github.com/vibeunion/supacloud/commit/da4e369b2094912fc72cb314be0633d362ee54ec))
+* **compiler:** verify feature route governance in migration assessment ([#2156](https://github.com/vibeunion/supacloud/issues/2156)) ([c5b162a](https://github.com/vibeunion/supacloud/commit/c5b162ae32839f576756144730c33da13dd2f1d0))
+
 ## [0.48.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.47.3...compiler-v0.48.0) (2026-10-18)
 
 
