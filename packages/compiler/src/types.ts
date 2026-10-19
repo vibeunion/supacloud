@@ -421,6 +421,7 @@ export interface FeatureSpecNode {
   states: string[];
   database?: FeatureDatabaseSourceNode;
   tenantField?: string;
+  readPermission?: string;
   requiredAdapters?: string[];
   requiredAdapterScopes?: Record<string, Scope>;
   transitions: FeatureTransitionNode[];
