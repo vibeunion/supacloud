@@ -118,11 +118,11 @@ async function generatedFixture(options: { bindAdapters?: boolean } = { bindAdap
                 "        CaseApprovalService,",
                 [
                     "        CaseApprovalService,",
-                    "        { provide: CaseApprovalReader, useValue: {} },",
-                    "        { provide: CaseApprovalWriter, useValue: {} },",
-                    "        { provide: CaseApprovalReceipts, useValue: {} },",
-                    "        { provide: CaseApprovalJobStatuses, useValue: {} },",
-                    "        { provide: CaseApprovalRefresher, useValue: {} },",
+                    '        { provide: CaseApprovalReader, useValue: {}, scope: "request" },',
+                    '        { provide: CaseApprovalWriter, useValue: {}, scope: "request" },',
+                    '        { provide: CaseApprovalReceipts, useValue: {}, scope: "request" },',
+                    '        { provide: CaseApprovalJobStatuses, useValue: {}, scope: "request" },',
+                    '        { provide: CaseApprovalRefresher, useValue: {}, scope: "job" },',
                 ].join("\n"),
             );
         await writeFile(featurePath, bound);
@@ -173,6 +173,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(featureSource).toContain('tenantField: "tenant_id"');
     expect(featureSource).toContain('"CaseApprovalReader"');
     expect(featureSource).toContain('"CaseApprovalRefresher"');
+    expect(featureSource).toContain('CaseApprovalRefresher: "job"');
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain('tenantScope: "required"');
     expect(featureSource).toContain('@Query({ name: "case-approval.detail", tenantScope: "required" })');

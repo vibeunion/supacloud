@@ -243,6 +243,13 @@ export const featureSpec = defineFeatureSpec({
         "${className}JobStatuses",
         "${className}Refresher",
     ],
+    requiredAdapterScopes: {
+        ${className}Reader: "request",
+        ${className}Writer: "request",
+        ${className}Receipts: "request",
+        ${className}JobStatuses: "request",
+        ${className}Refresher: "job",
+    },
     transitions: {
         approve: {
             from: "draft", to: "approved", command: "Approve${className}Command",

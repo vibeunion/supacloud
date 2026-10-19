@@ -33,6 +33,13 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         `Feature ${spec.name} must declare unique, non-empty adapter token identifiers.`);
     }
   }
+  if (spec.requiredAdapterScopes !== undefined) {
+    if (spec.requiredAdapters === undefined
+      || Object.keys(spec.requiredAdapterScopes).some((token) => !spec.requiredAdapters?.includes(token))) {
+      error("feature-adapter-requirements-invalid",
+        `Feature ${spec.name} must scope only declared required adapters.`);
+    }
+  }
   const databaseTransition = spec.transitions.some((transition) => transition.persistence?.boundary === "database");
   if (databaseTransition && spec.database === undefined && spec.file !== undefined) {
     error("feature-database-source-required",
@@ -59,6 +66,12 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       if (!provider) {
         error("feature-adapter-unresolved",
           `Feature ${spec.name} requires adapter ${token}, but module ${module.name} does not register a provider for it.`);
+      } else {
+        const expectedScope = spec.requiredAdapterScopes?.[token];
+        if (expectedScope !== undefined && provider.scope !== expectedScope) {
+          error("feature-adapter-provider-scope",
+            `Feature ${spec.name} requires adapter ${token} to use ${expectedScope} scope, but module ${module.name} registers it with ${provider.scope} scope.`);
+        }
       }
     }
   }

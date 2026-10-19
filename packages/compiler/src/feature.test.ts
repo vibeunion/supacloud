@@ -110,6 +110,25 @@ describe("feature specs", () => {
     expect(validateFeatureSpec(spec, module)).toEqual([]);
   });
 
+  test("rejects required Feature adapters with the wrong scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      requiredAdapters: ["CaseRefresher"],
+      requiredAdapterScopes: { CaseRefresher: "job" },
+      transitions: [],
+    };
+    const module: ModuleNode = {
+      ...baseModule(spec),
+      providers: [{
+        token: "CaseRefresher", tokenKind: "injection-token", kind: "value",
+        scope: "request", deps: [], exported: false, file: "case.adapter.ts", line: 1,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-adapter-provider-scope");
+  });
+
   test("lowers a colocated defineFeatureSlice into the application graph", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-feature-"));
     await writeFile(join(root, "feature.ts"), [

@@ -1059,6 +1059,7 @@ function parseFeatureSpec(
   if (databaseExpr !== undefined && database === undefined) return invalid();
   const tenantField = stringLiteralProp(input, "tenantField");
   const requiredAdaptersExpr = getProp(input, "requiredAdapters");
+  const requiredAdapterScopesExpr = getProp(input, "requiredAdapterScopes");
   const statesExpr = getProp(input, "states");
   const transitionObject = getProp(input, "transitions");
   if (!name || !statesExpr || !ts.isArrayLiteralExpression(statesExpr) ||
@@ -1074,6 +1075,18 @@ function parseFeatureSpec(
       ? requiredAdaptersExpr.elements.map((element) => (element as ts.StringLiteral).text)
       : undefined;
   if (requiredAdaptersExpr !== undefined && requiredAdapters === undefined) return invalid();
+  const requiredAdapterScopes = requiredAdapterScopesExpr === undefined
+    ? undefined
+    : ts.isObjectLiteralExpression(requiredAdapterScopesExpr)
+      && requiredAdapterScopesExpr.properties.every((property) =>
+        ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name)
+        && ts.isStringLiteral(property.initializer) && isScope(property.initializer.text))
+      ? Object.fromEntries(requiredAdapterScopesExpr.properties.map((property) => [
+        propertyName((property as ts.PropertyAssignment).name),
+        (property as ts.PropertyAssignment).initializer.getText().slice(1, -1) as Scope,
+      ]))
+      : undefined;
+  if (requiredAdapterScopesExpr !== undefined && requiredAdapterScopes === undefined) return invalid();
   const states: string[] = [];
   for (const state of statesExpr.elements) {
     if (!ts.isStringLiteral(state)) return invalid();
@@ -1132,6 +1145,7 @@ function parseFeatureSpec(
     ...(database === undefined ? {} : { database }),
     ...(tenantField === undefined ? {} : { tenantField }),
     ...(requiredAdapters === undefined ? {} : { requiredAdapters }),
+    ...(requiredAdapterScopes === undefined ? {} : { requiredAdapterScopes }),
     transitions,
     file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input),
   };
