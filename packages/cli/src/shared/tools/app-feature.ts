@@ -68,6 +68,7 @@ export const ${className}ListResponse = t.Array(${className}Row);
 export const ${className}RefreshInput = t.Object({
     id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
     version: t.Integer({ minimum: 1 }),
+    operationId: t.String({ minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]+$" }),
 });
 `,
         [`${name}.model.ts`]: `import {
@@ -383,7 +384,8 @@ test("${name} rejects missing trusted tenant context before adapter execution", 
 
 test("${name} rejects missing trusted job context before dispatch", async () => {
     const job = new Refresh${className}Job({});
-    await expect(job.run({ id: "example", version: 1 })).rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
+    await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
+        .rejects.toThrow("FEATURE_CONTEXT_REQUIRED");
 });
 
 test("${name} runs the refresh adapter with trusted tenant context", async () => {
@@ -393,10 +395,11 @@ test("${name} runs the refresh adapter with trusted tenant context", async () =>
             received = { context, input };
         },
     });
-    await expect(job.run({ id: "example", version: 1 })).resolves.toBeUndefined();
+    await expect(job.run({ id: "example", version: 1, operationId: "operation-example" }))
+        .resolves.toBeUndefined();
     expect(received).toEqual({
         context: ${className}RequestContext,
-        input: { id: "example", version: 1 },
+        input: { id: "example", version: 1, operationId: "operation-example" },
     });
 });
 

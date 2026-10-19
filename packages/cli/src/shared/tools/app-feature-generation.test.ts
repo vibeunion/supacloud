@@ -168,6 +168,8 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalRefreshInput = t.Object");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
+        .toContain('operationId: t.String({ minLength: 1, maxLength: 512, pattern: "^[A-Za-z0-9._:-]+$" })');
+    expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain('t.Union([t.Literal("draft"), t.Literal("approved")])');
     const contractsManifest = JSON.parse(
         await readFile(join(root, "generated/contracts.manifest.json"), "utf8"),
