@@ -32,6 +32,44 @@ const baseModule = (spec: FeatureSpecNode): ModuleNode => ({
 });
 
 describe("feature specs", () => {
+  test("retains the explicit database source and derived row type", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-feature-database-"));
+    await writeFile(join(root, "feature.ts"), [
+      "const spec = defineFeatureSpec({",
+      '  name: "case", states: ["draft", "accepted"],',
+      '  database: { source: "db/schema.ts", table: "public.reviews", rowType: "ReviewRow" },',
+      '  transitions: { accept: { from: "draft", to: "accepted" } },',
+      "});",
+      "const CaseFeature = defineFeatureSlice({ name: \"case\", spec, tags: [\"type:feature\"] });",
+      "",
+    ].join("\n"), "utf8");
+    const graph = await analyzeProject(root);
+    expect(graph.modules[0]?.featureSpec?.database).toEqual({
+      source: "db/schema.ts", table: "public.reviews", rowType: "ReviewRow",
+    });
+  });
+
+  test("blocks a source feature that omits its database provenance", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      file: "src/features/case/case.feature.ts",
+      line: 1,
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        command: "AcceptCommand", permission: "case.accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    expect(validateFeatureSpec(spec).map((diagnostic) => diagnostic.code))
+      .toContain("feature-database-source-required");
+  });
+
   test("lowers a colocated defineFeatureSlice into the application graph", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-feature-"));
     await writeFile(join(root, "feature.ts"), [

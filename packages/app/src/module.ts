@@ -30,9 +30,19 @@ export interface FeaturePersistenceOptions {
   reconciliation: "required" | "none";
 }
 
+export interface FeatureDatabaseSourceOptions {
+  /** Project-relative database source configuration or schema entrypoint. */
+  source: string;
+  /** Schema-qualified table name owned by the feature. */
+  table: string;
+  /** Exported row type derived from the database source. */
+  rowType: string;
+}
+
 export interface FeatureSpecOptions {
   name: string;
   states: readonly string[];
+  database?: FeatureDatabaseSourceOptions;
   tenantField?: string;
   transitions: Readonly<Record<string, FeatureTransitionOptions>>;
 }

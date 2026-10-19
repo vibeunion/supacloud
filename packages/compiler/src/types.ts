@@ -408,9 +408,16 @@ export interface FeaturePersistenceNode {
   reconciliation: "required" | "none";
 }
 
+export interface FeatureDatabaseSourceNode {
+  source: string;
+  table: string;
+  rowType: string;
+}
+
 export interface FeatureSpecNode {
   name: string;
   states: string[];
+  database?: FeatureDatabaseSourceNode;
   tenantField?: string;
   transitions: FeatureTransitionNode[];
   file?: string;

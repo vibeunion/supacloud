@@ -177,6 +177,7 @@ export type {
 export { defineFeatureSlice, defineFeatureSpec, defineModule } from "./module";
 export type {
   FeatureEvent,
+  FeatureDatabaseSourceOptions,
   FeatureSliceOptions,
   FeaturePersistenceOptions,
   FeatureSpecOptions,
