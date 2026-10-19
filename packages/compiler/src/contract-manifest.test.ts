@@ -69,6 +69,7 @@ test("contract manifest preserves tenant boundaries for commands and queries", (
       queries: [{
         className: "ListCases",
         name: "case.list",
+        permission: "case.read",
         tenantScope: "required",
       }],
       exports: [],
@@ -79,7 +80,8 @@ test("contract manifest preserves tenant boundaries for commands and queries", (
   expect(buildContractManifest(graph, { client: false, openapi: false, permissions: false }))
     .toMatchObject({
       commands: [{ name: "case.approve", tenantScope: "required" }],
-      queries: [{ name: "case.list", tenantScope: "required" }],
+      queries: [{ name: "case.list", permission: "case.read", tenantScope: "required" }],
+      permissions: ["case.approve", "case.read"],
     });
 });
 
