@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.108.0](https://github.com/vibeunion/supacloud/compare/cli-v0.107.1...cli-v0.108.0) (2026-10-20)
+
+
+### Features
+
+* **cli:** generate feature slice client adapter ([b7ae753](https://github.com/vibeunion/supacloud/commit/b7ae753e7b9e6053cec5d2a8057c7b64754dfa01))
+
 ## [0.107.1](https://github.com/vibeunion/supacloud/compare/cli-v0.107.0...cli-v0.107.1) (2026-10-20)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.13.0...contracts-v0.14.0) (2026-10-20)
+
+
+### Features
+
+* **cli:** generate feature slice client adapter ([b7ae753](https://github.com/vibeunion/supacloud/commit/b7ae753e7b9e6053cec5d2a8057c7b64754dfa01))
+
 ## [0.13.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.12.0...contracts-v0.13.0) (2026-10-19)
 
 
