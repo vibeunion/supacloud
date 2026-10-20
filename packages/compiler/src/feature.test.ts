@@ -12,7 +12,10 @@ const baseModule = (spec: FeatureSpecNode): ModuleNode => ({
   file: "case.module.ts",
   line: 1,
   imports: [],
-  providers: [],
+  providers: [{
+    token: "AcceptCommand", tokenKind: "class", kind: "class", useClass: "AcceptCommand",
+    scope: "request", deps: [], exported: false, file: "case.command.ts", line: 1,
+  }],
   controllers: [{
     className: "CaseController",
     path: "/cases",
@@ -68,6 +71,62 @@ describe("feature specs", () => {
     };
     expect(validateFeatureSpec(spec).map((diagnostic) => diagnostic.code))
       .toContain("feature-database-source-required");
+  });
+
+  test("blocks required Feature adapters that are not registered", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      requiredAdapters: ["CaseReader", "CaseWriter"],
+      transitions: [],
+    };
+    expect(validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code))
+      .toContain("feature-adapter-unresolved");
+  });
+
+  test("accepts required Feature adapters registered by token or implementation", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      requiredAdapters: ["CaseReader", "CaseWriter"],
+      transitions: [],
+    };
+    const module: ModuleNode = {
+      ...baseModule(spec),
+      providers: [
+        ...baseModule(spec).providers,
+        {
+          token: "CaseReader", tokenKind: "injection-token", kind: "class",
+          useClass: "DatabaseCaseReader", scope: "request", deps: [],
+          exported: false, file: "case.adapter.ts", line: 1,
+        },
+        {
+          token: "CaseWriter", tokenKind: "injection-token", kind: "class",
+          useClass: "CaseWriter", scope: "request", deps: [],
+          exported: false, file: "case.adapter.ts", line: 2,
+        },
+      ],
+    };
+    expect(validateFeatureSpec(spec, module)).toEqual([]);
+  });
+
+  test("rejects required Feature adapters with the wrong scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      requiredAdapters: ["CaseRefresher"],
+      requiredAdapterScopes: { CaseRefresher: "job" },
+      transitions: [],
+    };
+    const module: ModuleNode = {
+      ...baseModule(spec),
+      providers: [{
+        token: "CaseRefresher", tokenKind: "injection-token", kind: "value",
+        scope: "request", deps: [], exported: false, file: "case.adapter.ts", line: 1,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-adapter-provider-scope");
   });
 
   test("lowers a colocated defineFeatureSlice into the application graph", async () => {
@@ -136,6 +195,31 @@ describe("feature specs", () => {
       }],
     };
     expect(validateFeatureSpec(spec, module)).toEqual([]);
+  });
+
+  test("rejects feature commands with application scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case", states: ["draft", "accepted"], tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted", command: "AcceptCommand",
+        permission: "case.accept",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      providers: [{
+        token: "AcceptCommand", tokenKind: "class" as const, kind: "class" as const,
+        useClass: "AcceptCommand", scope: "application" as const, deps: [],
+        exported: false, file: "case.command.ts", line: 1,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-command-provider-scope");
   });
 
   test("detects state and governance drift", () => {
@@ -388,6 +472,53 @@ describe("feature specs", () => {
       .toContain("feature-query-tenant-boundary");
   });
 
+  test("rejects feature queries that are not registered as providers", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      queries: [{ className: "ListCaseQuery", name: "case.list", permission: "case.read", tenantScope: "required" as const }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-provider-unresolved");
+  });
+
+  test("rejects feature queries with application scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case", states: ["draft", "accepted"], tenantField: "tenant_id",
+      transitions: [{
+        name: "accept", from: "draft", to: "accepted",
+        persistence: {
+          boundary: "database", optimisticLock: "required",
+          versionField: "version", tenantField: "tenant_id", stateField: "state",
+          receipt: "required", reconciliation: "none",
+        },
+      }],
+    };
+    const module = {
+      ...baseModule(spec),
+      providers: [{
+        token: "ListCaseQuery", tokenKind: "class" as const, kind: "class" as const,
+        useClass: "ListCaseQuery", scope: "application" as const, deps: [],
+        exported: false, file: "case.query.ts", line: 1,
+      }],
+      queries: [{ className: "ListCaseQuery", name: "case.list", tenantScope: "required" as const }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-provider-scope");
+  });
+
   test("requires tenant-scoped jobs for database features", () => {
     const spec: FeatureSpecNode = {
       name: "case",
@@ -407,6 +538,51 @@ describe("feature specs", () => {
       jobs: [{
         className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
         scope: "job", tenantScope: "none",
+      }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-tenant-boundary");
+  });
+
+  test("requires tenant-scoped queries for external features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      queries: [{ className: "ListCaseQuery", name: "case.list", tenantScope: "none" }],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code))
+      .toContain("feature-query-tenant-boundary");
+  });
+
+  test("requires tenant-scoped jobs for external features", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "submitted"],
+      tenantField: "tenant_id",
+      transitions: [{
+        name: "submit", from: "draft", to: "submitted", job: "case.reconcile",
+        persistence: {
+          boundary: "external", optimisticLock: "none",
+          receipt: "required", reconciliation: "required",
+        },
+      }],
+    };
+    const diagnostics = validateFeatureSpec(spec, {
+      ...baseModule(spec),
+      jobs: [{
+        className: "ReconcileCaseJob", name: "case.reconcile", serviceKey: "reconcileCaseJob",
+        scope: "job", input: "ReconcileCaseInput", tenantScope: "none",
       }],
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code))
@@ -538,6 +714,47 @@ describe("feature specs", () => {
     };
     expect(validateFeatureSpec(spec, baseModule(spec)).map((diagnostic) => diagnostic.code))
       .toContain("feature-job-unresolved");
+  });
+
+  test("rejects feature Jobs that are not registered as providers", () => {
+    const spec: FeatureSpecNode = {
+      name: "case",
+      states: ["draft", "accepted"],
+      tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const module = {
+      ...baseModule(spec),
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job" as const, input: "RefreshCaseInput", schemaKinds: { input: "declared" as const },
+        tenantScope: "required" as const, idempotency: "required" as const, mode: "task" as const,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-provider-unresolved");
+  });
+
+  test("rejects feature Jobs with request scope", () => {
+    const spec: FeatureSpecNode = {
+      name: "case", states: ["draft", "accepted"], tenantField: "tenant_id",
+      transitions: [{ name: "accept", from: "draft", to: "accepted", job: "case.refresh" }],
+    };
+    const module = {
+      ...baseModule(spec),
+      providers: [{
+        token: "RefreshCaseJob", tokenKind: "class" as const, kind: "class" as const,
+        useClass: "RefreshCaseJob", scope: "request" as const, deps: [],
+        exported: false, file: "case.job.ts", line: 1,
+      }],
+      jobs: [{
+        className: "RefreshCaseJob", name: "case.refresh", serviceKey: "refreshCaseJob",
+        scope: "job" as const, input: "RefreshCaseInput", schemaKinds: { input: "declared" as const },
+        tenantScope: "required" as const, idempotency: "required" as const, mode: "task" as const,
+      }],
+    };
+    expect(validateFeatureSpec(spec, module).map((diagnostic) => diagnostic.code))
+      .toContain("feature-job-provider-scope");
   });
 
   test("requires tenant-scoped commands for database features", () => {

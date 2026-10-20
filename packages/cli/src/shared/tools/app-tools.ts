@@ -153,6 +153,8 @@ export interface AppToolArguments {
     name?: string;
     module?: string;
     permission?: string;
+    read_permission?: string;
+    "read-permission"?: string;
     rpc?: string;
     database_source?: string;
     database_table?: string;
@@ -357,11 +359,12 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     if ((kind === "resource" || kind === "feature") && (args.force || args.module !== undefined)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", `${kind} creates its own module; use --name and optionally --register-in, never --force or --module`);
     }
-    if (kind !== "feature" && (args.permission !== undefined || args.rpc !== undefined)) {
-        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--permission and --rpc are only supported for feature generation");
+    if (kind !== "feature" && (args.permission !== undefined || args.read_permission !== undefined || args.rpc !== undefined)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--permission, --read-permission and --rpc are only supported for feature generation");
     }
     const featureGovernance = kind === "feature" ? {
         permission: requireFeatureCapability(args.permission, "permission"),
+        readPermission: requireFeatureCapability(args.read_permission, "read-permission"),
         rpc: requireFeatureCapability(args.rpc, "rpc"),
         database: {
             source: requireFeatureDatabase(args.database_source, "database-source",
@@ -1711,6 +1714,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         || (request.database_source !== undefined && request["database-source"] !== undefined)
         || (request.database_table !== undefined && request["database-table"] !== undefined)
         || (request.database_type !== undefined && request["database-type"] !== undefined)
+        || (request.read_permission !== undefined && request["read-permission"] !== undefined)
         || (request.request_id !== undefined && request["request-id"] !== undefined)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
     }
@@ -1722,6 +1726,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         ...(request["database-source"] === undefined ? {} : { database_source: request["database-source"] }),
         ...(request["database-table"] === undefined ? {} : { database_table: request["database-table"] }),
         ...(request["database-type"] === undefined ? {} : { database_type: request["database-type"] }),
+        ...(request["read-permission"] === undefined ? {} : { read_permission: request["read-permission"] }),
         ...(request["request-id"] === undefined ? {} : { request_id: request["request-id"] }),
     };
     if (request.events !== undefined || request.request_id !== undefined) {
@@ -1853,6 +1858,8 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
+            read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
+            "read-permission": optional(Type.String(), "[generate feature] CLI alias of read_permission"),
             rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
             database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
             database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),
@@ -1902,6 +1909,8 @@ export function registerAppAliases(server: ToolServer): void {
         name: optional(Type.String(), "[generate] Object name"),
         module: optional(Type.String(), "[generate] Target feature module"),
         permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
+        read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
+        "read-permission": optional(Type.String(), "[generate feature] CLI alias of read_permission"),
         rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
         database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
         database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),

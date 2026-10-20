@@ -44,6 +44,10 @@ export interface FeatureSpecOptions {
   states: readonly string[];
   database?: FeatureDatabaseSourceOptions;
   tenantField?: string;
+  readPermission?: string;
+  /** Injection tokens that must be bound by the owning Feature module. */
+  requiredAdapters?: readonly string[];
+  requiredAdapterScopes?: Readonly<Record<string, "application" | "request" | "job">>;
   transitions: Readonly<Record<string, FeatureTransitionOptions>>;
 }
 

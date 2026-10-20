@@ -229,6 +229,7 @@ export interface EffectRouteNode {
 }
 
 export interface RouteNode {
+  permission?: string;
   /** Transport-level idempotency contract, independent of route command binding. */
   idempotency?: "required" | "none";
   /** Explicit query cache tags exposed to generated clients. */
@@ -377,6 +378,7 @@ export interface JobNode {
 export interface QueryNode {
   className: string;
   name: string;
+  permission?: string;
   tenantScope?: "required" | "none";
 }
 
@@ -419,6 +421,9 @@ export interface FeatureSpecNode {
   states: string[];
   database?: FeatureDatabaseSourceNode;
   tenantField?: string;
+  readPermission?: string;
+  requiredAdapters?: string[];
+  requiredAdapterScopes?: Record<string, Scope>;
   transitions: FeatureTransitionNode[];
   file?: string;
   line?: number;

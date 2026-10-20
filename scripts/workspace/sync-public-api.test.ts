@@ -51,3 +51,45 @@ test("the public API collector rejects wildcard exports before any snapshot writ
   await expect(f.generate()).rejects.toThrow("explicit exports");
   expect(readFileSync(f.snapshot, "utf8")).toBe(before);
 });
+
+for (const [name, source] of [
+  ["missing type declaration", "export type { Missing } from './missing';\n"],
+  ["missing value declaration", "export { Missing } from './missing';\n"],
+  ["transitive unresolved alias", "export { Missing } from './relay';\n"],
+  ["missing named export", "export { Missing } from './present';\n"],
+  ["uninstalled dependency", "export type { Missing } from '@fixture/not-installed';\n"],
+] as const) {
+  test(`the public API collector rejects ${name} without replacing the snapshot`, async () => {
+    const f = fixture(), before = readFileSync(f.snapshot, "utf8");
+    writeFileSync(resolve(f.root, "relay.ts"), "export { Missing } from './missing';\n");
+    writeFileSync(resolve(f.root, "present.ts"), "export const Present = 1;\n");
+    writeFileSync(f.source, source);
+    await expect(f.generate()).rejects.toThrow("Cannot resolve public API export Missing");
+    expect(readFileSync(f.snapshot, "utf8")).toBe(before);
+  });
+}
+
+test("resolved renamed type and value exports retain nonempty signatures and kinds", async () => {
+  const f = fixture();
+  writeFileSync(resolve(f.root, "present.ts"), [
+    "export interface Original { id: string; }",
+    'export class Value { readonly id = "id"; }',
+    "export function read(id: string): string { return id; }",
+  ].join("\n"));
+  writeFileSync(f.source, "export type { Original as PublicRecord } from './present';\nexport { Value, read as lookup } from './present';\n");
+  const actual = await collectPublicApi({ packageName: "@test/sync", source: f.source, snapshot: f.snapshot });
+  expect(Object.fromEntries(actual.exports.map(item => [item.name, item.kind])))
+    .toEqual({ lookup: "value", PublicRecord: "type", Value: "both" });
+  expect(actual.exports.every(item => item.signature.length > 0)).toBe(true);
+});
+
+test("the public API collector recovers after missing declarations are built", async () => {
+  const f = fixture(), before = readFileSync(f.snapshot, "utf8");
+  writeFileSync(f.source, "export type { Missing } from './missing';\n");
+  await expect(f.generate()).rejects.toThrow("Cannot resolve public API export Missing");
+  writeFileSync(resolve(f.root, "missing.ts"), "export interface Missing { id: string; }\n");
+  const actual = await collectPublicApi({ packageName: "@test/sync", source: f.source, snapshot: f.snapshot });
+  expect(actual.exports[0]?.kind).toBe("type");
+  expect(actual.exports[0]?.signature).toContain("id: string");
+  expect(readFileSync(f.snapshot, "utf8")).toBe(before);
+});

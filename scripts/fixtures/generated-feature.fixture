@@ -57,14 +57,15 @@ const approvalRequest = (expectedVersion = 1) => new Request("http://localhost/c
 const trustedContext = () => ({
     requestId: "fixture-request",
     identity: { authenticated: true, subject: "fixture-reviewer" },
-    access: { tenantId: "fixture-tenant", permissions: ["cases:approve"] },
+    access: { tenantId: "fixture-tenant", permissions: ["cases:approve", "cases:read"] },
     idempotencyKey: "fixture-approval",
 });
 const unbound = createApp({ deps: {}, requestContext: trustedContext, commandGovernance: governance });
 for (const path of ["/case-approval", "/case-approval/example"]) {
     const response = await unbound.handle(new Request("http://localhost" + path));
-    assert.equal(response.status, 503);
-    assert.ok(!(await response.text()).includes("Bind CaseApprovalReader"));
+    const body = await response.text();
+    assert.equal(response.status, 503, `${path}: ${body}`);
+    assert.ok(!body.includes("Bind CaseApprovalReader"));
 }
 authorized = true;
 const missingWriter = await unbound.handle(approvalRequest());

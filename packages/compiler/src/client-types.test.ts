@@ -179,7 +179,15 @@ test("feature transition route bindings carry command governance into generated 
     externalTokens: [],
     modules: [{
       name: "cases", className: "CasesModule", file: "cases.ts", line: 1,
-      imports: [], providers: [], queries: [], exports: [],
+      imports: [], providers: [{
+        token: "ListCasesQuery", tokenKind: "class", kind: "class", useClass: "ListCasesQuery",
+        scope: "request", deps: [], exported: false, file: "cases.ts", line: 1,
+      }, {
+        token: "ApproveCaseCommand", tokenKind: "class", kind: "class", useClass: "ApproveCaseCommand",
+        scope: "request", deps: [], exported: false, file: "cases.ts", line: 1,
+      }], queries: [{
+        className: "ListCasesQuery", name: "case.list", permission: "case.read", tenantScope: "required",
+      }], exports: [],
       commands: [{
         className: "ApproveCaseCommand",
         name: "case.approve",
@@ -271,6 +279,7 @@ test("feature transition route bindings carry command governance into generated 
       .toContain('idempotency: "required"');
     expect(renderOpenApi(featureGraph)).toContain('"idempotency": "required"');
     expect(renderPermissions(featureGraph)).toContain('"idempotency": "required"');
+    expect(renderPermissions(featureGraph)).toContain('"case.read"');
     const delivery = createDeliveryPlan(featureGraph);
     expect(delivery.ok).toBe(true);
     expect(delivery.plan?.targets[0]?.routes).toEqual([expect.objectContaining({

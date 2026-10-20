@@ -988,10 +988,12 @@ function parseModule(
     if (queryDec) {
       const meta = decoratorObjectArg(queryDec);
       if (meta) {
+        const permission = stringLiteralProp(meta, "permission");
         const tenantScope = commandModeProp(meta, "tenantScope");
         queries.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
+          ...(permission === undefined ? {} : { permission }),
           ...(tenantScope === undefined ? {} : { tenantScope }),
         });
       }
@@ -1058,6 +1060,9 @@ function parseFeatureSpec(
     : undefined;
   if (databaseExpr !== undefined && database === undefined) return invalid();
   const tenantField = stringLiteralProp(input, "tenantField");
+  const readPermission = stringLiteralProp(input, "readPermission");
+  const requiredAdaptersExpr = getProp(input, "requiredAdapters");
+  const requiredAdapterScopesExpr = getProp(input, "requiredAdapterScopes");
   const statesExpr = getProp(input, "states");
   const transitionObject = getProp(input, "transitions");
   if (!name || !statesExpr || !ts.isArrayLiteralExpression(statesExpr) ||
@@ -1066,6 +1071,25 @@ function parseFeatureSpec(
     input.properties.some((property) => !ts.isPropertyAssignment(property))) {
     return invalid();
   }
+  const requiredAdapters = requiredAdaptersExpr === undefined
+    ? undefined
+    : ts.isArrayLiteralExpression(requiredAdaptersExpr)
+      && requiredAdaptersExpr.elements.every((element) => ts.isStringLiteral(element) && element.text.trim().length > 0)
+      ? requiredAdaptersExpr.elements.map((element) => (element as ts.StringLiteral).text)
+      : undefined;
+  if (requiredAdaptersExpr !== undefined && requiredAdapters === undefined) return invalid();
+  const requiredAdapterScopes = requiredAdapterScopesExpr === undefined
+    ? undefined
+    : ts.isObjectLiteralExpression(requiredAdapterScopesExpr)
+      && requiredAdapterScopesExpr.properties.every((property) =>
+        ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name)
+        && ts.isStringLiteral(property.initializer) && isScope(property.initializer.text))
+      ? Object.fromEntries(requiredAdapterScopesExpr.properties.map((property) => [
+        propertyName((property as ts.PropertyAssignment).name),
+        (property as ts.PropertyAssignment).initializer.getText().slice(1, -1) as Scope,
+      ]))
+      : undefined;
+  if (requiredAdapterScopesExpr !== undefined && requiredAdapterScopes === undefined) return invalid();
   const states: string[] = [];
   for (const state of statesExpr.elements) {
     if (!ts.isStringLiteral(state)) return invalid();
@@ -1123,6 +1147,9 @@ function parseFeatureSpec(
     name, states,
     ...(database === undefined ? {} : { database }),
     ...(tenantField === undefined ? {} : { tenantField }),
+    ...(readPermission === undefined ? {} : { readPermission }),
+    ...(requiredAdapters === undefined ? {} : { requiredAdapters }),
+    ...(requiredAdapterScopes === undefined ? {} : { requiredAdapterScopes }),
     transitions,
     file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input),
   };
@@ -2173,6 +2200,8 @@ function parseController(
       const optionsArg = args[1];
       const optionsObject = resolveStaticObjectLiteral(optionsArg, ctx);
       if (optionsObject) {
+        const permission = stringLiteralProp(optionsObject, "permission");
+        if (permission !== undefined) route.permission = permission;
         const parsePolicy = routePolicyProperty(optionsObject, "parse", ctx);
         const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
         const idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);

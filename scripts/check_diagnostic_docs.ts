@@ -507,6 +507,52 @@ export const value: number = "wrong";`,
     },
   },
 });`,
+  SC6128: `@Module({ name: "case", providers: [] })
+class CaseModule {}
+// The Feature transition references AcceptCommand, but the module does not
+// register it as a runtime provider.`,
+  SC6129: `@Module({ name: "case", providers: [] })
+class CaseModule {}
+// The Feature transition references RefreshCaseJob, but the module does not
+// register it as a runtime provider.`,
+  SC6130: `@Module({ name: "case", providers: [] })
+class CaseModule {}
+// The Feature query references ListCaseQuery, but the module does not
+// register it as a runtime provider.`,
+  SC6131: `@Module({ name: "case", providers: [{ useClass: "ListCaseQuery", scope: "application" }] })
+class CaseModule {}
+// Feature Queries must be request-scoped.`,
+  SC6132: `@Module({ name: "case", providers: [{ useClass: "RefreshCaseJob", scope: "request" }] })
+class CaseModule {}
+// Feature Jobs must be job-scoped.`,
+  SC6134: `@Module({ name: "case", providers: [{ useClass: "ApproveCaseCommand", scope: "application" }] })
+class CaseModule {}
+// Feature Commands must be request-scoped.`,
+  SC6135: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  requiredAdapters: ["CaseReader"],
+  transitions: {},
+});
+// The Feature module must register a provider for every required adapter.`,
+  SC6136: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  requiredAdapters: ["CaseReader", "CaseReader"],
+  transitions: {},
+});
+// Adapter requirements must be unique identifier names.`,
+  SC6137: `defineFeatureSpec({
+  name: "case",
+  states: ["draft", "approved"],
+  requiredAdapters: ["CaseRefresher"],
+  requiredAdapterScopes: { CaseRefresher: "job" },
+  transitions: {},
+});
+// The registered adapter provider must use the declared scope.`,
+  SC6138: `@Query({ name: "case.list", tenantScope: "required" })
+class ListCaseQuery {}
+// Feature queries must declare an explicit read permission.`,
   SC6116: `defineFeatureSpec({
   name: "case",
   states: ["draft", "approved"],

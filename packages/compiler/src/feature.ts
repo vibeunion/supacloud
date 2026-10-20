@@ -26,6 +26,20 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
   if (spec.tenantField !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(spec.tenantField)) {
     error("feature-tenant-boundary-invalid", `Feature ${spec.name} declares an unsafe tenant field.`);
   }
+  if (spec.requiredAdapters !== undefined) {
+    if (spec.requiredAdapters.length === 0 || spec.requiredAdapters.some((token) => !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(token))
+      || new Set(spec.requiredAdapters).size !== spec.requiredAdapters.length) {
+      error("feature-adapter-requirements-invalid",
+        `Feature ${spec.name} must declare unique, non-empty adapter token identifiers.`);
+    }
+  }
+  if (spec.requiredAdapterScopes !== undefined) {
+    if (spec.requiredAdapters === undefined
+      || Object.keys(spec.requiredAdapterScopes).some((token) => !spec.requiredAdapters?.includes(token))) {
+      error("feature-adapter-requirements-invalid",
+        `Feature ${spec.name} must scope only declared required adapters.`);
+    }
+  }
   const databaseTransition = spec.transitions.some((transition) => transition.persistence?.boundary === "database");
   if (databaseTransition && spec.database === undefined && spec.file !== undefined) {
     error("feature-database-source-required",
@@ -45,6 +59,22 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
     }
   }
   const names = new Set<string>();
+  if (module && spec.requiredAdapters !== undefined) {
+    for (const token of spec.requiredAdapters) {
+      const provider = module.providers.find((candidate) =>
+        candidate.token === token || candidate.useClass === token);
+      if (!provider) {
+        error("feature-adapter-unresolved",
+          `Feature ${spec.name} requires adapter ${token}, but module ${module.name} does not register a provider for it.`);
+      } else {
+        const expectedScope = spec.requiredAdapterScopes?.[token];
+        if (expectedScope !== undefined && provider.scope !== expectedScope) {
+          error("feature-adapter-provider-scope",
+            `Feature ${spec.name} requires adapter ${token} to use ${expectedScope} scope, but module ${module.name} registers it with ${provider.scope} scope.`);
+        }
+      }
+    }
+  }
   for (const transition of spec.transitions) {
     if (!transition.name.trim() || names.has(transition.name)) {
       error("duplicate-feature-transition", `Feature ${spec.name} has duplicate/empty transition '${transition.name}'.`);
@@ -93,10 +123,22 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       }
     }
     if (!module) continue;
-    if (transition.persistence?.boundary === "database") {
+    if (transition.persistence !== undefined) {
       for (const query of module.queries) {
+        const queryProvider = module.providers.find((provider) =>
+          provider.token === query.className || provider.useClass === query.className);
+        if (!queryProvider) {
+          error("feature-query-provider-unresolved",
+            `Feature query ${query.className} is not registered as a runtime provider in module ${module.name}.`);
+        } else if (queryProvider.scope !== "request") {
+          error("feature-query-provider-scope",
+            `Feature query ${query.className} must use request scope, but module ${module.name} registers it with ${queryProvider.scope} scope.`);
+        }
         if (query.tenantScope !== "required") {
           error("feature-query-tenant-boundary", `Query ${query.className} in Feature ${spec.name} must declare tenantScope: "required".`);
+        }
+        if (spec.readPermission !== undefined && query.permission !== spec.readPermission) {
+          error("feature-query-permission", `Query ${query.className} in Feature ${spec.name} must declare read permission '${spec.readPermission}'.`);
         }
       }
       for (const job of module.jobs ?? []) {
@@ -115,6 +157,15 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
       error("feature-command-unresolved", `Transition ${transition.name} declares governance without a command binding.`);
     }
     if (command) {
+      const commandProvider = module.providers.find((provider) =>
+        provider.token === command.className || provider.useClass === command.className);
+      if (!commandProvider) {
+        error("feature-command-provider-unresolved",
+          `Feature transition ${transition.name} references command ${command.className}, but the command is not registered as a provider in module ${module.name}.`);
+      } else if (commandProvider.scope !== "request") {
+        error("feature-command-provider-scope",
+          `Feature command ${command.className} must use request scope, but module ${module.name} registers it with ${commandProvider.scope} scope.`);
+      }
       for (const key of ["permission", "transaction", "idempotency", "audit"] as const) {
         if (transition[key] !== undefined && transition[key] !== command[key]) {
           error("feature-governance-drift", `Transition ${transition.name} ${key} differs from command ${command.className}.`);
@@ -142,6 +193,15 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         error("feature-job-unresolved", `Transition ${transition.name} must reference exactly one Job in module ${module.name}.`);
       } else {
         const job = jobs[0]!;
+        const jobProvider = module.providers.find((provider) =>
+          provider.token === job.className || provider.useClass === job.className);
+        if (!jobProvider) {
+          error("feature-job-provider-unresolved",
+            `Feature transition ${transition.name} references Job ${job.className}, but the Job is not registered as a runtime provider in module ${module.name}.`);
+        } else if (jobProvider.scope !== "job") {
+          error("feature-job-provider-scope",
+            `Feature Job ${job.className} must use job scope, but module ${module.name} registers it with ${jobProvider.scope} scope.`);
+        }
         if (job.tenantScope !== "required") {
           error("feature-job-tenant-boundary", `Job ${job.className} in Feature ${spec.name} must declare tenantScope: "required".`);
         }

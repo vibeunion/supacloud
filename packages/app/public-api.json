@@ -544,6 +544,11 @@
       "signature": "export interface FeatureOperationResult {\n    readonly id: string;\n    readonly operationId: string;\n}"
     },
     {
+      "name": "FeaturePermissionError",
+      "kind": "both",
+      "signature": "export declare class FeaturePermissionError extends Error {\n    readonly permission: string;\n    readonly _tag: \"PERMISSION_DENIED\";\n    constructor(permission: string);\n}"
+    },
+    {
       "name": "FeaturePersistenceOptions",
       "kind": "type",
       "signature": "export interface FeaturePersistenceOptions {\n    boundary: \"database\" | \"external\";\n    optimisticLock: \"required\" | \"none\";\n    versionField?: string;\n    tenantField?: string;\n    stateField?: string;\n    receipt: \"required\" | \"none\";\n    reconciliation: \"required\" | \"none\";\n}"
@@ -561,7 +566,7 @@
     {
       "name": "FeatureSpecOptions",
       "kind": "type",
-      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    database?: FeatureDatabaseSourceOptions;\n    tenantField?: string;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
+      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    database?: FeatureDatabaseSourceOptions;\n    tenantField?: string;\n    readPermission?: string;\n    requiredAdapters?: readonly string[];\n    requiredAdapterScopes?: Readonly<Record<string, \"application\" | \"request\" | \"job\">>;\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
     },
     {
       "name": "FeatureState",
@@ -1291,7 +1296,7 @@
     {
       "name": "QueryOptions",
       "kind": "type",
-      "signature": "export interface QueryOptions {\n    name: string;\n    tenantScope?: \"required\" | \"none\";\n}"
+      "signature": "export interface QueryOptions {\n    name: string;\n    permission?: string;\n    tenantScope?: \"required\" | \"none\";\n}"
     },
     {
       "name": "RedirectCommand",
@@ -1312,6 +1317,11 @@
       "name": "requireFeatureOperationResult",
       "kind": "value",
       "signature": "export declare function requireFeatureOperationResult<T extends FeatureOperationResult>(input: FeatureOperationLookupInput, value: unknown): T;"
+    },
+    {
+      "name": "requireFeaturePermission",
+      "kind": "value",
+      "signature": "export declare function requireFeaturePermission(context: FeatureRequestContext, permission: string): void;"
     },
     {
       "name": "requireFeatureRequestContext",
@@ -1426,7 +1436,7 @@
     {
       "name": "RouteOptions",
       "kind": "type",
-      "signature": "export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    idempotency?: \"required\" | \"none\";\n    tags?: readonly string[];\n    parse?: \"none\";\n    allowDeleteBody?: true;\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    body?: Schemas[\"body\"] extends TSchema ? Schemas[\"body\"] : unknown;\n    params?: Schemas[\"params\"] extends TSchema ? Schemas[\"params\"] : unknown;\n    query?: Schemas[\"query\"] extends TSchema ? Schemas[\"query\"] : unknown;\n    headers?: Schemas[\"headers\"] extends TSchema ? Schemas[\"headers\"] : unknown;\n    cookie?: Schemas[\"cookie\"] extends TSchema ? Schemas[\"cookie\"] : unknown;\n    response?: Schemas[\"response\"] extends TSchema ? Schemas[\"response\"] : unknown;\n    responses?: Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? Schemas[\"responses\"] : Readonly<Record<string | number, unknown>>;\n    effect?: EffectRouteOptions;\n    command?: Type<unknown>;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    title?: string;\n    data?: Record<string, unknown>;\n    aspects?: Aspect[];\n}"
+      "signature": "export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    permission?: string;\n    idempotency?: \"required\" | \"none\";\n    tags?: readonly string[];\n    parse?: \"none\";\n    allowDeleteBody?: true;\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    body?: Schemas[\"body\"] extends TSchema ? Schemas[\"body\"] : unknown;\n    params?: Schemas[\"params\"] extends TSchema ? Schemas[\"params\"] : unknown;\n    query?: Schemas[\"query\"] extends TSchema ? Schemas[\"query\"] : unknown;\n    headers?: Schemas[\"headers\"] extends TSchema ? Schemas[\"headers\"] : unknown;\n    cookie?: Schemas[\"cookie\"] extends TSchema ? Schemas[\"cookie\"] : unknown;\n    response?: Schemas[\"response\"] extends TSchema ? Schemas[\"response\"] : unknown;\n    responses?: Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? Schemas[\"responses\"] : Readonly<Record<string | number, unknown>>;\n    effect?: EffectRouteOptions;\n    command?: Type<unknown>;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    title?: string;\n    data?: Record<string, unknown>;\n    aspects?: Aspect[];\n}"
     },
     {
       "name": "RouteParamBinding",

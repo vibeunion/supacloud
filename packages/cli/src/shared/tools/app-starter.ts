@@ -289,7 +289,7 @@ export function createCompiledModules(): never {
 `,
         "src/review/review.ts": `import { Effect } from "effect";
 import {
-  Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
+  Body, Command, Controller, DB_CLIENT, Get, Inject, Injectable, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,
 } from "@supacloud/app";
 import { ApplicationError, assertFeatureTransition, createSchemaDecoder } from "@supacloud/elysia";
@@ -333,6 +333,7 @@ function readReview(value: unknown): Review {
   }
 }
 
+@Injectable({ scope: "request" })
 @Command({
   name: "review.approve", permission: "review.approve", transaction: "required",
   idempotency: "required", audit: "review.approved", aspects: [requireRequest],

@@ -170,10 +170,16 @@ export async function collectPublicApi(target: ApiTarget): Promise<PublicApiSnap
       const resolved = exportSymbol.flags & ts.SymbolFlags.Alias
         ? checker.getAliasedSymbol(exportSymbol)
         : exportSymbol;
+      const signature = declarationSignature(resolved, checker);
+      // Missing dependency declarations resolve aliases to an unknown symbol.
+      // Never turn that incomplete graph into an approved empty API signature.
+      if (!resolved.declarations?.length || !signature) {
+        throw new Error(`Cannot resolve public API export ${exportSymbol.name} in ${target.packageName}; build/install its dependencies before generating snapshots`);
+      }
       return {
         name: exportSymbol.name,
         kind: symbolKind(resolved),
-        signature: declarationSignature(resolved, checker),
+        signature,
       };
     })
     .sort((left, right) => left.name.localeCompare(right.name));

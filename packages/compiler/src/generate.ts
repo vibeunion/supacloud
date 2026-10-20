@@ -1458,6 +1458,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? undefined
           : commandByClassName.get(featureTransition.command);
         const governedCommand = command ?? featureCommand;
+        const routePermission = route.permission ?? governedCommand?.permission ?? featureTransition?.permission;
         const idempotencyMode = route.idempotency
           ?? command?.idempotency
           ?? featureTransition?.idempotency
@@ -1487,6 +1488,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["parse", route.parse],
           ["allowDeleteBody", route.allowDeleteBody],
           ["idempotency", idempotencyMode === "none" ? undefined : idempotencyMode],
+          ["permission", routePermission],
           ["tags", route.tags],
           ["invalidateTags", invalidationTags],
         ] as const) {
@@ -1533,6 +1535,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           path: fullPath,
           controller: controller.className,
           handler: route.handler,
+          ...(routePermission === undefined ? {} : { permission: routePermission }),
           kind: procedureKind,
           idempotency: idempotencyMode,
           ...(route.tags === undefined ? {} : { tags: route.tags }),
@@ -1545,7 +1548,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           handler: route.handler,
           kind: procedureKind,
           ...(governedCommand?.name === undefined ? {} : { command: governedCommand.name }),
-          ...(governedCommand?.permission === undefined ? {} : { permission: governedCommand.permission }),
+          ...(routePermission === undefined ? {} : { permission: routePermission }),
           idempotency: idempotencyMode,
           ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
           ...(invalidationTags === undefined ? {} : { invalidateTags: [...invalidationTags] }),
@@ -1600,6 +1603,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  controller: string;",
     "  handler: string;",
     "  kind: Kind;",
+    "  permission?: string;",
     "  idempotency: Idempotency;",
     "  tags?: readonly string[];",
     "  invalidateTags?: readonly string[];",
@@ -2262,7 +2266,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
           ?? command?.idempotency
           ?? featureTransition?.idempotency
           ?? "none";
-        const permission = governedCommand?.permission ?? featureTransition?.permission;
+        const permission = route.permission ?? governedCommand?.permission ?? featureTransition?.permission;
         const requiresAuth = (route.guards?.length ?? 0) > 0 || permission !== undefined || governedCommand !== undefined;
         const responseKind = route.contract?.response;
         const responseContentType = responseKind === "binary" || responseKind === "stream"
@@ -2744,6 +2748,9 @@ export function renderPermissions(graph: ApplicationGraph): string {
     for (const command of module.commands) {
       if (command.permission) permissions.add(command.permission);
     }
+    for (const query of module.queries) {
+      if (query.permission) permissions.add(query.permission);
+    }
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const featureTransition = featureTransitionForRoute(module, controller, route);
@@ -2755,7 +2762,7 @@ export function renderPermissions(graph: ApplicationGraph): string {
             candidate.className === featureTransition.command || candidate.name === featureTransition.command);
         const governedCommand = command ?? featureCommand;
         const effectiveCommand = route.command ?? featureTransition?.command;
-        const perm = governedCommand?.permission ?? featureTransition?.permission;
+        const perm = route.permission ?? governedCommand?.permission ?? featureTransition?.permission;
         const idempotency = route.idempotency
           ?? command?.idempotency
           ?? featureTransition?.idempotency;

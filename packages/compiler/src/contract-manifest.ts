@@ -27,6 +27,7 @@ export interface ContractManifest {
     name: string;
     className: string;
     module: string;
+    permission?: string;
     tenantScope?: "required" | "none";
   }>;
   jobs: Array<{
@@ -153,8 +154,10 @@ export function buildContractManifest(
       });
     }
     for (const query of module.queries) {
+      if (query.permission) permissions.add(query.permission);
       queries.push({
         name: query.name, className: query.className, module: module.name,
+        ...(query.permission === undefined ? {} : { permission: query.permission }),
         ...(query.tenantScope === undefined ? {} : { tenantScope: query.tenantScope }),
       });
     }
@@ -178,6 +181,7 @@ export function buildContractManifest(
         states: [...module.featureSpec.states],
         ...(module.featureSpec.database === undefined ? {} : { database: module.featureSpec.database }),
         ...(module.featureSpec.tenantField === undefined ? {} : { tenantField: module.featureSpec.tenantField }),
+        ...(module.featureSpec.readPermission === undefined ? {} : { readPermission: module.featureSpec.readPermission }),
         transitions: module.featureSpec.transitions.map((transition) => {
           const job = transition.job === undefined ? undefined
             : (module.jobs ?? []).find((candidate) => candidate.className === transition.job || candidate.name === transition.job);
@@ -228,7 +232,8 @@ export function buildContractManifest(
         const idempotency = route.idempotency
           ?? command?.idempotency
           ?? featureTransition?.idempotency;
-        if (governedCommand?.permission) permissions.add(governedCommand.permission);
+        const permission = route.permission ?? governedCommand?.permission ?? featureTransition?.permission;
+        if (permission) permissions.add(permission);
         if (route.contract?.evidence) fixtures.add(route.contract.evidence);
         routes.push({
           method: route.method,
@@ -237,7 +242,7 @@ export function buildContractManifest(
           controller: controller.className,
           handler: route.handler,
           ...(effectiveCommand === undefined ? {} : { command: effectiveCommand }),
-          ...(governedCommand?.permission === undefined ? {} : { permission: governedCommand.permission }),
+          ...(permission === undefined ? {} : { permission }),
           ...(idempotency === undefined ? {} : { idempotency }),
           ...(route.tags === undefined ? {} : { tags: [...route.tags] }),
           requestSchemas: Object.fromEntries(

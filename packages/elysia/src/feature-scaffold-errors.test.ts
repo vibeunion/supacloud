@@ -31,13 +31,15 @@ let ServiceClass: new (
 ) => Service;
 let ControllerClass: new (
   list: { execute(): Promise<unknown> },
+  detail: { execute(id: string): Promise<unknown> },
+  receipts: { execute(id: string, operationId: string): Promise<unknown> },
+  jobStatuses: { execute(id: string, operationId: string): Promise<unknown> },
   command: { execute(id: string, input: { expectedVersion: number }): Promise<unknown> },
-  service: Service,
 ) => Controller;
 let root: string | undefined;
 const identity = {
   requestId: "request", identity: { authenticated: true, subject: "actor" },
-  access: { tenantId: "tenant", permissions: ["cases:approve"] },
+  access: { tenantId: "tenant", permissions: ["cases:approve", "cases:read"] },
 };
 const row = { id: "case-1", state: "approved", version: 2 };
 const input: Input = { id: row.id, operationId: "operation-1" };
@@ -48,7 +50,7 @@ beforeAll(async () => {
     compilerOptions: { experimentalDecorators: true },
   }));
   const files = featureScaffold("case-approval", "CaseApproval", {
-    permission: "cases:approve", rpc: "approveCase",
+    permission: "cases:approve", readPermission: "cases:read", rpc: "approveCase",
     database: { source: "db/schema.ts", table: "public.reviews", rowType: "ReviewRow" },
   });
   for (const suffix of ["contracts", "model", "service", "feature"]) {
@@ -67,9 +69,13 @@ afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }
 function controller(context: unknown, lookup: Lookup["lookup"], failure?: Error, onRead: () => void = () => {}) {
   const call = async () => { onRead(); if (failure) throw failure; return row; };
   const service = new ServiceClass(context, { list: call, detail: call }, { approve: call }, { lookup }, { lookup });
-  return new ControllerClass({ execute: () => service.list({}) }, {
-    execute: (id, body) => service.approve(id, body),
-  }, service);
+  return new ControllerClass(
+    { execute: () => service.list({}) },
+    { execute: (id) => service.detail(id) },
+    { execute: (id, operationId) => service.receipt(id, operationId) },
+    { execute: (id, operationId) => service.jobStatus(id, operationId) },
+    { execute: (id, body) => service.approve(id, body) },
+  );
 }
 function run(instance: Controller, method: Method) {
   const effect = getRoutes(ControllerClass).find(route => route.handler === method)?.effect;
@@ -88,6 +94,25 @@ for (const method of ["list", "detail", "approve", "receipt", "jobStatus"] as co
     const instance = controller(undefined, async () => { calls++; return {}; }, undefined, () => { calls++; });
     await expect(run(instance, method)).rejects.toMatchObject({ status: 401, code: "AUTHENTICATION_REQUIRED" });
     expect(calls).toBe(0);
+  });
+}
+for (const method of ["list", "detail", "receipt", "jobStatus"] as const) {
+  for (const permissions of [[], ["cases:approve"]]) {
+    test(`generated ${method} denies missing read permission with ${JSON.stringify(permissions)} before adapters`, async () => {
+      let calls = 0;
+      const context = { ...identity, access: { ...identity.access, permissions } };
+      const instance = controller(context, async () => { calls++; return {}; }, undefined, () => { calls++; });
+      await expect(run(instance, method)).rejects.toMatchObject({ status: 403, code: "PERMISSION_DENIED" });
+      expect(calls).toBe(0);
+    });
+  }
+  test(`generated ${method} allows a read-only identity and invokes one adapter`, async () => {
+    let calls = 0;
+    const context = { ...identity, access: { ...identity.access, permissions: ["cases:read"] } };
+    const result = { ...row, ...input, status: "unknown" };
+    const instance = controller(context, async () => { calls++; return result; }, undefined, () => { calls++; });
+    expect(await run(instance, method)).toBe(method === "list" || method === "detail" ? row : result);
+    expect(calls).toBe(1);
   });
 }
 for (const method of ["receipt", "jobStatus"] as const) {
