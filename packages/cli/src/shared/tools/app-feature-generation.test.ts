@@ -149,6 +149,7 @@ async function generatedFixture(options: { bindAdapters?: boolean } = { bindAdap
             paths: {
                 "@supacloud/app/core": [join(import.meta.dir, "../../../../app/src/core.ts")],
                 "@supacloud/app": [join(import.meta.dir, "../../../../app/src/core.ts")],
+                "@supacloud/contracts/client": [join(import.meta.dir, "../../../../contracts/src/client.ts")],
             },
         },
         include: ["src/**/*.ts"],
