@@ -218,7 +218,7 @@ console.log("Built consumer factory: original and generated routes served togeth
     }
     const featurePreview = JSON.parse(await run([...featureGeneration, "--dry-run"]));
     assert.equal(featurePreview.written, false);
-    assert.equal(featurePreview.changes.length, 9);
+    assert.equal(featurePreview.changes.length, 10);
     assert.equal(await readFile(join(project, "src/app.module.ts"), "utf8"), featureParent);
     await assert.rejects(readFile(join(project, "src/features/case-approval/case-approval.feature.ts")), { code: "ENOENT" });
     assert.equal(JSON.parse(await run(featureGeneration)).written, true);
