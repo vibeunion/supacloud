@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.35.2...elysia-v0.36.0) (2026-10-20)
+
+
+### Features
+
+* **route:** publish feature read permissions ([#2203](https://github.com/vibeunion/supacloud/issues/2203)) ([65ee9bf](https://github.com/vibeunion/supacloud/commit/65ee9bf6948a63700c4966ac71f48d47551eb30b))
+
 ## [0.35.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.35.1...elysia-v0.35.2) (2026-10-19)
 
 

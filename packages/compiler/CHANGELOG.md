@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.50.1...compiler-v0.51.0) (2026-10-20)
+
+
+### Features
+
+* **route:** publish feature read permissions ([#2203](https://github.com/vibeunion/supacloud/issues/2203)) ([65ee9bf](https://github.com/vibeunion/supacloud/commit/65ee9bf6948a63700c4966ac71f48d47551eb30b))
+
 ## [0.50.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.50.0...compiler-v0.50.1) (2026-10-19)
 
 
