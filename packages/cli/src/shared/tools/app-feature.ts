@@ -135,6 +135,38 @@ export const ${className}Refresher = new InjectionToken<${className}RefreshPort>
     "${name}.refresher", { scope: "job" },
 );
 `,
+        [`${name}.client.ts`]: `import {
+    createFeatureSliceCommandClient,
+    type AuthoritativeCommandContract,
+    type AuthoritativeCommandTransport,
+    type FeatureSliceCommandClient,
+    type FeatureSliceCommandClientOptions,
+} from "@supacloud/contracts/client";
+import type { ${className}ApproveCommand } from "./${name}.model";
+import { ${className}ApproveInvalidateTags } from "./${name}.contracts";
+
+/**
+ * Browser/client boundary for the Feature transition.
+ *
+ * The transport must call the real generated API/RPC path. The framework owns
+ * pending identity, read-only recovery and explicit invalidation metadata;
+ * persistence, authorization and the receipt source remain application-owned.
+ */
+export type ${className}CommandTransport = AuthoritativeCommandTransport<${className}ApproveCommand>;
+export type ${className}CommandContract<Acknowledgement, Authority> =
+    AuthoritativeCommandContract<${className}ApproveCommand, Acknowledgement, Authority>;
+
+export function create${className}CommandClient<Acknowledgement, Authority>(
+    contract: ${className}CommandContract<Acknowledgement, Authority>,
+    transport: ${className}CommandTransport,
+    options: FeatureSliceCommandClientOptions<${className}ApproveCommand>,
+): FeatureSliceCommandClient<${className}ApproveCommand, Authority> {
+    return createFeatureSliceCommandClient(contract, transport, {
+        ...options,
+        invalidateTags: options.invalidateTags ?? ${className}ApproveInvalidateTags,
+    });
+}
+`,
         [`${name}.service.ts`]: `import {
     FeatureAdapterError, Inject, Injectable, Optional, REQUEST_CONTEXT, requireFeatureOperationResult,
     requireFeaturePermission,

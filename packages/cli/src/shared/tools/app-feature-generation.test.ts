@@ -31,7 +31,7 @@ test("feature preview and apply share a complete, non-overwriting plan", async (
     const root = await fixture();
     const preview = data(await runAppTool({ ...feature, root, dry_run: true }));
     expect(preview).toMatchObject({ ok: true, written: false });
-    expect(preview.changes).toHaveLength(8);
+    expect(preview.changes).toHaveLength(9);
     expect(await readdir(root)).toEqual([]);
     const applied = data(await runAppTool({ ...feature, root }));
     expect(applied).toMatchObject({ ok: true, written: true });
@@ -225,6 +225,10 @@ test("the generated approval compiles only with the explicit persistent capabili
         .toContain("export const CaseApprovalJobStatus =");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.contracts.ts"), "utf8"))
         .toContain("export const CaseApprovalApproveInvalidateTags");
+    const featureClientSource = await readFile(join(root, "src/features/case-approval/case-approval.client.ts"), "utf8");
+    expect(featureClientSource).toContain("createFeatureSliceCommandClient");
+    expect(featureClientSource).toContain("CaseApprovalApproveInvalidateTags");
+    expect(featureClientSource).toContain("FeatureSliceCommandClientOptions");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
         .toContain("requireFeatureJobContext(this.jobContext, input.operationId)");
     expect(await readFile(join(root, "src/features/case-approval/case-approval.feature.ts"), "utf8"))
