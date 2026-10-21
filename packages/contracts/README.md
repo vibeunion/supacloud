@@ -25,7 +25,7 @@ from the root. This is a breaking import-path change with no framework dependenc
   require the domain matcher. `unknownError(input, lookupFailure)` maps a failed
   lookup without mistaking a missing/malformed receipt for a network failure.
 - `createPendingCommandRecovery` (`/client`): manually reconcile after a reload
-  using only `input`, `authority`, `lookupAuthority`, `matches` and a `lookup`
+  using only `input`, `authority`, optional `lookupAuthority`, `matches` and a `lookup`
   transport. The returned zero-argument function reads the stored identity,
   performs at most one lookup, and returns `{ input, authority }` on confirmation
   or `null` if no marker exists. A contextual `lookupAuthority` receives an
@@ -50,6 +50,39 @@ from the root. This is a breaking import-path change with no framework dependenc
 `createContractCommandClient` remains a thin legacy protocol export. New work should
 use `createAuthoritativeCommandClient`: transport acknowledgement and business
 authority need not have the same shape.
+
+### One receipt contract for execution and recovery
+
+`lookupAuthority(raw, input)` is an optional alternative to `authority(raw)` for
+lookup responses only. Use it to validate the existing receipt's request, entity
+and command identity and project its result into the common authority type. The
+domain `matches` predicate remains mandatory after projection. Direct responses
+still use `responseAuthority ?? authority`; no existing one-argument decoder or
+contract needs to change.
+
+Pass the same contract to `createFeatureSliceCommandClient` and
+`createPendingCommandRecovery`. A recovery-specific input decoder can additionally
+enforce the expected entity, but should not capture an earlier pre-read marker.
+The framework supplies the stored request snapshot, so applications need neither
+per-request authority closures nor a second receipt decoder for page reloads.
+These callbacks do not create receipts, authorize a request or resend a command.
+
+Opting into `lookupAuthority` requires structured-cloneable decoded input, including
+for the lower-level authoritative client. Clone failure is invalid input before
+any transport runs. Caller aliases, transport arguments, contextual decoder input
+and matcher input are isolated, including nested values. Older contracts without
+this callback keep their existing behavior.
+
+Acceptance covered by `src/authoritative_command.test.ts`:
+
+- Given one contract, when a write succeeds, loses its response or is recovered
+  after reload, then the same domain receipt rules apply and no write is replayed.
+- Given a foreign request, command or entity receipt, when it is decoded, then the
+  outcome stays unknown and the original pending marker remains.
+- Given callback argument mutation, when confirmation continues, then its request
+  identity and unknown-error attribution still refer to the original operation.
+- Given a replacement marker, when an old lookup finishes, then it cannot clear
+  the replacement or return it as the recovered operation.
 
 ## Boundaries
 
