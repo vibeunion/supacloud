@@ -13,6 +13,9 @@ from the root. This is a breaking import-path change with no framework dependenc
 - `createAuthoritativeCommandClient`: validate input, acknowledgement and authority
   independently. By default even a valid acknowledgement triggers one authoritative
   lookup. One invocation sends at most one write and one lookup; it never retries.
+  Use the optional `lookupAuthority(raw, input)` decoder when a receipt must be
+  projected against the original request identity; the framework supplies an
+  isolated request copy.
 - `createPendingCommandClient` (`/client`): combine that confirmation flow with an
   existing JSON pending marker. Input must be persisted and read back before sending;
   an existing or corrupt marker blocks a new write. Confirmed authority or definitive
@@ -22,9 +25,11 @@ from the root. This is a breaking import-path change with no framework dependenc
   require the domain matcher. `unknownError(input, lookupFailure)` maps a failed
   lookup without mistaking a missing/malformed receipt for a network failure.
 - `createPendingCommandRecovery` (`/client`): manually reconcile after a reload
-  using only `input`, `authority`, `matches` and a `lookup` transport. The returned
-  zero-argument function reads the stored identity, performs at most one lookup,
-  and returns `{ input, authority }` on confirmation or `null` if no marker exists.
+  using only `input`, `authority`, `lookupAuthority`, `matches` and a `lookup`
+  transport. The returned zero-argument function reads the stored identity,
+  performs at most one lookup, and returns `{ input, authority }` on confirmation
+  or `null` if no marker exists. A contextual `lookupAuthority` receives an
+  isolated copy of that stored identity.
   It never calls a send transport or writes a new marker. Unknown outcomes retain
   the marker and use the same `unknownError` mapping as the pending client.
 - `createAuthenticatedFetch`: obtain a current token **before** sending over HTTPS.
