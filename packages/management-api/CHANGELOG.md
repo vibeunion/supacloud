@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.122.3...management-api-v0.123.0) (2026-10-21)
+
+
+### Features
+
+* **storage:** render PDF pages through Imagor ([#2219](https://github.com/vibeunion/supacloud/issues/2219)) ([7f4ee51](https://github.com/vibeunion/supacloud/commit/7f4ee51240b006549799c2b2c83fde7bb2f8efd8))
+
 ## [0.122.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.122.2...management-api-v0.122.3) (2026-10-19)
 
 
