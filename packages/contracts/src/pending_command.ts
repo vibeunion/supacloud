@@ -37,11 +37,12 @@ function clearPendingCommand(
  * Null means no marker exists, not that a command was rolled back or confirmed.
  */
 export function createPendingCommandRecovery<Input, Authority>(
-  contract: Pick<AuthoritativeCommandContract<Input, unknown, Authority>, "input" | "authority" | "matches">,
+  contract: Pick<AuthoritativeCommandContract<Input, unknown, Authority>, "input" | "authority" | "lookupAuthority" | "matches">,
   transport: Pick<AuthoritativeCommandTransport<Input>, "lookup">,
   options: PendingCommandRecoveryOptions<Input>,
 ): () => Promise<{ input: Input; authority: Authority } | null> {
   const { storage, key, unknownError } = options;
+  const lookupAuthority = contract.lookupAuthority;
   if (!key.trim()) throw new TypeError("Invalid pending command configuration");
   return async () => {
     const serialized = storage.getItem(key);
@@ -60,7 +61,13 @@ export function createPendingCommandRecovery<Input, Authority>(
     let authority: Authority;
     let matched: boolean;
     try {
-      authority = decodeHttpContract(contract.authority, raw, "response");
+      authority = decodeHttpContract(
+        lookupAuthority === undefined
+          ? contract.authority
+          : (value) => lookupAuthority(value, structuredClone(input)),
+        raw,
+        "response",
+      );
       matched = contract.matches(structuredClone(input), authority) === true;
     } catch {
       throw unknownError(input);
