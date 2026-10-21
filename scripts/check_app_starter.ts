@@ -231,7 +231,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
   }
 
   // The production bundle must not contain the compiler or the memory demo entry.
-  const bundle = await readFile(join(project, "dist/application.js"), "utf8");
+  const bundle = await readFile(join(project, "output/supacloud/application.js"), "utf8");
   assert.ok(!bundle.includes("@typescript/typescript6"));
   assert.ok(!bundle.includes("Local demo:"));
   const artifact = join(project, "generated/application.ts");
@@ -384,7 +384,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
     console.log(await run(["run", "test"], templateProject));
     console.log(await run(["run", "build"], templateProject));
 
-    const templateBundle = await readFile(join(templateProject, "dist/application.js"), "utf8");
+    const templateBundle = await readFile(join(templateProject, "output/supacloud/application.js"), "utf8");
     assert.ok(!templateBundle.includes("@typescript/typescript6"), "Template bundle must not contain the compiler");
     assert.ok(!templateBundle.includes("Local demo:"), "Template bundle must not contain the memory demo server");
 

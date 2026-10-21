@@ -105,7 +105,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
         check: "bun run compile && bun run check:generated && bun run typecheck && bun run test",
         test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
         dev: "bun --no-env-file scripts/environment.ts development bun scripts/dev.ts",
-        build: "bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir dist",
+        build: "bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir output/supacloud",
         "env:development": "bun --no-env-file scripts/environment.ts development",
         "env:test": "bun --no-env-file scripts/environment.ts test",
         "env:staging": "bun --no-env-file scripts/environment.ts staging",
@@ -137,7 +137,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "supacloud.config.ts"],
     }),
     "bunfig.toml": "env = false\n",
-    ".gitignore": ["node_modules/", "dist/", ".env", ".env.*", "!.env.*.example", "!.env.test", ""].join("\n"),
+    ".gitignore": ["node_modules/", "dist/", "output/supacloud/", ".env", ".env.*", "!.env.*.example", "!.env.test", ""].join("\n"),
     ".env.development.example": "APP_ENV=development\nPORT=3000\n",
     ".env.test": "APP_ENV=test\n",
     ".env.staging.example": "APP_ENV=staging\n# Inject credentials using the deployment platform.\n",
@@ -284,9 +284,14 @@ do not widen them to \`unknown\` just to accept unvalidated data.
 ## Production Boundary
 
 \`bun run build\` emits an application factory, not a server. Import \`createApp\`
-from \`dist/application.js\` in your trusted host and supply real dependency,
+from \`output/supacloud/application.js\` in your trusted host and supply real dependency,
 request-context and command-governance adapters. The memory sandbox is
 development/test only.
+
+Keep backend bundles outside the frontend output directory. Vite normally cleans
+\`dist/\` before building; server artifacts placed there can be deleted or included
+in a public frontend archive. Use disjoint output directories, not a disabled
+frontend clean step. Compiler source artifacts remain in \`generated/\`.
 
 ## Inspection And Repair
 
@@ -374,6 +379,10 @@ The job runs through the platform worker/edge adapter, not the local memory
 sandbox. Bind persistence, authorization and audit to durable adapters before
 invoking it in production. Do not schedule destructive work without an
 idempotency key.
+
+\`bun run build\` emits \`output/supacloud/application.js\`, an application factory,
+not a deployed Worker. Keep it outside any frontend output directory such as
+\`dist/\`; frontend clean steps and public archives must not own server bundles.
 
 ## Inspection And Repair
 
@@ -480,6 +489,10 @@ explicit options; do not install every recipe into this application.
 ## Integration and delivery
 
 createApp requires application-owned trusted identity and durable adapters.
+\`bun run build\` emits \`output/supacloud/application.js\`, not a deployed server.
+Keep this backend directory separate from frontend output such as \`dist/\`,
+which frontend tools may clean and publish. Do not disable frontend cleanup to
+preserve backend artifacts; use disjoint output directories.
 Database migrations and seed data require an explicitly selected development
 database and a reviewed application script; the CLI never infers a production target.
 Commit generated/ after compilation. At release, check generated drift before

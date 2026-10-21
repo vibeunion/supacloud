@@ -204,10 +204,37 @@ Use `onExecution` for metadata-only execution traces and compiler `context`/`exp
 for static plans. Real SupAuth sessions and durable database integration remain
 deployment acceptance gates, not properties established by the memory demo.
 
-`bun run build` produces `dist/application.js`, not a deployed service. Its
+`bun run build` produces `output/supacloud/application.js`, not a deployed service. Its
 `createApp(adapters)` factory requires trusted request identity, a persistent
 repository and command governance. The compiler and demo entry are not part of
 this production entry. The memory server refuses staging and production.
+
+### Build Output Ownership
+
+New `minimal`, `http`, `command` and `edge` starters keep backend bundles in
+`output/supacloud/`, separate from a Vite frontend's default `dist/`.
+Vite normally empties its output directory when rebuilding. Placing an App or
+Function bundle under that directory can delete it on a later frontend build;
+building the backend afterward can instead include server code in a public
+frontend archive. Build order and `emptyOutDir: false` are not isolation controls.
+
+Keep these outputs disjoint, including when customizing frontend paths:
+
+| Output | Default location | Owner |
+| --- | --- | --- |
+| Generated TypeScript/contracts | `generated/` | SupaCloud compiler |
+| Application factory bundle | `output/supacloud/application.js` | Starter `build` script |
+| Separately bundled Edge Functions | e.g. `output/supacloud/functions/<name>/index.js` | Application's explicit Function build |
+| Static frontend assets | e.g. `dist/` | Frontend build tool |
+
+This changes only newly initialized starter projects. Existing projects must
+update their build, host imports, deployment paths and ignore rules explicitly;
+the CLI does not rewrite existing files or infer arbitrary shell-script outputs.
+The compiler's `outDir` still controls generated sources and its delivery
+namespace, not the standalone Bun factory bundle. The starter output is ignored
+by Git; `generated/` remains committed for drift checks.
+
+### Persistent Adapters
 
 Replace the example's synchronous `ReviewStore` and command with a real async
 repository or transactional RPC. Lock the authoritative row or compare its

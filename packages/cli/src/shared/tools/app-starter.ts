@@ -46,7 +46,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
                 dev: "bun --no-env-file scripts/environment.ts development bun scripts/dev.ts",
                 "dev:integration": "bun --no-env-file scripts/environment.ts development bun scripts/integration.ts",
-                build: "bun run db:check && bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir dist",
+                build: "bun run db:check && bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir output/supacloud",
                 "env:development": "bun --no-env-file scripts/environment.ts development",
                 "env:test": "bun --no-env-file scripts/environment.ts test",
                 "env:staging": "bun --no-env-file scripts/environment.ts staging",
@@ -86,7 +86,7 @@ export function appStarterFiles(name: string): Record<string, string> {
         }),
         "bunfig.toml": "env = false\n",
         ".gitignore": [
-            "node_modules/", "dist/", "output/database-audit/", "db/migration-candidates/", ".env", ".env.*", "!.env.*.example", "!.env.test", "",
+            "node_modules/", "dist/", "output/supacloud/", "output/database-audit/", "db/migration-candidates/", ".env", ".env.*", "!.env.*.example", "!.env.test", "",
         ].join("\n"),
         ".env.development.example": "APP_ENV=development\nPORT=3000\n",
         ".env.test": "APP_ENV=test\n",
@@ -662,15 +662,20 @@ must also pin and validate the expected project and API origin.
 
 ## Production Boundary
 
-\`bun run build\` creates dist/application.js, an application factory, not a
+\`bun run build\` creates output/supacloud/application.js, an application factory, not a
 production server. The compiler is a devDependency and is absent from that
 runtime entry. The memory demo is kept in scripts/ and refuses staging/production.
 
-Import createApp from dist/application.js in your trusted host and supply:
+Import createApp from output/supacloud/application.js in your trusted host and supply:
 
 - deps.dbClient implementing ReviewStore, with reads/writes bound to a real transaction;
 - requestContext from verified identity, never a body-supplied actor;
 - commandGovernance authorization, durable idempotency, transaction and audit adapters.
+
+Keep backend bundles outside the frontend output directory. Vite normally cleans
+dist/ before building; server artifacts placed there can be deleted or included
+in a public frontend archive. Use disjoint output directories, not a disabled
+frontend clean step. Compiler source artifacts remain in generated/.
 
 The starter also includes src/host/review-postgres.ts and src/delivery-host.ts.
 The PostgreSQL adapter executes the same compiled approval handler with durable
@@ -762,7 +767,7 @@ startup before any request is served.
 ## Unified User Center
 
 For enterprise unified login, use SupAuth as the external user center. This
-starter exports createSupAuthApp(identity, adapters) from dist/application.js.
+starter exports createSupAuthApp(identity, adapters) from output/supacloud/application.js.
 Supply issuer, audience, clientId, projectId, an explicit HTTPS jwksUrl and resolveAccess
 that reads current application-local access. The runtime verifies credential
 signatures, configured issuer and audience, allowed asymmetric algorithms/keys
