@@ -661,6 +661,47 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
+  test("public PDF renders one bounded page and other non-images stay rejected", async () => {
+    mockObjects.set("avatars/forms/intake.pdf", {
+      metadata: { size: 4, mimetype: "application/pdf" },
+      updated: new Date().toISOString(),
+    });
+    mockObjects.set("avatars/forms/notes.txt", {
+      metadata: { size: 4, mimetype: "text/plain" },
+      updated: new Date().toISOString(),
+    });
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockImplementation(async (_ref, _bucket, objectName) =>
+      new Response(objectName.endsWith(".pdf") ? "%PDF" : "text", {
+        headers: { "content-type": objectName.endsWith(".pdf") ? "application/pdf" : "text/plain" },
+      }),
+    );
+    const calls: string[] = [];
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      calls.push(String(input));
+      return new Response("png", { headers: { "content-type": "image/png" } });
+    });
+    try {
+      const rendered = await request("/storage/v1/render/image/public/avatars/forms/intake.pdf?width=300&height=200&format=png&page=2&dpi=96", {
+        headers: { apikey: "test-token" },
+      });
+      expect(rendered.status).toBe(200);
+      expect(rendered.headers.get("content-type")).toBe("image/png");
+      expect(calls).toHaveLength(1);
+      const pathname = new URL(calls[0] || "").pathname;
+      expect(pathname).toContain("page(2)");
+      expect(pathname).toContain("dpi(96)");
+
+      const rejected = await request("/storage/v1/render/image/public/avatars/forms/notes.txt", {
+        headers: { apikey: "test-token" },
+      });
+      expect(rejected.status).toBe(400);
+      expect(calls).toHaveLength(1);
+    } finally {
+      fetchSpy.mockRestore();
+      downloadSpy.mockRestore();
+    }
+  });
+
   test("signed transform url keeps advanced imagor options", async () => {
     mockObjects.set("avatars/folder/hero.png", {
       metadata: { size: 3, mimetype: "image/png" },

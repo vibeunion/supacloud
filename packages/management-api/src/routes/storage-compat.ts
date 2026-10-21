@@ -32,6 +32,7 @@ import { StorageService } from "../services/storage.service";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
 import {
+    ImagorRequestError,
     imagorOutputContentType,
     runImagorWithRequest,
 } from "../services/imagor.service";
@@ -2053,8 +2054,10 @@ async function proxyToImagor(
     const sourceInfo = await StorageRLS.getObjectInfo(ref, logicalBucket, filePath, undefined, true);
     const sourceContentType = resolveDownloadContentType(downloadRes, sourceInfo);
 
-    // Validate source file is actually an image before wasting resources on imagor
-    if (sourceContentType && !sourceContentType.startsWith('image/')) {
+    // Images and single PDF pages are rendered by Imagor. Other types are rejected
+    // before the bytes are posted.
+    const sourceMediaType = sourceContentType.split(';', 1)[0]?.trim().toLowerCase() || '';
+    if (sourceMediaType && !sourceMediaType.startsWith('image/') && sourceMediaType !== 'application/pdf') {
         return status(400, { message: `Cannot transform non-image file (Content-Type: ${sourceContentType})` }) as unknown as { message: string };
     }
 
@@ -2094,6 +2097,9 @@ async function proxyToImagor(
         set.headers['X-Image-Engine'] = 'imagor/libvips';
         return new Response(await res.arrayBuffer());
     } catch (err: unknown) {
+        if (err instanceof ImagorRequestError) {
+            return status(400, { message: err.message, code: "400" }) as unknown as { message: string };
+        }
         logger.error('Imagor proxy error:', { error: err instanceof Error ? err.message : String(err) });
         return status(502, { message: 'Image processing service unavailable', code: "502" }) as unknown as { message: string };
     }

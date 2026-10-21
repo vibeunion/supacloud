@@ -23,6 +23,7 @@ import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth"
 import {
     buildImagorRequest,
     checkImagorHealth,
+    ImagorRequestError,
     imagorOutputContentType,
     resolveImagorMaxBytes,
     runImagor,
@@ -187,7 +188,7 @@ async function transformRawImageBytes(
     if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
     const sourceContentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() || "";
-    if (!sourceContentType.startsWith("image/")) {
+    if (!sourceContentType.startsWith("image/") && sourceContentType !== "application/pdf") {
         return status(415, { message: "Image content type is required", code: "415" });
     }
 
@@ -223,7 +224,10 @@ async function transformRawImageBytes(
         set.headers["Cache-Control"] = "private, max-age=3600";
         set.headers["X-Image-Engine"] = "imagor/libvips";
         return new Response(result.body, { headers: set.headers as unknown as HeadersInit });
-    } catch {
+    } catch (error: unknown) {
+        if (error instanceof ImagorRequestError) {
+            return status(400, { message: error.message, code: "400" });
+        }
         logger.error("Imagor raw image transform proxy failed");
         return status(502, { message: "Image processing service unavailable", code: "502" });
     }
@@ -529,6 +533,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             set.headers['X-Image-Engine'] = 'imagor/libvips';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
+            if (err instanceof ImagorRequestError) {
+                return status(400, { message: err.message, code: "400" });
+            }
             logger.error('Imagor image transform proxy failed');
             return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
@@ -568,6 +575,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
+            if (err instanceof ImagorRequestError) {
+                return status(400, { message: err.message, code: "400" });
+            }
             return status(502, { message: 'Smartcrop service unavailable', code: '502' });
         }
     })
@@ -595,6 +605,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
+            if (err instanceof ImagorRequestError) {
+                return status(400, { message: err.message, code: "400" });
+            }
             return status(502, { message: 'Watermark service unavailable', code: '502' });
         }
     })
@@ -620,6 +633,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
+            if (err instanceof ImagorRequestError) {
+                return status(400, { message: err.message, code: "400" });
+            }
             return status(502, { message: 'Blur service unavailable', code: '502' });
         }
     })
@@ -634,6 +650,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             return res.json();
         } catch (err: unknown) {
+            if (err instanceof ImagorRequestError) {
+                return status(400, { message: err.message, code: "400" });
+            }
             return status(502, { message: 'Image info service unavailable', code: '502' });
         }
     })
@@ -659,6 +678,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
+            if (err instanceof ImagorRequestError) {
+                return status(400, { message: err.message, code: "400" });
+            }
             return status(502, { message: 'Thumbnail service unavailable', code: '502' });
         }
     })

@@ -5159,15 +5159,32 @@ deploy_service_containers() {
         log_info "Removing the legacy Imaginary container before the Imagor migration"
         $RUNTIME rm -f supacloud-imaginary
     fi
+    local IMAGOR_UPLOAD_ACCEPT="image/*,application/pdf"
+    local imagor_action="create"
     if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imagor$'; then
-        log_info "Imagor container already exists, skipping"
-    else
+        local imagor_cmd=""
+        if imagor_cmd="$($RUNTIME inspect supacloud-imagor --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}' 2>/dev/null)" \
+            && [[ "$imagor_cmd" == *"application/pdf"* ]]; then
+            log_info "Imagor container already exists, skipping"
+            imagor_action="skip"
+        elif [[ -n "$imagor_cmd" ]]; then
+            log_info "Recreating Imagor container so PDF uploads are accepted"
+            imagor_action="recreate"
+        else
+            log_warn "Could not inspect Imagor container arguments; leaving the existing container in place"
+            imagor_action="skip"
+        fi
+    fi
+    if [[ "$imagor_action" != "skip" ]]; then
         local IMAGOR_IMAGE_VALUE="${IMAGOR_IMAGE:-${IMAGINARY_IMAGE:-shumc/imagor:1.9.8}}"
         local IMAGOR_IMAGE_PULL="${MIRROR_PREFIX}${IMAGOR_IMAGE_VALUE}"
         log_info "Pulling and deploying Imagor (image processing): ${IMAGOR_IMAGE_VALUE}"
         if ! $RUNTIME pull "$IMAGOR_IMAGE_PULL" 2>/dev/null; then
             IMAGOR_IMAGE_PULL="$IMAGOR_IMAGE_VALUE"
             $RUNTIME pull "$IMAGOR_IMAGE_PULL"
+        fi
+        if [[ "$imagor_action" == "recreate" ]]; then
+            $RUNTIME rm -f supacloud-imagor
         fi
 
         $RUNTIME run -d \
@@ -5178,7 +5195,7 @@ deploy_service_containers() {
             -imagor-unsafe \
             -upload-loader-enable \
             -upload-loader-max-allowed-size 67108864 \
-            -upload-loader-accept "image/*"
+            -upload-loader-accept "$IMAGOR_UPLOAD_ACCEPT"
 
         log_info "Imagor deployed on port 9010"
     fi

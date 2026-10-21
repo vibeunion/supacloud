@@ -14,6 +14,13 @@ export type ImagorRequest = {
     outputFormat: string | null;
 };
 
+export class ImagorRequestError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "ImagorRequestError";
+    }
+}
+
 export const DEFAULT_IMAGOR_MAX_BYTES = 500 * 1024 * 1024;
 
 export function resolveImagorMaxBytes(value = process.env.SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES): number {
@@ -331,15 +338,68 @@ export function buildImagorRequest(
     };
 }
 
+const PDF_CONTENT_TYPE = "application/pdf";
+const DEFAULT_PDF_PAGE = 1;
+const DEFAULT_PDF_DPI = 120;
+const MIN_PDF_PAGE = 1;
+const MAX_PDF_PAGE = 20;
+const MIN_PDF_DPI = 36;
+const MAX_PDF_DPI = 200;
+
+function mediaType(contentType: string): string {
+    return contentType.split(";", 1)[0]?.trim().toLowerCase() || "";
+}
+
+function boundedPdfInteger(
+    query: ImageTransformQuery,
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+    message: string,
+): number {
+    const raw = queryString(query, key);
+    if (raw === undefined || raw.trim() === "") return fallback;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < min || value > max) {
+        throw new ImagorRequestError(message);
+    }
+    return value;
+}
+
+function pdfRenderQuery(query: ImageTransformQuery): ImageTransformQuery {
+    return {
+        ...query,
+        page: String(boundedPdfInteger(
+            query,
+            "page",
+            DEFAULT_PDF_PAGE,
+            MIN_PDF_PAGE,
+            MAX_PDF_PAGE,
+            "PDF page must be an integer from 1 to 20",
+        )),
+        dpi: String(boundedPdfInteger(
+            query,
+            "dpi",
+            DEFAULT_PDF_DPI,
+            MIN_PDF_DPI,
+            MAX_PDF_DPI,
+            "PDF dpi must be an integer from 36 to 200",
+        )),
+    };
+}
+
 export async function runImagorWithRequest(
     query: ImageTransformQuery,
     source: ImagorSource,
     operation: ImagorOperation = "standard",
 ): Promise<{ request: ImagorRequest; response: Response }> {
-    const request = buildImagorRequest(query, operation);
+    const sourceMediaType = mediaType(source.contentType);
+    const isPdf = sourceMediaType === PDF_CONTENT_TYPE;
+    const request = buildImagorRequest(isPdf ? pdfRenderQuery(query) : query, operation);
     const response = await fetch(`${IMAGOR_URL}${request.path}`, {
         method: "POST",
-        headers: { "Content-Type": source.contentType },
+        headers: { "Content-Type": isPdf ? PDF_CONTENT_TYPE : source.contentType },
         body: source.bytes,
     });
     return { request, response };

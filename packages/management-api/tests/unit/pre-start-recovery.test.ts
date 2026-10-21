@@ -116,5 +116,7 @@ describe("Management pre-start recovery sandbox", () => {
     expect(imagorSection).toContain("--name supacloud-imagor");
     expect(imagorSection).toContain("-upload-loader-enable");
     expect(imagorSection).toContain("-p 127.0.0.1:9010:8000");
+    expect(imagorSection).toContain('local IMAGOR_UPLOAD_ACCEPT="image/*,application/pdf"');
+    expect(imagorSection).toContain("Recreating Imagor container so PDF uploads are accepted");
   });
 });
