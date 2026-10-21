@@ -669,7 +669,7 @@ describe("storage management routes", () => {
 
     const nonImage = await request("/v1/storage/proj_1/transform/bytes", {
       method: "POST",
-      headers: { Authorization: "Bearer dev-master-token", "Content-Type": "application/pdf" },
+      headers: { Authorization: "Bearer dev-master-token", "Content-Type": "text/plain" },
       body: new Uint8Array([1]),
     });
     expect(nonImage.status).toBe(415);
@@ -684,6 +684,55 @@ describe("storage management routes", () => {
       body: new Uint8Array([1]),
     });
     expect(oversized.status).toBe(413);
+  });
+
+
+  test("raw PDF transforms default to the first page and reject pages outside the render limit", async () => {
+    const calls: Array<{ url: string; method?: string; contentType?: string }> = [];
+    const fetcher = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        contentType: (init?.headers as Record<string, string>)?.["Content-Type"],
+      });
+      return new Response("png", { headers: { "content-type": "image/png" } });
+    });
+
+    try {
+      const response = await request("/v1/storage/proj_1/transform/bytes?width=300&height=200&format=png", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer dev-master-token",
+          "Content-Type": "application/pdf",
+        },
+        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.method).toBe("POST");
+      expect(calls[0]?.contentType).toBe("application/pdf");
+      const pathname = new URL(calls[0]?.url || "").pathname;
+      expect(pathname).toContain("page(1)");
+      expect(pathname).toContain("dpi(120)");
+
+      const invalid = await request("/v1/storage/proj_1/transform/bytes?page=21&dpi=201", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer dev-master-token",
+          "Content-Type": "application/pdf",
+        },
+        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toMatchObject({
+        code: "400",
+        message: "PDF page must be an integer from 1 to 20",
+      });
+      expect(calls).toHaveLength(1);
+    } finally {
+      fetcher.mockRestore();
+    }
   });
 
   test("image transforms report a missing source object as 404 and oversized sources as 413", async () => {

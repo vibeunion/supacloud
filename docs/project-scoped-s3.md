@@ -182,8 +182,11 @@ Upstream image errors do not expose storage coordinates to callers or logs.
 
 For objects owned by an application but not registered in SupaCloud Storage,
 an authenticated service may use `POST /v1/storage/:ref/transform/bytes`. The
-request body is the image bytes and the normal image transformation query
+request body is the image or PDF bytes and the normal image transformation query
 parameters are used (`width`, `height`, `resize`, `format`, and `quality`).
+`application/pdf` renders one page through the same Imagor pipeline. It defaults
+to page 1 at 120 DPI; `page` must be an integer from 1 to 20 and `dpi` an integer
+from 36 to 200. Other non-image content types are still rejected.
 The caller remains responsible for authorizing and reading the foreign S3 or
 QNAP object. SupaCloud accepts no source URL, S3 credential, or redirect target;
 it only transforms the supplied bytes, with the same configured source limit and
