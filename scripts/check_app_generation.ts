@@ -148,7 +148,7 @@ console.log("Packed resource: real compiled DI/routes, fail-closed placeholder, 
     console.log(await run(["scripts/verify-generated-resource.ts"]));
     // Verify the shipped built application, not just one hand-mounted module.
     await writeFile(join(project, "scripts/verify-built-application.mjs"), `import { strict as assert } from "node:assert";
-import { createApp } from "../dist/application.js";
+import { createApp } from "../output/supacloud/application.js";
 
 const app = createApp({
     deps: {},
@@ -321,7 +321,7 @@ export default defineSupacloudConfig({
     await run(["test", "src/features/case-approval/case-approval.feature.test.ts"]);
     await run(["run", "build"]);
     await writeFile(join(project, "scripts/verify-built-feature.mjs"), `import { strict as assert } from "node:assert";
-import { createApp } from "../dist/application.js";
+import { createApp } from "../output/supacloud/application.js";
 
 assert.throws(() => createApp({
     deps: {}, requestContext: () => ({}), commandGovernance: { authorize: () => {} },
@@ -357,7 +357,7 @@ console.log("Built feature: missing named runtime RPC prevents startup");
     const unboundApplication = await readFile(join(project, "generated/application.ts"), "utf8");
     assert.doesNotMatch(unboundApplication, /const caseApproval(?:Reader|Writer|Receipts|JobStatuses|Refresher) =/);
     await run(["run", "build"]);
-    const unboundBundle = await readFile(join(project, "dist/application.js"), "utf8");
+    const unboundBundle = await readFile(join(project, "output/supacloud/application.js"), "utf8");
     assert.doesNotMatch(unboundBundle, /caseApproval(?:Reader|Writer|Receipts|JobStatuses|Refresher)\s*=/);
     await copyFile(join(repo, "scripts/fixtures/generated-feature.fixture"), join(project, "scripts/verify-generated-feature.ts"));
     await run(["run", "typecheck"]);
