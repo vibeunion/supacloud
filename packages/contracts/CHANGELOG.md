@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.14.0...contracts-v0.15.0) (2026-10-21)
+
+
+### Features
+
+* **contracts:** bind receipt decoding to request identity ([#2214](https://github.com/vibeunion/supacloud/issues/2214)) ([dbd8313](https://github.com/vibeunion/supacloud/commit/dbd83132eda46ea1cc8d05424409fb17a56e43d0))
+
 ## [0.14.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.13.0...contracts-v0.14.0) (2026-10-20)
 
 
