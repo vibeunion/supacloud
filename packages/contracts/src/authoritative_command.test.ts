@@ -4,7 +4,7 @@ import {
   type AuthoritativeCommandContract,
   type AuthoritativeCommandOutcome,
 } from "./contract_client";
-import { createPendingCommandClient, createPendingCommandRecovery } from "./client";
+import { createFeatureSliceCommandClient, createPendingCommandClient, createPendingCommandRecovery } from "./client";
 
 function input(value: unknown): { id: string } {
   if (!value || typeof value !== "object" || !("id" in value)
@@ -246,6 +246,182 @@ function pendingStorage() {
     removeItem: (key: string) => { values.delete(key); },
   };
 }
+
+describe("request-bound receipt authority", () => {
+  type Request = { id: string; identity: { requestId: string; command: string } };
+  const original: Request = { id: "target", identity: { requestId: "request-1", command: "approve" } };
+  const key = "tenant:actor:target";
+  const unknownError = (request: Request, cause?: unknown) =>
+    new Error(`${cause === undefined ? "unknown" : "unavailable"}:${request.identity.requestId}`);
+  const receipt = (request: Request) => ({ request, result: state, current: { enabled: false } });
+  const decodeRequest = (raw: unknown): Request => {
+    const decoded = input(raw);
+    if (!raw || typeof raw !== "object" || !("identity" in raw)
+      || !raw.identity || typeof raw.identity !== "object"
+      || !("requestId" in raw.identity) || typeof raw.identity.requestId !== "string"
+      || !("command" in raw.identity) || typeof raw.identity.command !== "string") {
+      throw new Error("invalid identity");
+    }
+    return { ...decoded, identity: { requestId: raw.identity.requestId, command: raw.identity.command } };
+  };
+  const shared = {
+    input: decodeRequest,
+    acknowledgement: authority,
+    authority,
+    lookupAuthority: (raw: unknown, request: Request) => {
+      if (!raw || typeof raw !== "object" || !("request" in raw) || !("result" in raw) || !("current" in raw)) {
+        throw new Error("invalid receipt");
+      }
+      const identity = decodeRequest(raw.request);
+      const result = authority(raw.result);
+      const current = raw.current;
+      if (!current || typeof current !== "object" || !("enabled" in current) || typeof current.enabled !== "boolean") {
+        throw new Error("invalid current state");
+      }
+      if (identity.id !== request.id || identity.identity.requestId !== request.identity.requestId
+        || identity.identity.command !== request.identity.command || result.id !== request.id) {
+        throw new Error("private mismatched receipt");
+      }
+      return { ...result, enabled: current.enabled };
+    },
+    matches: (request: Request, result: typeof state) => request.id === result.id,
+  } satisfies AuthoritativeCommandContract<Request, typeof state, typeof state>;
+
+  test("one shared contract confirms direct writes, lost responses and read-only reloads", async () => {
+    for (const mode of ["response", "lost", "invalid-response", "reload"] as const) {
+      const storage = pendingStorage();
+      let sends = 0, reads = 0;
+      const transport = {
+        send: async () => {
+          sends++;
+          if (mode === "lost") throw new Error("lost");
+          return mode === "invalid-response" ? {} : state;
+        },
+        lookup: async (request: Request) => { reads++; return receipt(request); },
+      };
+      const options = { storage, key, unknownError, confirmation: "response" as const };
+      const client = createFeatureSliceCommandClient(shared, transport, options);
+      if (mode === "reload") {
+        storage.setItem(key, JSON.stringify(original));
+        const recover = createPendingCommandRecovery(shared, { lookup: transport.lookup }, {
+          key, unknownError, storage: { getItem: storage.getItem, removeItem: storage.removeItem },
+        });
+        expect(await recover()).toEqual({ input: original, authority: { ...state, enabled: false } });
+      } else {
+        expect(await client.execute(original)).toEqual(mode === "response" ? state : { ...state, enabled: false });
+      }
+      expect([sends, reads]).toEqual(mode === "response" ? [1, 0] : mode === "reload" ? [0, 1] : [1, 1]);
+      expect(storage.getItem(key)).toBeNull();
+    }
+  });
+
+  test("foreign operation, command and entity receipts retain the marker in both confirmation paths", async () => {
+    for (const mode of ["execute", "recover"] as const) {
+      for (const foreign of [
+        { ...original, id: "other" },
+        { ...original, identity: { ...original.identity, requestId: "request-2" } },
+        { ...original, identity: { ...original.identity, command: "reject" } },
+      ]) {
+        const storage = pendingStorage();
+        let sends = 0, reads = 0;
+        const client = createFeatureSliceCommandClient(shared, {
+          send: async () => { sends++; throw new Error("lost"); },
+          lookup: async () => { reads++; return receipt(foreign); },
+        }, { storage, key, unknownError });
+        if (mode === "recover") storage.setItem(key, JSON.stringify(original));
+        await expect(mode === "execute" ? client.execute(original) : client.recover()).rejects.toThrow("unknown:request-1");
+        expect(storage.getItem(key)).toBe(JSON.stringify(original));
+        expect([sends, reads]).toEqual([mode === "execute" ? 1 : 0, 1]);
+      }
+    }
+  });
+
+  test("contextual decoding isolates caller, transport, decoder and matcher request copies", async () => {
+    const caller = structuredClone(original);
+    const response = Promise.withResolvers<unknown>();
+    const client = createAuthoritativeCommandClient({
+      ...shared,
+      input: () => caller,
+      lookupAuthority: (raw, request) => {
+        expect(request).toEqual(original);
+        const result = shared.lookupAuthority(raw, request);
+        request.identity.requestId = "decoder-mutated";
+        return result;
+      },
+      matches: request => { expect(request).toEqual(original); return true; },
+    }, {
+      send: request => {
+        request.identity.requestId = "send-mutated";
+        return response.promise;
+      },
+      lookup: async request => {
+        expect(request).toEqual(original);
+        request.identity.requestId = "lookup-mutated";
+        return receipt(original);
+      },
+    });
+    const operation = client(caller);
+    caller.identity.requestId = "caller-mutated";
+    response.reject(new Error("lost"));
+    expect(await operation).toMatchObject({ status: "confirmed", authority: { ...state, enabled: false } });
+  });
+
+  test("a receipt decoder cannot retarget recovery or the unknown error", async () => {
+    const storage = pendingStorage();
+    storage.setItem(key, JSON.stringify(original));
+    let matched: Request | undefined;
+    const recover = createPendingCommandRecovery({
+      ...shared,
+      lookupAuthority: (_raw, request) => { request.identity.requestId = "decoder-mutated"; return state; },
+      matches: request => { matched = request; return false; },
+    }, { lookup: async () => receipt(original) }, { storage, key, unknownError });
+    await expect(recover()).rejects.toThrow("unknown:request-1");
+    expect(matched).toEqual(original);
+    expect(storage.getItem(key)).toBe(JSON.stringify(original));
+  });
+
+  test("late contextual recovery returns the original identity without clearing its replacement", async () => {
+    const storage = pendingStorage();
+    storage.setItem(key, JSON.stringify(original));
+    const response = Promise.withResolvers<unknown>();
+    const recover = createPendingCommandRecovery(shared, { lookup: () => response.promise }, { storage, key, unknownError });
+    const operation = recover();
+    const replacement = JSON.stringify({ ...original, identity: { ...original.identity, requestId: "request-2" } });
+    storage.setItem(key, replacement);
+    response.resolve(receipt(original));
+    expect(await operation).toEqual({ input: original, authority: { ...state, enabled: false } });
+    expect(storage.getItem(key)).toBe(replacement);
+  });
+
+  test("projection errors remain unknown rather than being classified as lookup failures", async () => {
+    for (const mode of ["invalid", "offline"] as const) {
+      const storage = pendingStorage();
+      storage.setItem(key, JSON.stringify(original));
+      const recover = createPendingCommandRecovery(shared, {
+        lookup: async () => {
+          if (mode === "offline") throw new Error("private network failure");
+          return null;
+        },
+      }, { storage, key, unknownError });
+      await expect(recover()).rejects.toThrow(`${mode === "offline" ? "unavailable" : "unknown"}:request-1`);
+      expect(storage.getItem(key)).toBe(JSON.stringify(original));
+    }
+  });
+
+  test("uncloneable contextual input is rejected before sending", async () => {
+    let sends = 0;
+    const client = createAuthoritativeCommandClient({
+      ...shared, input: () => ({ ...original, callback: () => {} }),
+    }, {
+      send: async () => { sends++; return state; },
+      lookup: async () => receipt(original),
+    });
+    expect(await client(original)).toEqual({
+      status: "invalid", diagnostics: [{ stage: "input", code: "INVALID_INPUT" }],
+    });
+    expect(sends).toBe(0);
+  });
+});
 
 describe("pending command recovery", () => {
   const key = "tenant:actor:target";

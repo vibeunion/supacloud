@@ -4,6 +4,8 @@ export interface AuthoritativeCommandContract<Input, Acknowledgement, Authority>
   input: ContractDecoder<Input>;
   acknowledgement: ContractDecoder<Acknowledgement>;
   authority: ContractDecoder<Authority>;
+  /** Optional receipt decoder with an isolated copy of the validated request. */
+  lookupAuthority?(value: unknown, input: Input): Authority;
   /** Optional direct-response decoder when a committed response and a receipt differ. */
   responseAuthority?: ContractDecoder<Authority>;
   matches(input: Input, authority: Authority): boolean;
@@ -53,19 +55,23 @@ export function createAuthoritativeCommandClient<Input, Acknowledgement, Authori
     throw new TypeError("Invalid command confirmation mode");
   }
   const confirmation = options.confirmation;
+  const lookupAuthority = contract.lookupAuthority;
   return async (value) => {
     const diagnostics: CommandDiagnostic[] = [];
     let input: Input;
     try {
       input = decodeHttpContract(contract.input, value, "request");
+      // Contextual receipt decoding must not capture a transport's mutable input.
+      if (lookupAuthority !== undefined) input = structuredClone(input);
     } catch {
       return { status: "invalid", diagnostics: [{ stage: "input", code: "INVALID_INPUT" }] };
     }
+    const request = () => lookupAuthority === undefined ? input : structuredClone(input);
 
     let acknowledgement: CommandAcknowledgement<Acknowledgement> = { status: "unavailable" };
     let response: { value: unknown } | undefined;
     try {
-      response = { value: await transport.send(input) };
+      response = { value: await transport.send(request()) };
     } catch (error) {
       try {
         if (transport.isDefinitiveWriteFailure?.(error) === true) {
@@ -86,7 +92,7 @@ export function createAuthoritativeCommandClient<Input, Acknowledgement, Authori
         return undefined;
       }
       try {
-        if (contract.matches(input, authority) === true) return { authority };
+        if (contract.matches(request(), authority) === true) return { authority };
       } catch {
         // Matchers may contain business data in their exceptions.
       }
@@ -114,12 +120,14 @@ export function createAuthoritativeCommandClient<Input, Acknowledgement, Authori
     // Both successful and failed sends converge here; a failed read has no retry path.
     let rawAuthority: unknown;
     try {
-      rawAuthority = await transport.lookup(input);
+      rawAuthority = await transport.lookup(request());
     } catch {
       diagnostics.push({ stage: "lookup", code: "LOOKUP_FAILED" });
       return { status: "unknown", acknowledgement, diagnostics };
     }
-    const result = confirm(rawAuthority);
+    const result = confirm(rawAuthority, lookupAuthority === undefined
+      ? contract.authority
+      : (raw) => lookupAuthority(raw, request()));
     return result === undefined
       ? { status: "unknown", acknowledgement, diagnostics }
       : { status: "confirmed", ...result, acknowledgement, source: "lookup", diagnostics };
