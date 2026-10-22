@@ -268,13 +268,14 @@ test("the generated approval compiles only with the explicit persistent capabili
     const generatedE2E = await readFile(join(root, "src/features/case-approval/case-approval.e2e.test.ts"), "utf8");
     expect(generatedE2E).toContain('test.skipIf(!enabled)');
     expect(generatedE2E).toContain('expect(replay.status).toBe(first.status)');
-    expect(generatedE2E).toContain('expect(replayBody).toEqual(firstBody)');
-    expect(generatedE2E).toContain("durable receipt");
+    expect(generatedE2E).toContain('expect(await object(replay)).toEqual(firstBody)');
+    expect(generatedE2E).toContain('status: "confirmed", state: firstBody.state, version: firstBody.version');
     expect(generatedE2E).toContain('conflicting replay');
     expect(generatedE2E).toContain('Promise.all');
     expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION');
-    expect(generatedE2E).toContain('test.skipIf(!tenantIsolationEnabled)');
-    expect(generatedE2E).toContain('cross-tenant access');
+    expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_REQUIRED');
+    expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_RACE_ID');
+    expect(generatedE2E).toContain('cross-tenant reads, writes and receipt disclosure');
     const factoryPath = join(root, "generated/application.ts");
     const before = await readFile(factoryPath, "utf8");
     const missingAdapter = await compileProject(options);
@@ -283,6 +284,115 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(await readFile(factoryPath, "utf8")).toBe(before);
 // Three cold compiles on a CI runner can exceed 30s; let the assertions decide.
 }, { timeout: 120_000 });
+
+async function runGeneratedAcceptance(root: string, configuration: Record<string, string>) {
+    const env = Object.fromEntries(Object.entries(process.env)
+        .filter(([key, value]) => !key.startsWith("SUPACLOUD_FEATURE_E2E_") && value !== undefined));
+    const child = Bun.spawn([
+        process.execPath, "--no-env-file", "test", "src/features/case-approval/case-approval.e2e.test.ts",
+    ], { cwd: root, env: { ...env, ...configuration }, stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ]);
+    return { code, output: stdout + stderr };
+}
+
+test("generated acceptance skips only an entirely unconfigured developer run", async () => {
+    const root = await fixture();
+    expect((await runAppTool({ ...feature, root })).isError).toBe(false);
+    const skipped = await runGeneratedAcceptance(root, {});
+    expect(skipped.code).toBe(0);
+    expect(skipped.output).toContain("2 skip");
+    for (const configuration of [
+        { SUPACLOUD_FEATURE_E2E_REQUIRED: "1" },
+        { SUPACLOUD_FEATURE_E2E_URL: "https://unused.invalid" },
+    ]) {
+        const failed = await runGeneratedAcceptance(root, configuration);
+        expect(failed.code).not.toBe(0);
+        expect(failed.output).toContain("Feature acceptance requires");
+    }
+});
+
+test.each([
+    "valid", "first-conflict", "no-winner", "two-winners", "foreign-receipt",
+    "unknown-receipt", "receipt-disclosure", "status-disclosure", "replay-disclosure",
+] as const)("generated HTTP acceptance rejects false green: %s", async mode => {
+    const root = await fixture();
+    expect((await runAppTool({ ...feature, root })).isError).toBe(false);
+    const rows = new Map([
+        ["approval", { id: "approval", state: "draft", version: 4 }],
+        ["race", { id: "race", state: "draft", version: 7 }],
+    ]);
+    const receipts = new Map<string, { body: string; row: { id: string; state: string; version: number } }>();
+    const requests: string[] = [];
+    // Protocol double only: proves the generated acceptance rejects broken responses, not DB atomicity.
+    const server = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        async fetch(req) {
+            const segments = new URL(req.url).pathname.split("/").filter(Boolean);
+            requests.push(`${req.method} ${segments.join("/")}`);
+            const other = req.headers.get("authorization") === "Bearer other";
+            const id = segments[1];
+            if (segments.length === 1) return Response.json(other ? [] : [...rows.values()]);
+            if (other) {
+                const leak = (mode === "receipt-disclosure" && segments[2] === "operations" && segments.length === 4)
+                    || (mode === "status-disclosure" && segments[4] === "status")
+                    || (mode === "replay-disclosure" && req.method === "POST");
+                return Response.json({}, { status: leak ? 200 : 403 });
+            }
+            const row = rows.get(id ?? "");
+            if (!row) return Response.json({}, { status: 404 });
+            if (segments.length === 2) return Response.json(row);
+            if (segments[2] === "operations") {
+                if (segments[4] === "status") {
+                    return Response.json({ id, operationId: segments[3], status: "queued" });
+                }
+                return Response.json({
+                    ...row, id: mode === "foreign-receipt" ? "foreign" : id,
+                    operationId: segments[3], status: mode === "unknown-receipt" ? "unknown" : "confirmed",
+                });
+            }
+            const body = await req.text();
+            const key = req.headers.get("idempotency-key") ?? "";
+            const receipt = receipts.get(key);
+            if (receipt) return Response.json(receipt.row, { status: receipt.body === body ? 200 : 409 });
+            if ((mode === "first-conflict" && id === "approval") || (mode === "no-winner" && id === "race")) {
+                return Response.json({}, { status: 409 });
+            }
+            const input: unknown = JSON.parse(body);
+            if (!(mode === "two-winners" && id === "race")
+                && (row.state !== "draft" || input === null || typeof input !== "object"
+                    || !("expectedVersion" in input) || input.expectedVersion !== row.version)) {
+                return Response.json({}, { status: 409 });
+            }
+            const approved = { ...row, state: "approved", version: row.version + 1 };
+            rows.set(id!, approved);
+            receipts.set(key, { body, row: approved });
+            return Response.json(approved);
+        },
+    });
+    try {
+        const result = await runGeneratedAcceptance(root, {
+            SUPACLOUD_FEATURE_E2E_REQUIRED: "1",
+            SUPACLOUD_FEATURE_E2E_URL: server.url.toString(),
+            SUPACLOUD_FEATURE_E2E_AUTHORIZATION: "Bearer reviewer",
+            SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION: "Bearer other",
+            SUPACLOUD_FEATURE_E2E_ID: "approval",
+            SUPACLOUD_FEATURE_E2E_RACE_ID: "race",
+            SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY: "operation",
+        });
+        if (mode === "valid") {
+            expect({ code: result.code, errors: result.code ? result.output : "" }).toEqual({ code: 0, errors: "" });
+            expect(result.output).toContain("2 pass");
+            expect(receipts.size).toBe(2);
+        } else {
+            expect(result.code, result.output).not.toBe(0);
+        }
+        expect(requests.length).toBeGreaterThan(0);
+    } finally {
+        server.stop(true);
+    }
+});
 
 test("the generated approval blocks missing adapter bindings at compile time", async () => {
     const root = await generatedFixture({ bindAdapters: false });
