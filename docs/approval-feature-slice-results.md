@@ -1,6 +1,7 @@
 # Approval Feature Slice: Scope And Results
 
-Date: 2026-10-14. Status: scaffold implementation, not completed adoption.
+Date: 2026-10-22. Status: generated slice and local acceptance gates implemented;
+real customer adoption and deployment evidence remain separate gates.
 
 ## Product Outcome
 
@@ -20,9 +21,9 @@ second engine, database schema, hand-maintained client or transport abstraction.
 
 | Outcome | This iteration | Remaining evidence |
 | --- | --- | --- |
-| Golden business slice and four-stack comparison | Approval scope and common acceptance below; recorded-agent evaluator has a bounded `create-feature-slice` task | NestJS, Spring, a named Go stack, and SupaCloud implementations and comparable measured trials |
+| Golden business slice | Approval scope and common acceptance below; PR #2220 strengthens generated acceptance with a successful write, receipt reconciliation, an isolated race, and cross-tenant denial | Revalidate the adopted xigu-fa revision against real PostgreSQL/RLS/RPC/worker/browser and record before/after metrics |
 | Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, receipt and job-status routes, explicit query invalidation tags, standard pending-command client adapter, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
-| Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Durable authorization, version checks, audit, outbox and result recovery in the chosen customer flow |
+| Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Customer-specific durable authorization, version checks, audit, outbox and result recovery remain application evidence |
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
 
 Invalidation tags are explicit transition metadata and are preserved in the
@@ -78,30 +79,44 @@ Scenario: Deploy and upgrade
 ## Measurement Rules
 
 Fix the task, database, acceptance suite, developer/agent context, dependencies,
-hardware and deployment environment before trials. Name and pin a concrete Go
-framework/library combination; "Go" alone is not a comparable product.
+hardware and deployment environment before trials. The current scope is a
+SupaCloud customer before/after comparison. Maintaining NestJS, Spring and Go
+implementations is deferred; no ecosystem ranking is claimed.
 
 Record handwritten and generated production files/lines separately, including
 SQL, config and glue. Record tests separately as well. Count nonblank physical
-lines with the same rule across stacks; do not exclude handwritten migrations
+lines with the same rule across snapshots; do not exclude handwritten migrations
 or copied boilerplate. Include adapter integration time. First runnable time
 ends when the real database-backed HTTP acceptance passes, not at generation
 or health-check success.
 
-| Metric | SupaCloud | NestJS | Spring | Named Go stack |
-| --- | --- | --- | --- | --- |
-| Handwritten files and lines | Not measured | Not measured | Not measured | Not measured |
-| Time to first runnable slice | Not measured | Not measured | Not measured | Not measured |
-| First-check failures | Not measured | Not measured | Not measured | Not measured |
-| Authorization/idempotency/state defects | Not measured | Not measured | Not measured | Not measured |
-| Deployment and stateful upgrade time | Not measured | Not measured | Not measured | Not measured |
+| Metric | Before framework adoption | After framework adoption |
+| --- | --- | --- |
+| Whole-slice handwritten files and lines | Not measured | Not measured |
+| Time to first runnable slice | Not measured | Not measured |
+| First-check failures | Not measured | Not measured |
+| Authorization/idempotency/state defects | Not measured | Not measured |
+| Deployment and stateful upgrade time | Not measured | Not measured |
+
+Use the [source inventory command](vibecoding-evaluation.md#customer-source-inventory)
+for reproducible file/line counts. Inventory completeness and functional equivalence
+still require review; a smaller file does not by itself prove less customer work.
+
+The xigu-fa acceptance record at
+`supacloud/fa/app/features/v2-management/intake-approval-acceptance.md` already
+records adoption of the published pending/Feature client, real local PG/RLS/RPC,
+and independent pgflow recovery with temporary MinIO. Those are historical,
+bounded local results, not missing implementations or production acceptance.
+Its initial five-line reduction measures one mechanism only, not the whole slice.
+Do not require a self-approval prohibition or an extra expected-version parameter
+that the authoritative xigu-fa RPC does not implement.
 
 Generator regression timings are not these benchmarks. The existing evaluator
 records agent trials and scope violations; it does not measure LOC, independent
 security correctness or deployment itself. Its result is not independent
 attestation. No improvement ratio or ecosystem ranking is established here.
 
-## Local Verification
+## Historical Local Verification (2026-10-14)
 
 - Feature-generator regression: preview/apply, explicit capability requirements,
   parent registration, conflicts, compiler acceptance/rejection and generated
@@ -138,15 +153,14 @@ authorization, idempotency, state transitions, audit or outbox behavior.
 
 ## Remaining Work
 
-1. Bind this recipe to one approved xigu-fa operation using its existing RPC and
-   source-of-truth tables; keep authorization and state rules in that application.
-2. Connect the generated Feature client adapter and compiler-generated client
+1. Connect the generated Feature client adapter and compiler-generated client
    with the existing query adapter in the
    browser, bind the generated job-status port to the existing Workflow/Queue
    read path, configure
    the generated E2E environment, then run authenticated negative, concurrency,
    crash and recovery acceptance.
-3. Verify the published dependency tuple and test-environment deployment/upgrade.
+2. Verify the published dependency tuple and test-environment deployment/upgrade.
    Local candidate-package acceptance is complete; publication is not verified.
-4. Implement the three comparison stacks against the same contract and record
-   repeated trials. Only then evaluate the "large project becomes medium" claim.
+3. Record xigu-fa before/after counts with `scripts/feature-slice-metrics.ts`.
+   Do not claim an improvement ratio until the same real acceptance and counting
+   rules have been applied to both snapshots.

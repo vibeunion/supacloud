@@ -56,3 +56,39 @@ runs have been recorded and reviewed.
 Daily verification uses `app verify-plan --target <module>` and a directly
 relevant single test file. Generated drift, consumer types, real PostgreSQL/RLS,
 authenticated behavior and delivery read-back remain release/adoption gates.
+
+## Customer Source Inventory
+
+Use `bun scripts/feature-slice-metrics.ts <customer-repository> <inventory.json>`
+to compare immutable customer commits without checking out or changing either
+revision. The reviewed JSON inventory has this shape (replace both placeholder
+refs with full 40-character commit SHAs):
+
+```json
+{
+  "version": 1,
+  "before": {
+    "ref": "<full-before-commit-sha>",
+    "files": [{ "path": "src/approval.ts", "category": "glue" }]
+  },
+  "after": {
+    "ref": "<full-after-commit-sha>",
+    "files": [{ "path": "src/approval.ts", "category": "glue" }]
+  }
+}
+```
+
+Classify every in-scope file as `business`, `database`, `config`, `glue`,
+`generated`, or `tests`. Include newly added and deleted paths in their respective
+snapshot, SQL and migrations, and copied handwritten code. Exclude SupaCloud's
+framework implementation from customer counts. Retain both inventories for
+review: the tool does not infer whether omitted files or classifications are fair.
+Count nonblank physical UTF-8 lines, including comments. Generated code and
+tests are reported separately from handwritten production code.
+
+Output includes commit and blob identities, each file's count, category totals
+and the handwritten delta. It rejects missing files, symlinks, binary content,
+duplicate paths and mutable Git refs. It never reads the working-tree contents.
+It does not measure functional equivalence, wall time, defects, worker recovery,
+deployment or stateful upgrades. Record those with reviewed acceptance evidence
+alongside the report; absent evidence stays unmeasured, never zero.
