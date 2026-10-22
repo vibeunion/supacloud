@@ -25,8 +25,9 @@ boundaries and static AOP.
    recovery on the supported self-hosted profile.
 2. Admin, Web Console, and project CLI: the standard interfaces for operating
    that platform without repository access.
-3. Application framework, compiler, SDK, and AI tooling: optional development
-   acceleration that must not become a platform prerequisite.
+3. Business feature-slice framework, compiler, SDK, and AI tooling: a first-class
+   development and governance path for new business work. It must not become a
+   platform prerequisite, but it should be the default path for new features.
 4. Lite: a separate bounded single-project and local-first runtime.
 
 ## Ownership
@@ -107,15 +108,30 @@ durable receipt instead of blindly retrying.
    one supported profile, clean installation, two-project operation, a
    stateful upgrade, and an independent recovery drill.
 2. Adopt this ownership contract in root documentation and the generated
-   starter, while keeping platform use independent from the framework.
+   starter; make Feature Slice the default entry point for new business work
+   while keeping platform use independent from the framework.
 3. Complete a supported SupAuth host-adapter recipe with verified identity,
    project-local access resolution, and authenticated multi-application tests.
 4. For one real business command, verify durable authorization, concurrency,
    idempotency, transaction, and audit behavior together.
 5. Add compiler checks only for statically provable mistakes, with actionable
    diagnostics and negative fixtures; keep runtime checks for external facts.
-6. Exercise AI-assisted feature creation/repair and multi-module AOP behavior.
-   Extend shared capabilities only when this exposes meaningful repeated work.
+6. Exercise AI-assisted feature creation/repair and multi-module AOP behavior,
+   and record whether repeated work actually decreases with the business-slice
+   baseline. Extend shared capabilities only when this exposes repeatable value.
+
+## Default Business-Slice Path
+
+New business work should start with `app generate --kind feature`. The generator
+keeps the database-derived model, Query, Command, contracts, permission
+declarations, version and idempotency boundaries, receipt recovery, job status,
+client, tests, and delivery checks in one inspectable slice. The database,
+migrations, RLS, RPCs, and domain state tables remain the sole source of truth.
+
+Applications may remain independent of the framework, and the platform must not
+reject an application that does not use it. “First-class” describes the default
+product path and its evidence gates; it does not force every project to install
+the framework or duplicate its business database in SupaCloud.
 
 ## Local Implementation
 
