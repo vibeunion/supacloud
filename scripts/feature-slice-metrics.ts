@@ -6,6 +6,7 @@ const execute = promisify(execFile);
 const categories = ["business", "database", "config", "glue", "generated", "tests"] as const;
 type Category = typeof categories[number];
 type Inventory = { ref: string; files: { path: string; category: Category }[] };
+type Entry = Inventory["files"][number] & { blob: string; nonblankLines: number };
 
 function record(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -13,22 +14,22 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function inventory(value: unknown): Inventory {
     if (!record(value) || Object.keys(value).some(key => !["ref", "files"].includes(key))
-        || typeof value.ref !== "string" || !/^[a-f0-9]{40}$/.test(value.ref)
-        || !Array.isArray(value.files) || value.files.length === 0 || value.files.length > 2000) {
+        || typeof value["ref"] !== "string" || !/^[a-f0-9]{40}$/.test(value["ref"])
+        || !Array.isArray(value["files"]) || value["files"].length === 0 || value["files"].length > 2000) {
         throw new Error("Expected a full commit SHA and 1-2000 explicitly classified files");
     }
-    const files = value.files.map(item => {
+    const files = value["files"].map(item => {
         if (!record(item) || Object.keys(item).some(key => !["path", "category"].includes(key))
-            || typeof item.path !== "string" || !/^[A-Za-z0-9_. /-]+$/.test(item.path)
-            || item.path.startsWith("/") || item.path.startsWith("-")
-            || item.path.split("/").some(part => !part || part === "." || part === "..")
-            || typeof item.category !== "string" || !categories.some(category => category === item.category)) {
+            || typeof item["path"] !== "string" || !/^[A-Za-z0-9_. /-]+$/.test(item["path"])
+            || item["path"].startsWith("/") || item["path"].startsWith("-")
+            || item["path"].split("/").some(part => !part || part === "." || part === "..")
+            || typeof item["category"] !== "string" || !categories.some(category => category === item["category"])) {
             throw new Error("Invalid file path or category");
         }
-        return { path: item.path, category: item.category as Category };
+        return { path: item["path"], category: item["category"] as Category };
     });
     if (new Set(files.map(item => item.path)).size !== files.length) throw new Error("Duplicate inventory path");
-    return { ref: value.ref, files };
+    return { ref: value["ref"], files };
 }
 
 async function git(root: string, args: string[]): Promise<Buffer> {
@@ -41,7 +42,7 @@ async function git(root: string, args: string[]): Promise<Buffer> {
 async function measure(root: string, input: Inventory) {
     const commit = (await git(root, ["rev-parse", "--verify", `${input.ref}^{commit}`])).toString().trim();
     if (commit !== input.ref) throw new Error("Inventory ref must identify a commit, not a tag object");
-    const entries = [];
+    const entries: Entry[] = [];
     for (const file of [...input.files].sort((a, b) => a.path.localeCompare(b.path))) {
         const tree = (await git(root, ["ls-tree", "-z", commit, "--", `:(literal)${file.path}`])).toString();
         const match = /^(100644|100755) blob ([a-f0-9]{40})\t([^\0]+)\0$/.exec(tree);
@@ -67,12 +68,12 @@ async function measure(root: string, input: Inventory) {
 
 /** Count reviewed customer inventories from Git objects, never the dirty checkout. */
 export async function measureFeatureSlice(root: string, value: unknown) {
-    if (!record(value) || value.version !== 1
+    if (!record(value) || value["version"] !== 1
         || Object.keys(value).some(key => !["version", "before", "after"].includes(key))) {
         throw new Error("Expected version 1, before and after inventories");
     }
-    const before = await measure(root, inventory(value.before));
-    const after = await measure(root, inventory(value.after));
+    const before = await measure(root, inventory(value["before"]));
+    const after = await measure(root, inventory(value["after"]));
     return {
         version: 1,
         evidence: "git-source-counts-for-reviewed-inventory-not-business-acceptance",
