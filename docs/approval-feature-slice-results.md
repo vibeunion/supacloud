@@ -1,6 +1,7 @@
 # Approval Feature Slice: Scope And Results
 
-Date: 2026-10-14. Status: scaffold implementation, not completed adoption.
+Date: 2026-10-22. Status: generated slice and local acceptance gates implemented;
+real customer adoption and deployment evidence remain separate gates.
 
 ## Product Outcome
 
@@ -20,9 +21,9 @@ second engine, database schema, hand-maintained client or transport abstraction.
 
 | Outcome | This iteration | Remaining evidence |
 | --- | --- | --- |
-| Golden business slice and four-stack comparison | Approval scope and common acceptance below; recorded-agent evaluator has a bounded `create-feature-slice` task | NestJS, Spring, a named Go stack, and SupaCloud implementations and comparable measured trials |
+| Golden business slice | Approval scope and common acceptance below; generated acceptance now requires a successful write, durable receipt reconciliation, an isolated race, and cross-tenant denial | Configure xigu-fa against real PostgreSQL/RLS/RPC/worker/browser and record before/after metrics |
 | Feature generator | HTTP schemas, read/write ports, Query, governed Command, state declaration, job placeholder, receipt and job-status routes, explicit query invalidation tags, standard pending-command client adapter, unit tests, typed fixture, authenticated E2E entry point and delivery checklist generated together | Real database bindings, generated browser client adoption, configured E2E execution and delivery read-back |
-| Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Durable authorization, version checks, audit, outbox and result recovery in the chosen customer flow |
+| Default business mechanisms | Reuses existing compiler/runtime governance instead of creating parallel mechanisms; rejects missing explicit capabilities | Customer-specific durable authorization, version checks, audit, outbox and result recovery remain application evidence |
 | Earlier rejection | Generated Command requires the registered persistent RPC; compilation checks state/route/governance consistency | Universal tenant/query inference, arbitrary table-write detection and dynamic state correctness are not claimed |
 
 Invalidation tags are explicit transition metadata and are preserved in the
@@ -138,15 +139,14 @@ authorization, idempotency, state transitions, audit or outbox behavior.
 
 ## Remaining Work
 
-1. Bind this recipe to one approved xigu-fa operation using its existing RPC and
-   source-of-truth tables; keep authorization and state rules in that application.
-2. Connect the generated Feature client adapter and compiler-generated client
+1. Connect the generated Feature client adapter and compiler-generated client
    with the existing query adapter in the
    browser, bind the generated job-status port to the existing Workflow/Queue
    read path, configure
    the generated E2E environment, then run authenticated negative, concurrency,
    crash and recovery acceptance.
-3. Verify the published dependency tuple and test-environment deployment/upgrade.
+2. Verify the published dependency tuple and test-environment deployment/upgrade.
    Local candidate-package acceptance is complete; publication is not verified.
-4. Implement the three comparison stacks against the same contract and record
-   repeated trials. Only then evaluate the "large project becomes medium" claim.
+3. Record xigu-fa before/after counts with `scripts/feature-slice-metrics.ts`.
+   Do not claim an improvement ratio until the same real acceptance and counting
+   rules have been applied to both snapshots.
