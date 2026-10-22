@@ -303,10 +303,11 @@ test("generated acceptance skips only an entirely unconfigured developer run", a
     const skipped = await runGeneratedAcceptance(root, {});
     expect(skipped.code).toBe(0);
     expect(skipped.output).toContain("2 skip");
-    for (const configuration of [
+    const configurations: Record<string, string>[] = [
         { SUPACLOUD_FEATURE_E2E_REQUIRED: "1" },
         { SUPACLOUD_FEATURE_E2E_URL: "https://unused.invalid" },
-    ]) {
+    ];
+    for (const configuration of configurations) {
         const failed = await runGeneratedAcceptance(root, configuration);
         expect(failed.code).not.toBe(0);
         expect(failed.output).toContain("Feature acceptance requires");
