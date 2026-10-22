@@ -269,7 +269,7 @@ test("the generated approval compiles only with the explicit persistent capabili
     expect(generatedE2E).toContain('test.skipIf(!enabled)');
     expect(generatedE2E).toContain('expect(replay.status).toBe(first.status)');
     expect(generatedE2E).toContain('expect(await object(replay)).toEqual(firstBody)');
-    expect(generatedE2E).toContain('status: "confirmed", state: firstBody.state, version: firstBody.version');
+    expect(generatedE2E).toContain('status: "confirmed", state: firstBody["state"], version: firstBody["version"]');
     expect(generatedE2E).toContain('conflicting replay');
     expect(generatedE2E).toContain('Promise.all');
     expect(generatedE2E).toContain('SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION');

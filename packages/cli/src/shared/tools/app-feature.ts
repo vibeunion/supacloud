@@ -808,9 +808,9 @@ test.skipIf(!enabled)("${name} authenticated approval, replay, recovery and conc
     expect(detail.ok).toBe(true);
     const before = await object(detail);
     expect(before).toMatchObject({ id: config.fixtureId, state: "draft" });
-    expect(Number.isSafeInteger(before.version)).toBe(true);
-    expect(Number(before.version)).toBeGreaterThanOrEqual(1);
-    const body = { ...${className}Fixture.approve, expectedVersion: Number(before.version) };
+    expect(Number.isSafeInteger(before["version"])).toBe(true);
+    expect(Number(before["version"])).toBeGreaterThanOrEqual(1);
+    const body = { ...${className}Fixture.approve, expectedVersion: Number(before["version"]) };
     const approve = (id: string, key: string, input = body) => request(
         config, path(id) + "/approve",
         {
@@ -822,8 +822,8 @@ test.skipIf(!enabled)("${name} authenticated approval, replay, recovery and conc
     expect(first.status).toBe(200);
     const firstBody = await object(first);
     expect(firstBody).toMatchObject({ id: config.fixtureId, state: "approved" });
-    expect(Number.isSafeInteger(firstBody.version)).toBe(true);
-    expect(Number(firstBody.version)).toBeGreaterThan(Number(before.version));
+    expect(Number.isSafeInteger(firstBody["version"])).toBe(true);
+    expect(Number(firstBody["version"])).toBeGreaterThan(Number(before["version"]));
 
     // Read-only reconciliation is exercised here; this is not a network-loss or worker-crash test.
     const operationPath = path(config.fixtureId) + "/operations/" + encodeURIComponent(config.idempotencyKey);
@@ -831,14 +831,14 @@ test.skipIf(!enabled)("${name} authenticated approval, replay, recovery and conc
     expect(recovered.ok).toBe(true);
     expect(await object(recovered)).toMatchObject({
         id: config.fixtureId, operationId: config.idempotencyKey,
-        status: "confirmed", state: firstBody.state, version: firstBody.version,
+        status: "confirmed", state: firstBody["state"], version: firstBody["version"],
     });
     const jobStatus = await request(config, operationPath + "/status", { headers });
     expect(jobStatus.ok).toBe(true);
     const job = await object(jobStatus);
     expect(job).toMatchObject({ id: config.fixtureId, operationId: config.idempotencyKey });
-    expect(typeof job.status).toBe("string");
-    expect(["queued", "running", "completed"].some(status => status === job.status)).toBe(true);
+    expect(typeof job["status"]).toBe("string");
+    expect(["queued", "running", "completed"].some(status => status === job["status"])).toBe(true);
 
     const replay = await approve(config.fixtureId, config.idempotencyKey);
     expect(replay.status).toBe(first.status);
@@ -860,9 +860,9 @@ test.skipIf(!enabled)("${name} authenticated approval, replay, recovery and conc
     expect(raceDetail.ok).toBe(true);
     const raceBefore = await object(raceDetail);
     expect(raceBefore).toMatchObject({ id: config.raceId, state: "draft" });
-    expect(Number.isSafeInteger(raceBefore.version)).toBe(true);
-    expect(Number(raceBefore.version)).toBeGreaterThanOrEqual(1);
-    const raceBody = { ...body, expectedVersion: Number(raceBefore.version) };
+    expect(Number.isSafeInteger(raceBefore["version"])).toBe(true);
+    expect(Number(raceBefore["version"])).toBeGreaterThanOrEqual(1);
+    const raceBody = { ...body, expectedVersion: Number(raceBefore["version"]) };
     const [raceA, raceB] = await Promise.all([
         approve(config.raceId, config.idempotencyKey + "-race-a", raceBody),
         approve(config.raceId, config.idempotencyKey + "-race-b", raceBody),
@@ -872,8 +872,8 @@ test.skipIf(!enabled)("${name} authenticated approval, replay, recovery and conc
     expect(statuses.filter(status => status === 409 || status === 422)).toHaveLength(1);
     const winner = await object(raceA.status === 200 ? raceA : raceB);
     expect(winner).toMatchObject({ id: config.raceId, state: "approved" });
-    expect(Number.isSafeInteger(winner.version)).toBe(true);
-    expect(Number(winner.version)).toBeGreaterThan(Number(raceBefore.version));
+    expect(Number.isSafeInteger(winner["version"])).toBe(true);
+    expect(Number(winner["version"])).toBeGreaterThan(Number(raceBefore["version"]));
     const raceAfter = await request(config, path(config.raceId), { headers });
     expect(raceAfter.ok).toBe(true);
     expect(await object(raceAfter)).toMatchObject(winner);
