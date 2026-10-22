@@ -758,125 +758,152 @@ import { ${className}Fixture } from "./${name}.fixture";
 const baseUrl = process.env["SUPACLOUD_FEATURE_E2E_URL"];
 const authorization = process.env["SUPACLOUD_FEATURE_E2E_AUTHORIZATION"];
 const otherAuthorization = process.env["SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION"];
-const fixtureId = process.env["SUPACLOUD_FEATURE_E2E_ID"] ?? ${className}Fixture.id;
+const fixtureId = process.env["SUPACLOUD_FEATURE_E2E_ID"];
+const raceId = process.env["SUPACLOUD_FEATURE_E2E_RACE_ID"];
 const idempotencyKey = process.env["SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY"];
-const enabled = Boolean(baseUrl && authorization && idempotencyKey);
-const tenantIsolationEnabled = Boolean(enabled && otherAuthorization);
+const required = process.env["SUPACLOUD_FEATURE_E2E_REQUIRED"] === "1";
+const enabled = required || [baseUrl, authorization, otherAuthorization, fixtureId, raceId, idempotencyKey]
+    .some(value => value !== undefined);
 
-function requireConfig(): { baseUrl: string; authorization: string; idempotencyKey: string } {
-    if (!baseUrl || !authorization || !idempotencyKey) {
-        throw new Error(
-            "Set SUPACLOUD_FEATURE_E2E_URL, SUPACLOUD_FEATURE_E2E_AUTHORIZATION and " +
-            "SUPACLOUD_FEATURE_E2E_IDEMPOTENCY_KEY before running this generated E2E test.",
-        );
+function requireConfig() {
+    if (![baseUrl, authorization, otherAuthorization, fixtureId, raceId, idempotencyKey]
+        .every(value => typeof value === "string" && value.trim().length > 0)) {
+        throw new Error("Feature acceptance requires URL, AUTHORIZATION, OTHER_AUTHORIZATION, ID, RACE_ID and IDEMPOTENCY_KEY (SUPACLOUD_FEATURE_E2E_*).");
     }
-    return { baseUrl, authorization, idempotencyKey };
-}
-
-async function json(response: Response): Promise<unknown> {
-    const text = await response.text();
-    if (!text) return undefined;
-    try {
-        return JSON.parse(text) as unknown;
-    } catch {
-        return text;
+    if (fixtureId === raceId) throw new Error("Feature acceptance requires two distinct draft fixtures.");
+    const url = new URL(baseUrl!);
+    if (url.username || url.password || url.search || url.hash
+        || (url.protocol !== "https:" && !(url.protocol === "http:"
+            && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
+        throw new Error("Feature acceptance requires HTTPS or a loopback HTTP endpoint without embedded credentials.");
     }
+    return { baseUrl: url, authorization: authorization!, otherAuthorization: otherAuthorization!,
+        fixtureId: fixtureId!, raceId: raceId!, idempotencyKey: idempotencyKey! };
 }
 
-function containsFixture(value: unknown): boolean {
-    return JSON.stringify(value).includes(fixtureId);
+function request(config: ReturnType<typeof requireConfig>, path: string, init: RequestInit = {}) {
+    return fetch(new URL(path, config.baseUrl), {
+        ...init, redirect: "error", signal: AbortSignal.timeout(10_000),
+    });
 }
 
-test.skipIf(!enabled)("${name} authenticated list/detail/approval E2E", async () => {
+async function object(response: Response): Promise<Record<string, unknown>> {
+    const value: unknown = await response.json();
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("Feature acceptance expected a JSON object.");
+    }
+    return value as Record<string, unknown>;
+}
+
+test.skipIf(!enabled)("${name} authenticated approval, replay, recovery and concurrency acceptance", async () => {
     const config = requireConfig();
     const headers = { authorization: config.authorization, "content-type": "application/json" };
-    const list = await fetch(new URL("/${name}", config.baseUrl), { headers });
+    const path = (id: string) => "/${name}/" + encodeURIComponent(id);
+    const list = await request(config, "/${name}", { headers });
     expect(list.ok).toBe(true);
-    const detail = await fetch(
-        new URL("/${name}/" + encodeURIComponent(fixtureId), config.baseUrl),
-        { headers },
-    );
+    const listed: unknown = await list.json();
+    expect(Array.isArray(listed)).toBe(true);
+    expect(listed).toContainEqual(expect.objectContaining({ id: config.fixtureId }));
+    const detail = await request(config, path(config.fixtureId), { headers });
     expect(detail.ok).toBe(true);
-    const approve = (key: string, body = ${className}Fixture.approve) => fetch(
-        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/approve", config.baseUrl),
+    const before = await object(detail);
+    expect(before).toMatchObject({ id: config.fixtureId, state: "draft" });
+    expect(Number.isSafeInteger(before["version"])).toBe(true);
+    expect(Number(before["version"])).toBeGreaterThanOrEqual(1);
+    const body = { ...${className}Fixture.approve, expectedVersion: Number(before["version"]) };
+    const approve = (id: string, key: string, input = body) => request(
+        config, path(id) + "/approve",
         {
-            method: "POST",
-            headers: { ...headers, "idempotency-key": key },
-            body: JSON.stringify(body),
+            method: "POST", headers: { ...headers, "idempotency-key": key },
+            body: JSON.stringify(input),
         },
     );
-    const first = await approve(config.idempotencyKey);
-    const firstBody = await json(first);
-    expect([200, 409, 422]).toContain(first.status);
+    const first = await approve(config.fixtureId, config.idempotencyKey);
+    expect(first.status).toBe(200);
+    const firstBody = await object(first);
+    expect(firstBody).toMatchObject({ id: config.fixtureId, state: "approved" });
+    expect(Number.isSafeInteger(firstBody["version"])).toBe(true);
+    expect(Number(firstBody["version"])).toBeGreaterThan(Number(before["version"]));
 
-    // A lost response is recovered through the durable receipt, never by
-    // submitting the approval again.
-    const recovered = await fetch(
-        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/operations/" + encodeURIComponent(config.idempotencyKey), config.baseUrl),
-        { headers },
-    );
+    // Read-only reconciliation is exercised here; this is not a network-loss or worker-crash test.
+    const operationPath = path(config.fixtureId) + "/operations/" + encodeURIComponent(config.idempotencyKey);
+    const recovered = await request(config, operationPath, { headers });
     expect(recovered.ok).toBe(true);
-    const recoveredBody = await json(recovered);
-    expect(recoveredBody).toMatchObject({ operationId: config.idempotencyKey });
-    const jobStatus = await fetch(
-        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/operations/" + encodeURIComponent(config.idempotencyKey) + "/status", config.baseUrl),
-        { headers },
-    );
+    expect(await object(recovered)).toMatchObject({
+        id: config.fixtureId, operationId: config.idempotencyKey,
+        status: "confirmed", state: firstBody["state"], version: firstBody["version"],
+    });
+    const jobStatus = await request(config, operationPath + "/status", { headers });
     expect(jobStatus.ok).toBe(true);
-    expect(await json(jobStatus)).toMatchObject({ operationId: config.idempotencyKey });
+    const job = await object(jobStatus);
+    expect(job).toMatchObject({ id: config.fixtureId, operationId: config.idempotencyKey });
+    expect(typeof job["status"]).toBe("string");
+    expect(["queued", "running", "completed"].some(status => status === job["status"])).toBe(true);
 
-    // Replaying an identical command may return the original success or a
-    // domain conflict, but it must never create a second successful transition.
-    const replay = await approve(config.idempotencyKey);
-    const replayBody = await json(replay);
+    const replay = await approve(config.fixtureId, config.idempotencyKey);
     expect(replay.status).toBe(first.status);
-    expect(replayBody).toEqual(firstBody);
+    expect(await object(replay)).toEqual(firstBody);
 
-    // Reusing a key with a different payload must be rejected by the receipt
-    // boundary instead of being treated as a new approval.
+    // Conflicting replay and stale version must fail without changing the authoritative row.
     const conflicting = await approve(
-        config.idempotencyKey,
-        { ...${className}Fixture.approve, reason: "conflicting replay" },
+        config.fixtureId, config.idempotencyKey, { ...body, reason: "conflicting replay" },
     );
     expect([400, 409, 422]).toContain(conflicting.status);
+    const stale = await approve(config.fixtureId, config.idempotencyKey + "-stale");
+    expect([409, 422]).toContain(stale.status);
+    const after = await request(config, path(config.fixtureId), { headers });
+    expect(after.ok).toBe(true);
+    expect(await object(after)).toMatchObject(firstBody);
 
-    // Two distinct keys racing on one version may commit at most one state
-    // transition. A fixture that is already terminal may reject both.
+    // Race on a separate fresh draft; racing the already-approved row proves nothing.
+    const raceDetail = await request(config, path(config.raceId), { headers });
+    expect(raceDetail.ok).toBe(true);
+    const raceBefore = await object(raceDetail);
+    expect(raceBefore).toMatchObject({ id: config.raceId, state: "draft" });
+    expect(Number.isSafeInteger(raceBefore["version"])).toBe(true);
+    expect(Number(raceBefore["version"])).toBeGreaterThanOrEqual(1);
+    const raceBody = { ...body, expectedVersion: Number(raceBefore["version"]) };
     const [raceA, raceB] = await Promise.all([
-        approve(config.idempotencyKey + "-race-a"),
-        approve(config.idempotencyKey + "-race-b"),
+        approve(config.raceId, config.idempotencyKey + "-race-a", raceBody),
+        approve(config.raceId, config.idempotencyKey + "-race-b", raceBody),
     ]);
-    expect([raceA.status, raceB.status].filter((status) => status >= 200 && status < 300).length)
-        .toBeLessThanOrEqual(1);
-});
+    const statuses = [raceA.status, raceB.status];
+    expect(statuses.filter(status => status === 200)).toHaveLength(1);
+    expect(statuses.filter(status => status === 409 || status === 422)).toHaveLength(1);
+    const winner = await object(raceA.status === 200 ? raceA : raceB);
+    expect(winner).toMatchObject({ id: config.raceId, state: "approved" });
+    expect(Number.isSafeInteger(winner["version"])).toBe(true);
+    expect(Number(winner["version"])).toBeGreaterThan(Number(raceBefore["version"]));
+    const raceAfter = await request(config, path(config.raceId), { headers });
+    expect(raceAfter.ok).toBe(true);
+    expect(await object(raceAfter)).toMatchObject(winner);
+}, { timeout: 120_000 });
 
-test.skipIf(!tenantIsolationEnabled)("${name} rejects cross-tenant access", async () => {
+test.skipIf(!enabled)("${name} rejects cross-tenant reads, writes and receipt disclosure", async () => {
     const config = requireConfig();
-    if (!otherAuthorization) throw new Error("Missing SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION");
     const headers = {
-        authorization: otherAuthorization,
+        authorization: config.otherAuthorization,
         "content-type": "application/json",
     };
-    const list = await fetch(new URL("/${name}", config.baseUrl), { headers });
+    const list = await request(config, "/${name}", { headers });
     expect(list.ok).toBe(true);
-    expect(containsFixture(await json(list))).toBe(false);
-
-    const detail = await fetch(
-        new URL("/${name}/" + encodeURIComponent(fixtureId), config.baseUrl),
-        { headers },
-    );
-    expect([403, 404]).toContain(detail.status);
-
-    const approval = await fetch(
-        new URL("/${name}/" + encodeURIComponent(fixtureId) + "/approve", config.baseUrl),
-        {
-            method: "POST",
-            headers: { ...headers, "idempotency-key": config.idempotencyKey + "-other-tenant" },
-            body: JSON.stringify(${className}Fixture.approve),
-        },
-    );
+    const listed: unknown = await list.json();
+    expect(Array.isArray(listed)).toBe(true);
+    expect(listed).not.toContainEqual(expect.objectContaining({ id: config.fixtureId }));
+    expect(listed).not.toContainEqual(expect.objectContaining({ id: config.raceId }));
+    const path = "/${name}/" + encodeURIComponent(config.fixtureId);
+    const operationPath = path + "/operations/" + encodeURIComponent(config.idempotencyKey);
+    for (const target of [path, operationPath, operationPath + "/status"]) {
+        const response = await request(config, target, { headers });
+        expect([403, 404]).toContain(response.status);
+    }
+    // Reuse the successful key: authorization must run before a cached success is disclosed.
+    const approval = await request(config, path + "/approve", {
+        method: "POST", headers: { ...headers, "idempotency-key": config.idempotencyKey },
+        body: JSON.stringify(${className}Fixture.approve),
+    });
     expect([403, 404]).toContain(approval.status);
-});
+}, { timeout: 120_000 });
 `,
         [`${name}.deployment.md`]: `# ${className} feature delivery checklist
 
@@ -904,10 +931,16 @@ Add request fields in the contract, not a second handwritten Writer interface.
 Typecheck application adapters after changing a field type; the derived Port
 must expose incompatible assumptions in business code.
 
-For authenticated tenant-isolation acceptance, also provide
-\`SUPACLOUD_FEATURE_E2E_OTHER_AUTHORIZATION\` for a principal from another tenant.
-The generated E2E then verifies that the fixture is absent from list results and that
-cross-tenant detail and approval are rejected.
+For release acceptance, set \`SUPACLOUD_FEATURE_E2E_REQUIRED=1\` and supply URL,
+AUTHORIZATION, OTHER_AUTHORIZATION, ID, RACE_ID and IDEMPOTENCY_KEY under the
+\`SUPACLOUD_FEATURE_E2E_\` prefix. Use two distinct fresh draft fixtures and a fresh
+key on every run. Missing or partial configuration fails; only an entirely
+unconfigured developer run skips. Use HTTPS, or loopback HTTP for local tests.
+The first approval must succeed, its receipt must match, replay must preserve the
+result, and exactly one of two concurrent writes on the second draft must succeed.
+Cross-tenant detail, receipt, job status and replay must be denied. This HTTP test
+does not prove audit/outbox counts, worker completion, crashes, browser interaction,
+revoked membership or deployment; verify those separately against durable sources.
 
 The named RPC adapter must invoke the continuation in the same database transaction
 used by the request-scoped Writer, or own the complete command instead; never execute
