@@ -12,7 +12,7 @@
       "devDependencies": {
         "@supabase/supabase-js": "^2.118.0",
         "@tanstack/query-core": "5.104.2",
-        "@tanstack/svelte-query": "6.3.2",
+        "@tanstack/svelte-query": "6.3.5",
         "@types/bun": "^1.4.3",
         "svelte": "5.57.2",
         "typebox": "1.3.37",
@@ -60,7 +60,7 @@
 
     "@tanstack/query-core": ["@tanstack/query-core@5.104.2", "", {}, "sha512-/qbsxJK5c3Ve1aFIULWYNcT2jeRUAiD4HME6Eu2ZdpofHoVgAjpkQhLg5xHuOoBkTPQUJLfP7zOxy0qsBcqROA=="],
 
-    "@tanstack/svelte-query": ["@tanstack/svelte-query@6.3.2", "", { "dependencies": { "@tanstack/query-core": "5.104.2" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-bMPh3iyijRxqLlulDqJO80wm6mJughvVVTV4SZFMgTNSiA5AJJoOHJ3btQtYpeHgN0dMALhfo4R8chwB/9JA2Q=="],
+    "@tanstack/svelte-query": ["@tanstack/svelte-query@6.3.5", "", { "dependencies": { "@tanstack/query-core": "5.104.5" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-6uFlPWAlJYk2+3Bnka6U6+QxtfzW70aGp3yoHbrDEJeT+vv+JUZw8qIvxz4BOLIBVraBdLWdaD6oLi2jAo5r3Q=="],
 
     "@types/bun": ["@types/bun@1.4.3", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.3.tgz", { "dependencies": { "bun-types": "1.4.3" } }, "sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw=="],
 
@@ -145,5 +145,7 @@
     "undici-types": ["undici-types@8.9.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.9.0.tgz", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "zimmerframe": ["zimmerframe@1.1.5", "https://registry.npmmirror.com/zimmerframe/-/zimmerframe-1.1.5.tgz", {}, "sha512-msJxIvYDYcoNL+PJsu+7qmpDWsYmAxTY+2TNYXXF0hzBzBk0BMecOqDOG/EckUoKCuKwObfbugIl8QpqHDXeFA=="],
+
+    "@tanstack/svelte-query/@tanstack/query-core": ["@tanstack/query-core@5.104.5", "", {}, "sha512-Q94gI8Opd+CbdVNOdj8ZCyV8WqLYitrDq1t96Xc8WZT6lY0r5iRnJLXYDxMex7EEf2v+mXvn4FcjaBKSxXZQ9A=="],
   }
 }
