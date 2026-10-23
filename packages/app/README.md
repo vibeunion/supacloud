@@ -25,6 +25,31 @@ contracts belong to generated clients, not a second HTTP/session implementation.
 Remove compatibility exports only after a separately reviewed consumer migration
 and a breaking release. No existing exports are removed here.
 
+## Legacy browser runtime
+
+The `/browser-compat` subpath is an optional, side-effect-free install entry for
+managed browsers older than the APIs bundled dependencies may use:
+
+- `URL.canParse` (Chromium 120+)
+- `AbortSignal.any` (Chromium 116+)
+- `crypto.randomUUID` (secure contexts)
+
+Bundled TypeBox currently calls `URL.canParse` while compiling schemas, so a
+Chromium 115 client can fail while decoding a valid response even though the
+network request succeeded. Import the compat entry first and call the installer
+before mounting the application:
+
+```ts
+import { installBrowserCompatPolyfills } from "@supacloud/app/browser-compat";
+
+installBrowserCompatPolyfills();
+```
+
+Each installer only fills a missing function and never replaces a native
+implementation. The module is opt-in: root and `/browser` behavior is unchanged,
+and modern browsers see no effect. Products should still declare their minimum
+browser baseline and run a smoke test against that baseline.
+
 ## Module format
 
 This package is **ESM-only**: `.js` files use `"type": "module"`. Existing

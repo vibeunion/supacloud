@@ -22,6 +22,11 @@
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
+    "./browser-compat": {
+      "types": "./dist/browser_compat.d.ts",
+      "import": "./dist/browser_compat.js",
+      "default": "./dist/browser_compat.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
@@ -69,7 +74,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/core.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs --format esm && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts --format esm && bun build src/reactive.ts --outdir dist --target browser --external rxjs --format esm && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs --format esm && bun build src/http.ts --outdir dist --target node --external @supacloud/app --format esm && bun build src/runtime.ts --outdir dist --target browser --format esm",
+    "build:js": "bun build src/index.ts src/core.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs --format esm && bun build src/contract_client.ts src/browser.ts src/browser_compat.ts --outdir dist --target browser --external @supacloud/contracts --format esm && bun build src/reactive.ts --outdir dist --target browser --external rxjs --format esm && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs --format esm && bun build src/http.ts --outdir dist --target node --external @supacloud/app --format esm && bun build src/runtime.ts --outdir dist --target browser --format esm",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack .",
