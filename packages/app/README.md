@@ -36,19 +36,32 @@ managed browsers older than the APIs bundled dependencies may use:
 
 Bundled TypeBox currently calls `URL.canParse` while compiling schemas, so a
 Chromium 115 client can fail while decoding a valid response even though the
-network request succeeded. Import the compat entry first and call the installer
-before mounting the application:
+network request succeeded. Import the compat entry first and install the
+baseline before mounting the application:
 
 ```ts
 import { installBrowserCompatPolyfills } from "@supacloud/app/browser-compat";
 
-installBrowserCompatPolyfills();
+const report = installBrowserCompatPolyfills();
+// { ready: [...], polyfilled: [...], unavailable: [...] }
 ```
 
-Each installer only fills a missing function and never replaces a native
-implementation. The module is opt-in: root and `/browser` behavior is unchanged,
-and modern browsers see no effect. Products should still declare their minimum
-browser baseline and run a smoke test against that baseline.
+Design rules:
+
+- feature detection only, never user-agent sniffing;
+- every installer is idempotent and only fills a missing function;
+- native implementations are never replaced;
+- the report distinguishes native, newly polyfilled, and unavailable APIs;
+- `AbortSignal.any` validates its input sequence and propagates the first abort
+  reason;
+- `crypto.randomUUID` uses `getRandomValues` and never falls back to
+  `Math.random`.
+
+The installer accepts optional `url`, `abortSignal`, and `crypto` targets for
+tests or non-global realms. Ordinary applications call it with no arguments.
+The module is opt-in: root and `/browser` behavior is unchanged, and modern
+browsers see no effect. Products should still declare their minimum browser
+baseline and run a smoke test against that baseline.
 
 ## Module format
 
