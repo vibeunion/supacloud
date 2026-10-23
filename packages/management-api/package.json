@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
-    "@elysia/openapi": "2.0.0-beta.6",
+    "@elysia/openapi": "2.0.0-rc.0",
     "@supacloud/delivery": "file:../delivery",
     "acorn": "^8.19.0",
     "aws4fetch": "^1.0.20",
