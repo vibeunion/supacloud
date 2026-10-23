@@ -46,7 +46,7 @@
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
     "@svadmin/ai-elements": "0.11.1",
-    "@svadmin/core": "^0.60.0",
+    "@svadmin/core": "^0.61.1",
     "@svadmin/elysia": "0.14.4",
     "@svadmin/sveltekit": "0.13.1",
     "@svadmin/ui": "0.83.1",
