@@ -32,13 +32,14 @@ describe("URL.canParse compatibility", () => {
 
   test("only fills a missing implementation", () => {
     const missing: { canParse?: unknown } = {};
-    installUrlCanParsePolyfill(missing);
+    expect(installUrlCanParsePolyfill(missing)).toBe(true);
     expect(typeof missing.canParse).toBe("function");
     expect((missing.canParse as typeof canParseUrl)("https://api.example.com")).toBe(true);
+    expect(installUrlCanParsePolyfill(missing)).toBe(false);
 
     const native = () => false;
     const existing: { canParse?: unknown } = { canParse: native };
-    installUrlCanParsePolyfill(existing);
+    expect(installUrlCanParsePolyfill(existing)).toBe(false);
     expect(existing.canParse).toBe(native);
   });
 });
@@ -54,22 +55,35 @@ describe("AbortSignal.any compatibility", () => {
     expect(combined.reason).toBe("cancelled-by-second");
   });
 
-  test("aborts immediately for an already-aborted signal", () => {
-    const already = new AbortController();
-    already.abort("already-aborted");
-    const combined = anyAbortSignal([new AbortController().signal, already.signal]);
+  test("aborts immediately for an already-aborted signal, using the first reason", () => {
+    const first = new AbortController();
+    first.abort("first-reason");
+    const second = new AbortController();
+    second.abort("second-reason");
+    const combined = anyAbortSignal([first.signal, second.signal]);
     expect(combined.aborted).toBe(true);
-    expect(combined.reason).toBe("already-aborted");
+    expect(combined.reason).toBe("first-reason");
+  });
+
+  test("an empty sequence returns a non-aborted signal", () => {
+    const combined = anyAbortSignal([]);
+    expect(combined.aborted).toBe(false);
+  });
+
+  test("rejects non-signal values and non-iterable input", () => {
+    expect(() => anyAbortSignal([{} as AbortSignal])).toThrow(TypeError);
+    expect(() => anyAbortSignal("not a signal" as unknown as Iterable<AbortSignal>)).toThrow(TypeError);
   });
 
   test("only fills a missing implementation", () => {
     const missing: { any?: unknown } = {};
-    installAbortSignalAnyPolyfill(missing);
+    expect(installAbortSignalAnyPolyfill(missing)).toBe(true);
     expect(typeof missing.any).toBe("function");
+    expect(installAbortSignalAnyPolyfill(missing)).toBe(false);
 
     const native = () => new AbortController().signal;
     const existing: { any?: unknown } = { any: native };
-    installAbortSignalAnyPolyfill(existing);
+    expect(installAbortSignalAnyPolyfill(existing)).toBe(false);
     expect(existing.any).toBe(native);
   });
 });
@@ -85,24 +99,53 @@ describe("crypto.randomUUID compatibility", () => {
     })).toMatch(UUID_V4);
   });
 
-  test("only fills a missing implementation", () => {
+  test("only fills a missing implementation and never uses Math.random", () => {
     const native = () => "11111111-1111-4111-8111-111111111111";
     const existing = { ...fakeCrypto(), randomUUID: native };
-    installRandomUuidPolyfill(existing);
+    expect(installRandomUuidPolyfill(existing)).toBe(false);
     expect(existing.randomUUID()).toBe("11111111-1111-4111-8111-111111111111");
 
     const missing = fakeCrypto() as ReturnType<typeof fakeCrypto> & { randomUUID?: () => string };
-    installRandomUuidPolyfill(missing);
+    expect(installRandomUuidPolyfill(missing)).toBe(true);
     expect(typeof missing.randomUUID).toBe("function");
     expect(missing.randomUUID!()).toMatch(UUID_V4);
   });
+
+  test("reports UUID as unavailable without a secure random source", () => {
+    const report = installBrowserCompatPolyfills({
+      url: {},
+      abortSignal: {},
+      crypto: {},
+    });
+    expect(report.unavailable).toContain("crypto.randomUUID");
+  });
 });
 
-test("the combined installer is idempotent", () => {
-  expect(() => {
-    installBrowserCompatPolyfills();
-    installBrowserCompatPolyfills();
-  }).not.toThrow();
+describe("combined installer", () => {
+  test("reports native, polyfilled, and unavailable features separately", () => {
+    const targets = {
+      url: {} as { canParse?: unknown },
+      abortSignal: {} as { any?: unknown },
+      crypto: fakeCrypto() as ReturnType<typeof fakeCrypto> & { randomUUID?: () => string },
+    };
+    const first = installBrowserCompatPolyfills(targets);
+    expect(first.polyfilled).toEqual(["url.canParse", "abortSignal.any", "crypto.randomUUID"]);
+    expect(first.ready).toEqual(["url.canParse", "abortSignal.any", "crypto.randomUUID"]);
+    expect(first.unavailable).toEqual([]);
+
+    const second = installBrowserCompatPolyfills(targets);
+    expect(second.polyfilled).toEqual([]);
+    expect(second.ready).toEqual(["url.canParse", "abortSignal.any", "crypto.randomUUID"]);
+    expect(second.unavailable).toEqual([]);
+  });
+
+  test("is idempotent against the real runtime", () => {
+    const first = installBrowserCompatPolyfills();
+    const second = installBrowserCompatPolyfills();
+    expect(second.polyfilled).toEqual([]);
+    expect(second.ready).toEqual(first.ready);
+    expect(second.unavailable).toEqual(first.unavailable);
+  });
 });
 
 test("the browser compatibility entrypoint has no Node or server dependencies", async () => {
