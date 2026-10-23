@@ -24,6 +24,7 @@
     "src/core.ts",
     "src/index.ts",
     "src/browser.ts",
+    "src/browser_compat.ts",
     "src/contract_client.ts",
     "src/execution.ts",
     "src/reactive.ts",
