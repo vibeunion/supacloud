@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/app-v0.32.0...app-v0.33.0) (2026-10-24)
+
+
+### Features
+
+* **app:** add optional browser compatibility entrypoint ([#2223](https://github.com/vibeunion/supacloud/issues/2223)) ([201dc46](https://github.com/vibeunion/supacloud/commit/201dc461f88c9cc4eefae16c22f730ea47a29bc5))
+
+
+### Elegance & Refactoring
+
+* **app:** harden browser compatibility baseline ([#2225](https://github.com/vibeunion/supacloud/issues/2225)) ([16f4489](https://github.com/vibeunion/supacloud/commit/16f448903f98090e0b0d6225e6ca4f796bd27805))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/app-v0.31.1...app-v0.32.0) (2026-10-20)
 
 
