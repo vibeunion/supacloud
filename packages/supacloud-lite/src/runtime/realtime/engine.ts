@@ -65,6 +65,8 @@ interface Channel {
   presenceKey: string
   /** whether the client opted into presence tracking */
   presenceEnabled: boolean
+  /** server-assigned ref for this connection's currently tracked meta */
+  presenceRef?: string
   /** subscriber auth (from the join's access_token), used to filter by RLS */
   ctx: RequestContext
   /** private channel (RLS-authorized via realtime.messages) */
@@ -392,7 +394,7 @@ export class RealtimeEngine {
       private: isPrivate,
       canBroadcast,
     }
-    if (this.resolveExternalToken) this.leaveChannel(conn, msg.topic)
+    this.leaveChannel(conn, msg.topic)
     conn.channels.set(msg.topic, channel)
     this.scheduleExternalExpiry(conn, channel)
 
@@ -436,20 +438,30 @@ export class RealtimeEngine {
     if (!channel) return
     if (channel.expiryTimer) clearTimeout(channel.expiryTimer)
     conn.channels.delete(topic)
-    // presence leave
-    const state = this.presence.get(topic)
-    if (state?.has(channel.presenceKey)) {
-      const metas = state.get(channel.presenceKey)
-      if (!metas) return
+    this.removePresence(channel)
+  }
+
+  private removePresence(channel: Channel): void {
+    const presenceRef = channel.presenceRef
+    if (!presenceRef) return
+    channel.presenceRef = undefined
+    const state = this.presence.get(channel.topic)
+    const current = state?.get(channel.presenceKey)
+    const leaving = current?.metas.find((meta) => meta.phx_ref === presenceRef)
+    if (!state || !current || !leaving) return
+    const remaining = current.metas.filter((meta) => meta.phx_ref !== presenceRef)
+    if (remaining.length > 0) {
+      state.set(channel.presenceKey, { metas: remaining })
+    } else {
       state.delete(channel.presenceKey)
-      if (state.size === 0) this.presence.delete(topic)
-      this.broadcastToTopic(topic, {
-        topic,
-        event: 'presence_diff',
-        payload: { joins: {}, leaves: { [channel.presenceKey]: metas } },
-        ref: null,
-      })
+      if (state.size === 0) this.presence.delete(channel.topic)
     }
+    this.broadcastToTopic(channel.topic, {
+      topic: channel.topic,
+      event: 'presence_diff',
+      payload: { joins: {}, leaves: { [channel.presenceKey]: { metas: [leaving] } } },
+      ref: null,
+    })
   }
 
   private scheduleExternalExpiry(conn: Connection, channel: Channel): void {
@@ -537,23 +549,31 @@ export class RealtimeEngine {
     const event = String((msg.payload?.event ?? '')).toLowerCase()
 
     if (event === 'track') {
-      const meta = {
-        ...((msg.payload?.payload as Record<string, unknown>) ?? {}),
-        phx_ref: `F${this.phxRefCounter++}`,
-      }
+      const payload = { ...((msg.payload?.payload as Record<string, unknown>) ?? {}) }
+      delete payload.phx_ref
+      delete payload.phx_ref_prev
       let state = this.presence.get(msg.topic)
       if (!state) {
         state = new Map()
         this.presence.set(msg.topic, state)
       }
-      const previous = state.get(channel.presenceKey)
-      state.set(channel.presenceKey, { metas: [meta] })
+      const current = state.get(channel.presenceKey)
+      const previous = current?.metas.find((meta) => meta.phx_ref === channel.presenceRef)
+      const meta = {
+        ...payload,
+        phx_ref: `F${this.phxRefCounter++}`,
+        ...(previous ? { phx_ref_prev: previous.phx_ref } : {}),
+      }
+      // A shared presence key can belong to multiple connections; replace only our own meta.
+      const others = current?.metas.filter((meta) => meta.phx_ref !== channel.presenceRef) ?? []
+      state.set(channel.presenceKey, { metas: [...others, meta] })
+      channel.presenceRef = meta.phx_ref
       this.broadcastToTopic(msg.topic, {
         topic: msg.topic,
         event: 'presence_diff',
         payload: {
           joins: { [channel.presenceKey]: { metas: [meta] } },
-          leaves: previous ? { [channel.presenceKey]: previous } : {},
+          leaves: previous ? { [channel.presenceKey]: { metas: [previous] } } : {},
         },
         ref: null,
       })
@@ -562,18 +582,7 @@ export class RealtimeEngine {
     }
 
     if (event === 'untrack') {
-      const state = this.presence.get(msg.topic)
-      const metas = state?.get(channel.presenceKey)
-      if (state && metas) {
-        state.delete(channel.presenceKey)
-        if (state.size === 0) this.presence.delete(msg.topic)
-        this.broadcastToTopic(msg.topic, {
-          topic: msg.topic,
-          event: 'presence_diff',
-          payload: { joins: {}, leaves: { [channel.presenceKey]: metas } },
-          ref: null,
-        })
-      }
+      this.removePresence(channel)
       if (msg.ref) this.reply(conn, msg, 'ok', {})
     }
   }
