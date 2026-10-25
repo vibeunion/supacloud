@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.109.0](https://github.com/vibeunion/supacloud/compare/cli-v0.108.2...cli-v0.109.0) (2026-10-25)
+
+
+### Features
+
+* **cli:** add project-scoped MCP config command ([#2241](https://github.com/vibeunion/supacloud/issues/2241)) ([333256e](https://github.com/vibeunion/supacloud/commit/333256ea9629746ca0cc732257a262bcb79c58cf))
+
+
+### Miscellaneous Chores
+
+* **deps:** refresh the Elysia runtime and dependency matrix ([#2243](https://github.com/vibeunion/supacloud/issues/2243)) ([917ff0f](https://github.com/vibeunion/supacloud/commit/917ff0fa81e3c47d86d18e8c58fff79c0f0f67f5))
+
 ## [0.108.2](https://github.com/vibeunion/supacloud/compare/cli-v0.108.1...cli-v0.108.2) (2026-10-22)
 
 

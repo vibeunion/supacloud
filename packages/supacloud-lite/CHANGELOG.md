@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.33.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.33.1...supacloud-lite-v0.33.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **lite:** preserve shared realtime presence sessions ([#2242](https://github.com/vibeunion/supacloud/issues/2242)) ([b6cff5a](https://github.com/vibeunion/supacloud/commit/b6cff5a4117a093fb7c75034bf09575eddb74bd8))
+
+
+### Miscellaneous Chores
+
+* **deps:** refresh the Elysia runtime and dependency matrix ([#2243](https://github.com/vibeunion/supacloud/issues/2243)) ([917ff0f](https://github.com/vibeunion/supacloud/commit/917ff0fa81e3c47d86d18e8c58fff79c0f0f67f5))
+
 ## [0.33.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.33.0...supacloud-lite-v0.33.1) (2026-10-19)
 
 

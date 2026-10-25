@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.15.0...contracts-v0.15.1) (2026-10-25)
+
+
+### Miscellaneous Chores
+
+* **deps:** refresh the Elysia runtime and dependency matrix ([#2243](https://github.com/vibeunion/supacloud/issues/2243)) ([917ff0f](https://github.com/vibeunion/supacloud/commit/917ff0fa81e3c47d86d18e8c58fff79c0f0f67f5))
+
 ## [0.15.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.14.0...contracts-v0.15.0) (2026-10-21)
 
 
