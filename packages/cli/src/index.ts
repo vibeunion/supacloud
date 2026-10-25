@@ -25,6 +25,7 @@ import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerLiteCliTools } from "./shared/tools/lite-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
+import { registerMcpTools } from "./shared/tools/mcp-tools";
 import { registerAppAliases, registerAppTools } from "./shared/tools/app-tools";
 import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
@@ -333,6 +334,7 @@ EXAMPLES
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
+  ${preferredCommand} mcp config
   ${preferredCommand} app init --name my-service
   ${preferredCommand} app init --name my-api --template http
   ${preferredCommand} app init --name my-worker --template edge
@@ -457,6 +459,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     })));
     Object.assign(tools, captureTools((server) => registerLiteCliTools(server)));
     Object.assign(tools, captureTools((server) => registerAiTools(server)));
+    Object.assign(tools, captureTools((server) => registerMcpTools(server, context)));
     Object.assign(tools, captureTools((server) => registerDeveloperExperienceTools(server, {
         cwd: process.cwd(),
         activeContext: context,
