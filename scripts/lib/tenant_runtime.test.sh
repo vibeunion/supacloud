@@ -7,9 +7,9 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
-grep -Fq 'v16.4' "$RUNTIME_SCRIPT"
-grep -Fq 'b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354' "$RUNTIME_SCRIPT"
-grep -Fq 'bf544f94f305a1ff37d82f5ef1298d584f1f98b51dfd8182d1437a02073d8731' "$RUNTIME_SCRIPT"
+grep -Fq 'v16.5' "$RUNTIME_SCRIPT"
+grep -Fq '5099e7ada38f9f6846cd87c14c5f158b7c165f1e9959665ad412e61f4dceba95' "$RUNTIME_SCRIPT"
+grep -Fq '96d75a34c7c095d5f97b87f88042f898192724350861328db9e1509e696ea057' "$RUNTIME_SCRIPT"
 grep -Fq 'v2.197.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
 grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
@@ -174,7 +174,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 (
     mkdir -p "$tmp_dir/postgrest-bin"
     fake_postgrest="$tmp_dir/postgrest-bin/postgrest"
-    printf '#!/bin/sh\nprintf "PostgREST 16.4\\n"\n' > "$fake_postgrest"
+    printf '#!/bin/sh\nprintf "PostgREST 16.5\\n"\n' > "$fake_postgrest"
     chmod 755 "$fake_postgrest"
     PATH="$tmp_dir/postgrest-bin:$PATH"
     POSTGREST_BIN="$fake_postgrest"
@@ -185,7 +185,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
         echo "tenant start accepted an outdated PostgREST binary" >&2
         exit 1
     fi
-    POSTGREST_VERSION=16.4
+    POSTGREST_VERSION=16.5
     if ensure_postgrest >/dev/null 2>&1; then
         echo "tenant start accepted a PostgREST version without the v prefix" >&2
         exit 1
