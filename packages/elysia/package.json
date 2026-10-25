@@ -54,8 +54,8 @@
     "@supacloud/contracts": "file:../contracts",
     "effect": "4.0.5",
     "exact-mirror": "1.2.6",
-    "jose": "^6.2.12",
-    "typebox": "1.3.37"
+    "jose": "^6.2.13",
+    "typebox": "1.4.2"
   },
   "overrides": {
     "@supacloud/delivery": "file:../delivery",
@@ -64,14 +64,14 @@
     "@graphql-tools/utils": "^12.0.4"
   },
   "peerDependencies": {
-    "elysia": "2.0.0-beta.32"
+    "elysia": "2.0.0-rc.0"
   },
   "devDependencies": {
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "file:../db",
     "@types/bun": "^1.4.3",
-    "elysia": "2.0.0-beta.32",
+    "elysia": "2.0.0-rc.0",
     "typescript": "^7.0.2"
   }
 }

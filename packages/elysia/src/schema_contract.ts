@@ -482,7 +482,7 @@ export function registerElysiaRoute<
     }
     return value;
   };
-  app.method(
+  app.route(
     route.method,
     route.path,
     { ...toElysiaRouteSchema(route.contract) },

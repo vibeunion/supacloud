@@ -6,8 +6,8 @@ skipped database test is not success.
 
 ## Supported Baseline
 
-The current acceptance target is Bun 1.4.3, Elysia 2.0.0-beta.32,
-`typebox` 1.3.37, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2 and
+The current acceptance target is Bun 1.4.3, Elysia 2.0.0-rc.0,
+`typebox` 1.4.2, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2 and
 TypeScript semantic API 6.0.2. `packages/elysia/compatibility.json` is checked
 against installed versions. The adapter's Elysia peer is exact during beta.
 Dependency upgrades must update this tuple deliberately and rerun the gates.

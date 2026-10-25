@@ -1376,7 +1376,7 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('CADDY_VERSION:-2.11.7');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.4"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.5"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
     const realtimeDigest =
       "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e";
@@ -1408,9 +1408,9 @@ describe("runtime companion version assets", () => {
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.7-ratelimit");
       expect(compose).toContain("supabase/gotrue:v2.197.0");
-      expect(compose).toContain("postgrest/postgrest:v16.4");
+      expect(compose).toContain("postgrest/postgrest:v16.5");
     }
-    expect(workflow).toContain("postgrest/postgrest:v16.4");
+    expect(workflow).toContain("postgrest/postgrest:v16.5");
     expect(workflow).toContain("supabase/gotrue:v2.197.0");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");

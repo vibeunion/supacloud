@@ -288,7 +288,7 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
   })
 
   // HEAD /:bucket -> HeadBucket
-  .method("HEAD", "/:bucket", {
+  .head("/:bucket", {
     params: t.Object({ ref: t.String(), bucket: t.String() }),
     detail: { tags: ["storage-s3"], summary: "S3 HeadBucket" },
   }, async ({ params, set }) => {
@@ -373,7 +373,7 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
   })
 
   // HEAD /:bucket/* -> HeadObject
-  .method("HEAD", "/:bucket/*", {
+  .head("/:bucket/*", {
     params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
     detail: { tags: ["storage-s3"], summary: "S3 HeadObject" },
   }, async ({ params, set }) => {
