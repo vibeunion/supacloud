@@ -62,7 +62,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 effect: "4.0.5",
-                elysia: "2.0.0-beta.32",
+                elysia: "2.0.0-rc.0",
                 rxjs: appMetadata.dependencies.rxjs,
             },
             devDependencies: {

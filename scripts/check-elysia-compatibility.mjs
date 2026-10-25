@@ -23,8 +23,8 @@ export function checkElysiaCompatibility(root) {
   const readJSON = (path) => JSON.parse(readFileSync(resolve(root, path), 'utf8'));
   const matrix = readJSON('packages/elysia/compatibility.json');
   const expected = matrix.packages?.elysia;
-  if (typeof expected !== 'string' || !/^2\.0\.0-beta\.\d+$/.test(expected)) {
-    return ['compatibility.json must declare an exact Elysia 2.0 beta version'];
+  if (typeof expected !== 'string' || !/^2\.0\.0-(?:beta|rc)\.\d+$/.test(expected)) {
+    return ['compatibility.json must declare an exact Elysia 2.0 prerelease version'];
   }
   for (const name of ['effect', 'typebox', 'exact-mirror']) {
     if (typeof matrix.packages?.[name] !== 'string' || !/^\d+\.\d+\.\d+$/.test(matrix.packages[name])) {

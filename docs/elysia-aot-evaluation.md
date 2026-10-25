@@ -125,7 +125,7 @@ production approval.
 
 ## Current-Main Review Evidence
 
-Additional review on Linux x64, Bun 1.4.3 and Elysia 2.0.0-beta.32:
+Additional review on Linux x64, Bun 1.4.3 and Elysia 2.0.0-rc.0:
 
 - The CLI suite passes 155 tests, including minified and unminified AOT runtime
   auth/validation, runtime and module-initialization environment values, parent

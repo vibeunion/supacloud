@@ -284,7 +284,7 @@ describe("edge_functions CLI tool", () => {
     });
 
     test.each([
-        ["elysia", "elysia", "2.0.0-beta.32"],
+        ["elysia", "elysia", "2.0.0-rc.0"],
         ["hono", "hono", "^4.13.5"],
     ] as const)("scaffolds installable %s functions", async (framework, dependency, version) => {
         const root = mkdtempSync(join(tmpdir(), `supacloud-${framework}-scaffold-`));

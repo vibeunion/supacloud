@@ -8,7 +8,7 @@
         "@supacloud/cli": "file:../cli",
         "@supacloud/delivery": "file:../delivery",
         "ssh2": "^1.17.0",
-        "typebox": "1.3.37",
+        "typebox": "1.4.2",
       },
       "devDependencies": {
         "@types/bun": "^1.4.3",
@@ -52,11 +52,11 @@
 
     "@graphql-typed-document-node/core": ["@graphql-typed-document-node/core@3.2.0", "", { "peerDependencies": { "graphql": "^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-mB9oAsNCm9aM3/SOv4YtBMqZbYj10R7dkq8byBqxGY/ncFwhf2oQzMV+LCRlWoDSEBJ3COiR1yeDvMtsoOsuFQ=="],
 
-    "@supacloud/cli": ["@supacloud/cli@file:../cli", { "dependencies": { "@supacloud/compiler": "^0.46.1", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "typebox": "1.3.37" }, "devDependencies": { "@supacloud/elysia": "file:../elysia", "@types/bun": "^1.4.3", "effect": "4.0.5", "elysia": "2.0.0-beta.32", "typescript": "^7.0.2" }, "bin": { "supacloud": "dist/index.js" } }],
+    "@supacloud/cli": ["@supacloud/cli@file:../cli", { "dependencies": { "@supacloud/compiler": "^0.46.1", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "typebox": "1.4.2" }, "devDependencies": { "@supacloud/elysia": "file:../elysia", "@types/bun": "^1.4.3", "effect": "4.0.5", "elysia": "2.0.0-rc.0", "typescript": "^7.0.2" }, "bin": { "supacloud": "dist/index.js" } }],
 
     "@supacloud/compiler": ["@supacloud/compiler@0.46.1", "", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.1.1", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "0.17.0", "@supacloud/delivery": "0.18.0", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.3.36" }, "bin": { "supacloud-compiler": "dist/cli.js" } }, "sha512-r5E7Pl/B/LMqC6Y9FOmrZBBzUNMlC968/wZ1vsFgUR9fCkCFpjdmbjq0bL/qNVdyhmvxewn7baHowie+9+JdgA=="],
 
-    "@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.3.37" }, "devDependencies": { "@types/bun": "^1.4.3", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
+    "@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.2" }, "devDependencies": { "@types/bun": "^1.4.3", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
 
     "@types/bun": ["@types/bun@1.4.3", "", { "dependencies": { "bun-types": "1.4.3" } }, "sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw=="],
 
@@ -216,7 +216,7 @@
 
     "tweetnacl": ["tweetnacl@0.14.5", "", {}, "sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA=="],
 
-    "typebox": ["typebox@1.3.37", "", {}, "sha512-k+Qogwk7lztlItGvFf5v4GZPPStFAFehAyOKYeuqIHzi3dfTFqPOTx38JG09hmpcK6TQgctrTD06U/0CTTpM1g=="],
+    "typebox": ["typebox@1.4.2", "", {}, "sha512-eSoZzgSIyOKDtTH9MI7XMAxMaiXq7UiSFWarysN1ka66baTLDxAVdQ6WkWn6qDqsJFVrcjzvuP+CqHo9yrlQpg=="],
 
     "typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
@@ -226,21 +226,27 @@
 
     "@supacloud/cli/@supacloud/db": ["@supacloud/db@file:../db", {}],
 
-    "@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
+    "@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.2" }, "devDependencies": { "@types/bun": "^1.4.3", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
 
     "@supacloud/cli/@supacloud/elysia": ["@supacloud/elysia@file:../elysia", {}],
 
+    "@supacloud/cli/typebox": ["typebox@1.3.37", "", {}, "sha512-k+Qogwk7lztlItGvFf5v4GZPPStFAFehAyOKYeuqIHzi3dfTFqPOTx38JG09hmpcK6TQgctrTD06U/0CTTpM1g=="],
+
     "@supacloud/compiler/@supacloud/db": ["@supacloud/db@file:../db", {}],
 
-    "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
+    "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.2" }, "devDependencies": { "@types/bun": "^1.4.3", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
 
     "@supacloud/compiler/typebox": ["typebox@1.3.36", "", {}, "sha512-bu2Ec2Ti9B4IFSFj1FcZbtLNB/W7igQwxocMGJLAG2NTv1nI+ImtIA34YgHW4CVyGVlJqNXR1GJyLmdWgV3DuA=="],
+
+    "@supacloud/delivery/typebox": ["typebox@1.3.36", "", {}, "sha512-bu2Ec2Ti9B4IFSFj1FcZbtLNB/W7igQwxocMGJLAG2NTv1nI+ImtIA34YgHW4CVyGVlJqNXR1GJyLmdWgV3DuA=="],
 
     "@types/node/undici-types": ["undici-types@5.26.5", "", {}, "sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA=="],
 
     "@types/tar-stream/@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
 
     "bun-types/@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
+
+    "@supacloud/cli/@supacloud/delivery/typebox": ["typebox@1.3.36", "", {}, "sha512-bu2Ec2Ti9B4IFSFj1FcZbtLNB/W7igQwxocMGJLAG2NTv1nI+ImtIA34YgHW4CVyGVlJqNXR1GJyLmdWgV3DuA=="],
 
     "@types/tar-stream/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 

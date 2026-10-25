@@ -115,7 +115,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         effect: "4.0.5",
-        elysia: "2.0.0-beta.32",
+        elysia: "2.0.0-rc.0",
         ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
       devDependencies: {

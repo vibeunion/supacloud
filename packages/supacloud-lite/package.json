@@ -62,7 +62,7 @@
     "@supacloud/db": "file:../db",
     "exact-mirror": "1.2.6",
     "tar": "^7.5.22",
-    "typebox": "1.3.37"
+    "typebox": "1.4.2"
   },
   "devDependencies": {
     "@supacloud/app": "file:../app",
@@ -72,8 +72,8 @@
     "@supabase/supabase-js": "^2.118.0",
     "@types/bun": "^1.4.3",
     "effect": "4.0.5",
-    "elysia": "2.0.0-beta.32",
-    "jose": "^6.2.12",
+    "elysia": "2.0.0-rc.0",
+    "jose": "^6.2.13",
     "typescript": "^7.0.2"
   },
   "overrides": {
