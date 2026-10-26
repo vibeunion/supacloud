@@ -52,6 +52,7 @@ cannot override these pool-level controls. Restart the runtime after changes.
 | `EDGE_RESPONSE_BUFFER_BUDGET_BYTES` | 268435456 (256 MiB) | Shared response read-ahead reservation cap, included in the overall body budget |
 | `EDGE_RESPONSE_READ_AHEAD_BYTES` | 16777216 (16 MiB) | Per-response read-ahead window; zero selects strict demand-driven transport |
 | `EDGE_WORKER_HEAP_BUDGET_BYTES` | 134217728 (128 MiB) | Collect a completed Worker heap above this threshold, then retire if it remains over budget |
+| `EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS` | 250 | Minimum gap between `bun:jsc.heapStats()` heap samples per Worker; `0` samples after every execution |
 | `EDGE_MODULE_BUDGET_BYTES` | 33554432 (32 MiB) | Retire on lifetime imported entry artifact/bytecode bytes above this threshold |
 | `EDGE_MODULE_GENERATION_LIMIT` | 100 | Retire after this many distinct module identities in one Worker generation |
 | `EDGE_RSS_BUDGET_BYTES` | unset | Optional process RSS admission/recycle threshold, also usable outside Linux |
@@ -76,6 +77,15 @@ post-execution/preheat heap telemetry. A preheat that exceeds a budget fails
 instead of attesting a Worker that is immediately discarded. Existing process
 recycle limits still bound long-term Worker churn. These are soft completion-time
 limits; CPU-blocking or memory-hungry tenant code still needs OS process limits.
+
+`heapStats()` walks the isolate heap, so it costs hundreds of microseconds on a
+warm Worker and milliseconds once a tenant retains live data. Sampling it on every
+execution therefore dominated small-request latency and made throughput degrade as
+heaps grew. Workers now report the most recent sample and refresh it at most once
+per `EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS` (preheat still forces a fresh sample).
+Heap-retirement and memory-gauge decisions are consequently accurate to within one
+sampling interval instead of one request; process RSS and cgroup admission checks
+are unaffected and remain the fast fail-safe for runaway allocation.
 
 Linux monitoring compares every cgroup ancestor against its own usage. A finite
 `memory.max` supplies a threshold at 90% when `memory.high` is absent or higher.
