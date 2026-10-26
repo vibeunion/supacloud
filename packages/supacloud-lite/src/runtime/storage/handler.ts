@@ -44,7 +44,7 @@ function clampExpiry(expiresIn: number): number {
  * the metadata row and the on-disk path. Returns an error string, or null when
  * the key is safe.
  */
-function invalidObjectKey(key: string): string | null {
+export function invalidObjectKey(key: string): string | null {
   if (!key) return 'object key is required'
   if (key.length > 1024) return 'object key too long'
   if (key.includes('\0')) return 'object key contains a null byte'
@@ -1357,7 +1357,7 @@ function legacyObjectKey(row: ObjectRow): string {
   return `${row.bucket_id}/${row.name}`
 }
 
-function invalidMimeType(bucket: BucketRow, contentType: string): Response | null {
+export function invalidMimeType(bucket: Pick<BucketRow, 'allowed_mime_types'>, contentType: string): Response | null {
   if (!bucket.allowed_mime_types?.length) return null
   const base = contentType.split(';')[0].trim().toLowerCase()
   const allowed = bucket.allowed_mime_types.some(
@@ -1375,23 +1375,42 @@ function parseNonNegativeIntegerHeader(value: string | null): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null
 }
 
-async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint8Array | null> {
-  if (!Number.isFinite(maxBytes) || maxBytes < 0) return null
+export function cancelStorageBody(body: { cancel(): Promise<unknown> } | null): void {
+  // A wrapped HTTP request may wait for its upstream before cancellation settles.
+  // Cancellation is best-effort once rejected; it must not block the error response.
+  void body?.cancel().catch(() => {})
+}
+
+export async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint8Array | null> {
+  if (!Number.isFinite(maxBytes) || maxBytes < 0) {
+    cancelStorageBody(request.body)
+    return null
+  }
   const contentLength = Number(request.headers.get('content-length'))
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) return null
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    cancelStorageBody(request.body)
+    return null
+  }
   if (!request.body) return new Uint8Array()
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []
   let total: number = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (total + value.byteLength > maxBytes) {
-      await reader.cancel()
-      return null
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (total + value.byteLength > maxBytes) {
+        cancelStorageBody(reader)
+        return null
+      }
+      chunks.push(value)
+      total += value.byteLength
     }
-    chunks.push(value)
-    total += value.byteLength
+  } catch (error) {
+    cancelStorageBody(reader)
+    throw error
+  } finally {
+    reader.releaseLock()
   }
   const body = new Uint8Array(total)
   let offset: number = 0

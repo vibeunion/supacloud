@@ -22,6 +22,7 @@ export type {
   StorageDriver,
 } from './runtime/types.js'
 export { MemoryStorageDriver } from './runtime/storage/driver.js'
+export { S3Handler, type S3EndpointOptions } from './runtime/storage/s3.js'
 export {
   S3StorageDriver,
   type S3StorageClientLike,

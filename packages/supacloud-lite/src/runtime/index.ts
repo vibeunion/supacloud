@@ -22,6 +22,7 @@ import { RealtimeEngine } from './realtime/engine.js'
 import { RestHandler } from './rest/handler.js'
 import { MemoryStorageDriver } from './storage/driver.js'
 import { StorageHandler } from './storage/handler.js'
+import { S3Handler } from './storage/s3.js'
 import { WebhooksService, type WebhookDelivery } from './webhooks/service.js'
 import { CronService } from './cron/service.js'
 import { NetService, type NetDelivery } from './net/service.js'
@@ -115,8 +116,8 @@ const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD',
   'access-control-allow-headers':
-    'authorization, apikey, content-type, prefer, accept, accept-profile, content-profile, range, x-upsert, x-client-info, x-supabase-api-version, cache-control',
-  'access-control-expose-headers': 'content-range, range-unit, content-profile',
+    'authorization, apikey, content-type, prefer, accept, accept-profile, content-profile, range, x-upsert, x-client-info, x-supabase-api-version, cache-control, x-amz-content-sha256, x-amz-date, x-amz-security-token, x-amz-copy-source, x-amz-metadata-directive, x-amz-sdk-checksum-algorithm, x-amz-checksum-mode',
+  'access-control-expose-headers': 'content-range, range-unit, content-profile, etag, x-amz-request-id, x-amz-version-id',
   'access-control-max-age': '86400',
 }
 
@@ -221,7 +222,8 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   // committed defaults, the persisted auth.config row layers live studio edits
   // on top, and the auth handler reads the merged object per request
   const authSettings = await loadAuthSettings(db, config.authSettings)
-  const storage = new StorageHandler(db, config.storageDriver ?? new MemoryStorageDriver(), {
+  const storageDriver = config.storageDriver ?? new MemoryStorageDriver()
+  const storage = new StorageHandler(db, storageDriver, {
     jwtSecret,
     defaultFileSizeLimit: config.storageFileSizeLimit,
     imageTransformLimits: config.storageImageTransformLimits,
@@ -234,6 +236,9 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
       await failStartup(error)
     }
   }
+  const s3 = config.s3Endpoint
+    ? await S3Handler.create(db, storageDriver, config.s3Endpoint, config.storageFileSizeLimit).catch(failStartup)
+    : undefined
   const auth = new AuthHandler(db, {
     jwtSecret,
     apiUrl,
@@ -380,6 +385,10 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
       return withCors(smsInbox.serve(req, url))
     }
 
+    // S3 uses SigV4 rather than the project apikey/JWT contract.
+    if (s3 && (path === '/storage/v1/s3' || path.startsWith('/storage/v1/s3/'))) {
+      return withCors(await s3.handle(req, url))
+    }
     // public endpoints that skip apikey checks
     if (path === '/storage/v1/status' && req.method === 'GET') {
       return withCors(await storage.handle(req, { role: 'anon', claims: null }, url))

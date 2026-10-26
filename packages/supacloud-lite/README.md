@@ -253,6 +253,9 @@ supacloud-lite auth create-user --project-dir ./my-project \
 - `SUPACLOUD_LITE_STORAGE_DIR`
 - `SUPACLOUD_LITE_STORAGE_BACKEND`：`fs`（默认）、`memory` 或 `s3`
 - `SUPACLOUD_LITE_S3_PREFIX`：S3 对象 key 前缀，可被 `--s3-prefix` 覆盖
+- `SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID` / `SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY`：启用入站 `/storage/v1/s3` 的 SigV4 凭据，必须成对设置
+- `SUPACLOUD_LITE_S3_ENDPOINT_REGION`：入站 S3 期望的 SigV4 region，默认 `us-east-1`
+- `SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS`：逗号分隔的入站 S3 bucket allowlist；为空表示项目内全部 bucket
 - `SUPACLOUD_LITE_POSTGRES_MIRROR`：native 引擎下载 PostgreSQL 发布包时使用的 HTTPS 镜像前缀，例如 `https://ghproxy.net/`
 - `SUPACLOUD_LITE_ENGINE`：`pglite`（默认）或 `native`
 - `SUPACLOUD_LITE_REPLICATION_PROFILE`：仅支持显式值 `powersync`，且仅用于 native 引擎
@@ -365,6 +368,26 @@ bunx supacloud-lite snapshot restore ./backups/project-a.tar.gz --force
 S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复制远端对象，也不会读取或保存 S3 凭据。恢复时必须传入 `--storage-backend s3`，并重新提供原 bucket/prefix 的环境变量；跨 bucket 迁移仍需使用对象存储自身的复制工具。
 
 内存数据库没有可持久化的数据，因此 `snapshot` 和 `upgrade` 会拒绝 `--memory`。
+
+### S3 兼容入口
+
+设置 `SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID` 和 `SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY` 后，Lite 会在 `/storage/v1/s3` 挂载 SigV4 + XML 的 S3 协议入口。AWS SDK 使用 path-style endpoint：
+
+```ts
+const s3 = new S3Client({
+  endpoint: 'https://example.com/storage/v1/s3',
+  region: 'us-east-1',
+  forcePathStyle: true,
+  credentials: { accessKeyId, secretAccessKey },
+})
+```
+
+支持 `ListBuckets`、Bucket 创建/HEAD/删除、`PutObject`、`GetObject`/Range、`HeadObject`、`DeleteObject`、`DeleteObjects`、`ListObjectsV2`、`CopyObject`、Presigned GET，以及最多 10000 个 part 的 multipart 上传。Multipart part 会先写入 StorageDriver 的临时 key，完成时按顺序合并；因此它适合单机 Lite，不是大规模并行对象组装服务。
+
+S3 对象和 multipart 完成后的总大小上限为 64 MiB，同时遵守 bucket 的大小、MIME 类型限制及项目默认大小限制。Multipart 完成请求必须明确列出升序且不重复的 part；XML 请求体上限为 2 MiB。
+项目最多保留 128 个活跃 multipart 上传、10000 个临时 part 和 256 MiB 临时数据。上传 24 小时后过期，启动和后续 multipart 请求会清理过期数据；删除 bucket 时也会清理其临时分片。
+
+第一版明确限制：只支持 path-style，不支持 virtual-hosted-style、S3 ACL/Bucket Policy、Versioning、Object Lock、Replication、S3 Select 和 `STREAMING-*` SigV4 payload。S3 凭据是服务级凭据，默认绕过 RLS；需要隔离时用 `SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS` 限定 bucket。S3 写入仍使用与普通 Storage API 相同的 bucket/object 元数据和 StorageDriver。
 
 ### 兼容范围
 
@@ -743,6 +766,9 @@ Environment variables:
 - `SUPACLOUD_LITE_STORAGE_DIR`
 - `SUPACLOUD_LITE_STORAGE_BACKEND`: `fs` (default), `memory`, or `s3`
 - `SUPACLOUD_LITE_S3_PREFIX`: S3 object key prefix, can be overridden by `--s3-prefix`
+- `SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID` / `SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY`: SigV4 credentials enabling the inbound `/storage/v1/s3` endpoint; set both together
+- `SUPACLOUD_LITE_S3_ENDPOINT_REGION`: SigV4 region expected by the inbound S3 endpoint, default `us-east-1`
+- `SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS`: comma-separated bucket allowlist for the inbound endpoint; empty means every project bucket
 - `SUPACLOUD_LITE_POSTGRES_MIRROR`: HTTPS prefix used to proxy native-engine PostgreSQL release downloads, for example `https://ghproxy.net/`
 - `SUPACLOUD_LITE_ENGINE`: `pglite` (default) or `native`
 - `SUPACLOUD_LITE_REPLICATION_PROFILE`: explicit `powersync` opt-in for the native engine only
@@ -916,6 +942,26 @@ proxy.
 See repository document `docs/lite-runtime-compatibility.md` for configuration
 and acceptance boundaries. Run `bun run benchmark` (or add `--native`) in the
 source package for a synthetic baseline, not a production performance claim.
+
+### S3-compatible endpoint
+
+When `SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID` and `SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY` are set, Lite mounts a SigV4 + XML S3 endpoint at `/storage/v1/s3`. Configure AWS SDKs with a path-style endpoint:
+
+```ts
+const s3 = new S3Client({
+  endpoint: 'https://example.com/storage/v1/s3',
+  region: 'us-east-1',
+  forcePathStyle: true,
+  credentials: { accessKeyId, secretAccessKey },
+})
+```
+
+It supports `ListBuckets`, bucket create/HEAD/delete, `PutObject`, `GetObject`/Range, `HeadObject`, `DeleteObject`, `DeleteObjects`, `ListObjectsV2`, `CopyObject`, presigned GET, and multipart uploads with up to 10000 parts. Multipart parts are staged in the StorageDriver and concatenated on completion; this is suitable for single-node Lite, not a distributed object-assembly service.
+
+S3 objects, including completed multipart uploads, are limited to 64 MiB and also honor bucket size/MIME restrictions and the project default size limit. Completion requests must explicitly list unique parts in ascending order. XML request bodies are limited to 2 MiB.
+Each project allows at most 128 active uploads, 10000 staged parts and 256 MiB of staged bytes. Uploads expire after 24 hours and are reclaimed at startup and on subsequent multipart requests. Bucket deletion also removes its staged multipart data.
+
+The first version deliberately excludes virtual-hosted-style addressing, S3 ACL/Bucket Policy, Versioning, Object Lock, Replication, S3 Select, and `STREAMING-*` SigV4 payloads. S3 credentials are service-level and bypass RLS by default; use `SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS` to restrict buckets. S3 writes use the same bucket/object metadata and StorageDriver as the normal Storage API.
 
 ### Compatibility Scope
 
