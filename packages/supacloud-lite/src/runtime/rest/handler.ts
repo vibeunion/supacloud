@@ -11,6 +11,13 @@ import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './
 import { errorToResponse, jsonResponse } from './errors.js'
 import { ParseError, parseQuery, type ParsedQuery } from './parse.js'
 
+/** Internal throw used to roll back a successful mutation while preserving its result. */
+class RollbackSignal extends Error {
+  constructor(public readonly result: unknown) {
+    super('rollback requested by Prefer: tx=rollback')
+  }
+}
+
 /** Parsed `Prefer` header directives that shape a request's behavior/response. */
 interface Prefer {
   /** `return=` - whether a mutation echoes the rows, nothing, or only headers */
@@ -21,6 +28,8 @@ interface Prefer {
   resolution?: 'merge-duplicates' | 'ignore-duplicates'
   /** `missing=` - treat columns absent from an insert body as their default or as null */
   missing?: 'default' | 'null'
+  /** `tx=` - roll a successful mutation back while still returning its response */
+  tx?: 'commit' | 'rollback'
 }
 
 /** Parse a comma-separated `Prefer` header; unknown tokens are ignored. */
@@ -33,6 +42,7 @@ function parsePrefer(header: string | null): Prefer {
     else if (k === 'count') prefer.count = v as Prefer['count']
     else if (k === 'resolution') prefer.resolution = v as Prefer['resolution']
     else if (k === 'missing') prefer.missing = v as Prefer['missing']
+    else if (k === 'tx' && (v === 'commit' || v === 'rollback')) prefer.tx = v
   }
   return prefer
 }
@@ -197,14 +207,18 @@ export class RestHandler {
           })
         }
         const built = builder.buildSelect(table, { count: prefer.count !== undefined })
+        const countMode = prefer.count
         const { rows, count } = await this.db.withContext(ctx, async (query) => {
           // Views and RLS predicates can call functions that write, even in SELECTs.
           await query('set transaction read only')
           const res = await query(built.sql, built.params)
           let count: number | null = null
           if (built.countSql) {
-            const c = await query(built.countSql, [])
-            count = (c.rows[0] as { count: number }).count
+            count = countMode === 'planned'
+              ? await plannedCount(query, built.countSql)
+              : countMode === 'estimated'
+                ? await estimatedCount(query, schema, table, built.countSql)
+                : (await query<{ count: number }>(built.countSql, [])).rows[0]?.count ?? 0
           }
           return { rows: (res.rows[0] as { body: unknown[] }).body, count }
         })
@@ -279,19 +293,32 @@ export class RestHandler {
       cdc: { schema: string; table: string; type: 'INSERT' | 'UPDATE' | 'DELETE' } | null
     }
   ): Promise<Response> {
-    const { rows, affected } = await this.db.withContext(ctx, async (query) => {
-      const res = await query(built.sql, built.params)
-      if (opts.queryReturning) {
-        const rows = (res.rows[0] as { body: unknown[] }).body
-        // Reject singular responses before committing writes or publishing CDC.
-        if (opts.wantsObject && !opts.wantsCsv) assertObjectCardinality(rows)
-        return { rows, affected: null }
-      }
-      return { rows: null, affected: res.affectedRows ?? 0 }
-    })
+    let rolledBack = false
+    let result: { rows: unknown[] | null; affected: number | null }
+    try {
+      result = await this.db.withContext(ctx, async (query) => {
+        const res = await query(built.sql, built.params)
+        const value: { rows: unknown[] | null; affected: number | null } = opts.queryReturning
+          ? (() => {
+              const rows = (res.rows[0] as { body: unknown[] }).body
+              // Reject singular responses before committing writes or publishing CDC.
+              if (opts.wantsObject && !opts.wantsCsv) assertObjectCardinality(rows)
+              return { rows, affected: null }
+            })()
+          : { rows: null, affected: res.affectedRows ?? 0 }
+        if (opts.prefer.tx === 'rollback') throw new RollbackSignal(value)
+        return value
+      })
+    } catch (error) {
+      if (!(error instanceof RollbackSignal)) throw error
+      result = error.result as { rows: unknown[] | null; affected: number | null }
+      rolledBack = true
+    }
+    const { rows, affected } = result
 
-    // synthesize CDC events for trigger-less engines (pg-mem)
-    if (opts.cdc && rows) {
+    // synthesize CDC events for trigger-less engines (pg-mem), but never for
+    // a transaction the caller explicitly rolled back.
+    if (opts.cdc && rows && !rolledBack) {
       this.db.emitCdc(opts.cdc, rows as Record<string, unknown>[])
     }
 
@@ -528,6 +555,29 @@ function assertObjectCardinality(rows: unknown[]): void {
       hint: null,
     })
   }
+}
+
+async function plannedCount(query: Querier, countSql: string): Promise<number> {
+  const result = await query(`explain (format json) ${countSql}`, [])
+  const raw = (result.rows[0] as Record<string, unknown> | undefined)?.['QUERY PLAN']
+  const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw
+  const plans = Array.isArray(parsed) ? parsed : []
+  const first = plans[0]
+  const plan = first !== null && typeof first === 'object' ? (first as Record<string, unknown>)['Plan'] : undefined
+  const rows = plan !== null && typeof plan === 'object' ? (plan as Record<string, unknown>)['Plan Rows'] : undefined
+  const count = Number(rows)
+  return Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0
+}
+
+async function estimatedCount(query: Querier, schema: string, table: string, fallbackSql: string): Promise<number> {
+  const relation = `${quoteIdent(schema)}.${quoteIdent(table)}`
+  const result = await query<{ estimate: number | string }>(
+    `select reltuples::bigint as estimate from pg_class where oid = $1::regclass`,
+    [relation],
+  )
+  const estimate = Number(result.rows[0]?.estimate)
+  // ANALYZE may not have run in a fresh Lite project; fall back to the planner.
+  return Number.isFinite(estimate) && estimate >= 0 ? estimate : plannedCount(query, fallbackSql)
 }
 
 function pickOverload(schema: string, name: string, fns: FunctionInfo[], providedNames: string[]): FunctionInfo {

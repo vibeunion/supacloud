@@ -34,6 +34,14 @@ Scenario: Strict function defaults
   And invalid declarations and broken functions prevent startup
   And development mode preserves its existing defaults
 
+Scenario: PostgREST count strategies and rollback preference
+  Given a GET request with Prefer: count=planned or count=estimated
+  Then Content-Range contains a planner/statistics estimate instead of an exact count
+  And exact count remains the default for count=exact
+  Given a successful mutation with Prefer: tx=rollback
+  Then the response reflects the would-be write
+  And the transaction is rolled back without CDC or webhook side effects
+
 Scenario: Diagnose and measure without changing project state
   Given an uninitialized project or an existing project
   When capability doctor runs
