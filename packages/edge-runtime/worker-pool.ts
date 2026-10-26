@@ -206,6 +206,20 @@ function withRuntimeFunctionVersion(
   });
 }
 
+type WorkerLifecycleHandlers = {
+  onMessage(message: WorkerResponseMessage): void;
+  onError(error: Error): void;
+  onExit(): void;
+};
+
+type WorkerResponseMessage = WorkerPreheatMessage & {
+  type?: string; status?: number; headers?: Record<string, string | string[]>;
+  body?: ArrayBuffer | null; port?: MessagePort; moduleCacheHit?: boolean;
+  moduleCacheSize?: number; timestamp?: string; stream?: "stdout" | "stderr";
+  level?: string; message?: string; heapSize?: number; heapCapacity?: number;
+  extraMemorySize?: number; importedModuleBytes?: number; importedModuleCount?: number; waitUntilPending?: boolean;
+};
+
 type WorkerControlMessage =
   | { type: "invalidate_module"; functionId: string }
   | { type: "invalidate_project"; projectRef: string };
@@ -446,6 +460,7 @@ export class WorkerPool {
       parkedTimer?: ReturnType<typeof setTimeout>;
       surplusTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
+      active?: WorkerLifecycleHandlers;
     }
   >();
   private parkedWorkers = new Set<Worker>();
@@ -522,7 +537,30 @@ export class WorkerPool {
     this.totalWorkerCreateMs += performance.now() - start;
     this.workers.push(w);
     this.workerMetadata.set(w, { generation: this.workerGeneration });
-    w.once("exit", () => this.onWorkerExit(w));
+    // Request routing is a per-worker dispatch, not a per-request listener: a
+    // warm slot multiplexes executions over its lifetime, so installing and
+    // tearing down three listeners on every dispatch shows up as measurable
+    // EventEmitter overhead on the hot path.
+    w.on("message", (message: WorkerResponseMessage) => {
+      this.workerMetadata.get(w)?.active?.onMessage(message);
+    });
+    w.on("error", (error: Error) => {
+      const active = this.workerMetadata.get(w)?.active;
+      if (active) {
+        active.onError(error);
+        return;
+      }
+      // No execution owns this worker; an unowned error would otherwise be an
+      // unhandled emitter error, so drop the slot instead of leaking it.
+      console.warn("[Pool] Idle worker error; replacing", error);
+      if (!this.draining && (this.activeWorkers.has(w) || this.parkedWorkers.has(w))) {
+        this.retireWorker(w);
+      }
+    });
+    w.once("exit", () => {
+      this.workerMetadata.get(w)?.active?.onExit();
+      this.onWorkerExit(w);
+    });
     return w;
   }
 
@@ -834,19 +872,25 @@ export class WorkerPool {
     let body: ArrayBuffer | null = null;
     let cancellationRequested = false;
     const execStart = performance.now();
-    const resolveOnce = (response: Response) => {
+    const resolveOnce = (response: Response, fromWorker = false) => {
       if (resolved) return;
       resolved = true;
-      resolve(started ? withRuntimeFunctionVersion(response, opts.functionVersion) : response);
+      // Worker responses already carry the runtime-owned version header, so the
+      // hot path returns them untouched. Locally built responses (cancellations,
+      // timeouts, crashes) still need the header stamped when the execution
+      // actually started.
+      resolve(started && !fromWorker
+        ? withRuntimeFunctionVersion(response, opts.functionVersion)
+        : response);
     };
     const cleanup = () => {
       finished = true;
       clearTimeout(timeout);
       clearTimeout(waitTimer);
       clearTimeout(cancelTimer);
-      worker.removeListener("message", onMessage);
-      worker.removeListener("error", onError);
-      worker.removeListener("exit", onExit);
+      if (this.workerMetadata.get(worker)?.active === handlers) {
+        this.workerMetadata.get(worker)!.active = undefined;
+      }
       signal.removeEventListener("abort", cancel);
       this.inFlight.delete(opts.executionKey);
       inputLease.release();
@@ -904,13 +948,7 @@ export class WorkerPool {
     };
     const onError = (error: Error) => retireWithFailure(500, error);
     const onExit = () => retireWithFailure(500, new Error("Function worker exited"));
-    const onMessage = (msg: {
-      type?: string; status?: number; headers?: Record<string, string | string[]>;
-      body?: ArrayBuffer | null; port?: MessagePort; moduleCacheHit?: boolean;
-      moduleCacheSize?: number; timestamp?: string; stream?: "stdout" | "stderr";
-      level?: string; message?: string; heapSize?: number; heapCapacity?: number;
-      extraMemorySize?: number; importedModuleBytes?: number; importedModuleCount?: number; waitUntilPending?: boolean;
-    }) => {
+    const onMessage = (msg: WorkerResponseMessage) => {
       if (finished) return;
       if (msg.type === "execution_started") { opts.onExecutionStarted?.(); return; }
       if (msg.type === "log") {
@@ -920,7 +958,7 @@ export class WorkerPool {
         return;
       }
       if (msg.type === "response_complete") {
-        if (msg.waitUntilPending && pendingResponse) { resolveOnce(pendingResponse); pendingResponse = undefined; }
+        if (msg.waitUntilPending && pendingResponse) { resolveOnce(pendingResponse, true); pendingResponse = undefined; }
         clearTimeout(timeout);
         waitTimer = setTimeout(() => retireWithFailure(504, new Error("EdgeRuntime.waitUntil timed out")),
           Math.min(WAIT_UNTIL_TIMEOUT_MS, opts.limits?.wait_until_timeout_ms ?? WAIT_UNTIL_TIMEOUT_MS));
@@ -932,7 +970,7 @@ export class WorkerPool {
         clearTimeout(waitTimer);
         this.recordWorkerMemory(worker, msg);
         complete();
-        if (pendingResponse) { resolveOnce(pendingResponse); pendingResponse = undefined; }
+        if (pendingResponse) { resolveOnce(pendingResponse, true); pendingResponse = undefined; }
         return;
       }
       if (cancellationRequested) { msg.port?.close(); return; }
@@ -944,6 +982,15 @@ export class WorkerPool {
       for (const [name, value] of Object.entries(msg.headers ?? {})) {
         if (Array.isArray(value)) for (const entry of value) headers.append(name, entry);
         else headers.set(name, value);
+      }
+      // Stamp the runtime-owned version header here so the response can be
+      // handed back as-is instead of being cloned into a second Response.
+      if (started) {
+        if (opts.functionVersion === null || opts.functionVersion === undefined) {
+          headers.delete(FUNCTION_VERSION_HEADER);
+        } else {
+          headers.set(FUNCTION_VERSION_HEADER, opts.functionVersion);
+        }
       }
       if (msg.port) {
         streamDone = false;
@@ -959,7 +1006,7 @@ export class WorkerPool {
         });
         if (!deliveryDone) this.responseDeliveries.set(opts.executionKey, received.fail);
         failStream = received.fail;
-        resolveOnce(new Response(received.stream, { status: msg.status, headers }));
+        resolveOnce(new Response(received.stream, { status: msg.status, headers }), true);
       } else {
         try { outputLease.resize(msg.body?.byteLength ?? 0); }
         catch (error) { requestCancellation(503, error as Error); return; }
@@ -979,9 +1026,10 @@ export class WorkerPool {
       }
     };
     this.inFlight.set(opts.executionKey, { cancel, cancelKey: opts.cancelKey });
-    worker.on("message", onMessage);
-    worker.once("error", onError);
-    worker.once("exit", onExit);
+    const metadata = this.workerMetadata.get(worker);
+    if (!metadata) throw new Error("Missing worker metadata");
+    const handlers: WorkerLifecycleHandlers = { onMessage, onError, onExit };
+    metadata.active = handlers;
     signal.addEventListener("abort", cancel, { once: true });
     if (signal.aborted) { cancel(); return; }
     try {
@@ -1549,28 +1597,39 @@ export class WorkerPool {
     request: WorkerPreheatRequest,
     tlsPolicy: EdgeFetchTlsPolicy,
   ): Promise<WorkerPreheatResult> {
+    const metadata = this.workerMetadata.get(request.worker);
+    if (!metadata) return Promise.resolve(this.failedPreheat(request, "Function worker exited before preheat"));
     return new Promise((resolve) => {
+      let finished = false;
       const finish = (preheat: WorkerPreheatResult) => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timeout);
-        request.worker.removeListener("message", onMessage);
+        if (metadata.active === handlers) metadata.active = undefined;
         resolve(preheat);
       };
+      const fail = (error: string) => {
+        if (!finished) finish(this.failedPreheat(request, error));
+      };
       const onMessage = (message: WorkerPreheatMessage) => {
+        if (finished) return;
         const preheat = this.preheatMessageResult(request, message);
         if (preheat) finish(preheat);
       };
       const timeout = setTimeout(() => {
-        finish(this.failedPreheat(request, "Worker preheat timed out"));
+        fail("Worker preheat timed out");
       }, this.config.preheatTimeoutMs ?? DEFAULT_PREHEAT_TIMEOUT_MS);
-      request.worker.on("message", onMessage);
+      const handlers: WorkerLifecycleHandlers = {
+        onMessage,
+        onError: (error) => fail(error.message),
+        onExit: () => fail("Function worker exited during preheat"),
+      };
+      metadata.active = handlers;
       try {
         this.postPreheatMessage(request, tlsPolicy);
       } catch (error) {
         console.warn("[Pool] Failed to dispatch worker preheat", error);
-        finish(this.failedPreheat(
-          request,
-          error instanceof Error ? error.message : String(error),
-        ));
+        fail(error instanceof Error ? error.message : String(error));
       }
     });
   }

@@ -19,6 +19,20 @@ async function waitForNaturalExits(pool: WorkerPool, expected: number): Promise<
   throw new Error(`Only ${pool.snapshotMetrics("stress").stress_total_natural_worker_exits} workers exited naturally`);
 }
 
+async function waitForIdleWorkers(pool: WorkerPool, expected: number): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const metrics = pool.snapshotMetrics("stress");
+    if (
+      metrics.stress_active_workers === 0
+      && metrics.stress_response_deliveries === 0
+      && metrics.stress_idle_workers === expected
+    ) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Workers did not become idle: ${JSON.stringify(pool.snapshotMetrics("stress"))}`);
+}
+
 async function runStress(): Promise<void> {
   const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-stress-"));
   const functionPath = join(projectRoot, "fetch.ts");
@@ -73,6 +87,7 @@ async function runStress(): Promise<void> {
 
     const expectedRetirements = hardRetirement ? CHURN_BATCHES * REQUESTS_PER_BATCH : 0;
     await waitForNaturalExits(pool, expectedRetirements);
+    await waitForIdleWorkers(pool, 2);
     const metrics = pool.snapshotMetrics("stress");
     console.log(JSON.stringify({
       survived: true,

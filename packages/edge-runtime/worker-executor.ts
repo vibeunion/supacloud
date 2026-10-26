@@ -127,17 +127,36 @@ const importedModules = new Set<string>();
 let importedModuleBytes = 0;
 const collectWorkerHeap = Bun.gc.bind(Bun);
 const workerHeapBudget = positiveBytes(process.env.EDGE_WORKER_HEAP_BUDGET_BYTES, 128 * 1024 * 1024);
-function memorySnapshot() {
-  let stats = heapStats();
-  // A sampled heap includes collectible buffers. Reclaim only above the soft
-  // budget before deciding whether the completed worker actually needs retirement.
-  if (stats.heapSize > workerHeapBudget) {
-    collectWorkerHeap(true);
-    stats = heapStats();
+// `Bun.jsc.heapStats()` walks the heap: it costs hundreds of microseconds on a
+// warm worker and milliseconds once a tenant has live data. Reporting live heap
+// on every execution made that walk the most expensive part of a small request,
+// so the snapshot is sampled on an interval and reused in between. Retirement
+// decisions and the pool gauges only need eventually-fresh numbers.
+const memorySampleIntervalMs = (() => {
+  const raw = process.env.EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS;
+  const parsed = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 250;
+})();
+let sampledHeap = { heapSize: 0, heapCapacity: 0, extraMemorySize: 0 };
+let sampledHeapAt = Number.NEGATIVE_INFINITY;
+function memorySnapshot(force = false) {
+  const now = performance.now();
+  if (force || now - sampledHeapAt >= memorySampleIntervalMs) {
+    let stats = heapStats();
+    // A sampled heap includes collectible buffers. Reclaim only above the soft
+    // budget before deciding whether the completed worker actually needs retirement.
+    if (stats.heapSize > workerHeapBudget) {
+      collectWorkerHeap(true);
+      stats = heapStats();
+    }
+    sampledHeap = {
+      heapSize: stats.heapSize,
+      heapCapacity: stats.heapCapacity,
+      extraMemorySize: stats.extraMemorySize,
+    };
+    sampledHeapAt = performance.now();
   }
-  return { heapSize: stats.heapSize, heapCapacity: stats.heapCapacity,
-    extraMemorySize: stats.extraMemorySize, importedModuleBytes,
-    importedModuleCount: importedModules.size };
+  return { ...sampledHeap, importedModuleBytes, importedModuleCount: importedModules.size };
 }
 
 function evictOldestModule() {
@@ -769,7 +788,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         await assertAttestedArtifact(msg.functionPath, msg.attestation);
         postToParent({
           type: "preheat_done",
-          ...memorySnapshot(),
+          ...memorySnapshot(true),
           functionId: msg.functionId,
           moduleCacheHit: moduleLoad.cacheHit,
           moduleCacheSize: moduleLoad.moduleCacheSize,
