@@ -327,3 +327,28 @@ describe("cgroup memory pressure recovery", () => {
     expect(errors).toHaveLength(1);
   });
 });
+
+test("memory.max supplies a proactive threshold when memory.high is unlimited", async () => {
+  const snapshot = await readMemoryPressureSnapshot(["/group"], reader({
+    "/group/memory.current": "800", "/group/memory.high": "max",
+    "/group/memory.max": "1000", "/group/memory.events": "high 0",
+  }));
+  expect(snapshot).toMatchObject({ currentBytes: 800, highBytes: 900, source: "max" });
+  const changes: boolean[] = [];
+  const monitor = createMemoryPressureMonitor({
+    sample: async () => snapshot, onPressure() {}, onError(error) { throw error; },
+    onAdmissionStateChange: (state) => changes.push(state.blocked),
+  });
+  await monitor.poll();
+  expect(changes).toEqual([true]);
+});
+
+test("explicit RSS budget works without cgroups and compares against the most pressured ancestor", async () => {
+  const { sampleRuntimeMemory } = await import("./memory-pressure");
+  expect(await sampleRuntimeMemory([], 1000, 850, reader({})))
+    .toMatchObject({ cgroup: "process-rss", currentBytes: 850, highBytes: 1000, source: "rss" });
+  expect(await sampleRuntimeMemory([], undefined, 850, reader({}))).toBeNull();
+  expect(await sampleRuntimeMemory(["/group"], 1000, 500, reader({
+    "/group/memory.current": "900", "/group/memory.high": "1000", "/group/memory.events": "high 0",
+  }))).toMatchObject({ cgroup: "/group", currentBytes: 900, highBytes: 1000 });
+});

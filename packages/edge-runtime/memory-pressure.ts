@@ -3,6 +3,7 @@ import { posix as path } from "node:path";
 
 export type MemoryPressureSnapshot = {
   cgroup: string;
+  source?: "max" | "rss";
   currentBytes: number;
   highBytes: number;
   highEvents: number;
@@ -77,17 +78,23 @@ export async function readMemoryPressureSnapshot(
   let highest: MemoryPressureSnapshot | null = null;
   for (const directory of directories) {
     try {
-      const [current, high, events] = await Promise.all([
+      const [current, high, maximum, events] = await Promise.all([
         readText(path.join(directory, "memory.current")),
-        readText(path.join(directory, "memory.high")),
-        readText(path.join(directory, "memory.events")),
+        readText(path.join(directory, "memory.high")).catch(() => "max"),
+        readText(path.join(directory, "memory.max")).catch(() => "max"),
+        readText(path.join(directory, "memory.events")).catch(() => "high 0"),
       ]);
       const currentBytes = parseCounter(current);
-      const highBytes = parseCounter(high);
+      const configuredHigh = parseCounter(high);
+      const maxBytes = parseCounter(maximum);
+      // Reserve 10% headroom before a hard OOM boundary when memory.high is absent.
+      const maxThreshold = maxBytes && Math.floor(maxBytes * 0.9);
+      const useMax = !!maxThreshold && (!configuredHigh || maxThreshold < configuredHigh);
+      const highBytes = useMax ? maxThreshold : configuredHigh;
       const highLine = events.split("\n").find((line) => /^high\s/.test(line));
       const highEvents = highLine ? parseCounter(highLine.replace(/^high\s+/, "")) : null;
-      if (currentBytes === null || highBytes === null || highEvents === null) continue;
-      const snapshot = { cgroup: directory, currentBytes, highBytes, highEvents };
+      if (currentBytes === null || !highBytes || highEvents === null) continue;
+      const snapshot: MemoryPressureSnapshot = { cgroup: directory, currentBytes, highBytes, highEvents, ...(useMax ? { source: "max" as const } : {}) };
       if (!highest || currentBytes / Math.max(1, highBytes)
         > highest.currentBytes / Math.max(1, highest.highBytes)) highest = snapshot;
     } catch {
@@ -95,6 +102,20 @@ export async function readMemoryPressureSnapshot(
     }
   }
   return highest;
+}
+
+/** Explicit RSS budget also works outside Linux/cgroup v2. Never infer it from host RAM. */
+export async function sampleRuntimeMemory(
+  directories: readonly string[], rssBudget: number | undefined,
+  rss = process.memoryUsage().rss, readText: ReadText = readTextFile,
+): Promise<MemoryPressureSnapshot | null> {
+  const cgroup = await readMemoryPressureSnapshot(directories, readText);
+  const processSnapshot: MemoryPressureSnapshot | null = rssBudget ? {
+    cgroup: "process-rss", source: "rss", currentBytes: rss, highBytes: rssBudget, highEvents: 0,
+  } : null;
+  if (!processSnapshot) return cgroup;
+  if (!cgroup || rss / rssBudget! > cgroup.currentBytes / cgroup.highBytes) return processSnapshot;
+  return cgroup;
 }
 
 export function createMemoryPressureMonitor(options: {
@@ -126,7 +147,7 @@ export function createMemoryPressureMonitor(options: {
       const stable = previous !== null && comparable && !throttling
         && snapshot.highEvents === previous.highEvents
         && snapshot.currentBytes <= previous.currentBytes;
-      if (ratio >= 1 || (ratio >= ADMISSION_BLOCK_RATIO
+      if (ratio >= 1 || (snapshot.source !== undefined && ratio >= ADMISSION_BLOCK_RATIO) || (ratio >= ADMISSION_BLOCK_RATIO
         && (throttling || (admissionRecovering && comparable && !stable)))) {
         admissionBlocked = true;
         admissionRecovering = false;

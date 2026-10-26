@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "bench:memory": "bun worker-memory-benchmark.ts",
     "bench:projects": "bun worker-project-benchmark.ts",
     "dev": "bun run --watch server.ts",
     "start": "bun run server.ts",

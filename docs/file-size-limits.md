@@ -53,22 +53,22 @@ file-count and format protections remain independent of the byte limit.
 
 ## Hosted Edge Runtime Requests
 
-The hosted Edge Runtime defaults to a 500 MiB request-body limit. Set
-`EDGE_MAX_BODY_SIZE_MB=500` on the runtime service to configure it, or use the
-installer's `edge_max_body_size_mb` option. Despite the environment variable's
-name, units are MiB (`1024 * 1024` bytes). Restart the runtime after a change.
-
-An explicit positive setting is preserved. Omitted or invalid settings fall
-back to 500 MiB. To retain the previous default on upgrade, set
-`EDGE_MAX_BODY_SIZE_MB=30`. The worker still enforces any smaller
-function-level `max_request_body_bytes`; external reverse proxies may impose
-their own lower limit.
+The hosted Edge Runtime source defaults to a **30 MiB** request-body limit.
+Set `EDGE_MAX_BODY_SIZE_MB` on the runtime service, or the installer's
+`edge_max_body_size_mb` option, to override it. Units are MiB (`1024 * 1024`
+bytes). Omitted or invalid runtime settings fall back to 30 MiB; the HTTP
+listener has a 128 MiB minimum ceiling. The worker still enforces any smaller
+function-level `max_request_body_bytes`. External proxies can impose lower limits.
+Restart the runtime after changing configuration.
 
 This is a whole-request limit, not a file-payload allowance: multipart encoding
-adds bytes, so a 500 MiB file needs a larger configured request-body limit.
-Large bodies are buffered by the worker; review memory and concurrency before
-restarting with the larger default. No database or existing bucket settings are
-rewritten.
+adds bytes. Uploads are checked incrementally, before a contiguous Worker
+transfer is allocated. Accepted uploads are still buffered before the handler
+runs; this preserves early 413 behavior even when the handler ignores its body.
+A process-wide buffer budget bounds admission across both worker pools and can
+return 503 before the per-request limit is reached. Increase that budget together
+with unusually large upload limits, accounting for collection and transfer copies.
+See [Edge Function memory controls](edge-function-memory.md).
 
 Management API project-scoped image transforms use the same 500 MiB default for
 source and `max_bytes` output filtering. Set
