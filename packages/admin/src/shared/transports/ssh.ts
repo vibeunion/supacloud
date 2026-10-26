@@ -7,6 +7,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Client, type ClientChannel } from "ssh2";
+import { parseControlPlaneSafetyReceipt } from "../releases/control-plane-safety-receipt";
 type SftpClient = {
     fastPut: (localPath: string, remotePath: string, cb: (err?: Error | null) => void) => void;
     writeFile: (
@@ -139,20 +140,28 @@ const BLOCKED_COMMANDS = [
     "crontab -r", "chmod -R 777 /",
 ];
 
-const TERMINAL_CONTROL_SEQUENCE = /\u001B\[[0-9;?]*[ -/]*[@-~]|\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B[@-Z\\-_]/g;
+const TERMINAL_CONTROL_SEQUENCE = /\u001B\[[0-9;?]*[ -/]*[@-~]|\u001B\](?:[^\u0007\u001B]|\u001B(?!\\))*?(?:\u0007|\u001B\\)|\u001B[@-Z\\-_]/g;
 const DISALLOWED_CONTROL_CHARACTER = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
-// Upgrade receipts include counts and flags whose names merely contain "key" or
-// "secret". They are not credentials and must stay readable for status projection.
-const UPGRADE_SAFETY_METADATA_FIELDS = new Set([
-    "current_key_checkpoint_present",
-    "deprecated_webhook_secrets",
-    "opaque_key_backfill_projects",
-    "stored_secret_values",
-]);
+const CONTROL_PLANE_SAFETY_PREFIXES = [
+    "SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT=",
+    "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=",
+];
 
 function structuredFieldCarriesSecret(fieldName: string): boolean {
-    return !UPGRADE_SAFETY_METADATA_FIELDS.has(fieldName) && SENSITIVE_STRUCTURED_FIELD.test(fieldName);
+    return SENSITIVE_STRUCTURED_FIELD.test(fieldName);
+}
+
+function isValidatedUpgradeSafetyMetadataLine(line: string): boolean {
+    const prefix = CONTROL_PLANE_SAFETY_PREFIXES.find(candidate => line.startsWith(candidate));
+    if (!prefix) return false;
+    try {
+        parseControlPlaneSafetyReceipt(line, prefix);
+        return true;
+    } catch {
+        // Invalid receipts are untrusted output, not metadata exemptions.
+        return false;
+    }
 }
 
 export function stripTerminalControls(output: string): string {
@@ -214,18 +223,15 @@ function structuredSensitiveFieldsAreRedacted(message: string): boolean {
         const parsedDiagnostic = JSON.parse(normalizedQuotes);
         if (!parsedDiagnostic || typeof parsedDiagnostic !== "object") return false;
         let foundSensitiveField: boolean = false;
-        const pending = [parsedDiagnostic];
-        while (pending.length > 0) {
-            const current = pending.pop();
-            if (!current || typeof current !== "object") continue;
-            for (const [fieldName, fieldValue] of Object.entries(current)) {
-                if (structuredFieldCarriesSecret(fieldName)) {
-                    foundSensitiveField = true;
-                    if (fieldValue !== "[REDACTED]") return false;
-                } else if (fieldValue && typeof fieldValue === "object") {
-                    pending.push(fieldValue);
-                }
-            }
+        // Inspect source fields too: JSON.parse discards earlier duplicate values.
+        for (const token of normalizedQuotes.matchAll(/"(?:\\.|[^"\\])*"/g)) {
+            const following = normalizedQuotes.slice(token.index + token[0].length);
+            if (!/^\s*:/.test(following)) continue;
+            const fieldName = decodedStructuredFieldName(token[0].slice(1, -1));
+            if (fieldName !== null && !structuredFieldCarriesSecret(fieldName)) continue;
+            foundSensitiveField = true;
+            const literal = following.match(/^\s*:\s*("(?:\\.|[^"\\])*")/);
+            if (!literal || JSON.parse(literal[1]!) !== "[REDACTED]") return false;
         }
         return foundSensitiveField;
     } catch {
@@ -235,7 +241,9 @@ function structuredSensitiveFieldsAreRedacted(message: string): boolean {
 
 export function redactSshOutput(output: string): string {
     const redactedEscapedFields = output.split("\n").map(line => (
-        containsSensitiveStructuredField(line) && !structuredSensitiveFieldsAreRedacted(line)
+        containsSensitiveStructuredField(line)
+            && !isValidatedUpgradeSafetyMetadataLine(line)
+            && !structuredSensitiveFieldsAreRedacted(line)
             ? "[REDACTED: structured secret output]"
             : line
     )).join("\n");

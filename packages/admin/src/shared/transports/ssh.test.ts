@@ -16,6 +16,26 @@ import {
 
 const TEST_HOST_KEY = Buffer.from("supacloud-test-host-key");
 const TEST_HOST_FINGERPRINT = `SHA256:${createHash("sha256").update(TEST_HOST_KEY).digest("base64").replace(/=+$/, "")}`;
+const SAFETY_METADATA = {
+    backup_id: "control-plane-20260819T000000Z-00000000-0000-4000-8000-000000000001",
+    backup_directory: "/var/lib/supacloud/backups/control-plane-upgrades/control-plane-20260819T000000Z-00000000-0000-4000-8000-000000000001",
+    bytes: 2048,
+    completed_at: "2026-08-19T00:00:00.000Z",
+    sha256: "c".repeat(64),
+    schema: "supacloud.control-plane-upgrade-safety.v1",
+    current_key_checkpoint_present: true,
+    candidate_counts: {
+        deprecated_webhook_secrets: 0,
+        legacy_deployment_history_rows: 0,
+        legacy_project_config_rows: 0,
+        opaque_key_backfill_projects: 1,
+        stored_secret_values: 2,
+    },
+};
+
+function safetyMetadataLine(receipt: unknown = SAFETY_METADATA): string {
+    return `SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=${JSON.stringify(receipt)}`;
+}
 
 class FakeSshClient extends EventEmitter {
     connectOptions: Record<string, unknown> | undefined;
@@ -215,14 +235,7 @@ describe("SshTransport audit safety", () => {
     });
 
     test("does not treat upgrade safety metadata or terminal color as secret redaction", async () => {
-        const receipt = "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=" + JSON.stringify({
-            current_key_checkpoint_present: true,
-            candidate_counts: {
-                deprecated_webhook_secrets: 0,
-                opaque_key_backfill_projects: 1,
-                stored_secret_values: 2,
-            },
-        });
+        const receipt = safetyMetadataLine();
         const colored = `\u001b[32m${receipt}\u001b[0m\n\u001b]0;upgrade\u0007`;
         expect(redactSshOutput(receipt)).toBe(receipt);
         expect(stripTerminalControls(colored)).toBe(`${receipt}\n`);
@@ -243,6 +256,108 @@ describe("SshTransport audit safety", () => {
             expect(result.stdoutRedacted).toBe(false);
         } finally {
             transport.close();
+        }
+    });
+
+    test("only exempts numeric and boolean safety metadata at the receipt schema and path", () => {
+        for (const field of Object.keys(SAFETY_METADATA.candidate_counts).filter(name => /secret|key/.test(name))) {
+            // Boundaries: safe integer / negative / fractional / unsafe / string / array / object / null.
+            for (const invalidCount of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, "synthetic-secret", ["synthetic-secret"], { value: "synthetic-secret" }, null, true]) {
+                const output = safetyMetadataLine({
+                    ...SAFETY_METADATA,
+                    candidate_counts: { ...SAFETY_METADATA.candidate_counts, [field]: invalidCount },
+                });
+                expect(outputRequiresSecretRedaction(output)).toBe(true);
+                expect(redactSshOutput(output)).toBe("[REDACTED: structured secret output]");
+            }
+        }
+        for (const invalidFlag of ["synthetic-secret", ["synthetic-secret"], { value: "synthetic-secret" }, null, 1]) {
+            expect(outputRequiresSecretRedaction(safetyMetadataLine({
+                ...SAFETY_METADATA, current_key_checkpoint_present: invalidFlag,
+            }))).toBe(true);
+        }
+        for (const output of [
+            safetyMetadataLine({ ...SAFETY_METADATA, schema: "untrusted.schema" }),
+            safetyMetadataLine({ ...SAFETY_METADATA, backup_directory: "/tmp/untrusted" }),
+            safetyMetadataLine({ ...SAFETY_METADATA, nested: { stored_secret_values: "synthetic-secret" } }),
+            '{"stored_secret_values":2}',
+            '{"current_key_checkpoint_present":true}',
+            '{"stored_secret_values":"synthetic-secret"}',
+            '{"stored_secret_values":"synthetic-secret","stored_secret_values":"[REDACTED]"}',
+            String.raw`{\"stored_secret_values\":\"synthetic-secret\"}suffix`,
+            String.raw`{"stored\u005fsecret_values":"synthetic-secret"}`,
+            String.raw`{"stored\\u005fsecret_values":"synthetic-secret"}`,
+            String.raw`{stored\u{005f}secret_values:"synthetic-secret"}`,
+            safetyMetadataLine().replace('"stored_secret_values":2', '"stored_secret_values":"synthetic-secret","stored_secret_values":2'),
+            safetyMetadataLine().replace('"stored_secret_values":2', '"stored_secret_values":"synthetic-secret"'),
+            safetyMetadataLine().slice(0, -1),
+        ]) {
+            expect(outputRequiresSecretRedaction(output)).toBe(true);
+            expect(redactSshOutput(output)).not.toContain("synthetic-secret");
+        }
+        for (const prefix of ["SAFETY", "PREFLIGHT"]) {
+            const output = safetyMetadataLine().replace("UPGRADE_SAFETY=", `UPGRADE_${prefix}=`);
+            expect(outputRequiresSecretRedaction(output)).toBe(false);
+            expect(redactSshOutput(output)).toBe(output);
+        }
+        const boundaryReceipt = safetyMetadataLine({
+            ...SAFETY_METADATA,
+            current_key_checkpoint_present: false,
+            candidate_counts: { ...SAFETY_METADATA.candidate_counts, stored_secret_values: Number.MAX_SAFE_INTEGER },
+        });
+        expect(outputRequiresSecretRedaction(boundaryReceipt)).toBe(false);
+        expect(redactSshOutput(boundaryReceipt)).toBe(boundaryReceipt);
+    });
+
+    test("both collectors redact metadata smuggling and preserve validated receipts", async () => {
+        const receipt = safetyMetadataLine();
+        const client = new FakeSshClient();
+        const output = `${receipt}\n{"stored_secret_values":["synthetic-secret"]}\n`
+            + '{"stored_secret_values":"synthetic-secret","stored_secret_values":"[REDACTED]"}\n';
+        client.stdout = Buffer.from(output);
+        client.stderrOutput = Buffer.from(output);
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root", hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+        try {
+            const result = await transport.exec("hostname");
+            expect(result.stdout).toBe(`${receipt}\n[REDACTED: structured secret output]\n[REDACTED: structured secret output]\n`);
+            expect(result.stderr).toBe(result.stdout);
+            expect(result.stdoutRedacted).toBe(true);
+            expect(result.stderrRedacted).toBe(true);
+            expect(result.stdoutTruncated).toBe(false);
+            expect(result.stderrTruncated).toBe(false);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("OSC normalization stops at the first BEL or ST across multiple controls", async () => {
+        const receipt = safetyMetadataLine();
+        for (const firstTerminator of ["\u0007", "\u001b\\"]) {
+            for (const secondTerminator of ["\u0007", "\u001b\\"]) {
+                const output = `\u001b]0;before${firstTerminator}${receipt}\n\u001b]0;after${secondTerminator}`;
+                expect(stripTerminalControls(output)).toBe(`${receipt}\n`);
+                expect(outputRequiresSecretRedaction(output)).toBe(false);
+                const secretOutput = `\u001b]0;before${firstTerminator}POSTGRES_PASSWORD=synthetic-secret\n\u001b]0;after${secondTerminator}`;
+                expect(stripTerminalControls(secretOutput)).toBe("POSTGRES_PASSWORD=synthetic-secret\n");
+                expect(outputRequiresSecretRedaction(secretOutput)).toBe(true);
+                const client = new FakeSshClient();
+                client.stdout = Buffer.from(output);
+                client.stderrOutput = Buffer.from(secretOutput);
+                const transport = new SshTransport({
+                    host: "server.example.com", port: 22, username: "root", hostFingerprint: TEST_HOST_FINGERPRINT,
+                }, { clientFactory: () => client as never });
+                try {
+                    const result = await transport.exec("hostname");
+                    expect(result.stdout).toBe(`${receipt}\n`);
+                    expect(result.stdoutRedacted).toBe(false);
+                    expect(result.stderr).toBe("POSTGRES_PASSWORD=[REDACTED]\n");
+                    expect(result.stderrRedacted).toBe(true);
+                } finally {
+                    transport.close();
+                }
+            }
         }
     });
 
