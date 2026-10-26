@@ -6,6 +6,7 @@ import { createProjectReleasePreheatRoutes, PROJECT_PREHEAT_SCHEMA } from "./pro
 import { Elysia } from "elysia";
 import {
   WorkerPool,
+  resolveMaxConcurrentExecutions,
   resolveMaxHttpBodySizeBytes,
   resolveProjectWorkerCacheOptions,
   resolveWorkerReplacementBudget,
@@ -117,6 +118,7 @@ const WORKER_REPLACEMENT_BUDGET_OPTIONS = WORKER_REPLACEMENT_BUDGET === undefine
   ? {}
   : { maxWorkerReplacementsBeforeRecycle: WORKER_REPLACEMENT_BUDGET };
 const PROJECT_WORKER_CACHE_OPTIONS = resolveProjectWorkerCacheOptions(process.env);
+const MAX_CONCURRENT_EXECUTIONS = resolveMaxConcurrentExecutions(POOL_SIZE, process.env);
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const RUNTIME_INSTANCE_ID = process.env.EDGE_RUNTIME_INSTANCE_ID?.trim() || crypto.randomUUID();
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -354,6 +356,7 @@ const pool = new WorkerPool({
   size: AOT_CAPTURE ? 0 : POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
+  maxConcurrentExecutions: AOT_CAPTURE ? 0 : MAX_CONCURRENT_EXECUTIONS,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
   ...PROJECT_WORKER_CACHE_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,

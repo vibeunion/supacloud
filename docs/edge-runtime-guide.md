@@ -281,6 +281,28 @@ workload-specific override and validate capacity using the actual function
 workload, including module preheating and long-running requests, before
 increasing worker counts.
 
+### Request Concurrency
+
+`WORKER_POOL_SIZE` is the warm pool: workers that are created at startup and
+kept resident. It is not a hard concurrency ceiling. Most Functions spend their
+wall-clock time waiting on `fetch()` or a database round trip, so a warm worker
+that is waiting is idle rather than busy. When every warm worker is executing
+and requests are queued, the foreground pool creates a worker up to
+`EDGE_MAX_FUNCTION_CONCURRENCY` (default `4 × WORKER_POOL_SIZE`, so 16 for the
+default pool of 4) instead of serialising the queue behind the warm size.
+Surplus workers retire as soon as the queue drains, which keeps memory bounded
+without a separate idle-scale-down policy. Set the ceiling to `WORKER_POOL_SIZE`
+to restore the previous strict queueing behaviour; values below it are rejected
+at startup.
+
+Surplus retirements are planned right-sizing and are exempt from the
+worker-leak retirement count budget, so burst concurrency cannot trigger the
+restart fail-safe. The retirement age budget still applies: a surplus worker
+that does not exit within the retirement age limit is treated as a leak.
+Raising the ceiling trades memory for throughput; measure with the real Function
+workload, because CPU-bound handlers gain little and consume every extra
+thread.
+
 On cgroup v2 hosts, the runtime resolves its membership from `/proc/self/cgroup`
 and `/proc/self/mountinfo`. It samples `memory.current`, `memory.high`, and
 `memory.events` for that cgroup and its visible ancestors once per second.

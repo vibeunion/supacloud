@@ -100,6 +100,7 @@ const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
 const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_EXTRA_PROJECT_WORKERS = 2;
 const DEFAULT_PARKED_WORKER_IDLE_MS = 30_000;
+const DEFAULT_CONCURRENCY_MULTIPLIER = 4;
 // Bun/JSC retains fixed host memory after Worker exit, so bound churn before recycling the process.
 const DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE = 128;
 const MAX_WORKER_REPLACEMENTS_ENV = "EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE";
@@ -133,6 +134,34 @@ export function resolveProjectWorkerCacheOptions(env: Record<string, string | un
     maxExtraProjectWorkers: parse("EDGE_MAX_EXTRA_PROJECT_WORKERS"),
     parkedWorkerIdleMs: parse("EDGE_PARKED_WORKER_IDLE_MS"),
   };
+}
+
+/**
+ * Resolves how many Function invocations may run at once in one runtime process.
+ *
+ * Edge Functions are dominated by outbound I/O, so a worker slot that waits on
+ * `fetch` or a database round trip is idle rather than busy. The pool therefore
+ * grows beyond its warm size while requests are queued, and shrinks back to it
+ * when the queue drains. `EDGE_MAX_FUNCTION_CONCURRENCY` is a hard upper bound;
+ * values below the warm pool size are rejected because they would disable slots
+ * that already exist.
+ */
+export function resolveMaxConcurrentExecutions(
+  size: number,
+  env: Record<string, string | undefined>,
+): number {
+  const raw = env.EDGE_MAX_FUNCTION_CONCURRENCY;
+  if (raw === undefined || raw.trim() === "") {
+    return size * DEFAULT_CONCURRENCY_MULTIPLIER;
+  }
+  const value = Number(raw);
+  if (!/^\d+$/.test(raw.trim()) || !Number.isSafeInteger(value)) {
+    throw new Error("EDGE_MAX_FUNCTION_CONCURRENCY must be a non-negative safe integer");
+  }
+  if (value < size) {
+    throw new Error("EDGE_MAX_FUNCTION_CONCURRENCY must be at least WORKER_POOL_SIZE");
+  }
+  return value;
 }
 
 function cancelledResponse(): Response {
@@ -303,11 +332,18 @@ type WorkerPoolConfig = {
   onWorkerRecycleRequired?: (event: WorkerPoolRecycleRequired) => void;
   maxExtraProjectWorkers?: number;
   parkedWorkerIdleMs?: number;
+  /**
+   * Upper bound on concurrently executing Function invocations. Defaults to
+   * `size`, which keeps the historical queueing behaviour.
+   */
+  maxConcurrentExecutions?: number;
 };
 
 type RetiredWorker = {
   retiredAt: number;
   ageTimer: ReturnType<typeof setTimeout>;
+  /** False for planned surplus retirements, which are not leak evidence. */
+  countsTowardsBudget: boolean;
 };
 
 type GenerationRotationDisposition = "idle-retired" | "parked-retired" | "busy-tainted" | "already-tainted";
@@ -418,6 +454,8 @@ export class WorkerPool {
   private totalParkedWorkerReuses = 0;
   private totalProjectWorkerEvictions = 0;
   private totalWorkerCreateMs = 0;
+  private totalWorkerSurplusCreations = 0;
+  private totalWorkerSurplusRetirements = 0;
   private tainted = new Set<Worker>();
   private draining = false;
   private admissionRecovering = false;
@@ -431,6 +469,7 @@ export class WorkerPool {
   private readonly onWorkerRecycleRequired: (event: WorkerPoolRecycleRequired) => void;
   private readonly maxWorkers: number;
   private readonly parkedWorkerIdleMs: number;
+  private readonly maxConcurrentExecutions: number;
 
   constructor(private config: WorkerPoolConfig) {
     this.responseReadAheadBytes = config.responseReadAheadBytes
@@ -461,6 +500,11 @@ export class WorkerPool {
     }
     if (!Number.isSafeInteger(this.parkedWorkerIdleMs) || this.parkedWorkerIdleMs < 0) {
       throw new TypeError("parkedWorkerIdleMs must be a non-negative safe integer");
+    }
+    this.maxConcurrentExecutions = config.maxConcurrentExecutions ?? config.size;
+    if (!Number.isSafeInteger(this.maxConcurrentExecutions)
+      || this.maxConcurrentExecutions < config.size) {
+      throw new TypeError("maxConcurrentExecutions must be a safe integer of at least size");
     }
     for (let i: number = 0; i < config.size; i++) {
       const w = this.createWorker();
@@ -568,7 +612,7 @@ export class WorkerPool {
       } else {
         this.totalQueuedRequests++;
         this.enqueueQueued({ opts, enqueuedAt, resolve, reject });
-        this.ensureWorkerForQueuedProject();
+        this.ensureCapacityForQueuedWork();
       }
     });
   }
@@ -622,6 +666,23 @@ export class WorkerPool {
       this.idle = this.idle.filter((candidate) => candidate !== worker);
       this.schedule(worker);
     }
+  }
+
+  /**
+   * Every warm worker is busy and work is queued. Functions are I/O bound, so
+   * grow the pool instead of serialising requests behind the warm size, up to
+   * `maxConcurrentExecutions`. Surplus workers are retired again by `recycle()`
+   * as soon as the queue drains.
+   */
+  private ensureCapacityForQueuedWork(): void {
+    this.ensureWorkerForQueuedProject();
+    if (this.queuedCount === 0) return;
+    if (this.draining || this.admissionBlocked || this.admissionRecovering) return;
+    if (this.activeWorkers.size >= this.maxConcurrentExecutions) return;
+    const worker = this.createWorker();
+    this.totalWorkerSurplusCreations++;
+    this.activeWorkers.add(worker);
+    this.schedule(worker);
   }
 
   // A parked worker retains its project, but owns no execution slot.
@@ -992,9 +1053,27 @@ export class WorkerPool {
     this.schedule(worker);
   }
 
+  /**
+   * Shrinks a grown pool back to its warm size once nothing is queued, so burst
+   * concurrency does not keep extra threads and heaps resident forever. Surplus
+   * workers retire without a replacement, so the pool converges on `size`.
+   */
+  private shouldRetireSurplusWorker(): boolean {
+    return !this.draining
+      && !this.admissionBlocked
+      && this.maxConcurrentExecutions > this.config.size
+      && this.activeWorkers.size > this.config.size
+      && this.queuedCount === 0;
+  }
+
   private schedule(worker: Worker) {
     if (this.tainted.has(worker)) {
       this.retireWorker(worker);
+      return;
+    }
+    if (this.shouldRetireSurplusWorker()) {
+      this.totalWorkerSurplusRetirements++;
+      this.retireWorker(worker, false);
       return;
     }
     if (this.draining || this.admissionBlocked) {
@@ -1030,7 +1109,7 @@ export class WorkerPool {
     this.execute(worker, next.opts, next.enqueuedAt, next.resolve).catch(next.reject);
   }
 
-  private retireWorker(worker: Worker) {
+  private retireWorker(worker: Worker, replace = true) {
     this.workerMemory.delete(worker);
     const ownedSlot = this.activeWorkers.delete(worker);
     const wasParked = this.parkedWorkers.delete(worker);
@@ -1044,7 +1123,10 @@ export class WorkerPool {
     this.parkedWorkers.delete(worker);
     const idleIdx = this.idle.indexOf(worker);
     if (idleIdx !== -1) this.idle.splice(idleIdx, 1);
-    this.trackRetiredWorker(worker);
+    // Surplus retirements are planned right-sizing, not evidence of a worker
+    // leak, so they are exempt from the retirement count budget. The age budget
+    // still fails safe if a retired surplus worker never exits.
+    this.trackRetiredWorker(worker, replace);
 
     try {
       worker.postMessage({ type: "retire" });
@@ -1055,7 +1137,7 @@ export class WorkerPool {
     worker.on("error", () => {});
     worker.unref();
 
-    if (!this.draining && ownedSlot) {
+    if (!this.draining && ownedSlot && replace) {
       this.recordWorkerReplacement();
       const replacement = this.createWorker();
       this.activeWorkers.add(replacement);
@@ -1063,14 +1145,18 @@ export class WorkerPool {
     }
   }
 
-  private trackRetiredWorker(worker: Worker) {
+  private trackRetiredWorker(worker: Worker, countsTowardsBudget = true) {
     const retiredAt = Date.now();
     const ageTimer = setTimeout(() => {
       if (!this.retiredWorkers.has(worker)) return;
       this.triggerRetirementFailSafe("age");
     }, this.retirementBudget.maxRetirementAgeMs);
-    this.retiredWorkers.set(worker, { retiredAt, ageTimer });
-    if (this.retiredWorkers.size > this.retirementBudget.maxRetiredWorkers) {
+    this.retiredWorkers.set(worker, { retiredAt, ageTimer, countsTowardsBudget });
+    let budgetedRetirements = 0;
+    for (const retired of this.retiredWorkers.values()) {
+      if (retired.countsTowardsBudget) budgetedRetirements++;
+    }
+    if (budgetedRetirements > this.retirementBudget.maxRetiredWorkers) {
       this.triggerRetirementFailSafe("count");
     }
   }
@@ -1717,6 +1803,9 @@ export class WorkerPool {
       [`${prefix}_parked_workers`]: this.parkedWorkers.size,
       [`${prefix}_total_workers`]: this.activeWorkers.size + this.parkedWorkers.size,
       [`${prefix}_max_project_workers`]: this.maxWorkers,
+      [`${prefix}_max_concurrent_executions`]: this.maxConcurrentExecutions,
+      [`${prefix}_total_worker_surplus_creations`]: this.totalWorkerSurplusCreations,
+      [`${prefix}_total_worker_surplus_retirements`]: this.totalWorkerSurplusRetirements,
       [`${prefix}_total_project_affinity_hits`]: this.totalProjectAffinityHits,
       [`${prefix}_total_parked_worker_reuses`]: this.totalParkedWorkerReuses,
       [`${prefix}_total_project_worker_evictions`]: this.totalProjectWorkerEvictions,
