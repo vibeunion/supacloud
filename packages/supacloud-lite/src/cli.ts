@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
@@ -10,6 +10,7 @@ import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
 import { createNativeEngine } from './runtime/node/native/engine.js'
 import { inspectPostgresExtensions } from './runtime/node/native/extensions.js'
 import { inspectPowerSyncReadiness, liteCapabilities } from './runtime/node/native/readiness.js'
+import { productionReadiness } from './runtime/node/production-readiness.js'
 import { createPgliteEngine } from './runtime/db/pglite-engine.js'
 import { inspectGraphql } from './runtime/graphql.js'
 import { loadProjectConfig } from './runtime/node/load-config.js'
@@ -42,6 +43,8 @@ interface CliOptions extends ProjectRuntimeOptions {
   serviceRole: boolean
   force: boolean
   json: boolean
+  production: boolean
+  externalAuthProxyIssuer?: string
   email?: string
   passwordStdin?: boolean
   emailConfirm?: boolean
@@ -61,6 +64,7 @@ function parseArgs(argv: string[]): CliOptions {
     serviceRole: false,
     force: false,
     json: false,
+    production: false,
   }
 
   for (let index: number = 0; index < args.length; index++) {
@@ -101,6 +105,7 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--service-role') options.serviceRole = true
     else if (argument === '--force') options.force = true
     else if (argument === '--json') options.json = true
+    else if (argument === '--production') options.production = true
     else if (argument === '--email') options.email = next()
     else if (argument === '--password-stdin') options.passwordStdin = true
     else if (argument === '--email-confirm') options.emailConfirm = true
@@ -251,10 +256,28 @@ async function main(): Promise<void> {
       throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
     }
     if (config.lite.graphql.enabled === false) report.graphql = { status: 'disabled', extension: 'pg_graphql' }
+    if (options.production) {
+      report.production_readiness = productionReadiness({
+        engine: paths.databaseEngine,
+        runtimeMode: config.lite.runtimeMode,
+        storageBackend: resolveStorageBackend(options.storageBackend),
+        identityMode: (options.identityModule ?? config.lite.identityModule) ? 'external' : 'local',
+        host: options.host ?? '127.0.0.1',
+        projectDir: paths.projectDir,
+        stateDir: paths.stateDir,
+        storageDir: paths.storageDir,
+        dataDir: paths.dataDir,
+        apiUrl: options.apiUrl ?? process.env.SUPACLOUD_LITE_API_URL,
+        siteUrl: options.siteUrl ?? process.env.SUPACLOUD_LITE_SITE_URL,
+        externalAuthProxyIssuer: options.externalAuthProxyIssuer,
+        latestSnapshotAt: latestSnapshotTimestamp(paths.stateDir),
+      })
+    }
     if (options.json) await writeStandardOutput(`${JSON.stringify(report, null, 2)}\n`)
     else await printDoctor(report)
     if (config.lite.graphql.enabled === true && report.graphql.status !== 'supported') process.exitCode = 1
     if (report.powersync_readiness?.ready === false) process.exitCode = 1
+    if (report.production_readiness?.ready === false) process.exitCode = 1
     return
   }
 
@@ -511,6 +534,19 @@ async function runUpgradeCommand(options: CliOptions): Promise<void> {
   }
 }
 
+function latestSnapshotTimestamp(stateDir: string): number | undefined {
+  let newest: number | undefined
+  for (const directory of [stateDir, join(stateDir, 'backups')]) {
+    if (!existsSync(directory)) continue
+    for (const name of readdirSync(directory)) {
+      if (!name.endsWith('.tar.gz')) continue
+      const modified = statSync(join(directory, name)).mtimeMs
+      if (newest === undefined || modified > newest) newest = modified
+    }
+  }
+  return newest
+}
+
 async function printInspection(rows: Awaited<ReturnType<typeof inspectDb>>): Promise<void> {
   if (rows.length === 0) {
     await writeStandardOutput('No tables in schema "public".\n')
@@ -541,6 +577,11 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
     output.push(`powersync_ready: ${report.powersync_readiness.ready}`)
     for (const blocker of report.powersync_readiness.blockers) output.push(`blocker: ${blocker}`)
     for (const warning of report.powersync_readiness.warnings) output.push(`warning: ${warning}`)
+  }
+  if (report.production_readiness) {
+    output.push(`production_ready: ${report.production_readiness.ready}`)
+    for (const blocker of report.production_readiness.blockers) output.push(`production_blocker: ${blocker}`)
+    for (const warning of report.production_readiness.warnings) output.push(`production_warning: ${warning}`)
   }
   await writeStandardOutput(`${output.join('\n')}\n`)
 }

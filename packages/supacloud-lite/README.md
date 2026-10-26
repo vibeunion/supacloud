@@ -166,6 +166,8 @@ Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重�
 
 `/graphql/v1` 使用真正的 `pg_graphql` 扩展和调用者的数据库角色/RLS，不模拟扩展。默认 PGlite 和标准 native 下载包均不包含该扩展；native 可通过 `--postgres-dir` 选择已经安装匹配扩展的 PostgreSQL。配置 `[lite.graphql] enabled = true` 会在运行时启动前验证扩展，`doctor --json` 区分已支持、缺失与尚未验证。
 
+`doctor --production` 在能力报告之外检查单机生产阻断项和运维义务：strict 运行时、非内存存储、外部身份同源代理、公开地址、数据库/存储目录隔离、状态目录位置和快照新鲜度。阻断项使命令以非零退出码结束；警告项表示必须由部署方承担的运维责任（例如 S3 对象不在快照内、PGlite 容量验证、TLS 必须由反代终止）。
+
 外部 SupAuth 可通过 `createSupAuthLiteIdentity` 复用 `@supacloud/elysia` 的验证和业务侧本地用户映射；本地 Auth 仍是默认模式。外部模式不会把本地令牌降级当成 SupAuth，也不会根据请求头授予权限。
 
 完整配置、边界和回归方法见仓库文档 `docs/lite-runtime-compatibility.md`。性能基线可在源码目录运行 `bun run benchmark`，native 模式加 `--native`。
@@ -187,7 +189,7 @@ supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
-supacloud-lite doctor [--json]
+supacloud-lite doctor [--json] [--production]
 supacloud-lite version
 ```
 
@@ -675,7 +677,7 @@ supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
-supacloud-lite doctor [--json]
+supacloud-lite doctor [--json] [--production]
 supacloud-lite version
 ```
 
@@ -865,6 +867,13 @@ an operator-managed installation selected with `--postgres-dir`. Required
 GraphQL fails startup when missing; `doctor --json` reports actual or unverified
 capability. External SupAuth can reuse the shared Elysia verifier through
 `createSupAuthLiteIdentity` and an explicit application-owned local user mapping.
+
+`doctor --production` adds single-node production policy checks: strict runtime,
+non-memory storage, external identity proxying, public URLs, database/storage
+path separation, state-directory location and snapshot freshness. Blockers exit
+non-zero; warnings are operational obligations such as backing up S3 objects
+outside the Lite snapshot, capacity-testing PGlite, and terminating TLS at the
+proxy.
 
 See repository document `docs/lite-runtime-compatibility.md` for configuration
 and acceptance boundaries. Run `bun run benchmark` (or add `--native`) in the
