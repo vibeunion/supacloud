@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.33.2...supacloud-lite-v0.34.0) (2026-10-26)
+
+
+### Features
+
+* **lite:** add authorized realtime HTTP broadcast ([#2250](https://github.com/vibeunion/supacloud/issues/2250)) ([405747c](https://github.com/vibeunion/supacloud/commit/405747cce8f055c371e8f76c38a862aaf480f94c))
+* **lite:** add production readiness doctor checks ([#2249](https://github.com/vibeunion/supacloud/issues/2249)) ([d9f09f2](https://github.com/vibeunion/supacloud/commit/d9f09f2ff797898af9a68d2c261b9d66e0eea001))
+* **lite:** add restricted same-origin external auth proxy ([#2247](https://github.com/vibeunion/supacloud/issues/2247)) ([10e420e](https://github.com/vibeunion/supacloud/commit/10e420e700f206a8f190e6d51622c980d867fc68))
+* **lite:** add storage status and metrics endpoints ([#2251](https://github.com/vibeunion/supacloud/issues/2251)) ([183b323](https://github.com/vibeunion/supacloud/commit/183b32397006a2b80d9961e7ae26d5779654b064))
+
+
+### Documentation
+
+* **lite:** add single-node production deployment assets ([#2248](https://github.com/vibeunion/supacloud/issues/2248)) ([1e36554](https://github.com/vibeunion/supacloud/commit/1e36554cbbdbfecbb1e2a4974af560e8fa62124a))
+
 ## [0.33.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.33.1...supacloud-lite-v0.33.2) (2026-10-25)
 
 
