@@ -83,9 +83,12 @@ warm Worker and milliseconds once a tenant retains live data. Sampling it on eve
 execution therefore dominated small-request latency and made throughput degrade as
 heaps grew. Workers now report the most recent sample and refresh it at most once
 per `EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS` (preheat still forces a fresh sample).
-Heap-retirement and memory-gauge decisions are consequently accurate to within one
-sampling interval instead of one request; process RSS and cgroup admission checks
-are unaffected and remain the fast fail-safe for runaway allocation.
+Sampling runs at execution completion, not on an idle timer. A request completing
+inside the window can leave an outdated heap gauge until a later completion after
+the interval, or a forced preheat sample. Heap-retirement is therefore a soft
+completion-time control; it does not bound allocations during a handler, waitUntil
+or idle retention. Process RSS and cgroup admission checks are unchanged and
+remain subject to their own sampling intervals and OS process limits.
 
 Linux monitoring compares every cgroup ancestor against its own usage. A finite
 `memory.max` supplies a threshold at 90% when `memory.high` is absent or higher.

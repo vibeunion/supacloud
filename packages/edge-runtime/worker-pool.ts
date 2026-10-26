@@ -206,13 +206,13 @@ function withRuntimeFunctionVersion(
   });
 }
 
-type WorkerExecutionHandlers = {
+type WorkerLifecycleHandlers = {
   onMessage(message: WorkerResponseMessage): void;
   onError(error: Error): void;
   onExit(): void;
 };
 
-type WorkerResponseMessage = {
+type WorkerResponseMessage = WorkerPreheatMessage & {
   type?: string; status?: number; headers?: Record<string, string | string[]>;
   body?: ArrayBuffer | null; port?: MessagePort; moduleCacheHit?: boolean;
   moduleCacheSize?: number; timestamp?: string; stream?: "stdout" | "stderr";
@@ -460,7 +460,7 @@ export class WorkerPool {
       parkedTimer?: ReturnType<typeof setTimeout>;
       surplusTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
-      active?: WorkerExecutionHandlers;
+      active?: WorkerLifecycleHandlers;
     }
   >();
   private parkedWorkers = new Set<Worker>();
@@ -1028,7 +1028,7 @@ export class WorkerPool {
     this.inFlight.set(opts.executionKey, { cancel, cancelKey: opts.cancelKey });
     const metadata = this.workerMetadata.get(worker);
     if (!metadata) throw new Error("Missing worker metadata");
-    const handlers: WorkerExecutionHandlers = { onMessage, onError, onExit };
+    const handlers: WorkerLifecycleHandlers = { onMessage, onError, onExit };
     metadata.active = handlers;
     signal.addEventListener("abort", cancel, { once: true });
     if (signal.aborted) { cancel(); return; }
@@ -1597,28 +1597,39 @@ export class WorkerPool {
     request: WorkerPreheatRequest,
     tlsPolicy: EdgeFetchTlsPolicy,
   ): Promise<WorkerPreheatResult> {
+    const metadata = this.workerMetadata.get(request.worker);
+    if (!metadata) return Promise.resolve(this.failedPreheat(request, "Function worker exited before preheat"));
     return new Promise((resolve) => {
+      let finished = false;
       const finish = (preheat: WorkerPreheatResult) => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timeout);
-        request.worker.removeListener("message", onMessage);
+        if (metadata.active === handlers) metadata.active = undefined;
         resolve(preheat);
       };
+      const fail = (error: string) => {
+        if (!finished) finish(this.failedPreheat(request, error));
+      };
       const onMessage = (message: WorkerPreheatMessage) => {
+        if (finished) return;
         const preheat = this.preheatMessageResult(request, message);
         if (preheat) finish(preheat);
       };
       const timeout = setTimeout(() => {
-        finish(this.failedPreheat(request, "Worker preheat timed out"));
+        fail("Worker preheat timed out");
       }, this.config.preheatTimeoutMs ?? DEFAULT_PREHEAT_TIMEOUT_MS);
-      request.worker.on("message", onMessage);
+      const handlers: WorkerLifecycleHandlers = {
+        onMessage,
+        onError: (error) => fail(error.message),
+        onExit: () => fail("Function worker exited during preheat"),
+      };
+      metadata.active = handlers;
       try {
         this.postPreheatMessage(request, tlsPolicy);
       } catch (error) {
         console.warn("[Pool] Failed to dispatch worker preheat", error);
-        finish(this.failedPreheat(
-          request,
-          error instanceof Error ? error.message : String(error),
-        ));
+        fail(error instanceof Error ? error.message : String(error));
       }
     });
   }
