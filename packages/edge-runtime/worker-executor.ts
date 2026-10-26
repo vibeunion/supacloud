@@ -724,23 +724,6 @@ function installOutboundHostPolicy(allowedHosts: string[] | undefined): () => vo
   };
 }
 
-
-const __trace = process.env.EDGE_WORKER_TRACE === "1";
-const __phases: Record<string, number> = {};
-let __count = 0;
-function __mark(t0: number, name: string) {
-  if (!__trace) return;
-  const t = performance.now();
-  __phases[name] = (__phases[name] ?? 0) + (t - t0);
-  return;
-}
-function __dump() {
-  if (!__trace || __count === 0 || __count % 200 !== 0) return;
-  const parts = Object.entries(__phases).map(([k, v]) => `${k}=${(v * 1000 / __count).toFixed(0)}us`).join(" ");
-  originalConsole.error(`[trace n=${__count}] ${parts}`);
-  for (const k of Object.keys(__phases)) delete __phases[k];
-}
-
 async function onParentMessage(msg: unknown): Promise<void> {
   if (!isParentMessage(msg)) {
     console.warn("[Worker] Ignoring invalid parent message");
@@ -840,8 +823,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
   const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body, internalBindings } = msg;
 
   const projectRef = msg.projectRef;
-  let __t = performance.now();
-  __mark(__t, "setup_request");
   const requestAbortController = new AbortController();
   currentAbortController = requestAbortController;
   currentExecutionKey = msg.executionKey;
@@ -853,19 +834,14 @@ async function onParentMessage(msg: unknown): Promise<void> {
     : undefined, async () => {
     try {
       setProjectRoot(projectRoot || path.dirname(functionPath));
-      __t = performance.now();
       injectEnv(env);
       setInjectedEnv(env);
-      __mark(__t, "inject_env");
-      __t = performance.now();
       setupConsoleCapture(functionId);
       setupEdgeRuntimeCompat(msg.capabilities?.background !== false);
-      __mark(__t, "console_compat");
       restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
         await resolveMessageTlsPolicy(tlsPolicy),
       );
       restoreOutboundHostPolicy = installOutboundHostPolicy(msg.capabilities?.outbound_hosts);
-      __t = performance.now();
       const moduleLoad = await loadModule({
         functionId,
         functionPath,
@@ -877,8 +853,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
         bytecodeArtifact: msg.bytecodeArtifact,
         bytecode: msg.bytecode,
       });
-      __mark(__t, "load_module");
-      __t = performance.now();
       // Retirement may arrive while module loading is suspended. Do not enter
       // tenant code after the worker has already closed its parent port.
       if (requestAbortController.signal.aborted) {
@@ -897,8 +871,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
         invalidateCachedModules((entry) => entry.functionId === functionId);
         throw error;
       }
-      __mark(__t, "assert_artifact");
-      __t = performance.now();
       postToParent({ type: "execution_started", functionId });
       const handler = moduleLoad.handler;
       const trace = projectRef ? createFunctionTrace(projectRef, new Headers(headers as Record<string, string>)) : undefined;
@@ -914,11 +886,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
             signal: requestAbortController.signal,
           });
 
-          __mark(__t, "build_request");
-          __t = performance.now();
           const result = await executeFunction(handler, req);
-          __mark(__t, "handler");
-          __t = performance.now();
           const response = trace ? new Response(result.body, {
             status: result.status, statusText: result.statusText,
             headers: traceHeaders(trace, result.headers),
@@ -938,8 +906,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
             resHeaders[k] = v;
           });
 
-          __mark(__t, "response_headers");
-          __t = performance.now();
           const prepared = response.body
             ? await prepareResponseBody(response.body, maxResponseBody,
                 response.headers.get("content-type")?.includes("text/event-stream") === true,
@@ -953,8 +919,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
             }, [prepared.port]);
             await prepared.run();
           } else {
-            __mark(__t, "prepare_body");
-            __t = performance.now();
             postToParent({
               status: response.status, headers: resHeaders, body: prepared.buffer,
               moduleCacheHit: moduleLoad.cacheHit, moduleCacheSize: moduleLoad.moduleCacheSize,
@@ -976,7 +940,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
         body: errorBody,
       }, [errorBody]);
     } finally {
-      __t = performance.now();
       // Tasks may also be registered by body production, nested tasks, or a failing handler.
       postToParent({ type: "response_complete", waitUntilPending: currentWaitUntilTasks.length > 0 });
       await flushWaitUntilTasks(functionId);
@@ -989,12 +952,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
       runCleanup(restoreConsole);
       runCleanup(() => setProjectRoot(null));
       runCleanup(() => setInjectedEnv({}));
-      __mark(__t, "restore_all");
-      __t = performance.now();
       postToParent({ type: "execution_complete", ...memorySnapshot() });
-      __mark(__t, "memory_snapshot+post");
-      __count++;
-      __dump();
     }
   });
 }
