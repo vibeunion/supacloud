@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/query",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TanStack Query adapter for SupaCloud procedure client with explicit invalidation tags",
   "type": "module",
   "main": "./dist/index.js",
