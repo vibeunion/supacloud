@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.2](https://github.com/vibeunion/supacloud/compare/admin-v0.30.1...admin-v0.30.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **admin:** read upgrade logs that contain terminal color ([#2254](https://github.com/vibeunion/supacloud/issues/2254)) ([a0147dc](https://github.com/vibeunion/supacloud/commit/a0147dc0141bc59f3bbfb6e46e23d6b398396d26))
+
 ## [0.30.1](https://github.com/vibeunion/supacloud/compare/admin-v0.30.0...admin-v0.30.1) (2026-10-25)
 
 

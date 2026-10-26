@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.1...management-api-v0.123.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound body buffers and preserve warm workers on cancellation ([#2260](https://github.com/vibeunion/supacloud/issues/2260)) ([59b8f36](https://github.com/vibeunion/supacloud/commit/59b8f3630352635afc2fe0a994360f7276f8c763))
+
 ## [0.123.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.0...management-api-v0.123.1) (2026-10-25)
 
 
