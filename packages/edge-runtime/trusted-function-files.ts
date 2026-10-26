@@ -163,6 +163,8 @@ async function assertHeldDirectoryBindings(heldDirectories: HeldDirectory[]): Pr
       readlink(`/proc/self/fd/${held.descriptor.fd}`),
       lstat(held.path),
     ]);
+    assertTrustedDirectory(descriptorMetadata);
+    assertTrustedDirectory(pathMetadata);
     if (currentPath !== held.path
       || !sameIdentity(held.identity, descriptorMetadata)
       || !sameIdentity(held.identity, pathMetadata)) {
@@ -308,6 +310,10 @@ export async function readFunctionFileDigest(
   filePath: string,
   options: FunctionFileReadOptions = {},
 ): Promise<TrustedFunctionFileDigest> {
+  if (options.maxBytes !== undefined
+    && (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0)) {
+    throw new Error("Function runtime file exceeds its byte limit");
+  }
   const absolutePath = resolve(filePath);
   if (process.platform !== "linux") return readBoundFunctionFile(absolutePath, options);
   const heldDirectories = await heldTrustedDirectoryChain(dirname(absolutePath));
@@ -332,6 +338,16 @@ export async function readTrustedFunctionFile(filePath: string, maxBytes?: numbe
 
 export async function readFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
   return materializeTrustedFunctionFile(await readFunctionFileDigest(filePath, { maxBytes, withBytes: true }));
+}
+
+export async function readFunctionFileBytes(snapshot: TrustedFunctionFileDigest): Promise<Buffer> {
+  if (snapshot.bytes !== undefined) return snapshot.bytes;
+  const current = await readFunctionFile(snapshot.path);
+  // Never associate replacement bytes with an earlier digest in a parse cache.
+  if (current.sha256 !== snapshot.sha256) {
+    throw new Error("Function runtime file changed before materializing bytes");
+  }
+  return current.bytes;
 }
 
 function materializeTrustedFunctionFile(file: TrustedFunctionFileDigest): TrustedFunctionFile {

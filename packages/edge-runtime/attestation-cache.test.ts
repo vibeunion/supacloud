@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clearFunctionFileDigestCache,
   readFunctionFile,
+  readFunctionFileBytes,
   readFunctionFileDigest,
 } from "./trusted-function-files";
 import { projectReleaseFunctionManifest } from "./project-release";
@@ -13,7 +14,8 @@ import { projectReleaseFunctionManifest } from "./project-release";
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 async function withTempRoot<T>(run: (root: string) => Promise<T>): Promise<T> {
-  const root = await mkdtemp(join(tmpdir(), ".supacloud-attestation-cache-"));
+  const trustedTemporaryRoot = process.platform === "linux" ? homedir() : tmpdir();
+  const root = await mkdtemp(join(trustedTemporaryRoot, ".supacloud-attestation-cache-"));
   clearFunctionFileDigestCache();
   try {
     return await run(root);
@@ -62,6 +64,9 @@ describe("Function artifact digest cache", () => {
       await writeFile(artifactPath, "0123456789");
       expect((await readFunctionFileDigest(artifactPath, { maxBytes: 10 })).sha256).toBe(sha256("0123456789"));
       await expect(readFunctionFileDigest(artifactPath, { maxBytes: 9 })).rejects.toThrow("byte limit");
+      for (const maxBytes of [-1, NaN, Infinity, 10.5]) {
+        await expect(readFunctionFileDigest(artifactPath, { maxBytes })).rejects.toThrow("byte limit");
+      }
     });
   });
 
@@ -73,6 +78,67 @@ describe("Function artifact digest cache", () => {
       const file = await readFunctionFile(artifactPath);
       expect(file.bytes.toString()).toBe("materialised");
       expect(file.sha256).toBe(sha256("materialised"));
+    });
+  });
+
+  test("rejects replacement between a digest hit and a parse-cache fill", async () => {
+    await withTempRoot(async (root) => {
+      const artifactPath = join(root, "config.json");
+      await writeFile(artifactPath, "original");
+      const first = await readFunctionFileDigest(artifactPath);
+      expect((await readFunctionFileBytes(first)).toString()).toBe("original");
+      const cached = await readFunctionFileDigest(artifactPath);
+      expect(cached.bytes).toBeUndefined();
+      expect((await readFunctionFileBytes(cached)).toString()).toBe("original");
+      await writeFile(join(root, "replacement.json"), "replaced");
+      await rename(join(root, "replacement.json"), artifactPath);
+      await expect(readFunctionFileBytes(cached)).rejects.toThrow("changed before materializing");
+      const replaced = await readFunctionFileDigest(artifactPath);
+      expect(replaced.sha256).toBe(sha256("replaced"));
+      expect((await readFunctionFileBytes(replaced)).toString()).toBe("replaced");
+    });
+  });
+
+  test("invalidates same-length rewrites even when mtime is restored", async () => {
+    await withTempRoot(async (root) => {
+      const artifactPath = join(root, "index.js");
+      await writeFile(artifactPath, "first");
+      const first = await readFunctionFileDigest(artifactPath);
+      await Bun.sleep(10);
+      await writeFile(artifactPath, "other");
+      await utimes(artifactPath, first.metadata.atime, first.metadata.mtime);
+      expect((await readFunctionFileDigest(artifactPath)).sha256).toBe(sha256("other"));
+    });
+  });
+
+  test("rejects symlink replacement and deletion after a cache hit", async () => {
+    await withTempRoot(async (root) => {
+      const artifactPath = join(root, "index.js");
+      await writeFile(artifactPath, "original");
+      await readFunctionFileDigest(artifactPath);
+      await rm(artifactPath);
+      await expect(readFunctionFileDigest(artifactPath)).rejects.toThrow();
+      await writeFile(join(root, "other.js"), "other");
+      await symlink(join(root, "other.js"), artifactPath);
+      await expect(readFunctionFileDigest(artifactPath)).rejects.toThrow("not trusted");
+    });
+  });
+
+  test.skipIf(process.platform !== "linux")("rechecks file and directory trust on cache hits", async () => {
+    await withTempRoot(async (root) => {
+      const artifactPath = join(root, "index.js");
+      await writeFile(artifactPath, "original");
+      await readFunctionFileDigest(artifactPath);
+      await chmod(artifactPath, 0o666);
+      await expect(readFunctionFileDigest(artifactPath)).rejects.toThrow("not trusted");
+      await chmod(artifactPath, 0o600);
+      await readFunctionFileDigest(artifactPath);
+      await chmod(root, 0o777);
+      try {
+        await expect(readFunctionFileDigest(artifactPath)).rejects.toThrow("directory is not trusted");
+      } finally {
+        await chmod(root, 0o700);
+      }
     });
   });
 });
@@ -131,6 +197,17 @@ describe("project release manifest cache", () => {
       expect(rewritten?.config.version).toBe("2");
       expect(rewritten?.authority?.activation_id).toBe(secondMutation);
       expect(rewritten).not.toBe(first);
+
+      const corrupt = releaseDocument({ hello: { version: "2", body: "two" } }, secondMutation);
+      corrupt._supacloud_activation.artifact_sha256 = "0".repeat(64);
+      await writeFile(releasePath, JSON.stringify(corrupt));
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(projectReleaseFunctionManifest(projectRoot, "hello")).rejects.toThrow("digest is invalid");
+      }
+      await rm(releasePath);
+      expect(await projectReleaseFunctionManifest(projectRoot, "hello")).toBeNull();
+      await writeFile(releasePath, JSON.stringify(releaseDocument({ hello: { version: "1", body: "one" } }, firstMutation)));
+      expect((await projectReleaseFunctionManifest(projectRoot, "hello"))?.config.version).toBe("1");
     });
   });
 

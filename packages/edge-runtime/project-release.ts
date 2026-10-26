@@ -1,7 +1,7 @@
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
 import { parseEdgeFunctionActivationManifest, type EdgeFunctionActivationManifest } from "./function-activation";
-import { readFunctionFile, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
+import { readFunctionFileBytes, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
 
 const PROJECT_RELEASE_FILE = ".project-release.json";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -77,7 +77,7 @@ export async function projectReleaseFunctionManifest(projectRoot: string, slug: 
   const cacheKey = `${digest.path}\u0000${digest.sha256}`;
   const cached = releaseCache.get(cacheKey);
   if (cached !== undefined) return cached.get(slug) ?? null;
-  const bytes = digest.bytes ?? (await readFunctionFile(releasePath)).bytes;
+  const bytes = await readFunctionFileBytes(digest);
   const members = releaseMembers(bytes.toString("utf8"), basename(projectRoot));
   rememberRelease(cacheKey, members);
   return members.get(slug) ?? null;

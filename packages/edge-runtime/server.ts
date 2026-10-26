@@ -43,7 +43,7 @@ import {
 } from "./function-source";
 import { functionBytecodeMode } from "./function-bytecode-contract";
 import { functionBytecodeCache } from "./function-bytecode";
-import { readFunctionFile, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
+import { readFunctionFile, readFunctionFileBytes, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
 import {
   assertCanonicalConfiguredFunctionVersion,
   resolveFunctionVersionBinding,
@@ -812,7 +812,7 @@ async function readFunctionActivationManifest(
     if (cached !== undefined && cached.sha256 === configFile.sha256) {
       return cached.manifest;
     }
-    const bytes = configFile.bytes ?? (await readFunctionFile(configPath)).bytes;
+    const bytes = await readFunctionFileBytes(configFile);
     const manifest = parseEdgeFunctionActivationManifest(bytes.toString("utf8"));
     activationManifestCache.delete(configFile.path);
     activationManifestCache.set(configFile.path, { sha256: configFile.sha256, manifest });
