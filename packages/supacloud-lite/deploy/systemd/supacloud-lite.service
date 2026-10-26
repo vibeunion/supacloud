@@ -1,0 +1,32 @@
+[Unit]
+Description=SupaCloud Lite (single-project backend)
+Documentation=https://github.com/vibeunion/supacloud/tree/main/packages/supacloud-lite
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=supacloud-lite
+Group=supacloud-lite
+WorkingDirectory=/opt/supacloud-lite/project
+EnvironmentFile=/etc/supacloud-lite/env
+Environment=SUPACLOUD_LITE_STATE_DIR=/var/lib/supacloud-lite
+Environment=SUPACLOUD_LITE_HOST=127.0.0.1
+Environment=SUPACLOUD_LITE_PORT=54321
+Environment=SUPACLOUD_LITE_RUNTIME_MODE=strict
+ExecStart=/usr/local/bin/supacloud-lite start --project-dir /opt/supacloud-lite/project
+Restart=on-failure
+RestartSec=3
+# Lite has no bundled TLS termination. Keep it on loopback and terminate TLS in
+# Caddy/Nginx; bind a non-loopback address only when another trusted proxy or
+# network boundary protects it.
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=supacloud-lite
+ReadWritePaths=/var/lib/supacloud-lite
+
+[Install]
+WantedBy=multi-user.target
