@@ -281,6 +281,31 @@ workload-specific override and validate capacity using the actual function
 workload, including module preheating and long-running requests, before
 increasing worker counts.
 
+### Request Concurrency
+
+`WORKER_POOL_SIZE` sets the resident warm pool. `EDGE_MAX_FUNCTION_CONCURRENCY`
+defaults to that same value, preserving the management API's CPU/memory sizing.
+Set a higher ceiling explicitly to overlap more I/O-bound invocations when the
+queue fills. Each additional invocation uses a separate worker and heap; this
+does not multiplex requests inside a worker. Values below the warm size fail at
+startup. Compose also leaves expansion disabled unless explicitly configured.
+
+Surplus workers remain reusable for one idle second, then retire without a
+replacement. Memory pressure bypasses that grace for idle workers and retires
+busy surplus workers after cleanup. Expansion is disabled during blocked or
+recovering admission and after the lifetime recycle budget is reached. Active,
+parked, and not-yet-exited retirees together must fit the resident worker ceiling
+before expansion. An exiting retiree wakes queued growth; parked workers still
+occupy no execution slots.
+
+All retiring workers count toward the concurrent retirement budget, whose default
+is `max(2 * configured concurrency, 8)`. Surplus retirements also count toward
+`EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE`; repeated burst churn can retain
+Bun host memory even after successful worker exits. The retirement age limit
+continues to apply. Raising concurrency trades memory for throughput: measure
+RSS, CPU, RPS, queue time and p95/p99 under sustained and repeated bursts before
+raising it in production. CPU-bound functions may gain little from more workers.
+
 On cgroup v2 hosts, the runtime resolves its membership from `/proc/self/cgroup`
 and `/proc/self/mountinfo`. It samples `memory.current`, `memory.high`, and
 `memory.events` for that cgroup and its visible ancestors once per second.
