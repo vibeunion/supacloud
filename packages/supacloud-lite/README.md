@@ -378,6 +378,19 @@ RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因
 
 PostgREST 的边缘语义补充：`Prefer: count=planned` 读取 `count(*)` 输入节点的 `Plan Rows`（聚合节点本身恒为 1），`count=estimated` 在无过滤条件时使用 `pg_class.reltuples`，有过滤条件或尚未 ANALYZE 时回退到计划估算；两者都只用于 GET/HEAD，结果仍写入 `Content-Range`。`Prefer: tx=rollback` 可包裹成功的 POST/PATCH/DELETE，返回与实际提交相同的状态和 representation，但事务最终回滚且不触发 CDC/webhook。其他 `Prefer` 值（`return`、`resolution`、`missing`）行为不变。
 
+Realtime 也支持服务端 HTTP 广播：
+
+```http
+POST /realtime/v1/api/broadcast
+apikey: <project-anon-key>
+authorization: Bearer <access-token>
+content-type: application/json
+
+{"messages":[{"topic":"room:42","event":"notice","payload":{"text":"hello"},"private":false}]}
+```
+
+请求沿用 Realtime 的 `messages` 数组格式，单次最多 100 条，每条 `event` 最多 256 字节、`topic` 最多 256 字节、`payload` 最多 1 MiB。`private: true` 会按 `realtime.messages` 的 INSERT policy 校验调用者；整个批次先完成校验再发送，任一主题无写权限时返回 `403`，不会部分广播。成功返回 `202 {"message":"Broadcast sent"}`。该端点只做实时投递，不持久化消息；需要离线补偿时仍应使用数据库表或 outbox。
+
 ### Capability doctor 与 PowerSync profile
 
 `doctor` 输出 Lite 自己的稳定能力契约，不复制完整 Management API：
@@ -892,6 +905,19 @@ source package for a synthetic baseline, not a production performance claim.
 Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row is deleted, so V1 only sends such DELETE events to `service_role` subscribers. Regular users can still receive INSERT/UPDATE events that pass row-by-row RLS validation.
 
 PostgREST edge semantics: `Prefer: count=planned` uses the `Plan Rows` of the `count(*)` input (the aggregate node itself is always 1), while `count=estimated` uses `pg_class.reltuples` only for unfiltered requests and otherwise falls back to the plan estimate, including before ANALYZE; both are only evaluated for GET/HEAD and still populate `Content-Range`. `Prefer: tx=rollback` wraps a successful POST/PATCH/DELETE, returns the same status and representation as a commit, then rolls the transaction back without firing CDC/webhooks. Other `Prefer` values (`return`, `resolution`, `missing`) keep their existing behavior.
+
+Realtime also exposes server-side HTTP broadcast:
+
+```http
+POST /realtime/v1/api/broadcast
+apikey: <project-anon-key>
+authorization: Bearer <access-token>
+content-type: application/json
+
+{"messages":[{"topic":"room:42","event":"notice","payload":{"text":"hello"},"private":false}]}
+```
+
+It uses Realtime's `messages` envelope: at most 100 messages per request, each `event` and `topic` at most 256 bytes, and each `payload` at most 1 MiB. `private: true` authorizes the caller through the `realtime.messages` INSERT policy. The whole batch is authorized before any delivery, so one denied topic returns `403` without partially broadcasting. Success returns `202 {"message":"Broadcast sent"}`. This endpoint delivers live events only; use a database table or outbox when messages must survive disconnects.
 
 ### Capability doctor and PowerSync profile
 

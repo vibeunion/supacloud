@@ -42,6 +42,14 @@ Scenario: PostgREST count strategies and rollback preference
   Then the response reflects the would-be write
   And the transaction is rolled back without CDC or webhook side effects
 
+Scenario: Server-side Realtime broadcast is bounded and authorized
+  Given a subscriber joined to a public or private Realtime topic
+  When an authenticated server sends POST /realtime/v1/api/broadcast
+  Then public messages are delivered without persistence
+  And private messages require the caller's realtime.messages INSERT policy
+  And the whole batch is rejected before delivery when any topic is unauthorized
+
+
 Scenario: Diagnose and measure without changing project state
   Given an uninitialized project or an existing project
   When capability doctor runs
