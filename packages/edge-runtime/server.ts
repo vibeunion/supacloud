@@ -44,7 +44,7 @@ import {
 } from "./function-source";
 import { functionBytecodeMode } from "./function-bytecode-contract";
 import { functionBytecodeCache } from "./function-bytecode";
-import { readFunctionFile, type TrustedFunctionFile } from "./trusted-function-files";
+import { readFunctionFile, readFunctionFileBytes, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
 import {
   assertCanonicalConfiguredFunctionVersion,
   resolveFunctionVersionBinding,
@@ -500,9 +500,9 @@ async function resolvedFunctionPath(
       throw new Error("Function path escapes project root");
     }
 
-    let artifact: TrustedFunctionFile;
+    let artifact: TrustedFunctionFileDigest;
     try {
-      artifact = await readFunctionFile(candidate);
+      artifact = await readFunctionFileDigest(candidate);
     } catch (error) {
       const code = error instanceof Error && "code" in error ? error.code : null;
       if (!authoritative && (code === "ENOENT" || code === "ENOTDIR")) continue;
@@ -784,11 +784,24 @@ type RuntimeActivationFence = EdgeFunctionActivationFence & {
 
 const activationFences = new Map<string, RuntimeActivationFence>();
 
+const ACTIVATION_MANIFEST_CACHE_LIMIT = 4096;
+const activationManifestCache = new Map<
+  string,
+  { sha256: string; manifest: EdgeFunctionActivationManifest }
+>();
+
 function isMissingFileError(error: unknown): boolean {
   return error instanceof Error
     && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
+/**
+ * Parses an activation manifest once per artifact digest. Dispatch re-reads the
+ * active manifest several times per request (authority resolution, activation
+ * snapshot and the pre-dispatch authority check); memoising the parse keeps
+ * those checks cheap without weakening them, because the cache key is the
+ * SHA-256 of the manifest bytes reachable only through the trusted read path.
+ */
 async function readFunctionActivationManifest(
   configPath: string,
   projectRoot: string,
@@ -797,10 +810,26 @@ async function readFunctionActivationManifest(
     throw new Error("Function config path escapes project root");
   }
   try {
-    const configFile = await readFunctionFile(configPath);
-    return parseEdgeFunctionActivationManifest(configFile.bytes.toString("utf8"));
+    const configFile = await readFunctionFileDigest(configPath);
+    const cached = activationManifestCache.get(configFile.path);
+    if (cached !== undefined && cached.sha256 === configFile.sha256) {
+      return cached.manifest;
+    }
+    const bytes = await readFunctionFileBytes(configFile);
+    const manifest = parseEdgeFunctionActivationManifest(bytes.toString("utf8"));
+    activationManifestCache.delete(configFile.path);
+    activationManifestCache.set(configFile.path, { sha256: configFile.sha256, manifest });
+    while (activationManifestCache.size > ACTIVATION_MANIFEST_CACHE_LIMIT) {
+      const oldest = activationManifestCache.keys().next();
+      if (oldest.done === true) break;
+      activationManifestCache.delete(oldest.value);
+    }
+    return manifest;
   } catch (error: unknown) {
-    if (isMissingFileError(error)) return null;
+    if (isMissingFileError(error)) {
+      activationManifestCache.delete(path.resolve(configPath));
+      return null;
+    }
     throw error;
   }
 }
@@ -935,7 +964,7 @@ async function assertDispatchAuthorityCurrent(
     configCache.delete(`${projectRef}/${functionName}`);
     throw new Error("Runtime environment changed before dispatch");
   }
-  const artifact = await readFunctionFile(activation.functionPath);
+  const artifact = await readFunctionFileDigest(activation.functionPath);
   if (artifact.sha256 !== activation.artifactSha256) {
     throw new Error("Function artifact SHA-256 does not match dispatch authority");
   }
