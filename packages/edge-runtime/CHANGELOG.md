@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.4](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.3...edge-runtime-v0.36.4) (2026-10-26)
+
+
+### Performance Improvements
+
+* **edge-runtime:** trim per-dispatch auth and env-proof bookkeeping ([#2262](https://github.com/vibeunion/supacloud/issues/2262)) ([7a18b5a](https://github.com/vibeunion/supacloud/commit/7a18b5a868fdc2f45c0e0c6d059a9c983b17f6ad))
+
 ## [0.36.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.2...edge-runtime-v0.36.3) (2026-10-26)
 
 
