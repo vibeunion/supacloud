@@ -465,7 +465,7 @@ export function resolveStorageBackend(value?: ConfiguredStorageBackend): Configu
   throw new Error(`unsupported SUPACLOUD_LITE_STORAGE_BACKEND: ${configured}`)
 }
 
-export function resolveS3EndpointOptions(env: NodeJS.ProcessEnv = process.env): S3EndpointOptions | undefined {
+export function resolveS3EndpointOptions(env: { [name: string]: string | undefined } = process.env): S3EndpointOptions | undefined {
   const accessKeyId = env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID
   const secretAccessKey = env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY
   if (!accessKeyId && !secretAccessKey) return undefined
