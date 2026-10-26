@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.36.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.2...edge-runtime-v0.36.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound body buffers and preserve warm workers on cancellation ([#2260](https://github.com/vibeunion/supacloud/issues/2260)) ([59b8f36](https://github.com/vibeunion/supacloud/commit/59b8f3630352635afc2fe0a994360f7276f8c763))
+
+
+### Performance Improvements
+
+* **edge-runtime:** cache trusted artifact digests and activation manifests ([#2258](https://github.com/vibeunion/supacloud/issues/2258)) ([e07a63a](https://github.com/vibeunion/supacloud/commit/e07a63a0fc486e3d398b7737aee1409a9f6766b5))
+* **edge-runtime:** cut per-request worker overhead (heap sampling, listener routing, response clone) ([#2261](https://github.com/vibeunion/supacloud/issues/2261)) ([1cff45a](https://github.com/vibeunion/supacloud/commit/1cff45ad30d0e4a72fd7be676839274ae1a9e4c4))
+* **edge-runtime:** scale function concurrency beyond the warm pool size ([#2259](https://github.com/vibeunion/supacloud/issues/2259)) ([1eb6159](https://github.com/vibeunion/supacloud/commit/1eb61597fb3d02dca41272a5acba92c1c6e24fc3))
+
 ## [0.36.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.1...edge-runtime-v0.36.2) (2026-10-25)
 
 

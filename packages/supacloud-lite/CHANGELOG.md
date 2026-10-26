@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.35.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.34.0...supacloud-lite-v0.35.0) (2026-10-26)
+
+
+### Features
+
+* **lite:** add PostgREST count strategies and rollback preference ([#2253](https://github.com/vibeunion/supacloud/issues/2253)) ([b87ef01](https://github.com/vibeunion/supacloud/commit/b87ef01f320cb1ed5b94cd16ea0412cf798fe5c9))
+* **lite:** add S3-compatible storage endpoint ([#2252](https://github.com/vibeunion/supacloud/issues/2252)) ([37a37b3](https://github.com/vibeunion/supacloud/commit/37a37b3e193cd328a5ef5e852d927b594ad1856f))
+
 ## [0.34.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.33.2...supacloud-lite-v0.34.0) (2026-10-26)
 
 
