@@ -42,6 +42,15 @@ Scenario: PostgREST count strategies and rollback preference
   Then the response reflects the would-be write
   And the transaction is rolled back without CDC or webhook side effects
 
+Scenario: Storage status and metrics expose only owned metadata
+  Given a running Lite Storage service
+  When a probe reads GET /storage/v1/status
+  Then it receives the service version without a project API key
+  When an operator reads GET /storage/v1/metrics with service_role
+  Then it receives bounded Prometheus metadata counts
+  And non-service callers are denied
+
+
 Scenario: Server-side Realtime broadcast is bounded and authorized
   Given a subscriber joined to a public or private Realtime topic
   When an authenticated server sends POST /realtime/v1/api/broadcast

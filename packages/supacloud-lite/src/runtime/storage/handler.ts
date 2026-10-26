@@ -17,6 +17,7 @@ import {
 } from './image-transform.js'
 import { ImageTransformCache, imageTransformCacheKey } from './image-transform-cache.js'
 import type { BucketSeed, RequestContext, StorageDriver } from '../types.js'
+import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 
 /** Construction options for {@link StorageHandler}. */
 export interface StorageConfig {
@@ -208,6 +209,12 @@ export class StorageHandler {
     const method = req.method.toUpperCase()
 
     try {
+      // ── service status and Prometheus metrics ──
+      if (rest === 'status' && method === 'GET') {
+        return json(200, { status: 'ok', name: 'supacloud-lite-storage', version: SUPACLOUD_LITE_VERSION })
+      }
+      if (rest === 'metrics' && method === 'GET') return await this.metrics(ctx)
+
       // ── buckets ──
       if (rest === 'bucket' && method === 'POST') return await this.createBucket(req, ctx)
       if (rest === 'bucket' && method === 'GET') return await this.listBuckets()
@@ -330,6 +337,43 @@ export class StorageHandler {
   }
 
   // ── buckets ─────────────────────────────────────────────────────────────
+
+  /**
+   * Prometheus text exposition for the storage metadata that Lite owns. Bucket
+   * and object counts are service-role only because they can reveal tenant
+   * activity even when object bytes themselves remain private.
+   */
+  private async metrics(ctx: RequestContext): Promise<Response> {
+    const denied = this.requireService(ctx)
+    if (denied) return denied
+    const [buckets, objects] = await Promise.all([
+      this.db.query<{ count: number }>(`select count(*)::int as count from storage.buckets`),
+      this.db.query<{ count: number; bytes: string | number | null }>(
+        `select count(*)::int as count,
+                coalesce(sum(case when metadata->>'size' ~ '^[0-9]+$' then (metadata->>'size')::bigint else 0 end), 0) as bytes
+         from storage.objects`
+      ),
+    ])
+    const bucketCount = buckets.rows[0]?.count ?? 0
+    const objectCount = objects.rows[0]?.count ?? 0
+    const objectBytes = Number(objects.rows[0]?.bytes ?? 0)
+    const body = [
+      '# HELP storage_buckets_total Number of storage buckets.',
+      '# TYPE storage_buckets_total gauge',
+      `storage_buckets_total ${bucketCount}`,
+      '# HELP storage_objects_total Number of storage object metadata rows.',
+      '# TYPE storage_objects_total gauge',
+      `storage_objects_total ${objectCount}`,
+      '# HELP storage_object_bytes_total Sum of declared object sizes in bytes.',
+      '# TYPE storage_object_bytes_total gauge',
+      `storage_object_bytes_total ${Number.isFinite(objectBytes) ? objectBytes : 0}`,
+      '',
+    ].join('\n')
+    return new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' },
+    })
+  }
 
   private requireService(ctx: RequestContext): Response | null {
     if (ctx.role !== 'service_role') {

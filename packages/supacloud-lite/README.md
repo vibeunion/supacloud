@@ -565,6 +565,8 @@ await running.close()
 
 图片变换目前提供 Bun.Image 的兼容子集：`width`、`height`、`resize=fill|contain`，以及 `format=origin|jpeg|png|webp` 和 JPEG/WebP `quality`。`resize=cover` 需要裁剪能力，当前 Bun 运行时没有对应 API，因此会明确返回不支持错误，不会错误地把图片拉伸成 `cover`。
 
+Storage 还提供两个运维端点：`GET /storage/v1/status` 无需项目 API key，返回服务名称、版本和健康状态；`GET /storage/v1/metrics` 需要 `service_role`，以 Prometheus 文本格式输出 bucket 数、对象元数据行数和声明对象总字节数。指标只统计 Lite 自己的 `storage` schema，不代表远端 S3 bucket 的真实用量或后台清理延迟。
+
 也可以使用 `createLiteBackend()` 直接创建内存或自定义目录的嵌入式后端，并把它的 `fetch` 传给自定义宿主。
 
 ### 来源与许可
@@ -1103,6 +1105,8 @@ await running.close()
 ```
 
 Image transforms currently provide a compatible subset of Bun.Image: `width`, `height`, `resize=fill|contain`, as well as `format=origin|jpeg|png|webp` and JPEG/WebP `quality`. `resize=cover` requires cropping capability, which the current Bun runtime does not have a corresponding API for, so it explicitly returns an unsupported error instead of incorrectly stretching the image to `cover`.
+
+Storage also exposes two operational endpoints: `GET /storage/v1/status` needs no project API key and returns the service name, version, and health; `GET /storage/v1/metrics` requires `service_role` and returns Prometheus text with bucket count, object metadata rows, and declared object bytes. These metrics cover Lite's `storage` schema only; they do not claim the real usage of a remote S3 bucket or background cleanup latency.
 
 You can also use `createLiteBackend()` to directly create an embedded backend with an in-memory or custom directory, and pass its `fetch` to a custom host.
 
