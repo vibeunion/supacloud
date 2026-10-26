@@ -1375,14 +1375,20 @@ function parseNonNegativeIntegerHeader(value: string | null): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null
 }
 
+export function cancelStorageBody(body: { cancel(): Promise<unknown> } | null): void {
+  // A wrapped HTTP request may wait for its upstream before cancellation settles.
+  // Cancellation is best-effort once rejected; it must not block the error response.
+  void body?.cancel().catch(() => {})
+}
+
 export async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint8Array | null> {
   if (!Number.isFinite(maxBytes) || maxBytes < 0) {
-    await request.body?.cancel()
+    cancelStorageBody(request.body)
     return null
   }
   const contentLength = Number(request.headers.get('content-length'))
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    await request.body?.cancel()
+    cancelStorageBody(request.body)
     return null
   }
   if (!request.body) return new Uint8Array()
@@ -1394,14 +1400,14 @@ export async function readLimitedBody(request: Request, maxBytes: number): Promi
       const { done, value } = await reader.read()
       if (done) break
       if (total + value.byteLength > maxBytes) {
-        await reader.cancel()
+        cancelStorageBody(reader)
         return null
       }
       chunks.push(value)
       total += value.byteLength
     }
   } catch (error) {
-    await reader.cancel()
+    cancelStorageBody(reader)
     throw error
   } finally {
     reader.releaseLock()

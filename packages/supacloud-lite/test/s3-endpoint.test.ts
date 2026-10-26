@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createHash, createHmac } from 'node:crypto'
-import { createLiteBackend, MemoryStorageDriver } from '../src/index.js'
+import { createLiteBackend, MemoryStorageDriver, serveBun } from '../src/index.js'
 import { testTimeout } from './helpers/timeouts.js'
 
 const accessKeyId = 'lite-s3-access'
@@ -369,6 +369,35 @@ describe('S3-compatible endpoint', () => {
       expect((await backend.db.query('select 1 from storage.s3_multipart_uploads')).rows).toHaveLength(0)
       expect((await backend.db.query('select 1 from storage.s3_multipart_parts')).rows).toHaveLength(0)
     } finally {
+      await backend.close()
+    }
+  }, testTimeout(30_000))
+
+  test('returns oversized HTTP responses without waiting for wrapped-body cancellation', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64),
+      s3Endpoint: { accessKeyId, secretAccessKey, region }, log: () => {},
+    })
+    const server = await serveBun(backend, { port: 0 })
+    const path = `/storage/v1/s3/${bucket}/object?uploadId=missing`
+    try {
+      const oversized = await fetch(`${server.url}${path}`, {
+        method: 'POST',
+        headers: authorization('POST', new URL(`http://local${path}`), new Uint8Array(), {
+          'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+        }),
+        body: new Uint8Array(2 * 1024 * 1024 + 1),
+        signal: AbortSignal.timeout(5000),
+      })
+      expect(oversized.status).toBe(413)
+      expect(await oversized.text()).toContain('EntityTooLarge')
+      const listing = await fetch(`${server.url}/storage/v1/s3`, {
+        headers: authorization('GET', new URL('http://local/storage/v1/s3'), new Uint8Array()),
+        signal: AbortSignal.timeout(5000),
+      })
+      expect(listing.status).toBe(200)
+    } finally {
+      await server.close()
       await backend.close()
     }
   }, testTimeout(30_000))

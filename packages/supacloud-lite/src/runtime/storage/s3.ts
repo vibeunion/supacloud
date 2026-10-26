@@ -9,7 +9,7 @@
 import type { Database, Querier } from '../db/database.js'
 import { Mutex } from '../db/engine.js'
 import type { StorageDriver } from '../types.js'
-import { invalidMimeType, invalidObjectKey, readLimitedBody } from './handler.js'
+import { cancelStorageBody, invalidMimeType, invalidObjectKey, readLimitedBody } from './handler.js'
 import { XMLParser, XMLValidator } from 'fast-xml-parser'
 
 export interface S3EndpointOptions {
@@ -357,7 +357,7 @@ export class S3Handler {
       if (error instanceof S3Error) return xmlError(error, requestId)
       return xmlError(new S3Error(500, 'InternalError', 'We encountered an internal error. Please try again.'), requestId)
     } finally {
-      if (req.body && !req.bodyUsed && !req.body.locked) await req.body.cancel()
+      if (req.body && !req.bodyUsed && !req.body.locked) cancelStorageBody(req.body)
     }
   }
 
