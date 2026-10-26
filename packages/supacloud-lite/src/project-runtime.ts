@@ -24,6 +24,7 @@ import { isRecord } from './runtime/validation.js'
 import type { DbEngine } from './runtime/db/engine.js'
 import type { RuntimeMode } from './runtime/functions/profile.js'
 import type { GraphqlOptions } from './runtime/graphql.js'
+import { createExternalAuthProxy } from './runtime/auth/proxy.js'
 import type { SeedOptions } from './runtime/node/project.js'
 
 const RESET_INITIALIZATION_ERROR = 'db reset requires initialized state; run "supacloud-lite migrate" first'
@@ -49,6 +50,8 @@ export interface ProjectRuntimeOptions {
   graphql?: GraphqlOptions
   externalIdentity?: ExternalIdentityVerifier
   identityModule?: string
+  externalAuthProxyIssuer?: string
+  externalAuthProxyRedirectOrigins?: string[]
   postgresDir?: string
   migrationBindings?: SeedOptions['bindings']
   projectDir?: string
@@ -502,7 +505,13 @@ export async function startProjectServer(options: ProjectRuntimeOptions = {}): P
   const resolvedOptions = options.port === 0 ? { ...options, port: await findEphemeralPort(options.host) } : options
   const project = await createProjectBackend({ ...resolvedOptions, startRuntimeServices: true })
   try {
-    const server = await serveBun(project.backend, { host: project.host, port: project.port })
+    const beforeRequest = options.externalAuthProxyIssuer
+      ? createExternalAuthProxy({
+          issuer: options.externalAuthProxyIssuer,
+          allowedRedirectOrigins: options.externalAuthProxyRedirectOrigins,
+        })
+      : undefined
+    const server = await serveBun(project.backend, { host: project.host, port: project.port, beforeRequest })
     let closePromise: Promise<void> | null = null
     return {
       ...project,
