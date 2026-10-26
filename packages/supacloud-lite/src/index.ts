@@ -31,6 +31,11 @@ export {
 export type { EdgeFunction, FunctionContext } from './runtime/functions/handler.js'
 export type { PgredisCacheBinding } from './runtime/functions/pgredis.js'
 export { createSupAuthLiteIdentity, type ExternalIdentityVerifier, type VerifiedSupAuthContext } from './runtime/identity.js'
+export {
+  createExternalAuthProxy,
+  type ExternalAuthProxy,
+  type ExternalAuthProxyOptions,
+} from './runtime/auth/proxy.js'
 export { inspectGraphql, type GraphqlCapability, type GraphqlOptions } from './runtime/graphql.js'
 export type { RuntimeMode } from './runtime/functions/profile.js'
 export { SUPACLOUD_LITE_VERSION } from './version.js'
