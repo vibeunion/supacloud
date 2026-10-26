@@ -299,16 +299,16 @@ function verifiedApiLoad(
   apiEnv: ApiRuntimeEnv,
   cacheEpoch: number,
 ): TenantEnvLoad {
-  const env = { ...apiEnv.env };
+  const env = Object.freeze({ ...apiEnv.env });
   const verified = apiEnv.revision !== null && MASTER_TOKEN.length > 0;
-  return {
+  return Object.freeze({
     env,
     revision: verified ? apiEnv.revision : null,
     envProof: verified ? runtimeEnvProof(ref, env) : null,
     loadState: verified ? "loaded" : "unverified",
     loadSource: "management_api",
     cacheEpoch,
-  };
+  });
 }
 
 function fallbackLoad(
@@ -317,14 +317,14 @@ function fallbackLoad(
   cacheEpoch: number,
   cached?: CachedTenantEnv,
 ): TenantEnvLoad {
-  return {
-    env: buildFallbackTenantEnv(ref, fileEnv, cached?.env),
+  return Object.freeze({
+    env: Object.freeze(buildFallbackTenantEnv(ref, fileEnv, cached?.env)),
     revision: null,
     envProof: null,
     loadState: "unverified",
     loadSource: cached ? "stale_cache" : "file_fallback",
     cacheEpoch,
-  };
+  });
 }
 
 async function loadTenantEnvUncached(ref: string, cacheEpoch: number): Promise<TenantEnvLoad> {
@@ -339,14 +339,20 @@ async function loadTenantEnvUncached(ref: string, cacheEpoch: number): Promise<T
   if (apiEnv === null) {
     const fallback = fallbackLoad(ref, fileEnv, cacheEpoch, cached);
     if ((cacheEpochs.get(ref) || 0) === cacheEpoch) {
-      envCache.set(ref, { ...fallback, expiresAt: Date.now() + ENV_FALLBACK_CACHE_TTL });
+      envCache.set(ref, Object.freeze({
+        ...fallback,
+        expiresAt: Date.now() + ENV_FALLBACK_CACHE_TTL,
+      }));
     }
     return fallback;
   }
 
   const loaded = verifiedApiLoad(ref, apiEnv, cacheEpoch);
   if ((cacheEpochs.get(ref) || 0) === cacheEpoch) {
-    envCache.set(ref, { ...loaded, expiresAt: Date.now() + ENV_CACHE_TTL });
+    envCache.set(ref, Object.freeze({
+      ...loaded,
+      expiresAt: Date.now() + ENV_CACHE_TTL,
+    }));
   }
   return loaded;
 }
@@ -385,21 +391,29 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
  * already cached tenant-env load, so it is memoised per load object and
  * execution profile instead of being re-derived per dispatch.
  */
-const moduleEnvProofMemo = new WeakMap<object, Map<TenantEnvExecutionProfile, string>>();
+type ModuleEnvProofMemoEntry = {
+  ref: string;
+  proof: string;
+};
+
+const moduleEnvProofMemo = new WeakMap<object, Map<TenantEnvExecutionProfile, ModuleEnvProofMemoEntry>>();
 
 export function tenantEnvModuleProof(
   ref: string,
   env: Record<string, string>,
-  load: Pick<TenantEnvLoad, "revision" | "loadState" | "loadSource">,
+  load: Pick<TenantEnvLoad, "revision" | "loadState" | "loadSource"> & Partial<Pick<TenantEnvLoad, "env">>,
   executionProfile: TenantEnvExecutionProfile,
 ): string | null {
   if (!MASTER_TOKEN) return null;
   // Only reuse a memoised proof when the environment is the one this load owns,
   // so a load object can never serve a proof for a different environment.
-  const memoizable = env === (load as TenantEnvLoad).env;
+  const loadedEnv = load.env;
+  const memoizable = env === loadedEnv
+    && Object.isFrozen(env)
+    && Object.isFrozen(load);
   if (memoizable) {
     const cached = moduleEnvProofMemo.get(load)?.get(executionProfile);
-    if (cached !== undefined) return cached;
+    if (cached?.ref === ref) return cached.proof;
   }
   const proof = keyedEnvProof("module-env", ref, JSON.stringify({
     executionProfile,
@@ -410,7 +424,7 @@ export function tenantEnvModuleProof(
   }));
   if (memoizable) {
     const byProfile = moduleEnvProofMemo.get(load) ?? new Map();
-    byProfile.set(executionProfile, proof);
+    byProfile.set(executionProfile, { ref, proof });
     moduleEnvProofMemo.set(load, byProfile);
   }
   return proof;

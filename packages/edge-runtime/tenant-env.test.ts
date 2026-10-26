@@ -128,15 +128,15 @@ describe("tenant env masking guard", () => {
     try {
       const proofModule = await import("./tenant-env.ts?module-proof-memo");
       const ref = "proj_module_proof_memo";
-      const env = { RUNTIME_SECRET: "memo-secret" };
-      const load = {
+      const env = Object.freeze({ RUNTIME_SECRET: "memo-secret" });
+      const load = Object.freeze({
         env,
         revision: `hmac-sha256:${"c".repeat(64)}`,
         envProof: `hmac-sha256:${"d".repeat(64)}`,
         loadState: "loaded" as const,
         loadSource: "management_api" as const,
         cacheEpoch: 0,
-      };
+      });
 
       const foreground = proofModule.tenantEnvModuleProof(ref, env, load, "foreground");
       expect(proofModule.tenantEnvModuleProof(ref, env, load, "foreground")).toBe(foreground);
@@ -145,9 +145,33 @@ describe("tenant env masking guard", () => {
       // An environment detached from the load still hashes to the same proof
       // but must never reuse (or poison) the memo.
       expect(proofModule.tenantEnvModuleProof(ref, { ...env }, load, "foreground")).toBe(foreground);
+      const otherRef = `${ref}_other`;
+      const otherProject = proofModule.tenantEnvModuleProof(otherRef, env, load, "foreground");
+      expect(otherProject).not.toBe(foreground);
+      expect(otherProject).toBe(proofModule.tenantEnvModuleProof(otherRef, { ...env }, load, "foreground"));
+      expect(proofModule.tenantEnvModuleProof(ref, env, load, "foreground")).toBe(foreground);
 
-      const changedEnv = { RUNTIME_SECRET: "rotated-secret" };
-      const rotated = { ...load, env: changedEnv, revision: `hmac-sha256:${"e".repeat(64)}` };
+      const mutableEnv = { ...env };
+      const mutableLoad = { ...load, env: mutableEnv };
+      expect(proofModule.tenantEnvModuleProof(ref, mutableEnv, mutableLoad, "foreground")).toBe(foreground);
+      mutableEnv.RUNTIME_SECRET = "mutated-secret";
+      const changedProof = proofModule.tenantEnvModuleProof(ref, mutableEnv, mutableLoad, "foreground");
+      expect(changedProof).not.toBe(foreground);
+      mutableLoad.revision = `hmac-sha256:${"f".repeat(64)}`;
+      expect(proofModule.tenantEnvModuleProof(ref, mutableEnv, mutableLoad, "foreground")).not.toBe(changedProof);
+
+      // Freezing only the container must not cache a still-mutable environment.
+      const frozenLoad = Object.freeze({ ...load, env: mutableEnv });
+      const beforeMutation = proofModule.tenantEnvModuleProof(ref, mutableEnv, frozenLoad, "foreground");
+      mutableEnv.RUNTIME_SECRET = "mutated-again";
+      expect(proofModule.tenantEnvModuleProof(ref, mutableEnv, frozenLoad, "foreground")).not.toBe(beforeMutation);
+
+      const changedEnv = Object.freeze({ RUNTIME_SECRET: "rotated-secret" });
+      const rotated = Object.freeze({
+        ...load,
+        env: changedEnv,
+        revision: `hmac-sha256:${"e".repeat(64)}`,
+      });
       const rotatedProof = proofModule.tenantEnvModuleProof(ref, changedEnv, rotated, "foreground");
       expect(rotatedProof).not.toBe(foreground);
       expect(proofModule.tenantEnvModuleProof(ref, changedEnv, rotated, "foreground")).toBe(rotatedProof);

@@ -7,7 +7,7 @@ incident. This review separates observed source behavior from proposed changes.
 | Item | Source finding | Decision and remaining work |
 | --- | --- | --- |
 | Four foreground slots | `server.ts` defaults to four; one invocation owns each Worker until cleanup. Parked Workers do not add execution slots. | Production is not necessarily four: `management-api/src/upgrade.ts` already computes external-runtime capacity from CPU and memory limits. Preserve the explicit override and memory-aware policy; do not increase to 16 on CPU count alone. |
-| Manifest/config/artifact verification | `getFunctionConfig` checks project release before its legacy cache. `assertDispatchAuthorityCurrent` reads authority and artifact; executor also checks artifact before entering tenant code. | Hot path exists. A bounded digest/parsed-manifest cache is worth implementing, but must retain trusted descriptors, ownership/mode checks, path bindings, activation fences and revocation. Simply moving a TTL lookup before authority detection can authorize stale policy. Not implemented in this change. |
+| Manifest/config/artifact verification | `getFunctionConfig` checks project release before its legacy cache. `assertDispatchAuthorityCurrent` reads authority and artifact; executor also checks artifact before entering tenant code. | Implemented in #2258 with bounded digest/parsed-manifest caches, retaining trusted descriptors, ownership/mode checks, path bindings, activation fences and revocation. Identity checks remain per dispatch. Simply moving a TTL lookup before authority detection can authorize stale policy. |
 | Cancellation/replacement | Abort previously waited for lifecycle completion or retired; stream cancellation and timeout retired directly. | Implemented cooperative cancellation, keyed to one execution, with a three-second cleanup deadline and reuse only after completion. Keep forced retirement for hung execution and process recovery for retained memory. An ack only confirms receipt, not termination. |
 | waitUntil occupancy | Background promises retain the originating Worker's env, console, TLS, bindings and slot. | True capacity cost. Closures cannot be transferred into another Worker pool. Separate serializable background jobs or redesign request context first; existing global-context isolation remains. |
 | Full request buffering | Previous implementation aggregated with `request.arrayBuffer()`. | Replaced with bounded incremental reads, early body-limit rejection and shared reservations. Final contiguous transfer is still required before handler entry; this is not streaming upload. |
@@ -39,11 +39,12 @@ official references, raw records and the remaining slow-client RSS regression.
 `packages/edge-runtime/http-dispatch-benchmark.ts` (`bun run bench:http`) now
 provides the end-to-end harness this review asked for. It boots the real
 entrypoint against a temporary project fixture and reports completed invocations
-over HTTP, so routing, JWT and throttle bookkeeping, attestation, queueing and
-response delivery are all included; `bench:memory` and `bench:projects` measure
-Worker-pool dispatch only.
+over HTTP, including routing, service-role API-key authentication, throttle
+bookkeeping, trusted-file checks, queueing and response delivery. The fixture
+does not exercise JWT signature verification, TLS, or an attested release
+manifest. `bench:memory` and `bench:projects` measure Worker-pool dispatch only.
 
-Development host (Bun 1.4.3, macOS arm64, 4 warm Workers, 16 concurrent clients,
+Author-reported development results (Bun 1.4.3, macOS arm64, pool size 4, 16 concurrent clients,
 15 000-20 000 completed invocations, single JSON response, no I/O in the handler):
 
 | Revision | Requests/s | p50 | p99 |
@@ -58,8 +59,8 @@ The first step was not a scheduling change. The executor called
 tenant allocations; it is now sampled at most once per
 `EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS`. The remaining per-request CPU is spread
 thin: Worker messaging (`postMessage` of the dispatch envelope), trusted-file
-identity checks, response delivery and native socket work each contribute single
-digit microseconds.
+identity checks, response delivery and native socket work were reported in the
+single-digit to tens-of-microseconds range.
 
 Against a bare `Bun.serve` route returning the same body, the function path still
 costs roughly ten times more CPU per request, and the gap is the invocation model
@@ -68,7 +69,10 @@ per-request environment injection) rather than one removable hotspot. Closing it
 needs request multiplexing inside a Worker or a different data plane, which stays
 blocked on per-request context isolation as described above.
 
-These numbers are local and unloaded. They do not replace Linux HTTP/TLS
+These numbers are local load-test results. Raw per-run records for the historical
+comparison are not included, so they are not an independently verified speedup.
+The harness warms requests sequentially; that does not guarantee every configured
+Worker has loaded the function. These results do not replace Linux HTTP/TLS
 acceptance with production function sizes, deployment limits and tenant code.
 
 Delivery of the implemented controls does not mark all proposed optimizations

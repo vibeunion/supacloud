@@ -3,7 +3,7 @@
  *
  * Boots the real Edge Runtime entrypoint against a temporary project fixture and
  * measures completed function invocations over HTTP, so the numbers include
- * routing, JWT/throttle bookkeeping, attestation, queueing and response
+ * routing, API-key/throttle bookkeeping, trusted-file checks, queueing and response
  * delivery instead of only Worker-pool dispatch.
  *
  *   bun http-dispatch-benchmark.ts --concurrency 16 --requests 20000
@@ -56,7 +56,7 @@ function parseOptions(argv: string[]): BenchmarkOptions {
   };
 }
 
-function functionSource(options: BenchmarkOptions): string {
+function functionSource(): string {
   return `export default async (req) => {
   const url = new URL(req.url);
   const requested = Number(url.searchParams.get("io") ?? 0);
@@ -73,61 +73,69 @@ function functionSource(options: BenchmarkOptions): string {
 
 export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
   const fixtureRoot = await mkdtemp(join(homedir(), ".supacloud-edge-http-bench-"));
-  const functionsDir = join(fixtureRoot, "functions");
-  const projectRoot = join(functionsDir, PROJECT_REF);
-  await mkdir(projectRoot, { recursive: true });
-  await writeFile(join(projectRoot, "bench.ts"), functionSource(options));
-
-  const management = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => Response.json({
-      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
-      SUPABASE_SERVICE_ROLE_KEY: SERVICE_ROLE_KEY,
-    }, {
-      headers: { "x-supacloud-runtime-env-revision": `hmac-sha256:${"e".repeat(64)}` },
-    }),
-  });
-  const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("reserved") });
-  const port = reservation.port;
-  reservation.stop(true);
-  const baseUrl = `http://127.0.0.1:${port}`;
-
-  const stderr = join(tmpdir(), `supacloud-edge-http-bench-${process.pid}.log`);
   const runtimeInstanceId = crypto.randomUUID();
-  const runtime = Bun.spawn([process.execPath, options.entrypoint], {
-    cwd: import.meta.dir,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: Bun.file(stderr),
-    env: {
-      ...process.env,
-      EDGE_RUNTIME_HOST: "127.0.0.1",
-      EDGE_RUNTIME_PORT: String(port),
-      EDGE_RUNTIME_INSTANCE_ID: runtimeInstanceId,
-      EDGE_RUNTIME_MASTER_KEY: INTERNAL_TOKEN,
-      EDGE_FUNCTIONS_DIR: functionsDir,
-      EDGE_FUNCTIONS_BASE_DIR: functionsDir,
-      MANAGEMENT_API_URL: `http://127.0.0.1:${management.port}`,
-      TENANTS_DIR: join(fixtureRoot, "tenants"),
-      WORKER_POOL_SIZE: String(options.size),
-      BACKGROUND_WORKER_POOL_SIZE: "1",
-      MAX_QUEUE_SIZE: String(Math.max(512, options.concurrency * 8)),
-      NODE_ENV: "production",
-    },
-  });
-
-  const query = `io=${options.ioMs}&bytes=${options.responseBytes}`;
-  const invoke = async () => {
-    const response = await fetch(`${baseUrl}/functions/v1/bench?${query}`, {
-      headers: { "x-project-ref": PROJECT_REF, apikey: SERVICE_ROLE_KEY },
-    });
-    const body = await response.arrayBuffer();
-    if (response.status !== 200) throw new Error(`dispatch failed with ${response.status}`);
-    return body.byteLength;
-  };
-
+  const stderr = join(tmpdir(), `supacloud-edge-http-bench-${runtimeInstanceId}.log`);
+  let management: ReturnType<typeof Bun.serve> | undefined;
+  let runtime: ReturnType<typeof Bun.spawn> | undefined;
   try {
+    const functionsDir = join(fixtureRoot, "functions");
+    const projectRoot = join(functionsDir, PROJECT_REF);
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(projectRoot, "bench.ts"), functionSource());
+
+    management = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => Response.json({
+        SUPACLOUD_AUTH_RUNTIME_MODE: "local",
+        SUPABASE_SERVICE_ROLE_KEY: SERVICE_ROLE_KEY,
+      }, {
+        headers: { "x-supacloud-runtime-env-revision": `hmac-sha256:${"e".repeat(64)}` },
+      }),
+    });
+    const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("reserved") });
+    const port = reservation.port;
+    reservation.stop(true);
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    runtime = Bun.spawn([process.execPath, options.entrypoint], {
+      cwd: import.meta.dir,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: Bun.file(stderr),
+      env: {
+        ...process.env,
+        EDGE_RUNTIME_HOST: "127.0.0.1",
+        EDGE_RUNTIME_PORT: String(port),
+        EDGE_RUNTIME_INSTANCE_ID: runtimeInstanceId,
+        EDGE_RUNTIME_MASTER_KEY: INTERNAL_TOKEN,
+        EDGE_FUNCTIONS_DIR: functionsDir,
+        EDGE_FUNCTIONS_BASE_DIR: functionsDir,
+        MANAGEMENT_API_URL: `http://127.0.0.1:${management.port}`,
+        TENANTS_DIR: join(fixtureRoot, "tenants"),
+        WORKER_POOL_SIZE: String(options.size),
+        BACKGROUND_WORKER_POOL_SIZE: "1",
+        MAX_QUEUE_SIZE: String(Math.max(512, options.concurrency * 8)),
+        NODE_ENV: "production",
+      },
+    });
+
+    const expectedBody = options.responseBytes > 0
+      ? Buffer.alloc(options.responseBytes, 97)
+      : Buffer.from(JSON.stringify({ ok: true, path: "/functions/v1/bench" }));
+    const query = `io=${options.ioMs}&bytes=${options.responseBytes}`;
+    const invoke = async () => {
+      const response = await fetch(`${baseUrl}/functions/v1/bench?${query}`, {
+        headers: { "x-project-ref": PROJECT_REF, apikey: SERVICE_ROLE_KEY },
+      });
+      const body = await response.arrayBuffer();
+      if (response.status !== 200) throw new Error(`dispatch failed with ${response.status}`);
+      if (!Buffer.from(body).equals(expectedBody)) {
+        throw new Error("unexpected benchmark response body");
+      }
+      return body.byteLength;
+    };
+
     const deadline = Date.now() + 20_000;
     for (;;) {
       let healthResponse: Response | undefined;
@@ -154,12 +162,14 @@ export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
 
     const latencies: number[] = [];
     let dispatched = 0;
+    let completedBytes = 0;
     const started = performance.now();
     await Promise.all(Array.from({ length: options.concurrency }, async () => {
       while (dispatched < options.requests) {
         dispatched += 1;
         const requestStart = performance.now();
-        await invoke();
+        const responseBytes = await invoke();
+        completedBytes += responseBytes;
         latencies.push(performance.now() - requestStart);
       }
     }));
@@ -171,6 +181,7 @@ export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
     return {
       ...options,
       requests: options.requests,
+      completedBytes,
       elapsedMs: Math.round(elapsedMs),
       requestsPerSecond: Math.round(options.requests * 1000 / elapsedMs),
       p50Ms: Number(percentile(0.5).toFixed(3)),
@@ -179,9 +190,17 @@ export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
       maxMs: Number((latencies.at(-1) ?? 0).toFixed(3)),
     };
   } finally {
-    runtime.kill("SIGTERM");
-    await Promise.race([runtime.exited, Bun.sleep(5_000).then(() => runtime.kill("SIGKILL"))]);
-    management.stop(true);
+    if (runtime) {
+      const child = runtime;
+      const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      try {
+        child.kill("SIGTERM");
+        await child.exited;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    management?.stop(true);
     await rm(fixtureRoot, { recursive: true, force: true });
     await rm(stderr, { force: true });
   }
