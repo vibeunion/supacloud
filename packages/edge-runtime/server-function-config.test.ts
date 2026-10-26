@@ -268,6 +268,9 @@ function edgeRuntimeEnvironment(
     TENANTS_DIR: join(fixtureRoot, "tenants"),
     WORKER_POOL_SIZE: "1",
     BACKGROUND_WORKER_POOL_SIZE: "1",
+    // Pin the foreground ceiling to the warm size so tests that depend on a
+    // request waiting in the queue keep their deterministic premise.
+    EDGE_MAX_FUNCTION_CONCURRENCY: "1",
     EDGE_TEST_REALPATH_STAT_FAILURES: JSON.stringify(statFailures),
     EDGE_TEST_ACTIVATION_GENERATION_READ_LOG: activationGenerationReadLog,
   };
