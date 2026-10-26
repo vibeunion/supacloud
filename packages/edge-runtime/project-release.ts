@@ -1,10 +1,28 @@
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
-import { readFunctionFile } from "./trusted-function-files";
-import { parseEdgeFunctionActivationManifest } from "./function-activation";
+import { parseEdgeFunctionActivationManifest, type EdgeFunctionActivationManifest } from "./function-activation";
+import { readFunctionFileBytes, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
 
 const PROJECT_RELEASE_FILE = ".project-release.json";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const RELEASE_CACHE_LIMIT = 256;
+
+/**
+ * Parsing a release manifest validates up to 128 members and re-hashes the
+ * canonical document. That work only depends on the file bytes, so it is
+ * memoised by artifact digest instead of being repeated on every dispatch.
+ */
+const releaseCache = new Map<string, Map<string, EdgeFunctionActivationManifest>>();
+
+function rememberRelease(cacheKey: string, members: Map<string, EdgeFunctionActivationManifest>): void {
+  releaseCache.delete(cacheKey);
+  releaseCache.set(cacheKey, members);
+  while (releaseCache.size > RELEASE_CACHE_LIMIT) {
+    const oldest = releaseCache.keys().next();
+    if (oldest.done === true) break;
+    releaseCache.delete(oldest.value);
+  }
+}
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -48,12 +66,19 @@ function releaseMembers(raw: string, projectRef: string) {
 }
 
 export async function projectReleaseFunctionManifest(projectRoot: string, slug: string) {
-  let bytes: Buffer;
+  const releasePath = join(projectRoot, PROJECT_RELEASE_FILE);
+  let digest: TrustedFunctionFileDigest;
   try {
-    bytes = (await readFunctionFile(join(projectRoot, PROJECT_RELEASE_FILE))).bytes;
+    digest = await readFunctionFileDigest(releasePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-  return releaseMembers(bytes.toString("utf8"), basename(projectRoot)).get(slug) ?? null;
+  const cacheKey = `${digest.path}\u0000${digest.sha256}`;
+  const cached = releaseCache.get(cacheKey);
+  if (cached !== undefined) return cached.get(slug) ?? null;
+  const bytes = await readFunctionFileBytes(digest);
+  const members = releaseMembers(bytes.toString("utf8"), basename(projectRoot));
+  rememberRelease(cacheKey, members);
+  return members.get(slug) ?? null;
 }
