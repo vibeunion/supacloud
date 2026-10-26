@@ -36,6 +36,19 @@ describe("embedded Edge Runtime process boundary", () => {
     });
   });
 
+  test("passes host memory budgets without widening the credential boundary", () => {
+    const budget = {
+      EDGE_BODY_BUFFER_BUDGET_BYTES: "268435456",
+      EDGE_RESPONSE_BUFFER_BUDGET_BYTES: "67108864",
+      EDGE_RESPONSE_READ_AHEAD_BYTES: "16777216",
+      EDGE_WORKER_HEAP_BUDGET_BYTES: "134217728",
+      EDGE_MODULE_BUDGET_BYTES: "33554432",
+      EDGE_MODULE_GENERATION_LIMIT: "100",
+      EDGE_RSS_BUDGET_BYTES: "1073741824",
+    };
+    expect(buildEdgeRuntimeChildEnv({ ...budget, UNRELATED_HOST_SECRET: "not-inherited" }, {})).toEqual(budget);
+  });
+
   test("rejects an empty runtime user when Management API runs as root", () => {
     expect(() => buildEdgeRuntimeCommand("/opt/supacloud/edge-runtime/server.ts", {
       bunPath: "/usr/local/bin/bun",

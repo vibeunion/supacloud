@@ -8,6 +8,7 @@ const REQUESTS_PER_BATCH = 6;
 // Leave enough room for worker cold start while still forcing the held fetch to time out.
 const REQUEST_TIMEOUT_MS = 800;
 const HELD_FETCH_DELAY_MS = 1_200;
+const hardRetirement = Bun.argv.includes("--wait-until");
 
 async function waitForNaturalExits(pool: WorkerPool, expected: number): Promise<void> {
   const deadline = Date.now() + 3_000;
@@ -31,7 +32,13 @@ async function runStress(): Promise<void> {
   await Bun.write(functionPath, `
     export default async function execute(request) {
       if (new URL(request.url).pathname.endsWith("/slow")) {
-        await globalThis.fetch(process.env.HELD_FETCH_URL);
+        const held = globalThis.fetch(process.env.HELD_FETCH_URL,
+          ${hardRetirement ? "undefined" : "{ signal: request.signal }"});
+        if (${hardRetirement}) {
+          EdgeRuntime.waitUntil(held);
+          return new Response("queued", { status: 202 });
+        }
+        await held;
       }
       return new Response("replacement");
     }
@@ -50,20 +57,21 @@ async function runStress(): Promise<void> {
       functionPath,
       projectRoot,
       env: { HELD_FETCH_URL: `http://127.0.0.1:${heldFetchServer.port}` },
+      limits: { wait_until_timeout_ms: 25 },
       request: new Request(`http://edge.local/functions/v1/stress/${path}`),
     });
-    expectStatus(await dispatch("fast"), 200);
+    await expectStatus(await dispatch("fast"), 200);
 
     for (let batch = 0; batch < CHURN_BATCHES; batch++) {
-      const timedOut = await Promise.all(
-        Array.from({ length: REQUESTS_PER_BATCH }, () => dispatch("slow")),
-      );
-      timedOut.forEach((response) => expectStatus(response, 504));
-      const replacementResponses = await Promise.all([dispatch("fast"), dispatch("fast")]);
-      replacementResponses.forEach((response) => expectStatus(response, 200));
+      await Promise.all(Array.from({ length: REQUESTS_PER_BATCH }, async () => {
+        await expectStatus(await dispatch("slow"), hardRetirement ? 202 : 504);
+      }));
+      await Promise.all(["fast", "fast"].map(async () => {
+        await expectStatus(await dispatch("fast"), 200);
+      }));
     }
 
-    const expectedRetirements = CHURN_BATCHES * REQUESTS_PER_BATCH;
+    const expectedRetirements = hardRetirement ? CHURN_BATCHES * REQUESTS_PER_BATCH : 0;
     await waitForNaturalExits(pool, expectedRetirements);
     const metrics = pool.snapshotMetrics("stress");
     console.log(JSON.stringify({
@@ -81,10 +89,11 @@ async function runStress(): Promise<void> {
   }
 }
 
-function expectStatus(response: Response, expected: number) {
+async function expectStatus(response: Response, expected: number) {
   if (response.status !== expected) {
     throw new Error(`Expected HTTP ${expected}, received ${response.status}`);
   }
+  await response.body?.cancel();
 }
 
 await runStress();

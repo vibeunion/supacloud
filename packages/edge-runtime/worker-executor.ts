@@ -1,3 +1,5 @@
+import { heapStats } from "bun:jsc";
+import { BodyLimitError, positiveBytes, prepareResponseBody } from "./body-transfer";
 import path from "path";
 import { fileURLToPath } from "node:url";
 import { isFrameworkRouterHandler, toFunctionLocalUrl, type FrameworkRouterHandler } from "./function-routing";
@@ -74,7 +76,7 @@ type LoadModuleResult = {
 
 type InvalidateModuleMessage = { type: "invalidate_module"; functionId: string };
 type InvalidateProjectMessage = { type: "invalidate_project"; projectRef: string };
-type WorkerLifecycleMessage = { type: "cancel_current" } | { type: "retire" };
+type WorkerLifecycleMessage = { type: "cancel_current"; executionKey: string } | { type: "retire" };
 type PreheatMessage = {
   type: "preheat";
   functionId: string;
@@ -92,6 +94,7 @@ type PreheatMessage = {
 };
 type ExecuteMessage = Omit<PreheatMessage, "type"> & {
   type?: undefined;
+  executionKey?: string;
   url: string;
   method: string;
   headers: Record<string, string | string[]>;
@@ -119,6 +122,23 @@ type ParentMessage =
   | ExecuteMessage;
 
 const moduleCache = new Map<string, ModuleCacheEntry>();
+// Engine imports outlive LRU entries. Track lifetime imports until Worker retirement.
+const importedModules = new Set<string>();
+let importedModuleBytes = 0;
+const collectWorkerHeap = Bun.gc.bind(Bun);
+const workerHeapBudget = positiveBytes(process.env.EDGE_WORKER_HEAP_BUDGET_BYTES, 128 * 1024 * 1024);
+function memorySnapshot() {
+  let stats = heapStats();
+  // A sampled heap includes collectible buffers. Reclaim only above the soft
+  // budget before deciding whether the completed worker actually needs retirement.
+  if (stats.heapSize > workerHeapBudget) {
+    collectWorkerHeap(true);
+    stats = heapStats();
+  }
+  return { heapSize: stats.heapSize, heapCapacity: stats.heapCapacity,
+    extraMemorySize: stats.extraMemorySize, importedModuleBytes,
+    importedModuleCount: importedModules.size };
+}
 
 function evictOldestModule() {
   while (moduleCache.size >= MAX_MODULE_CACHE) {
@@ -349,6 +369,7 @@ const bunRuntime = (globalThis as unknown as { Bun?: { env: Record<string, strin
 const originalBunEnv = bunRuntime ? { ...bunRuntime.env } : null;
 let envSnapshotActive: boolean = false;
 let currentAbortController: AbortController | null = null;
+let currentExecutionKey: string | undefined;
 let currentInjectedEnv: Record<string, string> = {};
 let currentWaitUntilTasks: Promise<unknown>[] = [];
 let retiring: boolean = false;
@@ -531,6 +552,11 @@ async function loadModule(input: {
       () => importModuleHandler(buildModuleImportUrl({ ...identity, functionPath: jsPath })),
     ),
   );
+  if (!importedModules.has(cacheKey)) {
+    importedModules.add(cacheKey);
+    importedModuleBytes += runtimeBunFile(input.functionPath).size;
+    if (derived) importedModuleBytes += runtimeBunFile(derived.path).size + runtimeBunFile(`${derived.path}.jsc`).size;
+  }
   const handler = input.artifactSha256 === undefined
     ? await importModuleHandler(buildModuleImportUrl(identity))
     : await withTrustedFunctionArtifact(
@@ -630,6 +656,7 @@ function hasPreheatFields(candidate: Record<string, unknown>): boolean {
 
 function isExecuteMessage(candidate: Record<string, unknown>): boolean {
   return candidate.type === undefined
+    && (candidate.executionKey === undefined || typeof candidate.executionKey === "string")
     && hasPreheatFields(candidate)
     && typeof candidate.url === "string"
     && typeof candidate.method === "string"
@@ -649,14 +676,15 @@ function isInternalBindings(candidate: unknown): candidate is Omit<PgredisRuntim
 function isParentMessage(message: unknown): message is ParentMessage {
   if (!message || typeof message !== "object") return false;
   const candidate = message as Record<string, unknown>;
-  if (candidate.type === "retire" || candidate.type === "cancel_current") return true;
+  if (candidate.type === "retire") return true;
+  if (candidate.type === "cancel_current") return typeof candidate.executionKey === "string";
   if (candidate.type === "invalidate_module") return typeof candidate.functionId === "string";
   if (candidate.type === "invalidate_project") return typeof candidate.projectRef === "string";
   if (candidate.type === "preheat") return hasPreheatFields(candidate);
   return isExecuteMessage(candidate);
 }
 
-function postToParent(message: unknown, transferList: ArrayBuffer[] = []) {
+function postToParent(message: unknown, transferList: (ArrayBuffer | import("node:worker_threads").MessagePort)[] = []) {
   if (retiring) return;
   parentPort!.postMessage(message, transferList);
 }
@@ -675,13 +703,6 @@ function installOutboundHostPolicy(allowedHosts: string[] | undefined): () => vo
   return () => {
     globalThis.fetch = originalFetch;
   };
-}
-
-class FunctionResponseLimitError extends Error {
-  constructor(readonly maxBytes: number) {
-    super(`Function response exceeded the configured limit of ${maxBytes} bytes`);
-    this.name = "FunctionResponseLimitError";
-  }
 }
 
 async function onParentMessage(msg: unknown): Promise<void> {
@@ -748,6 +769,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         await assertAttestedArtifact(msg.functionPath, msg.attestation);
         postToParent({
           type: "preheat_done",
+          ...memorySnapshot(),
           functionId: msg.functionId,
           moduleCacheHit: moduleLoad.cacheHit,
           moduleCacheSize: moduleLoad.moduleCacheSize,
@@ -773,8 +795,9 @@ async function onParentMessage(msg: unknown): Promise<void> {
   }
 
   if (msg.type === "cancel_current") {
+    if (msg.executionKey !== currentExecutionKey) return;
     currentAbortController?.abort(new DOMException("Task cancelled", "AbortError"));
-    postToParent({ type: "cancel_ack" });
+    postToParent({ type: "cancel_ack", executionKey: msg.executionKey });
     return;
   }
 
@@ -783,177 +806,136 @@ async function onParentMessage(msg: unknown): Promise<void> {
   const projectRef = msg.projectRef;
   const requestAbortController = new AbortController();
   currentAbortController = requestAbortController;
+  currentExecutionKey = msg.executionKey;
   let restoreFetchTlsPolicy = () => {};
   let restoreOutboundHostPolicy = () => {};
 
-  try {
-    setProjectRoot(projectRoot || path.dirname(functionPath));
-    injectEnv(env);
-    setInjectedEnv(env);
-    setupConsoleCapture(functionId);
-    setupEdgeRuntimeCompat(msg.capabilities?.background !== false);
-    restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
-      await resolveMessageTlsPolicy(tlsPolicy),
-    );
-    restoreOutboundHostPolicy = installOutboundHostPolicy(msg.capabilities?.outbound_hosts);
-    const moduleLoad = await loadModule({
-      functionId,
-      functionPath,
-      projectRoot,
-      moduleVersion: msg.moduleVersion,
-      projectRef,
-      envProof: msg.envProof,
-      artifactSha256: msg.artifactSha256,
-      bytecodeArtifact: msg.bytecodeArtifact,
-      bytecode: msg.bytecode,
-    });
-    // Retirement may arrive while module loading is suspended. Do not enter
-    // tenant code after the worker has already closed its parent port.
-    if (requestAbortController.signal.aborted) {
-      const abortReason = requestAbortController.signal.reason;
-      throw abortReason instanceof Error
-        ? abortReason
-        : new DOMException("Task cancelled", "AbortError");
-    }
+  await runWithPgredisBinding(internalBindings
+    ? { ...internalBindings, signal: requestAbortController.signal }
+    : undefined, async () => {
     try {
-      await assertExpectedArtifact(functionPath, msg.artifactSha256);
-      if (msg.bytecodeArtifact) {
-        await assertExpectedArtifact(msg.bytecodeArtifact.path, msg.bytecodeArtifact.sha256);
-        await assertExpectedArtifact(`${msg.bytecodeArtifact.path}.jsc`, msg.bytecodeArtifact.bytecodeSha256);
+      setProjectRoot(projectRoot || path.dirname(functionPath));
+      injectEnv(env);
+      setInjectedEnv(env);
+      setupConsoleCapture(functionId);
+      setupEdgeRuntimeCompat(msg.capabilities?.background !== false);
+      restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
+        await resolveMessageTlsPolicy(tlsPolicy),
+      );
+      restoreOutboundHostPolicy = installOutboundHostPolicy(msg.capabilities?.outbound_hosts);
+      const moduleLoad = await loadModule({
+        functionId,
+        functionPath,
+        projectRoot,
+        moduleVersion: msg.moduleVersion,
+        projectRef,
+        envProof: msg.envProof,
+        artifactSha256: msg.artifactSha256,
+        bytecodeArtifact: msg.bytecodeArtifact,
+        bytecode: msg.bytecode,
+      });
+      // Retirement may arrive while module loading is suspended. Do not enter
+      // tenant code after the worker has already closed its parent port.
+      if (requestAbortController.signal.aborted) {
+        const abortReason = requestAbortController.signal.reason;
+        throw abortReason instanceof Error
+          ? abortReason
+          : new DOMException("Task cancelled", "AbortError");
       }
-    } catch (error: unknown) {
-      invalidateCachedModules((entry) => entry.functionId === functionId);
-      throw error;
-    }
-    postToParent({ type: "execution_started", functionId });
-    const handler = moduleLoad.handler;
-    const trace = projectRef ? createFunctionTrace(projectRef, new Headers(headers as Record<string, string>)) : undefined;
-    let traceStatus = 500;
-    await runFunctionTrace(trace, () => runWithPgredisBinding(internalBindings
-      ? { ...internalBindings, signal: requestAbortController.signal }
-      : undefined, async () => {
-        const handlerUrl = (msg.framework && msg.framework !== "fetch") || isFrameworkRouterHandler(handler)
-          ? toFunctionLocalUrl(url)
-          : url;
-        const req = new Request(handlerUrl, {
-          method,
-          headers: trace ? traceHeaders(trace, headers as Record<string, string>) : new Headers(headers as Record<string, string>),
-          body: body ? Buffer.from(body) : undefined,
-          signal: requestAbortController.signal,
-        });
-
-        const result = await executeFunction(handler, req);
-        const response = trace ? new Response(result.body, {
-          status: result.status, statusText: result.statusText,
-          headers: traceHeaders(trace, result.headers),
-        }) : result;
-        traceStatus = response.status;
-        const maxResponseBody = msg.limits?.max_response_body_bytes;
-
-        if (
-          response.body &&
-          response.headers.get("content-type")?.includes("text/event-stream")
-        ) {
-          const streamId = crypto.randomUUID();
-          postToParent({
-            type: "stream_start",
-            streamId,
-            status: response.status,
-            headers: Object.fromEntries(response.headers.entries()),
-            moduleCacheHit: moduleLoad.cacheHit,
-            moduleCacheSize: moduleLoad.moduleCacheSize,
+      try {
+        await assertExpectedArtifact(functionPath, msg.artifactSha256);
+        if (msg.bytecodeArtifact) {
+          await assertExpectedArtifact(msg.bytecodeArtifact.path, msg.bytecodeArtifact.sha256);
+          await assertExpectedArtifact(`${msg.bytecodeArtifact.path}.jsc`, msg.bytecodeArtifact.bytecodeSha256);
+        }
+      } catch (error: unknown) {
+        invalidateCachedModules((entry) => entry.functionId === functionId);
+        throw error;
+      }
+      postToParent({ type: "execution_started", functionId });
+      const handler = moduleLoad.handler;
+      const trace = projectRef ? createFunctionTrace(projectRef, new Headers(headers as Record<string, string>)) : undefined;
+      let traceStatus = 500;
+      await runFunctionTrace(trace, async () => {
+          const handlerUrl = (msg.framework && msg.framework !== "fetch") || isFrameworkRouterHandler(handler)
+            ? toFunctionLocalUrl(url)
+            : url;
+          const req = new Request(handlerUrl, {
+            method,
+            headers: trace ? traceHeaders(trace, headers as Record<string, string>) : new Headers(headers as Record<string, string>),
+            body: body ? Buffer.from(body) : undefined,
+            signal: requestAbortController.signal,
           });
 
-          try {
-            const reader = response.body.getReader();
-            let responseBytes: number = 0;
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) {
-                postToParent({
-                  type: "stream_chunk",
-                  streamId,
-                  done: true,
-                });
-                break;
+          const result = await executeFunction(handler, req);
+          const response = trace ? new Response(result.body, {
+            status: result.status, statusText: result.statusText,
+            headers: traceHeaders(trace, result.headers),
+          }) : result;
+          traceStatus = response.status;
+          const maxResponseBody = msg.limits?.max_response_body_bytes;
+
+          const resHeaders: Record<string, string | string[]> = {};
+          response.headers.forEach((v, k) => {
+            if (k.toLowerCase() === "set-cookie") {
+              const cookies = response.headers.getSetCookie();
+              if (cookies && cookies.length > 1) {
+                resHeaders[k] = cookies;
+                return;
               }
-              responseBytes += value.byteLength;
-              if (maxResponseBody !== undefined && responseBytes > maxResponseBody) {
-                await reader.cancel();
-                throw new FunctionResponseLimitError(maxResponseBody);
-              }
-              // Buffer.slice() shares storage; never detach a producer-owned chunk.
-              const chunk = new Uint8Array(value).buffer;
-              postToParent({
-                type: "stream_chunk",
-                streamId,
-                chunk,
-                done: false,
-              }, [chunk]);
             }
-          } catch (err: unknown) {
-            traceStatus = 500;
+            resHeaders[k] = v;
+          });
+
+          const prepared = response.body
+            ? await prepareResponseBody(response.body, maxResponseBody,
+                response.headers.get("content-type")?.includes("text/event-stream") === true,
+                requestAbortController.signal)
+            : { buffer: null };
+          if ("port" in prepared && prepared.port) {
             postToParent({
-              type: "stream_chunk",
-              streamId,
-              done: true,
-              error: err instanceof Error ? err.message : String(err),
-            });
+              type: "stream_start", status: response.status, headers: resHeaders,
+              port: prepared.port, moduleCacheHit: moduleLoad.cacheHit,
+              moduleCacheSize: moduleLoad.moduleCacheSize,
+            }, [prepared.port]);
+            await prepared.run();
+          } else {
+            postToParent({
+              status: response.status, headers: resHeaders, body: prepared.buffer,
+              moduleCacheHit: moduleLoad.cacheHit, moduleCacheSize: moduleLoad.moduleCacheSize,
+            }, prepared.buffer ? [prepared.buffer] : []);
           }
 
-          await flushWaitUntilTasks(functionId);
-          return;
-        }
-
-        const resBody = response.body ? await response.arrayBuffer() : null;
-        if (maxResponseBody !== undefined && resBody && resBody.byteLength > maxResponseBody) {
-          throw new FunctionResponseLimitError(maxResponseBody);
-        }
-
-        const resHeaders: Record<string, string | string[]> = {};
-        response.headers.forEach((v, k) => {
-          if (k.toLowerCase() === "set-cookie") {
-            const cookies = response.headers.getSetCookie();
-            if (cookies && cookies.length > 1) {
-              resHeaders[k] = cookies;
-              return;
-            }
-          }
-          resHeaders[k] = v;
-        });
-
-        postToParent({
-          status: response.status,
-          headers: resHeaders,
-          body: resBody,
-          waitUntilPending: currentWaitUntilTasks.length > 0,
-          moduleCacheHit: moduleLoad.cacheHit,
-          moduleCacheSize: moduleLoad.moduleCacheSize,
-        }, resBody ? [resBody] : []);
-        await flushWaitUntilTasks(functionId);
-      }), () => traceStatus);
-  } catch (err: unknown) {
-    const aborted = currentAbortController?.signal.aborted || (err instanceof Error && err.name === "AbortError");
-    const message = err instanceof Error ? err.message : String(err);
-    const errorBody = new TextEncoder().encode(JSON.stringify({
-      error: message,
-      name: err instanceof Error ? err.name : "Error",
-    })).buffer;
-    postToParent({
-      status: aborted ? 499 : err instanceof FunctionResponseLimitError ? 502 : 500,
-      headers: { "Content-Type": "application/json" },
-      body: errorBody,
-    }, [errorBody]);
-  } finally {
-    runCleanup(restoreOutboundHostPolicy);
-    runCleanup(restoreFetchTlsPolicy);
-    currentAbortController = null;
-    runCleanup(clearEdgeRuntimeCompat);
-    runCleanup(restoreEnv);
-    runCleanup(restoreConsole);
-    runCleanup(() => setProjectRoot(null));
-    runCleanup(() => setInjectedEnv({}));
-  }
+        }, () => traceStatus);
+    } catch (err: unknown) {
+      const aborted = currentAbortController?.signal.aborted || (err instanceof Error && err.name === "AbortError");
+      // Bound before JSON encoding (control characters can expand sixfold).
+      const message = (err instanceof Error ? err.message : String(err)).slice(0, 4096);
+      const errorBody = new TextEncoder().encode(JSON.stringify({
+        error: message,
+        name: err instanceof BodyLimitError ? "FunctionResponseLimitError" : err instanceof Error ? err.name.slice(0, 128) : "Error",
+      })).buffer;
+      postToParent({
+        status: aborted ? 499 : err instanceof BodyLimitError ? 502 : 500,
+        headers: { "Content-Type": "application/json" },
+        body: errorBody,
+      }, [errorBody]);
+    } finally {
+      // Tasks may also be registered by body production, nested tasks, or a failing handler.
+      postToParent({ type: "response_complete", waitUntilPending: currentWaitUntilTasks.length > 0 });
+      await flushWaitUntilTasks(functionId);
+      runCleanup(restoreOutboundHostPolicy);
+      runCleanup(restoreFetchTlsPolicy);
+      currentAbortController = null;
+      currentExecutionKey = undefined;
+      runCleanup(clearEdgeRuntimeCompat);
+      runCleanup(restoreEnv);
+      runCleanup(restoreConsole);
+      runCleanup(() => setProjectRoot(null));
+      runCleanup(() => setInjectedEnv({}));
+      postToParent({ type: "execution_complete", ...memorySnapshot() });
+    }
+  });
 }
 
 parentPort.on("message", onParentMessage);

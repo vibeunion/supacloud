@@ -1,4 +1,9 @@
-import { Worker, type WorkerOptions } from "worker_threads";
+import { receiveBufferedResponse } from "./response-buffer";
+import {
+  BODY_CHUNK_BYTES, BodyBufferBudget, BodyLimitError, BufferBudgetError,
+  bodyBufferBudget, bufferedBody, positiveBytes, readBoundedBody, responseBufferBudget,
+} from "./body-transfer";
+import { Worker, type WorkerOptions, type MessagePort } from "worker_threads";
 import { functionBytecodeCache } from "./function-bytecode";
 import type { FunctionBytecodeArtifact } from "./function-bytecode-contract";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
@@ -56,6 +61,7 @@ interface DispatchOptions {
 
 type ScheduledDispatch = DispatchOptions & {
   executionKey: string;
+  releaseQueueReservation: () => void;
 };
 
 type QueuedDispatch = {
@@ -213,6 +219,11 @@ type WorkerPreheatRequest = BulkPreheatRequest & { worker: Worker };
 type WorkerPreheatMessage = {
   type?: string;
   functionId?: string;
+  heapSize?: number;
+  heapCapacity?: number;
+  extraMemorySize?: number;
+  importedModuleBytes?: number;
+  importedModuleCount?: number;
   moduleCacheHit?: boolean;
   moduleCacheSize?: number;
   attestation?: unknown;
@@ -277,6 +288,9 @@ type RetirementBudgetExceeded = {
 
 type WorkerPoolConfig = {
   size: number;
+  bodyBufferBudget?: BodyBufferBudget;
+  responseBufferBudget?: BodyBufferBudget;
+  responseReadAheadBytes?: number;
   requestTimeout: number;
   smol?: boolean;
   preheatTimeoutMs?: number;
@@ -339,7 +353,28 @@ export class WorkerPool {
   private queuedCount = 0;
   private lastDispatchedProjectRef: string | null = null;
   private inFlight = new Map<string, { cancel: () => void; cancelKey?: string }>();
+  private responseDeliveries = new Map<string, (error: Error) => void>();
   private totalRequests = 0;
+  private workerMemory = new Map<Worker, { heapSize: number; heapCapacity: number; extraMemorySize: number }>();
+  private memoryRetirements = 0;
+  private readonly responseReadAheadBytes: number;
+  private readonly maxWorkerHeap = positiveBytes(process.env.EDGE_WORKER_HEAP_BUDGET_BYTES, 128 * 1024 * 1024);
+  private readonly maxModuleBytes = positiveBytes(process.env.EDGE_MODULE_BUDGET_BYTES, 32 * 1024 * 1024);
+  private readonly maxModuleCount = positiveBytes(process.env.EDGE_MODULE_GENERATION_LIMIT, 100);
+
+  private recordWorkerMemory(worker: Worker, message: {
+    heapSize?: number; heapCapacity?: number; extraMemorySize?: number;
+    importedModuleBytes?: number; importedModuleCount?: number;
+  }) {
+    this.workerMemory.set(worker, { heapSize: message.heapSize ?? 0,
+      heapCapacity: message.heapCapacity ?? 0, extraMemorySize: message.extraMemorySize ?? 0 });
+    if ((message.heapSize ?? 0) > this.maxWorkerHeap
+      || (message.importedModuleBytes ?? 0) > this.maxModuleBytes
+      || (message.importedModuleCount ?? 0) >= this.maxModuleCount) {
+      this.memoryRetirements++;
+      this.tainted.add(worker);
+    }
+  }
   private totalInvalidations = 0;
   private totalEnvLoadMs = 0;
   private totalQueueWaitMs = 0;
@@ -398,6 +433,15 @@ export class WorkerPool {
   private readonly parkedWorkerIdleMs: number;
 
   constructor(private config: WorkerPoolConfig) {
+    this.responseReadAheadBytes = config.responseReadAheadBytes
+      ?? (process.env.EDGE_RESPONSE_READ_AHEAD_BYTES === "0" ? 0
+        : positiveBytes(process.env.EDGE_RESPONSE_READ_AHEAD_BYTES, 16 * 1024 * 1024));
+    if (!Number.isSafeInteger(this.responseReadAheadBytes) || this.responseReadAheadBytes < 0) {
+      throw new Error("EDGE_RESPONSE_READ_AHEAD_BYTES must be a non-negative integer");
+    }
+    if ((config.responseBufferBudget ?? responseBufferBudget).limit < BODY_CHUNK_BYTES) {
+      throw new Error("Response buffer budget must allow at least one 512 KiB chunk");
+    }
     this.retirementBudget = config.retirementBudget ?? {
       maxRetiredWorkers: Math.max(config.size * 2, 8),
       maxRetirementAgeMs: DEFAULT_MAX_RETIREMENT_AGE_MS,
@@ -469,7 +513,23 @@ export class WorkerPool {
     const signal = opts.signal ?? opts.request.signal;
     if (signal.aborted) return cancelledResponse();
 
-    const responsePromise = this.enqueue({ ...opts, executionKey });
+    const budget = this.config.bodyBufferBudget ?? bodyBufferBudget;
+    const queueLease = budget.lease();
+    const maxBody = Math.min(MAX_BODY_SIZE, opts.limits?.max_request_body_bytes ?? MAX_BODY_SIZE);
+    const declared = Number(opts.request.headers.get("content-length"));
+    try {
+      queueLease.resize(BODY_CHUNK_BYTES + (opts.request.body
+        ? Number.isSafeInteger(declared) && declared > 0 ? Math.min(declared, maxBody) : maxBody
+        : 0));
+    } catch {
+      if (opts.request.body && !opts.request.body.locked) void opts.request.body.cancel().catch(() => {});
+      return admissionBlockedResponse();
+    }
+    let queued = true;
+    const responsePromise = this.enqueue({ ...opts, executionKey, releaseQueueReservation: () => {
+      queued = false;
+      queueLease.release();
+    } });
     const cancelDispatch = () => {
       this.cancelExecution(executionKey);
     };
@@ -480,6 +540,8 @@ export class WorkerPool {
       return await responsePromise;
     } finally {
       signal.removeEventListener("abort", cancelDispatch);
+      queueLease.release();
+      if (queued && opts.request.body && !opts.request.body.locked) void opts.request.body.cancel().catch(() => {});
     }
   }
 
@@ -689,390 +751,226 @@ export class WorkerPool {
     enqueuedAt: number | null,
     resolve: (response: Response) => void,
   ) {
+    opts.releaseQueueReservation();
     this.assignWorkerProject(worker, this.projectKey(opts));
-    const queueWaitMs = enqueuedAt === null ? 0 : Math.round(performance.now() - enqueuedAt);
-    this.totalQueueWaitMs += queueWaitMs;
-    const cancelGraceMs = 3_000;
-
-    let resolved: boolean = false;
-    let executionStarted: boolean = false;
-    let cancellationRequested: boolean = false;
+    this.totalQueueWaitMs += enqueuedAt === null ? 0 : Math.round(performance.now() - enqueuedAt);
+    const budget = this.config.bodyBufferBudget ?? bodyBufferBudget;
+    const inputLease = budget.lease();
+    const outputLease = budget.lease();
+    const abort = new AbortController();
+    const signal = opts.signal ?? opts.request.signal;
+    let resolved = false;
+    let finished = false;
+    let started = false;
+    let streamDone = true;
+    let executionDone = false;
+    let responseReceived = false;
+    let pendingResponse: Response | undefined;
+    let readingRequest = false;
+    let failStream: ((error: Error) => void) | undefined;
+    let waitTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelTimer: ReturnType<typeof setTimeout> | undefined;
+    let body: ArrayBuffer | null = null;
+    let cancellationRequested = false;
+    const execStart = performance.now();
     const resolveOnce = (response: Response) => {
       if (resolved) return;
       resolved = true;
-      resolve(
-        executionStarted
-          ? withRuntimeFunctionVersion(response, opts.functionVersion)
-          : response,
-      );
+      resolve(started ? withRuntimeFunctionVersion(response, opts.functionVersion) : response);
     };
-    const cleanupInFlight = () => {
+    const cleanup = () => {
+      finished = true;
+      clearTimeout(timeout);
+      clearTimeout(waitTimer);
+      clearTimeout(cancelTimer);
+      worker.removeListener("message", onMessage);
+      worker.removeListener("error", onError);
+      worker.removeListener("exit", onExit);
+      signal.removeEventListener("abort", cancel);
       this.inFlight.delete(opts.executionKey);
+      inputLease.release();
+      body = null;
     };
-    const metadata = this.workerMetadata.get(worker) || { generation: this.workerGeneration };
-    metadata.isCancelling = false;
-    if (metadata.replacementTimer) {
-      clearTimeout(metadata.replacementTimer);
-      metadata.replacementTimer = undefined;
-    }
-    this.workerMetadata.set(worker, metadata);
-    const clearCancellationState = () => {
-      const current = this.workerMetadata.get(worker);
-      if (!current) return;
-      current.isCancelling = false;
-      if (current.replacementTimer) {
-        clearTimeout(current.replacementTimer);
-        current.replacementTimer = undefined;
-      }
+    const releaseResponse = (error: Error) => {
+      const failBody = failStream;
+      failStream = undefined;
+      if (failBody) failBody(error);
+      else outputLease.release();
     };
-
-    let detachResponseListeners = () => {};
-
-    const timeout = setTimeout(() => {
-      detachResponseListeners();
-      cleanupInFlight();
-      clearCancellationState();
-      resolveOnce(new Response("Gateway Timeout", { status: 504 }));
-      this.retireWorker(worker);
-    }, Math.min(this.config.requestTimeout, opts.limits?.timeout_ms ?? this.config.requestTimeout));
-
-    const replaceCancelledWorker = () => {
-      detachResponseListeners();
-      cleanupInFlight();
-      clearCancellationState();
-      resolveOnce(cancelledResponse());
+    const retireWithFailure = (status: number, error: Error) => {
+      if (finished) return;
+      releaseResponse(error);
+      cleanup();
+      abort.abort(error);
+      resolveOnce(status === 499 ? cancelledResponse() : new Response(error.message, { status }));
       this.retireWorker(worker);
     };
-
-    const cancelExecution = () => {
+    const requestCancellation = (status: number, error: Error) => {
+      if (finished || cancellationRequested) return;
       cancellationRequested = true;
-      if (!executionStarted) return;
-      const current = this.workerMetadata.get(worker);
-      if (!current || current.isCancelling) return;
-      current.isCancelling = true;
       clearTimeout(timeout);
-      try {
-        worker.postMessage({ type: "cancel_current" });
-      } catch (error) {
-        console.warn("[Pool] Failed to signal worker cancellation; replacing worker", error);
-        replaceCancelledWorker();
-        return;
-      }
-      current.replacementTimer = setTimeout(replaceCancelledWorker, cancelGraceMs);
-    };
-
-    this.inFlight.set(opts.executionKey, {
-      cancel: cancelExecution,
-      cancelKey: opts.cancelKey,
-    });
-
-    const releaseBeforeExecution = () => {
-      clearTimeout(timeout);
-      cleanupInFlight();
-      clearCancellationState();
-      this.recycle(worker);
-    };
-
-    const finishCancelledBeforeExecution = () => {
-      if (resolved) return true;
-      if (!cancellationRequested) return false;
-      releaseBeforeExecution();
-      resolveOnce(cancelledResponse());
-      return true;
-    };
-
-    const headers: Record<string, string | string[]> = {};
-    opts.request.headers.forEach((v, k) => {
-      const lower = k.toLowerCase();
-      if (lower === "set-cookie" || lower === FUNCTION_VERSION_HEADER) return;
-      headers[k] = v;
-    });
-    const cookies = opts.request.headers.getSetCookie();
-    if (cookies && cookies.length > 0) {
-      headers["set-cookie"] = cookies;
-    }
-
-    let body: ArrayBuffer | null = null;
-    if (opts.request.body && !["GET", "HEAD"].includes(opts.request.method)) {
-      const contentLength = opts.request.headers.get("content-length");
-      const maxRequestBody = Math.min(MAX_BODY_SIZE, opts.limits?.max_request_body_bytes ?? MAX_BODY_SIZE);
-      if (contentLength && parseInt(contentLength) > maxRequestBody) {
-        releaseBeforeExecution();
-        resolveOnce(
-          new Response(
-            JSON.stringify({
-              error: `Request body too large (max ${formatBodyLimit(maxRequestBody)})`,
-            }),
-            {
-              status: 413,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
-        );
-        return;
-      }
-      try {
-        body = await opts.request.arrayBuffer();
-      } catch (error) {
-        if (finishCancelledBeforeExecution()) return;
-        releaseBeforeExecution();
-        throw error;
-      }
-      if (finishCancelledBeforeExecution()) return;
-      if (body.byteLength > maxRequestBody) {
-        releaseBeforeExecution();
-        resolveOnce(
-          new Response(
-            JSON.stringify({
-              error: `Request body too large (max ${formatBodyLimit(maxRequestBody)})`,
-            }),
-            {
-              status: 413,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
-        );
-        return;
-      }
-    }
-
-    const execStart = performance.now();
-    let tlsPolicy: EdgeFetchTlsPolicy;
-    try {
-      tlsPolicy = await this.resolveTlsPolicy(opts.env);
-    } catch (error) {
-      if (finishCancelledBeforeExecution()) return;
-      releaseBeforeExecution();
-      throw error;
-    }
-    if (finishCancelledBeforeExecution()) return;
-
-    let waitUntilTimeout: ReturnType<typeof setTimeout> | undefined;
-    let failActiveStream: ((error: Error) => void) | undefined;
-
-    type WorkerResponseMessage = {
-      type?: string;
-      status: number;
-      streamId?: string;
-      headers?: Record<string, string | string[]>;
-      body?: ArrayBuffer;
-      timestamp?: string;
-      stream?: "stdout" | "stderr";
-      level?: string;
-      message?: string;
-      waitUntilPending?: boolean;
-      moduleCacheHit?: boolean;
-      moduleCacheSize?: number;
-      chunk?: ArrayBuffer;
-      done?: boolean;
-      error?: string;
-    };
-    const onMsg = (msg: WorkerResponseMessage) => {
-      if (msg.type === "execution_started") {
-        opts.onExecutionStarted?.();
-        return;
-      }
-      if (msg.type === "log" && opts.onLog && msg.timestamp && msg.stream && msg.level && msg.message) {
-        opts.onLog({
-          timestamp: msg.timestamp,
-          stream: msg.stream,
-          level: msg.level,
-          message: msg.message,
-        });
-        return;
-      }
-
-      if (msg.type === "wait_until_done") {
-        clearTimeout(timeout);
-        cleanupInFlight();
-        clearCancellationState();
-        worker.removeListener("error", onErr);
-        worker.removeListener("message", onMsg);
+      abort.abort(error);
+      if (!started) {
+        releaseResponse(error);
+        cleanup();
+        resolveOnce(status === 499 ? cancelledResponse() : new Response(error.message, { status }));
         this.recycle(worker);
         return;
       }
-
-      if (msg.type === "cancel_ack") {
+      if (failStream) streamDone = true;
+      releaseResponse(error);
+      pendingResponse = undefined;
+      resolveOnce(status === 499 ? cancelledResponse() : new Response(error.message, { status }));
+      if (executionDone) { streamDone = true; complete(); return; }
+      try {
+        worker.postMessage({ type: "cancel_current", executionKey: opts.executionKey });
+      } catch {
+        retireWithFailure(status, error);
         return;
       }
-
-      const isResponseMessage =
-        typeof msg.status === "number" || msg.type === "stream_start";
-      if (!isResponseMessage) {
-        return;
-      }
-
-      const workerExecMs = Math.round(performance.now() - execStart);
-      this.totalWorkerExecMs += workerExecMs;
-      this.recordModuleCacheStats(msg);
-      clearTimeout(timeout);
-      const waitUntilPending = msg.waitUntilPending === true;
-      const streamPending = msg.type === "stream_start" && !!msg.streamId;
-      if (!waitUntilPending && !streamPending) {
-        cleanupInFlight();
-        clearCancellationState();
-        worker.removeListener("error", onErr);
-        worker.removeListener("message", onMsg);
-      } else if (waitUntilPending) {
-        waitUntilTimeout = setTimeout(() => {
-          worker.removeAllListeners("message");
-          worker.removeListener("error", onErr);
-          cleanupInFlight();
-          clearCancellationState();
-          console.error("[Pool] EdgeRuntime.waitUntil timed out; replacing worker");
-          this.retireWorker(worker);
-        }, Math.min(WAIT_UNTIL_TIMEOUT_MS, opts.limits?.wait_until_timeout_ms ?? WAIT_UNTIL_TIMEOUT_MS));
-      } else {
-        worker.removeListener("message", onMsg);
-      }
-
-      const resHeaders = new Headers();
-      for (const [k, v] of Object.entries(msg.headers ?? {})) {
-        if (Array.isArray(v)) {
-          for (const val of v) resHeaders.append(k, val);
-        } else {
-          resHeaders.set(k, v);
-        }
-      }
-      if (msg.type === "stream_start" && msg.streamId) {
-        const streamId = msg.streamId;
-        let streamFinished: boolean = false;
-        let streamListener: ((streamMsg: WorkerResponseMessage) => void) | undefined;
-        const clearStreamState = () => {
-          streamFinished = true;
-          if (streamListener) worker.removeListener("message", streamListener);
-          worker.removeListener("error", onErr);
-          cleanupInFlight();
-          clearCancellationState();
-          failActiveStream = undefined;
-        };
-        const completeStream = () => {
-          if (streamFinished) return;
-          clearStreamState();
-          this.recycle(worker);
-        };
-        const abandonStream = () => {
-          if (streamFinished) return;
-          clearStreamState();
-          this.retireWorker(worker);
-        };
-
-        const bodyStream = new ReadableStream<Uint8Array>({
-          start(controller) {
-            failActiveStream = (error) => {
-              controller.error(error);
-              abandonStream();
-            };
-            streamListener = (streamMsg: WorkerResponseMessage) => {
-              if (streamMsg.type === "stream_chunk" && streamMsg.streamId === streamId) {
-                if (streamMsg.done) {
-                  if (streamMsg.error) {
-                    controller.error(new Error(streamMsg.error));
-                  } else {
-                    controller.close();
-                  }
-                  completeStream();
-                } else if (streamMsg.chunk) {
-                  controller.enqueue(new Uint8Array(streamMsg.chunk));
-                }
-              }
-            };
-            worker.on("message", streamListener);
-          },
-          cancel() {
-            abandonStream();
-          },
+      cancelTimer = setTimeout(() => retireWithFailure(status, error), 3_000);
+      cancelTimer.unref?.();
+    };
+    const complete = () => {
+      if (finished || !executionDone || !streamDone) return;
+      cleanup();
+      this.recycle(worker);
+    };
+    const timeout = setTimeout(() => requestCancellation(504, new Error("Gateway Timeout")),
+      Math.min(this.config.requestTimeout, opts.limits?.timeout_ms ?? this.config.requestTimeout));
+    const cancel = () => {
+      requestCancellation(499, new Error("Task cancelled"));
+    };
+    const onError = (error: Error) => retireWithFailure(500, error);
+    const onExit = () => retireWithFailure(500, new Error("Function worker exited"));
+    const onMessage = (msg: {
+      type?: string; status?: number; headers?: Record<string, string | string[]>;
+      body?: ArrayBuffer | null; port?: MessagePort; moduleCacheHit?: boolean;
+      moduleCacheSize?: number; timestamp?: string; stream?: "stdout" | "stderr";
+      level?: string; message?: string; heapSize?: number; heapCapacity?: number;
+      extraMemorySize?: number; importedModuleBytes?: number; importedModuleCount?: number; waitUntilPending?: boolean;
+    }) => {
+      if (finished) return;
+      if (msg.type === "execution_started") { opts.onExecutionStarted?.(); return; }
+      if (msg.type === "log") {
+        if (msg.timestamp && msg.stream && msg.level && msg.message) opts.onLog?.({
+          timestamp: msg.timestamp, stream: msg.stream, level: msg.level, message: msg.message,
         });
-
-        resolveOnce(
-          new Response(bodyStream, {
-            status: msg.status,
-            headers: resHeaders,
-          }),
-        );
-      } else {
-        resolveOnce(
-          new Response(msg.body, {
-            status: msg.status,
-            headers: resHeaders,
-          }),
-        );
-        if (waitUntilPending) {
-          worker.removeListener("message", onMsg);
-          const waitUntilListener = (waitMsg: WorkerResponseMessage) => {
-            if (waitMsg.type === "log" && opts.onLog && waitMsg.timestamp && waitMsg.stream && waitMsg.level && waitMsg.message) {
-              opts.onLog({
-                timestamp: waitMsg.timestamp,
-                stream: waitMsg.stream,
-                level: waitMsg.level,
-                message: waitMsg.message,
-              });
-              return;
-            }
-            if (waitMsg.type !== "wait_until_done") return;
-            if (waitUntilTimeout) clearTimeout(waitUntilTimeout);
-            worker.removeListener("message", waitUntilListener);
-            worker.removeListener("error", onErr);
-            cleanupInFlight();
-            clearCancellationState();
-            this.recycle(worker);
-          };
-          worker.on("message", waitUntilListener);
-        } else {
-          this.recycle(worker);
-        }
-      }
-    };
-
-    const onErr = (err: Error) => {
-      clearTimeout(timeout);
-      if (waitUntilTimeout) clearTimeout(waitUntilTimeout);
-      console.error("[Pool] Worker error:", err);
-      if (failActiveStream) {
-        failActiveStream(err);
         return;
       }
-      cleanupInFlight();
-      clearCancellationState();
-      detachResponseListeners();
-      resolveOnce(new Response("Internal Error", { status: 500 }));
-      this.retireWorker(worker);
+      if (msg.type === "response_complete") {
+        if (msg.waitUntilPending && pendingResponse) { resolveOnce(pendingResponse); pendingResponse = undefined; }
+        clearTimeout(timeout);
+        waitTimer = setTimeout(() => retireWithFailure(504, new Error("EdgeRuntime.waitUntil timed out")),
+          Math.min(WAIT_UNTIL_TIMEOUT_MS, opts.limits?.wait_until_timeout_ms ?? WAIT_UNTIL_TIMEOUT_MS));
+        return;
+      }
+      if (msg.type === "execution_complete") {
+        executionDone = true;
+        if (cancellationRequested) streamDone = true;
+        clearTimeout(waitTimer);
+        this.recordWorkerMemory(worker, msg);
+        complete();
+        if (pendingResponse) { resolveOnce(pendingResponse); pendingResponse = undefined; }
+        return;
+      }
+      if (cancellationRequested) { msg.port?.close(); return; }
+      if (msg.status === undefined || responseReceived) return;
+      responseReceived = true;
+      this.totalWorkerExecMs += Math.round(performance.now() - execStart);
+      this.recordModuleCacheStats(msg);
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(msg.headers ?? {})) {
+        if (Array.isArray(value)) for (const entry of value) headers.append(name, entry);
+        else headers.set(name, value);
+      }
+      if (msg.port) {
+        streamDone = false;
+        let deliveryDone = false;
+        const received = receiveBufferedResponse({
+          port: msg.port, lease: outputLease, bodyBudget: budget,
+          responseBudget: this.config.responseBufferBudget ?? responseBufferBudget,
+          readAheadBytes: this.responseReadAheadBytes, signal,
+          idleTimeoutMs: Math.min(this.config.requestTimeout, opts.limits?.timeout_ms ?? this.config.requestTimeout),
+          onCancel: (error) => requestCancellation(error ? 500 : 499, error ?? new Error("Function body cancelled")),
+          onProducerDone: () => { streamDone = true; complete(); },
+          onConsumerDone: () => { deliveryDone = true; this.responseDeliveries.delete(opts.executionKey); },
+        });
+        if (!deliveryDone) this.responseDeliveries.set(opts.executionKey, received.fail);
+        failStream = received.fail;
+        resolveOnce(new Response(received.stream, { status: msg.status, headers }));
+      } else {
+        try { outputLease.resize(msg.body?.byteLength ?? 0); }
+        catch (error) { requestCancellation(503, error as Error); return; }
+        let responseBody: ReadableStream<Uint8Array> | null = null;
+        if (msg.body) {
+          let deliveryDone = false;
+          const received = bufferedBody(msg.body, {
+            release: outputLease.release, signal,
+            idleTimeoutMs: Math.min(this.config.requestTimeout, opts.limits?.timeout_ms ?? this.config.requestTimeout),
+            onDone: () => { deliveryDone = true; this.responseDeliveries.delete(opts.executionKey); },
+          });
+          if (!deliveryDone) this.responseDeliveries.set(opts.executionKey, received.fail);
+          failStream = received.fail;
+          responseBody = received.stream;
+        }
+        pendingResponse = new Response(responseBody, { status: msg.status, headers });
+      }
     };
-
-    detachResponseListeners = () => {
-      worker.removeListener("message", onMsg);
-      worker.removeListener("error", onErr);
-    };
-    worker.on("message", onMsg);
-    worker.once("error", onErr);
+    this.inFlight.set(opts.executionKey, { cancel, cancelKey: opts.cancelKey });
+    worker.on("message", onMessage);
+    worker.once("error", onError);
+    worker.once("exit", onExit);
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) { cancel(); return; }
     try {
+      outputLease.resize(BODY_CHUNK_BYTES);
+      if (opts.request.body && !["GET", "HEAD"].includes(opts.request.method)) {
+        const max = Math.min(MAX_BODY_SIZE, opts.limits?.max_request_body_bytes ?? MAX_BODY_SIZE);
+        const declared = Number(opts.request.headers.get("content-length"));
+        if (declared > max) throw new BodyLimitError(max);
+        readingRequest = true;
+        body = await readBoundedBody(opts.request.body, max, abort.signal, inputLease.resize);
+        readingRequest = false;
+        inputLease.resize(body.byteLength);
+      }
+      if (finished) return;
+      const tlsPolicy = await this.resolveTlsPolicy(opts.env);
+      if (finished) return;
+      const headers: Record<string, string | string[]> = {};
+      opts.request.headers.forEach((value, name) => {
+        if (name !== "set-cookie" && name !== FUNCTION_VERSION_HEADER) headers[name] = value;
+      });
+      const cookies = opts.request.headers.getSetCookie();
+      if (cookies.length) headers["set-cookie"] = cookies;
       worker.postMessage({
-        functionId: opts.functionId,
-        functionPath: opts.functionPath,
-        projectRoot: opts.projectRoot,
-        projectRef: opts.projectRef,
-        framework: opts.framework,
-        capabilities: opts.capabilities,
-        limits: opts.limits,
-        moduleVersion: opts.moduleVersion,
-        envProof: opts.envProof,
-        artifactSha256: opts.artifactSha256,
-        bytecode: opts.bytecode,
-        bytecodeArtifact: functionBytecodeCache.lookup(opts),
-        env: opts.env,
-        internalBindings: opts.internalBindings,
-        tlsPolicy,
-        url: opts.request.url,
-        method: opts.request.method,
-        headers,
-        body,
+        executionKey: opts.executionKey,
+        functionId: opts.functionId, functionPath: opts.functionPath,
+        projectRoot: opts.projectRoot, projectRef: opts.projectRef,
+        framework: opts.framework, capabilities: opts.capabilities, limits: opts.limits,
+        moduleVersion: opts.moduleVersion, envProof: opts.envProof,
+        artifactSha256: opts.artifactSha256, bytecode: opts.bytecode,
+        bytecodeArtifact: functionBytecodeCache.lookup(opts), env: opts.env,
+        internalBindings: opts.internalBindings, tlsPolicy,
+        url: opts.request.url, method: opts.request.method, headers, body,
       }, body ? [body] : []);
+      body = null;
+      started = true;
     } catch (error) {
-      onErr(error instanceof Error ? error : new Error(String(error)));
-      return;
+      if (finished) return;
+      if (started) {
+        retireWithFailure(500, error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      cleanup(); outputLease.release();
+      if (opts.request.body && !opts.request.body.locked) void opts.request.body.cancel().catch(() => {});
+      resolveOnce(error instanceof BodyLimitError
+        ? new Response(JSON.stringify({ error: `Request body too large (max ${formatBodyLimit(error.limit)})` }),
+            { status: 413, headers: { "Content-Type": "application/json" } })
+        : error instanceof BufferBudgetError ? admissionBlockedResponse()
+        : new Response(readingRequest ? "Failed to read request" : "Internal Error", { status: readingRequest ? 400 : 500 }));
+      this.recycle(worker);
     }
-    executionStarted = true;
-    if (cancellationRequested) cancelExecution();
   }
 
   private recycle(worker: Worker) {
@@ -1133,6 +1031,7 @@ export class WorkerPool {
   }
 
   private retireWorker(worker: Worker) {
+    this.workerMemory.delete(worker);
     const ownedSlot = this.activeWorkers.delete(worker);
     const wasParked = this.parkedWorkers.delete(worker);
     if (!ownedSlot && !wasParked) return;
@@ -1152,6 +1051,8 @@ export class WorkerPool {
     } catch (error) {
       console.warn("[Pool] Failed to signal cooperative worker retirement", error);
     }
+    // A cancelled tenant producer may throw from a pending timer after retirement.
+    worker.on("error", () => {});
     worker.unref();
 
     if (!this.draining && ownedSlot) {
@@ -1216,6 +1117,7 @@ export class WorkerPool {
   }
 
   private removeWorkerReferences(worker: Worker) {
+    this.workerMemory.delete(worker);
     const metadata = this.workerMetadata.get(worker);
     if (metadata?.parkedTimer) clearTimeout(metadata.parkedTimer);
     this.workerMetadata.delete(worker);
@@ -1476,6 +1378,10 @@ export class WorkerPool {
       return this.failedPreheat(request, "Worker preheat attestation mismatch");
     }
     this.recordModuleCacheStats(message);
+    this.recordWorkerMemory(request.worker, message);
+    if (this.tainted.has(request.worker)) {
+      return this.failedPreheat(request, "Function preheat exceeded the worker memory budget");
+    }
     return {
       success: true,
       cacheHit: typeof message.moduleCacheHit === "boolean" ? message.moduleCacheHit : null,
@@ -1802,6 +1708,10 @@ export class WorkerPool {
 
   snapshotMetrics(prefix = "supacloud_edge"): Record<string, number> {
     return {
+      [`${prefix}_worker_heap_bytes`]: [...this.workerMemory.values()].reduce((sum, item) => sum + item.heapSize, 0),
+      [`${prefix}_worker_heap_capacity_bytes`]: [...this.workerMemory.values()].reduce((sum, item) => sum + item.heapCapacity, 0),
+      [`${prefix}_worker_extra_memory_bytes`]: [...this.workerMemory.values()].reduce((sum, item) => sum + item.extraMemorySize, 0),
+      [`${prefix}_memory_retirements`]: this.memoryRetirements,
       [`${prefix}_active_workers`]: this.activeWorkers.size - this.idle.length,
       [`${prefix}_idle_workers`]: this.idle.length,
       [`${prefix}_parked_workers`]: this.parkedWorkers.size,
@@ -1813,6 +1723,7 @@ export class WorkerPool {
       [`${prefix}_total_worker_create_ms`]: this.totalWorkerCreateMs,
       [`${prefix}_worker_smol`]: this.config.smol ? 1 : 0,
       [`${prefix}_queue_length`]: this.queuedCount,
+      [`${prefix}_response_deliveries`]: this.responseDeliveries.size,
       [`${prefix}_total_requests`]: this.totalRequests,
       [`${prefix}_total_invalidations`]: this.totalInvalidations,
       [`${prefix}_tainted_workers`]: this.tainted.size,
@@ -1907,11 +1818,11 @@ export class WorkerPool {
       await this.bulkPreheatTail;
     }
 
-    if (this.inFlight.size === 0) return;
+    if (this.inFlight.size === 0 && this.responseDeliveries.size === 0) return;
 
     await new Promise<void>((resolve) => {
       const check = () => {
-        if (this.inFlight.size === 0) {
+        if (this.inFlight.size === 0 && this.responseDeliveries.size === 0) {
           resolve();
           return;
         }
@@ -1929,6 +1840,7 @@ export class WorkerPool {
     ]);
     if (!drained) {
       console.error(`[Pool] Cooperative shutdown drain exceeded ${maxDrainMs}ms`);
+      for (const fail of this.responseDeliveries.values()) fail(new Error("Runtime is shutting down"));
     }
     for (const worker of [...this.activeWorkers, ...this.parkedWorkers]) {
       this.retireWorker(worker);

@@ -51,6 +51,13 @@ function preheatIdentity(request: {
   };
 }
 
+// Status-only assertions still release the response, just as an HTTP consumer would.
+async function discardedResponseStatus(pending: Promise<Response>): Promise<number> {
+  const response = await pending;
+  await response.body?.cancel().catch(() => {}); // Aborted responses may already be errored.
+  return response.status;
+}
+
 afterEach(async () => {
   for (const pool of pools.splice(0)) {
     await pool.shutdown();
@@ -97,6 +104,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
         request: new Request("http://edge.local/functions/v1/versioned"),
       });
       expect(legacy.headers.has("x-supacloud-function-version")).toBe(false);
+      await legacy.body?.cancel();
 
       const omittedLegacy = await pool.dispatch({
         functionId: "proj_versioned_omitted",
@@ -107,6 +115,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
         request: new Request("http://edge.local/functions/v1/versioned"),
       });
       expect(omittedLegacy.headers.has("x-supacloud-function-version")).toBe(false);
+      await omittedLegacy.body?.cancel();
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -814,11 +823,11 @@ describe("WorkerPool subprocess guard", () => {
       });
       // Even a cached handler must revalidate both the published authority and executable sidecar.
       await writeFile(functionPath, 'export default () => new Response("changed");');
-      expect((await dispatch()).status).toBe(500);
+      expect(await discardedResponseStatus(dispatch())).toBe(500);
       await writeFile(functionPath, originalSource);
       await chmod(`${artifact.path}.jsc`, 0o600);
       await writeFile(`${artifact.path}.jsc`, "tampered bytecode");
-      expect((await dispatch()).status).toBe(500);
+      expect(await discardedResponseStatus(dispatch())).toBe(500);
       await writeFile(`${artifact.path}.jsc`, originalBytecode);
       await chmod(`${artifact.path}.jsc`, 0o400);
       await chmod(dirname(artifact.path), 0o700);
@@ -826,7 +835,7 @@ describe("WorkerPool subprocess guard", () => {
       const replacement = join(projectRoot, "untrusted.jsc");
       await writeFile(replacement, originalBytecode);
       await symlink(replacement, `${artifact.path}.jsc`);
-      expect((await dispatch()).status).toBe(500);
+      expect(await discardedResponseStatus(dispatch())).toBe(500);
       expect(functionBytecodeCache.metrics.builds).toBe(builds);
     } finally {
       await pool.shutdown();
@@ -1631,6 +1640,8 @@ describe("WorkerPool framework routing", () => {
       });
 
       expect(second.status).toBe(200);
+      await first.body?.cancel();
+      await second.body?.cancel();
       expect(await waitForFile(detachedPath)).toContain("unavailable outside a request");
     } finally {
       service.stop(true);
@@ -1758,7 +1769,7 @@ describe("WorkerPool framework routing", () => {
 });
 
 describe("WorkerPool cancellation and replacement", () => {
-  test("replaces a timed-out worker and immediately serves the queued request", async () => {
+  test("replaces an uncooperative timed-out worker after the cleanup grace period", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-timeout-replace-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -1901,7 +1912,9 @@ describe("WorkerPool cancellation and replacement", () => {
       expect(cancelled.status).toBe(499);
       expect(cancelled.headers.get("x-supacloud-function-version")).toBe("43");
       expect(await (await fastResponse).text()).toBe("fast");
-      expect(pool.snapshotMetrics("cancel")["cancel_idle_workers"]).toBe(1);
+      const metrics = pool.snapshotMetrics("cancel");
+      expect(metrics["cancel_idle_workers"]).toBe(1);
+      expect(metrics["cancel_total_worker_replacements"]).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1943,7 +1956,8 @@ describe("WorkerPool cancellation and replacement", () => {
       await waitForFile(loadingPath);
       controller.abort();
 
-      expect((await responsePromise).status).toBe(499);
+      expect(await discardedResponseStatus(responsePromise)).toBe(499);
+      await waitForMetric(pool, "idle_workers", 1);
       expect(existsSync(handlerPath)).toBe(false);
       expect(executionStarted).toBe(0);
       expect(pool.snapshotMetrics("cancel")["cancel_idle_workers"]).toBe(1);
@@ -2003,7 +2017,7 @@ describe("WorkerPool cancellation and replacement", () => {
 
       firstController.abort();
 
-      expect((await firstResponse).status).toBe(499);
+      expect(await discardedResponseStatus(firstResponse)).toBe(499);
       const secondSettled = await Promise.race([
         secondResponse.then(() => true),
         Bun.sleep(50).then(() => false),
@@ -2011,7 +2025,7 @@ describe("WorkerPool cancellation and replacement", () => {
       expect(secondSettled).toBe(false);
 
       expect(pool.cancel("shared-task-id")).toBe(true);
-      expect((await secondResponse).status).toBe(499);
+      expect(await discardedResponseStatus(secondResponse)).toBe(499);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -2055,8 +2069,8 @@ describe("WorkerPool cancellation and replacement", () => {
 
       controller.abort();
 
-      expect((await queuedResponse).status).toBe(499);
-      expect((await slowResponse).status).toBe(200);
+      expect(await discardedResponseStatus(queuedResponse)).toBe(499);
+      expect(await discardedResponseStatus(slowResponse)).toBe(200);
       expect(pool.snapshotMetrics("queue")["queue_total_queued_requests"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -2120,7 +2134,7 @@ describe("WorkerPool cancellation and replacement", () => {
     }
   });
 
-  test("replaces a cancelled streaming worker before serving the queue", async () => {
+  test("reuses a cancelled streaming worker after cooperative cleanup", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-stream-cancel-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -2168,7 +2182,7 @@ describe("WorkerPool cancellation and replacement", () => {
 
       expect(await (await queuedResponse).json()).toEqual({ overlap: false });
       const metrics = pool.snapshotMetrics("stream");
-      expect(metrics["stream_total_worker_replacements"]).toBe(1);
+      expect(metrics["stream_total_worker_replacements"]).toBe(0);
       expect(metrics["stream_idle_workers"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -2207,7 +2221,7 @@ describe("WorkerPool cancellation and replacement", () => {
 
       await Bun.sleep(40);
       expect(drained).toBe(false);
-      expect((await responsePromise).status).toBe(200);
+      expect(await discardedResponseStatus(responsePromise)).toBe(200);
       await drainPromise;
       expect(drained).toBe(true);
     } finally {
@@ -2279,6 +2293,7 @@ describe("WorkerPool cancellation and replacement", () => {
         request: new Request("http://edge.local/functions/v1/fn"),
       });
       expect(response.status).toBe(202);
+      await response.body?.cancel();
 
       let drained = false;
       const drainPromise = pool.drain().then(() => {
@@ -2296,7 +2311,7 @@ describe("WorkerPool cancellation and replacement", () => {
 });
 
 describe("WorkerPool cooperative retirement", () => {
-  test("retires a worker that times out during module initialization", async () => {
+  test("reuses a worker that cooperates with timeout during module initialization", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-load-"));
     const functionPath = join(projectRoot, "slow-load.ts");
     await Bun.write(functionPath, `
@@ -2326,7 +2341,8 @@ describe("WorkerPool cooperative retirement", () => {
         request: new Request("http://edge.local/functions/v1/slow-load"),
       });
       expect(response.status).toBe(504);
-      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      await waitForMetric(pool, "idle_workers", 1);
+      expect(pool.snapshotMetrics("retirement")["retirement_total_worker_replacements"]).toBe(0);
       expect(pool.snapshotMetrics("retirement")["retirement_retired_workers"]).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -2382,13 +2398,15 @@ describe("WorkerPool cooperative retirement", () => {
           request: new Request("http://edge.local/functions/v1/slow"),
         });
         await waitForFile(startedPath);
+        const [worker] = (pool as unknown as { activeWorkers: Set<{ emit: (name: string, error: Error) => void }> }).activeWorkers;
+        worker.emit("error", new Error("simulated worker failure"));
         return responsePromise;
       };
 
       expect(await preheatReplacement()).toBe(true);
-      expect((await dispatchSlow(firstStartedPath)).status).toBe(504);
+      expect(await discardedResponseStatus(dispatchSlow(firstStartedPath))).toBe(500);
       expect(await preheatReplacement()).toBe(true);
-      expect((await dispatchSlow(secondStartedPath)).status).toBe(504);
+      expect(await discardedResponseStatus(dispatchSlow(secondStartedPath))).toBe(500);
       expect(exceeded).toEqual(["count"]);
       expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
       expect((await pool.dispatch({
@@ -2452,7 +2470,9 @@ describe("WorkerPool cooperative retirement", () => {
         request: new Request("http://edge.local/functions/v1/slow"),
       });
       await waitForFile(startedPath);
-      expect((await responsePromise).status).toBe(504);
+      const [worker] = (pool as unknown as { activeWorkers: Set<{ emit: (name: string, error: Error) => void }> }).activeWorkers;
+      worker.emit("error", new Error("simulated worker failure"));
+      expect(await discardedResponseStatus(responsePromise)).toBe(500);
       await waitForMetric(pool, "retirement_budget_exceeded", 1);
       expect(exceeded).toEqual(["age"]);
       await Bun.sleep(50);
@@ -2636,6 +2656,7 @@ describe("WorkerPool metrics NaN fix", () => {
       clock.mockRestore();
       const res = await response;
       expect(res.status).toBe(200);
+      await res.body?.cancel();
 
       const metrics = pool.snapshotMetrics("test");
       for (const [, value] of Object.entries(metrics)) {
@@ -2687,6 +2708,8 @@ describe("WorkerPool metrics NaN fix", () => {
       ]);
       expect(res1.status).toBe(200);
       expect(res2.status).toBe(200);
+      await res1.body?.cancel();
+      await res2.body?.cancel();
 
       const metrics = pool.snapshotMetrics("testq");
       for (const [, value] of Object.entries(metrics)) {
@@ -2731,14 +2754,14 @@ describe("WorkerPool metrics NaN fix", () => {
       const queued = dispatch();
       pool.setAdmissionBlocked(true);
 
-      expect((await queued).status).toBe(503);
-      expect((await dispatch()).status).toBe(503);
-      expect((await active).status).toBe(200);
+      expect(await discardedResponseStatus(queued)).toBe(503);
+      expect(await discardedResponseStatus(dispatch())).toBe(503);
+      expect(await discardedResponseStatus(active)).toBe(200);
       expect(pool.snapshotMetrics("admission")["admission_admission_blocked"]).toBe(1);
       expect(pool.snapshotMetrics("admission")["admission_total_admission_rejected"]).toBe(2);
 
       pool.setAdmissionBlocked(false);
-      expect((await dispatch()).status).toBe(200);
+      expect(await discardedResponseStatus(dispatch())).toBe(200);
     } finally {
       await pool.drain();
       await rm(projectRoot, { recursive: true, force: true });
@@ -2879,7 +2902,7 @@ describe("WorkerPool parked project slots", () => {
     async options => {
       const { pool, dispatch } = setup(options);
       const first: unknown = await (await dispatch("a")).json();
-      await dispatch("b");
+      await (await dispatch("b")).body?.cancel();
       expect(await (await dispatch("a")).json()).not.toEqual(first);
       expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
       expect(pool.snapshotMetrics("test").test_total_worker_replacements).toBe(2);
@@ -2922,10 +2945,10 @@ describe("WorkerPool parked project slots", () => {
     });
     const queued = dispatch("b");
     try {
-      expect((await first).status).toBe(200);
+      expect(await discardedResponseStatus(first)).toBe(200);
       expect(await (await queued).json()).toMatchObject({ owner: "b" });
       expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
-      expect((await dispatch("b")).status).toBe(200);
+      expect(await discardedResponseStatus(dispatch("b"))).toBe(200);
     } finally {
       releaseBody();
       await held;
@@ -2945,11 +2968,11 @@ describe("WorkerPool parked project slots", () => {
     const c = dispatch("c", 100);
     expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
     expect(pool.snapshotMetrics("test").test_queue_length).toBe(2);
-    expect((await a).status).toBe(200);
+    expect(await discardedResponseStatus(a)).toBe(200);
     expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
-    expect((await b).status).toBe(200);
+    expect(await discardedResponseStatus(b)).toBe(200);
     expect(pool.snapshotMetrics("test").test_active_workers).toBe(1);
-    expect((await c).status).toBe(200);
+    expect(await discardedResponseStatus(c)).toBe(200);
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(2);
     expect(pool.snapshotMetrics("test").test_total_workers).toBe(3);
   });
@@ -2968,8 +2991,8 @@ describe("WorkerPool parked project slots", () => {
   test("evicts the least recently parked project at the resident worker limit", async () => {
     const { pool, dispatch } = setup({ maxExtraProjectWorkers: 1 });
     const first: unknown = await (await dispatch("a")).json();
-    await dispatch("b");
-    await dispatch("c");
+    await (await dispatch("b")).body?.cancel();
+    await (await dispatch("c")).body?.cancel();
     expect(pool.snapshotMetrics("test").test_total_workers).toBe(2);
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(1);
     expect(pool.snapshotMetrics("test").test_total_project_worker_evictions).toBe(1);
@@ -2980,8 +3003,8 @@ describe("WorkerPool parked project slots", () => {
 
   test("retires expired parked workers without allocating replacements", async () => {
     const { pool, dispatch } = setup({ parkedWorkerIdleMs: 30 });
-    await dispatch("a");
-    await dispatch("b");
+    await (await dispatch("a")).body?.cancel();
+    await (await dispatch("b")).body?.cancel();
     await waitForMetric(pool, "parked_workers", 0);
     expect(pool.snapshotMetrics("test").test_total_workers).toBe(1);
     expect(pool.snapshotMetrics("test").test_total_project_worker_evictions).toBe(1);
@@ -2991,7 +3014,7 @@ describe("WorkerPool parked project slots", () => {
   test("clears parked generations before versioned preheat", async () => {
     const { pool, dispatch } = setup();
     const first: unknown = await (await dispatch("a")).json();
-    await dispatch("b");
+    await (await dispatch("b")).body?.cancel();
     const projectRoot = join(import.meta.dir, "fixtures");
     const preheat = await pool.preheatVersionedIdleWorkers({
       projectRef: "b", projectRoot, functionId: "b_fn",
@@ -3008,8 +3031,8 @@ describe("WorkerPool parked project slots", () => {
 
   test("invalidates modules in parked workers", async () => {
     const { pool, dispatch } = setup();
-    await dispatch("a");
-    await dispatch("b");
+    await (await dispatch("a")).body?.cancel();
+    await (await dispatch("b")).body?.cancel();
     const result = await pool.invalidateModule("a_fn");
     expect(result.attempted).toBe(2);
     expect(result.invalidated).toBe(1);
@@ -3021,8 +3044,8 @@ describe("WorkerPool parked project slots", () => {
   test("wires monitor recovery to one request per pool and releases parked caches", async () => {
     const { pool, dispatch } = setup({ size: 2 });
     const active = [dispatch("a", 50), dispatch("b", 50)];
-    await Promise.all(active);
-    await dispatch("c");
+    await Promise.all(active.map(async pending => (await pending).body?.cancel()));
+    await (await dispatch("c")).body?.cancel();
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(1);
     let sample = { cgroup: "/test", highBytes: 100, currentBytes: 95, highEvents: 1 };
     const monitor = createMemoryPressureMonitor({
@@ -3034,16 +3057,16 @@ describe("WorkerPool parked project slots", () => {
     await monitor.poll();
     sample = { ...sample, highEvents: 2 };
     await monitor.poll();
-    expect((await dispatch("a")).status).toBe(503);
+    expect(await discardedResponseStatus(dispatch("a"))).toBe(503);
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
     for (let i = 0; i < 3; i++) await monitor.poll();
     const probe = dispatch("c", 50);
-    expect((await dispatch("c")).status).toBe(503);
-    expect((await probe).status).toBe(200);
-    expect((await dispatch("a")).status).toBe(200);
+    expect(await discardedResponseStatus(dispatch("c"))).toBe(503);
+    expect(await discardedResponseStatus(probe)).toBe(200);
+    expect(await discardedResponseStatus(dispatch("a"))).toBe(200);
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
     for (let i = 0; i < 3; i++) await monitor.poll();
-    expect((await Promise.all([dispatch("c"), dispatch("b")])).map(r => r.status)).toEqual([200, 200]);
+    expect(await Promise.all([dispatch("c"), dispatch("b")].map(discardedResponseStatus))).toEqual([200, 200]);
     expect(pool.snapshotMetrics("test").test_admission_recovering).toBe(0);
     monitor.stop();
   });
@@ -3062,12 +3085,12 @@ describe("WorkerPool parked project slots", () => {
 
   test("retires both execution slots and parked workers on shutdown", async () => {
     const { pool, dispatch } = setup();
-    await dispatch("a");
-    await dispatch("b");
+    await (await dispatch("a")).body?.cancel();
+    await (await dispatch("b")).body?.cancel();
     await pool.shutdown();
     expect(pool.snapshotMetrics("test").test_total_workers).toBe(0);
     expect(pool.snapshotMetrics("test").test_parked_workers).toBe(0);
-    expect((await dispatch("a")).status).toBe(503);
+    expect(await discardedResponseStatus(dispatch("a"))).toBe(503);
   });
 });
 
@@ -4142,7 +4165,7 @@ describe("WorkerPool module cache", () => {
 });
 
 describe("WorkerPool binary transfers", () => {
-  test("transfers the consumed request buffer without changing binary response bytes", async () => {
+  test("incrementally reads requests without arrayBuffer aggregation or detaching user storage", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-transfer-"));
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
@@ -4156,12 +4179,12 @@ describe("WorkerPool binary transfers", () => {
       const expected = Uint8Array.from({ length: 2 * 1024 * 1024 }, (_, i) => i % 251);
       const consumed = expected.slice().buffer;
       const request = new Request("http://edge.local/fn", { method: "POST", body: expected });
-      request.arrayBuffer = async () => consumed;
+      request.arrayBuffer = async () => { throw new Error("Full request aggregation must not be used"); };
       const response = await pool.dispatch({
         functionId: "transfer", projectRef: "transfer", functionPath, projectRoot, env: {}, request,
       });
       expect(response.status).toBe(200);
-      expect(consumed.byteLength).toBe(0);
+      expect(consumed.byteLength).toBe(expected.byteLength);
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(expected);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -4173,15 +4196,14 @@ describe("WorkerPool binary transfers", () => {
     const functionPath = join(projectRoot, "fn.ts");
     await Bun.write(functionPath, `
       const source = new Uint8Array([0, 1, 127, 128, 255]);
-      let consumed: ArrayBuffer | undefined;
-      const read = Response.prototype.arrayBuffer;
+      let aggregateCalls = 0;
       Response.prototype.arrayBuffer = async function () {
-        consumed = await read.call(this);
-        return consumed;
+        aggregateCalls++;
+        throw new Error("Full response aggregation must not be used");
       };
       export default (request: Request) => {
         if (new URL(request.url).pathname.endsWith("/state")) {
-          return Response.json({ transferredBytes: consumed?.byteLength, source: Array.from(source) });
+          return Response.json({ aggregateCalls, source: Array.from(source) });
         }
         return new Response(source);
       };
@@ -4199,7 +4221,7 @@ describe("WorkerPool binary transfers", () => {
         const response = await dispatch("");
         expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([0, 1, 127, 128, 255]);
         expect(await (await dispatch("/state")).json()).toEqual({
-          transferredBytes: 0, source: [0, 1, 127, 128, 255],
+          aggregateCalls: 0, source: [0, 1, 127, 128, 255],
         });
       }
     } finally {

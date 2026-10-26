@@ -1,3 +1,5 @@
+import { memoryUsage as jscMemoryUsage } from "bun:jsc";
+import { bodyBufferBudget, positiveBytes, responseBufferBudget } from "./body-transfer";
 import "./url-import-plugin";
 import { projectReleaseFunctionManifest } from "./project-release";
 import { createProjectReleasePreheatRoutes, PROJECT_PREHEAT_SCHEMA } from "./project-release-preheat";
@@ -70,11 +72,13 @@ import {
 import { runtimeSourceIdentity } from "./runtime-source-identity";
 import {
   createMemoryPressureMonitor,
-  readMemoryPressureSnapshot,
+  sampleRuntimeMemory,
   resolveMemoryCgroups,
 } from "./memory-pressure";
 
 const AOT_CAPTURE = process.env.ELYSIA_AOT_BUILD === "1";
+const RSS_BUDGET = process.env.EDGE_RSS_BUDGET_BYTES
+  ? positiveBytes(process.env.EDGE_RSS_BUDGET_BYTES, 0) : undefined;
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
@@ -1532,7 +1536,19 @@ const app = new Elysia()
     const background = backgroundPool.snapshotMetrics("supacloud_edge_background");
     const bytecode = Object.fromEntries(Object.entries(functionBytecodeCache.metrics)
       .map(([name, value]) => [`supacloud_edge_bytecode_${name}`, value]));
-    return Object.entries({ ...foreground, ...background, ...bytecode })
+    const memory = jscMemoryUsage();
+    const processMetrics = {
+      supacloud_edge_process_rss_bytes: process.memoryUsage().rss,
+      supacloud_edge_process_commit_bytes: memory.currentCommit,
+      supacloud_edge_body_buffer_reserved_bytes: bodyBufferBudget.used,
+      supacloud_edge_body_buffer_peak_bytes: bodyBufferBudget.peak,
+      supacloud_edge_body_buffer_budget_bytes: bodyBufferBudget.limit,
+      supacloud_edge_body_buffer_rejections: bodyBufferBudget.rejected,
+      supacloud_edge_response_buffer_reserved_bytes: responseBufferBudget.used,
+      supacloud_edge_response_buffer_peak_bytes: responseBufferBudget.peak,
+      supacloud_edge_response_buffer_budget_bytes: responseBufferBudget.limit,
+    };
+    return Object.entries({ ...foreground, ...background, ...bytecode, ...processMetrics })
       .map(([key, value]) => `${key} ${value}`)
       .join("\n");
   })
@@ -2060,9 +2076,9 @@ if (!AOT_CAPTURE) {
   });
 
   const memoryCgroups = await resolveMemoryCgroups();
-  if (memoryCgroups.length > 0) {
+  if (memoryCgroups.length > 0 || RSS_BUDGET !== undefined) {
     const monitor = createMemoryPressureMonitor({
-      sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
+      sample: () => shuttingDown ? Promise.resolve(null) : sampleRuntimeMemory(memoryCgroups, RSS_BUDGET),
       onAdmissionStateChange: ({ blocked, recovering, snapshot }) => {
         pool.setAdmissionBlocked(blocked, recovering);
         backgroundPool.setAdmissionBlocked(blocked, recovering);
@@ -2076,12 +2092,12 @@ if (!AOT_CAPTURE) {
         }
       },
       onPressure: (snapshot) => {
-        console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
+        console.error("[EdgeRuntime] Sustained runtime memory pressure; recycling runtime", {
           ...snapshot,
           ...pool.snapshotMetrics("supacloud_edge"),
           ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
         });
-        void gracefulShutdown("cgroup memory pressure", 1);
+        void gracefulShutdown("runtime memory pressure", 1);
       },
       onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
     });
