@@ -84,6 +84,8 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--runtime-mode') options.runtimeMode = runtimeMode(next())
     else if (argument === '--postgres-dir') options.postgresDir = resolve(next())
     else if (argument === '--identity-module') options.identityModule = resolve(next())
+    else if (argument === '--external-auth-proxy-issuer') options.externalAuthProxyIssuer = next()
+    else if (argument === '--external-auth-proxy-redirect-origin') options.externalAuthProxyRedirectOrigins = commaSeparated(next())
     else if (argument === '--replication-profile') {
       options.replicationProfile = next() as ProjectRuntimeOptions['replicationProfile']
     }
@@ -616,6 +618,10 @@ Options:
       --runtime-mode      development (default) or strict
       --postgres-dir      operator-managed PostgreSQL installation (native only)
       --identity-module   trusted external identity bridge module
+      --external-auth-proxy-issuer <url>
+                           proxy OAuth token/userinfo/logout to this external issuer
+      --external-auth-proxy-redirect-origin <origin>
+                           allowed logout redirect origin (repeatable list via commas)
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
   --baseline             db pull: write and record already-present schema as a migration

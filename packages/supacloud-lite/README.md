@@ -168,6 +168,19 @@ Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重�
 
 外部 SupAuth 可通过 `createSupAuthLiteIdentity` 复用 `@supacloud/elysia` 的验证和业务侧本地用户映射；本地 Auth 仍是默认模式。外部模式不会把本地令牌降级当成 SupAuth，也不会根据请求头授予权限。
 
+如果浏览器应用与身份服务不同源，且身份服务没有为业务域名开放 CORS，可在 Lite 前面启用受限的同源 OAuth 反代：
+
+```sh
+supacloud-lite start \
+  --external-auth-proxy-issuer https://auth.example.com/auth/v1 \
+  --external-auth-proxy-redirect-origin https://app.example.com
+```
+
+反代只接受 `/auth/v1/oauth/token`（POST）、`/auth/v1/oauth/userinfo`（GET）和
+`/auth/v1/logout`（GET/POST），不会转发 cookie、`x-forwarded-*` 或任意上游地址。
+授权请求仍由浏览器顶层跳转到身份服务；应用端把 token/userinfo 指向 Lite 同源地址。
+嵌入宿主也可以直接调用 `createExternalAuthProxy()`。
+
 完整配置、边界和回归方法见仓库文档 `docs/lite-runtime-compatibility.md`。性能基线可在源码目录运行 `bun run benchmark`，native 模式加 `--native`。
 
 ### CLI
@@ -852,6 +865,23 @@ an operator-managed installation selected with `--postgres-dir`. Required
 GraphQL fails startup when missing; `doctor --json` reports actual or unverified
 capability. External SupAuth can reuse the shared Elysia verifier through
 `createSupAuthLiteIdentity` and an explicit application-owned local user mapping.
+
+When the browser application and the identity service have different origins and
+the identity service does not allow the application origin via CORS, Lite can
+serve a restricted same-origin OAuth proxy:
+
+```sh
+supacloud-lite start \
+  --external-auth-proxy-issuer https://auth.example.com/auth/v1 \
+  --external-auth-proxy-redirect-origin https://app.example.com
+```
+
+The proxy accepts only `/auth/v1/oauth/token` (POST),
+`/auth/v1/oauth/userinfo` (GET) and `/auth/v1/logout` (GET/POST). It never
+forwards cookies, `x-forwarded-*`, or arbitrary upstream URLs. Authorization
+remains a top-level navigation to the identity service; the application points
+token/userinfo at the Lite same-origin address. Embedded hosts can call
+`createExternalAuthProxy()` directly.
 
 See repository document `docs/lite-runtime-compatibility.md` for configuration
 and acceptance boundaries. Run `bun run benchmark` (or add `--native`) in the
