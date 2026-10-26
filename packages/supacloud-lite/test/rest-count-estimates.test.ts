@@ -113,6 +113,43 @@ describe('REST role-aware count estimates', () => {
     }
   })
 
+  test('disables parallel workers while planning a count', async () => {
+    const database = db!
+    const previous = await database.query<{ workers: string }>(
+      "select current_setting('max_parallel_workers_per_gather') as workers",
+    )
+    await database.exec('set max_parallel_workers_per_gather = 2')
+    const observedWorkers: string[] = []
+    const originalWithContext = database.withContext.bind(database)
+    database.withContext = ((ctx, callback) => originalWithContext(ctx, (query) => callback(async (sql, params) => {
+      if (sql.startsWith('explain (format json) ')) {
+        const settings = await query<{ workers: string }>(
+          "select current_setting('max_parallel_workers_per_gather') as workers",
+        )
+        observedWorkers.push(settings.rows[0]!.workers)
+      }
+      return query(sql, params)
+    }))) as typeof database.withContext
+    try {
+      for (const count of ['planned', 'estimated'] as const) {
+        for (const role of ['anon', 'authenticated'] as const) {
+          const response = await read('estimate_items', { count, role })
+          expect(total(response)).toBeGreaterThan(0)
+          const session = await database.query<{ workers: string }>(
+            "select current_setting('max_parallel_workers_per_gather') as workers",
+          )
+          expect(session.rows[0]!.workers).toBe('2')
+        }
+      }
+      expect(observedWorkers).toEqual(['0', '0', '0', '0'])
+    } finally {
+      database.withContext = originalWithContext
+      await database.query("select set_config('max_parallel_workers_per_gather', $1, false)", [
+        previous.rows[0]!.workers,
+      ])
+    }
+  })
+
   for (const role of ['anon', 'authenticated'] as const) {
     test(`does not expose table statistics when ${role} has no SELECT policy`, async () => {
       const response = await read('estimate_denied', { count: 'estimated', role })

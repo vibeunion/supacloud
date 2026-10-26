@@ -557,6 +557,8 @@ function assertObjectCardinality(rows: unknown[]): void {
 }
 
 async function plannedCount(query: Querier, countSql: string): Promise<number> {
+  // Partial count aggregates estimate worker outputs, not the counted query's rows.
+  await query('set local max_parallel_workers_per_gather = 0')
   const result = await query(`explain (format json) ${countSql}`, [])
   const raw = (result.rows[0] as Record<string, unknown> | undefined)?.['QUERY PLAN']
   const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw
