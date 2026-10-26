@@ -34,6 +34,43 @@ and pressure-triggered `Bun.gc(true)` trade GC work for memory. Worker-side
 together. See [memory controls and measurements](edge-function-memory.md) for
 official references, raw records and the remaining slow-client RSS regression.
 
+## Measured end-to-end result (2026-10-27)
+
+`packages/edge-runtime/http-dispatch-benchmark.ts` (`bun run bench:http`) now
+provides the end-to-end harness this review asked for. It boots the real
+entrypoint against a temporary project fixture and reports completed invocations
+over HTTP, so routing, JWT and throttle bookkeeping, attestation, queueing and
+response delivery are all included; `bench:memory` and `bench:projects` measure
+Worker-pool dispatch only.
+
+Development host (Bun 1.4.3, macOS arm64, 4 warm Workers, 16 concurrent clients,
+15 000-20 000 completed invocations, single JSON response, no I/O in the handler):
+
+| Revision | Requests/s | p50 | p99 |
+| --- | ---: | ---: | ---: |
+| Before the Worker execution fixes | ~2 900 | ~5.2 ms | 7-9 ms |
+| After heap-sampling/listener/version-stamp fixes | ~11 700 | ~1.1 ms | 3.1-3.9 ms |
+| After throttle/keyed-proof bookkeeping fixes | ~13 800 | ~1.05 ms | 3.2-3.6 ms |
+
+The first step was not a scheduling change. The executor called
+`bun:jsc.heapStats()` on every completed execution, which walks the isolate heap
+(~0.8 ms empty, ~2.8 ms with 4 MiB live) and made per-request cost grow with
+tenant allocations; it is now sampled at most once per
+`EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS`. The remaining per-request CPU is spread
+thin: Worker messaging (`postMessage` of the dispatch envelope), trusted-file
+identity checks, response delivery and native socket work each contribute single
+digit microseconds.
+
+Against a bare `Bun.serve` route returning the same body, the function path still
+costs roughly ten times more CPU per request, and the gap is the invocation model
+itself (per-request Worker message, per-request trusted-file verification,
+per-request environment injection) rather than one removable hotspot. Closing it
+needs request multiplexing inside a Worker or a different data plane, which stays
+blocked on per-request context isolation as described above.
+
+These numbers are local and unloaded. They do not replace Linux HTTP/TLS
+acceptance with production function sizes, deployment limits and tenant code.
+
 Delivery of the implemented controls does not mark all proposed optimizations
 complete. Production performance acceptance remains **PARTIAL** until Linux
 HTTP/TLS tests with the reported function and deployment limits establish memory,

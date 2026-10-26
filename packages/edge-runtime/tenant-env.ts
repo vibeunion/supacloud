@@ -379,6 +379,14 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
   return (await loadTenantRuntimeEnv(ref)).env;
 }
 
+/**
+ * A module-environment proof is an HMAC over the whole tenant environment, and
+ * the dispatch path needs it on every request. It only depends on an immutable,
+ * already cached tenant-env load, so it is memoised per load object and
+ * execution profile instead of being re-derived per dispatch.
+ */
+const moduleEnvProofMemo = new WeakMap<object, Map<TenantEnvExecutionProfile, string>>();
+
 export function tenantEnvModuleProof(
   ref: string,
   env: Record<string, string>,
@@ -386,13 +394,26 @@ export function tenantEnvModuleProof(
   executionProfile: TenantEnvExecutionProfile,
 ): string | null {
   if (!MASTER_TOKEN) return null;
-  return keyedEnvProof("module-env", ref, JSON.stringify({
+  // Only reuse a memoised proof when the environment is the one this load owns,
+  // so a load object can never serve a proof for a different environment.
+  const memoizable = env === (load as TenantEnvLoad).env;
+  if (memoizable) {
+    const cached = moduleEnvProofMemo.get(load)?.get(executionProfile);
+    if (cached !== undefined) return cached;
+  }
+  const proof = keyedEnvProof("module-env", ref, JSON.stringify({
     executionProfile,
     revision: load.revision,
     state: load.loadState,
     source: load.loadSource,
     env: canonicalRuntimeEnv(env),
   }));
+  if (memoizable) {
+    const byProfile = moduleEnvProofMemo.get(load) ?? new Map();
+    byProfile.set(executionProfile, proof);
+    moduleEnvProofMemo.set(load, byProfile);
+  }
+  return proof;
 }
 
 export function reserveTenantEnvDispatch(ref: string): TenantEnvDispatchReservation {

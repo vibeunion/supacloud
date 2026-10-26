@@ -122,6 +122,43 @@ describe("tenant env masking guard", () => {
     }
   });
 
+  test("memoises the module proof for one immutable tenant env load", async () => {
+    const previousMasterToken = process.env.MASTER_TOKEN;
+    process.env.MASTER_TOKEN = "tenant-env-module-proof-memo-key";
+    try {
+      const proofModule = await import("./tenant-env.ts?module-proof-memo");
+      const ref = "proj_module_proof_memo";
+      const env = { RUNTIME_SECRET: "memo-secret" };
+      const load = {
+        env,
+        revision: `hmac-sha256:${"c".repeat(64)}`,
+        envProof: `hmac-sha256:${"d".repeat(64)}`,
+        loadState: "loaded" as const,
+        loadSource: "management_api" as const,
+        cacheEpoch: 0,
+      };
+
+      const foreground = proofModule.tenantEnvModuleProof(ref, env, load, "foreground");
+      expect(proofModule.tenantEnvModuleProof(ref, env, load, "foreground")).toBe(foreground);
+      // The cached proof must stay profile specific.
+      expect(proofModule.tenantEnvModuleProof(ref, env, load, "background")).not.toBe(foreground);
+      // An environment detached from the load still hashes to the same proof
+      // but must never reuse (or poison) the memo.
+      expect(proofModule.tenantEnvModuleProof(ref, { ...env }, load, "foreground")).toBe(foreground);
+
+      const changedEnv = { RUNTIME_SECRET: "rotated-secret" };
+      const rotated = { ...load, env: changedEnv, revision: `hmac-sha256:${"e".repeat(64)}` };
+      const rotatedProof = proofModule.tenantEnvModuleProof(ref, changedEnv, rotated, "foreground");
+      expect(rotatedProof).not.toBe(foreground);
+      expect(proofModule.tenantEnvModuleProof(ref, changedEnv, rotated, "foreground")).toBe(rotatedProof);
+      // A rotated load must not have changed the original memo.
+      expect(proofModule.tenantEnvModuleProof(ref, env, load, "foreground")).toBe(foreground);
+    } finally {
+      if (previousMasterToken === undefined) delete process.env.MASTER_TOKEN;
+      else process.env.MASTER_TOKEN = previousMasterToken;
+    }
+  });
+
   test("drops masked placeholders before runtime injection", () => {
     expect(stripMaskedSecretValues({
       SUPABASE_URL: "********",
