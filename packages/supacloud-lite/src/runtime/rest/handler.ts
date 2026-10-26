@@ -214,10 +214,11 @@ export class RestHandler {
           const res = await query(built.sql, built.params)
           let count: number | null = null
           if (built.countSql) {
+            const filtered = q.conditions.length > 0
             count = countMode === 'planned'
               ? await plannedCount(query, built.countSql)
               : countMode === 'estimated'
-                ? await estimatedCount(query, schema, table, built.countSql)
+                ? await estimatedCount(query, schema, table, built.countSql, filtered)
                 : (await query<{ count: number }>(built.countSql, [])).rows[0]?.count ?? 0
           }
           return { rows: (res.rows[0] as { body: unknown[] }).body, count }
@@ -564,12 +565,29 @@ async function plannedCount(query: Querier, countSql: string): Promise<number> {
   const plans = Array.isArray(parsed) ? parsed : []
   const first = plans[0]
   const plan = first !== null && typeof first === 'object' ? (first as Record<string, unknown>)['Plan'] : undefined
-  const rows = plan !== null && typeof plan === 'object' ? (plan as Record<string, unknown>)['Plan Rows'] : undefined
-  const count = Number(rows)
-  return Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0
+  return planRowEstimate(plan)
 }
 
-async function estimatedCount(query: Querier, schema: string, table: string, fallbackSql: string): Promise<number> {
+/** `count(*)` itself is an Aggregate whose Plan Rows is always 1; the estimate is its input. */
+function planRowEstimate(plan: unknown): number {
+  if (plan === null || typeof plan !== 'object') return 0
+  const node = plan as Record<string, unknown>
+  const type = typeof node['Node Type'] === 'string' ? node['Node Type'] : ''
+  const children = Array.isArray(node['Plans']) ? node['Plans'] : []
+  if (type.endsWith('Aggregate') && children.length > 0) return planRowEstimate(children[0])
+  const rows = Number(node['Plan Rows'])
+  return Number.isFinite(rows) && rows >= 0 ? Math.trunc(rows) : 0
+}
+
+async function estimatedCount(
+  query: Querier,
+  schema: string,
+  table: string,
+  fallbackSql: string,
+  filtered: boolean,
+): Promise<number> {
+  // Table statistics do not account for filters, so a filtered request uses the planner.
+  if (filtered) return plannedCount(query, fallbackSql)
   const relation = `${quoteIdent(schema)}.${quoteIdent(table)}`
   const result = await query<{ estimate: number | string }>(
     `select reltuples::bigint as estimate from pg_class where oid = $1::regclass`,

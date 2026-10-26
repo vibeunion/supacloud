@@ -45,11 +45,22 @@ describe('PostgREST edge semantics', () => {
         const response = await request(backend, '/rest/v1/edge_items?select=*', {
           headers: { prefer: `count=${strategy}` },
         })
-        expect(response.status).toBe(200)
+        expect([200, 206]).toContain(response.status)
         const range = response.headers.get('content-range')
         expect(range).toMatch(/^\d+-\d+\/\d+$/)
-        expect(Number(range!.split('/')[1])).toBeGreaterThanOrEqual(0)
+        // The aggregate node of count(*) always reports one output row; the estimate must come from its input.
+        expect(Number(range!.split('/')[1])).toBeGreaterThan(1)
       }
+
+      await backend.db.exec('analyze public.edge_items')
+      const estimated = await request(backend, '/rest/v1/edge_items?select=*', {
+        headers: { prefer: 'count=estimated' },
+      })
+      expect(estimated.headers.get('content-range')).toBe('0-2/3')
+      const planned = await request(backend, '/rest/v1/edge_items?select=*', {
+        headers: { prefer: 'count=planned' },
+      })
+      expect(Number(planned.headers.get('content-range')!.split('/')[1])).toBeGreaterThan(1)
 
       const exact = await request(backend, '/rest/v1/edge_items?select=*', {
         headers: { prefer: 'count=exact' },
