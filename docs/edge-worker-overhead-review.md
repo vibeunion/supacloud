@@ -28,12 +28,15 @@ dispatch attestation are excluded.
 | 1 ms handler delay, 3,000 calls | 1,473 / 2,368 | 20 / 24 | 13 / 15 | 4,234 / 1,218 | 144 / 128 |
 | JSON stringify/parse 300,000 items, 600 calls | 846 / 1,024 | 35 / 37 | 29 / 30 | 2,844 / 2,358 | 365 / 353 |
 | 8 MiB response, slow consumers, 60 calls | 71 / 71 | 434 / 434 | 427 / 427 | 371 / 360 | 599 / 567 |
+| Same slow consumers, 1,800 calls | 72 / 74 | 427 / 431 | 421 / 426 | 9,731 / 6,964 | 829 / 811 |
 
 The short-response measurement spans several sampling intervals even in the
 faster candidate. Reduced inspection cost helps short handlers most; it cannot
 remove handler I/O or client backpressure. The short-response RSS increase is a
 trade-off, not a memory reduction claim. Each run completed without worker
-replacement; the slow-consumer runs consumed 480 MiB. Candidate body and response
+replacement; the slow-consumer runs consumed 480 MiB and 14,400 MiB respectively.
+The longer comparison lasted about 25 seconds per policy; it does not establish
+long-term leak freedom. Candidate body and response
 reservations returned to zero. A logical buffer reservation is not process RSS.
 
 ## Reproduce
@@ -50,6 +53,7 @@ bun worker-memory-benchmark.ts --workers 4 --max-concurrency 4 --concurrency 30 
 bun worker-memory-benchmark.ts --workers 4 --max-concurrency 4 --concurrency 30 \
   --batches 20 --json-items 300000 --response-mib 0 --pause-ms 0 --delay-per-64k-ms 0
 bun worker-memory-benchmark.ts --workers 4 --max-concurrency 4 --concurrency 30 --batches 2
+# Repeat with --batches 60 for the longer slow-consumer comparison.
 ```
 
 Validation: 355 passing Edge Runtime tests, 22 platform skips on macOS; typecheck
