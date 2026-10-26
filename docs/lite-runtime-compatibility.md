@@ -35,9 +35,12 @@ Scenario: Strict function defaults
   And development mode preserves its existing defaults
 
 Scenario: PostgREST count strategies and rollback preference
-  Given a GET request with Prefer: count=planned or count=estimated
-  Then Content-Range contains a planner/statistics estimate instead of an exact count
-  And exact count remains the default for count=exact
+  Given a table or view GET/HEAD request with Prefer: count=planned or count=estimated
+  Then Content-Range contains a query-plan estimate under the caller's role and JWT claims
+  And filters, RLS, inner embeds, views, and GROUP BY shape the estimated row set
+  And relation-wide reltuples statistics are not returned directly
+  And estimated uses the planner, not PostgREST's threshold-based exact count fallback
+  And count=exact still computes the exact count
   Given a successful mutation with Prefer: tx=rollback
   Then the response reflects the would-be write
   And the transaction is rolled back without CDC or webhook side effects

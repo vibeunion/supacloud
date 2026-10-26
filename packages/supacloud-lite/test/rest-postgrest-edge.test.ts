@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createLiteBackend } from '../src/index.js'
+import type { CdcEvent } from '../src/runtime/db/database.js'
 import { testTimeout } from './helpers/timeouts.js'
 
 const migration = {
@@ -72,7 +73,17 @@ describe('PostgREST edge semantics', () => {
   }, testTimeout(30_000))
 
   test('rolls back successful mutations while preserving the response', async () => {
-    const backend = await createLiteBackend({ jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), migrations: [migration], log: () => {} })
+    const deliveries: string[] = []
+    const events: CdcEvent[] = []
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), migrations: [migration], log: () => {},
+      webhooks: [{ table: 'edge_items', url: 'http://webhook.test/changes' }],
+      webhookFetch: (async (_input, init) => {
+        deliveries.push(String(init?.body))
+        return new Response(null, { status: 204 })
+      }) as typeof fetch,
+    })
+    const stopCdc = await backend.db.onCdcEvent((event) => events.push(event))
     try {
       const committed = await request(backend, '/rest/v1/edge_items', {
         method: 'POST',
@@ -81,6 +92,10 @@ describe('PostgREST edge semantics', () => {
       })
       expect(committed.status).toBe(201)
       expect(await committed.json()).toEqual([{ id: 1, name: 'kept' }])
+      expect(events.map((event) => event.type)).toEqual(['INSERT'])
+      expect(deliveries).toHaveLength(1)
+      events.length = 0
+      deliveries.length = 0
 
       const rolledBack = await request(backend, '/rest/v1/edge_items', {
         method: 'POST',
@@ -104,9 +119,28 @@ describe('PostgREST edge semantics', () => {
       expect(updated.status).toBe(200)
       expect(await updated.json()).toEqual([{ id: 1, name: 'temporary' }])
 
+      const deleted = await request(backend, '/rest/v1/edge_items?id=eq.1', {
+        method: 'DELETE',
+        headers: { prefer: 'return=representation,tx=rollback' },
+      })
+      expect(deleted.status).toBe(200)
+      expect(await deleted.json()).toEqual([{ id: 1, name: 'kept' }])
+
       const after = await request(backend, '/rest/v1/edge_items?select=*')
       expect(await after.json()).toEqual([{ id: 1, name: 'kept' }])
+      expect(events).toEqual([])
+      expect(deliveries).toEqual([])
+
+      const committedDelete = await request(backend, '/rest/v1/edge_items?id=eq.1', {
+        method: 'DELETE',
+        headers: { prefer: 'return=representation,tx=commit' },
+      })
+      expect(committedDelete.status).toBe(200)
+      expect(await committedDelete.json()).toEqual([{ id: 1, name: 'kept' }])
+      expect(events.map((event) => event.type)).toEqual(['DELETE'])
+      expect(deliveries).toHaveLength(1)
     } finally {
+      await stopCdc()
       await backend.close()
     }
   }, testTimeout(30_000))

@@ -22,7 +22,7 @@ class RollbackSignal extends Error {
 interface Prefer {
   /** `return=` - whether a mutation echoes the rows, nothing, or only headers */
   return?: 'representation' | 'minimal' | 'headers-only'
-  /** `count=` - include a total row count (only `exact` is computed here) */
+  /** `count=` - include an exact or planner-derived total row count */
   count?: 'exact' | 'planned' | 'estimated'
   /** `resolution=` - upsert conflict behavior on insert */
   resolution?: 'merge-duplicates' | 'ignore-duplicates'
@@ -214,12 +214,10 @@ export class RestHandler {
           const res = await query(built.sql, built.params)
           let count: number | null = null
           if (built.countSql) {
-            const filtered = q.conditions.length > 0
-            count = countMode === 'planned'
+            // Use the caller's complete query plan, never relation-wide statistics.
+            count = countMode === 'planned' || countMode === 'estimated'
               ? await plannedCount(query, built.countSql)
-              : countMode === 'estimated'
-                ? await estimatedCount(query, schema, table, built.countSql, filtered)
-                : (await query<{ count: number }>(built.countSql, [])).rows[0]?.count ?? 0
+              : (await query<{ count: number }>(built.countSql, [])).rows[0]?.count ?? 0
           }
           return { rows: (res.rows[0] as { body: unknown[] }).body, count }
         })
@@ -571,31 +569,18 @@ async function plannedCount(query: Querier, countSql: string): Promise<number> {
 /** `count(*)` itself is an Aggregate whose Plan Rows is always 1; the estimate is its input. */
 function planRowEstimate(plan: unknown): number {
   if (plan === null || typeof plan !== 'object') return 0
-  const node = plan as Record<string, unknown>
+  let node = plan as Record<string, unknown>
   const type = typeof node['Node Type'] === 'string' ? node['Node Type'] : ''
   const children = Array.isArray(node['Plans']) ? node['Plans'] : []
-  if (type.endsWith('Aggregate') && children.length > 0) return planRowEstimate(children[0])
+  // Unwrap only count(*); an input GROUP BY aggregate represents the counted rows.
+  if (type.endsWith('Aggregate')) {
+    const input = children
+      .filter((child): child is Record<string, unknown> => child !== null && typeof child === 'object')
+      .find((child) => child['Parent Relationship'] !== 'InitPlan' && child['Parent Relationship'] !== 'SubPlan')
+    if (input) node = input
+  }
   const rows = Number(node['Plan Rows'])
   return Number.isFinite(rows) && rows >= 0 ? Math.trunc(rows) : 0
-}
-
-async function estimatedCount(
-  query: Querier,
-  schema: string,
-  table: string,
-  fallbackSql: string,
-  filtered: boolean,
-): Promise<number> {
-  // Table statistics do not account for filters, so a filtered request uses the planner.
-  if (filtered) return plannedCount(query, fallbackSql)
-  const relation = `${quoteIdent(schema)}.${quoteIdent(table)}`
-  const result = await query<{ estimate: number | string }>(
-    `select reltuples::bigint as estimate from pg_class where oid = $1::regclass`,
-    [relation],
-  )
-  const estimate = Number(result.rows[0]?.estimate)
-  // ANALYZE may not have run in a fresh Lite project; fall back to the planner.
-  return Number.isFinite(estimate) && estimate >= 0 ? estimate : plannedCount(query, fallbackSql)
 }
 
 function pickOverload(schema: string, name: string, fns: FunctionInfo[], providedNames: string[]): FunctionInfo {
