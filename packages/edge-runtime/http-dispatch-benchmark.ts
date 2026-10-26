@@ -94,6 +94,7 @@ export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   const stderr = join(tmpdir(), `supacloud-edge-http-bench-${process.pid}.log`);
+  const runtimeInstanceId = crypto.randomUUID();
   const runtime = Bun.spawn([process.execPath, options.entrypoint], {
     cwd: import.meta.dir,
     stdin: "ignore",
@@ -103,6 +104,7 @@ export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
       ...process.env,
       EDGE_RUNTIME_HOST: "127.0.0.1",
       EDGE_RUNTIME_PORT: String(port),
+      EDGE_RUNTIME_INSTANCE_ID: runtimeInstanceId,
       EDGE_RUNTIME_MASTER_KEY: INTERNAL_TOKEN,
       EDGE_FUNCTIONS_DIR: functionsDir,
       EDGE_FUNCTIONS_BASE_DIR: functionsDir,
@@ -128,10 +130,19 @@ export async function benchmarkHttpDispatch(options: BenchmarkOptions) {
   try {
     const deadline = Date.now() + 20_000;
     for (;;) {
+      let healthResponse: Response | undefined;
       try {
-        if ((await fetch(`${baseUrl}/health`)).ok) break;
+        healthResponse = await fetch(`${baseUrl}/health`);
       } catch {
         // Not listening yet.
+      }
+      if (healthResponse?.ok) {
+        const health: unknown = await healthResponse.json();
+        if (health === null || typeof health !== "object"
+          || !("instanceId" in health) || health.instanceId !== runtimeInstanceId) {
+          throw new Error("Edge Runtime health endpoint reported an unexpected runtime instance");
+        }
+        break;
       }
       if (Date.now() > deadline || runtime.exitCode !== null) {
         throw new Error(`Edge Runtime did not become healthy; see ${stderr}`);
