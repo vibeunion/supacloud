@@ -8,6 +8,8 @@ import type { SupaliteBackendShape } from './server-shared.js'
 export interface ServeOptions {
   port?: number
   host?: string
+  /** Optional same-origin request hook. Returning a response short-circuits Lite. */
+  beforeRequest?: (request: Request) => Promise<Response | null>
 }
 
 export interface ServerHandle {
@@ -51,7 +53,10 @@ export async function serveBun(backend: SupaliteBackendShape, opts: ServeOptions
       headers.delete('x-supacloud-lite-remote-addr')
       const ip = srv.requestIP(req)?.address
       if (ip) headers.set('x-supacloud-lite-remote-addr', ip)
-      return backend.fetch(new Request(req, { headers }))
+      const request = new Request(req, { headers })
+      const hookResponse = await opts.beforeRequest?.(request)
+      if (hookResponse) return hookResponse
+      return backend.fetch(request)
     },
     websocket: {
       open(ws: { data: WsData; send(d: string | Uint8Array): void; close(c?: number, r?: string): void }) {
