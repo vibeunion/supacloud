@@ -536,6 +536,10 @@ Lite 的缓存调用是进程内数据库操作，不具备标准版跨进程 HT
 
 V1 不在一个进程内复用多个 PGlite 项目。需要多个项目时，为每个项目配置独立的工作目录、端口和 `.supacloud-lite` 状态目录，并用进程管理器分别启动。这样可保持数据库、JWT、Storage 和 Realtime 的故障域隔离。
 
+### 生产部署
+
+`deploy/` 提供单机生产部署模板：systemd 用户/目录/状态目录约定、Caddy TLS 反代、外部 SupAuth 同源代理、快照维护窗口、S3 对象单独备份和回滚步骤。Lite 不自带 TLS、HA 或控制面；必须保持单进程单状态目录，并由 Caddy/Nginx 终止 TLS。生产前至少应完成容量测试、恢复演练和未认证请求失败关闭验证。
+
 ### 资源边界
 
 PGlite 是 WebAssembly PostgreSQL，不是 SQLite。它换来了 PostgreSQL SQL、角色、RLS 和 Supabase 迁移兼容性，但内存占用通常高于 PocketBase/SQLite。生产部署前应按真实 schema、并发和 Realtime 负载做容量测试。
@@ -1064,6 +1068,16 @@ Lite's cache calls are in-process database operations and do not have the timeou
 ### Multiple Projects
 
 V1 does not multiplex multiple PGlite projects within a single process. When multiple projects are needed, configure an independent working directory, port, and `.supacloud-lite` state directory for each project, and start them separately with a process manager. This keeps the database, JWT, Storage, and Realtime failure domains isolated.
+
+### Production Deployment
+
+The `deploy/` directory documents a single-node production contract: systemd
+service account/state directories, Caddy TLS termination, external SupAuth
+same-origin proxying, snapshot maintenance windows, separate S3 object backup,
+and rollback. Lite does not bundle TLS, HA, or a control plane. Keep one process
+per state directory and terminate TLS at Caddy/Nginx. Before production, run
+capacity tests, a restore drill, and an unauthenticated-request fail-closed
+check.
 
 ### Resource Boundaries
 
