@@ -17,6 +17,7 @@ import {
 import { loadSupabaseProject } from './runtime/node/project.js'
 import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
+import type { S3EndpointOptions } from './runtime/storage/s3.js'
 import type { SmsSender, StorageDriver } from './runtime/types.js'
 import { validateExternalIdentityClaims, type ExternalIdentityVerifier } from './runtime/identity.js'
 import { isRecord } from './runtime/validation.js'
@@ -58,6 +59,8 @@ export interface ProjectRuntimeOptions {
   storageDriver?: StorageDriver
   smsSender?: SmsSender
   s3?: S3StorageDriverOptions
+  /** Inbound /storage/v1/s3 credentials; env fallback: SUPACLOUD_LITE_S3_ENDPOINT_* */
+  s3Endpoint?: S3EndpointOptions
   host?: string
   port?: number
   apiUrl?: string
@@ -347,6 +350,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
       webhooks,
       startRuntimeServices: options.startRuntimeServices,
       storageDriver,
+      s3Endpoint: options.s3Endpoint ?? resolveS3EndpointOptions(),
       log: options.log,
     })
     if (replication && options.applyMigrations !== false) {
@@ -459,6 +463,24 @@ export function resolveStorageBackend(value?: ConfiguredStorageBackend): Configu
   const configured = value ?? process.env.SUPACLOUD_LITE_STORAGE_BACKEND ?? 'fs'
   if (configured === 'fs' || configured === 'memory' || configured === 's3') return configured
   throw new Error(`unsupported SUPACLOUD_LITE_STORAGE_BACKEND: ${configured}`)
+}
+
+export function resolveS3EndpointOptions(env: NodeJS.ProcessEnv = process.env): S3EndpointOptions | undefined {
+  const accessKeyId = env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID
+  const secretAccessKey = env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY
+  if (!accessKeyId && !secretAccessKey) return undefined
+  if (!accessKeyId || !secretAccessKey) {
+    throw new Error('SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID and SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY must be set together')
+  }
+  const bucketScope = env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS
+    ? env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS.split(',').map((bucket) => bucket.trim()).filter(Boolean)
+    : undefined
+  return {
+    accessKeyId,
+    secretAccessKey,
+    region: env.SUPACLOUD_LITE_S3_ENDPOINT_REGION || 'us-east-1',
+    ...(bucketScope && bucketScope.length > 0 ? { bucketScope } : {}),
+  }
 }
 
 function createStorageDriver(

@@ -81,6 +81,17 @@ export interface BackendConfig {
   seedSql?: string
   /** Where object storage bytes live. Default: in-memory. Node CLI passes a fs driver. */
   storageDriver?: StorageDriver
+  /**
+   * Credentials for the inbound S3-compatible endpoint at /storage/v1/s3.
+   * Omit to keep the endpoint disabled. This is separate from storageDriver:
+   * the endpoint is a SigV4/XML frontend over the same buckets and driver.
+   */
+  s3Endpoint?: {
+    accessKeyId: string
+    secretAccessKey: string
+    region?: string
+    bucketScope?: string[]
+  }
   /** Edge functions: name → fetch handler or framework router (Elysia/Hono), served at /functions/v1/<name>. */
   functions?: Map<string, import('./functions/handler.js').FunctionRegistryValue> | Record<string, import('./functions/handler.js').FunctionRegistryValue>
   /** Per-function JWT verification setting from config.toml; false makes the function public. */
