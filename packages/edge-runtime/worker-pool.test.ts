@@ -3282,7 +3282,7 @@ describe("WorkerPool Bun plugin project isolation", () => {
         responses.push(await (await dispatch(projectRef)).text());
       }
       expect(responses).toEqual(["project-a", "project-b", "project-a", "project-b"]);
-      expect(recycleEvents).toEqual([{ workerReplacements: 2, maxWorkerReplacements: 2 }]);
+      expect(recycleEvents).toEqual([{ workerReplacements: 2, surplusRetirements: 0, maxWorkerReplacements: 2 }]);
       expect(pool.snapshotMetrics("plugin_recycle")["plugin_recycle_queue_length"]).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -3744,7 +3744,7 @@ describe("WorkerPool module cache", () => {
         expect(preheat.succeeded).toBe(1);
       }
 
-      expect(recycleEvents).toEqual([{ workerReplacements: 2, maxWorkerReplacements: 2 }]);
+      expect(recycleEvents).toEqual([{ workerReplacements: 2, surplusRetirements: 0, maxWorkerReplacements: 2 }]);
       expect(succeededAtRecycle).toEqual([2]);
       await waitForMetric(pool, "total_natural_worker_exits", 3);
       const metrics = pool.snapshotMetrics("recycle");

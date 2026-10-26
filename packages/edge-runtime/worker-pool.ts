@@ -100,7 +100,7 @@ const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
 const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_EXTRA_PROJECT_WORKERS = 2;
 const DEFAULT_PARKED_WORKER_IDLE_MS = 30_000;
-const DEFAULT_CONCURRENCY_MULTIPLIER = 4;
+const SURPLUS_WORKER_IDLE_MS = 1_000;
 // Bun/JSC retains fixed host memory after Worker exit, so bound churn before recycling the process.
 const DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE = 128;
 const MAX_WORKER_REPLACEMENTS_ENV = "EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE";
@@ -139,10 +139,9 @@ export function resolveProjectWorkerCacheOptions(env: Record<string, string | un
 /**
  * Resolves how many Function invocations may run at once in one runtime process.
  *
- * Edge Functions are dominated by outbound I/O, so a worker slot that waits on
- * `fetch` or a database round trip is idle rather than busy. The pool therefore
- * grows beyond its warm size while requests are queued, and shrinks back to it
- * when the queue drains. `EDGE_MAX_FUNCTION_CONCURRENCY` is a hard upper bound;
+ * Extra workers can overlap I/O, but each retains its own heap. Expansion is
+ * opt-in so a memory-sized warm pool remains the default capacity budget.
+ * `EDGE_MAX_FUNCTION_CONCURRENCY` is a hard upper bound;
  * values below the warm pool size are rejected because they would disable slots
  * that already exist.
  */
@@ -152,7 +151,7 @@ export function resolveMaxConcurrentExecutions(
 ): number {
   const raw = env.EDGE_MAX_FUNCTION_CONCURRENCY;
   if (raw === undefined || raw.trim() === "") {
-    return size * DEFAULT_CONCURRENCY_MULTIPLIER;
+    return size;
   }
   const value = Number(raw);
   if (!/^\d+$/.test(raw.trim()) || !Number.isSafeInteger(value)) {
@@ -306,6 +305,7 @@ export type WorkerPoolVersionPreheatResult = WorkerPoolPreheatResult & {
 
 type WorkerPoolRecycleRequired = {
   workerReplacements: number;
+  surplusRetirements: number;
   maxWorkerReplacements: number;
 };
 
@@ -342,8 +342,6 @@ type WorkerPoolConfig = {
 type RetiredWorker = {
   retiredAt: number;
   ageTimer: ReturnType<typeof setTimeout>;
-  /** False for planned surplus retirements, which are not leak evidence. */
-  countsTowardsBudget: boolean;
 };
 
 type GenerationRotationDisposition = "idle-retired" | "parked-retired" | "busy-tainted" | "already-tainted";
@@ -446,6 +444,7 @@ export class WorkerPool {
       projectRef?: string;
       replacementTimer?: ReturnType<typeof setTimeout>;
       parkedTimer?: ReturnType<typeof setTimeout>;
+      surplusTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
     }
   >();
@@ -482,7 +481,7 @@ export class WorkerPool {
       throw new Error("Response buffer budget must allow at least one 512 KiB chunk");
     }
     this.retirementBudget = config.retirementBudget ?? {
-      maxRetiredWorkers: Math.max(config.size * 2, 8),
+      maxRetiredWorkers: Math.max((config.maxConcurrentExecutions ?? config.size) * 2, 8),
       maxRetirementAgeMs: DEFAULT_MAX_RETIREMENT_AGE_MS,
     };
     this.onRetirementBudgetExceeded = config.onRetirementBudgetExceeded ?? ((exceeded) => {
@@ -492,10 +491,10 @@ export class WorkerPool {
     this.maxWorkerReplacementsBeforeRecycle = config.maxWorkerReplacementsBeforeRecycle
       ?? DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE;
     this.onWorkerRecycleRequired = config.onWorkerRecycleRequired ?? (() => process.exit(1));
-    this.maxWorkers = config.size + (config.maxExtraProjectWorkers
+    this.maxWorkers = (config.maxConcurrentExecutions ?? config.size) + (config.maxExtraProjectWorkers
       ?? DEFAULT_MAX_EXTRA_PROJECT_WORKERS);
     this.parkedWorkerIdleMs = config.parkedWorkerIdleMs ?? DEFAULT_PARKED_WORKER_IDLE_MS;
-    if (!Number.isSafeInteger(this.maxWorkers) || this.maxWorkers < config.size) {
+    if (!Number.isSafeInteger(this.maxWorkers) || this.maxWorkers < (config.maxConcurrentExecutions ?? config.size)) {
       throw new TypeError("maxExtraProjectWorkers must be a non-negative safe integer");
     }
     if (!Number.isSafeInteger(this.parkedWorkerIdleMs) || this.parkedWorkerIdleMs < 0) {
@@ -656,6 +655,7 @@ export class WorkerPool {
       ));
     if (fallbackIndex < 0) return undefined;
     const worker = this.idle.splice(fallbackIndex, 1)[0];
+    this.clearSurplusTimer(worker);
     if (workerIndex >= 0) this.totalProjectAffinityHits++;
     return worker;
   }
@@ -669,16 +669,15 @@ export class WorkerPool {
   }
 
   /**
-   * Every warm worker is busy and work is queued. Functions are I/O bound, so
-   * grow the pool instead of serialising requests behind the warm size, up to
-   * `maxConcurrentExecutions`. Surplus workers are retired again by `recycle()`
-   * as soon as the queue drains.
+   * Explicit burst capacity is used only while admission is fully open.
    */
   private ensureCapacityForQueuedWork(): void {
     this.ensureWorkerForQueuedProject();
     if (this.queuedCount === 0) return;
     if (this.draining || this.admissionBlocked || this.admissionRecovering) return;
     if (this.activeWorkers.size >= this.maxConcurrentExecutions) return;
+    if (this.workerRecycleRequired) return;
+    if (this.activeWorkers.size + this.parkedWorkers.size + this.retiredWorkers.size >= this.maxWorkers) return;
     const worker = this.createWorker();
     this.totalWorkerSurplusCreations++;
     this.activeWorkers.add(worker);
@@ -687,6 +686,7 @@ export class WorkerPool {
 
   // A parked worker retains its project, but owns no execution slot.
   private parkWorker(worker: Worker): void {
+    this.clearSurplusTimer(worker);
     this.activeWorkers.delete(worker);
     this.idle = this.idle.filter(candidate => candidate !== worker);
     this.parkedWorkers.add(worker);
@@ -726,7 +726,7 @@ export class WorkerPool {
     );
     if (cached) this.unparkWorker(cached);
     this.parkWorker(worker);
-    while (this.parkedWorkers.size > this.maxWorkers - this.config.size) {
+    while (this.parkedWorkers.size > this.maxWorkers - this.maxConcurrentExecutions) {
       const oldest = this.parkedWorkers.values().next().value;
       if (oldest) this.evictParkedWorker(oldest);
     }
@@ -1056,24 +1056,52 @@ export class WorkerPool {
   /**
    * Shrinks a grown pool back to its warm size once nothing is queued, so burst
    * concurrency does not keep extra threads and heaps resident forever. Surplus
-   * workers retire without a replacement, so the pool converges on `size`.
+   * workers retire after a short idle grace, preserving warm state across bursts.
    */
   private shouldRetireSurplusWorker(): boolean {
     return !this.draining
-      && !this.admissionBlocked
       && this.maxConcurrentExecutions > this.config.size
       && this.activeWorkers.size > this.config.size
       && this.queuedCount === 0;
   }
 
+  private clearSurplusTimer(worker: Worker): void {
+    const metadata = this.workerMetadata.get(worker);
+    if (!metadata?.surplusTimer) return;
+    clearTimeout(metadata.surplusTimer);
+    metadata.surplusTimer = undefined;
+  }
+
+  private retireSurplusWorker(worker: Worker): void {
+    this.totalWorkerSurplusRetirements++;
+    this.retireWorker(worker, false);
+    this.checkWorkerRecycleBudget();
+  }
+
+  private deferSurplusRetirement(worker: Worker): void {
+    const metadata = this.workerMetadata.get(worker)!;
+    if (metadata.surplusTimer) return;
+    metadata.surplusTimer = setTimeout(() => {
+      metadata.surplusTimer = undefined;
+      if (this.shouldRetireSurplusWorker() && this.idle.includes(worker)) {
+        this.retireSurplusWorker(worker);
+      }
+    }, SURPLUS_WORKER_IDLE_MS);
+    metadata.surplusTimer.unref?.();
+  }
+
   private schedule(worker: Worker) {
+    this.clearSurplusTimer(worker);
     if (this.tainted.has(worker)) {
       this.retireWorker(worker);
       return;
     }
     if (this.shouldRetireSurplusWorker()) {
-      this.totalWorkerSurplusRetirements++;
-      this.retireWorker(worker, false);
+      if (this.admissionBlocked || this.admissionRecovering) this.retireSurplusWorker(worker);
+      else {
+        this.idle.push(worker);
+        this.deferSurplusRetirement(worker);
+      }
       return;
     }
     if (this.draining || this.admissionBlocked) {
@@ -1115,6 +1143,7 @@ export class WorkerPool {
     const wasParked = this.parkedWorkers.delete(worker);
     if (!ownedSlot && !wasParked) return;
     this.totalWorkerRetirements++;
+    this.clearSurplusTimer(worker);
     const metadata = this.workerMetadata.get(worker);
     if (metadata?.replacementTimer) clearTimeout(metadata.replacementTimer);
     if (metadata?.parkedTimer) clearTimeout(metadata.parkedTimer);
@@ -1123,10 +1152,7 @@ export class WorkerPool {
     this.parkedWorkers.delete(worker);
     const idleIdx = this.idle.indexOf(worker);
     if (idleIdx !== -1) this.idle.splice(idleIdx, 1);
-    // Surplus retirements are planned right-sizing, not evidence of a worker
-    // leak, so they are exempt from the retirement count budget. The age budget
-    // still fails safe if a retired surplus worker never exits.
-    this.trackRetiredWorker(worker, replace);
+    this.trackRetiredWorker(worker);
 
     try {
       worker.postMessage({ type: "retire" });
@@ -1145,18 +1171,14 @@ export class WorkerPool {
     }
   }
 
-  private trackRetiredWorker(worker: Worker, countsTowardsBudget = true) {
+  private trackRetiredWorker(worker: Worker) {
     const retiredAt = Date.now();
     const ageTimer = setTimeout(() => {
       if (!this.retiredWorkers.has(worker)) return;
       this.triggerRetirementFailSafe("age");
     }, this.retirementBudget.maxRetirementAgeMs);
-    this.retiredWorkers.set(worker, { retiredAt, ageTimer, countsTowardsBudget });
-    let budgetedRetirements = 0;
-    for (const retired of this.retiredWorkers.values()) {
-      if (retired.countsTowardsBudget) budgetedRetirements++;
-    }
-    if (budgetedRetirements > this.retirementBudget.maxRetiredWorkers) {
+    this.retiredWorkers.set(worker, { retiredAt, ageTimer });
+    if (this.retiredWorkers.size > this.retirementBudget.maxRetiredWorkers) {
       this.triggerRetirementFailSafe("count");
     }
   }
@@ -1170,6 +1192,7 @@ export class WorkerPool {
     }
 
     this.removeWorkerReferences(worker);
+    if (retired && !this.draining) this.ensureCapacityForQueuedWork();
     if (!this.activeWorkers.delete(worker) || this.draining) return;
 
     this.recordWorkerReplacement();
@@ -1180,7 +1203,11 @@ export class WorkerPool {
 
   private recordWorkerReplacement(): void {
     this.totalWorkerReplacements++;
-    if (this.totalWorkerReplacements >= this.maxWorkerReplacementsBeforeRecycle) {
+    this.checkWorkerRecycleBudget();
+  }
+
+  private checkWorkerRecycleBudget(): void {
+    if (this.totalWorkerReplacements + this.totalWorkerSurplusRetirements >= this.maxWorkerReplacementsBeforeRecycle) {
       this.workerRecycleRequired = true;
     }
     this.notifyWorkerRecycleRequired();
@@ -1196,6 +1223,7 @@ export class WorkerPool {
     this.workerRecycleNotificationSent = true;
     const event = {
       workerReplacements: this.totalWorkerReplacements,
+      surplusRetirements: this.totalWorkerSurplusRetirements,
       maxWorkerReplacements: this.maxWorkerReplacementsBeforeRecycle,
     };
     console.warn("[Pool] Worker replacement budget reached; recycling Edge Runtime", event);
@@ -1203,6 +1231,7 @@ export class WorkerPool {
   }
 
   private removeWorkerReferences(worker: Worker) {
+    this.clearSurplusTimer(worker);
     this.workerMemory.delete(worker);
     const metadata = this.workerMetadata.get(worker);
     if (metadata?.parkedTimer) clearTimeout(metadata.parkedTimer);
@@ -1266,6 +1295,10 @@ export class WorkerPool {
     this.queuedCount = 0;
     for (const worker of [...this.parkedWorkers]) {
       this.evictParkedWorker(worker);
+    }
+    for (const worker of [...this.idle]) {
+      if (this.activeWorkers.size <= this.config.size) break;
+      this.retireSurplusWorker(worker);
     }
   }
 

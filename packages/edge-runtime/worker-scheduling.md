@@ -14,7 +14,7 @@ Each pool independently supports these host settings:
 | --- | --- | --- |
 | `EDGE_MAX_EXTRA_PROJECT_WORKERS` | `2` | Maximum parked workers beyond the execution slots |
 | `EDGE_PARKED_WORKER_IDLE_MS` | `30000` | Time before a parked worker is retired |
-| `EDGE_MAX_FUNCTION_CONCURRENCY` | `4 x WORKER_POOL_SIZE` | Foreground ceiling on simultaneously executing invocations |
+| `EDGE_MAX_FUNCTION_CONCURRENCY` | `WORKER_POOL_SIZE` | Opt-in foreground ceiling on simultaneously executing invocations |
 
 Either retention setting can be `0` to disable retention. Both settings must be
 non-negative safe integers. With defaults, foreground and background pools
@@ -24,13 +24,17 @@ apply.
 
 A foreground request that finds no free or assignable worker is queued and then
 raises the pool above its warm size, one worker per queued request, never beyond
-`EDGE_MAX_FUNCTION_CONCURRENCY`. Surplus workers retire without a replacement as
-soon as the queue drains, so burst concurrency does not keep threads resident.
-Those retirements are planned right-sizing and are exempt from the retirement
-count budget, but the retirement age budget still fails safe if a retired
-surplus worker never exits.
+`EDGE_MAX_FUNCTION_CONCURRENCY`. Surplus workers keep their warm state for one
+idle second, then retire without a replacement. This avoids recreating workers
+between nearby bursts. Expansion reserves resident capacity for outstanding
+retirements and stops once the lifetime recycle budget is reached. All retirements count toward
+the concurrent retirement budget; surplus retirements also count toward the
+lifetime recycle budget because Bun can retain host memory after worker exit.
+The default retirement count budget scales with the configured concurrency.
 
 Memory admission closes on pressure and clears queued work and parked caches.
+Idle surplus workers retire immediately; busy surplus workers retire after their
+execution cleanup. They never execute a second request during cleanup or waitUntil.
 Three consecutive non-growing, non-throttled samples below `memory.high` allow
 limited recovery, even when idle caches plateau above the normal resume threshold.
 Recovery admits at most one execution per pool and does not retain newly parked
