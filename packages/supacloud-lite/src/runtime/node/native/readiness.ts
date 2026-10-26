@@ -7,6 +7,7 @@ import {
   type PowerSyncReplicationOptions,
 } from './replication.js'
 import type { ExtensionInventorySource, PostgresExtensionInventory } from './extensions.js'
+import type { ProductionReadiness } from '../production-readiness.js'
 
 export type LiteCapabilityStatus = 'supported' | 'static' | 'disabled' | 'unsupported'
 
@@ -37,6 +38,7 @@ export interface LiteDoctorReport {
   powersync_source: LiteCapabilityStatus
   replication_profile?: 'powersync'
   powersync_readiness?: PowerSyncReadiness
+  production_readiness?: ProductionReadiness
 }
 
 export interface PowerSyncReadiness {
