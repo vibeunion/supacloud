@@ -20,6 +20,7 @@
     "dist",
     "!dist/standalone",
     "README.md",
+    "deploy",
     "CHANGELOG.md",
     "RELEASING.md",
     "THIRD_PARTY_NOTICES.md",
