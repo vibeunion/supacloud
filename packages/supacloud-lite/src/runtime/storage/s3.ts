@@ -412,10 +412,11 @@ export class S3Handler {
           `select p.driver_key from storage.s3_multipart_parts p join storage.s3_multipart_uploads u using (upload_id) where u.bucket_id = $1`,
           [bucket],
         )
-        await this.driver.deleteMany(parts.rows.map((part) => part.driver_key))
+        await this.queueStagedCleanup(query, parts.rows.map((part) => part.driver_key))
         await query(`delete from storage.s3_multipart_uploads where bucket_id = $1`, [bucket])
         await query(`delete from storage.buckets where id = $1`, [bucket])
       })
+      await this.drainStagedCleanup()
       return new Response(null, { status: 204, headers: this.headers(requestId) })
     }
     if (method === 'GET' && url.searchParams.get('list-type') === '2') return this.listObjects(url, bucket, requestId)
@@ -699,9 +700,10 @@ export class S3Handler {
         `select part_number, etag, size, driver_key from storage.s3_multipart_parts where upload_id = $1`,
         [uploadId],
       )
-      await this.driver.deleteMany(parts.rows.map((part) => part.driver_key))
+      await this.queueStagedCleanup(query, parts.rows.map((part) => part.driver_key))
       await query(`delete from storage.s3_multipart_uploads where upload_id = $1 and bucket_id = $2 and name = $3`, [uploadId, bucket, key])
     })
+    await this.drainStagedCleanup()
     return new Response(null, { status: 204, headers: this.headers(requestId) })
   }
 
@@ -720,15 +722,23 @@ export class S3Handler {
     })
   }
 
+  private async queueStagedCleanup(query: Querier, driverKeys: string[]): Promise<void> {
+    await query(
+      'insert into storage.s3_staged_cleanup (driver_key) select unnest($1::text[]) on conflict do nothing',
+      [driverKeys],
+    )
+  }
+
   private async expireMultipart(): Promise<void> {
     await this.multipartState(async (query) => {
       const parts = await query<{ driver_key: string }>(
         `select p.driver_key from storage.s3_multipart_parts p join storage.s3_multipart_uploads u using (upload_id)
          where u.created_at < now() - interval '24 hours'`,
       )
-      await this.driver.deleteMany(parts.rows.map((part) => part.driver_key))
+      await this.queueStagedCleanup(query, parts.rows.map((part) => part.driver_key))
       await query(`delete from storage.s3_multipart_uploads where created_at < now() - interval '24 hours'`)
     })
+    await this.drainStagedCleanup()
   }
 
   private async discardFailedStage(key: string, error: unknown): Promise<never> {

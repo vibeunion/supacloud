@@ -373,6 +373,45 @@ describe('S3-compatible endpoint', () => {
     }
   }, testTimeout(30_000))
 
+  test('keeps staged bytes when multipart metadata deletion rolls back', async () => {
+    const driver = new MemoryStorageDriver()
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), storageDriver: driver,
+      buckets: [{ id: bucket, public: false, fileSizeLimit: null, allowedMimeTypes: null }],
+      s3Endpoint: { accessKeyId, secretAccessKey, region }, log: () => {},
+    })
+    try {
+      const created = await request(backend, 'POST', `/${bucket}/rollback?uploads`)
+      const uploadId = (await created.text()).match(/<UploadId>([^<]+)<\/UploadId>/)![1]!
+      const part = await request(backend, 'PUT', `/${bucket}/rollback?partNumber=1&uploadId=${uploadId}`, 'kept')
+      expect(part.status).toBe(200)
+      const stagedKey = (await backend.db.query<{ driver_key: string }>(
+        'select driver_key from storage.s3_multipart_parts where upload_id = $1',
+        [uploadId],
+      )).rows[0]!.driver_key
+      await backend.db.exec(`
+        create function storage.fail_s3_upload_delete() returns trigger language plpgsql as $$
+        begin raise exception 'synthetic upload delete failure'; end $$;
+        create trigger fail_s3_upload_delete before delete on storage.s3_multipart_uploads
+          for each row execute function storage.fail_s3_upload_delete();
+      `)
+      expect((await request(backend, 'DELETE', `/${bucket}/rollback?uploadId=${uploadId}`)).status).toBe(500)
+      expect((await request(backend, 'DELETE', `/${bucket}`)).status).toBe(500)
+      await backend.db.exec("update storage.s3_multipart_uploads set created_at = now() - interval '25 hours'")
+      expect((await request(backend, 'POST', `/${bucket}/fresh?uploads`)).status).toBe(500)
+      expect(await driver.get(stagedKey)).not.toBeNull()
+      expect((await backend.db.query(
+        'select 1 from storage.s3_multipart_parts where upload_id = $1', [uploadId],
+      )).rows).toHaveLength(1)
+      await backend.db.exec('drop trigger fail_s3_upload_delete on storage.s3_multipart_uploads')
+      await backend.db.exec('update storage.s3_multipart_uploads set created_at = now()')
+      expect((await request(backend, 'DELETE', `/${bucket}/rollback?uploadId=${uploadId}`)).status).toBe(204)
+      expect(await driver.get(stagedKey)).toBeNull()
+    } finally {
+      await backend.close()
+    }
+  }, testTimeout(30_000))
+
   test('rejects unsigned and incorrectly signed requests', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64),
