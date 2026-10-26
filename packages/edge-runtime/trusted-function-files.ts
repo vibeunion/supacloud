@@ -20,6 +20,66 @@ export type TrustedFunctionFile = {
   metadata: Stats;
 };
 
+/**
+ * A trusted read that may omit the file contents when the digest of the current
+ * file identity is already known. Callers that only need to prove "this path
+ * still holds the artifact with digest X" must use this instead of
+ * `readFunctionFile`, which always materialises the bytes.
+ */
+export type TrustedFunctionFileDigest = {
+  path: string;
+  sha256: string;
+  metadata: Stats;
+  bytes: Buffer | undefined;
+};
+
+export type FunctionFileReadOptions = {
+  maxBytes?: number;
+  /** Force materialising the bytes even when the digest is cached. */
+  withBytes?: boolean;
+};
+
+const DIGEST_CACHE_LIMIT = 4096;
+const digestCache = new Map<string, { identity: string; sha256: string }>();
+
+function fileIdentity(metadata: Stats): string {
+  return [
+    metadata.dev,
+    metadata.ino,
+    metadata.size,
+    metadata.mtimeMs,
+    metadata.ctimeMs,
+  ].join(":");
+}
+
+function lookupDigest(filePath: string, metadata: Stats): string | null {
+  const cached = digestCache.get(filePath);
+  if (cached === undefined || cached.identity !== fileIdentity(metadata)) return null;
+  // Refresh recency so hot artifacts survive eviction.
+  digestCache.delete(filePath);
+  digestCache.set(filePath, cached);
+  return cached.sha256;
+}
+
+function rememberDigest(filePath: string, metadata: Stats, sha256: string): void {
+  digestCache.delete(filePath);
+  digestCache.set(filePath, { identity: fileIdentity(metadata), sha256 });
+  while (digestCache.size > DIGEST_CACHE_LIMIT) {
+    const oldest = digestCache.keys().next();
+    if (oldest.done === true) break;
+    digestCache.delete(oldest.value);
+  }
+}
+
+/**
+ * Drops cached digests. Tests and deployment-time cleanup use this; dispatch
+ * paths do not need it because the cache key is the full file identity.
+ */
+export function clearFunctionFileDigestCache(filePath?: string): void {
+  if (filePath === undefined) digestCache.clear();
+  else digestCache.delete(resolve(filePath));
+}
+
 function sameIdentity(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
@@ -103,6 +163,8 @@ async function assertHeldDirectoryBindings(heldDirectories: HeldDirectory[]): Pr
       readlink(`/proc/self/fd/${held.descriptor.fd}`),
       lstat(held.path),
     ]);
+    assertTrustedDirectory(descriptorMetadata);
+    assertTrustedDirectory(pathMetadata);
     if (currentPath !== held.path
       || !sameIdentity(held.identity, descriptorMetadata)
       || !sameIdentity(held.identity, pathMetadata)) {
@@ -159,8 +221,9 @@ async function readBoundedFile(file: FileHandle, metadata: Stats, maxBytes?: num
 async function readHeldFunctionFile(
   filePath: string,
   heldDirectories: HeldDirectory[],
-  maxBytes?: number,
-): Promise<TrustedFunctionFile> {
+  options: FunctionFileReadOptions = {},
+): Promise<TrustedFunctionFileDigest> {
+  const { maxBytes, withBytes = false } = options;
   const parent = heldDirectories.at(-1);
   if (!parent) throw new Error("Function runtime directory is unavailable");
   const entryName = basename(filePath);
@@ -177,37 +240,37 @@ async function readHeldFunctionFile(
     if (!sameIdentity(pathMetadata, before)) {
       throw new Error("Function runtime file identity changed before read");
     }
+    const knownDigest = withBytes ? null : lookupDigest(filePath, before);
+    if (knownDigest !== null) {
+      // The bytes are unchanged as far as the file identity can tell, so skip
+      // re-reading and re-hashing them while keeping every binding check.
+      if (maxBytes !== undefined && before.size > maxBytes) {
+        throw new Error("Function runtime file exceeds its byte limit");
+      }
+      const after = await file.stat();
+      if (fileChanged(before, after)) throw new Error("Function runtime file changed while reading");
+      await assertPathBinding(filePath, after);
+      await assertHeldDirectoryBindings(heldDirectories);
+      return { path: filePath, sha256: knownDigest, metadata: after, bytes: undefined };
+    }
     const bytes = await readBoundedFile(file, before, maxBytes);
     const after = await file.stat();
     if (fileChanged(before, after)) throw new Error("Function runtime file changed while reading");
     await assertPathBinding(filePath, after);
     await assertHeldDirectoryBindings(heldDirectories);
-    return {
-      path: filePath,
-      bytes,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      metadata: after,
-    };
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    rememberDigest(filePath, after, sha256);
+    return { path: filePath, sha256, metadata: after, bytes };
   } finally {
     await file.close();
   }
 }
 
-export async function readTrustedFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
-  const absolutePath = resolve(filePath);
-  const heldDirectories = await heldTrustedDirectoryChain(dirname(absolutePath));
-  try {
-    return await readHeldFunctionFile(absolutePath, heldDirectories, maxBytes);
-  } finally {
-    await closeHeldDirectories(heldDirectories);
-  }
-}
-
-export async function readFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
-  if (process.platform === "linux") {
-    return readTrustedFunctionFile(filePath, maxBytes);
-  }
-  const absolutePath = resolve(filePath);
+async function readBoundFunctionFile(
+  absolutePath: string,
+  options: FunctionFileReadOptions,
+): Promise<TrustedFunctionFileDigest> {
+  const { maxBytes, withBytes = false } = options;
   const pathMetadata = await lstat(absolutePath);
   assertTrustedRegularFile(pathMetadata, false);
   const file = await openBoundFunctionFile(absolutePath);
@@ -217,19 +280,79 @@ export async function readFunctionFile(filePath: string, maxBytes?: number): Pro
     if (!sameIdentity(pathMetadata, before)) {
       throw new Error("Function runtime file identity changed before read");
     }
+    const knownDigest = withBytes ? null : lookupDigest(absolutePath, before);
+    if (knownDigest !== null) {
+      if (maxBytes !== undefined && before.size > maxBytes) {
+        throw new Error("Function runtime file exceeds its byte limit");
+      }
+      const after = await file.stat();
+      if (fileChanged(before, after)) throw new Error("Function runtime file changed while reading");
+      await assertPathBinding(absolutePath, after);
+      return { path: absolutePath, sha256: knownDigest, metadata: after, bytes: undefined };
+    }
     const bytes = await readBoundedFile(file, before, maxBytes);
     const after = await file.stat();
     if (fileChanged(before, after)) throw new Error("Function runtime file changed while reading");
     await assertPathBinding(absolutePath, after);
-    return {
-      path: absolutePath,
-      bytes,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      metadata: after,
-    };
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    rememberDigest(absolutePath, after, sha256);
+    return { path: absolutePath, sha256, metadata: after, bytes };
   } finally {
     await file.close();
   }
+}
+
+/**
+ * Trusted read that returns the digest of the current file identity. When the
+ * identity is already known, the contents are not read at all.
+ */
+export async function readFunctionFileDigest(
+  filePath: string,
+  options: FunctionFileReadOptions = {},
+): Promise<TrustedFunctionFileDigest> {
+  if (options.maxBytes !== undefined
+    && (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0)) {
+    throw new Error("Function runtime file exceeds its byte limit");
+  }
+  const absolutePath = resolve(filePath);
+  if (process.platform !== "linux") return readBoundFunctionFile(absolutePath, options);
+  const heldDirectories = await heldTrustedDirectoryChain(dirname(absolutePath));
+  try {
+    return await readHeldFunctionFile(absolutePath, heldDirectories, options);
+  } finally {
+    await closeHeldDirectories(heldDirectories);
+  }
+}
+
+export async function readTrustedFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
+  const absolutePath = resolve(filePath);
+  const heldDirectories = await heldTrustedDirectoryChain(dirname(absolutePath));
+  try {
+    return materializeTrustedFunctionFile(
+      await readHeldFunctionFile(absolutePath, heldDirectories, { maxBytes, withBytes: true }),
+    );
+  } finally {
+    await closeHeldDirectories(heldDirectories);
+  }
+}
+
+export async function readFunctionFile(filePath: string, maxBytes?: number): Promise<TrustedFunctionFile> {
+  return materializeTrustedFunctionFile(await readFunctionFileDigest(filePath, { maxBytes, withBytes: true }));
+}
+
+export async function readFunctionFileBytes(snapshot: TrustedFunctionFileDigest): Promise<Buffer> {
+  if (snapshot.bytes !== undefined) return snapshot.bytes;
+  const current = await readFunctionFile(snapshot.path);
+  // Never associate replacement bytes with an earlier digest in a parse cache.
+  if (current.sha256 !== snapshot.sha256) {
+    throw new Error("Function runtime file changed before materializing bytes");
+  }
+  return current.bytes;
+}
+
+function materializeTrustedFunctionFile(file: TrustedFunctionFileDigest): TrustedFunctionFile {
+  if (file.bytes === undefined) throw new Error("Function runtime file bytes are unavailable");
+  return { path: file.path, bytes: file.bytes, sha256: file.sha256, metadata: file.metadata };
 }
 
 export async function assertTrustedFunctionArtifact(
