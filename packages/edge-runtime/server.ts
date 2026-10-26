@@ -52,6 +52,7 @@ import {
 } from "./function-version";
 import path from "path";
 import fs from "fs/promises";
+import { createHash } from "node:crypto";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
 import { createPgredisCapability } from "./pgredis-capability";
 import {
@@ -227,18 +228,25 @@ function bumpProjectModuleEpoch(projectRef: string): number {
   return next;
 }
 
-async function authFailureKey(
+function authFailureKey(
   projectRef: string,
   functionName: string,
   authHeader: string | null | undefined,
   apikeyHeader: string | null | undefined,
-): Promise<string> {
+): string {
   const material = `${authHeader || ""}\n${apikeyHeader || ""}` || "missing-auth";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
-  const fingerprint = Array.from(new Uint8Array(digest).slice(0, 16))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const fingerprint = createHash("sha256").update(material, "utf8").digest("hex").slice(0, 32);
   return `${projectRef}/${functionName}/${fingerprint}`;
+}
+
+/**
+ * Authentication-failure throttling only matters once a failure has been
+ * recorded. Successful traffic used to hash the credential headers twice per
+ * dispatch purely to look up an empty cache, so both lookups now short-circuit
+ * before hashing anything.
+ */
+function hasAuthFailures(): boolean {
+  return authFailureCache.size > 0;
 }
 
 function clearStaleAuthFailures(now = Date.now()) {
@@ -274,7 +282,8 @@ async function authFailureBlockResponse(
   authHeader: string | null | undefined,
   apikeyHeader: string | null | undefined,
 ): Promise<Response | null> {
-  const key = await authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
+  if (!hasAuthFailures()) return null;
+  const key = authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
   const entry = authFailureCache.get(key);
   if (!entry || entry.blockedUntil <= Date.now()) return null;
   return authFailureLimitResponse(entry.blockedUntil);
@@ -287,7 +296,7 @@ async function recordAuthFailure(
   apikeyHeader: string | null | undefined,
 ): Promise<Response | null> {
   const now = Date.now();
-  const key = await authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
+  const key = authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
   const current = authFailureCache.get(key);
   const entry = current && now - current.windowStart <= AUTH_FAILURE_WINDOW_MS
     ? current
@@ -311,7 +320,8 @@ async function clearAuthFailure(
   authHeader: string | null | undefined,
   apikeyHeader: string | null | undefined,
 ) {
-  const key = await authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
+  if (!hasAuthFailures()) return;
+  const key = authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
   authFailureCache.delete(key);
 }
 
