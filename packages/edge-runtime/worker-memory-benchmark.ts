@@ -18,6 +18,11 @@ const concurrency = numeric("--concurrency", 30);
 const batches = numeric("--batches", 1);
 if (concurrency === 0 || batches === 0) throw new Error("Concurrency and batches must be positive");
 const workers = numeric("--workers", 4);
+const maxConcurrentExecutions = numeric("--max-concurrency", workers);
+const handlerDelayMs = numeric("--handler-delay-ms", 0);
+const jsonItems = numeric("--json-items", 0);
+const betweenBatchesMs = numeric("--between-batches-ms", 0);
+const smol = option("--smol", "true") === "true";
 const responseMiB = numeric("--response-mib", 8);
 const pauseMs = numeric("--pause-ms", 250);
 const consumerDelay = numeric("--delay-per-64k-ms", 1);
@@ -27,10 +32,14 @@ const Pool = baselineModule ? (await import(baselineModule)).WorkerPool as typeo
 const root = await mkdtemp(join(tmpdir(), "edge-memory-benchmark-"));
 const file = join(root, "fn.ts");
 await Bun.write(file, `
-  export default (request) => {
+  export default async (request) => {
     const url = new URL(request.url);
+    const rows = Number(url.searchParams.get('jsonItems'));
+    const parsed = rows ? JSON.parse(JSON.stringify(Array.from({ length: rows }, (_, i) => i))) : [];
+    const delay = Number(url.searchParams.get('delay'));
+    if (delay) await Bun.sleep(delay);
     let remaining = Number(url.searchParams.get('mib'));
-    if (!remaining) return new Response('ok');
+    if (!remaining) return new Response(String(parsed.length));
     return new Response(new ReadableStream({
       pull(controller) {
         if (!remaining--) { controller.close(); return; }
@@ -41,10 +50,10 @@ await Bun.write(file, `
     } });
   };
 `);
-const pool = new Pool({ size: workers, requestTimeout: 60_000, smol: true });
+const pool = new Pool({ size: workers, maxConcurrentExecutions, requestTimeout: 60_000, smol });
 const dispatch = (mib: number) => pool.dispatch({
   functionId: "benchmark", projectRef: "benchmark", projectRoot: root, functionPath: file, env: {},
-  request: new Request(`http://edge.test/fn?mib=${mib}&mode=${mode}`, {
+  request: new Request(`http://edge.test/fn?mib=${mib}&mode=${mode}&delay=${handlerDelayMs}&jsonItems=${jsonItems}`, {
     headers: { traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-00` },
   }),
 });
@@ -62,6 +71,7 @@ try {
   const cpuStart = process.cpuUsage();
   let consumed = 0;
   for (let batch = 0; batch < batches; batch++) {
+    if (batch > 0 && betweenBatchesMs) await Bun.sleep(betweenBatchesMs);
     const batchStarted = performance.now();
     await Promise.all(Array.from({ length: concurrency }, async () => {
       const response = await dispatch(responseMiB);
@@ -85,7 +95,8 @@ try {
   peak = Math.max(peak, process.memoryUsage().rss);
   latencies.sort((a, b) => a - b);
   headersMs.sort((a, b) => a - b);
-  console.log(JSON.stringify({ mode, concurrency, batches, workers, responseMiB, pauseMs, consumerDelay,
+  console.log(JSON.stringify({ mode, concurrency, batches, workers, maxConcurrentExecutions,
+    handlerDelayMs, jsonItems, betweenBatchesMs, smol, responseMiB, pauseMs, consumerDelay,
     bun: Bun.version, platform: process.platform, readAheadBytes: process.env.EDGE_RESPONSE_READ_AHEAD_BYTES ?? "default",
     responseBufferBudgetBytes: baselineModule ? null : responseBufferBudget.limit,
     transferChunkBytes: baselineModule ? null : BODY_CHUNK_BYTES,
@@ -95,11 +106,15 @@ try {
     baselineRssMiB: Math.round(baselineRss / 1048576), peakRssMiB: Math.round(peak / 1048576),
     consumedMiB: consumed / 1048576, elapsedMs,
     p95Ms: Math.round(latencies[Math.floor(latencies.length * 0.95)] ?? 0),
+    p99Ms: Math.round(latencies[Math.floor(latencies.length * 0.99)] ?? 0),
     bufferBudgetPeakBytes: baselineModule ? null : bodyBufferBudget.peak,
     bufferBudgetRemainingBytes: baselineModule ? null : bodyBufferBudget.used,
     responseBufferPeakBytes: baselineModule ? null : responseBufferBudget.peak,
     responseBufferRemainingBytes: baselineModule ? null : responseBufferBudget.used,
     workerReplacements: pool.snapshotMetrics().supacloud_edge_total_worker_replacements,
+    surplusCreations: pool.snapshotMetrics().supacloud_edge_total_worker_surplus_creations,
+    surplusRetirements: pool.snapshotMetrics().supacloud_edge_total_worker_surplus_retirements,
+    totalQueueWaitMs: pool.snapshotMetrics().supacloud_edge_total_queue_wait_ms,
     workerHeapBytes: pool.snapshotMetrics().supacloud_edge_worker_heap_bytes,
     workerHeapCapacityBytes: pool.snapshotMetrics().supacloud_edge_worker_heap_capacity_bytes,
     workerExtraMemoryBytes: pool.snapshotMetrics().supacloud_edge_worker_extra_memory_bytes,
