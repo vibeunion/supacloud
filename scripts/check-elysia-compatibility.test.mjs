@@ -55,7 +55,7 @@ function fixture(t) {
   return { root, write, edit };
 }
 
-test('accepts consistent exact beta declarations without installing dependencies', (t) => {
+test('accepts consistent exact RC declarations without installing dependencies', (t) => {
   assert.deepEqual(checkElysiaCompatibility(fixture(t).root), []);
 });
 test('parses emitted trailing commas without rewriting strings or evaluating code', () => {
@@ -64,7 +64,7 @@ test('parses emitted trailing commas without rewriting strings or evaluating cod
   assert.deepEqual(parseLockfile(source), expected);
   assert.throws(() => parseLockfile('({ injected: process.exit() })'));
 });
-test('rejects a widened beta peer', (t) => {
+test('rejects a widened RC peer', (t) => {
   const f = fixture(t);
   f.edit('packages/elysia/package.json', (p) => { p.peerDependencies.elysia = '>=2.0.0-rc.0 <3'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /peerDependencies\.elysia must equal/);
@@ -103,7 +103,7 @@ test('rejects an incorrect resolved version and a missing direct-consumer lock',
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /missing lockfile/);
 });
 test('rejects direct, plugin and aliased framework dependencies in core packages', (t) => {
-  for (const [name, spec] of [['elysia', version], ['@elysia/openapi', '2.0.0-beta.4'],
+  for (const [name, spec] of [['elysia', version], ['@elysia/openapi', version],
     ['@supacloud/elysia', 'file:../elysia'], ['http-framework', `npm:elysia@${version}`]]) {
     const f = fixture(t);
     f.edit('packages/app/package.json', (p) => { p.dependencies[name] = spec; });

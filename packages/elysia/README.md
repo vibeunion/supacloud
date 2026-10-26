@@ -18,7 +18,7 @@ The matrix is a
 required target, not proof of an execution. See the dated, commit-specific
 [framework acceptance record](../../docs/framework-acceptance.md) for actual
 results. The contract-upgrade gate checks both TypeScript engines. These tests
-do not establish a wider beta version matrix or Node.js runtime compatibility.
+do not establish a wider RC version matrix or Node.js runtime compatibility.
 
 Keep the exact Elysia peer until additional versions have their own acceptance
 evidence. A server using this adapter still installs Elysia; application metadata
@@ -642,7 +642,7 @@ Lightweight error class carrying HTTP `status`, machine-readable `code`, and
 optional structured `details`.
 
 The adapter registers `ApplicationError` and `SchemaContractError` in Elysia
-2.0's native error dictionary (`app.error(ErrorClass, handler)`). Typed entries
+2.0's native error dictionary (`app.onError(ErrorClass, handler)`). Typed entries
 keep these classes out of the generic catch-all, so route response inference
 stays precise while Elysia (and Eden Treaty) knows the errors are handled. The
 dictionary is exported as `applicationErrorDictionary`, and
