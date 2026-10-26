@@ -384,6 +384,9 @@ const s3 = new S3Client({
 
 支持 `ListBuckets`、Bucket 创建/HEAD/删除、`PutObject`、`GetObject`/Range、`HeadObject`、`DeleteObject`、`DeleteObjects`、`ListObjectsV2`、`CopyObject`、Presigned GET，以及最多 10000 个 part 的 multipart 上传。Multipart part 会先写入 StorageDriver 的临时 key，完成时按顺序合并；因此它适合单机 Lite，不是大规模并行对象组装服务。
 
+S3 对象和 multipart 完成后的总大小上限为 64 MiB，同时遵守 bucket 的大小、MIME 类型限制及项目默认大小限制。Multipart 完成请求必须明确列出升序且不重复的 part；XML 请求体上限为 2 MiB。
+项目最多保留 128 个活跃 multipart 上传、10000 个临时 part 和 256 MiB 临时数据。上传 24 小时后过期，启动和后续 multipart 请求会清理过期数据；删除 bucket 时也会清理其临时分片。
+
 第一版明确限制：只支持 path-style，不支持 virtual-hosted-style、S3 ACL/Bucket Policy、Versioning、Object Lock、Replication、S3 Select 和 `STREAMING-*` SigV4 payload。S3 凭据是服务级凭据，默认绕过 RLS；需要隔离时用 `SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS` 限定 bucket。S3 写入仍使用与普通 Storage API 相同的 bucket/object 元数据和 StorageDriver。
 
 ### 兼容范围
@@ -952,6 +955,9 @@ const s3 = new S3Client({
 ```
 
 It supports `ListBuckets`, bucket create/HEAD/delete, `PutObject`, `GetObject`/Range, `HeadObject`, `DeleteObject`, `DeleteObjects`, `ListObjectsV2`, `CopyObject`, presigned GET, and multipart uploads with up to 10000 parts. Multipart parts are staged in the StorageDriver and concatenated on completion; this is suitable for single-node Lite, not a distributed object-assembly service.
+
+S3 objects, including completed multipart uploads, are limited to 64 MiB and also honor bucket size/MIME restrictions and the project default size limit. Completion requests must explicitly list unique parts in ascending order. XML request bodies are limited to 2 MiB.
+Each project allows at most 128 active uploads, 10000 staged parts and 256 MiB of staged bytes. Uploads expire after 24 hours and are reclaimed at startup and on subsequent multipart requests. Bucket deletion also removes its staged multipart data.
 
 The first version deliberately excludes virtual-hosted-style addressing, S3 ACL/Bucket Policy, Versioning, Object Lock, Replication, S3 Select, and `STREAMING-*` SigV4 payloads. S3 credentials are service-level and bypass RLS by default; use `SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS` to restrict buckets. S3 writes use the same bucket/object metadata and StorageDriver as the normal Storage API.
 

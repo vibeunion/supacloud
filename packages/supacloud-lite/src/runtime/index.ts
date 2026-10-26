@@ -237,7 +237,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     }
   }
   const s3 = config.s3Endpoint
-    ? await S3Handler.create(db, storageDriver, config.s3Endpoint).catch(failStartup)
+    ? await S3Handler.create(db, storageDriver, config.s3Endpoint, config.storageFileSizeLimit).catch(failStartup)
     : undefined
   const auth = new AuthHandler(db, {
     jwtSecret,
