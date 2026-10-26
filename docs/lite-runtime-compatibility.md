@@ -34,12 +34,21 @@ Scenario: Strict function defaults
   And invalid declarations and broken functions prevent startup
   And development mode preserves its existing defaults
 
+Scenario: Storage status and metrics expose only owned metadata
+  Given a running Lite Storage service
+  When a probe reads GET /storage/v1/status
+  Then it receives the service version without a project API key
+  When an operator reads GET /storage/v1/metrics with service_role
+  Then it receives bounded Prometheus metadata counts
+  And non-service callers are denied
+
 Scenario: Server-side Realtime broadcast is bounded and authorized
   Given a subscriber joined to a public or private Realtime topic
   When an authenticated server sends POST /realtime/v1/api/broadcast
   Then public messages are delivered without persistence
   And private messages require the caller's realtime.messages INSERT policy
   And the whole batch is rejected before delivery when any topic is unauthorized
+
 
 Scenario: Diagnose and measure without changing project state
   Given an uninitialized project or an existing project
