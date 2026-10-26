@@ -213,6 +213,46 @@ describe("control-plane safety receipt", () => {
             "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY={not-json}\n",
         )).toThrow("not valid JSON");
     });
+
+    test("rejects metadata secret smuggling in failure summaries and causes", () => {
+        for (const message of [
+            '{"stored_secret_values":"synthetic-secret"}',
+            '{"stored_secret_values":"synthetic-secret","stored_secret_values":"[REDACTED]"}',
+            '{"deprecated_webhook_secrets":["synthetic-secret"]}',
+            '{"opaque_key_backfill_projects":{"value":"synthetic-secret"}}',
+            '{"current_key_checkpoint_present":"synthetic-secret"}',
+            String.raw`{\"stored_secret_values\":\"synthetic-secret\"}suffix`,
+            String.raw`{"stored\u005fsecret_values":"synthetic-secret"}`,
+            String.raw`{stored\u{005f}secret_values:"synthetic-secret"}`,
+        ]) {
+            expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(message))).toThrow("contains sensitive data");
+            expect(() => parseUpgradeFailureEvidence(`SUPACLOUD_UPGRADE_FAILURE=${JSON.stringify({
+                schema: "supacloud.upgrade-failure.v1", summary: "upgrade failed", causes: [message],
+            })}\n`)).toThrow("contains sensitive data");
+        }
+    });
+
+    test("both receipt parsers reject invalid metadata types and duplicate source fields", () => {
+        const validJson = JSON.stringify(controlPlaneSafetyEvidence);
+        const invalidJson = [
+            ...["synthetic-secret", ["synthetic-secret"], { value: "synthetic-secret" }, null, true, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]
+                .map(count => JSON.stringify({
+                    ...controlPlaneSafetyEvidence,
+                    candidate_counts: { ...controlPlaneSafetyEvidence.candidate_counts, stored_secret_values: count },
+                })),
+            JSON.stringify({ ...controlPlaneSafetyEvidence, current_key_checkpoint_present: "synthetic-secret" }),
+            validJson.replace('"stored_secret_values":6', '"stored_secret_values":"synthetic-secret","stored_secret_values":6'),
+            validJson.replace('"stored_secret_values":6', String.raw`"stored\u005fsecret_values":"synthetic-secret","stored_secret_values":6`),
+            validJson.replace('"current_key_checkpoint_present":true', '"current_key_checkpoint_present":"synthetic-secret","current_key_checkpoint_present":true'),
+            validJson.replace('"stored_secret_values":6', '"stored_secret_values":"synthetic-\\\"quoted-secret","stored_secret_values":6'),
+        ];
+        for (const json of invalidJson) {
+            expect(() => parseControlPlaneSafetyEvidence(`SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=${json}\n`))
+                .toThrow("receipt is invalid");
+            expect(() => parseControlPlanePreflightEvidence(`SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT=${json}\n`))
+                .toThrow("receipt is invalid");
+        }
+    });
 });
 
 type RemoteStateFixture = {
@@ -1756,7 +1796,6 @@ describe("local upgrade remote runner", () => {
             "transaction failed without a structured receipt\n",
             `${failedUpgradeLog()}${failedUpgradeLog()}`,
             "SUPACLOUD_UPGRADE_FAILURE={not-json}\n",
-            failedUpgradeLog(String.raw`{to\\u006ben:"unquoted-unicode-token"}`),
         ]) {
             const ssh = new ScriptedSsh([
                 remoteState({ status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: false }),
@@ -1771,6 +1810,20 @@ describe("local upgrade remote runner", () => {
             expect(ssh.commands).toHaveLength(2);
             expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
         }
+    });
+
+    test("retains failed status and log records when sensitive output is detected before receipt parsing", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: false }),
+            remoteResult(failedUpgradeLog(String.raw`{to\\u006ben:"unquoted-unicode-token"}`)),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("retained log could not be read");
+        expect(String(failure)).not.toContain("unquoted-unicode-token");
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
     });
 
     test("retains failed status and log records when SSH changed the receipt stream", async () => {
@@ -1944,6 +1997,77 @@ describe("upgrade_status inspection", () => {
         }
     });
 
+    test("reads a succeeded upgrade when retained log coloring is only terminal controls", async () => {
+        const coloredLog = successfulUpgradeLog()
+            .split("\n")
+            .map((line) => line.length > 0 ? `\u001b[1;32m${line}\u001b[0m` : line)
+            .join("\n");
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "SUCCEEDED",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            {
+                success: true,
+                stdout: coloredLog,
+                stderr: "\u001b[33mcolor only\u001b[0m",
+                code: 0,
+                stdoutRedacted: false,
+                stderrRedacted: false,
+            },
+        ]);
+
+        const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+        expect(projection.lifecycle).toBe("succeeded");
+        if (projection.lifecycle !== "succeeded") throw new Error("Expected succeeded projection");
+        expect(projection.transaction).toEqual(upgradeStatusControlPlaneEvidence);
+        expect(JSON.stringify(projection)).not.toContain("\u001b");
+    });
+
+    test("preserves receipts between separate OSC sequences ending in BEL or ST", async () => {
+        for (const terminator of ["\u0007", "\u001b\\"]) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+                remoteResult(`\u001b]0;before${terminator}${successfulUpgradeLog()}\u001b]0;after${terminator}`),
+            ]);
+            expect((await inspectRemoteUpgradeStatus(ssh as never, validUuid)).lifecycle).toBe("succeeded");
+            expect(ssh.commands).toHaveLength(2);
+        }
+    });
+
+    test("rejects secret output between OSC sequences without projecting a valid receipt", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+            remoteResult(`${successfulUpgradeLog()}\u001b]0;before\u001b\\POSTGRES_PASSWORD=synthetic-secret\n\u001b]0;after\u001b\\`),
+        ]);
+        const failure = await inspectRemoteUpgradeStatus(ssh as never, validUuid).catch((error: unknown) => error);
+        expect(String(failure)).toContain("retained log could not be read safely");
+        expect(String(failure)).not.toContain("synthetic-secret");
+        expect(ssh.commands).toHaveLength(2);
+    });
+
+    test("terminal controls never clear transport redaction or truncation evidence", async () => {
+        for (const integrityFlag of ["stdoutRedacted", "stderrRedacted", "stdoutTruncated", "stderrTruncated"] as const) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+                {
+                    ...remoteResult(`\u001b[32m${successfulUpgradeLog()}\u001b[0m`),
+                    stderr: "\u001b[33m[REDACTED]\u001b[0m",
+                    [integrityFlag]: true,
+                },
+            ]);
+            await expect(inspectRemoteUpgradeStatus(ssh as never, validUuid))
+                .rejects.toThrow("retained log could not be read safely");
+            expect(ssh.commands).toHaveLength(2);
+        }
+    });
+
     test("emits a failed projection with validated failure receipt and no mutation", async () => {
         const ssh = new ScriptedSsh([
             remoteState({
@@ -2112,7 +2236,7 @@ describe("upgrade_status inspection", () => {
             }),
             {
                 success: true,
-                stdout: successfulUpgradeLog(),
+                stdout: `${successfulUpgradeLog()}\u001b[31mPOSTGRES_PASSWORD=database-password\u001b[0m\n`,
                 stderr: "",
                 code: 0,
                 stdoutRedacted: true,
@@ -2121,6 +2245,7 @@ describe("upgrade_status inspection", () => {
 
         const err = await inspectRemoteUpgradeStatus(ssh as never, validUuid).catch((e: unknown) => e);
         expect(String(err)).toContain("retained log could not be read safely");
+        expect(String(err)).not.toContain("database-password");
         expect(String(err)).not.toContain(paths.status);
         expect(String(err)).not.toContain(paths.log);
     });
