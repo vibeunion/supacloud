@@ -389,6 +389,8 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 
 RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因此 V1 只向 `service_role` 订阅者发送这类 DELETE 事件。普通用户仍可收到通过逐行 RLS 校验的 INSERT/UPDATE 事件。
 
+PostgREST 的边缘语义补充：表和 view 的 `Prefer: count=planned` 和 `count=estimated` 都在当前角色与 JWT claims 的只读事务中读取最外层 `count(*)` 输入节点的 `Plan Rows`（该计数聚合节点本身恒为 1），保留过滤条件、RLS、inner embed、view 和查询本身的 GROUP BY 聚合。Lite 不直接读取全表 `pg_class.reltuples`；`estimated` 是保守的 planner 兼容实现，不实现 PostgREST 按阈值切换精确计数的行为，估算值仍可能不准确。两者都只用于 GET/HEAD，结果仍写入 `Content-Range`。`Prefer: tx=rollback` 可包裹成功的 POST/PATCH/DELETE，返回与实际提交相同的状态和 representation，但事务最终回滚且不触发 CDC/webhook。其他 `Prefer` 值（`return`、`resolution`、`missing`）行为不变。
+
 Realtime 也支持服务端 HTTP 广播：
 
 ```http
@@ -937,6 +939,8 @@ source package for a synthetic baseline, not a production performance claim.
 | Multi-project control plane | Not supported | V1 runs only one project per process; multiple projects can be deployed via multiple processes |
 
 Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row is deleted, so V1 only sends such DELETE events to `service_role` subscribers. Regular users can still receive INSERT/UPDATE events that pass row-by-row RLS validation.
+
+PostgREST edge semantics: for tables and views, `Prefer: count=planned` and `count=estimated` both read the `Plan Rows` of the outermost `count(*)` input inside the current role and JWT-claims read-only transaction (that counting aggregate itself always produces one row). This preserves filters, RLS, inner embeds, views, and the query's own GROUP BY aggregates. Lite does not read relation-wide `pg_class.reltuples` directly; `estimated` is a conservative planner-based compatibility implementation, not PostgREST's threshold-based switch to exact counting, and estimates may still be inaccurate. Both are only evaluated for GET/HEAD and still populate `Content-Range`. `Prefer: tx=rollback` wraps a successful POST/PATCH/DELETE, returns the same status and representation as a commit, then rolls the transaction back without firing CDC/webhooks. Other `Prefer` values (`return`, `resolution`, `missing`) keep their existing behavior.
 
 Realtime also exposes server-side HTTP broadcast:
 

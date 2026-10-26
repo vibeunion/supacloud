@@ -34,6 +34,17 @@ Scenario: Strict function defaults
   And invalid declarations and broken functions prevent startup
   And development mode preserves its existing defaults
 
+Scenario: PostgREST count strategies and rollback preference
+  Given a table or view GET/HEAD request with Prefer: count=planned or count=estimated
+  Then Content-Range contains a query-plan estimate under the caller's role and JWT claims
+  And filters, RLS, inner embeds, views, and GROUP BY shape the estimated row set
+  And relation-wide reltuples statistics are not returned directly
+  And estimated uses the planner, not PostgREST's threshold-based exact count fallback
+  And count=exact still computes the exact count
+  Given a successful mutation with Prefer: tx=rollback
+  Then the response reflects the would-be write
+  And the transaction is rolled back without CDC or webhook side effects
+
 Scenario: Storage status and metrics expose only owned metadata
   Given a running Lite Storage service
   When a probe reads GET /storage/v1/status
@@ -41,6 +52,7 @@ Scenario: Storage status and metrics expose only owned metadata
   When an operator reads GET /storage/v1/metrics with service_role
   Then it receives bounded Prometheus metadata counts
   And non-service callers are denied
+
 
 Scenario: Server-side Realtime broadcast is bounded and authorized
   Given a subscriber joined to a public or private Realtime topic
