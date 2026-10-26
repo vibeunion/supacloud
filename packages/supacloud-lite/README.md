@@ -376,6 +376,19 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 
 RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因此 V1 只向 `service_role` 订阅者发送这类 DELETE 事件。普通用户仍可收到通过逐行 RLS 校验的 INSERT/UPDATE 事件。
 
+Realtime 也支持服务端 HTTP 广播：
+
+```http
+POST /realtime/v1/api/broadcast
+apikey: <project-anon-key>
+authorization: Bearer <access-token>
+content-type: application/json
+
+{"messages":[{"topic":"room:42","event":"notice","payload":{"text":"hello"},"private":false}]}
+```
+
+请求沿用 Realtime 的 `messages` 数组格式，单次最多 100 条，每条 `event` 最多 256 字节、`topic` 最多 256 字节、`payload` 最多 1 MiB。`private: true` 会按 `realtime.messages` 的 INSERT policy 校验调用者；整个批次先完成校验再发送，任一主题无写权限时返回 `403`，不会部分广播。成功返回 `202 {"message":"Broadcast sent"}`。该端点只做实时投递，不持久化消息；需要离线补偿时仍应使用数据库表或 outbox。
+
 ### Capability doctor 与 PowerSync profile
 
 `doctor` 输出 Lite 自己的稳定能力契约，不复制完整 Management API：
@@ -892,6 +905,19 @@ source package for a synthetic baseline, not a production performance claim.
 | Multi-project control plane | Not supported | V1 runs only one project per process; multiple projects can be deployed via multiple processes |
 
 Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row is deleted, so V1 only sends such DELETE events to `service_role` subscribers. Regular users can still receive INSERT/UPDATE events that pass row-by-row RLS validation.
+
+Realtime also exposes server-side HTTP broadcast:
+
+```http
+POST /realtime/v1/api/broadcast
+apikey: <project-anon-key>
+authorization: Bearer <access-token>
+content-type: application/json
+
+{"messages":[{"topic":"room:42","event":"notice","payload":{"text":"hello"},"private":false}]}
+```
+
+It uses Realtime's `messages` envelope: at most 100 messages per request, each `event` and `topic` at most 256 bytes, and each `payload` at most 1 MiB. `private: true` authorizes the caller through the `realtime.messages` INSERT policy. The whole batch is authorized before any delivery, so one denied topic returns `403` without partially broadcasting. Success returns `202 {"message":"Broadcast sent"}`. This endpoint delivers live events only; use a database table or outbox when messages must survive disconnects.
 
 ### Capability doctor and PowerSync profile
 
