@@ -43,6 +43,8 @@ interface CliOptions extends ProjectRuntimeOptions {
   serviceRole: boolean
   force: boolean
   json: boolean
+  production: boolean
+  externalAuthProxyIssuer?: string
   email?: string
   passwordStdin?: boolean
   emailConfirm?: boolean
