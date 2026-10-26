@@ -390,6 +390,9 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
       return withCors(await s3.handle(req, url))
     }
     // public endpoints that skip apikey checks
+    if (path === '/storage/v1/status' && req.method === 'GET') {
+      return withCors(await storage.handle(req, { role: 'anon', claims: null }, url))
+    }
     if (
       path.startsWith('/storage/v1/object/public/') ||
       path.startsWith('/storage/v1/object/sign/') ||
