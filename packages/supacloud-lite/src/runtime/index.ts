@@ -433,6 +433,53 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     const ctx = await resolveContext(req, url)
     if (ctx instanceof Response) return ctx
 
+    if (path === '/realtime/v1/api/broadcast' || path === '/realtime/v1/api/broadcast/') {
+      if (req.method !== 'POST') {
+        return withCors(new Response(JSON.stringify({ message: 'Method not allowed' }), {
+          status: 405,
+          headers: { 'content-type': 'application/json', allow: 'POST' },
+        }))
+      }
+      const contentType = req.headers.get('content-type') ?? ''
+      if (contentType && !contentType.includes('application/json')) {
+        return withCors(new Response(JSON.stringify({ message: 'Content-Type must be application/json' }), {
+          status: 415,
+          headers: { 'content-type': 'application/json' },
+        }))
+      }
+      let body: unknown
+      try {
+        body = await req.json()
+      } catch {
+        return withCors(new Response(JSON.stringify({ message: 'Invalid JSON body' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }))
+      }
+      const messages = typeof body === 'object' && body !== null && 'messages' in body ? body.messages : undefined
+      if (!Array.isArray(messages)) {
+        return withCors(new Response(JSON.stringify({ message: 'messages must be an array' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }))
+      }
+      try {
+        await realtime.broadcastHttp(
+          messages as { topic: string; event: string; payload?: unknown; private?: boolean }[],
+          ctx,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Broadcast failed'
+        return withCors(new Response(JSON.stringify({ message }), {
+          status: message.startsWith('not authorized') ? 403 : 400,
+          headers: { 'content-type': 'application/json' },
+        }))
+      }
+      return withCors(new Response(JSON.stringify({ message: 'Broadcast sent' }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }))
+    }
     if (path.startsWith('/rest/v1')) return withCors(await rest.handle(req, ctx, url))
     if (path === '/graphql/v1' || path === '/graphql/v1/') return withCors(await graphql.handle(req, ctx))
     if (path.startsWith('/functions/v1')) return withCors(await functions.handle(req, ctx, url))
