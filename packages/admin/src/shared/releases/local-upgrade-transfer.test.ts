@@ -1944,6 +1944,39 @@ describe("upgrade_status inspection", () => {
         }
     });
 
+    test("reads a succeeded upgrade when retained log coloring is only terminal controls", async () => {
+        const coloredLog = successfulUpgradeLog()
+            .split("\n")
+            .map((line) => line.length > 0 ? `\u001b[1;32m${line}\u001b[0m` : line)
+            .join("\n");
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "SUCCEEDED",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            {
+                success: true,
+                stdout: coloredLog,
+                stderr: "\u001b[33mcolor only\u001b[0m",
+                code: 0,
+                stdoutRedacted: true,
+                stderrRedacted: true,
+            },
+        ]);
+
+        const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+        expect(projection.lifecycle).toBe("succeeded");
+        if (projection.lifecycle !== "succeeded") throw new Error("Expected succeeded projection");
+        expect(projection.transaction).toEqual(upgradeStatusControlPlaneEvidence);
+        expect(JSON.stringify(projection)).not.toContain("\u001b");
+    });
+
     test("emits a failed projection with validated failure receipt and no mutation", async () => {
         const ssh = new ScriptedSsh([
             remoteState({
@@ -2112,7 +2145,7 @@ describe("upgrade_status inspection", () => {
             }),
             {
                 success: true,
-                stdout: successfulUpgradeLog(),
+                stdout: `${successfulUpgradeLog()}\u001b[31mPOSTGRES_PASSWORD=database-password\u001b[0m\n`,
                 stderr: "",
                 code: 0,
                 stdoutRedacted: true,
@@ -2121,6 +2154,7 @@ describe("upgrade_status inspection", () => {
 
         const err = await inspectRemoteUpgradeStatus(ssh as never, validUuid).catch((e: unknown) => e);
         expect(String(err)).toContain("retained log could not be read safely");
+        expect(String(err)).not.toContain("database-password");
         expect(String(err)).not.toContain(paths.status);
         expect(String(err)).not.toContain(paths.log);
     });

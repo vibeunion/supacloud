@@ -122,11 +122,12 @@ class BoundedOutputCollector {
             const lastNewline = output.lastIndexOf("\n");
             output = lastNewline >= 0 ? output.slice(0, lastNewline + 1) : "";
         }
-        const redacted = redactSshOutput(output);
+        const normalized = stripTerminalControls(output);
+        const redacted = redactSshOutput(normalized);
         const bounded = !this.truncated
             ? redacted
             : `${redacted}${redacted && !redacted.endsWith("\n") ? "\n" : ""}[TRUNCATED: output exceeded ${this.limit}-byte limit]`;
-        return { output: bounded, redacted: redacted !== output };
+        return { output: bounded, redacted: redacted !== normalized };
     }
 }
 
@@ -137,6 +138,31 @@ const BLOCKED_COMMANDS = [
     "iptables -F", "ufw disable",
     "crontab -r", "chmod -R 777 /",
 ];
+
+const TERMINAL_CONTROL_SEQUENCE = /\u001B\[[0-9;?]*[ -/]*[@-~]|\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B[@-Z\\-_]/g;
+const DISALLOWED_CONTROL_CHARACTER = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+// Upgrade receipts include counts and flags whose names merely contain "key" or
+// "secret". They are not credentials and must stay readable for status projection.
+const UPGRADE_SAFETY_METADATA_FIELDS = new Set([
+    "current_key_checkpoint_present",
+    "deprecated_webhook_secrets",
+    "opaque_key_backfill_projects",
+    "stored_secret_values",
+]);
+
+function structuredFieldCarriesSecret(fieldName: string): boolean {
+    return !UPGRADE_SAFETY_METADATA_FIELDS.has(fieldName) && SENSITIVE_STRUCTURED_FIELD.test(fieldName);
+}
+
+export function stripTerminalControls(output: string): string {
+    return output.replace(TERMINAL_CONTROL_SEQUENCE, "").replace(DISALLOWED_CONTROL_CHARACTER, "");
+}
+
+export function outputRequiresSecretRedaction(output: string): boolean {
+    const normalized = stripTerminalControls(output);
+    return redactSshOutput(normalized) !== normalized;
+}
 
 export function redactSshCommand(command: string): string {
     return command
@@ -178,7 +204,7 @@ function containsSensitiveStructuredField(message: string): boolean {
     ];
     return fieldPatterns.some(pattern => [...normalizedQuotes.matchAll(pattern)].some(match => {
         const decodedName = decodedStructuredFieldName(match[1]!);
-        return decodedName === null || SENSITIVE_STRUCTURED_FIELD.test(decodedName);
+        return decodedName === null || structuredFieldCarriesSecret(decodedName);
     }));
 }
 
@@ -193,7 +219,7 @@ function structuredSensitiveFieldsAreRedacted(message: string): boolean {
             const current = pending.pop();
             if (!current || typeof current !== "object") continue;
             for (const [fieldName, fieldValue] of Object.entries(current)) {
-                if (SENSITIVE_STRUCTURED_FIELD.test(fieldName)) {
+                if (structuredFieldCarriesSecret(fieldName)) {
                     foundSensitiveField = true;
                     if (fieldValue !== "[REDACTED]") return false;
                 } else if (fieldValue && typeof fieldValue === "object") {

@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
-import { redactSshOutput, type SshResult, type SshTransport } from "../transports/ssh";
+import {
+    outputRequiresSecretRedaction,
+    redactSshOutput,
+    stripTerminalControls,
+    type SshResult,
+    type SshTransport,
+} from "../transports/ssh";
 import {
     buildUpgradeLockScript,
     SUPACLOUD_UPGRADE_LOCK_PATH,
@@ -276,7 +282,7 @@ function upgradeFailureReceiptIsInvalid(receipt: Record<string, unknown>): boole
 
 function upgradeFailureMessageContainsSensitiveData(message: string): boolean {
     const bareBearer = /\bBearer\s+(?!\[REDACTED\](?:\s|$|[,;.)]))\S+/i;
-    return redactSshOutput(message) !== message || bareBearer.test(message);
+    return outputRequiresSecretRedaction(message) || bareBearer.test(message);
 }
 
 export function parseUpgradeFailureEvidence(log: string): UpgradeFailureEvidence {
@@ -942,6 +948,20 @@ async function observeRemoteState(
     );
 }
 
+function retainedUpgradeLogIsUnsafe(output: SshResult): boolean {
+    if (output.stdoutTruncated || output.stderrTruncated) return true;
+    const stdout = stripTerminalControls(output.stdout);
+    const stderr = stripTerminalControls(output.stderr);
+    // Terminal color sets the transport flag by changing bytes, but it is not
+    // secret redaction. A flag that remains after stripping, or a normalized
+    // log that still contains secrets, must not be projected.
+    const stdoutChangedBySecret = output.stdoutRedacted === true
+        && (stdout === output.stdout || redactSshOutput(stdout) !== stdout);
+    const stderrChangedBySecret = output.stderrRedacted === true
+        && (stderr === output.stderr || redactSshOutput(stderr) !== stderr);
+    return stdoutChangedBySecret || stderrChangedBySecret;
+}
+
 async function remoteLogTail(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
     const script = [
         `PATH=${REMOTE_COMMAND_PATH}`,
@@ -952,11 +972,10 @@ async function remoteLogTail(ssh: SshTransport, paths: RemoteUpgradePaths): Prom
     ].join("\n");
     const output = await ssh.exec(rootCommand(script), 15_000);
     if (!output.success) throw remoteFailure("Unable to read the remote upgrade log", output);
-    if (output.stdoutRedacted || output.stderrRedacted
-        || output.stdoutTruncated || output.stderrTruncated) {
+    if (retainedUpgradeLogIsUnsafe(output)) {
         throw new Error("Remote upgrade log required transport redaction or truncation");
     }
-    return output.stdout.slice(-4_000);
+    return stripTerminalControls(output.stdout).slice(-4_000);
 }
 
 async function cleanupRemoteRecords(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<void> {

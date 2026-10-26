@@ -7,9 +7,11 @@ import { join } from "node:path";
 
 import {
     getAuditLog,
+    outputRequiresSecretRedaction,
     redactSshOutput,
     SshCommandOutcomeUnknownError,
     SshTransport,
+    stripTerminalControls,
 } from "./ssh";
 
 const TEST_HOST_KEY = Buffer.from("supacloud-test-host-key");
@@ -207,6 +209,38 @@ describe("SshTransport audit safety", () => {
             expect(result.stdout).toContain("[REDACTED]");
             expect(result.stdout).not.toContain("database-password");
             expect(result.stdoutRedacted).toBe(true);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("does not treat upgrade safety metadata or terminal color as secret redaction", async () => {
+        const receipt = "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=" + JSON.stringify({
+            current_key_checkpoint_present: true,
+            candidate_counts: {
+                deprecated_webhook_secrets: 0,
+                opaque_key_backfill_projects: 1,
+                stored_secret_values: 2,
+            },
+        });
+        const colored = `\u001b[32m${receipt}\u001b[0m\n\u001b]0;upgrade\u0007`;
+        expect(redactSshOutput(receipt)).toBe(receipt);
+        expect(stripTerminalControls(colored)).toBe(`${receipt}\n`);
+        expect(outputRequiresSecretRedaction(colored)).toBe(false);
+        expect(outputRequiresSecretRedaction("\u001b[31mPOSTGRES_PASSWORD=database-password\u001b[0m")).toBe(true);
+
+        const client = new FakeSshClient();
+        client.stdout = Buffer.from(colored);
+        const transport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+        try {
+            const result = await transport.exec("tail -n 80 -- /var/log/supacloud/upgrade.log");
+            expect(result.stdout).toBe(`${receipt}\n`);
+            expect(result.stdoutRedacted).toBe(false);
         } finally {
             transport.close();
         }
