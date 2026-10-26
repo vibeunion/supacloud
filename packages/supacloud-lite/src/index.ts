@@ -60,6 +60,11 @@ export {
   type PowerSyncReplicationOptions,
 } from './runtime/node/native/replication.js'
 export {
+  productionReadiness,
+  type ProductionReadiness,
+  type ProductionReadinessInput,
+} from './runtime/node/production-readiness.js'
+export {
   inspectPowerSyncReadiness,
   liteCapabilities,
   type LiteCapabilityStatus,
