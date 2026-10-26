@@ -22,6 +22,18 @@ export interface RealtimeSocketLike {
   close(code?: number, reason?: string): void
 }
 
+/** One message accepted by the Realtime HTTP broadcast endpoint. */
+export interface HttpBroadcastMessage {
+  /** channel topic, with or without the `realtime:` prefix */
+  topic: string
+  /** broadcast event name */
+  event: string
+  /** JSON payload delivered to subscribers */
+  payload?: unknown
+  /** authorize against realtime.messages RLS before broadcasting */
+  private?: boolean
+}
+
 /** A decoded Phoenix channel message (normalized from either serializer version). */
 interface PhoenixMessage {
   /** channel topic the message targets */
@@ -86,8 +98,19 @@ interface Connection {
 
 type PresenceMetas = { metas: Record<string, unknown>[] }
 
+function normalizeBroadcastTopic(raw: string): string {
+  const topic = raw.trim().replace(/^realtime:/, '')
+  if (!topic) throw new Error('broadcast topic is required')
+  return topic
+}
+
 /** Holds all live connections and fans database changes and broadcasts out to them. */
 export class RealtimeEngine {
+  /** HTTP broadcast request limits (aligned with Realtime's bounded payload contract). */
+  static readonly MAX_HTTP_BROADCAST_MESSAGES = 100
+  static readonly MAX_HTTP_BROADCAST_TOPIC_BYTES = 256
+  static readonly MAX_HTTP_BROADCAST_EVENT_BYTES = 256
+  static readonly MAX_HTTP_BROADCAST_PAYLOAD_BYTES = 1024 * 1024
   private connections = new Set<Connection>()
   private bindingCounter = 1
   private phxRefCounter = 1
@@ -158,6 +181,47 @@ export class RealtimeEngine {
       // realtime schema missing / unexpected error → deny (safe default)
       return { read: false, write: false }
     }
+  }
+
+  /**
+   * Validate and authorize every HTTP broadcast message before delivering any
+   * of them. This keeps a multi-message request all-or-nothing: one denied
+   * private topic cannot partially publish the rest of the payload.
+   */
+  async broadcastHttp(messages: HttpBroadcastMessage[], ctx: RequestContext): Promise<void> {
+    if (messages.length === 0) throw new Error('messages must not be empty')
+    if (messages.length > RealtimeEngine.MAX_HTTP_BROADCAST_MESSAGES) {
+      throw new Error(`messages must contain at most ${RealtimeEngine.MAX_HTTP_BROADCAST_MESSAGES} items`)
+    }
+    const normalized: Array<{ topic: string; event: string; payload: unknown }> = []
+    for (const message of messages) {
+      if (typeof message.topic !== 'string') throw new Error('broadcast topic must be a string')
+      if (typeof message.event !== 'string') throw new Error('broadcast event must be a string')
+      const topic = normalizeBroadcastTopic(message.topic)
+      if (new TextEncoder().encode(topic).byteLength > RealtimeEngine.MAX_HTTP_BROADCAST_TOPIC_BYTES) {
+        throw new Error('broadcast topic is too large')
+      }
+      const event = message.event.trim()
+      if (!event) throw new Error('broadcast event is required')
+      if (new TextEncoder().encode(event).byteLength > RealtimeEngine.MAX_HTTP_BROADCAST_EVENT_BYTES) {
+        throw new Error('broadcast event is too large')
+      }
+      let payloadText: string
+      try {
+        payloadText = JSON.stringify(message.payload ?? null)
+      } catch {
+        throw new Error('broadcast payload must be JSON serializable')
+      }
+      if (new TextEncoder().encode(payloadText).byteLength > RealtimeEngine.MAX_HTTP_BROADCAST_PAYLOAD_BYTES) {
+        throw new Error('broadcast payload is too large')
+      }
+      if (message.private === true) {
+        const access = await this.authorizePrivate(topic, ctx)
+        if (!access.write) throw new Error(`not authorized to broadcast on private topic: ${topic}`)
+      }
+      normalized.push({ topic, event, payload: message.payload ?? null })
+    }
+    for (const message of normalized) this.dispatchDbBroadcast(message)
   }
 
   /** Fan a realtime.send() database broadcast out to a topic's subscribers. */
