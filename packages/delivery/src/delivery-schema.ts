@@ -7,14 +7,25 @@ const reference = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z
 const references = Type.Array(reference, { uniqueItems: true });
 const kind = Type.Union([Type.Literal("api"), Type.Literal("jobs"), Type.Literal("webhook"), Type.Literal("function")]);
 const isolation = Type.Union([Type.Literal("shared"), Type.Literal("process")]);
+const targetName = Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" });
+const functionSlug = Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" });
 const mode = Type.Union([Type.Literal("required"), Type.Literal("none")]);
 export const DeliveryFilePathSchema = Type.String({
   maxLength: 512,
   pattern: "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$",
 });
-/** Declarative Edge Function target. Rendering/activation is implemented by later delivery phases. */
+/** Declarative Edge Function target; module-backed targets project HTTP routes into the Function. */
 const functionTarget = Type.Object({
-  slug: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
+  slug: functionSlug,
+  entrypoint: DeliveryFilePathSchema,
+  verifyJwt: Type.Boolean(),
+}, objectOptions);
+
+/** Convenience declaration expanded into a module-owned Function target. */
+const automaticFunction = Type.Object({
+  name: Type.Optional(targetName),
+  slug: functionSlug,
+  modules: Type.Array(reference, { minItems: 1, uniqueItems: true }),
   entrypoint: DeliveryFilePathSchema,
   verifyJwt: Type.Boolean(),
 }, objectOptions);
@@ -23,7 +34,7 @@ export const DeliveryOptionsSchema = Type.Object({
   version: Type.Literal(1),
   execution: Type.Optional(WorkerExecutionSchema),
   targets: Type.Optional(Type.Array(Type.Object({
-    name: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
+    name: targetName,
     kind,
     modules: Type.Optional(Type.Array(reference, { minItems: 1, uniqueItems: true })),
     isolation: Type.Optional(isolation),
@@ -31,6 +42,7 @@ export const DeliveryOptionsSchema = Type.Object({
     compute: Type.Optional(ComputeResourcesSchema),
     function: Type.Optional(functionTarget),
   }, objectOptions))),
+  functions: Type.Optional(Type.Array(automaticFunction, { maxItems: 32 })),
   // These are declarations, never evidence that a remote host enforces isolation.
   runtime: Type.Optional(Type.Object({
     processIsolation: Type.Boolean(),
@@ -165,11 +177,28 @@ export function parseDeliveryOptions(value: unknown): DeliveryOptions {
     throw new DeliveryConfigurationError();
   }
   for (const target of value.targets ?? []) {
-    // Function targets declare an entrypoint instead of app modules; other kinds require modules.
+    // Function targets always carry an entrypoint descriptor. They may also own
+    // modules whose HTTP routes are projected into that Function.
     const invalidShape = target.kind === "function"
-      ? target.function === undefined || target.modules !== undefined || target.compute !== undefined
+      ? target.function === undefined || target.compute !== undefined
       : target.modules === undefined || target.function !== undefined;
     if (invalidShape) throw new DeliveryConfigurationError();
+  }
+  const targetNames = new Set((value.targets ?? []).map(target => target.name));
+  const functionSlugs = new Set<string>();
+  for (const target of value.targets ?? []) {
+    if (target.function !== undefined && functionSlugs.has(target.function.slug)) {
+      throw new DeliveryConfigurationError();
+    }
+    if (target.function !== undefined) functionSlugs.add(target.function.slug);
+  }
+  for (const declared of value.functions ?? []) {
+    const name = declared.name ?? declared.slug;
+    if (targetNames.has(name) || functionSlugs.has(declared.slug)) {
+      throw new DeliveryConfigurationError();
+    }
+    targetNames.add(name);
+    functionSlugs.add(declared.slug);
   }
   const migrations = value.build?.migrations ?? [];
   try { validateWorkerExecution(value.execution?.groups ?? []); }
@@ -180,7 +209,22 @@ export function parseDeliveryOptions(value: unknown): DeliveryOptions {
       || !/\.sql$/i.test(item.source) || item.source.split("/").includes("node_modules"))) {
     throw new DeliveryConfigurationError();
   }
-  return value;
+  if (value.functions === undefined || value.functions.length === 0) return value;
+  const targets = [...(value.targets ?? [])];
+  for (const declared of value.functions) {
+    targets.push({
+      name: declared.name ?? declared.slug,
+      kind: "function",
+      modules: [...declared.modules],
+      function: {
+        slug: declared.slug,
+        entrypoint: declared.entrypoint,
+        verifyJwt: declared.verifyJwt,
+      },
+    });
+  }
+  const { functions: _expandedFunctions, ...rest } = value;
+  return { ...rest, targets };
 }
 
 /** Validate plans received from files/messages before using their typed contract. */

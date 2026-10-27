@@ -93,16 +93,51 @@ describe("function target declarations", () => {
     expect(requireValue(plan.targets.find((item) => item.name === "api")).routes).toHaveLength(1);
   });
 
-  test("requires an entrypoint descriptor and forbids app modules", () => {
+  test("requires an entrypoint descriptor and rejects compute on a Function", () => {
     expect(() => parseDeliveryOptions({ version: 1, targets: [{ name: "fn", kind: "function" }] }))
       .toThrow("Invalid delivery configuration");
     expect(() => parseDeliveryOptions({ version: 1, targets: [{
-      name: "fn", kind: "function", modules: ["orders"],
+      name: "fn", kind: "function", modules: ["orders"], compute: { cpuLimit: 0.5, memoryLimitMiB: 256 },
       function: { slug: "fh", entrypoint: "f.ts", verifyJwt: false },
     }] })).toThrow("Invalid delivery configuration");
     expect(() => parseDeliveryOptions({ version: 1, targets: [{
       name: "orders", kind: "api", modules: ["orders"],
       function: { slug: "fh", entrypoint: "f.ts", verifyJwt: false },
+    }] })).toThrow("Invalid delivery configuration");
+  });
+
+  test("expands a module Function declaration into the owning target", () => {
+    const options: DeliveryOptions = {
+      version: 1,
+      functions: [{
+        slug: "reports-fn", modules: ["reports"],
+        entrypoint: "functions/reports.ts", verifyJwt: true,
+      }],
+    };
+    const plan = successful(createDeliveryPlan(graph(http("orders"), http("reports")), options));
+    const target = requireValue(plan.targets.find((item) => item.name === "reports-fn"));
+    expect(target.kind).toBe("function");
+    expect(target.modules.map((item) => item.name)).toEqual(["reports"]);
+    expect(target.routes.map((route) => route.path)).toEqual(["/reports"]);
+    expect(target.function).toEqual({
+      slug: "reports-fn", entrypoint: "functions/reports.ts", verifyJwt: true,
+    });
+    expect(requireValue(plan.targets.find((item) => item.name === "api")).routes.map((route) => route.path))
+      .toEqual(["/orders"]);
+    expect(plan.targets.flatMap((item) => item.routes).map((route) => route.path).sort())
+      .toEqual(["/orders", "/reports"]);
+  });
+
+  test("rejects duplicate automatic Function names and slugs", () => {
+    expect(() => parseDeliveryOptions({ version: 1, functions: [{
+      slug: "reports-fn", modules: ["reports"], entrypoint: "functions/reports.ts", verifyJwt: false,
+    }, {
+      name: "reports-fn", slug: "other-fn", modules: ["orders"], entrypoint: "functions/orders.ts", verifyJwt: false,
+    }] })).toThrow("Invalid delivery configuration");
+    expect(() => parseDeliveryOptions({ version: 1, functions: [{
+      slug: "reports-fn", modules: ["reports"], entrypoint: "functions/reports.ts", verifyJwt: false,
+    }, {
+      slug: "reports-fn", modules: ["orders"], entrypoint: "functions/orders.ts", verifyJwt: false,
     }] })).toThrow("Invalid delivery configuration");
   });
 });

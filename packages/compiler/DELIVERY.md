@@ -62,25 +62,48 @@ their kind. HTTP and Job ownership are independent, so one module can contribute
 HTTP to `api` and Jobs to `jobs`. Two HTTP targets cannot both own the same module.
 `api` and `jobs` are reserved for their matching workload kinds.
 
-`kind: "function"` declares an Edge Function target instead of an app-module
-target. It carries a `function` descriptor (`slug`, `entrypoint`, `verifyJwt`)
-and must not declare `modules`. Function targets own no HTTP routes or Jobs, so
-the plan surfaces them alongside the module-owned targets:
+`kind: "function"` declares an Edge Function target. It always carries a
+`function` descriptor (`slug`, `entrypoint`, `verifyJwt`). A Function target may
+be standalone or own modules:
+
+- **Standalone** (`modules` omitted): the entrypoint is the Function handler
+  itself. It may export a default function/object or named `fetch`/`handle`.
+- **Module-backed** (for example `modules: ["reports"]`): the entrypoint is a
+  trusted host composition module exporting
+  `createDeliveryApplication(modules, lifecycle)`, the same contract used by an
+  HTTP host. The selected modules' HTTP routes move to the Function target; their
+  Jobs do not. This is the supported way to split a heavy module out of `api`
+  without writing a second application by hand.
 
 ```ts
 {
   version: 1,
   targets: [
+    { name: "reports", kind: "function", modules: ["reports"],
+      function: { slug: "app-reports", entrypoint: "functions/reports-host.ts", verifyJwt: true } },
     { name: "intake-hooks", kind: "function",
-      function: { slug: "fa-intake-hooks", entrypoint: "functions/intake/index.ts", verifyJwt: false } },
+      function: { slug: "app-intake-hooks", entrypoint: "functions/intake/index.ts", verifyJwt: false } },
   ],
 }
 ```
 
-This version only **plans** function targets. The local delivery build still
-rejects them with `delivery-function-build-unsupported`; rendering, upload and
-activation belong to a later delivery phase (see the project deployment
-Function/schedule work). Existing HTTP/Worker configuration is unaffected.
+For a module/feature declaration, the `functions` shorthand expands to the same
+validated Function target. The target name defaults to the slug:
+
+```ts
+{
+  version: 1,
+  functions: [
+    { slug: "app-reports", modules: ["reports"],
+      entrypoint: "functions/reports-host.ts", verifyJwt: true },
+  ],
+}
+```
+
+Expansion is deterministic and happens before route ownership. Duplicate target
+names, duplicate Function slugs, and modules owned by two HTTP/Function targets
+fail closed. The shorthand does not guess entrypoints or permissions. `api` and
+`jobs` remain reserved for their matching workload kinds.
 
 No unused explicit target is accepted. Unknown modules, duplicate ownership,
 unresolved imports, cyclic dependencies, duplicate job names, and conflicting
@@ -152,7 +175,8 @@ delivery/
     generated/application.ts
     bundle/index.js
     bundle/package.json
-    bundle/app.manifest.json
+    bundle/app.manifest.json      # module-backed targets
+    bundle/function.json          # Function targets only
     bundle/target.json
     bundle/assets/...
 ```
@@ -287,8 +311,10 @@ HOST=127.0.0.1 PORT=3000 bun --no-env-file bundle/index.js
 ```
 
 HTTP objects have `entryKind: "bun-http-application"`; their entry is an executable
-that starts the listener, not an import-only module factory. Targets without a
-host keep `entryKind: "compiled-module-factory"`. All object kinds still report
+that starts the listener, not an import-only module factory. Function targets
+produce `entryKind: "bun-function-application"` entries exporting a default
+`fetch` handler. Targets without a host keep
+`entryKind: "compiled-module-factory"`. All object kinds still report
 `deploymentReady: false`: a local build neither activates a service nor verifies
 its environment, migrations, health, credentials, isolation or recovery.
 HTTP object identities bind their executable discriminator; existing factory
@@ -309,6 +335,31 @@ even if host cleanup finishes. The full deadline bounds initialization cancellat
 and host cleanup; expiry exits nonzero without claiming cleanup succeeded.
 Startup, listener and shutdown failures use generic messages; the host remains
 responsible for sanitizing its own logging and responses.
+
+## Runnable Functions
+
+Module-backed Function targets use the same host contract as HTTP targets:
+export `createDeliveryApplication(modules, lifecycle)` from the declared
+entrypoint. The generated bundle exports a default `{ fetch(request) }` object.
+The host is created lazily once per Function isolate and the host owns its
+identity, database, governance, and error policy. The compiler does not provide
+an anonymous or in-memory fallback.
+
+Standalone Function targets do not require a compiler application graph. Their
+declared entrypoint is imported and its default export (or the module namespace
+when there is no default) becomes the Function handler. Use this for an existing
+fetch handler that has no module-owned HTTP routes.
+
+Function bundles include `bundle/function.json` with the attested slug,
+entrypoint, and `verifyJwt` declaration. Module-backed Functions also include
+the normal application manifest, execution context, and development metadata;
+standalone Functions do not. Function objects carry
+`entryKind: "bun-function-application"` in their immutable identity.
+
+This stage builds local Function artifacts only. Application release upload still
+rejects a delivery manifest containing Function targets, so they cannot be
+silently started as application HTTP services. Creating the Edge Function
+version, activation, and receipt remains a separate trusted release operation.
 
 ## Runnable Workers
 

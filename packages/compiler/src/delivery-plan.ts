@@ -85,7 +85,7 @@ export function createDeliveryPlan(
     if (declaration.kind !== "function" || declaration.function === undefined) continue;
     targets.set(declaration.name, {
       name: declaration.name, kind: "function", isolation: "shared",
-      roots: [], modules: [], routes: [], jobs: [], externalTokens: [],
+      roots: sorted(declaration.modules ?? []), modules: [], routes: [], jobs: [], externalTokens: [],
       function: declaration.function,
       requirements: { processIsolation: false, durableQueue: false, capabilities: sorted(declaration.capabilities ?? []) },
       runtimeStatus: options.runtime === undefined ? "unchecked" : "declared-compatible",

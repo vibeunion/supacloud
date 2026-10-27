@@ -10,6 +10,7 @@ import { renderDeliveryTarget } from "./delivery-render";
 import { bundleDeliveryTarget } from "./delivery-bundle";
 import { renderDeliveryHttpEntry } from "./delivery-http";
 import { renderDeliveryWorkerEntry } from "./delivery-worker";
+import { renderDeliveryFunctionEntry, renderStandaloneFunctionEntry } from "./delivery-function";
 import { prepareDeliveryMigrations } from "./delivery-migrations";
 import { artifactInventory, canonical, digest, exists, inside, noLinks, publishPointer, readOwned, reserveOutput, sourceInventory, writeArtifact } from "./delivery-files";
 import { scanGeneratedArtifacts } from "./type-safety";
@@ -62,13 +63,6 @@ export async function buildDeliveryProject(
     const checked = await checkProject(options);
     const planned = createDeliveryPlan({ ...checked.graph, diagnostics: checked.diagnostics }, settings, options);
     if (!planned.ok) return failed(planned.diagnostics);
-    if (planned.plan.targets.some((target) => target.kind === "function")) {
-      return failed([{
-        severity: "error", code: "delivery-function-build-unsupported",
-        message: "Function target rendering is not implemented yet; the delivery build only produces HTTP and Worker application objects.",
-        suggestion: "Declare HTTP/Worker application targets for now; Function and schedule delivery is tracked separately.",
-      }]);
-    }
     if (options.graphql && checked.mismatches.some((mismatch) => mismatch.startsWith("graphql"))) {
       throw new Error("Refresh GraphQL artifacts with compile before building independent targets.");
     }
@@ -82,7 +76,7 @@ export async function buildDeliveryProject(
     if (new Set(assetOwners).size !== assetOwners.length) throw new Error("Duplicate target asset path.");
     const httpApplications = settings.build?.httpApplications ?? [];
     const workerApplications = settings.build?.workerApplications ?? [];
-    const hosts = new Map<string, { path: string; hash: string; kind: "http" | "worker" }>();
+    const hosts = new Map<string, { path: string; hash: string; kind: "http" | "worker" | "function" }>();
     for (const [kind, applications] of [["http", httpApplications], ["worker", workerApplications]] as const) {
       for (const app of applications) {
         if (hosts.has(app.target)) throw new Error("Duplicate delivery application host.");
@@ -94,6 +88,15 @@ export async function buildDeliveryProject(
         if (inside(generatedRoot, path) || !/\.[cm]?ts$/.test(path)) throw new Error("Hosts require application TypeScript source.");
         hosts.set(app.target, { path, kind, hash: digest(await readOwned(sourceRoot, path)) });
       }
+    }
+    for (const target of planned.plan.targets) {
+      if (target.kind !== "function" || target.modules.length === 0 || target.function === undefined) continue;
+      if (hosts.has(target.name)) throw new Error("Duplicate delivery application host.");
+      const path = resolve(sourceRoot, target.function.entrypoint);
+      if (inside(generatedRoot, path) || !/\.[cm]?ts$/.test(path)) {
+        throw new Error("Function hosts require application TypeScript source.");
+      }
+      hosts.set(target.name, { path, kind: "function", hash: digest(await readOwned(sourceRoot, path)) });
     }
 
     phase = "migration-inputs";
@@ -155,20 +158,40 @@ export async function buildDeliveryProject(
       temporary.push(stage);
       // Same depth as the immutable object directory; no random staging names enter source imports.
       const generatedDirectory = join(objectRoot, "0".repeat(64), "generated");
-      const rendered = renderDeliveryTarget(checked.graph, target, {
+      const host = hosts.get(target.name);
+      const standaloneFunction = target.kind === "function" && target.modules.length === 0;
+      const rendered = standaloneFunction ? undefined : renderDeliveryTarget(checked.graph, target, {
         ...options, rootDir: sourceRoot, outDir: generatedDirectory,
       });
-      const host = hosts.get(target.name);
-      const entryKind = host?.kind === "http" ? "bun-http-application"
-        : host?.kind === "worker" ? "bun-worker-application" : "compiled-module-factory";
-      const applicationCode = rendered.applicationCode
-        + (host?.kind === "http" ? renderDeliveryHttpEntry(generatedDirectory, host.path)
-          : host?.kind === "worker" ? renderDeliveryWorkerEntry(generatedDirectory, host.path) : "");
-      const generated: Record<string, string> = {
-        "application.ts": applicationCode,
-        ...(rendered.clientCode === undefined ? {} : { "client.ts": rendered.clientCode }),
-        ...(rendered.permissionsCode === undefined ? {} : { "permissions.ts": rendered.permissionsCode }),
-      };
+      let entryKind: DeliveryObject["entryKind"];
+      let applicationCode: string;
+      let generated: Record<string, string>;
+      if (standaloneFunction) {
+        if (target.function === undefined) throw new Error("Function target requires an entrypoint descriptor.");
+        const entrypointPath = resolve(sourceRoot, target.function.entrypoint);
+        if (inside(generatedRoot, entrypointPath) || !/\.[cm]?ts$/.test(entrypointPath)) {
+          throw new Error("Standalone Function entrypoints require application TypeScript source.");
+        }
+        entryKind = "bun-function-application";
+        applicationCode = renderStandaloneFunctionEntry(generatedDirectory, entrypointPath);
+        generated = { "function.ts": applicationCode };
+      } else {
+        if (target.kind === "function" && host?.kind !== "function") {
+          throw new Error("Module-backed Function targets require an entrypoint host.");
+        }
+        entryKind = target.kind === "function" ? "bun-function-application"
+          : host?.kind === "http" ? "bun-http-application"
+            : host?.kind === "worker" ? "bun-worker-application" : "compiled-module-factory";
+        applicationCode = rendered!.applicationCode
+          + (host?.kind === "http" ? renderDeliveryHttpEntry(generatedDirectory, host.path)
+            : host?.kind === "worker" ? renderDeliveryWorkerEntry(generatedDirectory, host.path)
+              : host?.kind === "function" ? renderDeliveryFunctionEntry(generatedDirectory, host.path) : "");
+        generated = {
+          "application.ts": applicationCode,
+          ...(rendered!.clientCode === undefined ? {} : { "client.ts": rendered!.clientCode }),
+          ...(rendered!.permissionsCode === undefined ? {} : { "permissions.ts": rendered!.permissionsCode }),
+        };
+      }
       const unsafe = scanGeneratedArtifacts(generated, true);
       if (unsafe.some((item) => item.severity === "error")) return failed(unsafe);
       for (const [name, contents] of Object.entries(generated)) await writeArtifact(stage, `generated/${name}`, contents);
@@ -207,9 +230,14 @@ export async function buildDeliveryProject(
       }
       for (const [path, bytes] of bundled.files) await writeArtifact(stage, path, bytes);
       await writeArtifact(stage, "bundle/package.json", canonical({ type: "module", private: true }));
-      await writeArtifact(stage, "bundle/app.manifest.json", rendered.manifestJson);
-      await writeArtifact(stage, "bundle/execution-context.json", rendered.executionSnapshot);
-      await writeArtifact(stage, "bundle/application-development.json", rendered.applicationDevelopment);
+      if (target.kind === "function" && target.function !== undefined) {
+        await writeArtifact(stage, "bundle/function.json", canonical(target.function));
+      }
+      if (rendered !== undefined) {
+        await writeArtifact(stage, "bundle/app.manifest.json", rendered.manifestJson);
+        await writeArtifact(stage, "bundle/execution-context.json", rendered.executionSnapshot);
+        await writeArtifact(stage, "bundle/application-development.json", rendered.applicationDevelopment);
+      }
       for (const [path, bytes] of migrations.files) await writeArtifact(stage, path, bytes);
       await writeArtifact(stage, "bundle/target.json", canonical({
         target, entryKind, deploymentReady: false,

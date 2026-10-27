@@ -13,8 +13,8 @@ export const DeliveryObjectSchema = Type.Object({
   entrypoint: Type.Literal("bundle/index.js"),
   entryKind: Type.Union([
     Type.Literal("compiled-module-factory"), Type.Literal("bun-http-application"),
-    Type.Literal("bun-worker-application"), Type.Literal("go-worker-application"),
-    Type.Literal("scriptc-worker-application"),
+    Type.Literal("bun-worker-application"), Type.Literal("bun-function-application"),
+    Type.Literal("go-worker-application"), Type.Literal("scriptc-worker-application"),
   ]),
   runtimeImports: Type.Array(Type.String()),
   files: Type.Array(Type.Object({
@@ -95,7 +95,9 @@ export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifes
     const target = value.plan.targets.find(target => target.name === object.name);
     if ((["bun-worker-application", "go-worker-application", "scriptc-worker-application"]
       .includes(object.entryKind) && target?.kind !== "jobs")
-      || (object.entryKind === "bun-http-application" && target?.kind === "jobs")) {
+      || (object.entryKind === "bun-http-application" && target?.kind === "jobs")
+      || (object.entryKind === "bun-function-application" && target?.kind !== "function")
+      || (target?.kind === "function" && object.entryKind !== "bun-function-application")) {
       throw new Error("Delivery executable kind does not match its target.");
     }
     if (new Set(object.files.map((file) => file.path)).size !== object.files.length

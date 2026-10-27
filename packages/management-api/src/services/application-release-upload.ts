@@ -78,6 +78,9 @@ export async function uploadApplicationRelease(
     expectedObjects = JSON.parse(objectsField);
   } catch { invalid(); }
   if (!Value.Check(objectsSchema, expectedObjects)) invalid();
+  if (manifest.plan.targets.some(target => target.kind === "function")) {
+    invalid("APPLICATION_RELEASE_FUNCTION_TARGET_UNSUPPORTED", 409);
+  }
   if (manifest.objects.length === 0 || manifest.objects.length > 32
     || manifest.objects.some(object => object.entryKind === "compiled-module-factory" || object.files.length > 1024)
     || manifest.objects.some(object => object.files.some(file => file.bytes > DELIVERY_ARTIFACT_MAX_FILE_BYTES))
