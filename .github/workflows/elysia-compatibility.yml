@@ -64,7 +64,7 @@ jobs:
           if-no-files-found: error
 
   conformance:
-    name: Elysia beta runtime conformance
+    name: Elysia RC runtime conformance
     needs: policy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -80,7 +80,7 @@ jobs:
       - name: Install the pinned adapter graph
         working-directory: packages/elysia
         run: bun install --frozen-lockfile
-      - name: Verify beta HTTP and generated-contract behavior
+      - name: Verify RC HTTP and generated-contract behavior
         working-directory: packages/elysia
         run: |
           bun run generate:example

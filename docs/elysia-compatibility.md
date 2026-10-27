@@ -1,4 +1,4 @@
-# Elysia dependency boundary and beta upgrade policy
+# Elysia dependency boundary and RC upgrade policy
 
 ## Scope
 
@@ -36,7 +36,7 @@ native host composition for those features rather than expanding every
 framework-specific option into the core application model. No performance
 improvement, zero overhead or framework portability is established by this PR.
 
-## Beta policy
+## RC policy
 
 `packages/elysia/compatibility.json` records the required acceptance target, not
 proof that a test run passed. The Elysia target is `2.0.0-rc.0`, with active
@@ -46,9 +46,9 @@ direct Elysia consumers, CLI scaffold literals and compiler migration target mus
 agree. Published templates retain version literals so that the compiler and CLI
 do not acquire a runtime dependency on the adapter just to read its metadata.
 
-An exact beta peer prevents silently claiming support for untested versions, but
+An exact RC peer prevents silently claiming support for untested versions, but
 it also requires coordinated adapter releases and consumer upgrades. A security
-fix in a newer beta still needs prompt review, testing and a deliberate update;
+fix in a newer RC still needs prompt review, testing and a deliberate update;
 an exact pin is not a reason to postpone security maintenance.
 
 `node scripts/check-elysia-compatibility.mjs` checks those declarations, the
@@ -80,7 +80,7 @@ metadata, templates and migration policy together. Regenerate affected locks
 using the recorded Bun version and review the diff. Run the declaration tests,
 frozen installs, native conformance, generated-contract/type checks, scaffold
 checks and the separate runtime-safety gate before marking the upgrade accepted.
-Do not widen the beta peer from a single-version test result.
+Do not widen the RC peer from a single-version test result.
 
 Rollback means restoring the prior coordinated manifests, locks and generated
 artifacts, rebuilding and redeploying the application. It does not undo completed

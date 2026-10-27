@@ -86,6 +86,14 @@ function closed(ws: WebSocket): Promise<number> {
   });
 }
 
+async function expectConnectionCount(expected: number) {
+  const deadline = performance.now() + 2000;
+  while (getWsConnectionCount() !== expected && performance.now() < deadline) {
+    await Bun.sleep(1);
+  }
+  expect(getWsConnectionCount()).toBe(expected);
+}
+
 test("task state survives separate Elysia open, message and close callbacks", async () => {
   const baseline = getWsConnectionCount();
   const ws = open("/ws/tasks?token=admin-test&project=project-a");
@@ -100,11 +108,11 @@ test("task state survives separate Elysia open, message and close callbacks", as
   const done = closed(ws);
   ws.close();
   await done;
-  await Bun.sleep(0);
-  expect(getWsConnectionCount()).toBe(baseline);
+  await expectConnectionCount(baseline);
 });
 
 test("project sessions reauthorize subscriptions and retain the original filter on denial", async () => {
+  const baseline = getWsConnectionCount();
   const ws = open("/ws/tasks?token=project-test&project=project-a");
   expect(await nextMessage(ws)).toMatchObject({ type: "connected" });
   const denied = nextMessage(ws);
@@ -116,7 +124,7 @@ test("project sessions reauthorize subscriptions and retain the original filter 
   const done = closed(ws);
   ws.close();
   await done;
-  await Bun.sleep(0);
+  await expectConnectionCount(baseline);
 });
 
 test("failed task and realtime authentication closes without registering a subscriber", async () => {
@@ -126,6 +134,5 @@ test("failed task and realtime authentication closes without registering a subsc
   const invalidRealtimeKey = open("/ws/realtime/v1/websocket?apikey=invalid");
   expect(await Promise.all([closed(invalidTask), closed(missingRealtimeKey), closed(invalidRealtimeKey)]))
     .toEqual([1008, 1008, 1008]);
-  await Bun.sleep(0);
-  expect(getWsConnectionCount()).toBe(baseline);
+  await expectConnectionCount(baseline);
 });
