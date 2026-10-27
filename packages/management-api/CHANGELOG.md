@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.2...management-api-v0.123.3) (2026-10-27)
+
+
+### Bug Fixes
+
+* **elysia:** finalize RC compatibility wording and websocket cleanup ([#2264](https://github.com/vibeunion/supacloud/issues/2264)) ([5734c64](https://github.com/vibeunion/supacloud/commit/5734c64183ac759dc2c4db43f74ee4e064552659))
+
 ## [0.123.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.1...management-api-v0.123.2) (2026-10-26)
 
 
