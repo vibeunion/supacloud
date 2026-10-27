@@ -547,7 +547,9 @@ export async function loadGeneratedOpenApiDocument(modulePath: string): Promise<
     moduleUrl.searchParams.set("supacloud-openapi-export", "1");
     const loaded: unknown = await import(moduleUrl.href);
     if (!isRecord(loaded)) throw new OpenApiDocumentError();
-    return parseOpenApiDocument(loaded["OPENAPI_DOCUMENT"]);
+    if ("OPENAPI_DOCUMENT" in loaded) return parseOpenApiDocument(loaded["OPENAPI_DOCUMENT"]);
+    if (typeof loaded["createOpenApiDocument"] !== "function") throw new OpenApiDocumentError();
+    return parseOpenApiDocument(await loaded["createOpenApiDocument"]());
   } catch (error) {
     if (error instanceof OpenApiDocumentError) throw error;
     throw new OpenApiDocumentError();

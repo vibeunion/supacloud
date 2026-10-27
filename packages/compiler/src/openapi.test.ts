@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
 import { checkProject, compileProject } from "./compile";
 import { renderOpenApi } from "./generate";
+import { exportGeneratedOpenApiJson, loadGeneratedOpenApiDocument, OpenApiDocumentError } from "./openapi-tools";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { ApplicationGraph } from "./types";
@@ -79,6 +80,127 @@ const graph: ApplicationGraph = {
 };
 
 describe("OpenAPI generator", () => {
+  test("factory-only imports defer schema conversion and support static JSON export", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-factory-"));
+    try {
+      const options = { rootDir: root, outDir: join(root, "generated") };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          "export let schemaReads = 0;",
+          "export const OrderParams = { type: 'object' };",
+          "export const OrderQuery = { type: 'object' };",
+          "export const CreateOrderBody = { type: 'object' };",
+          "export const OrderResponse = { get type() { schemaReads += 1; return 'object'; }, properties: { id: { type: 'string' } } };",
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(graph, { ...options, openApi: { snapshots: false } }),
+        "generated/snapshot.ts": renderOpenApi(graph, options),
+        "consumer.ts": [
+          'import { createOpenApiDocument, serializeOpenApiDocument, type OpenApiDocument } from "./generated/openapi";',
+          "const document: OpenApiDocument = createOpenApiDocument();",
+          "const json: string = serializeOpenApiDocument(document);",
+          "void json;",
+        ].join("\n"),
+      });
+      const program = ts.createProgram([join(root, "consumer.ts")], {
+        noEmit: true,
+        strict: true,
+        skipLibCheck: true,
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        types: [],
+      });
+      expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
+
+      const schemas = await import(pathToFileURL(join(root, "src/contracts.ts")).href);
+      const modulePath = join(root, "generated/openapi.ts");
+      const generated = await import(pathToFileURL(modulePath).href);
+      expect(schemas.schemaReads).toBe(0);
+      expect("OPENAPI_DOCUMENT" in generated).toBe(false);
+      expect("OPENAPI_JSON" in generated).toBe(false);
+
+      const document = generated.createOpenApiDocument();
+      expect(schemas.schemaReads).toBeGreaterThan(0);
+      const snapshot = await import(pathToFileURL(join(root, "generated/snapshot.ts")).href);
+      expect(document).toEqual(snapshot.OPENAPI_DOCUMENT);
+      expect(generated.createOpenApiDocument()).not.toBe(document);
+      expect(generated.serializeOpenApiDocument()).toBe(snapshot.OPENAPI_JSON);
+      expect(generated.serializeOpenApiDocument(document, 0)).toBe(`${JSON.stringify(document)}\n`);
+
+      const outputPath = join(root, "static/openapi.json");
+      expect(await exportGeneratedOpenApiJson({ modulePath, outputPath })).toEqual({ path: outputPath, written: true });
+      expect(JSON.parse(await readFile(outputPath, "utf8"))).toEqual(document);
+      expect(await exportGeneratedOpenApiJson({ modulePath, outputPath })).toEqual({ path: outputPath, written: false });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test.each(["OPENAPI_DOCUMENT", "createOpenApiDocument"])("bundled %s consumers remove unused snapshots", async (exportName) => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-tree-shaking-"));
+    try {
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          "export let schemaReads = 0;",
+          "export const OrderParams = { type: 'object' };",
+          "export const OrderQuery = { type: 'object' };",
+          "export const CreateOrderBody = { type: 'object' };",
+          "export const OrderResponse = { get type() { schemaReads += 1; return 'object'; } };",
+        ].join("\n"),
+        "openapi.ts": renderOpenApi(graph, { rootDir: root, outDir: root }),
+        "consumer.ts": `export { ${exportName} } from "./openapi"; export { schemaReads } from "./src/contracts";`,
+      });
+      const build = await Bun.build({
+        entrypoints: [join(root, "consumer.ts")],
+        target: "bun",
+        minify: true,
+        write: false,
+      });
+      expect(build.success).toBe(true);
+      const output = build.outputs[0];
+      if (!output) throw new Error("Expected an OpenAPI consumer bundle");
+      const bundlePath = join(root, "consumer.mjs");
+      await writeFile(bundlePath, await output.text());
+      // Observe serialization in a separate process so the test cannot affect other imports.
+      const child = Bun.spawn([process.execPath, "--no-env-file", "--eval", [
+        "const stringify = JSON.stringify;",
+        "let serializations = 0;",
+        "JSON.stringify = (...args) => { serializations += 1; return stringify(...args); };",
+        `const generated = await import(${JSON.stringify(pathToFileURL(bundlePath).href)});`,
+        "const initialSchemaReads = generated.schemaReads;",
+        "const document = generated.OPENAPI_DOCUMENT ?? generated.createOpenApiDocument();",
+        "console.log(stringify({ serializations, initialSchemaReads, version: document.openapi }));",
+      ].join("\n")], { stdout: "pipe", stderr: "pipe" });
+      const stdout = await new Response(child.stdout).text();
+      const stderr = await new Response(child.stderr).text();
+      expect({ exitCode: await child.exited, stderr }).toEqual({ exitCode: 0, stderr: "" });
+      const result = record(JSON.parse(stdout));
+      expect(result).toMatchObject({ serializations: 0, version: "3.1.0" });
+      if (exportName === "createOpenApiDocument") expect(result.initialSchemaReads).toBe(0);
+      else expect(result.initialSchemaReads).toBeGreaterThan(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("static export rejects invalid factories and never masks an invalid legacy snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-invalid-factory-"));
+    try {
+      const files = {
+        "invalid.ts": "export const createOpenApiDocument = () => ({ paths: {} });",
+        "throws.ts": "export const createOpenApiDocument = () => { throw new Error('private details'); };",
+        "legacy.ts": "export const OPENAPI_DOCUMENT = null; export const createOpenApiDocument = () => ({ openapi: '3.1.0', info: {}, paths: {} });",
+      };
+      await writeFixtureProject(root, files);
+      for (const file of Object.keys(files)) {
+        await expect(loadGeneratedOpenApiDocument(join(root, file))).rejects.toThrow(OpenApiDocumentError);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("renders imported schemas, parameters, security metadata and a strict consumer module", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-render-"));
     try {
@@ -228,6 +350,10 @@ export const OrderResponse = {
 
       const matching = await checkProject({ rootDir: root, outDir, generateOpenApi: true });
       expect(matching.upToDate).toBe(true);
+      const factoryOptions = { rootDir: root, outDir, generateOpenApi: true, openApi: { snapshots: false } };
+      const changedMode = await checkProject(factoryOptions);
+      expect(changedMode.upToDate).toBe(false);
+      expect(changedMode.mismatches).toContain("openapi.ts: disk artifact differs from current compiler output");
       const openApiPath = join(outDir, "openapi.ts");
       const original = await readFile(openApiPath, "utf8");
       try {
@@ -238,6 +364,8 @@ export const OrderResponse = {
       } finally {
         await writeFile(openApiPath, original, "utf8");
       }
+      expect((await compileProject(factoryOptions)).diagnostics).toEqual([]);
+      expect((await checkProject(factoryOptions)).upToDate).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
