@@ -899,6 +899,7 @@ describe("CaddyGatewayProvider", () => {
         expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
         expect(route?.match?.[0]?.path).toEqual(["/*"]);
         expect(route?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:30042");
+        expect(JSON.stringify(route)).not.toContain("/.well-known/supacloud-frontend-release");
         const apiRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-rest");
         const corsSubroute = findCorsSubroute(apiRoute);
         const exactMatcher = corsSubroute?.routes?.[0]?.match?.find((matcher: any) => matcher.header?.Origin);
@@ -998,6 +999,7 @@ describe("CaddyGatewayProvider", () => {
             hosts: ["static.example.com"],
             root: "/var/supacloud/frontends/proj123/0000002b/build",
             mode: "static",
+            releaseId: "a".repeat(64),
         });
 
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
@@ -1009,6 +1011,8 @@ describe("CaddyGatewayProvider", () => {
         const encode = route?.handle?.find((handler: any) => handler.handler === "encode");
         const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
         const subroutes = subroute?.routes ?? [];
+        const pointerRoute = subroutes.find((item: any) => item.match?.[0]?.path?.includes("/.well-known/supacloud-frontend-release"));
+        const pointerBody = pointerRoute ? JSON.parse(pointerRoute.handle?.[1]?.body ?? "null") : null;
         const assetRouteIndex = subroutes.findIndex((item: any) => item.match?.[0]?.path?.includes("/assets/*") && item.match?.[0]?.file);
         const missingAssetRouteIndex = subroutes.findIndex((item: any) => item.match?.[0]?.path?.includes("/assets/*") && !item.match?.[0]?.file);
         const fallbackIndex = subroutes.findIndex((item: any) => item.match?.[0]?.file?.try_files?.includes("/index.html"));
@@ -1028,6 +1032,13 @@ describe("CaddyGatewayProvider", () => {
         expect(securityHeaders?.response?.set?.["X-Content-Type-Options"]).toEqual(["nosniff"]);
         expect(securityHeaders?.response?.set?.["Referrer-Policy"]).toEqual(["strict-origin-when-cross-origin"]);
         expect(encode?.prefer).toEqual(["zstd", "gzip"]);
+        expect(pointerRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-store"]);
+        expect(pointerRoute?.handle?.[0]?.response?.set?.["Content-Type"]).toEqual(["application/json; charset=utf-8"]);
+        expect(pointerRoute?.handle?.[1]?.handler).toBe("static_response");
+        expect(pointerRoute?.handle?.[1]?.status_code).toBe(200);
+        expect(pointerBody).toEqual({ schema: "supacloud.frontend-release-pointer.v1", release_id: "a".repeat(64) });
+        expect(pointerRoute?.terminal).toBe(true);
+        expect(subroutes.indexOf(pointerRoute)).toBeLessThan(avifRouteIndex);
         expect(avifRouteIndex).toBeLessThan(assetRouteIndex);
         expect(webpRouteIndex).toBeLessThan(assetRouteIndex);
         expect(assetRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}"]);

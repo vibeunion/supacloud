@@ -19,6 +19,8 @@ test("the browser app entry bundles without Node or server DI dependencies", asy
   const exports = Object.values(graph.outputs).flatMap((output) => output.exports);
   expect(exports).toContain("HttpClient");
   expect(exports).toContain("HttpContractError");
+  expect(exports).toContain("watchFrontendRelease");
+  expect(exports).toContain("parseFrontendReleasePointer");
 });
 
 test("the browser HttpClient keeps the fetch and contract execution surface", async () => {

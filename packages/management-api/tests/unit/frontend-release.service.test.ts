@@ -207,6 +207,7 @@ class MemoryMutations {
 
 class MemoryGateway {
   root: string | null = null;
+  releaseId: string | null = null;
   failNext = false;
   failAfterApply = false;
   durabilityUnknownAfterApply = false;
@@ -216,8 +217,9 @@ class MemoryGateway {
 
   constructor(private readonly mutations: MemoryMutations) {}
 
-  async configureFrontendRoute(route: { root: string }): Promise<void> {
+  async configureFrontendRoute(route: { root: string; releaseId?: string }): Promise<void> {
     this.writeCalls += 1;
+    this.releaseId = route.releaseId ?? null;
     this.mutations.events.push(`route:configure:${this.mutations.leaseDepth}`);
     if (this.durabilityUnknownAfterApply) {
       this.durabilityUnknownAfterApply = false;
@@ -489,6 +491,8 @@ describe.skipIf(process.platform !== "linux")("FrontendReleaseService", () => {
 
     const activated = await prepared.service.activateRelease(activation(prepared));
     expectActivation(activated, prepared);
+    expect(prepared.gateway.releaseId).toBe(prepared.sha256);
+    await expect(prepared.service.activeReleaseId(PROJECT_REF, DEPLOYMENT_ID)).resolves.toBe(prepared.sha256);
     expect(prepared.gateway.root).toBe(join(
       prepared.root,
       PROJECT_REF,

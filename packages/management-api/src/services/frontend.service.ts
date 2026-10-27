@@ -92,6 +92,7 @@ const IMMUTABLE_LEGACY_DEPLOY_ERROR = "Immutable frontend release is active or u
 
 export interface FrontendImmutableReleaseState {
   activeBuildDir(projectRef: string, deploymentId: string): Promise<string | null>;
+  activeReleaseId?(projectRef: string, deploymentId: string): Promise<string | null>;
   hasActiveRelease(projectRef: string, deploymentId: string): Promise<boolean>;
   hasUnresolvedActivation(projectRef: string, deploymentId: string): Promise<boolean>;
 }
@@ -1108,9 +1109,12 @@ export class FrontendService {
     await this.deploymentLock(deployment.project_ref, deployment.id, async () => {
       const currentDeployment = await this.getDeployment(deployment.project_ref, deployment.id);
       if (!currentDeployment) throw new Error("Deployment not found");
-      const activeBuildDir = await (await this.releaseState())
-        .activeBuildDir(deployment.project_ref, deployment.id);
-      await this.applyGatewayRoute(currentDeployment, buildDir, isSSR, activeBuildDir);
+      const releaseState = await this.releaseState();
+      const [activeBuildDir, activeReleaseId] = await Promise.all([
+        releaseState.activeBuildDir(deployment.project_ref, deployment.id),
+        releaseState.activeReleaseId?.(deployment.project_ref, deployment.id) ?? Promise.resolve(null),
+      ]);
+      await this.applyGatewayRoute(currentDeployment, buildDir, isSSR, activeBuildDir, activeBuildDir ? activeReleaseId : null);
     });
   }
 
@@ -1119,6 +1123,7 @@ export class FrontendService {
     buildDir: string,
     isSSR: boolean,
     activeBuildDir: string | null,
+    activeReleaseId: string | null = null,
   ): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
     const { gatewayService } = await import("./gateway.service");
@@ -1127,7 +1132,11 @@ export class FrontendService {
       deploymentId: deployment.id,
       hosts: [deployment.domain, ...deployment.custom_domains],
       ...(activeBuildDir || !isSSR
-        ? { mode: "static", root: activeBuildDir || buildDir }
+        ? {
+            mode: "static",
+            root: activeBuildDir || buildDir,
+            ...(activeBuildDir && activeReleaseId ? { releaseId: activeReleaseId } : {}),
+          }
         : { mode: "proxy", port }),
     });
   }

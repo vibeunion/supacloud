@@ -110,6 +110,32 @@ compatibility adapter. SupaCloud decorators retain module/compiler metadata,
 while production application factories remain compiler-generated and
 reflection-free.
 
+## Frontend Release Discovery
+
+Browser applications can enable zero-configuration update handling with one
+call:
+
+```ts
+import { watchFrontendRelease } from "@supacloud/app/browser";
+
+const watcher = watchFrontendRelease();
+// watcher.stop() on application teardown
+```
+
+The watcher reads `/.well-known/supacloud-frontend-release` with `cache:
+"no-store"`, keeps the first observed `release_id` as its baseline, and handles
+each later change once. By default (`autoReload: "safe"`):
+
+- hidden tabs reload immediately;
+- visible tabs reload after 30 seconds without activity, but only when no
+  editable control is focused and no modal, unsaved or busy marker is present;
+- `dialog[open]`, `[aria-modal="true"]`, `[data-supacloud-unsaved="true"]` and
+  `[data-supacloud-busy="true"]` defer the reload.
+
+It also dispatches `supacloud:frontend-update-available` on `window` and accepts
+an optional `onUpdate` callback for custom banners. Set `autoReload: "never"` to
+disable automatic reload entirely.
+
 ## Runtime Boundary
 
 Angular is the runtime DI engine: `InjectionToken`, hierarchical injectors,

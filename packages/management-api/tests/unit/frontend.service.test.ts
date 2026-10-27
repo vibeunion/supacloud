@@ -882,6 +882,56 @@ describe("FrontendService gateway routing", () => {
     expect(fileServer?.precompressed_order).toEqual(["br", "zstd", "gzip"]);
   });
 
+  test("publishes the active immutable release pointer with the static route", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-pointer-"));
+    const releaseRoot = join(baseDir, "proj123", "0000002a", "releases", "a".repeat(64), "build");
+    await mkdir(releaseRoot, { recursive: true });
+    const calls: Array<{ url: string; method: string; body: any }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const method = init?.method || "GET";
+      const body = typeof init?.body === "string" && init.body.length > 0
+        ? JSON.parse(init.body) as any
+        : null;
+      calls.push({ url, method, body });
+      return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+    }) as unknown as typeof fetch;
+
+    const releaseState = async () => ({
+      activeBuildDir: async () => releaseRoot,
+      activeReleaseId: async () => "a".repeat(64),
+      hasActiveRelease: async () => true,
+      hasUnresolvedActivation: async () => false,
+    });
+
+    try {
+      const setup = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const deployment = await setup.createDeployment("proj123", { name: "site", framework: "static" });
+      const service = new FrontendService(baseDir, withoutDeploymentLock, releaseState);
+      await service.configureGatewayRoute(deployment, join(baseDir, "legacy-build"), false);
+
+      const loadCall = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+      const route = loadCall?.body?.apps?.http?.servers?.supacloud?.routes?.find(
+        (item: any) => item["@id"] === `route-frontend-proj123-${deployment.id}`,
+      );
+      const subroutes = route?.handle?.find((handler: any) => handler.handler === "subroute")?.routes ?? [];
+      const pointer = subroutes.find(
+        (item: any) => item.match?.[0]?.path?.includes("/.well-known/supacloud-frontend-release"),
+      );
+      expect(JSON.parse(pointer?.handle?.[1]?.body ?? "null")).toEqual({
+        schema: "supacloud.frontend-release-pointer.v1",
+        release_id: "a".repeat(64),
+      });
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
   test("reconciles successful static deployments back into Caddy routes", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-reconcile-test-"));
     const calls: Array<{ url: string; method: string; body: any }> = [];

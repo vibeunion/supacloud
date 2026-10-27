@@ -344,6 +344,55 @@ curl -X POST http://localhost:9090/v1/projects/my-project/frontend/deployments/a
 默认域名格式为 `<部署ID>.<项目ref>.<BASE_DOMAIN>`；静态站点由 Caddy 直接提供文件服务，
 SSR 站点则由 Caddy 反向代理到对应的受管进程。无需安装或维护 Nginx。
 
+## 前端发布版本指针
+
+不可变静态发布激活后，托管域名会提供同源、只读的当前发布指针：
+
+```text
+GET /.well-known/supacloud-frontend-release
+Cache-Control: no-store
+Content-Type: application/json; charset=utf-8
+
+{"schema":"supacloud.frontend-release-pointer.v1","release_id":"<64位sha256>"}
+```
+
+该指针只用于发现新旧版本，不包含项目配置、环境变量或凭据。HTML 与 SPA fallback 继续使用
+`no-cache`，内容哈希资源继续使用 `immutable` 长缓存；不要为了更新提示把静态资源改成
+`no-store`。
+
+浏览器在应用启动时调用一次即可，默认开箱即用：
+
+```ts
+import { watchFrontendRelease } from "@supacloud/app/browser";
+
+const watcher = watchFrontendRelease();
+
+// 应用销毁时停止；普通 SPA 也可以不处理，页面刷新后自然结束。
+watcher.stop();
+```
+
+默认 `autoReload: "safe"`：
+
+- 页面在后台时，发现新发布立即刷新；
+- 页面在前台时，静默等待 30 秒；期间没有键盘/鼠标/滚动活动，且没有输入框焦点、
+  打开的弹窗、上传/任务中标记时自动刷新；
+- 以下 DOM 标记会阻止自动刷新，等条件解除或页面转入后台后再刷新：
+  - `dialog[open]`
+  - `[aria-modal="true"]`
+  - `[data-supacloud-unsaved="true"]`
+  - `[data-supacloud-busy="true"]`
+- 应用仍可通过 `onUpdate` 或 `supacloud:frontend-update-available` 事件展示自己的提示；
+  不需要提示时无需任何回调；
+- 需要完全禁用自动刷新时显式设置 `autoReload: "never"`。
+
+```ts
+window.addEventListener("supacloud:frontend-update-available", (event) => {
+  console.info("new frontend release", event.detail.releaseId);
+});
+```
+
+Legacy 静态部署、SSR 和反向代理部署没有不可变 `release_id`，不会暴露该指针。
+
 ## 目录结构
 
 ```

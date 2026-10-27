@@ -29,3 +29,14 @@ export {
   HttpReplayError,
   type HttpReplayPolicy,
 } from "./http_replay";
+export {
+  FRONTEND_RELEASE_POINTER_PATH,
+  FRONTEND_RELEASE_POINTER_SCHEMA,
+  FRONTEND_UPDATE_EVENT,
+  parseFrontendReleasePointer,
+  watchFrontendRelease,
+  type FrontendReleasePointer,
+  type FrontendReleaseUpdate,
+  type FrontendReleaseWatchOptions,
+  type FrontendReleaseWatcher,
+} from "./frontend_update";
