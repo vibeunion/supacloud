@@ -116,6 +116,52 @@ describe("WorkerPool heap sampling", () => {
     expect(await reportHeap(pool, fixture)).toBeGreaterThan(first);
   });
 
+  test("per-Function heap budget raises the preheat budget above the host default", async () => {
+    process.env.EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS = "600000";
+    process.env.EDGE_WORKER_HEAP_BUDGET_BYTES = "1";
+    const fixture = await projectFixture(0);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 10_000, smol: true });
+    pools.push(pool);
+
+    const result = await pool.preheatVersionedIdleWorkers({
+      functionId: "memory_sampling_fn",
+      functionPath: fixture.functionPath,
+      projectRoot: fixture.projectRoot,
+      env: {},
+      projectRef: "test-project",
+      moduleVersion: "1",
+      bytecode: "off",
+      limits: { max_heap_bytes: 256 * 1024 ** 2 },
+    });
+    expect(result.succeeded).toBe(1);
+    expect(result.failure).toBeUndefined();
+  });
+
+  test("per-Function heap budget rejects a preheat above its own budget", async () => {
+    process.env.EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS = "0";
+    process.env.EDGE_WORKER_HEAP_BUDGET_BYTES = String(256 * 1024 ** 2);
+    const fixture = await projectFixture(0);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 10_000, smol: true });
+    pools.push(pool);
+
+    const result = await pool.preheatVersionedIdleWorkers({
+      functionId: "memory_sampling_fn",
+      functionPath: fixture.functionPath,
+      projectRoot: fixture.projectRoot,
+      env: {},
+      projectRef: "test-project",
+      moduleVersion: "1",
+      bytecode: "off",
+      limits: { max_heap_bytes: 1 },
+    });
+    expect(result.succeeded).toBe(0);
+    expect(result.failure).toMatchObject({
+      code: "EDGE_WORKER_HEAP_BUDGET_EXCEEDED",
+      heapBudgetBytes: 1,
+    });
+    expect(result.failure?.heapSize).toBeGreaterThan(1);
+  });
+
   test("preheat forces a fresh sample within a warm sampling window", async () => {
     process.env.EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS = "600000";
     process.env.EDGE_WORKER_HEAP_BUDGET_BYTES = String(128 * 1024 ** 2);

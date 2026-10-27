@@ -38,6 +38,7 @@ interface DispatchOptions {
     max_request_body_bytes?: number;
     max_response_body_bytes?: number;
     wait_until_timeout_ms?: number;
+    max_heap_bytes?: number;
   };
   functionVersion?: string | null;
   moduleVersion?: string;
@@ -246,6 +247,7 @@ type PreheatOptions = {
   bytecode?: "off" | "auto" | "required";
   bytecodeArtifact?: FunctionBytecodeArtifact;
   maxWorkers?: number;
+  limits?: DispatchOptions["limits"];
 };
 
 type BulkPreheatRequest = {
@@ -283,6 +285,15 @@ export type VersionedPreheatRequest = {
   attestation?: EdgeRuntimePreheatIdentity;
   bytecode?: "off" | "auto" | "required";
   maxWorkers?: number;
+  limits?: DispatchOptions["limits"];
+};
+
+type WorkerPreheatFailure = {
+  code: "EDGE_WORKER_HEAP_BUDGET_EXCEEDED";
+  heapSize: number;
+  heapBudgetBytes: number;
+  importedModuleBytes: number;
+  importedModuleCount: number;
 };
 
 type WorkerPreheatResult = {
@@ -291,6 +302,7 @@ type WorkerPreheatResult = {
   moduleCacheSize: number;
   attestation: EdgeRuntimePreheatAttestation | null;
   error?: string;
+  failure?: WorkerPreheatFailure;
 };
 
 export type WorkerPoolPreheatResult = {
@@ -301,6 +313,7 @@ export type WorkerPoolPreheatResult = {
   durationMs: number;
   attestation: EdgeRuntimePreheatAttestation | null;
   error?: string;
+  failure?: WorkerPreheatFailure;
 };
 
 export type WorkerPoolGenerationRotationResult = {
@@ -410,13 +423,20 @@ export class WorkerPool {
   private readonly maxModuleBytes = positiveBytes(process.env.EDGE_MODULE_BUDGET_BYTES, 32 * 1024 * 1024);
   private readonly maxModuleCount = positiveBytes(process.env.EDGE_MODULE_GENERATION_LIMIT, 100);
 
+  private heapBudget(limits?: DispatchOptions["limits"]): number {
+    const requested = limits?.max_heap_bytes;
+    return requested !== undefined && Number.isSafeInteger(requested) && requested > 0
+      ? requested
+      : this.maxWorkerHeap;
+  }
+
   private recordWorkerMemory(worker: Worker, message: {
     heapSize?: number; heapCapacity?: number; extraMemorySize?: number;
     importedModuleBytes?: number; importedModuleCount?: number;
-  }) {
+  }, heapBudget = this.maxWorkerHeap) {
     this.workerMemory.set(worker, { heapSize: message.heapSize ?? 0,
       heapCapacity: message.heapCapacity ?? 0, extraMemorySize: message.extraMemorySize ?? 0 });
-    if ((message.heapSize ?? 0) > this.maxWorkerHeap
+    if ((message.heapSize ?? 0) > heapBudget
       || (message.importedModuleBytes ?? 0) > this.maxModuleBytes
       || (message.importedModuleCount ?? 0) >= this.maxModuleCount) {
       this.memoryRetirements++;
@@ -968,7 +988,7 @@ export class WorkerPool {
         executionDone = true;
         if (cancellationRequested) streamDone = true;
         clearTimeout(waitTimer);
-        this.recordWorkerMemory(worker, msg);
+        this.recordWorkerMemory(worker, msg, this.heapBudget(opts.limits));
         complete();
         if (pendingResponse) { resolveOnce(pendingResponse, true); pendingResponse = undefined; }
         return;
@@ -1060,6 +1080,7 @@ export class WorkerPool {
         moduleVersion: opts.moduleVersion, envProof: opts.envProof,
         artifactSha256: opts.artifactSha256, bytecode: opts.bytecode,
         bytecodeArtifact: functionBytecodeCache.lookup(opts), env: opts.env,
+        maxHeapBytes: this.heapBudget(opts.limits),
         internalBindings: opts.internalBindings, tlsPolicy,
         url: opts.request.url, method: opts.request.method, headers, body,
       }, body ? [body] : []);
@@ -1522,7 +1543,11 @@ export class WorkerPool {
     };
   }
 
-  private failedPreheat(request: WorkerPreheatRequest, error: string): WorkerPreheatResult {
+  private failedPreheat(
+    request: WorkerPreheatRequest,
+    error: string,
+    failure?: WorkerPreheatFailure,
+  ): WorkerPreheatResult {
     this.retireWorker(request.worker);
     return {
       success: false,
@@ -1530,6 +1555,7 @@ export class WorkerPool {
       moduleCacheSize: this.lastModuleCacheEntries,
       attestation: null,
       error,
+      ...(failure === undefined ? {} : { failure }),
     };
   }
 
@@ -1545,9 +1571,21 @@ export class WorkerPool {
       return this.failedPreheat(request, "Worker preheat attestation mismatch");
     }
     this.recordModuleCacheStats(message);
-    this.recordWorkerMemory(request.worker, message);
+    const heapBudget = this.heapBudget(request.options.limits);
+    this.recordWorkerMemory(request.worker, message, heapBudget);
     if (this.tainted.has(request.worker)) {
-      return this.failedPreheat(request, "Function preheat exceeded the worker memory budget");
+      const heapSize = message.heapSize ?? 0;
+      return this.failedPreheat(
+        request,
+        "Function preheat exceeded the worker memory budget",
+        heapSize > heapBudget ? {
+          code: "EDGE_WORKER_HEAP_BUDGET_EXCEEDED",
+          heapSize,
+          heapBudgetBytes: heapBudget,
+          importedModuleBytes: message.importedModuleBytes ?? 0,
+          importedModuleCount: message.importedModuleCount ?? 0,
+        } : undefined,
+      );
     }
     return {
       success: true,
@@ -1588,6 +1626,7 @@ export class WorkerPool {
       bytecode: request.options.bytecode,
       bytecodeArtifact: request.options.bytecodeArtifact,
       attestation: request.options.attestation,
+      maxHeapBytes: this.heapBudget(request.options.limits),
       env: request.env,
       tlsPolicy,
     });
@@ -1710,7 +1749,7 @@ export class WorkerPool {
             options: {
               projectRef: request.projectRef, moduleVersion: request.moduleVersion,
               envProof: request.envProof, attestation: request.attestation,
-              bytecode: request.bytecode,
+              bytecode: request.bytecode, limits: request.limits,
             },
           }, workers), start);
           if (result.succeeded !== workers.length || result.attestation === null) {
@@ -1742,6 +1781,7 @@ export class WorkerPool {
         attestation: request.attestation,
         bytecode: request.bytecode,
         maxWorkers: request.maxWorkers,
+        limits: request.limits,
       },
     });
     return { ...preheat, rotation };
@@ -1874,6 +1914,7 @@ export class WorkerPool {
       durationMs,
       attestation: allWorkersAttested ? results[0]!.attestation : null,
       error: results.find((result) => !result.success && result.error)?.error,
+      failure: results.find((result) => result.failure !== undefined)?.failure,
     };
   }
 

@@ -49,14 +49,22 @@ describe("Edge Function capability and limit profiles", () => {
     const config = parseEdgeFunctionActivationManifest(JSON.stringify({
       version: "2",
       capabilities: { secrets: ["A"], outbound_hosts: ["api.example.com"], bindings: ["pgredis"] },
-      limits: { timeout_ms: 5000, max_request_body_bytes: 1024 },
+      limits: {
+        timeout_ms: 5000,
+        max_request_body_bytes: 1024,
+        max_heap_bytes: 268435456,
+      },
     })).config;
     expect(config.capabilities).toEqual({
       secrets: ["A"],
       outbound_hosts: ["api.example.com"],
       bindings: ["pgredis"],
     });
-    expect(config.limits).toEqual({ timeout_ms: 5000, max_request_body_bytes: 1024 });
+    expect(config.limits).toEqual({
+      timeout_ms: 5000,
+      max_request_body_bytes: 1024,
+      max_heap_bytes: 268435456,
+    });
   });
 
   test("rejects malformed capability and limit profiles", () => {
@@ -64,6 +72,9 @@ describe("Edge Function capability and limit profiles", () => {
       .toThrow("invalid capabilities.secrets");
     expect(() => parseEdgeFunctionActivationManifest(JSON.stringify({ limits: { timeout_ms: 0 } })))
       .toThrow("invalid limits.timeout_ms");
+    expect(() => parseEdgeFunctionActivationManifest(JSON.stringify({
+      limits: { max_heap_bytes: 512 * 1024 * 1024 + 1 },
+    }))).toThrow("invalid limits.max_heap_bytes");
   });
 
   test("rejects system-managed secrets in capability profiles", () => {

@@ -781,6 +781,7 @@ type FunctionLimits = {
   max_request_body_bytes?: number;
   max_response_body_bytes?: number;
   wait_until_timeout_ms?: number;
+  max_heap_bytes?: number;
 };
 
 type ActivationPoolControl = Awaited<ReturnType<WorkerPool["invalidateProject"]>>;
@@ -1040,6 +1041,8 @@ function functionCapabilities(value: unknown): FunctionCapabilities {
   };
 }
 
+const MAX_FUNCTION_HEAP_BYTES = 512 * 1024 * 1024;
+
 function functionLimits(value: unknown): FunctionLimits {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -1053,11 +1056,16 @@ function functionLimits(value: unknown): FunctionLimits {
       throw new Error(`Function activation limits.${field} is invalid`);
     }
   }
+  if (record.max_heap_bytes !== undefined
+    && (!integer(record.max_heap_bytes) || record.max_heap_bytes > MAX_FUNCTION_HEAP_BYTES)) {
+    throw new Error("Function activation limits.max_heap_bytes is invalid");
+  }
   return {
     ...(integer(record.timeout_ms) ? { timeout_ms: record.timeout_ms } : {}),
     ...(integer(record.max_request_body_bytes) ? { max_request_body_bytes: record.max_request_body_bytes } : {}),
     ...(integer(record.max_response_body_bytes) ? { max_response_body_bytes: record.max_response_body_bytes } : {}),
     ...(integer(record.wait_until_timeout_ms) ? { wait_until_timeout_ms: record.wait_until_timeout_ms } : {}),
+    ...(integer(record.max_heap_bytes) ? { max_heap_bytes: record.max_heap_bytes } : {}),
   };
 }
 
@@ -1547,6 +1555,7 @@ const app = new Elysia()
             projectRef: ref, moduleVersion: activation.moduleVersion, env: tenantEnvLoad.env,
             envProof: proof, attestation,
             bytecode: activation.bytecode,
+            limits: activation.limits,
             ...(profile === "background" ? { maxWorkers: resolveBackgroundPreheatWorkers() } : {}),
           };
         };
@@ -1828,6 +1837,7 @@ const app = new Elysia()
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
               bytecode: activation.bytecode,
+              limits: activation.limits,
             }),
             backgroundPool.preheatVersionedIdleWorkers({
               functionId,
@@ -1839,6 +1849,7 @@ const app = new Elysia()
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
               bytecode: activation.bytecode,
+              limits: activation.limits,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ])
@@ -1849,6 +1860,7 @@ const app = new Elysia()
               envProof: foregroundModuleEnvProof || undefined,
               attestation: foregroundAttestation ?? undefined,
               bytecode: activation.bytecode,
+              limits: activation.limits,
             }),
             backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
@@ -1856,6 +1868,7 @@ const app = new Elysia()
               envProof: backgroundModuleEnvProof || undefined,
               attestation: backgroundAttestation ?? undefined,
               bytecode: activation.bytecode,
+              limits: activation.limits,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ]);

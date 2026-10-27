@@ -89,6 +89,7 @@ type PreheatMessage = {
   bytecode?: "off" | "auto" | "required";
   bytecodeArtifact?: FunctionBytecodeArtifact;
   attestation?: EdgeRuntimePreheatIdentity;
+  maxHeapBytes?: number;
   env: Record<string, string>;
   tlsPolicy?: EdgeFetchTlsPolicy;
 };
@@ -112,6 +113,7 @@ type ExecuteMessage = Omit<PreheatMessage, "type"> & {
     max_request_body_bytes?: number;
     max_response_body_bytes?: number;
     wait_until_timeout_ms?: number;
+    max_heap_bytes?: number;
   };
 };
 type ParentMessage =
@@ -139,13 +141,16 @@ const memorySampleIntervalMs = (() => {
 })();
 let sampledHeap = { heapSize: 0, heapCapacity: 0, extraMemorySize: 0 };
 let sampledHeapAt = Number.NEGATIVE_INFINITY;
-function memorySnapshot(force = false) {
+let sampledHeapBudget = workerHeapBudget;
+function memorySnapshot(force = false, heapBudget = workerHeapBudget) {
   const now = performance.now();
-  if (force || now - sampledHeapAt >= memorySampleIntervalMs) {
+  // A completed sample only describes the budget that produced it. Switching
+  // between per-Function budgets must not reuse a stale pass/fail decision.
+  if (force || heapBudget !== sampledHeapBudget || now - sampledHeapAt >= memorySampleIntervalMs) {
     let stats = heapStats();
     // A sampled heap includes collectible buffers. Reclaim only above the soft
     // budget before deciding whether the completed worker actually needs retirement.
-    if (stats.heapSize > workerHeapBudget) {
+    if (stats.heapSize > heapBudget) {
       collectWorkerHeap(true);
       stats = heapStats();
     }
@@ -155,6 +160,7 @@ function memorySnapshot(force = false) {
       extraMemorySize: stats.extraMemorySize,
     };
     sampledHeapAt = performance.now();
+    sampledHeapBudget = heapBudget;
   }
   return { ...sampledHeap, importedModuleBytes, importedModuleCount: importedModules.size };
 }
@@ -668,6 +674,10 @@ function hasPreheatFields(candidate: Record<string, unknown>): boolean {
     && (candidate.bytecode === undefined || candidate.bytecode === "off"
       || candidate.bytecode === "auto" || candidate.bytecode === "required")
     && (candidate.bytecodeArtifact === undefined || isFunctionBytecodeArtifact(candidate.bytecodeArtifact))
+    && (candidate.maxHeapBytes === undefined
+      || typeof candidate.maxHeapBytes === "number"
+      && Number.isSafeInteger(candidate.maxHeapBytes)
+      && candidate.maxHeapBytes > 0)
     && hasPreheatArtifactFields(candidate)
     && isStringRecord(candidate.env)
     && (candidate.tlsPolicy === undefined || isTlsPolicy(candidate.tlsPolicy));
@@ -788,7 +798,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         await assertAttestedArtifact(msg.functionPath, msg.attestation);
         postToParent({
           type: "preheat_done",
-          ...memorySnapshot(true),
+          ...memorySnapshot(true, msg.maxHeapBytes),
           functionId: msg.functionId,
           moduleCacheHit: moduleLoad.cacheHit,
           moduleCacheSize: moduleLoad.moduleCacheSize,
@@ -952,7 +962,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
       runCleanup(restoreConsole);
       runCleanup(() => setProjectRoot(null));
       runCleanup(() => setInjectedEnv({}));
-      postToParent({ type: "execution_complete", ...memorySnapshot() });
+      postToParent({ type: "execution_complete", ...memorySnapshot(false, msg.maxHeapBytes) });
     }
   });
 }

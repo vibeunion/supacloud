@@ -48,6 +48,7 @@ const functionLimitsSchema = t.Object({
   max_request_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
   max_response_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
   wait_until_timeout_ms: t.Optional(t.Integer({ minimum: 1, maximum: 900_000 })),
+  max_heap_bytes: t.Optional(t.Integer({ minimum: 1, maximum: 512 * 1024 * 1024 })),
 }, { additionalProperties: false });
 const functionBytecodeSchema = t.Union([t.Literal("off"), t.Literal("auto"), t.Literal("required")]);
 
