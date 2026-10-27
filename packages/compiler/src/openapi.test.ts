@@ -155,7 +155,6 @@ describe("OpenAPI generator", () => {
         entrypoints: [join(root, "consumer.ts")],
         target: "bun",
         minify: true,
-        write: false,
       });
       expect(build.success).toBe(true);
       const output = build.outputs[0];

@@ -871,7 +871,7 @@
     {
       "name": "OpenApiOptions",
       "kind": "type",
-      "signature": "export interface OpenApiOptions {\n    title?: string;\n    version?: string;\n    description?: string;\n    servers?: OpenApiServer[];\n    securitySchemes?: Record<string, OpenApiSecurityScheme>;\n}"
+      "signature": "export interface OpenApiOptions {\n    snapshots?: boolean;\n    title?: string;\n    version?: string;\n    description?: string;\n    servers?: OpenApiServer[];\n    securitySchemes?: Record<string, OpenApiSecurityScheme>;\n}"
     },
     {
       "name": "OpenApiSecurityScheme",
