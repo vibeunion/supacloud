@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.52.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.51.2...compiler-v0.52.0) (2026-10-27)
+
+
+### Features
+
+* **compiler:** build module-owned Function targets ([#2271](https://github.com/vibeunion/supacloud/issues/2271)) ([2baa6cd](https://github.com/vibeunion/supacloud/commit/2baa6cd3b900059ff5e4211abeee4be54b06eae1))
+* **compiler:** support OpenAPI generation without eager snapshots ([#2272](https://github.com/vibeunion/supacloud/issues/2272)) ([b1ac067](https://github.com/vibeunion/supacloud/commit/b1ac06715c3d63828222d42d0232c3d208e1f025))
+
 ## [0.51.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.51.1...compiler-v0.51.2) (2026-10-27)
 
 

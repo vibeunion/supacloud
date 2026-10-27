@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.124.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.3...management-api-v0.124.0) (2026-10-27)
+
+
+### Features
+
+* **compiler:** build module-owned Function targets ([#2271](https://github.com/vibeunion/supacloud/issues/2271)) ([2baa6cd](https://github.com/vibeunion/supacloud/commit/2baa6cd3b900059ff5e4211abeee4be54b06eae1))
+* **edge:** add per-Function heap budget limits ([#2270](https://github.com/vibeunion/supacloud/issues/2270)) ([f3a2fa8](https://github.com/vibeunion/supacloud/commit/f3a2fa8be3bb11d5983ae5b572d468a30b9b7260))
+* **frontend:** expose immutable release pointer and browser watcher ([#2274](https://github.com/vibeunion/supacloud/issues/2274)) ([84a08ba](https://github.com/vibeunion/supacloud/commit/84a08ba42fdfa25e8f72fd93b8875918a50ca5f6))
+
 ## [0.123.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.2...management-api-v0.123.3) (2026-10-27)
 
 

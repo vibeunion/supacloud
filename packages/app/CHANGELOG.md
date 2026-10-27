@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/app-v0.33.0...app-v0.34.0) (2026-10-27)
+
+
+### Features
+
+* **frontend:** expose immutable release pointer and browser watcher ([#2274](https://github.com/vibeunion/supacloud/issues/2274)) ([84a08ba](https://github.com/vibeunion/supacloud/commit/84a08ba42fdfa25e8f72fd93b8875918a50ca5f6))
+
 ## [0.33.0](https://github.com/vibeunion/supacloud/compare/app-v0.32.0...app-v0.33.0) (2026-10-25)
 
 

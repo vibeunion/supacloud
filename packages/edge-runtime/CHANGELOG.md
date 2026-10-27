@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.4...edge-runtime-v0.37.0) (2026-10-27)
+
+
+### Features
+
+* **edge:** add per-Function heap budget limits ([#2270](https://github.com/vibeunion/supacloud/issues/2270)) ([f3a2fa8](https://github.com/vibeunion/supacloud/commit/f3a2fa8be3bb11d5983ae5b572d468a30b9b7260))
+
 ## [0.36.4](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.3...edge-runtime-v0.36.4) (2026-10-26)
 
 

@@ -3,10 +3,10 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.51.2"
+      "version": "0.52.0"
     },
     "app": {
-      "version": "0.33.0",
+      "version": "0.34.0",
       "dependencies": {
         "rxjs": "7.8.2"
       }
