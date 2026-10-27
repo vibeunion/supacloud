@@ -2,9 +2,11 @@
  * Browser-side immutable frontend release discovery.
  *
  * The platform serves a no-store release pointer for immutable static
- * deployments. Applications can watch it and prompt the user to reload after a
- * new release becomes active. This helper never reloads the page and never
- * interrupts unsaved work.
+ * deployments. The default watcher reloads automatically when that is safe:
+ * immediately while the tab is hidden, or after an idle period when the page is
+ * visible. Editable focus, modal dialogs and explicit unsaved/busy markers defer
+ * the reload. Applications can still provide their own prompt through the
+ * update event or opt out with `autoReload: "never"`.
  */
 
 export const FRONTEND_RELEASE_POINTER_PATH = "/.well-known/supacloud-frontend-release";
@@ -14,6 +16,14 @@ export const FRONTEND_UPDATE_EVENT = "supacloud:frontend-update-available";
 const RELEASE_ID_PATTERN = /^[0-9a-f]{64}$/;
 const DEFAULT_CHECK_INTERVAL_MS = 5 * 60_000;
 const MIN_CHECK_INTERVAL_MS = 5_000;
+const DEFAULT_AUTO_RELOAD_IDLE_MS = 30_000;
+const ACTIVITY_EVENTS = ["pointerdown", "keydown", "input", "focusin", "focusout", "scroll"] as const;
+const UNSAFE_RELOAD_SELECTOR = [
+  "dialog[open]",
+  "[aria-modal=\"true\"]",
+  "[data-supacloud-unsaved=\"true\"]",
+  "[data-supacloud-busy=\"true\"]",
+].join(",");
 
 export interface FrontendReleasePointer {
   schema: typeof FRONTEND_RELEASE_POINTER_SCHEMA;
@@ -37,6 +47,19 @@ export interface FrontendReleaseWatchOptions {
   checkOnFocus?: boolean;
   /** Re-check when the document becomes visible. Defaults to true. */
   checkOnVisibility?: boolean;
+  /**
+   * Automatic reload policy after a new release is observed.
+   * - "safe" (default): reload immediately while hidden, otherwise after the
+   *   page is idle and no editable field, modal, unsaved marker or busy marker
+   *   is present.
+   * - "hidden": reload only after the page becomes hidden.
+   * - "never": only report the update.
+   */
+  autoReload?: "safe" | "hidden" | "never";
+  /** Idle delay before a visible page reloads. Defaults to 30 seconds. */
+  autoReloadIdleMs?: number;
+  /** Override the final reload action (for tests or custom hosts). */
+  reload?: () => void;
   /** Dispatch FRONTEND_UPDATE_EVENT on window after an update. Defaults to true. */
   dispatchEvent?: boolean;
   /** Called once for each newly observed release. */
@@ -105,6 +128,84 @@ export function watchFrontendRelease(options: FrontendReleaseWatchOptions = {}):
     window.dispatchEvent(new CustomEvent(FRONTEND_UPDATE_EVENT, { detail: update }));
   }
 
+  const autoReload = options.autoReload ?? "safe";
+  const autoReloadIdleMs = Math.max(0, options.autoReloadIdleMs ?? DEFAULT_AUTO_RELOAD_IDLE_MS);
+  let pendingUpdate: FrontendReleaseUpdate | null = null;
+  let autoReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let reloadRequested = false;
+
+  function editableFocus(): boolean {
+    if (typeof document === "undefined") return false;
+    const active = document.activeElement as HTMLElement | null;
+    return Boolean(active && (active.isContentEditable
+      || active.tagName === "INPUT"
+      || active.tagName === "TEXTAREA"
+      || active.tagName === "SELECT"));
+  }
+
+  function canAutoReloadNow(): boolean {
+    if (typeof document === "undefined") return false;
+    if (document.visibilityState === "hidden") return true;
+    if (editableFocus()) return false;
+    return !document.querySelector(UNSAFE_RELOAD_SELECTOR);
+  }
+
+  function clearAutoReloadTimer(): void {
+    if (autoReloadTimer === null) return;
+    clearTimeout(autoReloadTimer);
+    autoReloadTimer = null;
+  }
+
+  function stopWatcher(): void {
+    stopped = true;
+    if (interval !== null) {
+      clearInterval(interval);
+      interval = null;
+    }
+    if (typeof window !== "undefined" && options.checkOnFocus !== false) {
+      window.removeEventListener("focus", scheduleCheck);
+    }
+    clearAutoReloadTimer();
+    if (typeof document !== "undefined" && options.checkOnVisibility !== false) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+    }
+    if (typeof document !== "undefined" && autoReload === "safe") {
+      for (const eventName of ACTIVITY_EVENTS) document.removeEventListener(eventName, onActivity, true);
+    }
+  }
+
+  function reloadNow(): void {
+    if (reloadRequested || !pendingUpdate) return;
+    reloadRequested = true;
+    clearAutoReloadTimer();
+    stopWatcher();
+    const reload = options.reload ?? (() => {
+      if (typeof window !== "undefined") window.location.reload();
+    });
+    reload();
+  }
+
+  function scheduleAutoReload(): void {
+    if (autoReload === "never" || !pendingUpdate || reloadRequested || stopped) return;
+    if (typeof document === "undefined") return;
+    if (document.visibilityState === "hidden") {
+      reloadNow();
+      return;
+    }
+    if (autoReload === "hidden") return;
+    clearAutoReloadTimer();
+    if (!canAutoReloadNow()) return;
+    autoReloadTimer = setTimeout(() => {
+      autoReloadTimer = null;
+      if (!pendingUpdate || !canAutoReloadNow()) return;
+      reloadNow();
+    }, autoReloadIdleMs);
+  }
+
+  function onActivity(): void {
+    if (pendingUpdate) scheduleAutoReload();
+  }
+
   async function performCheck(): Promise<FrontendReleaseUpdate | null> {
     if (stopped) return null;
     try {
@@ -114,7 +215,9 @@ export function watchFrontendRelease(options: FrontendReleaseWatchOptions = {}):
       currentReleaseId = pointer.release_id;
       if (previousReleaseId === null || previousReleaseId === pointer.release_id) return null;
       const update = { previousReleaseId, releaseId: pointer.release_id, pointer };
+      pendingUpdate = update;
       announce(update);
+      scheduleAutoReload();
       return update;
     } catch (error) {
       if (!stopped) options.onError?.(error);
@@ -137,7 +240,9 @@ export function watchFrontendRelease(options: FrontendReleaseWatchOptions = {}):
   }
 
   const visibilityHandler = () => {
-    if (typeof document !== "undefined" && document.visibilityState === "visible") scheduleCheck();
+    if (typeof document === "undefined") return;
+    if (document.visibilityState === "visible") scheduleCheck();
+    else scheduleAutoReload();
   };
   if (intervalMs > 0) interval = setInterval(scheduleCheck, intervalMs);
   if (typeof window !== "undefined" && options.checkOnFocus !== false) {
@@ -146,6 +251,9 @@ export function watchFrontendRelease(options: FrontendReleaseWatchOptions = {}):
   if (typeof document !== "undefined" && options.checkOnVisibility !== false) {
     document.addEventListener("visibilitychange", visibilityHandler);
   }
+  if (typeof document !== "undefined" && autoReload === "safe") {
+    for (const eventName of ACTIVITY_EVENTS) document.addEventListener(eventName, onActivity, true);
+  }
 
   // Establish the baseline immediately. A tab that starts on an old bundle
   // keeps that release ID and reports the next activation as an update.
@@ -153,19 +261,7 @@ export function watchFrontendRelease(options: FrontendReleaseWatchOptions = {}):
 
   return {
     check,
-    stop() {
-      stopped = true;
-      if (interval !== null) {
-        clearInterval(interval);
-        interval = null;
-      }
-      if (typeof window !== "undefined" && options.checkOnFocus !== false) {
-        window.removeEventListener("focus", scheduleCheck);
-      }
-      if (typeof document !== "undefined" && options.checkOnVisibility !== false) {
-        document.removeEventListener("visibilitychange", visibilityHandler);
-      }
-    },
+    stop: stopWatcher,
     currentReleaseId() {
       return currentReleaseId;
     },

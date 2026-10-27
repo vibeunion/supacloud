@@ -112,22 +112,29 @@ reflection-free.
 
 ## Frontend Release Discovery
 
-Browser applications can watch the platform's immutable frontend release
-pointer from `@supacloud/app/browser`:
+Browser applications can enable zero-configuration update handling with one
+call:
 
 ```ts
 import { watchFrontendRelease } from "@supacloud/app/browser";
 
-const watcher = watchFrontendRelease({
-  onUpdate: ({ releaseId }) => showRefreshBanner(releaseId),
-});
+const watcher = watchFrontendRelease();
+// watcher.stop() on application teardown
 ```
 
 The watcher reads `/.well-known/supacloud-frontend-release` with `cache:
-"no-store"`, keeps the first observed `release_id` as its baseline, and reports
-each later change once. It also dispatches
-`supacloud:frontend-update-available` on `window`. It never reloads the page;
-applications must preserve unsaved work and decide when to prompt the user.
+"no-store"`, keeps the first observed `release_id` as its baseline, and handles
+each later change once. By default (`autoReload: "safe"`):
+
+- hidden tabs reload immediately;
+- visible tabs reload after 30 seconds without activity, but only when no
+  editable control is focused and no modal, unsaved or busy marker is present;
+- `dialog[open]`, `[aria-modal="true"]`, `[data-supacloud-unsaved="true"]` and
+  `[data-supacloud-busy="true"]` defer the reload.
+
+It also dispatches `supacloud:frontend-update-available` on `window` and accepts
+an optional `onUpdate` callback for custom banners. Set `autoReload: "never"` to
+disable automatic reload entirely.
 
 ## Runtime Boundary
 

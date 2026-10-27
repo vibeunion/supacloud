@@ -360,30 +360,35 @@ Content-Type: application/json; charset=utf-8
 `no-cache`，内容哈希资源继续使用 `immutable` 长缓存；不要为了更新提示把静态资源改成
 `no-store`。
 
-浏览器可以在启动时记录一次 `release_id`，之后在定时器或页面重新聚焦时比较。平台不会
-自动刷新用户页面，也不会中断未保存草稿。`@supacloud/app/browser` 提供无 UI 的监听器：
+浏览器在应用启动时调用一次即可，默认开箱即用：
 
 ```ts
-import {
-  FRONTEND_UPDATE_EVENT,
-  watchFrontendRelease,
-} from "@supacloud/app/browser";
+import { watchFrontendRelease } from "@supacloud/app/browser";
 
-const watcher = watchFrontendRelease({
-  intervalMs: 5 * 60_000,
-  onUpdate: ({ previousReleaseId, releaseId }) => {
-    console.info("frontend release changed", previousReleaseId, releaseId);
-    // 由应用决定何时提示刷新；有未保存内容时不要直接 reload。
-  },
-});
+const watcher = watchFrontendRelease();
 
-// 也可以只监听浏览器事件：
-window.addEventListener(FRONTEND_UPDATE_EVENT, (event) => {
+// 应用销毁时停止；普通 SPA 也可以不处理，页面刷新后自然结束。
+watcher.stop();
+```
+
+默认 `autoReload: "safe"`：
+
+- 页面在后台时，发现新发布立即刷新；
+- 页面在前台时，静默等待 30 秒；期间没有键盘/鼠标/滚动活动，且没有输入框焦点、
+  打开的弹窗、上传/任务中标记时自动刷新；
+- 以下 DOM 标记会阻止自动刷新，等条件解除或页面转入后台后再刷新：
+  - `dialog[open]`
+  - `[aria-modal="true"]`
+  - `[data-supacloud-unsaved="true"]`
+  - `[data-supacloud-busy="true"]`
+- 应用仍可通过 `onUpdate` 或 `supacloud:frontend-update-available` 事件展示自己的提示；
+  不需要提示时无需任何回调；
+- 需要完全禁用自动刷新时显式设置 `autoReload: "never"`。
+
+```ts
+window.addEventListener("supacloud:frontend-update-available", (event) => {
   console.info("new frontend release", event.detail.releaseId);
 });
-
-// 页面卸载或应用销毁时停止轮询。
-watcher.stop();
 ```
 
 Legacy 静态部署、SSR 和反向代理部署没有不可变 `release_id`，不会暴露该指针。

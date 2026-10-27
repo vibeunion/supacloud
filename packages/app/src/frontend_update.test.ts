@@ -45,6 +45,7 @@ describe("frontend release pointer", () => {
       checkOnFocus: false,
       checkOnVisibility: false,
       dispatchEvent: false,
+      autoReload: "never",
       onUpdate: ({ previousReleaseId, releaseId }) => updates.push({ previousReleaseId, releaseId }),
     });
 
@@ -81,6 +82,7 @@ describe("frontend release pointer", () => {
       checkOnFocus: false,
       checkOnVisibility: false,
       dispatchEvent: false,
+      autoReload: "never",
       onUpdate: (update) => updates.push(update.releaseId),
       onError: (error) => errors.push(error),
     });
@@ -95,4 +97,84 @@ describe("frontend release pointer", () => {
 
     watcher.stop();
   });
+  test("auto reloads while hidden without any application wiring", async () => {
+    const hadDocument = "document" in globalThis;
+    const hadWindow = "window" in globalThis;
+    const previousDocument = (globalThis as any).document;
+    const previousWindow = (globalThis as any).window;
+    const documentTarget = Object.assign(new EventTarget(), {
+      visibilityState: "hidden",
+      activeElement: null,
+      querySelector: () => null,
+    });
+    const windowTarget = new EventTarget();
+    Object.defineProperty(globalThis, "document", { value: documentTarget, configurable: true });
+    Object.defineProperty(globalThis, "window", { value: windowTarget, configurable: true });
+    let reloads = 0;
+
+    try {
+      const { fetcher } = sequenceFetch([RELEASE_A, RELEASE_B]);
+      const watcher = watchFrontendRelease({
+        fetch: fetcher,
+        intervalMs: 0,
+        checkOnFocus: false,
+        dispatchEvent: false,
+        reload: () => { reloads += 1; },
+      });
+
+      await watcher.check();
+      expect(reloads).toBe(0);
+      await watcher.check();
+      expect(reloads).toBe(1);
+      await watcher.check();
+      expect(reloads).toBe(1);
+      watcher.stop();
+    } finally {
+      if (hadDocument) Object.defineProperty(globalThis, "document", { value: previousDocument, configurable: true });
+      else delete (globalThis as any).document;
+      if (hadWindow) Object.defineProperty(globalThis, "window", { value: previousWindow, configurable: true });
+      else delete (globalThis as any).window;
+    }
+  });
+
+  test("auto reloads a visible idle page after the default grace period", async () => {
+    const hadDocument = "document" in globalThis;
+    const hadWindow = "window" in globalThis;
+    const previousDocument = (globalThis as any).document;
+    const previousWindow = (globalThis as any).window;
+    const documentTarget = Object.assign(new EventTarget(), {
+      visibilityState: "visible",
+      activeElement: null,
+      querySelector: () => null,
+    });
+    const windowTarget = new EventTarget();
+    Object.defineProperty(globalThis, "document", { value: documentTarget, configurable: true });
+    Object.defineProperty(globalThis, "window", { value: windowTarget, configurable: true });
+    let reloads = 0;
+
+    try {
+      const { fetcher } = sequenceFetch([RELEASE_A, RELEASE_B]);
+      const watcher = watchFrontendRelease({
+        fetch: fetcher,
+        intervalMs: 0,
+        checkOnFocus: false,
+        dispatchEvent: false,
+        autoReloadIdleMs: 10,
+        reload: () => { reloads += 1; },
+      });
+
+      await watcher.check();
+      await watcher.check();
+      expect(reloads).toBe(0);
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(reloads).toBe(1);
+      watcher.stop();
+    } finally {
+      if (hadDocument) Object.defineProperty(globalThis, "document", { value: previousDocument, configurable: true });
+      else delete (globalThis as any).document;
+      if (hadWindow) Object.defineProperty(globalThis, "window", { value: previousWindow, configurable: true });
+      else delete (globalThis as any).window;
+    }
+  });
+
 });
