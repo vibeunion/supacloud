@@ -251,12 +251,23 @@ test("CLI exposes structured builds and rejects write-like preview flags", async
   } finally { await rm(project, {recursive: true, force: true}); }
 }, 60_000);
 
-test("rejects function targets until function rendering is implemented", async () => {
+test("builds a standalone Function target without an application graph", async () => {
   const project = await mkdtemp(join(tmpdir(), "delivery-function-"));
   try {
     await writeFixtureProject(project, {
-      ...GOOD_PROJECT_FILES,
-      "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
+      "tsconfig.json": `{
+        "compilerOptions": {
+          "target": "ES2022",
+          "module": "ESNext",
+          "moduleResolution": "bundler",
+          "strict": true
+        }
+      }`,
+      "src/function.ts": `export default {
+        fetch(request: Request) {
+          return new Response(new URL(request.url).pathname);
+        },
+      };`,
     });
     const result = await buildDeliveryProject({
       rootDir: project, outDir: join(project, "generated"), strict: false,
@@ -265,11 +276,20 @@ test("rejects function targets until function rendering is implemented", async (
       version: 1,
       targets: [{
         name: "intake-hooks", kind: "function",
-        function: { slug: "fa-intake-hooks", entrypoint: "src/runtime.ts", verifyJwt: false },
+        function: { slug: "fa-intake-hooks", entrypoint: "src/function.ts", verifyJwt: false },
       }],
     });
-    expect(result.ok).toBe(false);
-    expect(result.manifest).toBeNull();
-    expect(result.diagnostics.map((item) => item.code)).toContain("delivery-function-build-unsupported");
+    if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+    const object = requireValue(result.manifest.objects.find((item) => item.name === "intake-hooks"));
+    expect(object.entryKind).toBe("bun-function-application");
+    expect(result.manifest.routes).toEqual([]);
+    expect(result.manifest.jobs).toEqual([]);
+    const bundle = join(project, "generated/delivery/objects", object.objectId, "bundle");
+    expect(JSON.parse(await readFile(join(bundle, "function.json"), "utf8")))
+      .toEqual({ slug: "fa-intake-hooks", entrypoint: "src/function.ts", verifyJwt: false });
+    await expect(readFile(join(bundle, "app.manifest.json"))).rejects.toThrow();
+    const loaded = await import(join(bundle, "index.js"));
+    const handler = loaded.default as { fetch(request: Request): Response | Promise<Response> };
+    expect(await (await handler.fetch(new Request("http://edge.test/intake"))).text()).toBe("/intake");
   } finally { await rm(project, { recursive: true, force: true }); }
 }, 120_000);
