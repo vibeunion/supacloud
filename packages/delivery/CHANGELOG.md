@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.21.1...delivery-v0.22.0) (2026-10-27)
+
+
+### Features
+
+* **compiler:** build module-owned Function targets ([#2271](https://github.com/vibeunion/supacloud/issues/2271)) ([2baa6cd](https://github.com/vibeunion/supacloud/commit/2baa6cd3b900059ff5e4211abeee4be54b06eae1))
+
 ## [0.21.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.21.0...delivery-v0.21.1) (2026-10-25)
 
 
