@@ -59,6 +59,7 @@ export interface EdgeFunctionLimits {
   max_request_body_bytes?: number;
   max_response_body_bytes?: number;
   wait_until_timeout_ms?: number;
+  max_heap_bytes?: number;
 }
 
 export const EDGE_FUNCTION_FRAMEWORKS = [
@@ -719,6 +720,8 @@ function validatedFunctionConfig(
 const MAX_FUNCTION_TIMEOUT_MS = 900_000;
 const MAX_FUNCTION_BODY_BYTES = Number.MAX_SAFE_INTEGER;
 const MAX_WAIT_UNTIL_TIMEOUT_MS = 900_000;
+// Keep the declared ceiling aligned with the Edge Runtime activation parser.
+const MAX_FUNCTION_HEAP_BYTES = 512 * 1024 * 1024;
 const FUNCTION_HOST_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
 function validatedStringList(value: unknown, field: string): string[] {
@@ -796,6 +799,13 @@ function validatedFunctionLimits(value: unknown): EdgeFunctionLimits {
       record["wait_until_timeout_ms"],
       "limits.wait_until_timeout_ms",
       MAX_WAIT_UNTIL_TIMEOUT_MS,
+    );
+  }
+  if (record["max_heap_bytes"] !== undefined) {
+    limits.max_heap_bytes = validatedPositiveLimit(
+      record["max_heap_bytes"],
+      "limits.max_heap_bytes",
+      MAX_FUNCTION_HEAP_BYTES,
     );
   }
   return limits;

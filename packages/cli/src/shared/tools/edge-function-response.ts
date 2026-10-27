@@ -15,6 +15,7 @@ type FunctionLimits = {
     max_request_body_bytes?: number;
     max_response_body_bytes?: number;
     wait_until_timeout_ms?: number;
+    max_heap_bytes?: number;
 };
 const LIST_STRING_FIELDS = [
     "id",
@@ -104,6 +105,7 @@ export function projectedFunctionLimits(candidate: unknown): FunctionLimits | nu
         max_request_body_bytes: Number.MAX_SAFE_INTEGER,
         max_response_body_bytes: Number.MAX_SAFE_INTEGER,
         wait_until_timeout_ms: 900_000,
+        max_heap_bytes: 512 * 1024 * 1024,
     };
     for (const field of Object.keys(maxima) as Array<keyof FunctionLimits>) {
         const value = record[field];

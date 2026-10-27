@@ -51,7 +51,7 @@ cannot override these pool-level controls. Restart the runtime after changes.
 | `EDGE_BODY_BUFFER_BUDGET_BYTES` | 268435456 (256 MiB) | Shared foreground/background logical body reservations |
 | `EDGE_RESPONSE_BUFFER_BUDGET_BYTES` | 268435456 (256 MiB) | Shared response read-ahead reservation cap, included in the overall body budget |
 | `EDGE_RESPONSE_READ_AHEAD_BYTES` | 16777216 (16 MiB) | Per-response read-ahead window; zero selects strict demand-driven transport |
-| `EDGE_WORKER_HEAP_BUDGET_BYTES` | 134217728 (128 MiB) | Collect a completed Worker heap above this threshold, then retire if it remains over budget |
+| `EDGE_WORKER_HEAP_BUDGET_BYTES` | 134217728 (128 MiB) | Default heap budget for a Function without `limits.max_heap_bytes`; collect above it, then retire if it remains over budget |
 | `EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS` | 250 | Minimum gap between `bun:jsc.heapStats()` heap samples per Worker; `0` samples after every execution |
 | `EDGE_MODULE_BUDGET_BYTES` | 33554432 (32 MiB) | Retire on lifetime imported entry artifact/bytecode bytes above this threshold |
 | `EDGE_MODULE_GENERATION_LIMIT` | 100 | Retire after this many distinct module identities in one Worker generation |
@@ -69,6 +69,18 @@ headroom is available. Strict read-ahead zero minimizes buffers but keeps
 Workers occupied by slow consumers, increasing queue latency. Both modes retain
 one handler per Worker because per-request environment and global policy change.
 
+A Function may override the host default with
+`limits.max_heap_bytes` (1 byte through 512 MiB). The value is part of the
+activation manifest, so it is attested with the artifact and applies to both
+preheat and execution. It raises or lowers the completion-time GC threshold for
+that Function without changing the default for other Functions in the same
+pool. The host-level `EDGE_WORKER_HEAP_BUDGET_BYTES` remains the default rather
+than a hard per-Function maximum. A preheat that exceeds the effective budget
+fails with `EDGE_WORKER_HEAP_BUDGET_EXCEEDED` and reports `heapSize`,
+`heapBudgetBytes`, `importedModuleBytes`, and `importedModuleCount`. Because all
+Functions share host memory, the sum of declared budgets is not an aggregate
+quota; keep systemd/cgroup limits as the final boundary.
+
 Removing entries from the handler LRU does not unload JSC modules. Lifetime
 import counters survive cache eviction/invalidation and reset only on Worker
 replacement. Artifact byte counts are estimates, not the size of the complete
@@ -77,6 +89,11 @@ post-execution/preheat heap telemetry. A preheat that exceeds a budget fails
 instead of attesting a Worker that is immediately discarded. Existing process
 recycle limits still bound long-term Worker churn. These are soft completion-time
 limits; CPU-blocking or memory-hungry tenant code still needs OS process limits.
+
+A larger `max_heap_bytes` also delays pressure collection, so size it from the
+Function's measured cold-start heap, not from its upload or bundle size. A
+Function whose cold bundle imports tens of MiB may legitimately need 256 MiB even
+though the artifact is small.
 
 `heapStats()` walks the isolate heap, so it costs hundreds of microseconds on a
 warm Worker and milliseconds once a tenant retains live data. Sampling it on every

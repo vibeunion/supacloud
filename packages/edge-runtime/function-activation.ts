@@ -12,6 +12,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_FUNCTION_TIMEOUT_MS = 900_000;
 const MAX_FUNCTION_BODY_BYTES = Number.MAX_SAFE_INTEGER;
 const MAX_WAIT_UNTIL_TIMEOUT_MS = 900_000;
+const MAX_FUNCTION_HEAP_BYTES = 512 * 1024 * 1024;
 const AUTHORITY_KEYS = [
   "activation_generation",
   "activation_id",
@@ -46,6 +47,7 @@ export type EdgeFunctionActivationConfig = {
     max_request_body_bytes?: number;
     max_response_body_bytes?: number;
     wait_until_timeout_ms?: number;
+    max_heap_bytes?: number;
   };
 };
 
@@ -179,6 +181,7 @@ function parseLimits(value: unknown): EdgeFunctionActivationConfig["limits"] {
     max_request_body_bytes: MAX_FUNCTION_BODY_BYTES,
     max_response_body_bytes: MAX_FUNCTION_BODY_BYTES,
     wait_until_timeout_ms: MAX_WAIT_UNTIL_TIMEOUT_MS,
+    max_heap_bytes: MAX_FUNCTION_HEAP_BYTES,
   } as const;
   const positive = (candidate: unknown, max: number): candidate is number =>
     typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0 && candidate <= max;
@@ -192,6 +195,7 @@ function parseLimits(value: unknown): EdgeFunctionActivationConfig["limits"] {
     ...(positive(value.max_request_body_bytes, maxima.max_request_body_bytes) ? { max_request_body_bytes: value.max_request_body_bytes } : {}),
     ...(positive(value.max_response_body_bytes, maxima.max_response_body_bytes) ? { max_response_body_bytes: value.max_response_body_bytes } : {}),
     ...(positive(value.wait_until_timeout_ms, maxima.wait_until_timeout_ms) ? { wait_until_timeout_ms: value.wait_until_timeout_ms } : {}),
+    ...(positive(value.max_heap_bytes, maxima.max_heap_bytes) ? { max_heap_bytes: value.max_heap_bytes } : {}),
   };
 }
 

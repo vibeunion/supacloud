@@ -226,10 +226,18 @@ activation and is rechecked by the runtime before dispatch:
     "timeout_ms": 30000,
     "max_request_body_bytes": 1048576,
     "max_response_body_bytes": 4194304,
-    "wait_until_timeout_ms": 60000
+    "wait_until_timeout_ms": 60000,
+    "max_heap_bytes": 268435456
   }
 }
 ```
+
+`max_heap_bytes` overrides the host's default completion-time Worker heap budget
+for this Function (1 byte through 512 MiB). It is enforced during preheat and
+after execution; a preheat over budget fails with a structured
+`EDGE_WORKER_HEAP_BUDGET_EXCEEDED` diagnostic instead of attesting a Worker that
+would be discarded immediately. It is a soft completion-time control, not a
+hard allocation sandbox, and does not change the aggregate host cgroup limit.
 
 `secrets` is an allow-list for injected tenant secrets. When it is omitted,
 legacy injection behavior is retained; when present, only named secrets are

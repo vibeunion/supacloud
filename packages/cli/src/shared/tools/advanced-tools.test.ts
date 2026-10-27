@@ -404,10 +404,13 @@ describe("edge_functions CLI tool", () => {
             action: "config",
             ref: "proj",
             slug: "render",
-            limits: '{"max_request_body_bytes": 524288000}',
+            limits: '{"max_request_body_bytes": 524288000, "max_heap_bytes": 268435456}',
             "expected-activation-id": EXPECTED_ACTIVATION_ID,
         });
-        expect(parsed.limits).toEqual({ max_request_body_bytes: 524288000 });
+        expect(parsed.limits).toEqual({
+            max_request_body_bytes: 524288000,
+            max_heap_bytes: 268435456,
+        });
     });
 
     test("returns a friendly error for invalid limits JSON", () => {
