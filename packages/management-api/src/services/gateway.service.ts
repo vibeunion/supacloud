@@ -15,7 +15,12 @@ import { isRecord, recordOrEmpty } from "../utils/record";
 import { stableStringify } from "../utils/stable-json";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
-import { FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE } from "./frontend-release-contract";
+import {
+    FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
+    FRONTEND_RELEASE_POINTER_PATH,
+    FRONTEND_RELEASE_POINTER_SCHEMA,
+    assertReleaseId,
+} from "./frontend-release-contract";
 import {
     APPLICATION_ROUTE_PREFIX, applicationGatewayProjectRef, applicationGatewayRoute, assertApplicationGatewayHosts,
     verifyApplicationGatewayRoutes, verifyApplicationGatewayActivationAbsent, type ApplicationGatewayInput,
@@ -201,6 +206,7 @@ export interface FrontendGatewayRoute {
     port?: number;
     root?: string;
     mode?: "proxy" | "static";
+    releaseId?: string;
 }
 
 interface CaddyGatewayFileOperations {
@@ -1342,6 +1348,33 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private makeStaticReleasePointerRoute(releaseId: string): CaddyRoute {
+        assertReleaseId(releaseId);
+        return {
+            match: [{ path: [FRONTEND_RELEASE_POINTER_PATH] }],
+            handle: [
+                {
+                    handler: "headers",
+                    response: {
+                        set: {
+                            "Cache-Control": ["no-store"],
+                            "Content-Type": ["application/json; charset=utf-8"],
+                        },
+                    },
+                },
+                {
+                    handler: "static_response",
+                    status_code: 200,
+                    body: JSON.stringify({
+                        schema: FRONTEND_RELEASE_POINTER_SCHEMA,
+                        release_id: releaseId,
+                    }),
+                },
+            ],
+            terminal: true,
+        };
+    }
+
     private makeStaticFrontendRoute(route: FrontendGatewayRoute): CaddyRoute {
         if (!route.root) {
             throw new Error("Caddy static frontend routes require a root directory");
@@ -1363,6 +1396,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 {
                     handler: "subroute",
                     routes: [
+                        ...(route.releaseId ? [this.makeStaticReleasePointerRoute(route.releaseId)] : []),
                         this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif"),
                         this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp"),
                         this.makeStaticAssetRoute(route.root, immutableCache),

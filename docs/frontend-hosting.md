@@ -344,6 +344,50 @@ curl -X POST http://localhost:9090/v1/projects/my-project/frontend/deployments/a
 默认域名格式为 `<部署ID>.<项目ref>.<BASE_DOMAIN>`；静态站点由 Caddy 直接提供文件服务，
 SSR 站点则由 Caddy 反向代理到对应的受管进程。无需安装或维护 Nginx。
 
+## 前端发布版本指针
+
+不可变静态发布激活后，托管域名会提供同源、只读的当前发布指针：
+
+```text
+GET /.well-known/supacloud-frontend-release
+Cache-Control: no-store
+Content-Type: application/json; charset=utf-8
+
+{"schema":"supacloud.frontend-release-pointer.v1","release_id":"<64位sha256>"}
+```
+
+该指针只用于发现新旧版本，不包含项目配置、环境变量或凭据。HTML 与 SPA fallback 继续使用
+`no-cache`，内容哈希资源继续使用 `immutable` 长缓存；不要为了更新提示把静态资源改成
+`no-store`。
+
+浏览器可以在启动时记录一次 `release_id`，之后在定时器或页面重新聚焦时比较。平台不会
+自动刷新用户页面，也不会中断未保存草稿。`@supacloud/app/browser` 提供无 UI 的监听器：
+
+```ts
+import {
+  FRONTEND_UPDATE_EVENT,
+  watchFrontendRelease,
+} from "@supacloud/app/browser";
+
+const watcher = watchFrontendRelease({
+  intervalMs: 5 * 60_000,
+  onUpdate: ({ previousReleaseId, releaseId }) => {
+    console.info("frontend release changed", previousReleaseId, releaseId);
+    // 由应用决定何时提示刷新；有未保存内容时不要直接 reload。
+  },
+});
+
+// 也可以只监听浏览器事件：
+window.addEventListener(FRONTEND_UPDATE_EVENT, (event) => {
+  console.info("new frontend release", event.detail.releaseId);
+});
+
+// 页面卸载或应用销毁时停止轮询。
+watcher.stop();
+```
+
+Legacy 静态部署、SSR 和反向代理部署没有不可变 `release_id`，不会暴露该指针。
+
 ## 目录结构
 
 ```

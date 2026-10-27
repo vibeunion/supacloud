@@ -145,6 +145,10 @@ export class FrontendReleaseService {
     return this.storage.activeBuildDir(projectRef, deploymentId);
   }
 
+  async activeReleaseId(projectRef: string, deploymentId: string): Promise<string | null> {
+    return (await this.storage.activeRelease(projectRef, deploymentId))?.release_id ?? null;
+  }
+
   hasActiveRelease(projectRef: string, deploymentId: string): Promise<boolean> {
     return this.storage.hasActiveRelease(projectRef, deploymentId);
   }

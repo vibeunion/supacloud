@@ -110,6 +110,25 @@ compatibility adapter. SupaCloud decorators retain module/compiler metadata,
 while production application factories remain compiler-generated and
 reflection-free.
 
+## Frontend Release Discovery
+
+Browser applications can watch the platform's immutable frontend release
+pointer from `@supacloud/app/browser`:
+
+```ts
+import { watchFrontendRelease } from "@supacloud/app/browser";
+
+const watcher = watchFrontendRelease({
+  onUpdate: ({ releaseId }) => showRefreshBanner(releaseId),
+});
+```
+
+The watcher reads `/.well-known/supacloud-frontend-release` with `cache:
+"no-store"`, keeps the first observed `release_id` as its baseline, and reports
+each later change once. It also dispatches
+`supacloud:frontend-update-available` on `window`. It never reloads the page;
+applications must preserve unsaved work and decide when to prompt the user.
+
 ## Runtime Boundary
 
 Angular is the runtime DI engine: `InjectionToken`, hierarchical injectors,

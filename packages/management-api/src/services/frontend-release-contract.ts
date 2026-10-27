@@ -18,6 +18,8 @@ export const FRONTEND_RELEASE_LIST_MAX_LIMIT = 100;
 export const FRONTEND_RELEASE_SCHEMA = FRONTEND_ARCHIVE_RELEASE_SCHEMA;
 export const FRONTEND_ACTIVE_RELEASE_SCHEMA = "supacloud.frontend-active-release.v1" as const;
 export const FRONTEND_ACTIVATION_CHECKPOINT_SCHEMA = "supacloud.frontend-release-activation.v1" as const;
+export const FRONTEND_RELEASE_POINTER_SCHEMA = "supacloud.frontend-release-pointer.v1" as const;
+export const FRONTEND_RELEASE_POINTER_PATH = "/.well-known/supacloud-frontend-release" as const;
 export const FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE = "CADDY_GATEWAY_DURABILITY_UNKNOWN" as const;
 export const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,20}$/;
 export const DEPLOYMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -133,6 +135,7 @@ export interface FrontendReleaseGateway {
     hosts: string[];
     root: string;
     mode: "static";
+    releaseId?: string;
   }): Promise<void>;
   removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
   readFrontendStaticRoot(projectRef: string, deploymentId: string): Promise<string | null>;

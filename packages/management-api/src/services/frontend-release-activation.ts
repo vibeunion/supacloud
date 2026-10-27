@@ -410,6 +410,7 @@ export class FrontendReleaseActivationService {
       hosts: [deployment.domain, ...deployment.custom_domains],
       root: this.storage.releaseBuildDir(deployment.project_ref, deployment.id, release.release_id),
       mode: "static" as const,
+      releaseId: release.release_id,
     };
     await this.gateway.configureFrontendRoute(route);
   }
