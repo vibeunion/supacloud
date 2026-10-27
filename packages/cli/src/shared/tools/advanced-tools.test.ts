@@ -338,6 +338,36 @@ describe("edge_functions CLI tool", () => {
         });
     });
 
+    test("accepts an exact top-level deploy identity when config omits version", async () => {
+        const base = confirmedFunctionMutation("api");
+        const { version: _version, ...configWithoutVersion } = base.data.config;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => ({
+                ...base,
+                data: { ...base.data, config: configWithoutVersion },
+            }),
+        });
+
+        const response = await callback({
+            action: "deploy",
+            ref: "proj",
+            slug: "api",
+            code: "export default () => new Response('ok');",
+            "expected-active-version": "3",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+
+        expect(JSON.parse(response.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.deploy",
+            project_ref: "proj",
+            slug: "api",
+            active_version: "4",
+            version: "4",
+            activation_id: COMMITTED_ACTIVATION_ID,
+        });
+    });
+
     test("parses a bundle file map from a CLI JSON string", () => {
         const { schema } = captureEdgeFunctionsTool({});
         const parsed = parseToolArguments(schema, {

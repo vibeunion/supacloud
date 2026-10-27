@@ -840,9 +840,13 @@ function confirmedMutationVersion(
     expectation: FunctionMutationExpectation,
 ): string | null {
     const activeVersion = receipt.active_version;
+    // `config.version` is not present in every historical Management API deployment snapshot.
+    // The top-level version/active_version pair is still CAS-bound, so accept an omitted config
+    // version while continuing to reject any contradictory value (issue: false OUTCOME_UNKNOWN).
+    const configVersion = config.version;
     if (!validReceiptVersion(activeVersion)
         || receipt.version !== activeVersion
-        || config.version !== activeVersion
+        || (configVersion !== undefined && configVersion !== activeVersion)
         || (expectation.targetVersion !== undefined && activeVersion !== expectation.targetVersion)) {
         return null;
     }

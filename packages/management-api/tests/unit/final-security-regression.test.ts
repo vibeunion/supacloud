@@ -1323,6 +1323,48 @@ describe("final security regressions", () => {
     }
   });
 
+  test("deploy response backfills config version for release-control confirmation", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockImplementationOnce(async (release) => ({
+      success: true,
+      previous_active_version: release.expectedActiveVersion,
+      active_version: "4",
+      version: "4",
+      activation_id: nextActivationId,
+      config: {
+        verify_jwt: release.config?.verify_jwt ?? true,
+        background_routes: release.config?.background_routes ?? [],
+        activation_id: nextActivationId,
+      },
+    }));
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/versionless-config-fn", {
+        method: "POST",
+        headers: jsonMasterHeaders,
+        body: JSON.stringify({
+          code: "export default { fetch() { return new Response('ok') } }",
+          expected_active_version: "absent",
+          expected_activation_id: "legacy",
+          verify_jwt: false,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        version: "4",
+        active_version: "4",
+        config: {
+          version: "4",
+          activation_id: nextActivationId,
+          verify_jwt: false,
+        },
+      });
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
   test("internal runtime env endpoint requires master auth and returns unmasked values", async () => {
     const runtimeEnvSpy = spyOn(runtimeEnvService, "buildProjectRuntimeEnv").mockResolvedValue({
       SUPACLOUD_PROJECT_REF: "proj_1",
