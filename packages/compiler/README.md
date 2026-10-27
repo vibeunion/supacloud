@@ -594,6 +594,42 @@ parameters、requestBody、responses、securitySchemes 以及 `x-supacloud` 路�
 因此不会维护第二份 API contract。默认包含 bearer JWT scheme；项目可在
 `openApi` 配置中补充文档信息、servers 和其他显式 security schemes。
 
+内存受限的业务进程可配置 `openApi: { snapshots: false }`，只生成
+`createOpenApiDocument` 和 `serializeOpenApiDocument` 工厂，不导出
+`OPENAPI_DOCUMENT` / `OPENAPI_JSON`，也不在模块加载时转换完整文档或序列化 JSON。
+例如：
+
+```ts
+export default defineSupacloudConfig({
+  generateOpenApi: true,
+  openApi: { title: "Orders API", version: "1.0.0", snapshots: false },
+});
+```
+
+重新生成后，可将工厂传给可选文档插件，按请求创建文档：
+
+```ts
+import { createOpenApiDocument } from "./generated/openapi";
+
+const documentation = {
+  openApi: { document: createOpenApiDocument },
+};
+// createApplication({ ..., documentation })
+```
+
+该模式仍加载文档所引用的 schema 和路由定义，但不会缓存生成的文档对象或 JSON
+字符串。`serializeOpenApiDocument()` 每次调用都会创建并序列化一份新文档；传入
+显式 document 时直接序列化该对象。应用路由的响应校验不受影响。
+
+需要彻底移出业务进程时，在构建/发布阶段使用下方 `openapi-export` 导出静态
+`openapi.json`，由静态服务或独立文档入口提供，业务入口不再导入生成的 OpenAPI
+模块。GraphQL SDL 同样可直接发布已有 `schema.graphql` 文件；生成的 GraphQL
+查询和结果校验应继续保留。部署必须显式携带这些静态文件，单文件函数 bundle
+不能假设请求时可访问源码目录。
+
+`snapshots` 默认仍为 `true`，保持旧导出兼容。快照初始化带有 pure 注解，支持该
+注解的打包器可移除未使用的快照；未打包导入默认模块仍会创建两份快照。
+
 `OPENAPI_JSON` 是运行时快照；需要提交独立 `openapi.json` 时，在应用已经能加载
 生成模块的运行时调用 `exportGeneratedOpenApiJson()` 或直接写出该字符串。编译器
 不会为了生成 JSON 执行应用 schema。`readOpenApiJson()` 和
@@ -625,7 +661,8 @@ supacloud-compiler openapi-export ./generated/openapi.ts ./generated/openapi.jso
 supacloud-compiler openapi-diff ./contracts/openapi.base.json ./generated/openapi.json --json
 ```
 
-`openapi-export` 在运行时加载生成的 `openapi.ts` 并原子地写出独立 JSON；它不会在
+`openapi-export` 在运行时加载生成的 `openapi.ts` 并原子地写出独立 JSON；也支持
+`snapshots: false` 的模块，此时调用 `createOpenApiDocument()`。它不会在
 编译阶段执行应用 schema。可用 `--space 0` 到 `--space 10` 控制缩进，重复执行不会
 改写内容不变的文件。当前只承诺 JSON 输出，YAML 转换由发布流水线按需处理。
 

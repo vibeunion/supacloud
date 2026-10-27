@@ -599,6 +599,8 @@ export type OpenApiSecurityScheme =
     };
 
 export interface OpenApiOptions {
+  /** Emit eager document and JSON snapshots for compatibility. Set false for factory-only imports. Defaults to true. */
+  snapshots?: boolean;
   title?: string;
   version?: string;
   description?: string;

@@ -2190,6 +2190,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
 export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions): string {
   const rootDir = options?.rootDir ?? process.cwd();
   const outDir = options?.outDir ?? process.cwd();
+  const snapshots = options?.openApi?.snapshots !== false;
   const imports = new ImportManager();
   const schemaLocals = new Map<string, string>();
   const schemaComponents = new Map<string, string>();
@@ -2719,14 +2720,18 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  };",
     "}",
     "",
-    "export const OPENAPI_DOCUMENT = createOpenApiDocument();",
-    "",
-    "export function serializeOpenApiDocument(document: OpenApiDocument = OPENAPI_DOCUMENT, space = 2): string {",
+    ...(snapshots ? [
+      "export const OPENAPI_DOCUMENT = /* @__PURE__ */ createOpenApiDocument();",
+      "",
+    ] : []),
+    `export function serializeOpenApiDocument(document: OpenApiDocument = ${snapshots ? "OPENAPI_DOCUMENT" : "createOpenApiDocument()"}, space = 2): string {`,
     "  return JSON.stringify(document, null, space) + \"\\n\";",
     "}",
     "",
-    "export const OPENAPI_JSON = serializeOpenApiDocument();",
-    "",
+    ...(snapshots ? [
+      "export const OPENAPI_JSON = /* @__PURE__ */ serializeOpenApiDocument();",
+      "",
+    ] : []),
   ].join("\n");
 }
 
