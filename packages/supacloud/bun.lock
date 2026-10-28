@@ -5,7 +5,7 @@
     "": {
       "name": "supacloud",
       "dependencies": {
-        "@supacloud/admin": "^0.30.1",
+        "@supacloud/admin": "^0.30.2",
         "@supacloud/cli": "^0.110.1",
       },
       "devDependencies": {
@@ -21,7 +21,7 @@
   "packages": {
     "@pgsql/types": ["@pgsql/types@18.0.0", "", {}, "sha512-jtAY4JU7jdVYZ/Vv3zlZqVP+FRWZokyCLKPPCnAApiaJAElpyyiMC3HRiquBu29kSrVs+rkqZD50SUIb/zyEGw=="],
 
-    "@supacloud/admin": ["@supacloud/admin@0.30.1", "", { "dependencies": { "@supacloud/cli": "0.109.0", "@supacloud/delivery": "0.21.1", "ssh2": "^1.17.0", "typebox": "1.4.2" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-iedFUBElGQHg6Mog4PYNan0ZPH+YM+qHjv0N6QwrCn3H5GeAm7VhM8NdVMaOz97yIWIktGNmCJ0NIercIIvx3g=="],
+    "@supacloud/admin": ["@supacloud/admin@0.30.2", "", { "dependencies": { "@supacloud/cli": "0.109.1", "@supacloud/delivery": "0.21.1", "ssh2": "^1.17.0", "typebox": "1.4.2" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-j+ZoFtdK04Dm2uFJ99kX/kwIKgX4xnBHjxGTCCjrstsCyQ57IKC/JNI0IOEb1not2bL9/ZfnGyBZm489BK8cKw=="],
 
     "@supacloud/cli": ["@supacloud/cli@0.110.1", "", { "dependencies": { "@supacloud/compiler": "^0.52.0", "@supacloud/db": "0.20.1", "@supacloud/delivery": "0.22.0", "typebox": "1.4.2" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-+pDqeWC/JVTiby6Fu2iRnBQ/u9RQXk1UF3xbAasPcuttklAXPXfhfQZ9RHcnIhIsYdBfeX8tozvDnj5sKCnnYA=="],
 
@@ -103,7 +103,7 @@
 
     "undici-types": ["undici-types@8.12.3", "", {}, "sha512-EXE4ydL3S76dFb27UFjNVZHTyv/TLdATj/KUe29ptdcg6qXL48J2tZ3126E5kICj5jn781OR+XlVH1N6Mz8jbA=="],
 
-    "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.109.0", "", { "dependencies": { "@supacloud/compiler": "^0.51.1", "@supacloud/db": "0.20.1", "@supacloud/delivery": "0.21.1", "typebox": "1.4.2" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-dnyhLHNFPtliFbqIfD1UBy6TJg8FINIfb1h4jqpxRbsETvQnkGBV8E9TzwjETwILg2N/Rx7F7EKvdqR82Uw6pw=="],
+    "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.109.1", "", { "dependencies": { "@supacloud/compiler": "^0.51.1", "@supacloud/db": "0.20.1", "@supacloud/delivery": "0.21.1", "typebox": "1.4.2" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-d3bXG0F+fjShnSV1RZx3Y0XsCUDWOnAitnza/ca9gGWLmVqKLRDAmFd1eFGUrDRgeu1nWL1hj6XF7LxfzL9ZVQ=="],
 
     "@supacloud/admin/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
 
