@@ -741,6 +741,9 @@ jobs:
         working-directory: packages/admin
         run: |
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          # The admin prebuild compiles the workspace CLI's tool runtime, which
+          # needs the CLI's own dependencies even when no CLI release runs.
+          bun install --cwd ../cli --frozen-lockfile --registry https://registry.npmjs.org
           bun install --lockfile-only --registry https://registry.npmjs.org
           bun install --frozen-lockfile
           bun run build

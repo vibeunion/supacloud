@@ -131,3 +131,14 @@ test('every referenced *_released output is declared in the job outputs', () => 
     }
   }
 });
+
+test('admin publication installs workspace CLI dependencies before building', () => {
+  const adminStart = source.indexOf('- name: Publish admin to NPM');
+  assert.ok(adminStart >= 0, 'Missing the admin publish step');
+  const adminStep = source.slice(adminStart, source.indexOf('- name: Publish testing utilities to NPM', adminStart));
+  assert.match(adminStep, /bun install --cwd \.\.\/cli --frozen-lockfile/);
+  assert.ok(
+    adminStep.indexOf('bun install --cwd ../cli') < adminStep.indexOf('bun run build'),
+    'CLI dependencies must be installed before the admin build',
+  );
+});
