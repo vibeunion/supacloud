@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.124.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.124.0...management-api-v0.124.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **edge-functions:** confirm deploys without config.version ([#2277](https://github.com/vibeunion/supacloud/issues/2277)) ([2a74a17](https://github.com/vibeunion/supacloud/commit/2a74a17c811998b6692c22454c5dee0f90a1c29a))
+
 ## [0.124.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.123.3...management-api-v0.124.0) (2026-10-27)
 
 
