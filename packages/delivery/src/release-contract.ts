@@ -64,23 +64,23 @@ function nonEmptyString(value: unknown, label: string, pattern?: RegExp): string
 
 function parseComponent(value: unknown, index: number): ReleaseComponent {
   const candidate = record(value, `Release component ${index}`);
-  if (candidate.kind === "migration") {
+  if (candidate["kind"] === "migration") {
     exactKeys(candidate, ["kind", "name"], `Release migration ${index}`);
-    return { kind: "migration", name: nonEmptyString(candidate.name, `Release migration ${index}`, MIGRATION_NAME) };
+    return { kind: "migration", name: nonEmptyString(candidate["name"], `Release migration ${index}`, MIGRATION_NAME) };
   }
-  if (candidate.kind === "function") {
+  if (candidate["kind"] === "function") {
     exactKeys(candidate, ["artifactSha256", "kind", "slug"], `Release Function ${index}`);
     return {
       kind: "function",
-      slug: nonEmptyString(candidate.slug, `Release Function ${index}`, FUNCTION_SLUG),
-      artifactSha256: nonEmptyString(candidate.artifactSha256, `Release Function ${index}`, SHA256),
+      slug: nonEmptyString(candidate["slug"], `Release Function ${index}`, FUNCTION_SLUG),
+      artifactSha256: nonEmptyString(candidate["artifactSha256"], `Release Function ${index}`, SHA256),
     };
   }
-  if (candidate.kind === "web") {
+  if (candidate["kind"] === "web") {
     exactKeys(candidate, ["artifactSha256", "kind"], `Release Web ${index}`);
     return {
       kind: "web",
-      artifactSha256: nonEmptyString(candidate.artifactSha256, `Release Web ${index}`, SHA256),
+      artifactSha256: nonEmptyString(candidate["artifactSha256"], `Release Web ${index}`, SHA256),
     };
   }
   throw new Error(`Release component ${index} kind is invalid`);
@@ -97,13 +97,13 @@ export function parseReleaseScope(value: unknown): ReleaseScope {
   exactKeys(candidate, [
     "components", "releaseId", "schema", "sourceCommit", "targetEnvironmentId", "targetProjectRef",
   ], "Release scope");
-  if (candidate.schema !== RELEASE_CONTRACT_SCHEMA) {
+  if (candidate["schema"] !== RELEASE_CONTRACT_SCHEMA) {
     throw new Error("Release scope schema is invalid");
   }
-  if (!Array.isArray(candidate.components) || candidate.components.length === 0) {
+  if (!Array.isArray(candidate["components"]) || candidate["components"].length === 0) {
     throw new Error("Release scope components must be non-empty");
   }
-  const components = candidate.components.map(parseComponent);
+  const components = candidate["components"].map(parseComponent);
   const componentKeys = components.map(componentKey);
   if (new Set(componentKeys).size !== componentKeys.length
     || componentKeys.some((key, index) => key !== [...componentKeys].sort()[index])) {
@@ -111,10 +111,10 @@ export function parseReleaseScope(value: unknown): ReleaseScope {
   }
   return {
     schema: RELEASE_CONTRACT_SCHEMA,
-    releaseId: nonEmptyString(candidate.releaseId, "Release scope releaseId"),
-    sourceCommit: nonEmptyString(candidate.sourceCommit, "Release scope sourceCommit", COMMIT),
-    targetEnvironmentId: nonEmptyString(candidate.targetEnvironmentId, "Release scope targetEnvironmentId", ENVIRONMENT_ID),
-    targetProjectRef: nonEmptyString(candidate.targetProjectRef, "Release scope targetProjectRef", PROJECT_REF),
+    releaseId: nonEmptyString(candidate["releaseId"], "Release scope releaseId"),
+    sourceCommit: nonEmptyString(candidate["sourceCommit"], "Release scope sourceCommit", COMMIT),
+    targetEnvironmentId: nonEmptyString(candidate["targetEnvironmentId"], "Release scope targetEnvironmentId", ENVIRONMENT_ID),
+    targetProjectRef: nonEmptyString(candidate["targetProjectRef"], "Release scope targetProjectRef", PROJECT_REF),
     components,
   };
 }
@@ -143,25 +143,25 @@ const VALID_PHASES: readonly ReleaseReceiptPhase[] = [
 export function parseReleaseReceipt(value: unknown): ReleaseReceipt {
   const candidate = record(value, "Release receipt");
   exactKeys(candidate, ["afterReadBack", "beforeReadBack", "phase", "releaseId", "schema", "scopeSha256"], "Release receipt");
-  if (candidate.schema !== RELEASE_CONTRACT_SCHEMA
-    || typeof candidate.phase !== "string"
-    || !VALID_PHASES.includes(candidate.phase as ReleaseReceiptPhase)) {
+  if (candidate["schema"] !== RELEASE_CONTRACT_SCHEMA
+    || typeof candidate["phase"] !== "string"
+    || !VALID_PHASES.includes(candidate["phase"] as ReleaseReceiptPhase)) {
     throw new Error("Release receipt identity is invalid");
   }
   for (const key of ["beforeReadBack", "afterReadBack"] as const) {
     if (candidate[key] !== null) record(candidate[key], `Release receipt ${key}`);
   }
-  if ((candidate.phase === "applied" || candidate.phase === "reconciled")
-    && (candidate.beforeReadBack === null || candidate.afterReadBack === null)) {
-    throw new Error(`Release receipt ${candidate.phase} requires before and after read-back`);
+  if ((candidate["phase"] === "applied" || candidate["phase"] === "reconciled")
+    && (candidate["beforeReadBack"] === null || candidate["afterReadBack"] === null)) {
+    throw new Error(`Release receipt ${candidate["phase"]} requires before and after read-back`);
   }
   return {
     schema: RELEASE_CONTRACT_SCHEMA,
-    releaseId: nonEmptyString(candidate.releaseId, "Release receipt releaseId"),
-    scopeSha256: nonEmptyString(candidate.scopeSha256, "Release receipt scopeSha256", SHA256),
-    phase: candidate.phase as ReleaseReceiptPhase,
-    beforeReadBack: candidate.beforeReadBack as Record<string, unknown> | null,
-    afterReadBack: candidate.afterReadBack as Record<string, unknown> | null,
+    releaseId: nonEmptyString(candidate["releaseId"], "Release receipt releaseId"),
+    scopeSha256: nonEmptyString(candidate["scopeSha256"], "Release receipt scopeSha256", SHA256),
+    phase: candidate["phase"] as ReleaseReceiptPhase,
+    beforeReadBack: candidate["beforeReadBack"] as Record<string, unknown> | null,
+    afterReadBack: candidate["afterReadBack"] as Record<string, unknown> | null,
   };
 }
 
