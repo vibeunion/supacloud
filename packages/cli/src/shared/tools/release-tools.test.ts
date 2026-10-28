@@ -1137,3 +1137,117 @@ test("scope_create scaffolds a canonical scope manifest with resolved baseCommit
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test("contract_plan validates the standard application release contract and reports a read-only plan", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-contract-plan-"));
+    try {
+        const projectRef = "vxmnblbzsxzutzrjntyu";
+        const commit = "a".repeat(40);
+        const contractPath = join(dir, "supacloud.release.json");
+        writeFileSync(contractPath, JSON.stringify({
+            schema: "supacloud.release-control.v2",
+            releaseId: "fa-release-20261027",
+            sourceCommit: commit,
+            targetProjectRef: projectRef,
+            targetEnvironmentId: "production",
+            components: [
+                { kind: "function", slug: "fa-api", artifactSha256: "b".repeat(64) },
+                { kind: "migration", name: "20261027060000_issue_5619" },
+                { kind: "web", artifactSha256: "c".repeat(64) },
+            ],
+        }, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        const response = await callback({
+            action: "contract_plan",
+            ref: projectRef,
+            environment_id: "production",
+            cwd: dir,
+        });
+        const result = payload(response);
+
+        expect(result).toMatchObject({
+            ok: true,
+            operation: "release.contract_plan",
+            plan_schema: "supacloud.release-plan.v1",
+            release_id: "fa-release-20261027",
+            target_project_ref: projectRef,
+            target_environment_id: "production",
+            component_counts: { migration: 1, function: 1, web: 1 },
+            checks: {
+                target_project_ref_matches_requested: true,
+                target_environment_id_matches_requested: true,
+                components_unique_and_sorted: true,
+            },
+            read_only: true,
+            mutations_performed: false,
+        });
+        expect(result.scope_sha256).toHaveLength(64);
+        expect(result.components.map((component: { kind: string }) => component.kind))
+            .toEqual(["function", "migration", "web"]);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("contract_plan rejects target binding mismatches and legacy scope shapes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-contract-plan-invalid-"));
+    try {
+        const projectRef = "vxmnblbzsxzutzrjntyu";
+        const contractPath = join(dir, "supacloud.release.json");
+        const contract = {
+            schema: "supacloud.release-control.v2",
+            releaseId: "fa-release-20261027",
+            sourceCommit: "a".repeat(40),
+            targetProjectRef: projectRef,
+            targetEnvironmentId: "production",
+            components: [{ kind: "web", artifactSha256: "c".repeat(64) }],
+        };
+        writeFileSync(contractPath, JSON.stringify(contract, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        await expect(callback({
+            action: "contract_plan", ref: "stmiwixcxpdjuftnjxqu", environment_id: "production", cwd: dir,
+        })).rejects.toThrow("does not match requested project");
+        await expect(callback({
+            action: "contract_plan", ref: projectRef, environment_id: "staging", cwd: dir,
+        })).rejects.toThrow("does not match requested environment");
+
+        writeFileSync(contractPath, JSON.stringify({
+            baseCommit: "a".repeat(40), functions: [], migrations: [], targetProjectRef: projectRef,
+            targetEnvironmentId: "production", taskId: "LEGACY", web: true,
+        }, null, 2) + "\n", "utf8");
+        await expect(callback({
+            action: "contract_plan", ref: projectRef, environment_id: "production", cwd: dir,
+        })).rejects.toThrow("unsupported or missing fields");
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("contract_plan can require the contract to describe the current source checkout", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-contract-plan-source-"));
+    try {
+        const projectRef = "vxmnblbzsxzutzrjntyu";
+        const contractPath = join(dir, "supacloud.release.json");
+        writeFileSync(contractPath, JSON.stringify({
+            schema: "supacloud.release-control.v2",
+            releaseId: "fa-release-20261027",
+            sourceCommit: "a".repeat(40),
+            targetProjectRef: projectRef,
+            targetEnvironmentId: "production",
+            components: [{ kind: "web", artifactSha256: "c".repeat(64) }],
+        }, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        await expect(callback({
+            action: "contract_plan",
+            ref: projectRef,
+            environment_id: "production",
+            require_current_source: true,
+            cwd: dir,
+        })).rejects.toThrow("does not match current HEAD");
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});

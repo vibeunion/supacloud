@@ -65,6 +65,12 @@
       "supacloud-source": "./src/deployment-evidence.ts",
       "bun": "./src/deployment-evidence.ts",
       "import": "./src/deployment-evidence.ts"
+    },
+    "./release-contract": {
+      "types": "./src/release-contract.ts",
+      "supacloud-source": "./src/release-contract.ts",
+      "bun": "./src/release-contract.ts",
+      "import": "./dist/release-contract.js"
     }
   },
   "files": [
@@ -75,7 +81,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/frontend-archive.ts src/frontend-archive-reader.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts src/delivery-tuple.ts src/contract-matrix.ts src/fa-stability.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
+    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/frontend-archive.ts src/frontend-archive-reader.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts src/delivery-tuple.ts src/contract-matrix.ts src/fa-stability.ts src/release-contract.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"

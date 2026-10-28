@@ -256,6 +256,7 @@ Feature: 自托管稳定基线
 - [平台安装与运维](platform-operations.zh-CN.md)
 - [多租户管理](multi-tenant-management.md)
 - [项目发布清单](project-release-manifest.md)
+- [应用级发布契约](application-release-contract.md)
 - [项目恢复演练](project-restore-drill.md)
 - [企业架构就绪度](enterprise-architecture-readiness.zh-CN.md)
 - `scripts/linux-delivery-acceptance.ts`

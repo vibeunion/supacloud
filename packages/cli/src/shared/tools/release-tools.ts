@@ -6,6 +6,11 @@ import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
+import {
+    parseReleaseScope,
+    releaseScopeSha256,
+    type ReleaseComponent,
+} from "@supacloud/delivery/release-contract";
 import { releaseControlFailure, releaseControlSuccess, type ReleaseControlToolResponse } from "./release-control-response";
 import { PROJECT_ENDPOINT_RESPONSE_MAX_BYTES, projectApiOrigins } from "./project-endpoint-read";
 
@@ -20,7 +25,8 @@ type ReleaseOperation =
     | "release.release_canary.fixture_disable_replay"
     | "release.scope_inspect"
     | "release.scope_rebind"
-    | "release.scope_create";
+    | "release.scope_create"
+    | "release.contract_plan";
 
 type ReleaseCanaryStageReceipt = {
     fixtureId: string;
@@ -700,6 +706,87 @@ function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolRe
     });
 }
 
+function releaseComponentView(component: ReleaseComponent): Record<string, unknown> {
+    if (component.kind === "migration") return { kind: component.kind, name: component.name };
+    if (component.kind === "function") {
+        return { kind: component.kind, slug: component.slug, artifact_sha256: component.artifactSha256 };
+    }
+    return { kind: component.kind, artifact_sha256: component.artifactSha256 };
+}
+
+function handleContractPlan(
+    args: Record<string, unknown>,
+    fallbackRef?: string,
+): ReleaseControlToolResponse {
+    const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
+    const requestedRef = (typeof args.ref === "string" && args.ref.trim()) || fallbackRef;
+    if (!requestedRef || !validProjectRef(requestedRef)) {
+        throw new Error("'ref' is required for contract_plan and must identify one project");
+    }
+    const requestedEnvironmentId = requestedScopeEnvironment(args, "contract_plan");
+    const file = typeof args.file === "string" && args.file.trim()
+        ? args.file.trim()
+        : "supacloud.release.json";
+    const filePath = resolve(cwd, file);
+    if (!existsSync(filePath)) {
+        throw new Error(`Release contract not found: ${file}`);
+    }
+    let parsedValue: unknown;
+    try {
+        parsedValue = JSON.parse(readFileSync(filePath, "utf8"));
+    } catch {
+        throw new Error(`Release contract '${file}' is not valid JSON`);
+    }
+    // parseReleaseScope 是唯一的结构校验入口，避免 CLI 与平台侧出现两套宽松规则。
+    const scope = parseReleaseScope(parsedValue);
+    if (scope.targetProjectRef !== requestedRef) {
+        throw new Error(
+            `Release contract target project '${scope.targetProjectRef}' does not match requested project '${requestedRef}'`,
+        );
+    }
+    if (scope.targetEnvironmentId !== requestedEnvironmentId) {
+        throw new Error(
+            `Release contract target environment '${scope.targetEnvironmentId}' does not match requested environment '${requestedEnvironmentId}'`,
+        );
+    }
+    const git = gitCommitInfo(cwd);
+    const sourceMatchesHead = git.head !== null && scope.sourceCommit === git.head;
+    const sourceMatchesOriginMain = git.originMain !== null && scope.sourceCommit === git.originMain;
+    if (args.require_current_source === true && !sourceMatchesHead) {
+        throw new Error(
+            `Release contract source commit '${scope.sourceCommit}' does not match current HEAD '${git.head ?? "unavailable"}'`,
+        );
+    }
+    const counts = scope.components.reduce((result, component) => {
+        result[component.kind] += 1;
+        return result;
+    }, { migration: 0, function: 0, web: 0 });
+
+    return releaseControlSuccess("release.contract_plan", {
+        plan_schema: "supacloud.release-plan.v1",
+        file: relative(cwd, filePath),
+        release_id: scope.releaseId,
+        scope_sha256: releaseScopeSha256(scope),
+        source_commit: scope.sourceCommit,
+        target_project_ref: scope.targetProjectRef,
+        target_environment_id: scope.targetEnvironmentId,
+        components: scope.components.map(releaseComponentView),
+        component_counts: counts,
+        checks: {
+            source_commit_matches_head: sourceMatchesHead,
+            source_commit_matches_origin_main: sourceMatchesOriginMain,
+            target_project_ref_matches_requested: true,
+            target_environment_id_matches_requested: true,
+            components_unique_and_sorted: true,
+        },
+        current_head: git.head,
+        origin_main: git.originMain,
+        source_is_current: sourceMatchesHead,
+        read_only: true,
+        mutations_performed: false,
+    });
+}
+
 function parseCommaList(value: unknown): string[] {
     if (!value) return [];
     if (Array.isArray(value)) {
@@ -768,7 +855,7 @@ export function registerReleaseTools(
         applicationOrigin?: string;
     } = {},
 ): void {
-    const localActions = ["scope_inspect", "scope_rebind", "scope_create"] as const;
+    const localActions = ["scope_inspect", "scope_rebind", "scope_create", "contract_plan"] as const;
     const remoteActions = [
         "logical_backup_list", "logical_backup_status", "logical_backup_create", "logical_backup_restore",
         "postgrest_status", "postgrest_restart",
@@ -782,18 +869,19 @@ export function registerReleaseTools(
         {
             action: withDescription(stringEnum(allActions), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
-            file: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Path to release scope JSON file"),
+            file: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create/contract_plan] Path to release scope or release contract JSON file"),
             files: optional(Type.String(), "[scope_rebind] Comma-separated list of release scope JSON files"),
             dir: optional(Type.String(), "[scope_rebind] Directory containing release scope JSON files (defaults to supacloud/fa/release-scopes, release-scopes, or scopes)"),
             task: optional(Type.String(), "[scope_rebind/scope_create] Task ID or prefix filter for scope files"),
             base_commit: optional(Type.String(), "[scope_rebind/scope_create] Target 40-character base commit SHA or git ref (defaults to origin/main -> main -> HEAD^ -> HEAD)"),
-            environment_id: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Exact target deployment environment"),
+            environment_id: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create/contract_plan] Exact target deployment environment"),
             functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to deploy"),
             excluded_functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to exclude"),
             migrations: optional(Type.String(), "[scope_create] Comma-separated list of migrations to apply"),
             web: optional(Type.Boolean(), "[scope_create] Whether web assets are included in release scope"),
             dry_run: optional(Type.Boolean(), "[scope_rebind] Perform calculation and validation without writing files"),
-            cwd: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Base directory for relative file and git resolution"),
+            cwd: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create/contract_plan] Base directory for relative file and git resolution"),
+            require_current_source: optional(Type.Boolean(), "[contract_plan] Fail unless the contract sourceCommit equals current HEAD"),
             backup_id: optional(Type.String(), "[logical_backup_create/status/restore] Stable project-bound backup ID; create generates one when omitted"),
             expected_sha256: optional(Type.String(), "[logical_backup_restore] Exact lowercase SHA-256 from the selected project inventory"),
             restore_confirmation: optional(Type.String(), "[logical_backup_restore] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
@@ -813,6 +901,9 @@ export function registerReleaseTools(
             }
             if (action === "scope_create") {
                 return handleScopeCreate(args, options.projectRef);
+            }
+            if (action === "contract_plan") {
+                return handleContractPlan(args, options.projectRef);
             }
 
             if (options.localOnly || !http) {

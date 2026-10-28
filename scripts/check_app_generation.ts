@@ -36,8 +36,17 @@ try {
     await mkdir(environment["HOME"], { recursive: true });
     await mkdir(environment["BUN_TMPDIR"], { recursive: true });
     const overrides: Record<string, string> = {};
-    for (const name of ["contracts", "commands", "db", "delivery", "compiler", "app", "elysia", "cli"]) {
-        const directory = join(repo, "packages", name);
+    // Pack every project-owned package the generated template can resolve. The
+    // template pins caret ranges such as @supacloud/js ^0.40.0 whose candidate
+    // version may not be published yet; registry resolution would hang or fail.
+    const candidates: [name: string, directory: string][] = [
+        ["contracts", "contracts"], ["commands", "commands"], ["delivery", "delivery"],
+        ["compiler", "compiler"], ["db", "db"], ["app", "app"], ["elysia", "elysia"],
+        // @supacloud/js depends on the locally linked @supacloud/query package.
+        ["query", "query"], ["js", "supacloud-js"], ["cli", "cli"],
+    ];
+    for (const [name, packageDirectory] of candidates) {
+        const directory = join(repo, "packages", packageDirectory);
         await run(starterInstallArgs("workspace"), directory);
         await run(["run", "build"], directory);
         await run(["pm", "pack", "--ignore-scripts", "--destination", temporary], directory);
