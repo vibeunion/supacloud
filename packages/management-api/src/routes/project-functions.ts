@@ -37,6 +37,24 @@ const expectedActivationIdSchema = t.Union([
     maxLength: 36,
   }),
 ]);
+
+/**
+ * Deployment responses must carry the same version in both the top-level receipt and the
+ * config snapshot. Some historical deploy paths omit `config.version`; fill it from the
+ * version that was just persisted so release-control clients do not report a successful
+ * deploy as OUTCOME_UNKNOWN.
+ */
+function deployedFunctionResponseConfig(
+  deployment: EdgeFunctionDeployResult,
+  version: string | null,
+): EdgeFunctionConfigSnapshot | undefined {
+  if (!deployment.config) return undefined;
+  return {
+    ...deployment.config,
+    ...(version === null ? {} : { version }),
+    activation_id: deployment.activation_id ?? deployment.config.activation_id,
+  };
+}
 const functionCapabilitiesSchema = t.Object({
   secrets: t.Optional(t.Array(t.String({ minLength: 1 }), { maxItems: 128 })),
   outbound_hosts: t.Optional(t.Array(t.String({ minLength: 1 }), { maxItems: 128 })),
@@ -983,27 +1001,29 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       });
       const failure = deploymentFailure(deployment);
       if (failure) return failure;
+      const version = deployment.version ?? deployment.active_version ?? deployment.config?.version ?? null;
+      const config = deployedFunctionResponseConfig(deployment, version);
       return {
         success: true,
         project_ref: params.ref,
         slug: params.slug,
         bundled: deployment.bundled ?? true,
-        version: deployment.version ?? null,
+        version,
         previous_active_version: deployment.previous_active_version,
         active_version: deployment.active_version,
         expected_activation_id: expectedId,
-        activation_id: deployment.activation_id ?? deployment.config?.activation_id,
+        activation_id: deployment.activation_id ?? config?.activation_id,
         bundle_hash: deployment.bundle_hash ?? null,
         bundle_size_bytes: deployment.bundle_size_bytes ?? null,
         import_count: deployment.import_count ?? null,
         external_packages: deployment.external_packages ?? [],
         preheat: deployment.preheat ?? null,
-        verify_jwt: deployment.config?.verify_jwt ?? true,
-        background_routes: deployment.config?.background_routes || [],
-        framework: deployment.config?.framework ?? "fetch",
-        capabilities: deployment.config?.capabilities ?? {},
-        limits: deployment.config?.limits ?? {},
-        config: deployment.config,
+        verify_jwt: config?.verify_jwt ?? true,
+        background_routes: config?.background_routes || [],
+        framework: config?.framework ?? "fetch",
+        capabilities: config?.capabilities ?? {},
+        limits: config?.limits ?? {},
+        config,
       };
     },
   )
@@ -1167,29 +1187,31 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       });
       const failure = deploymentFailure(deployment);
       if (failure) return failure;
+      const version = deployment.version ?? deployment.active_version ?? deployment.config?.version ?? null;
+      const config = deployedFunctionResponseConfig(deployment, version);
       return {
         success: true,
         project_ref: params.ref,
         slug: params.slug,
         bundled: true,
         files: deployment.files ?? Object.keys(body.files).length,
-        version: deployment.version ?? null,
+        version,
         previous_active_version: deployment.previous_active_version,
         active_version: deployment.active_version,
         expected_activation_id: expectedId,
-        activation_id: deployment.activation_id ?? deployment.config?.activation_id,
+        activation_id: deployment.activation_id ?? config?.activation_id,
         import_map: deployment.import_map ?? null,
         bundle_hash: deployment.bundle_hash ?? null,
         bundle_size_bytes: deployment.bundle_size_bytes ?? null,
         import_count: deployment.import_count ?? null,
         external_packages: deployment.external_packages ?? [],
         preheat: deployment.preheat ?? null,
-        verify_jwt: deployment.config?.verify_jwt ?? true,
-        background_routes: deployment.config?.background_routes || [],
-        framework: deployment.config?.framework ?? "fetch",
-        capabilities: deployment.config?.capabilities ?? {},
-        limits: deployment.config?.limits ?? {},
-        config: deployment.config,
+        verify_jwt: config?.verify_jwt ?? true,
+        background_routes: config?.background_routes || [],
+        framework: config?.framework ?? "fetch",
+        capabilities: config?.capabilities ?? {},
+        limits: config?.limits ?? {},
+        config,
       };
     },
   )
