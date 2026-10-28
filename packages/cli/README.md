@@ -605,6 +605,19 @@ supacloud release release_canary_fixture_disable_replay --ref abc123 \
   --issuer <issuer-url> --subject <central-subject-uuid>
 ```
 
+A standard cross-component release contract can be validated without mutation:
+
+```bash
+supacloud release contract_plan --file supacloud.release.json \
+  --ref abc123 --environment_id production --require_current_source
+```
+
+The plan rejects project or environment binding mismatches and returns the
+canonical `scope_sha256`; it does not apply migrations, Functions, Application
+releases, or frontend assets. See
+[docs/application-release-contract.md](../../docs/application-release-contract.md).
+
+
 Backup creation reports success only after the CLI verifies exactly one new
 logical-backup receipt against the inventory before and after the mutation.
 Logical restore is project-scoped: pause the selected project first, obtain the

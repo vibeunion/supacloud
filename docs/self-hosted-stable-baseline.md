@@ -287,6 +287,7 @@ The baseline should reuse these existing surfaces:
 - [Platform installation and operations](platform-operations.md)
 - [Multi-tenant management](multi-tenant-management.md)
 - [Project release manifest](project-release-manifest.md)
+- [Application release contract](application-release-contract.md)
 - [Project restore drills](project-restore-drill.md)
 - [Enterprise architecture readiness](enterprise-architecture-readiness.md)
 - `scripts/linux-delivery-acceptance.ts`

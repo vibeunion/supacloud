@@ -81,6 +81,12 @@ activate, and roll back atomically as a single release unit. The CLI and
 Management API do not currently implement this batch contract; do not emulate
 atomicity with an untracked sequence of single-Function mutations.
 
+The cross-component identity is now implemented as the read-only
+[application release contract](application-release-contract.md)
+(`supacloud.release-control.v2` + `release contract_plan`). It binds a release
+to one source commit, project, environment and sorted component set, but it
+does not replace this proposed atomic batch apply contract.
+
 ### Release Manifest Schema (`deploy-manifest.json`)
 
 ```json

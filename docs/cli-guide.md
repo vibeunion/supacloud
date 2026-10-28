@@ -619,6 +619,19 @@ immutable source reads and activation targets still require positive versions.
 Multi-Function release units are available through the opt-in Management
 `function-releases` API; see [project release manifests](project-release-manifest.md)
 for staging, atomic authority switching, recovery and in-flight semantics.
+
+A cross-component release can be described as one immutable
+`supacloud.release-control.v2` contract and checked locally before any mutation:
+
+```bash
+supacloud release contract_plan --file supacloud.release.json   --ref abc123 --environment_id production --require_current_source
+```
+
+The plan is read-only, rejects a contract bound to another project or
+environment, and reports the canonical `scope_sha256`. See
+[application release contract](application-release-contract.md) for the schema,
+receipt and execution boundaries.
+
 The CLI `edge_functions deploy_manifest --atomic` interface remains proposed.
 Existing per-function runners must still stop on `OUTCOME_UNKNOWN` and
 reconcile with `edge_functions list` plus immutable version reads. They cannot

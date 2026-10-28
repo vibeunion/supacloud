@@ -61,7 +61,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     mutations: { read: ["status"] },
     release: {
         read: ["logical_backup_list", "logical_backup_status", "postgrest_status"],
-        local: ["scope_inspect", "scope_rebind", "scope_create"],
+        local: ["scope_inspect", "scope_rebind", "scope_create", "contract_plan"],
         write: ["logical_backup_create", "logical_backup_restore", "postgrest_restart", "release_canary_fixture_stage_replay", "release_canary_fixture_disable_replay"],
     },
     secrets: { read: ["list"], write: ["upsert", "delete"] },

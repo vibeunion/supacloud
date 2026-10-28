@@ -127,3 +127,10 @@ export async function readDeliveryExecutableArchive(manifestPath: string): Promi
   }
   return { manifest, objects };
 }
+export {
+  RELEASE_CONTRACT_SCHEMA, assertReleaseReceiptTransition, parseReleaseReceipt, parseReleaseScope,
+  releaseScopeSha256,
+} from "./release-contract";
+export type {
+  ReleaseComponent, ReleaseReceipt, ReleaseReceiptPhase, ReleaseScope,
+} from "./release-contract";
