@@ -228,11 +228,11 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 
 The Web Console currently tracks the published SVAdmin line:
 
-- `@svadmin/core` `0.59.0`
-- `@svadmin/ui` `0.82.0`
-- `@svadmin/elysia` `0.14.3`
-- `@svadmin/sveltekit` `0.13.0`
-- `@svadmin/ai-elements` `0.11.0`
+- `@svadmin/core` `0.66.0`
+- `@svadmin/ui` `0.92.0`
+- `@svadmin/elysia` `0.14.11`
+- `@svadmin/sveltekit` `0.13.8`
+- `@svadmin/ai-elements` `0.12.4`
 
 This release line requires SvelteKit 3, so the Console also migrated its
 adapter configuration into the Vite `sveltekit` plugin and moved page state
