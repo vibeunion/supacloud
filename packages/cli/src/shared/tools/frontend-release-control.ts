@@ -685,21 +685,38 @@ async function verifyLiveDeployment(url: string): Promise<{
         });
         const contentLength = Number(response.headers.get("content-length") ?? "");
         if (Number.isFinite(contentLength) && contentLength > LIVE_RESPONSE_MAX_BYTES) {
-            await response.body?.cancel();
+            void response.body?.cancel().catch(() => undefined);
             return {
                 ok: false, status: response.status,
                 content_type: response.headers.get("content-type"), bytes: contentLength,
                 error_code: "LIVE_RESPONSE_TOO_LARGE",
             };
         }
-        const body = new Uint8Array(await response.arrayBuffer());
-        const ok = response.status === 200 && body.byteLength > 0 && body.byteLength <= LIVE_RESPONSE_MAX_BYTES;
+        let bytes = 0;
+        const reader = response.body?.getReader();
+        if (reader) {
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    bytes += value.byteLength;
+                    if (bytes > LIVE_RESPONSE_MAX_BYTES) {
+                        void reader.cancel().catch(() => undefined);
+                        break;
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+        }
+        const ok = response.status === 200 && bytes > 0 && bytes <= LIVE_RESPONSE_MAX_BYTES;
         return {
             ok,
             status: response.status,
             content_type: response.headers.get("content-type"),
-            bytes: body.byteLength,
-            error_code: ok ? null : body.byteLength === 0 ? "LIVE_RESPONSE_EMPTY" : "LIVE_RESPONSE_INVALID",
+            bytes,
+            error_code: bytes > LIVE_RESPONSE_MAX_BYTES ? "LIVE_RESPONSE_TOO_LARGE"
+                : ok ? null : bytes === 0 ? "LIVE_RESPONSE_EMPTY" : "LIVE_RESPONSE_INVALID",
         };
     } catch (error: unknown) {
         const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
@@ -728,9 +745,24 @@ export async function verifyFrontendRelease(
     const live = liveUrl
         ? await verifyLiveDeployment(liveUrl)
         : { ok: false, status: 0, content_type: null, bytes: 0, error_code: "LIVE_URL_UNAVAILABLE" };
+    let errorCode = live.error_code;
+    if (live.ok) {
+        try {
+            const readback = await readActiveFrontendRelease(http, projectRef, deploymentId);
+            if ("failure" in readback) errorCode = "ACTIVE_RELEASE_READBACK_FAILED";
+            else if (readback.inventory.active_release_id !== inventory.active_release_id
+                || readback.inventory.active_activation_id !== inventory.active_activation_id) {
+                errorCode = "STALE_AUTHORITY";
+            }
+        } catch {
+            errorCode = "ACTIVE_RELEASE_READBACK_FAILED";
+        }
+    }
+    const ok = errorCode === null;
     const receipt = {
         schema: "supacloud.frontend-release-verification.v1",
-        ok: live.ok,
+        ok,
+        error_code: errorCode,
         project_ref: projectRef,
         deployment_id: deploymentId,
         active_release_id: inventory.active_release_id,
@@ -747,7 +779,7 @@ export async function verifyFrontendRelease(
     };
     return {
         content: [{ type: "text", text: JSON.stringify(receipt, null, 2) }],
-        ...(live.ok ? {} : { isError: true }),
+        ...(ok ? {} : { isError: true }),
     };
 }
 
