@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.22.0...delivery-v0.23.0) (2026-10-28)
+
+
+### Features
+
+* **release:** add application release contract plan ([#2285](https://github.com/vibeunion/supacloud/issues/2285)) ([3f339be](https://github.com/vibeunion/supacloud/commit/3f339be6b9d995235f0931c661b9851d052d33a7))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.21.1...delivery-v0.22.0) (2026-10-27)
 
 
