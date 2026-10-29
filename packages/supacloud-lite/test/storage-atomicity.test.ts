@@ -211,6 +211,25 @@ describe('Storage atomicity', () => {
       await backend.close()
     }
   })
+  test('persists and serves content-encoding metadata', async () => {
+    const { backend, client } = await createStorageHarness(new FailingStorageDriver())
+    try {
+      const uploaded = await client.storage.from('assets').upload('encoded.txt', new TextEncoder().encode('encoded'), {
+        contentType: 'text/plain',
+        contentEncoding: 'gzip',
+        upsert: true,
+      })
+      expect(uploaded.error).toBeNull()
+
+      const response = await backend.fetch('http://local/storage/v1/object/authenticated/assets/encoded.txt', {
+        headers: { apikey: backend.anonKey, authorization: `Bearer ${backend.serviceRoleKey}` },
+      })
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-encoding')).toBe('gzip')
+    } finally {
+      await backend.close()
+    }
+  })
 })
 
 async function createStorageHarness(driver: StorageDriver) {

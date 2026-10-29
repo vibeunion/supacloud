@@ -96,7 +96,7 @@
     "directory": "packages/supacloud-js"
   },
   "peerDependencies": {
-    "@supabase/supabase-js": "^2.117.3",
+    "@supabase/supabase-js": "^2.118.0",
     "@tanstack/query-core": "^5.104.1"
   },
   "peerDependenciesMeta": {

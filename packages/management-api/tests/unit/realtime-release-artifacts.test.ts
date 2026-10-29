@@ -40,9 +40,9 @@ test.skipIf(process.env.SUPACLOUD_TEST_REALTIME_ARTIFACTS !== "1")(
         resolveTarget: async () => { throw new Error("artifact check must not access a database"); },
       });
       const artifact = await rpc.walColumnRepairArtifact();
-      expect(artifact.schemaFiles).toHaveLength(22);
+      expect(artifact.schemaFiles).toHaveLength(26);
       expect(artifact.schemaTreeSha256).toBe(
-        "89cae15f960cb164424ebdee2d8e29b5276f72438c87aaa91c442104ef822984",
+        "09118792d5ba5953e00734be0d1444125e5b9aef7a893999aa733ebfeedd9efe",
       );
       expect(artifact.profileSha256).toBe(
         "b1109c7cfa7132351e8bd2a6cffbff5e60c01dcd9b54f9e2103a7de5b1e540a3",

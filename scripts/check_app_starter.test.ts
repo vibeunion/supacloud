@@ -28,11 +28,11 @@ describe("starter dependency installation", () => {
 
   test("keeps the SDK in dependencies instead of duplicating it", () => {
     const manifest: { dependencies: Record<string, string>; devDependencies: Record<string, string> } = {
-      dependencies: { "@supabase/supabase-js": "^2.117.3" },
+      dependencies: { "@supabase/supabase-js": "^2.118.0" },
       devDependencies: { "@supabase/supabase-js": "^2.114.0" },
     };
     addStarterTestDependencies(manifest);
-    expect(manifest.dependencies["@supabase/supabase-js"]).toBe("^2.117.3");
+    expect(manifest.dependencies["@supabase/supabase-js"]).toBe("^2.118.0");
     expect(manifest.devDependencies["@supabase/supabase-js"]).toBeUndefined();
     expect(manifest.devDependencies["jose"]).toBe("^6.2.11");
   });

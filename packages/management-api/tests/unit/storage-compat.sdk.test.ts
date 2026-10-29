@@ -903,6 +903,50 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     uploadSpy.mockRestore();
   });
 
+  test("raw content-encoding is persisted and replayed on download", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+    const upload = await request("/storage/v1/object/avatars/encoded.json", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+        "content-length": "3",
+      },
+      body: "abc",
+    });
+    expect(upload.status).toBe(200);
+    expect(mockObjects.get("avatars/encoded.json")?.metadata.contentEncoding).toBe("gzip");
+
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response("abc", { headers: { "content-type": "application/json" } }),
+    );
+    const download = await request("/storage/v1/object/public/avatars/encoded.json", {
+      headers: { apikey: "test-token" },
+    });
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-encoding")).toBe("gzip");
+    downloadSpy.mockRestore();
+    uploadSpy.mockRestore();
+  });
+
+  test("multipart contentEncoding is persisted as object metadata", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+    const formData = new FormData();
+    formData.append("contentEncoding", "br");
+    formData.append("file", new Blob(["encoded"], { type: "text/plain" }), "encoded.txt");
+
+    const res = await request("/storage/v1/object/avatars/encoded.txt", {
+      method: "POST",
+      headers: { apikey: "test-token" },
+      body: formData,
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockObjects.get("avatars/encoded.txt")?.metadata.contentEncoding).toBe("br");
+    uploadSpy.mockRestore();
+  });
+
   test("duplicate upload without upsert is rejected", async () => {
     mockObjects.set("avatars/existing.txt", {
       metadata: { size: 5, mimetype: "text/plain" },

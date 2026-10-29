@@ -6,13 +6,17 @@ implementation of the Supabase platform.
 
 ## Stable baseline
 
-The repository uses `@supabase/supabase-js` `2.117.3` as the shared SDK
+The repository uses `@supabase/supabase-js` `2.118.0` as the shared SDK
 baseline for Edge Runtime, Management API, SupaCloud JS, Compiler, and Lite.
-Generated application starters use the same peer dependency.
+Generated application starters use the same peer dependency. `2.118.0` adds
+Storage content-encoding uploads and PostgREST type-generation overload fixes.
 
-The official Supabase CLI compatibility adapter recommends `2.120.0` for
+The official Supabase CLI compatibility adapter recommends `2.122.0` for
 `SUPABASE_CLI_VERSION`; an installed binary or an explicit
-`SUPACLOUD_SUPABASE_CLI_BIN` still takes precedence.
+`SUPACLOUD_SUPABASE_CLI_BIN` still takes precedence. PostgreSQL TLS variables
+(`PGSSLMODE`, `PGSSLROOTCERT`, `PGSSLCERT`, `PGSSLKEY`, and related policy
+settings) are forwarded so linked `db push` and `pg_dump` honor `verify-full`
+without exposing database passwords or connection URLs.
 
 ## Capabilities already implemented
 
@@ -27,6 +31,10 @@ their existing routes, contracts, and tests:
   application contexts, with tenant authorization and plan-only writes.
 - Supabase Storage Vector API compatibility backed by the project vector
   service.
+- Storage content-encoding metadata, including raw and multipart uploads, with
+the encoding replayed on public, authenticated, signed, and TUS-backed
+downloads.
+- TUS 1.0 resumable uploads in the full platform and Lite.
 - Supabase Queues compatibility through the `pgmq_public` API.
 - `pg_graphql` compatibility through the real PostgreSQL extension.
 
@@ -44,6 +52,10 @@ when a framework-specific SSR entrypoint is generated.
   persistence/sync contract stabilizes.
 - Analytics Buckets remain an infrastructure capability rather than a core
   runtime dependency.
+- Storage object versioning, noncurrent-version lifecycle expiration, and the
+  related bucket versioning status workflow are not implemented yet. Do not
+  advertise them as compatible until the object-version schema, delete markers,
+  and lifecycle cleanup have a migration and recovery test.
 - Vector Buckets are exposed through the existing compatibility surface; they
   do not replace the current `pgvector` plus PostgreSQL hybrid-search path.
 

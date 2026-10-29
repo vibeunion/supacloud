@@ -47,6 +47,7 @@ export function extractMultipartFileFast(
     let bestFile: { fileBuffer: Buffer; mimeType: string } | null = null;
     let metadataStr: string | null = null;
     let cacheControlStr: string | null = null;
+    let contentEncodingStr: string | null = null;
 
     while (searchPos < buffer.length) {
         const partStart = buffer.indexOf(boundaryBuffer, searchPos);
@@ -66,6 +67,8 @@ export function extractMultipartFileFast(
                 metadataStr = buffer.subarray(fileStart, fileEnd).toString("utf-8");
             } else if (headersRow.includes('name="cacheControl"') && fileEnd >= fileStart) {
                 cacheControlStr = buffer.subarray(fileStart, fileEnd).toString("utf-8");
+            } else if (headersRow.includes('name="contentEncoding"') && fileEnd >= fileStart) {
+                contentEncodingStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             } else if (headersRow.includes("filename=") || headersRow.includes("Content-Type:")) {
                 const typeMatch = headersRow.match(/Content-Type:\s*([^\r\n]+)/i);
                 const mimeType = typeMatch?.[1]?.trim() || "application/octet-stream";
@@ -95,6 +98,7 @@ export function extractMultipartFileFast(
         }
     }
     if (cacheControlStr) metadata.cacheControl = cacheControlStr;
+    if (contentEncodingStr) metadata.contentEncoding = contentEncodingStr;
 
     return {
         ...bestFile,
@@ -198,6 +202,14 @@ export function parseContentLength(value: string | null | undefined): number | n
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed < 0) return null;
     return Math.floor(parsed);
+}
+
+export function resolveContentEncoding(info?: Record<string, unknown> | null): string | undefined {
+    const metadata = (info?.metadata || {}) as Record<string, unknown>;
+    const value = info?.content_encoding ?? metadata.contentEncoding;
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
 }
 
 export function isMultipartContentType(contentType: string | undefined): boolean {

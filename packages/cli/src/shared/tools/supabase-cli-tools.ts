@@ -75,9 +75,25 @@ const VALID_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const VALID_MIGRATION_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,100}$/;
 const VALID_SCHEMA = /^[A-Za-z_][A-Za-z0-9_$]*$/;
 const VALID_PROJECT_REF = /^[A-Za-z0-9_-]{1,64}$/;
+// Supabase CLI 2.122+ forwards PostgreSQL TLS settings to linked db commands
+// and pg_dump. These are file paths or policy values, never connection secrets.
+const OFFICIAL_CLI_PG_TLS_ENV = new Set([
+    "PGSSLMODE",
+    "PGSSLROOTCERT",
+    "PGSSLCERT",
+    "PGSSLKEY",
+    "PGSSLCRL",
+    "PGSSLCRLDIR",
+    "PGSSLSNI",
+    "PGSSLNEGOTIATION",
+    "PGSSLCOMPRESSION",
+    "PGREQUIRESSL",
+]);
 
 function isSensitiveEnvironmentKey(key: string): boolean {
-    return key.toUpperCase().startsWith("PG") || SENSITIVE_ENV_KEY.test(key);
+    const upper = key.toUpperCase();
+    if (OFFICIAL_CLI_PG_TLS_ENV.has(upper)) return false;
+    return upper.startsWith("PG") || SENSITIVE_ENV_KEY.test(upper);
 }
 
 function requireMigrationName(name: string | undefined): string {
@@ -348,7 +364,7 @@ export function resolveOfficialSupabaseCommand(
 
     const version = environment.SUPABASE_CLI_VERSION?.trim();
     if (version) {
-        if (!VALID_VERSION.test(version)) throw new Error("Invalid SUPABASE_CLI_VERSION; use an exact version such as 2.120.0");
+        if (!VALID_VERSION.test(version)) throw new Error("Invalid SUPABASE_CLI_VERSION; use an exact version such as 2.122.0");
         if (process.versions.bun) return [process.execPath, "x", `supabase@${version}`];
         if (process.platform === "win32") {
             throw new Error("SUPABASE_CLI_VERSION bootstrap is unavailable under Node on Windows; install the official CLI or set SUPACLOUD_SUPABASE_CLI_BIN");
