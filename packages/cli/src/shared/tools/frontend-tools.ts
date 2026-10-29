@@ -10,20 +10,21 @@ import {
     getFrontendRelease,
     listFrontendReleases,
     rollbackFrontendRelease,
+    verifyFrontendRelease,
 } from "./frontend-release-control";
 
 export function registerFrontendTools(server: ToolServer, http: HttpTransport): void {
     registerTool(server,
         "frontend",
         `Frontend hosting and immutable prebuilt releases. Supports: static, react, vue, svelte, sveltekit, sveltekit-static, nextjs, nuxt, astro.
-Actions: list, get, create, update, delete, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records, list_releases, get_active_release, get_release, rollback. Publish with supacloud deploy.`,
+Actions: list, get, create, update, delete, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records, list_releases, get_active_release, get_release, verify_release, rollback. Publish with supacloud deploy.`,
         {
             action: withDescription(stringEnum([
                 "list", "get", "create", "update", "delete",
                 "build_logs",
                 "add_domain", "remove_domain", "set_env",
                 "list_frameworks", "list_records",
-                "list_releases", "get_active_release", "get_release", "rollback",
+                "list_releases", "get_active_release", "get_release", "verify_release", "rollback",
             ]), "Action"),
             ref: optional(Type.String(), "Project ref"),
             id: optional(Type.String(), "Deployment ID"),
@@ -116,6 +117,9 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
                 case "get_active_release":
                     need("ref", ref); need("id", id);
                     return getActiveFrontendRelease(http, ref, id);
+                case "verify_release":
+                    need("ref", ref); need("id", id);
+                    return verifyFrontendRelease(http, ref, id);
                 case "rollback":
                     need("ref", ref); need("id", id);
                     return rollbackFrontendRelease(http, ref, id, release_id);

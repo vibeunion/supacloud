@@ -193,6 +193,7 @@ describe("CLI execution policy", () => {
         })).toThrow("cannot target a different project");
         expect(executionMode("frontend", "list_releases", {})).toBe("read");
         expect(executionMode("frontend", "get_release", {})).toBe("read");
+        expect(executionMode("frontend", "verify_release", {})).toBe("read");
         expect(executionMode("frontend", "upload_release", {})).toBe("write");
         expect(executionMode("frontend", "activate_release", {})).toBe("write");
         expect(() => authorizeExecution("frontend", { action: "upload_release", ref: "prod-ref" }, {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import {
     listFrontendReleases,
     readFrontendReleaseAuthority,
     rollbackFrontendRelease,
+    verifyFrontendRelease,
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
@@ -125,6 +126,37 @@ function boundRollbackFixture() {
         },
     );
     return { state, calls, invoke, http };
+}
+
+function verifyFixture(liveResponse: () => Response) {
+    const base = `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}`;
+    const calls: string[] = [];
+    const state = { activeReleaseId: RELEASE_ID, activeActivationId: MUTATION_ID, activeStatus: 200 };
+    const server = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        async fetch(request) {
+            const url = new URL(request.url);
+            calls.push(`${request.method} ${url.pathname}`);
+            if (request.method === "GET" && url.pathname === `${base}/active-release`) {
+                return Response.json(state.activeStatus === 200 ? {
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: state.activeReleaseId, active_activation_id: state.activeActivationId,
+                    releases: [release(state.activeReleaseId)], next_cursor: null,
+                } : { token: "must-not-escape" }, { status: state.activeStatus });
+            }
+            if (request.method === "GET" && url.pathname === base) {
+                return Response.json({
+                    id: DEPLOYMENT_ID, name: "FA Web",
+                    deployment_url: `${url.origin}/site/`,
+                });
+            }
+            if (request.method === "GET" && url.pathname === "/site/") return liveResponse();
+            return Response.json({}, { status: 404 });
+        },
+    });
+    servers.push(server);
+    const http = new HttpTransport({ baseUrl: server.url.toString(), token: "local-verify-fixture" });
+    return { calls, http, state };
 }
 
 afterEach(async () => {
@@ -1349,5 +1381,120 @@ describe("immutable frontend release control", () => {
             expectedActivationId: "absent",
             mutationId: "",
         })).rejects.toThrow("'mutation_id' must be a UUIDv4");
+    });
+
+    test("verifies the active release and live deployment URL in one receipt", async () => {
+        const { calls, http } = verifyFixture(() => new Response(
+            "<!doctype html><title>FA</title>",
+            { headers: { "content-type": "text/html; charset=utf-8" } },
+        ));
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).not.toBe(true);
+        const receipt = parsed(response);
+        expect(receipt).toMatchObject({
+            schema: "supacloud.frontend-release-verification.v1",
+            ok: true,
+            project_ref: PROJECT_REF,
+            deployment_id: DEPLOYMENT_ID,
+            active_release_id: RELEASE_ID,
+            active_activation_id: MUTATION_ID,
+            release: { release_id: RELEASE_ID, tree_sha256: TREE_SHA },
+            live: { status: 200, content_type: "text/html; charset=utf-8", error_code: null },
+        });
+        expect((receipt.live as Record<string, unknown>).url).toMatch(/\/site\/$/u);
+        expect(calls).toEqual([
+            `GET /v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+            `GET /v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}`,
+            "GET /site/",
+            `GET /v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+        ]);
+    });
+
+    test("stops reading an oversized live stream without a content-length header", async () => {
+        const { http } = verifyFixture(() => new Response("unused"));
+        let chunks = 0;
+        let cancelled = false;
+        const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                if (chunks === 32) return controller.close();
+                chunks++;
+                controller.enqueue(new Uint8Array(64 * 1024));
+            },
+            cancel() { cancelled = true; },
+        });
+        const originalFetch = globalThis.fetch;
+        const liveFetch = Object.assign((input: Parameters<typeof fetch>[0], options?: Parameters<typeof fetch>[1]) => {
+            if (typeof input === "string" && input.endsWith("/site/")) {
+                return Promise.resolve(new Response(body));
+            }
+            return originalFetch(input, options);
+        }, { preconnect: originalFetch.preconnect });
+        const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(liveFetch);
+        try {
+            const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({
+                ok: false, live: { status: 200, error_code: "LIVE_RESPONSE_TOO_LARGE" },
+            });
+            expect(cancelled).toBe(true);
+            expect(chunks).toBeLessThan(32);
+        } finally {
+            fetchSpy.mockRestore();
+        }
+    });
+
+    test.each([
+        { activeReleaseId: TARGET_RELEASE_ID },
+        { activeActivationId: ROLLBACK_ID },
+    ])("fails verification when the active authority changes during the live request: %j", async (change) => {
+        const { http, state } = verifyFixture(() => {
+            Object.assign(state, change);
+            return new Response("healthy new deployment");
+        });
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            ok: false, error_code: "STALE_AUTHORITY",
+            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+            live: { status: 200, error_code: null },
+        });
+    });
+
+    test("fails verification when active authority cannot be read back", async () => {
+        const { http, state } = verifyFixture(() => {
+            state.activeStatus = 403;
+            return new Response("healthy deployment");
+        });
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            ok: false, error_code: "ACTIVE_RELEASE_READBACK_FAILED",
+            live: { status: 200, error_code: null },
+        });
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([
+        { body: "", errorCode: "LIVE_RESPONSE_EMPTY" },
+        { body: "x".repeat(1024 * 1024 + 1), errorCode: "LIVE_RESPONSE_TOO_LARGE" },
+    ])("rejects an empty or oversized live response: $errorCode", async ({ body, errorCode }) => {
+        const { http } = verifyFixture(() => new Response(body));
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            ok: false, live: { status: 200, error_code: errorCode },
+        });
+    });
+
+    test("marks the receipt as failed when the live deployment is unhealthy", async () => {
+        const { http } = verifyFixture(() => new Response("unavailable", { status: 503 }));
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            schema: "supacloud.frontend-release-verification.v1",
+            ok: false,
+            active_release_id: RELEASE_ID,
+            live: { status: 503, error_code: "LIVE_RESPONSE_INVALID" },
+        });
     });
 });
