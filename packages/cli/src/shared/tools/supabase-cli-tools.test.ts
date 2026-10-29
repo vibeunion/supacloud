@@ -224,6 +224,10 @@ describe("official Supabase CLI adapter", () => {
             DATABASE_URL: "postgresql://postgres:password@localhost/postgres",
             PGPASSWORD: "postgres-password",
             PGPASSFILE: "/Users/test/.pgpass",
+            PGSSLMODE: "verify-full",
+            PGSSLROOTCERT: "/Users/test/root.crt",
+            PGSSLCERT: "/Users/test/client.crt",
+            PGSSLKEY: "/Users/test/client.key",
             AUTHORIZATION: "Bearer hidden",
             CUSTOM_SECRET: "custom-secret",
         });
@@ -239,6 +243,10 @@ describe("official Supabase CLI adapter", () => {
         expect(environment.DATABASE_URL).toBeUndefined();
         expect(environment.PGPASSWORD).toBeUndefined();
         expect(environment.PGPASSFILE).toBeUndefined();
+        expect(environment.PGSSLMODE).toBe("verify-full");
+        expect(environment.PGSSLROOTCERT).toBe("/Users/test/root.crt");
+        expect(environment.PGSSLCERT).toBe("/Users/test/client.crt");
+        expect(environment.PGSSLKEY).toBe("/Users/test/client.key");
         expect(environment.AUTHORIZATION).toBeUndefined();
         expect(environment.CUSTOM_SECRET).toBeUndefined();
         expect(createOfficialSupabaseEnvironment({
@@ -275,8 +283,8 @@ describe("official Supabase CLI adapter", () => {
         })).toEqual(["/opt/bin/supabase"]);
 
         expect(resolveOfficialSupabaseCommand("/workspace/project", {
-            SUPABASE_CLI_VERSION: "2.120.0",
-        })).toEqual([process.execPath, "x", "supabase@2.120.0"]);
+            SUPABASE_CLI_VERSION: "2.122.0",
+        })).toEqual([process.execPath, "x", "supabase@2.122.0"]);
 
         expect(() => resolveOfficialSupabaseCommand("/workspace/project", {
             SUPABASE_CLI_VERSION: "latest; echo unsafe",

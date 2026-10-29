@@ -53,6 +53,7 @@ import {
     parseContentLength,
     parseFileSizeLimit,
     readUploadBody,
+    resolveContentEncoding,
     resolveDownloadContentType,
     setDownloadDisposition,
     signedUploadMatches,
@@ -702,6 +703,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, contentType, headers["content-length"], STORAGE_UPLOAD_MAX_BYTES);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
+            const contentEncoding = headers['content-encoding']?.trim() || (customMetadata?.contentEncoding as string | undefined);
+            if (contentEncoding) userMetadata.contentEncoding = contentEncoding;
             const upsert = headers['x-upsert'] === 'true';
 
             // Validate bucket constraints (file size limit, allowed mime types)
@@ -727,7 +730,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
-            const metadata = { mimetype: fileMimeType, size, cacheControl: cc, userMetadata };
+            const metadata = { mimetype: fileMimeType, size, cacheControl: cc, ...(contentEncoding ? { contentEncoding } : {}), userMetadata };
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert, undefined, undefined,
                 async () => {
@@ -773,12 +776,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, headers['content-type'], headers["content-length"], STORAGE_UPLOAD_MAX_BYTES);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
+            const contentEncoding = headers['content-encoding']?.trim() || (customMetadata?.contentEncoding as string | undefined);
+            if (contentEncoding) userMetadata.contentEncoding = contentEncoding;
 
             const auth = headers['authorization'];
             let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
-            const metadata = { mimetype: fileMimeType, size, cacheControl: cc, userMetadata };
+            const metadata = { mimetype: fileMimeType, size, cacheControl: cc, ...(contentEncoding ? { contentEncoding } : {}), userMetadata };
             // PUT essentially enforces upsert = true
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, auth, 'update', params.bucket, filePath, metadata, false, true, undefined, undefined,
@@ -830,6 +835,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!res) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found internally' });
 
             set.headers['Content-Type'] = resolveDownloadContentType(res, info);
+            const contentEncoding = resolveContentEncoding(info);
+            if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             const rawCc = (info?.cache_control as string) || '3600';
             set.headers['Cache-Control'] = /^\d+$/.test(rawCc) ? `public, max-age=${rawCc}` : rawCc;
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
@@ -867,6 +874,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             set.headers['Content-Type'] = resolveDownloadContentType(res, info);
+            const contentEncoding = resolveContentEncoding(info);
+            if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, max-age=3600';
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
@@ -964,6 +973,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             set.headers['Content-Type'] = resolveDownloadContentType(res, info);
+            const contentEncoding = resolveContentEncoding(info);
+            if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, max-age=3600';
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
@@ -1160,10 +1171,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Bypass external headers — token already validates authorization
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
+            const contentEncoding = headers['content-encoding']?.trim() || (customMetadata?.contentEncoding as string | undefined);
+            if (contentEncoding) userMetadata.contentEncoding = contentEncoding;
             let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
-            const metadata = { mimetype: fileMimeType, size, cacheControl: cc, userMetadata };
+            const metadata = { mimetype: fileMimeType, size, cacheControl: cc, ...(contentEncoding ? { contentEncoding } : {}), userMetadata };
 
             const consumedUpload = await SignedStore.consume(token);
             if (!signedUploadMatches(consumedUpload, ref, params.bucket, filePath)) {
@@ -1230,6 +1243,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             set.headers['Content-Type'] = resolveDownloadContentType(res, info);
+            const contentEncoding = resolveContentEncoding(info);
+            if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, no-store';
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(await res.arrayBuffer());
@@ -1788,7 +1803,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     'upload', 
                     upload.bucket, 
                     upload.objectName, 
-                    { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl },
+                    { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl, ...(upload.meta?.contentEncoding ? { contentEncoding: upload.meta.contentEncoding } : {}) },
                     false, true, undefined, undefined,
                     async () => {
                         const uploaded = await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, asm.stream, upload.contentType);

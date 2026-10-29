@@ -100,7 +100,7 @@ test("the database starter registers live Catalog governance while default check
         .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');
     for (const template of ["minimal", "http", "edge"] as const) {
         const files = appTemplateFiles("plain", template, {
-            "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",
+            "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
         });
         expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
         expect(files["database.sources.json"]).toBeUndefined();
@@ -128,7 +128,7 @@ test("starter route schemas live in contract-only files", () => {
     expect(http["src/orders/contracts.ts"]).toContain("export const OrderResult");
 
     const minimal = appTemplateFiles("example", "minimal", {
-        "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.3",
+        "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
     });
     expect(minimal["src/features/health/health.ts"]).toContain('from "./contracts"');
     expect(minimal["src/features/health/contracts.ts"]).toContain("export const HealthResult");

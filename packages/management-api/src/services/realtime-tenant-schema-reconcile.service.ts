@@ -12,13 +12,13 @@ const DATABASE_OID_PATTERN = /^[1-9]\d{0,9}$/;
 const REPLACEMENT_EPOCH_PATTERN = /^(none|[0-9a-f]{64})$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-const OFFICIAL_REALTIME_RUNTIME_VERSION = "2.138.1";
+const OFFICIAL_REALTIME_RUNTIME_VERSION = "2.150.0";
 const OFFICIAL_REALTIME_MANIFEST_SHA256 =
-  "4cbd8c1a606febe2c8740ca5e1ff3f2026a9db34ea09aec537457f901fb8382a";
+  "da0fae835b833d0d1d846b06a9222cf35a9396870ac01d5ca82ac6823d67b3d7";
 const OFFICIAL_REALTIME_PROFILE_SHA256 =
   "b1109c7cfa7132351e8bd2a6cffbff5e60c01dcd9b54f9e2103a7de5b1e540a3";
 const OFFICIAL_REALTIME_SCHEMA_TREE_SHA256 =
-  "89cae15f960cb164424ebdee2d8e29b5276f72438c87aaa91c442104ef822984";
+  "09118792d5ba5953e00734be0d1444125e5b9aef7a893999aa733ebfeedd9efe";
 const OFFICIAL_PGDELTA_WRAPPER_SHA256 =
   "65a2ac788d7b2f4f177b759b37642c9e5d0c2c4841b2d0e611f2e31be995d799";
 const OFFICIAL_PGDELTA_BUNDLE_SHA256_BY_ARCH = {
@@ -36,14 +36,14 @@ const OFFICIAL_PGDELTA_EXPANDED_SHA256_BY_ARCH = {
 // The image digest is part of the reviewed release identity. A mutable tag is
 // not sufficient for a destructive tenant-schema reconciliation.
 export const OFFICIAL_REALTIME_IMAGE_DIGEST =
-  "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e";
+  "sha256:2843107437cb746edb925155504558683882e65d119c1321fda40fc43d51d847";
 const OFFICIAL_REALTIME_IMAGE_MANIFEST_DIGEST_BY_ARCH = {
-  amd64: "sha256:023cd658da8212c67d12eb1a43914bab67e1a3ea51f731a385ad7596d8226ec0",
-  arm64: "sha256:839743c3294d69d9eef0d2909338b40be1da1fe58114129e510dfd2fe2020c79",
+  amd64: "sha256:9c3f28e55a6824af8cc0a81721173fe1ac0219a0467299241708ef6fe610e5d7",
+  arm64: "sha256:5993c5380c7e9559df078ce2f08cdb141c7d423e70c47a4a3e9b691bf19c9496",
 } as const;
 const OFFICIAL_REALTIME_IMAGE_CONFIG_DIGEST_BY_ARCH = {
-  amd64: "sha256:b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd",
-  arm64: "sha256:ecc1bc4f347e7565b290ddd68c0079e3e9b0f8cad7ba06d1ee686135bfaa1b97",
+  amd64: "sha256:a93144c130cf7d7e6c73faad3ccacd64d2c2b5a01806b4e91d923ce4f0df5f63",
+  arm64: "sha256:aab22b41f63670a1fc7837956ce2f8f5a575f555bedc707a7fe8d9b862718a00",
 } as const;
 export type EffectiveAclEntry = [grantee: string, grantor: string, privilege: string, grantable: boolean];
 

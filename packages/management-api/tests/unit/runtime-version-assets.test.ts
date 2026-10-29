@@ -1379,8 +1379,8 @@ describe("runtime companion version assets", () => {
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.5"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
     const realtimeDigest =
-      "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e";
-    expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.138.1"');
+      "sha256:2843107437cb746edb925155504558683882e65d119c1321fda40fc43d51d847";
+    expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.150.0"');
     expect(installer).toContain(
       `REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@${realtimeDigest}"`,
     );
@@ -1388,7 +1388,7 @@ describe("runtime companion version assets", () => {
       `Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@${realtimeDigest}`,
     );
     expect(realtimeUnit).toContain(
-      "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.138.1",
+      "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.150.0",
     );
     const ciWorkflow = Bun.YAML.parse(workflow) as {
       jobs: Record<string, {
@@ -1398,7 +1398,7 @@ describe("runtime companion version assets", () => {
     };
     const integrationJob = ciWorkflow.jobs["integration-test"];
     expect(integrationJob?.services?.["realtime"]?.image).toBe(
-      "ghcr.io/supabase/realtime:v2.138.1",
+      "ghcr.io/supabase/realtime:v2.150.0",
     );
     expect(workflow).not.toContain("public.ecr.aws/supabase/realtime");
     expect(integrationJob?.steps.find((step) => step.name === "Wait for CI services")?.run)
@@ -1416,7 +1416,7 @@ describe("runtime companion version assets", () => {
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
-    expect(workflow).toContain("image: supabase/postgres:17.6.1.177");
+    expect(workflow).toContain("image: supabase/postgres:17.11.0.011");
 
     const upgradeNotes = readRepoFile("docs/platform-component-upgrade-notes.md");
     expect(upgradeNotes).toContain("v5 删除内部构建器");

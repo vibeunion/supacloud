@@ -363,7 +363,7 @@ open-source Supabase CLI. SupaCloud does not fork or vendor the upstream CLI.
 The adapter resolves the executable in this order:
 
 1. `SUPACLOUD_SUPABASE_CLI_BIN` (an explicit executable path)
-2. `SUPABASE_CLI_VERSION=2.120.0` as the recommended pinned Bun/npm package runner version
+2. `SUPABASE_CLI_VERSION=2.122.0` as the recommended pinned Bun/npm package runner version
 3. `<workdir>/node_modules/supabase`
 4. `supabase` on `PATH`
 
@@ -371,6 +371,13 @@ The normal path does not contact npm. Install the official CLI through its
 supported package manager, or add it as a project development dependency. On
 Windows under Node.js, use an installed official CLI or
 `SUPACLOUD_SUPABASE_CLI_BIN`; the adapter will not invoke `.cmd` through a shell.
+
+CLI 2.122+ reads `supabase/supabase.lock` when it is present in the workdir, so
+`stack` commands can reproduce an exact service-version set. PostgreSQL TLS
+settings are forwarded to official `db push --linked`, `db pull`, and `pg_dump`
+calls: `PGSSLMODE`, `PGSSLROOTCERT`, `PGSSLCERT`, `PGSSLKEY`, `PGSSLCRL`,
+`PGSSLCRLDIR`, `PGSSLSNI`, `PGSSLNEGOTIATION`, `PGSSLCOMPRESSION`, and
+`PGREQUIRESSL`. Passwords, connection URLs, and `PGPASSFILE` remain blocked.
 
 ```bash
 # Local schema authoring; SupaCloud credentials are not required.

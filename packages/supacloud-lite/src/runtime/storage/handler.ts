@@ -155,6 +155,7 @@ interface TusUpload {
   bucketId: string
   key: string
   contentType: string
+  contentEncoding?: string
   cacheControl: string
   upsert: boolean
   length: number
@@ -476,6 +477,7 @@ export class StorageHandler {
 
     const upsert = (req.headers.get('x-upsert') ?? 'false').toLowerCase() === 'true' || req.method === 'PUT'
     let contentType = req.headers.get('content-type') ?? 'application/octet-stream'
+    let contentEncoding = req.headers.get('content-encoding') ?? undefined
     let cacheControl = req.headers.get('cache-control') ?? 'no-cache'
     let bytes: Uint8Array
     const sizeLimit = this.effectiveFileSizeLimit(bucket)
@@ -495,6 +497,8 @@ export class StorageHandler {
       if (!filePart) return storageError(400, 'invalid_request', 'no file found in multipart body')
       const cc = parts.find((p) => p.name === 'cacheControl')
       if (cc) cacheControl = new TextDecoder().decode(cc.data)
+      const encoding = parts.find((p) => p.name === 'contentEncoding')
+      if (encoding) contentEncoding = new TextDecoder().decode(encoding.data)
       bytes = filePart.data
       contentType = filePart.contentType ?? 'application/octet-stream'
     } else {
@@ -514,7 +518,7 @@ export class StorageHandler {
     if (mimeError) return mimeError
 
     try {
-      const id = await this.persistObject(ctx, bucketId, key, bytes, contentType, cacheControl, upsert)
+      const id = await this.persistObject(ctx, bucketId, key, bytes, contentType, cacheControl, upsert, contentEncoding)
       return json(200, { Key: `${bucketId}/${key}`, Id: id })
     } catch (e) {
       if (e instanceof RlsPolicyError) return rlsDeniedResponse()
@@ -565,9 +569,10 @@ export class StorageHandler {
     bytes: Uint8Array,
     contentType: string,
     cacheControl: string,
-    upsert: boolean
+    upsert: boolean,
+    contentEncoding?: string
   ): Promise<string> {
-    const metadata = objectMetadata(bytes.length, contentType, cacheControl)
+    const metadata = objectMetadata(bytes.length, contentType, cacheControl, contentEncoding)
     const ownership = storageObjectOwnership(ctx)
     const previous = (
       await this.db.query<ObjectRow>(`select * from storage.objects where bucket_id = $1 and name = $2`, [bucketId, key])
@@ -668,7 +673,8 @@ export class StorageHandler {
             new Uint8Array(),
             contentType,
             meta.cacheControl ?? 'no-cache',
-            upsert
+            upsert,
+            meta.contentEncoding
           )
         } catch (error) {
           if (error instanceof RlsPolicyError) return rlsDeniedResponse()
@@ -710,6 +716,7 @@ export class StorageHandler {
         bucketId,
         key,
         contentType,
+        contentEncoding: meta.contentEncoding,
         cacheControl: meta.cacheControl ?? 'no-cache',
         upsert,
         length,
@@ -812,7 +819,8 @@ export class StorageHandler {
         data,
         upload.contentType,
         upload.cacheControl,
-        upload.upsert
+        upload.upsert,
+        upload.contentEncoding
       )
     } catch (e) {
       this.tusUploads.delete(id)
@@ -1304,12 +1312,13 @@ function parseSizeLimit(v: number | string | null | undefined): number | null {
   return Math.floor(parseFloat(m[1]) * mult)
 }
 
-function objectMetadata(size: number, contentType: string, cacheControl: string): Record<string, unknown> {
+function objectMetadata(size: number, contentType: string, cacheControl: string, contentEncoding?: string): Record<string, unknown> {
   return {
     eTag: `"${crypto.randomUUID()}"`,
     size,
     mimetype: contentType,
     cacheControl,
+    ...(contentEncoding ? { contentEncoding } : {}),
     lastModified: new Date().toISOString(),
     contentLength: size,
     httpStatusCode: 200,
@@ -1320,6 +1329,7 @@ function objectHeaders(row: ObjectRow, contentLength: number): Headers {
   const metadata = row.metadata ?? {}
   return new Headers({
     'content-type': String(metadata.mimetype ?? 'application/octet-stream'),
+    ...(typeof metadata.contentEncoding === 'string' ? { 'content-encoding': metadata.contentEncoding } : {}),
     'content-length': String(contentLength),
     'cache-control': String(metadata.cacheControl ?? 'no-cache'),
     etag: String(metadata.eTag ?? '""'),

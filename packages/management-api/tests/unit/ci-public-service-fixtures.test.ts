@@ -16,7 +16,7 @@ test("public integration fixtures initialize without unavailable fork PR secrets
   const integration = object((await jobs())["integration-test"]);
   const services = object(integration.services);
   for (const [name, image] of [
-    ["postgres", "supabase/postgres:17.6.1.177"],
+    ["postgres", "supabase/postgres:17.11.0.011"],
     ["postgrest", "postgrest/postgrest:v16.5"],
     ["gotrue", "supabase/gotrue:v2.197.0"],
   ]) {

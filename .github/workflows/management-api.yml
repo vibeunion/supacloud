@@ -932,7 +932,7 @@ jobs:
     services:
       postgres:
         # Upstream Supabase compatibility fixture only. SupaCloud deployment remains PostgreSQL 18.
-        image: supabase/postgres:17.6.1.177
+        image: supabase/postgres:17.11.0.011
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -976,7 +976,7 @@ jobs:
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
         # Official upstream mirror avoids ECR Public's anonymous data quota.
-        image: ghcr.io/supabase/realtime:v2.138.1
+        image: ghcr.io/supabase/realtime:v2.150.0
         ports:
           - 4000:4000
         env:
