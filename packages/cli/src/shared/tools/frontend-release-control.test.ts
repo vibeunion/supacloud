@@ -14,6 +14,7 @@ import {
     listFrontendReleases,
     readFrontendReleaseAuthority,
     rollbackFrontendRelease,
+    verifyFrontendRelease,
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
@@ -125,6 +126,36 @@ function boundRollbackFixture() {
         },
     );
     return { state, calls, invoke, http };
+}
+
+function verifyFixture(liveResponse: () => Response) {
+    const base = `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}`;
+    const calls: string[] = [];
+    const server = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        async fetch(request) {
+            const url = new URL(request.url);
+            calls.push(`${request.method} ${url.pathname}`);
+            if (request.method === "GET" && url.pathname === `${base}/active-release`) {
+                return Response.json({
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                    releases: [release()], next_cursor: null,
+                });
+            }
+            if (request.method === "GET" && url.pathname === base) {
+                return Response.json({
+                    id: DEPLOYMENT_ID, name: "FA Web",
+                    deployment_url: `${url.origin}/site/`,
+                });
+            }
+            if (request.method === "GET" && url.pathname === "/site/") return liveResponse();
+            return Response.json({}, { status: 404 });
+        },
+    });
+    servers.push(server);
+    const http = new HttpTransport({ baseUrl: server.url.toString(), token: "local-verify-fixture" });
+    return { calls, http };
 }
 
 afterEach(async () => {
@@ -1349,5 +1380,43 @@ describe("immutable frontend release control", () => {
             expectedActivationId: "absent",
             mutationId: "",
         })).rejects.toThrow("'mutation_id' must be a UUIDv4");
+    });
+
+    test("verifies the active release and live deployment URL in one receipt", async () => {
+        const { calls, http } = verifyFixture(() => new Response(
+            "<!doctype html><title>FA</title>",
+            { headers: { "content-type": "text/html; charset=utf-8" } },
+        ));
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).not.toBe(true);
+        const receipt = parsed(response);
+        expect(receipt).toMatchObject({
+            schema: "supacloud.frontend-release-verification.v1",
+            ok: true,
+            project_ref: PROJECT_REF,
+            deployment_id: DEPLOYMENT_ID,
+            active_release_id: RELEASE_ID,
+            active_activation_id: MUTATION_ID,
+            release: { release_id: RELEASE_ID, tree_sha256: TREE_SHA },
+            live: { status: 200, content_type: "text/html; charset=utf-8", error_code: null },
+        });
+        expect((receipt.live as Record<string, unknown>).url).toMatch(/\/site\/$/u);
+        expect(calls).toEqual([
+            `GET /v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+            `GET /v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}`,
+            "GET /site/",
+        ]);
+    });
+
+    test("marks the receipt as failed when the live deployment is unhealthy", async () => {
+        const { http } = verifyFixture(() => new Response("unavailable", { status: 503 }));
+        const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            schema: "supacloud.frontend-release-verification.v1",
+            ok: false,
+            active_release_id: RELEASE_ID,
+            live: { status: 503, error_code: "LIVE_RESPONSE_INVALID" },
+        });
     });
 });

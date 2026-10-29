@@ -17,6 +17,8 @@ const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
 const ARCHIVE_CHUNK_BYTES = 64 * 1024;
 const RESPONSE_MAX_BYTES = 1024 * 1024;
+const LIVE_RESPONSE_MAX_BYTES = 1024 * 1024;
+const LIVE_CHECK_TIMEOUT_MS = 10_000;
 const UPLOAD_REQUEST_TIMEOUT_MS = 10 * 60_000;
 const MUTATION_RESPONSE_TIMEOUT_MS = 5_000;
 const RELEASE_LIST_LIMIT_MAX = 100;
@@ -653,6 +655,100 @@ export async function getActiveFrontendRelease(
 ): Promise<ToolResponse> {
     const snapshot = await readActiveFrontendRelease(http, projectRef, deploymentId);
     return "failure" in snapshot ? snapshot.failure : toolResponse(snapshot.inventory);
+}
+
+function deploymentLiveUrl(candidate: unknown): string | null {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+    const value = (candidate as Record<string, unknown>).deployment_url;
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+        const url = new URL(value.trim());
+        return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
+async function verifyLiveDeployment(url: string): Promise<{
+    ok: boolean;
+    status: number;
+    content_type: string | null;
+    bytes: number;
+    error_code: string | null;
+}> {
+    try {
+        const response = await fetch(url, {
+            method: "GET",
+            redirect: "follow",
+            cache: "no-store",
+            signal: AbortSignal.timeout(LIVE_CHECK_TIMEOUT_MS),
+        });
+        const contentLength = Number(response.headers.get("content-length") ?? "");
+        if (Number.isFinite(contentLength) && contentLength > LIVE_RESPONSE_MAX_BYTES) {
+            await response.body?.cancel();
+            return {
+                ok: false, status: response.status,
+                content_type: response.headers.get("content-type"), bytes: contentLength,
+                error_code: "LIVE_RESPONSE_TOO_LARGE",
+            };
+        }
+        const body = new Uint8Array(await response.arrayBuffer());
+        const ok = response.status === 200 && body.byteLength > 0 && body.byteLength <= LIVE_RESPONSE_MAX_BYTES;
+        return {
+            ok,
+            status: response.status,
+            content_type: response.headers.get("content-type"),
+            bytes: body.byteLength,
+            error_code: ok ? null : body.byteLength === 0 ? "LIVE_RESPONSE_EMPTY" : "LIVE_RESPONSE_INVALID",
+        };
+    } catch (error: unknown) {
+        const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+        return {
+            ok: false, status: 0, content_type: null, bytes: 0,
+            error_code: timedOut ? "LIVE_CHECK_TIMEOUT" : "LIVE_CHECK_FAILED",
+        };
+    }
+}
+
+export async function verifyFrontendRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+): Promise<ToolResponse> {
+    const snapshot = await readActiveFrontendRelease(http, projectRef, deploymentId);
+    if ("failure" in snapshot) return snapshot.failure;
+    const inventory = snapshot.inventory;
+    const release = inventory.releases[0];
+    if (!release) return releaseFailure("frontend.verify_release", "NO_ACTIVE_RELEASE", 200);
+    const deployment = await http.get(deploymentEndpoint(projectRef, deploymentId), {
+        maxJsonBytes: RESPONSE_MAX_BYTES,
+    });
+    const liveUrl = deployment.ok && deployment.status === 200
+        ? deploymentLiveUrl(deployment.data) : null;
+    const live = liveUrl
+        ? await verifyLiveDeployment(liveUrl)
+        : { ok: false, status: 0, content_type: null, bytes: 0, error_code: "LIVE_URL_UNAVAILABLE" };
+    const receipt = {
+        schema: "supacloud.frontend-release-verification.v1",
+        ok: live.ok,
+        project_ref: projectRef,
+        deployment_id: deploymentId,
+        active_release_id: inventory.active_release_id,
+        active_activation_id: inventory.active_activation_id,
+        release,
+        live: {
+            url: liveUrl,
+            status: live.status,
+            content_type: live.content_type,
+            bytes: live.bytes,
+            error_code: live.error_code,
+        },
+        checked_at: new Date().toISOString(),
+    };
+    return {
+        content: [{ type: "text", text: JSON.stringify(receipt, null, 2) }],
+        ...(live.ok ? {} : { isError: true }),
+    };
 }
 
 export async function readFrontendReleaseAuthority(
