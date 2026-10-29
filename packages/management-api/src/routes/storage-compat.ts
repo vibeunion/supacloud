@@ -32,6 +32,17 @@ import { StorageService } from "../services/storage.service";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
 import {
+    deleteExactVersion,
+    ensureStorageVersioningSchema,
+    getLifecycleConfiguration,
+    getObjectVersion,
+    getVersionDownloadResponse,
+    getVersionInfo,
+    normalizeVersioningStatus,
+    purgeBucketVersions,
+    validateLifecycleConfiguration,
+} from "../services/storage-versioning";
+import {
     ImagorRequestError,
     imagorOutputContentType,
     runImagorWithRequest,
@@ -119,10 +130,10 @@ async function getSigningSecretForTenant(ref: string): Promise<string | null> {
 
 import { jwtVerify } from "jose";
 
-async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): Promise<string> {
+async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number, versionId?: string): Promise<string> {
     const secret = await getSigningSecretForTenant(ref);
     if (!secret) throw new Error('Storage signing secret unavailable');
-    const payload = signedUrlPayload(ref, bucket, path, expiresAt);
+    const payload = signedUrlPayload(ref, bucket, path, expiresAt, versionId);
     const hmac = createHmac('sha256', secret);
     hmac.update(payload);
     return hmac.digest('hex');
@@ -131,16 +142,17 @@ async function generateSignedToken(ref: string, bucket: string, path: string, ex
 /**
  * Verify a signed token against path + expiry.
  */
-async function verifySignedToken(ref: string, bucket: string, path: string, token: string, expiresAt?: number): Promise<boolean> {
+async function verifySignedToken(ref: string, bucket: string, path: string, token: string, expiresAt?: number, versionId?: string): Promise<boolean> {
     try {
         const secret = await getSigningSecretForTenant(ref);
         if (!secret) return false;
 
         if (expiresAt && expiresAt < Math.floor(Date.now() / 1000)) return false;
-        if (verifyLegacySignedToken(secret, ref, bucket, path, token, expiresAt)) return true;
+        if (verifyLegacySignedToken(secret, ref, bucket, path, token, expiresAt, Math.floor(Date.now() / 1000), versionId)) return true;
 
         const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-        return payload.url === `${bucket}/${path}` && payload.ref === ref;
+        return payload.url === `${bucket}/${path}` && payload.ref === ref
+            && (versionId ? payload.versionId === versionId : true);
     } catch {
         return false;
     }
@@ -254,6 +266,31 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     }
 
     return apiKeyRef;
+}
+
+async function serveVersionDownload(
+    ref: string,
+    bucket: string,
+    filePath: string,
+    versionId: string,
+    query: Record<string, unknown>,
+    set: { headers: Record<string, string> },
+    cacheControl: string,
+): Promise<Response | null> {
+    const info = await getVersionInfo(ref, bucket, filePath, versionId);
+    const res = await getVersionDownloadResponse(ref, bucket, filePath, versionId);
+    if (!info || !res) return null;
+    set.headers['Content-Type'] = resolveDownloadContentType(res, info);
+    const contentEncoding = resolveContentEncoding(info);
+    if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
+    set.headers['Cache-Control'] = cacheControl;
+    set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+    const etag = res.headers?.get('ETag') || (info.id ? `"${String(info.id)}"` : undefined);
+    if (etag) set.headers['ETag'] = etag;
+    const lastModified = res.headers?.get('Last-Modified') || info.updated_at || info.created_at;
+    if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
+    setDownloadDisposition(query as Record<string, string | undefined>, filePath, set);
+    return new Response(await res.arrayBuffer());
 }
 
 async function requireVectorServiceRole(
@@ -487,6 +524,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 updated_at: (b.updated_at as string) || new Date().toISOString(),
                 file_size_limit: b.file_size_limit || null,
                 allowed_mime_types: b.allowed_mime_types || null,
+                versioning_status: (b.versioning_status as string) || 'DISABLED',
                 type: (b.type as string) || 'STANDARD',
             }));
         } catch (e: unknown) {
@@ -504,7 +542,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
             allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
             file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
-            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
+            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+            versioning_status: t.Optional(t.String()),
+            versioningStatus: t.Optional(t.String())
         }),
         detail: { tags: ["storage"], summary: "Create a storage bucket" },
     }, async ({ headers, body }) => {
@@ -515,6 +555,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const name = body.name || ref;
         const bucketId = String(body.id || name);
         const isPublic = body.public === true;
+        let versioningStatus;
+        try {
+            versioningStatus = normalizeVersioningStatus(body.versioning_status ?? body.versioningStatus, 'create');
+        } catch (error: unknown) {
+            return status(400, { statusCode: "400", error: 'Bad Request', message: error instanceof Error ? error.message : 'Invalid versioning status' });
+        }
+        if (ref !== 'test_mock') await ensureStorageVersioningSchema(ref);
         
         // Parse file size limit (e.g. '1mb', '1kb', '50mb')
         const rawFileSizeLimit = body.file_size_limit !== undefined ? body.file_size_limit : body.fileSizeLimit;
@@ -525,7 +572,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // 1. Register bucket in Postgres `storage.buckets` subject to RLS BEFORE allocating in S3
         try {
-            await StorageRLS.registerLogicalBucket(ref, auth, bucketId, String(name), isPublic, fileSizeLimit, allowedMimeTypes);
+            await StorageRLS.registerLogicalBucket(ref, auth, bucketId, String(name), isPublic, fileSizeLimit, allowedMimeTypes, versioningStatus);
         } catch (err: unknown) {
             return status(403, { statusCode: "403", error: 'Forbidden', message: err instanceof Error ? err.message : 'Access Denied' });
         }
@@ -543,6 +590,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             public: isPublic,
             file_size_limit: fileSizeLimit,
             allowed_mime_types: allowedMimeTypes,
+            versioning_status: versioningStatus,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             type: body.type || 'STANDARD',
@@ -572,6 +620,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 updated_at: (bucket.updated_at as string) || new Date().toISOString(),
                 file_size_limit: bucket.file_size_limit || null,
                 allowed_mime_types: bucket.allowed_mime_types || null,
+                versioning_status: (bucket.versioning_status as string) || 'DISABLED',
                 type: (bucket.type as string) || 'STANDARD',
             };
         } catch (e: unknown) {
@@ -589,7 +638,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
             allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
             file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
-            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
+            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+            versioning_status: t.Optional(t.String()),
+            versioningStatus: t.Optional(t.String())
         }),
         detail: { tags: ["storage"], summary: "Update bucket settings" },
     }, async ({ params, headers, body }) => {
@@ -609,13 +660,87 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const fileSizeLimit = parseFileSizeLimit(rawFileSizeLimit ?? current.file_size_limit ?? null);
             const rawAllowedMimeTypes = body.allowed_mime_types !== undefined ? body.allowed_mime_types : body.allowedMimeTypes;
             const allowedMimeTypes = parseAllowedMimeTypes(rawAllowedMimeTypes) ?? parseAllowedMimeTypes(current.allowed_mime_types);
+            const rawVersioning = body.versioning_status ?? body.versioningStatus;
+            let versioningStatus;
+            try {
+                versioningStatus = rawVersioning === undefined
+                    ? undefined
+                    : normalizeVersioningStatus(rawVersioning, 'update');
+            } catch (error: unknown) {
+                return status(400, { statusCode: "400", error: 'Bad Request', message: error instanceof Error ? error.message : 'Invalid versioning status' });
+            }
+            if (ref !== 'test_mock') await ensureStorageVersioningSchema(ref);
             
-            await StorageRLS.registerLogicalBucket(ref, auth, params.id, name, isPublic, fileSizeLimit, allowedMimeTypes);
+            await StorageRLS.registerLogicalBucket(ref, auth, params.id, name, isPublic, fileSizeLimit, allowedMimeTypes, versioningStatus);
 
             return { message: "Successfully updated" };
         } catch (e: unknown) {
             return status(403, { statusCode: "403", error: 'Forbidden', message: e instanceof Error ? e.message : 'Access Denied' });
         }
+    })
+
+    // GET /bucket/:id/lifecycle — Get lifecycle rules for noncurrent object versions
+    .get('/bucket/:id/lifecycle', {
+        detail: { tags: ["storage"], summary: "Get bucket lifecycle configuration" },
+    }, async ({ params, headers }) => {
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
+        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+        const auth = headers['authorization'];
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.id, auth);
+        if (!bucket) return status(404, { statusCode: "404", error: 'Not Found', message: 'The resource was not found' });
+        if (ref === 'test_mock') {
+            if (bucket.lifecycle_rules === undefined || bucket.lifecycle_rules === null) {
+                return status(404, { statusCode: "404", error: 'NoSuchLifecycleConfiguration', message: 'The lifecycle configuration does not exist' });
+            }
+            return bucket.lifecycle_rules;
+        }
+        await ensureStorageVersioningSchema(ref);
+        const lifecycle = await getLifecycleConfiguration(ref, params.id).catch((error: unknown) => {
+            if (error instanceof Error && error.message === 'BUCKET_NOT_FOUND') return null;
+            throw error;
+        });
+        if (!lifecycle) {
+            return status(404, { statusCode: "404", error: 'NoSuchLifecycleConfiguration', message: 'The lifecycle configuration does not exist' });
+        }
+        return lifecycle;
+    })
+
+    // PUT /bucket/:id/lifecycle — Replace lifecycle rules for noncurrent object versions
+    .put('/bucket/:id/lifecycle', {
+        body: t.Unknown(),
+        detail: { tags: ["storage"], summary: "Set bucket lifecycle configuration" },
+    }, async ({ params, headers, body, set }) => {
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
+        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+        const auth = headers['authorization'];
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.id, auth);
+        if (!bucket) return status(404, { statusCode: "404", error: 'Not Found', message: 'The resource was not found' });
+        try {
+            const lifecycle = validateLifecycleConfiguration(body);
+            await StorageRLS.setLifecycleRules(ref, auth, params.id, lifecycle);
+            set.headers['x-supabase-api-version'] = '1';
+            return lifecycle;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Invalid lifecycle configuration';
+            if (message === 'BUCKET_NOT_FOUND') return status(404, { statusCode: "404", error: 'Not Found', message: 'The resource was not found' });
+            return status(400, { statusCode: "400", error: 'Bad Request', message });
+        }
+    })
+
+    // DELETE /bucket/:id/lifecycle — Remove lifecycle configuration
+    .delete('/bucket/:id/lifecycle', {
+        detail: { tags: ["storage"], summary: "Delete bucket lifecycle configuration" },
+    }, async ({ params, headers }) => {
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
+        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+        const auth = headers['authorization'];
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.id, auth);
+        if (!bucket) return status(404, { statusCode: "404", error: 'Not Found', message: 'The resource was not found' });
+        if (ref !== 'test_mock') await ensureStorageVersioningSchema(ref);
+        await StorageRLS.deleteLifecycleRules(ref, auth, params.id).catch((error: unknown) => {
+            if (!(error instanceof Error && error.message === 'BUCKET_NOT_FOUND')) throw error;
+        });
+        return { message: 'Successfully deleted' };
     })
 
     // POST /bucket/:id/empty — Empty bucket
@@ -636,8 +761,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         // 2. Clear physical storage
         const result = await StorageService.emptyBucket(ref, params.id);
         if (!result.success) return status(500, { statusCode: "500", error: 'Internal', message: result.error || 'Failed to empty bucket' });
+
+        // 3. Purge noncurrent versions and their archived bytes
+        try {
+            await purgeBucketVersions(ref, params.id);
+        } catch (error: unknown) {
+            logger.error("Failed to purge bucket object versions", {
+                ref,
+                bucketId: params.id,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return status(500, { statusCode: "500", error: 'Internal', message: 'Failed to purge object versions' });
+        }
         
-        // 3. Logical delete bucket
+        // 4. Logical delete bucket
         await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
         return { message: "Successfully emptied" };
     })
@@ -670,7 +807,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             });
         }
         
-        // 3. Logical delete bucket
+        // 3. Purge noncurrent versions and their archived bytes before cascading bucket metadata
+        try {
+            await purgeBucketVersions(ref, params.id);
+        } catch (error: unknown) {
+            logger.error("Failed to purge bucket object versions", {
+                ref,
+                bucketId: params.id,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return status(500, { statusCode: "500", error: 'Internal', message: 'Failed to purge object versions' });
+        }
+
+        // 4. Logical delete bucket
         try {
             await StorageRLS.deleteLogicalBucket(ref, auth, params.id, false);
         } catch (error: unknown) {
@@ -827,7 +976,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
         }
 
-
+        const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
+        if (versionId) {
+            try {
+                const versionResponse = await serveVersionDownload(
+                    ref, params.bucket, filePath, versionId, query as Record<string, unknown>,
+                    set as { headers: Record<string, string> }, 'public, max-age=3600',
+                );
+                if (!versionResponse) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+                return versionResponse;
+            } catch {
+                return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
+            }
+        }
 
         try {
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
@@ -861,6 +1022,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         const auth = headers['authorization'];
+        const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
+        if (versionId) {
+            const permittedVersion = await StorageRLS.authorizeObjectVersion(ref, auth, 'download', params.bucket, filePath, versionId);
+            if (!permittedVersion) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+            try {
+                const versionResponse = await serveVersionDownload(
+                    ref, params.bucket, filePath, versionId, query as Record<string, unknown>,
+                    set as { headers: Record<string, string> }, 'private, max-age=3600',
+                );
+                if (!versionResponse) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+                return versionResponse;
+            } catch {
+                return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
+            }
+        }
+
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
@@ -894,12 +1071,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // GET /object/info/:bucket/* — File metadata
     .get('/object/info/public/:bucket/*', {
         detail: { tags: ["storage"], summary: "Get public file metadata" },
-    }, async ({ params, headers }) => {
+    }, async ({ params, headers, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Bucket is not public' });
+
+        const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
+        if (versionId) {
+            const versionInfo = await getVersionInfo(ref, params.bucket, filePath, versionId);
+            if (!versionInfo) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+            return versionInfo;
+        }
 
         const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
         if (!info) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found' });
@@ -908,9 +1092,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
     .get('/object/info/:bucket/*', {
         detail: { tags: ["storage"], summary: "Get file metadata" },
-    }, async ({ params, headers }) => {
+    }, async ({ params, headers, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
+        const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
+        if (versionId) {
+            const permittedVersion = await StorageRLS.authorizeObjectVersion(ref, headers['authorization'], 'download', params.bucket, filePath, versionId);
+            if (!permittedVersion) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+            const versionInfo = await getVersionInfo(ref, params.bucket, filePath, versionId);
+            if (!versionInfo) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+            return versionInfo;
+        }
         
         const permitted = await StorageRLS.authorizeAction(ref, headers['authorization'], 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(404, { statusCode: "404", error: 'Not Found', message: permitted.error || 'Object not found' });
@@ -960,6 +1152,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         const auth = headers['authorization'];
+        const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
+        if (versionId) {
+            const permittedVersion = await StorageRLS.authorizeObjectVersion(ref, auth, 'download', params.bucket, filePath, versionId);
+            if (!permittedVersion) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+            try {
+                const versionResponse = await serveVersionDownload(
+                    ref, params.bucket, filePath, versionId, query as Record<string, unknown>,
+                    set as { headers: Record<string, string> }, 'private, max-age=3600',
+                );
+                if (!versionResponse) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+                return versionResponse;
+            } catch {
+                return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
+            }
+        }
+
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
@@ -1000,7 +1208,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             url: t.Optional(t.String()),
             path: t.Optional(t.String()),
             expiresIn: t.Optional(t.Number()),
-            transform: t.Optional(t.Any())
+            transform: t.Optional(t.Any()),
+            versionId: t.Optional(t.String())
         })),
         detail: { tags: ["storage"], summary: "Create a signed URL" },
     }, async ({ params, headers, body, request }) => {
@@ -1015,17 +1224,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // Check object exists via RLS
         const auth = headers['authorization'];
-        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        const versionId = typeof payload.versionId === 'string' ? payload.versionId : undefined;
+        const permitted = versionId
+            ? { permitted: await StorageRLS.authorizeObjectVersion(ref, auth, 'download', params.bucket, filePath, versionId) }
+            : await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(400, { statusCode: "400", error: 'Not Found', message: permitted.error || 'Object not found' });
 
         const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
-        const token = await generateSignedToken(ref, params.bucket, filePath, expiresAt);
+        const token = await generateSignedToken(ref, params.bucket, filePath, expiresAt, versionId);
 
         const transform = payload.transform;
         const signPrefix = transform ? `/render/image/sign` : `/object/sign`;
 
         return {
-            signedURL: buildSignedPath(`${signPrefix}/${params.bucket}/${filePath}`, expiresAt, token, transform),
+            signedURL: buildSignedPath(`${signPrefix}/${params.bucket}/${filePath}`, expiresAt, token, transform, undefined, versionId),
         };
     })
 
@@ -1223,13 +1435,27 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const token = query.token as string;
         const expiresAt = query.expiresAt ? Number(query.expiresAt) : undefined;
+        const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
 
         if (!token) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        if (!await verifySignedToken(ref, params.bucket, filePath, token, expiresAt)) {
+        if (!await verifySignedToken(ref, params.bucket, filePath, token, expiresAt, versionId)) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
+        }
+
+        if (versionId) {
+            try {
+                const versionResponse = await serveVersionDownload(
+                    ref, params.bucket, filePath, versionId, query as Record<string, unknown>,
+                    set as { headers: Record<string, string> }, 'private, no-store',
+                );
+                if (!versionResponse) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object version not found' });
+                return versionResponse;
+            } catch {
+                return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
+            }
         }
 
         // Transform support for signed URLs
@@ -1324,6 +1550,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             limit: t.Optional(t.Number()),
             offset: t.Optional(t.Number()),
             search: t.Optional(t.String()),
+            noncurrentVersions: t.Optional(t.String()),
+            deleteMarkers: t.Optional(t.String()),
             sortBy: t.Optional(t.Object({
                 column: t.Optional(t.String()),
                 order: t.Optional(t.String())
@@ -1340,7 +1568,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const search = body?.search || '';
 
         // Fetch securely from RLS DB
-        let files;
+        let files: Awaited<ReturnType<typeof StorageRLS.listObjects>>;
         try {
             files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
         } catch (e: unknown) {
@@ -1351,15 +1579,35 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(403, { statusCode: "403", error: 'Forbidden', message });
         }
 
-        return files.map(f => {
+        const versionMode = ['include', 'only'].includes(String(body?.noncurrentVersions || '')) ? String(body?.noncurrentVersions) : 'exclude';
+        const markerMode = ['include', 'only'].includes(String(body?.deleteMarkers || '')) ? String(body?.deleteMarkers) : 'exclude';
+        const includeCurrent = versionMode !== 'only' && markerMode !== 'only';
+        const includeNoncurrent = versionMode === 'include' || versionMode === 'only';
+        const includeMarkers = markerMode === 'include' || markerMode === 'only';
+        let versionFiles: Awaited<ReturnType<typeof StorageRLS.listObjectVersions>> = [];
+        if (includeNoncurrent || includeMarkers) {
+            const allVersions = await StorageRLS.listObjectVersions(ref, auth, params.bucket, {
+                prefix, limit: limit + offset, offset: 0, search, sortBy: body?.sortBy,
+            });
+            versionFiles = allVersions.filter((version) =>
+                version.is_delete_marker ? includeMarkers : includeNoncurrent,
+            );
+        }
+        const visibleFiles = includeCurrent ? [...files, ...versionFiles] : versionFiles;
+        return visibleFiles.slice(0, limit).map(f => {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
             const size = normalizeStorageObjectSize(f.size ?? f.metadata?.size);
+            const versioned = f as typeof f & { version?: string; archived_at?: string; is_delete_marker?: boolean; is_versioned?: boolean };
             return {
                 name: cleanName || f.name,
                 id: f.id,
                 updated_at: f.updated_at,
                 created_at: f.created_at,
                 last_accessed_at: f.last_accessed_at,
+                version: versioned.version,
+                archived_at: versioned.archived_at,
+                is_delete_marker: versioned.is_delete_marker === true,
+                is_versioned: versioned.is_versioned === true,
                 metadata: f.metadata ? {
                     ...f.metadata,
                     size,
@@ -1386,6 +1634,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             cursor: t.Optional(t.String()),
             with_delimiter: t.Optional(t.Boolean()),
             search: t.Optional(t.String()),
+            noncurrentVersions: t.Optional(t.String()),
+            deleteMarkers: t.Optional(t.String()),
             sortBy: t.Optional(t.Object({
                 column: t.Optional(t.String()),
                 order: t.Optional(t.String())
@@ -1415,7 +1665,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const with_delimiter = body?.with_delimiter ?? false;
 
         // Fetch securely from RLS DB (ask for limit + 1 to test hasNext)
-        let files;
+        let files: Awaited<ReturnType<typeof StorageRLS.listObjects>>;
         try {
             files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit + 1, offset, body?.sortBy, search, with_delimiter);
         } catch (e: unknown) {
@@ -1426,6 +1676,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(403, { statusCode: "403", error: 'Forbidden', message });
         }
 
+        const versionMode = ['include', 'only'].includes(String(body?.noncurrentVersions || '')) ? String(body?.noncurrentVersions) : 'exclude';
+        const markerMode = ['include', 'only'].includes(String(body?.deleteMarkers || '')) ? String(body?.deleteMarkers) : 'exclude';
+        const includeCurrent = versionMode !== 'only' && markerMode !== 'only';
+        const includeNoncurrent = versionMode === 'include' || versionMode === 'only';
+        const includeMarkers = markerMode === 'include' || markerMode === 'only';
+        if (!includeCurrent) files = [];
+        let versionFiles: Awaited<ReturnType<typeof StorageRLS.listObjectVersions>> = [];
+        if (includeNoncurrent || includeMarkers) {
+            const allVersions = await StorageRLS.listObjectVersions(ref, auth, params.bucket, {
+                prefix, limit: limit + offset, offset: 0, search, sortBy: body?.sortBy,
+            });
+            versionFiles = allVersions.filter((version) =>
+                version.is_delete_marker ? includeMarkers : includeNoncurrent,
+            );
+        }
         const objects = [];
         const folders = [];
         
@@ -1459,6 +1724,34 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             }
         }
 
+        for (const f of versionFiles.slice(0, limit)) {
+            const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
+            const size = normalizeStorageObjectSize(f.size ?? f.metadata?.size);
+            const versioned = f as typeof f & { version?: string; archived_at?: string; is_delete_marker?: boolean; is_versioned?: boolean };
+            objects.push({
+                name: cleanName || f.name,
+                key: f.name,
+                id: f.id,
+                updated_at: versioned.archived_at || f.updated_at || new Date().toISOString(),
+                created_at: f.created_at || f.updated_at || new Date().toISOString(),
+                last_accessed_at: f.last_accessed_at || f.updated_at || new Date().toISOString(),
+                version: versioned.version,
+                archived_at: versioned.archived_at,
+                is_delete_marker: versioned.is_delete_marker === true,
+                is_versioned: versioned.is_versioned === true,
+                metadata: f.metadata ? {
+                    ...f.metadata,
+                    size,
+                    mimetype: f.metadata.mimetype || 'application/octet-stream',
+                    cacheControl: f.metadata.cacheControl || f.metadata.cache_control,
+                    eTag: f.metadata.eTag || f.metadata.etag || `"${f.id}"`,
+                    lastModified: versioned.archived_at || f.updated_at,
+                    contentLength: size,
+                    httpStatusCode: 200
+                } : null,
+            });
+        }
+
         const nextCursor = hasNext ? Buffer.from(String(offset + limit)).toString('base64') : null;
 
         return { nextCursor, objects, folders, hasNext };
@@ -1471,21 +1764,49 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     .delete('/object/:bucket', {
         body: t.Optional(t.Object({
-            prefixes: t.Optional(t.Array(t.String()))
+            prefixes: t.Optional(t.Array(t.Union([
+                t.String(),
+                t.Object({ path: t.String(), versionId: t.String() })
+            ])))
         })),
         detail: { tags: ["storage"], summary: "Batch delete objects" },
     }, async ({ params, headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
-        const prefixes = body?.prefixes || [];
+        const entries = (body?.prefixes || []) as Array<string | { path: string; versionId: string }>;
         const auth = headers['authorization'];
 
         const results = await mapWithConcurrency(
-            prefixes,
+            entries,
             STORAGE_BATCH_CONCURRENCY,
-            async (p: string) => {
+            async (entry: string | { path: string; versionId: string }) => {
+                const p = typeof entry === 'string' ? entry : entry.path;
                 // Get info for the deleted object response natively matching FileObject (respect RLS)
                 // We MUST get info before deletion because getting info after deletion will return null
                 try {
+                    if (typeof entry !== 'string') {
+                        const current = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
+                        if (!current || String(current.version || '') !== entry.versionId) {
+                            const permittedVersion = await StorageRLS.authorizeObjectVersion(
+                                ref, auth, 'delete', params.bucket, p, entry.versionId,
+                            );
+                            if (!permittedVersion) throw new Error('Object version not found (may require delete permission)');
+                            const version = await getObjectVersion(ref, params.bucket, p, entry.versionId);
+                            if (!version) throw new Error('Object version not found');
+                            const deleted = await deleteExactVersion(ref, params.bucket, p, entry.versionId);
+                            if (!deleted) throw new Error('Failed to delete object version');
+                            return {
+                                status: 'fulfilled' as const,
+                                value: {
+                                    name: p,
+                                    bucket_id: params.bucket,
+                                    id: version.id,
+                                    version: entry.versionId,
+                                    is_delete_marker: version.is_delete_marker,
+                                },
+                            };
+                        }
+                    }
+
                     const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
                     if (!info) throw new Error('Object not found (may require select permission)');
 
@@ -1515,7 +1836,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (r.status === 'fulfilled' && r.value) {
                 successfulDeletes.push(r.value);
             } else {
-                failedDeletes.push(prefixes[i]);
+                const entry = entries[i];
+                failedDeletes.push(typeof entry === 'string' ? entry : entry.path);
             }
         }
 

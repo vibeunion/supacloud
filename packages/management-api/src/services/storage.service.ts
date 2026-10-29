@@ -223,7 +223,9 @@ export class StorageService {
    * Return the logical root bucket for this project setup
    */
   static async listBuckets(projectRef: string): Promise<Record<string, unknown>[]> {
-    return await getStorageDriver().listBuckets(projectRef);
+    const buckets = await getStorageDriver().listBuckets(projectRef);
+    // Internal bucket used by object versioning is never part of the user-visible namespace.
+    return buckets.filter((bucket) => String(bucket["id"] ?? bucket["name"] ?? "") !== ".supacloud_versions");
   }
 
   static async listFiles(projectRef: string, bucketName: string): Promise<Record<string, unknown>[]> {

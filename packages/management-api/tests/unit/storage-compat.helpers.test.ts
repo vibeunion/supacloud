@@ -25,6 +25,19 @@ describe("storage compatibility helpers", () => {
     expect(verifyLegacySignedToken(secret, "project-ref", "avatars", "folder/cat.png", token, expiresAt, expiresAt + 1)).toBe(false);
   });
 
+  test("binds signed URLs to an exact object version", () => {
+    const secret = "tenant-signing-secret";
+    const expiresAt = 4_000_000_000;
+    const versionId = "version-42";
+    const payload = signedUrlPayload("project-ref", "avatars", "folder/cat.png", expiresAt, versionId);
+    const token = createHmac("sha256", secret).update(payload).digest("hex");
+
+    expect(verifyLegacySignedToken(secret, "project-ref", "avatars", "folder/cat.png", token, expiresAt, Math.floor(Date.now() / 1000), versionId)).toBe(true);
+    expect(verifyLegacySignedToken(secret, "project-ref", "avatars", "folder/cat.png", token, expiresAt)).toBe(false);
+    expect(buildSignedPath("/object/sign/avatars/folder/cat.png", expiresAt, token, undefined, undefined, versionId))
+      .toContain(`versionId=${versionId}`);
+  });
+
   test("extracts multipart bytes and merges metadata with cache control", () => {
     const boundary = "boundary-123";
     const body = Buffer.from([

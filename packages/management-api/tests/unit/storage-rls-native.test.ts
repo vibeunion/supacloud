@@ -21,7 +21,11 @@ test.skipIf(!bin)("logical bucket MIME arrays roundtrip through native PostgreSQ
     });
     const db = database;
     await db.unsafe(`
+      CREATE ROLE anon NOLOGIN;
+      CREATE ROLE authenticated NOLOGIN;
       CREATE ROLE service_role NOLOGIN BYPASSRLS;
+      CREATE SCHEMA auth;
+      CREATE FUNCTION auth.uid() RETURNS uuid AS $$ SELECT NULL::uuid $$ LANGUAGE SQL STABLE;
       CREATE SCHEMA storage;
       CREATE TABLE storage.buckets (
         id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL,

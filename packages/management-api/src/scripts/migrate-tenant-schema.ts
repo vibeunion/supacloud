@@ -291,6 +291,44 @@ CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_
 CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
 -- 8. Storage
+ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS versioning_status TEXT NOT NULL DEFAULT 'DISABLED';
+ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS lifecycle_rules JSONB;
+CREATE TABLE IF NOT EXISTS storage.object_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket_id TEXT NOT NULL REFERENCES storage.buckets(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    owner UUID,
+    owner_id TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_delete_marker BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT object_versions_bucket_name_version_key UNIQUE (bucket_id, name, version_id)
+);
+CREATE INDEX IF NOT EXISTS object_versions_bucket_name_idx
+    ON storage.object_versions (bucket_id, name, archived_at DESC);
+CREATE INDEX IF NOT EXISTS object_versions_archive_idx
+    ON storage.object_versions (bucket_id, archived_at);
+ALTER TABLE storage.object_versions ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "Allow public read on storage.object_versions" ON storage.object_versions
+    FOR SELECT USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated read on storage.object_versions" ON storage.object_versions
+    FOR SELECT TO authenticated USING (auth.uid() = owner);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated insert on storage.object_versions" ON storage.object_versions
+    FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets) AND auth.uid() = owner);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated delete on storage.object_versions" ON storage.object_versions
+    FOR DELETE TO authenticated USING (auth.uid() = owner);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+GRANT ALL ON storage.object_versions TO service_role;
+GRANT SELECT, INSERT, DELETE ON storage.object_versions TO authenticated;
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
     id TEXT PRIMARY KEY,
     in_progress_size BIGINT NOT NULL DEFAULT 0,

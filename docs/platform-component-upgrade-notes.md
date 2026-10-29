@@ -31,6 +31,12 @@
 - `@supabase/supabase-js` 统一到 2.118.0，生成模板、SupaCloud JS peer 依赖和
   starter metadata 同步到 `^2.118.0`。Storage API 与 Lite 均持久化并回放
   `Content-Encoding` 元数据，覆盖原始、multipart、签名上传和 TUS 完成路径。
+- Storage 对象版本能力已落地：`storage.buckets.versioning_status`、
+  `storage.object_versions`、删除标记（delete marker）、按 `versionId` 下载/删除、
+  非当前版本归档到内部 `.supacloud_versions` 桶，以及
+  `noncurrentVersionExpiration` 生命周期清理 worker。已有租户首次访问时执行幂等
+  schema 补齐；恢复与过期行为由 `storage-versioning.test.ts` 覆盖。生命周期过滤
+  仍只支持上游当前的空 filter，版本能力仅面向 standard bucket。
 - 官方 Supabase CLI 推荐版本更新到 2.122.0。适配器放行 `PGSSL*` TLS 配置并继续
   阻断密码、连接 URL 和 `PGPASSFILE`；`supabase/supabase.lock` 由官方 CLI 在
   workdir 内直接读取，不复制到控制面。

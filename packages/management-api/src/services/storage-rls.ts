@@ -4,6 +4,14 @@ import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import { isOpaqueApiKey } from "../utils/api-keys";
 import { resolveProjectApiKey } from "../utils/project-auth";
 import { isRecord } from "../utils/record";
+import {
+  STORAGE_VERSION_BUCKET,
+  ensureStorageVersioningSchema,
+  ensureVersionBucket,
+  objectVersionStorageKey,
+  type StorageVersioningStatus,
+} from "./storage-versioning";
+import { StorageService } from "./storage.service";
 
 
 // ── TEST MOCK STATE ──
@@ -13,6 +21,8 @@ type StorageMockBucket = {
   public: boolean;
   file_size_limit: number | null;
   allowed_mime_types: string[] | null;
+  versioning_status?: StorageVersioningStatus;
+  lifecycle_rules?: unknown;
   created_at?: string;
   updated_at?: string;
 };
@@ -35,6 +45,10 @@ export type StorageListObject = {
   bucket_id?: string;
   owner?: string;
   sortKey?: string;
+  version?: string;
+  archived_at?: string;
+  is_delete_marker?: boolean;
+  is_versioned?: boolean;
 };
 
 export const mockBuckets = new Map<string, StorageMockBucket>();
@@ -46,6 +60,7 @@ type LogicalBucketInput = {
   public: boolean;
   fileSizeLimit?: number | null;
   allowedMimeTypes?: string[] | null;
+  versioningStatus?: StorageVersioningStatus;
 };
 
 function normalizeSqlRole(role: unknown, allowServiceRole = false): 'anon' | 'authenticated' | 'service_role' {
@@ -78,22 +93,24 @@ async function applyRlsContext(tx: import("bun").SQL, payload: Record<string, un
 async function upsertLogicalBucket(db: import("bun").SQL, bucket: LogicalBucketInput): Promise<void> {
   const allowedMimeTypes = bucket.allowedMimeTypes?.length ? db.array(bucket.allowedMimeTypes, "TEXT") : null;
   await db`
-    INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
-    VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, now(), now())
-    ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, updated_at = now()
+    INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, versioning_status, created_at, updated_at)
+    VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, ${bucket.versioningStatus ?? 'DISABLED'}, now(), now())
+    ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, versioning_status = COALESCE(${bucket.versioningStatus ?? null}, storage.buckets.versioning_status), updated_at = now()
   `;
 }
 
 export class StorageRLS {
 
   
-  static async registerLogicalBucket(ref: string, token: string | undefined, bucketId: string, name: string, isPublic: boolean, fileSizeLimit?: number | null, allowedMimeTypes?: string[] | null): Promise<void> {
+  static async registerLogicalBucket(ref: string, token: string | undefined, bucketId: string, name: string, isPublic: boolean, fileSizeLimit?: number | null, allowedMimeTypes?: string[] | null, versioningStatus?: StorageVersioningStatus): Promise<void> {
     if (ref === 'test_mock') {
-      mockBuckets.set(bucketId, { id: bucketId, name, public: isPublic, file_size_limit: fileSizeLimit || null, allowed_mime_types: allowedMimeTypes || null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      const existing = mockBuckets.get(bucketId);
+      mockBuckets.set(bucketId, { id: bucketId, name, public: isPublic, file_size_limit: fileSizeLimit || null, allowed_mime_types: allowedMimeTypes || null, versioning_status: versioningStatus ?? existing?.versioning_status ?? 'DISABLED', lifecycle_rules: existing?.lifecycle_rules, created_at: existing?.created_at ?? new Date().toISOString(), updated_at: new Date().toISOString() });
       return;
     }
 
     try {
+        await ensureStorageVersioningSchema(ref);
         await this.withBucketRLS(ref, token, async (tx) => {
             await upsertLogicalBucket(tx, {
               id: bucketId,
@@ -117,15 +134,17 @@ export class StorageRLS {
         public: bucket.public,
         file_size_limit: bucket.fileSizeLimit || null,
         allowed_mime_types: bucket.allowedMimeTypes?.length ? bucket.allowedMimeTypes : null,
+        versioning_status: bucket.versioningStatus ?? 'DISABLED',
       });
       return true;
     }
+    await ensureStorageVersioningSchema(ref);
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
     const allowedMimeTypes = bucket.allowedMimeTypes?.length ? db.array(bucket.allowedMimeTypes, "TEXT") : null;
     const rows = await db`
-      INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
-      VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, now(), now())
+      INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, versioning_status, created_at, updated_at)
+      VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, ${bucket.versioningStatus ?? 'DISABLED'}, now(), now())
       ON CONFLICT (id) DO NOTHING
       RETURNING id
     `;
@@ -137,7 +156,7 @@ export class StorageRLS {
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
     return await db`
-      SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types,
+      SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status,
         FLOOR(EXTRACT(EPOCH FROM COALESCE(updated_at, created_at, TIMESTAMPTZ 'epoch')) * 1000000)::bigint::text AS revision
       FROM storage.buckets
       ORDER BY name ASC
@@ -177,7 +196,7 @@ export class StorageRLS {
     if (ref === 'test_mock') return Array.from(mockBuckets.values());
 
     return await this.withBucketRLS(ref, token, async (tx) => {
-        let query = tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets`;
+        let query = tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status FROM storage.buckets`;
         if (options?.search) {
              const searchTerm = `%${options.search}%`;
              query = tx`${query} WHERE name ILIKE ${searchTerm}`;
@@ -221,12 +240,12 @@ export class StorageRLS {
     if (adminOverride) {
         const dbName = await resolveDbName(ref);
         const db = getProjectDb(dbName);
-        const rows = await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
+        const rows = await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status FROM storage.buckets WHERE id = ${bucketId}`;
         return (rows[0] as Record<string, unknown>) || null;
     }
 
     return await this.withBucketRLS(ref, token, async (tx) => {
-        const rows = await tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
+        const rows = await tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status FROM storage.buckets WHERE id = ${bucketId}`;
         return (rows[0] as Record<string, unknown>) || null;
     }).catch(() => null);
   }
@@ -352,6 +371,135 @@ export class StorageRLS {
     }).catch(() => null);
   }
 
+  static async setLifecycleRules(
+    ref: string,
+    token: string | null | undefined,
+    bucketId: string,
+    rules: unknown,
+  ): Promise<void> {
+    if (ref === 'test_mock') {
+      const bucket = mockBuckets.get(bucketId);
+      if (!bucket) throw new Error('BUCKET_NOT_FOUND');
+      bucket.lifecycle_rules = rules;
+      return;
+    }
+    await this.withBucketRLS(ref, token, async (tx) => {
+      const updated = await tx`
+        UPDATE storage.buckets
+        SET lifecycle_rules = ${JSON.stringify(rules)}::jsonb, updated_at = now()
+        WHERE id = ${bucketId}
+        RETURNING id
+      `;
+      if (updated.length === 0) throw new Error('BUCKET_NOT_FOUND');
+    });
+  }
+
+  static async deleteLifecycleRules(
+    ref: string,
+    token: string | null | undefined,
+    bucketId: string,
+  ): Promise<void> {
+    if (ref === 'test_mock') {
+      const bucket = mockBuckets.get(bucketId);
+      if (!bucket) throw new Error('BUCKET_NOT_FOUND');
+      bucket.lifecycle_rules = undefined;
+      return;
+    }
+    await this.withBucketRLS(ref, token, async (tx) => {
+      const updated = await tx`
+        UPDATE storage.buckets
+        SET lifecycle_rules = NULL, updated_at = now()
+        WHERE id = ${bucketId}
+        RETURNING id
+      `;
+      if (updated.length === 0) throw new Error('BUCKET_NOT_FOUND');
+    });
+  }
+
+  static async authorizeObjectVersion(
+    ref: string,
+    token: string | null | undefined,
+    action: 'download' | 'delete',
+    bucketId: string,
+    objectName: string,
+    versionId: string,
+  ): Promise<boolean> {
+    if (ref === 'test_mock') return false;
+    try {
+      return await this.withBucketRLS(ref, token, async (tx, payload) => {
+        const rows = await tx`
+          SELECT owner FROM storage.object_versions
+          WHERE bucket_id = ${bucketId} AND name = ${objectName} AND version_id = ${versionId}
+          LIMIT 1
+        `;
+        if (rows.length === 0) return false;
+        if (action === 'download' || payload.role === 'service_role') return true;
+        return payload.role === 'authenticated'
+          && payload.sub != null
+          && String(rows[0]?.["owner"] || '') === String(payload.sub);
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  static async listObjectVersions(
+    ref: string,
+    token: string | null | undefined,
+    bucketId: string,
+    options: { prefix?: string; limit?: number; offset?: number; search?: string; sortBy?: { column?: string; order?: string } } = {},
+  ): Promise<StorageListObject[]> {
+    if (ref === 'test_mock') return [];
+    const prefix = options.prefix || '';
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 1000);
+    const offset = Math.max(options.offset ?? 0, 0);
+    const sortColumn = options.sortBy?.column === 'created_at' ? 'created_at' : 'archived_at';
+    const direction = (options.sortBy?.order || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    try {
+      return await this.withBucketRLS(ref, token, async (tx) => {
+        const [bucket] = await tx`SELECT id FROM storage.buckets WHERE id = ${bucketId}`;
+        if (!bucket) throw new Error('BUCKET_NOT_FOUND');
+        const rows = await tx.unsafe(
+          `SELECT id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at
+           FROM storage.object_versions
+           WHERE bucket_id = $1 AND name LIKE $2 AND ($3::text = '' OR name ILIKE $3)
+           ORDER BY ${sortColumn} ${direction}, name ASC
+           LIMIT $4 OFFSET $5`,
+          [bucketId, `${prefix}%`, options.search ? `%${options.search}%` : '', limit, offset],
+        );
+        return rows.map((row: Record<string, unknown>) => {
+          const meta = isRecord(row["metadata"]) ? row["metadata"] : {};
+          const size = normalizeStorageObjectSize(meta["size"]);
+          return {
+            id: String(row["id"]),
+            name: String(row["name"]),
+            bucket_id: bucketId,
+            owner: row["owner"] ? String(row["owner"]) : undefined,
+            size,
+            type: String(meta["mimetype"] || 'application/octet-stream'),
+            metadata: {
+              size,
+              mimetype: String(meta["mimetype"] || 'application/octet-stream'),
+              cacheControl: String(meta["cacheControl"] || meta["cache_control"] || '3600').replace(/^max-age=/, ''),
+              ...(typeof meta["contentEncoding"] === 'string' ? { contentEncoding: meta["contentEncoding"] } : {}),
+            },
+            updated_at: String(row["archived_at"]),
+            created_at: String(row["created_at"]),
+            last_accessed_at: String(row["archived_at"]),
+            version: String(row["version_id"]),
+            archived_at: String(row["archived_at"]),
+            is_delete_marker: row["is_delete_marker"] === true,
+            is_versioned: true,
+          };
+        });
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message === 'BUCKET_NOT_FOUND' || message === 'Access Denied' || message === 'PROJECT_NOT_FOUND') throw e;
+      throw new Error('RLS_VIOLATION_OR_NOT_FOUND');
+    }
+  }
+
   static async getTenantJwtSecret(ref: string): Promise<string | null> {
     const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref=${ref}`;
     return rows[0]?.jwt_secret || null;
@@ -441,6 +589,7 @@ export class StorageRLS {
        return { permitted: true };
     }
 
+    await ensureStorageVersioningSchema(ref);
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
 
@@ -460,6 +609,59 @@ export class StorageRLS {
 
         // Prepare owner uuid safely (sometimes sub is not uuid)
         const owner = typeof payload.sub === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.sub) ? payload.sub : null;
+
+        // Supabase-compatible object versioning. The previous current object is copied
+        // to an internal bucket before it is overwritten or deleted, then recorded in
+        // storage.object_versions. Delete operations additionally create a delete marker.
+        let versioningStatus: string = 'DISABLED';
+        if (action === 'upload' || action === 'update' || action === 'delete') {
+          const bucketRows = await tx`SELECT versioning_status FROM storage.buckets WHERE id = ${bucketId} LIMIT 1`;
+          versioningStatus = String(bucketRows[0]?.["versioning_status"] || 'DISABLED');
+        }
+        let currentVersionRow: Record<string, unknown> | null = null;
+        if (versioningStatus === 'ENABLED') {
+          const current = await tx`
+            SELECT id, bucket_id, name, owner, metadata, version, created_at
+            FROM storage.objects
+            WHERE bucket_id = ${bucketId} AND name = ${objectName}
+            LIMIT 1
+          `;
+          currentVersionRow = (current[0] as Record<string, unknown> | undefined) || null;
+          if (currentVersionRow) {
+            const versionId = String(currentVersionRow["version"] || crypto.randomUUID());
+            if (!(await ensureVersionBucket(ref))) throw new Error('PHYSICAL_UPLOAD_FAILED');
+            const copied = await StorageService.copyFile(
+              ref,
+              bucketId,
+              objectName,
+              STORAGE_VERSION_BUCKET,
+              objectVersionStorageKey(bucketId, objectName, versionId),
+            );
+            if (!copied) throw new Error('PHYSICAL_UPLOAD_FAILED');
+            await tx`
+              INSERT INTO storage.object_versions
+                (bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at)
+              VALUES (
+                ${bucketId}, ${objectName}, ${versionId},
+                ${currentVersionRow["owner"] || null}, ${currentVersionRow["metadata"] || {}},
+                false, ${currentVersionRow["created_at"] || new Date()}, now()
+              )
+              ON CONFLICT (bucket_id, name, version_id) DO NOTHING
+            `;
+            if (action === 'delete') {
+              const markerId = crypto.randomUUID();
+              await tx`
+                INSERT INTO storage.object_versions
+                  (bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at)
+                VALUES (
+                  ${bucketId}, ${objectName}, ${markerId},
+                  ${currentVersionRow["owner"] || null}, '{}'::jsonb,
+                  true, now(), now() + interval '1 millisecond'
+                )
+              `;
+            }
+          }
+        }
 
         if (action === 'upload') {
           if (upsert) {
@@ -705,6 +907,7 @@ export class StorageRLS {
               last_accessed_at,
               owner,
               metadata,
+              version,
               CASE
                 WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint
                 ELSE 0
@@ -735,6 +938,7 @@ export class StorageRLS {
               max(last_accessed_at) AS last_accessed_at,
               NULL::uuid AS owner,
               jsonb_build_object('mimetype', NULL) AS metadata,
+              NULL::text AS version,
               0::bigint AS size,
               TRUE AS is_folder,
               folder_name AS sort_key
@@ -751,6 +955,7 @@ export class StorageRLS {
               last_accessed_at,
               owner,
               metadata,
+              version,
               size,
               FALSE AS is_folder,
               relative_name AS sort_key
@@ -789,6 +994,7 @@ export class StorageRLS {
               last_accessed_at: String(row["last_accessed_at"] ?? row["last_accessed"] ?? row["updated"] ?? ""),
               bucket_id: bucketId,
               owner: row["owner"] ? String(row["owner"]) : undefined,
+              version: row["version"] ? String(row["version"]) : undefined,
               size,
               metadata: row["is_folder"] || row["isFolder"] ? null : {
                   size,

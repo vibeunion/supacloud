@@ -860,7 +860,9 @@ export async function initDatabase() {
               public boolean default false,
               avif_autodetection boolean default false,
               file_size_limit bigint,
-              allowed_mime_types text[]
+              allowed_mime_types text[],
+              versioning_status text not null default 'DISABLED',
+              lifecycle_rules jsonb
           );
           CREATE TABLE IF NOT EXISTS storage.objects (
               id uuid not null primary key default gen_random_uuid(),
@@ -877,10 +879,27 @@ export async function initDatabase() {
               version text default gen_random_uuid()
           );
           ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS owner_id text;
+          ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS versioning_status text NOT NULL DEFAULT 'DISABLED';
+          ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS lifecycle_rules jsonb;
           ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS owner_id text;
           ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS user_metadata jsonb;
           ALTER TABLE storage.objects ALTER COLUMN owner SET DEFAULT auth.uid();
           CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_bucketid_name ON storage.objects (bucket_id, name);
+          CREATE TABLE IF NOT EXISTS storage.object_versions (
+              id uuid not null primary key default gen_random_uuid(),
+              bucket_id text not null references storage.buckets(id) on delete cascade,
+              name text not null,
+              version_id text not null,
+              owner uuid,
+              owner_id text,
+              metadata jsonb not null default '{}'::jsonb,
+              is_delete_marker boolean not null default false,
+              created_at timestamptz not null default now(),
+              archived_at timestamptz not null default now(),
+              unique (bucket_id, name, version_id)
+          );
+          CREATE INDEX IF NOT EXISTS object_versions_bucket_name_idx ON storage.object_versions (bucket_id, name, archived_at desc);
+          CREATE INDEX IF NOT EXISTS object_versions_archive_idx ON storage.object_versions (bucket_id, archived_at);
           CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
               id text not null primary key,
               in_progress_size bigint not null default 0,
@@ -904,6 +923,7 @@ export async function initDatabase() {
           ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY;
           ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
           ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE storage.object_versions ENABLE ROW LEVEL SECURITY;
           REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM anon;
           GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon;
           GRANT ALL ON ALL TABLES IN SCHEMA storage TO authenticated, service_role;
@@ -958,6 +978,38 @@ export async function initDatabase() {
           BEGIN
             CREATE POLICY "Allow authenticated delete on storage.objects"
               ON storage.objects FOR DELETE TO authenticated
+              USING (auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow public read on storage.object_versions"
+              ON storage.object_versions FOR SELECT
+              USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated read on storage.object_versions"
+              ON storage.object_versions FOR SELECT TO authenticated
+              USING (auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated insert on storage.object_versions"
+              ON storage.object_versions FOR INSERT TO authenticated
+              WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets) AND auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated delete on storage.object_versions"
+              ON storage.object_versions FOR DELETE TO authenticated
               USING (auth.uid() = owner);
           EXCEPTION WHEN duplicate_object THEN NULL;
           END

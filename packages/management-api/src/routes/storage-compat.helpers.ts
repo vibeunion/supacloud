@@ -15,8 +15,8 @@ const TRANSFORM_QUERY_KEYS = new Set([
     "wm_gravity", "wm_dx", "wm_dy", "wm_width", "wm_height",
 ]);
 
-export function signedUrlPayload(ref: string, bucket: string, path: string, expiresAt: number): string {
-    return `${ref}:${bucket}/${path}:${expiresAt}`;
+export function signedUrlPayload(ref: string, bucket: string, path: string, expiresAt: number, versionId?: string): string {
+    return `${ref}:${bucket}/${path}:${expiresAt}${versionId ? `:version:${versionId}` : ""}`;
 }
 
 export function verifyLegacySignedToken(
@@ -27,11 +27,12 @@ export function verifyLegacySignedToken(
     token: string,
     expiresAt?: number,
     nowSeconds = Math.floor(Date.now() / 1000),
+    versionId?: string,
 ): boolean {
     if (!expiresAt || expiresAt < nowSeconds || !/^[0-9a-f]{64}$/i.test(token)) return false;
 
     const expectedToken = createHmac("sha256", secret)
-        .update(signedUrlPayload(ref, bucket, path, expiresAt))
+        .update(signedUrlPayload(ref, bucket, path, expiresAt, versionId))
         .digest("hex");
     const tokenBuffer = Buffer.from(token, "hex");
     const expectedBuffer = Buffer.from(expectedToken, "hex");
@@ -153,9 +154,11 @@ export function buildSignedPath(
     token: string,
     transform?: Record<string, unknown>,
     download?: boolean | string,
+    versionId?: string,
 ): string {
     const search = new URLSearchParams({ token, expiresAt: String(expiresAt) });
     if (download) search.set("download", typeof download === "string" ? download : "");
+    if (versionId) search.set("versionId", versionId);
 
     for (const [key, value] of Object.entries(transform || {})) {
         if (value === undefined || value === null) continue;

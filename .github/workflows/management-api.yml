@@ -648,7 +648,7 @@ jobs:
       - name: Verify activation journal on an owned cluster
         run: |
           "$SUPACLOUD_STARTER_POSTGRES_BIN/postgres" --version
-          bun --no-env-file test scripts/lib/application-activation-native.test.ts scripts/lib/application-migrations-native.test.ts
+          bun --no-env-file test scripts/lib/application-activation-native.test.ts scripts/lib/application-migrations-native.test.ts packages/management-api/tests/integration/storage-versioning.test.ts
 
   docker-and-scripts-checks:
     name: Docker & Scripts Checks

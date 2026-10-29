@@ -350,8 +350,11 @@ registerCheck({
         CREATE TABLE IF NOT EXISTS storage.buckets (
           id text NOT NULL PRIMARY KEY, name text NOT NULL, owner uuid,
           created_at timestamptz default now(), updated_at timestamptz default now(),
-          public boolean default false, file_size_limit bigint, allowed_mime_types text[]
+          public boolean default false, file_size_limit bigint, allowed_mime_types text[],
+          versioning_status text not null default 'DISABLED', lifecycle_rules jsonb
         );
+        ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS versioning_status text NOT NULL DEFAULT 'DISABLED';
+        ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS lifecycle_rules jsonb;
         CREATE TABLE IF NOT EXISTS storage.objects (
           id uuid NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
           bucket_id text REFERENCES storage.buckets, name text, owner uuid,
@@ -361,6 +364,18 @@ registerCheck({
           version text default gen_random_uuid()
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_bucketid_name ON storage.objects (bucket_id, name);
+        CREATE TABLE IF NOT EXISTS storage.object_versions (
+          id uuid NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+          bucket_id text NOT NULL REFERENCES storage.buckets(id) ON DELETE CASCADE,
+          name text NOT NULL, version_id text NOT NULL, owner uuid, owner_id text,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          is_delete_marker boolean NOT NULL DEFAULT false,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          archived_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (bucket_id, name, version_id)
+        );
+        CREATE INDEX IF NOT EXISTS object_versions_bucket_name_idx ON storage.object_versions (bucket_id, name, archived_at DESC);
+        ALTER TABLE storage.object_versions ENABLE ROW LEVEL SECURITY;
       `);
       return { success: true, message: "Storage schema tables re-created" };
     } catch (err: unknown) {
