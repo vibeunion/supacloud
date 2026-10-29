@@ -529,7 +529,7 @@ jobs:
   supacloud-lite-windows:
     name: SupaCloud Lite (Windows)
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code

@@ -548,6 +548,7 @@ them before opening an archive or sending HTTP.
 supacloud frontend list_releases --ref abc123 --id web
 supacloud frontend get_active_release --ref abc123 --id web
 supacloud frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud frontend verify_release --ref abc123 --id web
 supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 supacloud frontend rollback --ref abc123 --id web
 ```
@@ -555,8 +556,16 @@ supacloud frontend rollback --ref abc123 --id web
 The active snapshot is read-only and protected by the deployment lock. It
 verifies the active immutable archive/tree, returns zero or one release, and
 does not hash unrelated historical releases. Inspection and operator rollback
-use this path. An HTTP 404 reports that the deployment or endpoint is missing;
-check the deployment and upgrade the server. There is no historical-inventory
+use this path. `verify_release` checks the active release together with its live
+deployment URL and returns a `supacloud.frontend-release-verification.v1`
+receipt containing the release identity, activation identity, HTTP status,
+content type, and byte count. It reads at most 1 MiB plus the chunk crossing
+that limit and cancels oversized responses. Before returning success, it reads
+the active authority again; a changed release or activation returns
+`ok: false` with `error_code: "STALE_AUTHORITY"`, and a failed authority
+readback returns `ACTIVE_RELEASE_READBACK_FAILED`. It requires no release ID
+or extra verification flags. An HTTP 404 reports that the deployment or endpoint
+is missing; check the deployment and upgrade the server. There is no historical-inventory
 fallback for older servers.
 
 For immutable frontend deployments the platform retains previous artifacts.
