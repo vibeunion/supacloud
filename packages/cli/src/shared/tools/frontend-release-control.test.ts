@@ -1423,12 +1423,13 @@ describe("immutable frontend release control", () => {
             cancel() { cancelled = true; },
         });
         const originalFetch = globalThis.fetch;
-        const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((input, options) => {
+        const liveFetch = Object.assign((input: Parameters<typeof fetch>[0], options?: Parameters<typeof fetch>[1]) => {
             if (typeof input === "string" && input.endsWith("/site/")) {
                 return Promise.resolve(new Response(body));
             }
             return originalFetch(input, options);
-        });
+        }, { preconnect: originalFetch.preconnect });
+        const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(liveFetch);
         try {
             const response = await verifyFrontendRelease(http, PROJECT_REF, DEPLOYMENT_ID);
             expect(response.isError).toBe(true);

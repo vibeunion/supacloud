@@ -564,8 +564,8 @@ that limit and cancels oversized responses. Before returning success, it reads
 the active authority again; a changed release or activation returns
 `ok: false` with `error_code: "STALE_AUTHORITY"`, and a failed authority
 readback returns `ACTIVE_RELEASE_READBACK_FAILED`. It requires no release ID
-or extra verification flags. An HTTP 404 reports that the deployment or endpoint is missing;
-check the deployment and upgrade the server. There is no historical-inventory
+or extra verification flags. An HTTP 404 reports that the deployment or endpoint
+is missing; check the deployment and upgrade the server. There is no historical-inventory
 fallback for older servers.
 
 For immutable frontend deployments the platform retains previous artifacts.
