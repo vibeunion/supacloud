@@ -50,7 +50,7 @@ Legend:
 | S3-compatible storage API with SigV4 (ListBuckets / PutObject / GetObject / DeleteObject / HeadObject) | **Built-in** (SigV4 + Bearer) | Partial (via extensions) | External / manual |
 | Resumable Storage uploads (TUS 1.0) | **Built-in** | **Built-in** | **Built-in** |
 | Storage `Content-Encoding` metadata | **Built-in** | **Built-in** | Version dependent |
-| Storage object versioning / noncurrent lifecycle | **Not yet implemented** | **Built-in** | Version dependent |
+| Storage object versioning / noncurrent lifecycle | **Built-in** (standard buckets; empty lifecycle filter) | **Built-in** | Version dependent |
 | Scheduled Edge Functions (cron-based triggers) | **Built-in** | **Built-in** (pg_cron + pg_net) | Manual (pg_cron) |
 | pg-meta typed metadata API (tables / columns / indexes / roles / policies / etc.) | **Built-in** | **Built-in** | External tool |
 | Built-in platform backups / restore surface | **Built-in** | **Built-in** | Operator responsibility |
@@ -175,7 +175,7 @@ In that model, adding your own project control plane, routing model, logs UI, te
 
 The compatibility target covers Supabase Cloud's project products and project management workflows. Organization/team governance, billing, Analytics/Logflare, and Analytics/Iceberg buckets are explicitly out of the current implementation scope. Hosted SLA and globally managed infrastructure are service-delivery properties and are not represented as local feature parity.
 
-Known project-level gaps are tracked rather than treated as exclusions: AWS PrivateLink needs provider-side provisioning, PostgreSQL major-upgrade execution still requires a deployment-specific provider executor, and Storage object versioning/lifecycle is not implemented. The control-plane workflow fails closed until the required provider executor passes preflight.
+Known project-level gaps are tracked rather than treated as exclusions: AWS PrivateLink needs provider-side provisioning and PostgreSQL major-upgrade execution still requires a deployment-specific provider executor. Storage object versioning and noncurrent lifecycle are implemented for standard buckets with the upstream-supported empty filter. The control-plane workflow fails closed until the required provider executor passes preflight.
 
 ## Source basis
 

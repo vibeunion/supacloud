@@ -36,7 +36,7 @@ describe("performance regressions", () => {
 
     expect(storageRouteSource).toContain("STORAGE_BATCH_CONCURRENCY");
     expect(storageRouteSource).toContain("mapWithConcurrency(paths");
-    expect(storageRouteSource).toContain("mapWithConcurrency(\n            prefixes");
+    expect(storageRouteSource).toContain("mapWithConcurrency(\n            entries");
     expect(storageRlsSource).toContain("WITH candidates AS");
     expect(storageRlsSource).toContain("LIMIT $7 OFFSET $8");
   });

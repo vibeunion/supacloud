@@ -52,10 +52,15 @@ when a framework-specific SSR entrypoint is generated.
   persistence/sync contract stabilizes.
 - Analytics Buckets remain an infrastructure capability rather than a core
   runtime dependency.
-- Storage object versioning, noncurrent-version lifecycle expiration, and the
-  related bucket versioning status workflow are not implemented yet. Do not
-  advertise them as compatible until the object-version schema, delete markers,
-  and lifecycle cleanup have a migration and recovery test.
+- Storage object versioning is implemented for standard buckets: bucket
+  `versioning_status` (`DISABLED` / `ENABLED` / `SUSPENDED`), noncurrent
+  versions, delete markers, exact-version download/delete, and
+  `noncurrentVersionExpiration` lifecycle rules. Previous bytes are archived
+  into the internal `.supacloud_versions` bucket, and a periodic lifecycle
+  worker expires eligible versions. Recovery and lifecycle behavior are covered
+  by `packages/management-api/tests/integration/storage-versioning.test.ts`.
+  Lifecycle filters remain limited to the upstream-supported empty filter and
+  object-version operations are limited to standard buckets.
 - Vector Buckets are exposed through the existing compatibility surface; they
   do not replace the current `pgvector` plus PostgreSQL hybrid-search path.
 

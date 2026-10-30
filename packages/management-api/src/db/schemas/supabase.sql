@@ -358,7 +358,9 @@ CREATE TABLE IF NOT EXISTS storage.buckets (
     avif_autodetection BOOLEAN DEFAULT false,
     file_size_limit BIGINT,
     allowed_mime_types TEXT[],
-    owner_id TEXT
+    owner_id TEXT,
+    versioning_status TEXT NOT NULL DEFAULT 'DISABLED',
+    lifecycle_rules JSONB
 );
 
 CREATE TABLE IF NOT EXISTS storage.objects (
@@ -378,6 +380,26 @@ CREATE TABLE IF NOT EXISTS storage.objects (
 CREATE INDEX IF NOT EXISTS objects_bucket_id_idx ON storage.objects (bucket_id);
 CREATE UNIQUE INDEX IF NOT EXISTS objects_bucket_name_idx ON storage.objects (bucket_id, name);
 CREATE INDEX IF NOT EXISTS btree_path_tokens ON storage.objects USING GIN (path_tokens);
+
+-- Noncurrent object versions and delete markers. Bytes are stored in the internal
+-- .supacloud_versions bucket; this table is the authoritative metadata index.
+CREATE TABLE IF NOT EXISTS storage.object_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket_id TEXT NOT NULL REFERENCES storage.buckets(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    owner UUID,
+    owner_id TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_delete_marker BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT object_versions_bucket_name_version_key UNIQUE (bucket_id, name, version_id)
+);
+CREATE INDEX IF NOT EXISTS object_versions_bucket_name_idx
+    ON storage.object_versions (bucket_id, name, archived_at DESC);
+CREATE INDEX IF NOT EXISTS object_versions_archive_idx
+    ON storage.object_versions (bucket_id, archived_at);
 
 -- supacloud:sql-module:storage-path-helpers:start
 CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] AS $$
@@ -448,6 +470,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA storage TO anon;
 -- Enable RLS
 ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE storage.object_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY;
 
@@ -470,6 +493,16 @@ CREATE POLICY "Allow authenticated update on storage.objects" ON storage.objects
     FOR UPDATE TO authenticated USING (auth.uid() = owner) WITH CHECK (auth.uid() = owner);
 -- Authenticated users can DELETE objects they own
 CREATE POLICY "Allow authenticated delete on storage.objects" ON storage.objects
+    FOR DELETE TO authenticated USING (auth.uid() = owner);
+
+-- ── storage.object_versions policies ──
+CREATE POLICY "Allow public read on storage.object_versions" ON storage.object_versions
+    FOR SELECT USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
+CREATE POLICY "Allow authenticated read on storage.object_versions" ON storage.object_versions
+    FOR SELECT TO authenticated USING (auth.uid() = owner);
+CREATE POLICY "Allow authenticated insert on storage.object_versions" ON storage.object_versions
+    FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets) AND auth.uid() = owner);
+CREATE POLICY "Allow authenticated delete on storage.object_versions" ON storage.object_versions
     FOR DELETE TO authenticated USING (auth.uid() = owner);
 
 -- ── storage.s3_multipart_uploads policies ──

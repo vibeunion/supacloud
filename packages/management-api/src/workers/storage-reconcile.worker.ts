@@ -63,7 +63,10 @@ async function reconcileProject(
     let bucketDirs: string[];
     try {
         const entries = await fs.readdir(projectRoot, { withFileTypes: true });
-        bucketDirs = entries.filter(e => e.isDirectory()).map(e => e.name);
+        bucketDirs = entries
+            .filter(e => e.isDirectory())
+            .map(e => e.name)
+            .filter(name => name !== ".supacloud_versions");
     } catch (e) {
         logger.warn(`[StorageReconcile] Cannot list buckets for ${ref}:`, {
             error: e instanceof Error ? e.message : String(e),

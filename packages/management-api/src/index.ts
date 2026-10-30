@@ -1510,6 +1510,10 @@ async function bootstrap() {
       await import("./workers/storage-reconcile.worker");
     startStorageReconcileWorker();
 
+    const { startStorageLifecycleWorker } =
+      await import("./services/storage-versioning");
+    startStorageLifecycleWorker();
+
     const { startRuntimeReconcileWorker } =
       await import("./workers/runtime-reconcile.worker");
     startRuntimeReconcileWorker();

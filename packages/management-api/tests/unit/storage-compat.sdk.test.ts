@@ -75,6 +75,77 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     }
   });
 
+  test("supports bucket versioning transitions and lifecycle configuration", async () => {
+    const createBucketSpy = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
+    const headers = {
+      "x-project-ref": "test_mock",
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+    };
+
+    const create = await request("/storage/v1/bucket", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "versioned", name: "versioned", versioningStatus: "ENABLED" }),
+    });
+    expect(create.status).toBe(200);
+    expect(await create.json()).toMatchObject({ id: "versioned", versioning_status: "ENABLED" });
+    expect(mockBuckets.get("versioned")?.versioning_status).toBe("ENABLED");
+
+    const suspend = await request("/storage/v1/bucket/versioned", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ versioning_status: "SUSPENDED" }),
+    });
+    expect(suspend.status).toBe(200);
+    expect(mockBuckets.get("versioned")?.versioning_status).toBe("SUSPENDED");
+
+    const disable = await request("/storage/v1/bucket/versioned", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ versioningStatus: "DISABLED" }),
+    });
+    expect(disable.status).toBe(400);
+
+    const missing = await request("/storage/v1/bucket/versioned/lifecycle", { headers });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: "NoSuchLifecycleConfiguration" });
+
+    const invalid = await request("/storage/v1/bucket/versioned/lifecycle", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ rules: [{ id: "bad", status: "Enabled", filter: {}, noncurrentVersionExpiration: { noncurrentDays: 0 } }] }),
+    });
+    expect(invalid.status).toBe(400);
+
+    const lifecycle = {
+      rules: [{
+        id: "expire-preview",
+        status: "Enabled",
+        filter: {},
+        noncurrentVersionExpiration: { noncurrentDays: 30, newerNoncurrentVersions: 3 },
+      }],
+    };
+    const put = await request("/storage/v1/bucket/versioned/lifecycle", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(lifecycle),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual(lifecycle);
+
+    const get = await request("/storage/v1/bucket/versioned/lifecycle", { headers });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual(lifecycle);
+
+    const remove = await request("/storage/v1/bucket/versioned/lifecycle", { method: "DELETE", headers });
+    expect(remove.status).toBe(200);
+    expect(mockBuckets.get("versioned")?.lifecycle_rules).toBeUndefined();
+    expect((await request("/storage/v1/bucket/versioned/lifecycle", { headers })).status).toBe(404);
+
+    createBucketSpy.mockRestore();
+  });
+
   test("does not report bucket deletion when an object arrives after physical deletion", async () => {
     const deleteBucketSpy = spyOn(StorageService, "deleteBucket").mockImplementation(async () => {
       mockObjects.set("avatars/arrived-during-delete.txt", { metadata: {}, updated: new Date().toISOString() });
