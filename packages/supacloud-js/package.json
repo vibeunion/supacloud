@@ -115,7 +115,7 @@
     "typescript": "^7.0.2",
     "@tanstack/query-core": "5.104.5",
     "@tanstack/svelte-query": "6.3.5",
-    "typebox": "1.4.2",
+    "typebox": "1.4.3",
     "svelte": "5.57.2"
   },
   "engines": {
