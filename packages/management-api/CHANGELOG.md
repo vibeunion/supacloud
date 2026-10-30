@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.126.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.125.0...management-api-v0.126.0) (2026-10-30)
+
+
+### Features
+
+* **storage:** implement object versioning and noncurrent lifecycle ([#2292](https://github.com/vibeunion/supacloud/issues/2292)) ([e8a7348](https://github.com/vibeunion/supacloud/commit/e8a7348b413e6e3b27e08393a6cbef0d7ac21d99))
+
+
+### Miscellaneous Chores
+
+* **upstream:** sync Supabase SDK, CLI, Realtime and Storage metadata ([#2290](https://github.com/vibeunion/supacloud/issues/2290)) ([fa15832](https://github.com/vibeunion/supacloud/commit/fa1583267a6535f7f45cb0c2a93c62a1c7643643))
+
 ## [0.125.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.124.1...management-api-v0.125.0) (2026-10-28)
 
 

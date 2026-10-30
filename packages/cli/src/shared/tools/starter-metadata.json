@@ -30,7 +30,7 @@
       }
     },
     "sdk": {
-      "version": "0.45.2",
+      "version": "0.45.3",
       "peerDependencies": {
         "@supabase/supabase-js": "^2.118.0"
       }

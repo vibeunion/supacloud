@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.112.0](https://github.com/vibeunion/supacloud/compare/cli-v0.111.0...cli-v0.112.0) (2026-10-30)
+
+
+### Features
+
+* **cli:** verify active frontend release and live URL ([#2289](https://github.com/vibeunion/supacloud/issues/2289)) ([ccbd203](https://github.com/vibeunion/supacloud/commit/ccbd203655e887e49105130615a7dd7f17a88d3c))
+
+
+### Miscellaneous Chores
+
+* **upstream:** sync Supabase SDK, CLI, Realtime and Storage metadata ([#2290](https://github.com/vibeunion/supacloud/issues/2290)) ([fa15832](https://github.com/vibeunion/supacloud/commit/fa1583267a6535f7f45cb0c2a93c62a1c7643643))
+
 ## [0.111.0](https://github.com/vibeunion/supacloud/compare/cli-v0.110.1...cli-v0.111.0) (2026-10-28)
 
 
