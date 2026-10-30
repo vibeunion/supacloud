@@ -152,7 +152,7 @@ async function verifySignedToken(ref: string, bucket: string, path: string, toke
 
         const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
         return payload.url === `${bucket}/${path}` && payload.ref === ref
-            && (versionId ? payload.versionId === versionId : true);
+            && payload.versionId === versionId;
     } catch {
         return false;
     }
@@ -1584,16 +1584,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const includeCurrent = versionMode !== 'only' && markerMode !== 'only';
         const includeNoncurrent = versionMode === 'include' || versionMode === 'only';
         const includeMarkers = markerMode === 'include' || markerMode === 'only';
-        let versionFiles: Awaited<ReturnType<typeof StorageRLS.listObjectVersions>> = [];
-        if (includeNoncurrent || includeMarkers) {
-            const allVersions = await StorageRLS.listObjectVersions(ref, auth, params.bucket, {
-                prefix, limit: limit + offset, offset: 0, search, sortBy: body?.sortBy,
-            });
-            versionFiles = allVersions.filter((version) =>
-                version.is_delete_marker ? includeMarkers : includeNoncurrent,
-            );
-        }
-        const visibleFiles = includeCurrent ? [...files, ...versionFiles] : versionFiles;
+        const visibleFiles = includeNoncurrent || includeMarkers
+            ? await StorageRLS.listObjectVersions(ref, auth, params.bucket, {
+                prefix, limit, offset, search, sortBy: body?.sortBy,
+                includeCurrent, includeNoncurrent, includeMarkers,
+            })
+            : files;
         return visibleFiles.slice(0, limit).map(f => {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
             const size = normalizeStorageObjectSize(f.size ?? f.metadata?.size);
@@ -1681,15 +1677,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const includeCurrent = versionMode !== 'only' && markerMode !== 'only';
         const includeNoncurrent = versionMode === 'include' || versionMode === 'only';
         const includeMarkers = markerMode === 'include' || markerMode === 'only';
-        if (!includeCurrent) files = [];
-        let versionFiles: Awaited<ReturnType<typeof StorageRLS.listObjectVersions>> = [];
         if (includeNoncurrent || includeMarkers) {
-            const allVersions = await StorageRLS.listObjectVersions(ref, auth, params.bucket, {
-                prefix, limit: limit + offset, offset: 0, search, sortBy: body?.sortBy,
+            files = await StorageRLS.listObjectVersions(ref, auth, params.bucket, {
+                prefix, limit: limit + 1, offset, search, sortBy: body?.sortBy,
+                includeCurrent, includeNoncurrent, includeMarkers,
             });
-            versionFiles = allVersions.filter((version) =>
-                version.is_delete_marker ? includeMarkers : includeNoncurrent,
-            );
         }
         const objects = [];
         const folders = [];
@@ -1710,6 +1702,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     updated_at: f.updated_at || new Date().toISOString(),
                     created_at: f.created_at || f.updated_at || new Date().toISOString(),
                     last_accessed_at: f.last_accessed_at || f.updated_at || new Date().toISOString(),
+                    version: f.version,
+                    archived_at: f.archived_at,
+                    is_delete_marker: f.is_delete_marker === true,
+                    is_versioned: f.is_versioned === true,
                     metadata: f.metadata ? {
                         ...f.metadata,
                         size,
@@ -1722,34 +1718,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     } : null,
                 });
             }
-        }
-
-        for (const f of versionFiles.slice(0, limit)) {
-            const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
-            const size = normalizeStorageObjectSize(f.size ?? f.metadata?.size);
-            const versioned = f as typeof f & { version?: string; archived_at?: string; is_delete_marker?: boolean; is_versioned?: boolean };
-            objects.push({
-                name: cleanName || f.name,
-                key: f.name,
-                id: f.id,
-                updated_at: versioned.archived_at || f.updated_at || new Date().toISOString(),
-                created_at: f.created_at || f.updated_at || new Date().toISOString(),
-                last_accessed_at: f.last_accessed_at || f.updated_at || new Date().toISOString(),
-                version: versioned.version,
-                archived_at: versioned.archived_at,
-                is_delete_marker: versioned.is_delete_marker === true,
-                is_versioned: versioned.is_versioned === true,
-                metadata: f.metadata ? {
-                    ...f.metadata,
-                    size,
-                    mimetype: f.metadata.mimetype || 'application/octet-stream',
-                    cacheControl: f.metadata.cacheControl || f.metadata.cache_control,
-                    eTag: f.metadata.eTag || f.metadata.etag || `"${f.id}"`,
-                    lastModified: versioned.archived_at || f.updated_at,
-                    contentLength: size,
-                    httpStatusCode: 200
-                } : null,
-            });
         }
 
         const nextCursor = hasNext ? Buffer.from(String(offset + limit)).toString('base64') : null;

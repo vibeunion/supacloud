@@ -332,6 +332,15 @@ test.skipIf(!bin)("object versioning archives noncurrent bytes, creates delete m
     }
     const currentBytes = physical.get(physicalKey(bucketId, objectName));
     expect([...historyBytes, new TextDecoder().decode(currentBytes)]).toEqual(expect.arrayContaining(["v3", "v4", "v5"]));
+    const mixedOptions = { includeCurrent: true, includeNoncurrent: true, includeMarkers: false, sortBy: { column: "created_at", order: "desc" } };
+    const allEntries = await StorageRLS.listObjectVersions("native-versioning", "fixture-token", bucketId, mixedOptions);
+    const firstPage = await StorageRLS.listObjectVersions("native-versioning", "fixture-token", bucketId, { ...mixedOptions, limit: 2 });
+    const secondPage = await StorageRLS.listObjectVersions("native-versioning", "fixture-token", bucketId, { ...mixedOptions, limit: 2, offset: 2 });
+    expect([...firstPage, ...secondPage].map((entry) => entry.version)).toEqual(allEntries.slice(0, 4).map((entry) => entry.version));
+    expect(new Set(allEntries.map((entry) => entry.version)).size).toBe(allEntries.length);
+    expect(allEntries.filter((entry) => entry.is_versioned === false)).toHaveLength(1);
+    const archivedOnly = await StorageRLS.listObjectVersions("native-versioning", "fixture-token", bucketId, { ...mixedOptions, includeCurrent: false });
+    expect(archivedOnly.every((entry) => entry.is_versioned === true)).toBe(true);
 
     const purged = await purgeBucketVersions("native-versioning", bucketId);
     expect(purged).toBeGreaterThan(0);

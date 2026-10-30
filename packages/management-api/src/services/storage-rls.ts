@@ -461,25 +461,35 @@ export class StorageRLS {
     ref: string,
     token: string | null | undefined,
     bucketId: string,
-    options: { prefix?: string; limit?: number; offset?: number; search?: string; sortBy?: { column?: string; order?: string } } = {},
+    options: { prefix?: string; limit?: number; offset?: number; search?: string; sortBy?: { column?: string; order?: string }; includeCurrent?: boolean; includeNoncurrent?: boolean; includeMarkers?: boolean } = {},
   ): Promise<StorageListObject[]> {
     if (ref === 'test_mock') return [];
     const prefix = options.prefix || '';
-    const limit = Math.min(Math.max(options.limit ?? 100, 1), 1000);
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 1001);
     const offset = Math.max(options.offset ?? 0, 0);
-    const sortColumn = options.sortBy?.column === 'created_at' ? 'created_at' : 'archived_at';
-    const direction = (options.sortBy?.order || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortColumn = options.sortBy?.column === 'created_at' ? 'created_at' : options.sortBy?.column === 'updated_at' ? 'updated_at' : 'name';
+    const direction = (options.sortBy?.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
     try {
       return await this.withBucketRLS(ref, token, async (tx) => {
         const [bucket] = await tx`SELECT id FROM storage.buckets WHERE id = ${bucketId}`;
         if (!bucket) throw new Error('BUCKET_NOT_FOUND');
         const rows = await tx.unsafe(
-          `SELECT id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at
-           FROM storage.object_versions
-           WHERE bucket_id = $1 AND name LIKE $2 AND ($3::text = '' OR name ILIKE $3)
-           ORDER BY ${sortColumn} ${direction}, name ASC
+          `WITH visible AS (
+             SELECT id, name, version::text AS version_id, owner, metadata, false AS is_delete_marker,
+               created_at, updated_at, last_accessed_at, false AS is_versioned
+             FROM storage.objects WHERE bucket_id = $1 AND $6::boolean
+             UNION ALL
+             SELECT id, name, version_id, owner, metadata, is_delete_marker,
+               created_at, archived_at AS updated_at, archived_at AS last_accessed_at, true AS is_versioned
+             FROM storage.object_versions WHERE bucket_id = $1
+               AND ((is_delete_marker AND $8::boolean) OR (NOT is_delete_marker AND $7::boolean))
+           )
+           SELECT * FROM visible
+           WHERE name LIKE $2 AND ($3::text = '' OR name ILIKE $3)
+           ORDER BY ${sortColumn} ${direction}, name ASC, id ASC, version_id ASC
            LIMIT $4 OFFSET $5`,
-          [bucketId, `${prefix}%`, options.search ? `%${options.search}%` : '', limit, offset],
+          [bucketId, `${prefix}%`, options.search ? `%${options.search}%` : '', limit, offset,
+            options.includeCurrent ?? false, options.includeNoncurrent ?? true, options.includeMarkers ?? true],
         );
         return rows.map((row: Record<string, unknown>) => {
           const meta = isRecord(row["metadata"]) ? row["metadata"] : {};
@@ -497,13 +507,13 @@ export class StorageRLS {
               cacheControl: String(meta["cacheControl"] || meta["cache_control"] || '3600').replace(/^max-age=/, ''),
               ...(typeof meta["contentEncoding"] === 'string' ? { contentEncoding: meta["contentEncoding"] } : {}),
             },
-            updated_at: String(row["archived_at"]),
+            updated_at: String(row["updated_at"]),
             created_at: String(row["created_at"]),
-            last_accessed_at: String(row["archived_at"]),
+            last_accessed_at: String(row["last_accessed_at"]),
             version: String(row["version_id"]),
-            archived_at: String(row["archived_at"]),
+            archived_at: row["is_versioned"] === true ? String(row["updated_at"]) : undefined,
             is_delete_marker: row["is_delete_marker"] === true,
-            is_versioned: true,
+            is_versioned: row["is_versioned"] === true,
           };
         });
       });
