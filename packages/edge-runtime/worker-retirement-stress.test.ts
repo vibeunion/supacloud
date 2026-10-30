@@ -2,8 +2,28 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
 const STRESS_TEST_TIMEOUT_MS = 15_000;
+const REPORT_PREFIX = "SUPACLOUD_RETIREMENT_REPORT ";
+
+function readStressReport(stdout: string): unknown {
+  const reportLine = stdout.split("\n").find((line) => line.startsWith(REPORT_PREFIX));
+  if (reportLine === undefined) throw new Error("Worker retirement report is missing");
+  return JSON.parse(reportLine.slice(REPORT_PREFIX.length)) as unknown;
+}
 
 describe("WorkerPool process-level cooperative retirement", () => {
+  test("reads the report when asynchronous trace spans follow it", () => {
+    const report = { survived: true, retirements: 0 };
+    const stdout = [
+      "[Deno Compat] Loaded Deno API compatibility shim",
+      `${REPORT_PREFIX}${JSON.stringify(report)}`,
+      JSON.stringify({ schema: "supacloud.trace-span.v1", status: 200 }),
+      "",
+    ].join("\n");
+    expect(readStressReport(stdout)).toEqual(report);
+    expect(() => readStressReport("{\"schema\":\"supacloud.trace-span.v1\"}\n"))
+      .toThrow("Worker retirement report is missing");
+  });
+
   test.each([
     { mode: "cooperative fetch timeout", args: [], retirements: 0 },
     { mode: "hard waitUntil timeout", args: ["--wait-until"], retirements: 24 },
@@ -22,9 +42,7 @@ describe("WorkerPool process-level cooperative retirement", () => {
     ]);
 
     expect(exitCode, stderr).toBe(0);
-    const reportLine = stdout.trim().split("\n").at(-1);
-    expect(reportLine).toBeDefined();
-    const report = JSON.parse(reportLine!);
+    const report = readStressReport(stdout);
     expect(report).toEqual({
       survived: true,
       retirements,
