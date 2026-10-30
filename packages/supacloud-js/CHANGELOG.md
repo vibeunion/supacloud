@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.3](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.2...supacloud-js-v0.45.3) (2026-10-30)
+
+
+### Miscellaneous Chores
+
+* **upstream:** sync Supabase SDK, CLI, Realtime and Storage metadata ([#2290](https://github.com/vibeunion/supacloud/issues/2290)) ([fa15832](https://github.com/vibeunion/supacloud/commit/fa1583267a6535f7f45cb0c2a93c62a1c7643643))
+
 ## [0.45.2](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.1...supacloud-js-v0.45.2) (2026-10-25)
 
 

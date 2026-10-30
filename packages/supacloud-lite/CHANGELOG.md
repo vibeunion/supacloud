@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.35.0...supacloud-lite-v0.35.1) (2026-10-30)
+
+
+### Miscellaneous Chores
+
+* **upstream:** sync Supabase SDK, CLI, Realtime and Storage metadata ([#2290](https://github.com/vibeunion/supacloud/issues/2290)) ([fa15832](https://github.com/vibeunion/supacloud/commit/fa1583267a6535f7f45cb0c2a93c62a1c7643643))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.34.0...supacloud-lite-v0.35.0) (2026-10-26)
 
 
