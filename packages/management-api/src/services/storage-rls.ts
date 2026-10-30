@@ -8,6 +8,7 @@ import {
   STORAGE_VERSION_BUCKET,
   ensureStorageVersioningSchema,
   ensureVersionBucket,
+  lockStorageObject,
   objectVersionStorageKey,
   type StorageVersioningStatus,
 } from "./storage-versioning";
@@ -103,6 +104,7 @@ export class StorageRLS {
 
   
   static async registerLogicalBucket(ref: string, token: string | undefined, bucketId: string, name: string, isPublic: boolean, fileSizeLimit?: number | null, allowedMimeTypes?: string[] | null, versioningStatus?: StorageVersioningStatus): Promise<void> {
+    if (bucketId === STORAGE_VERSION_BUCKET) throw new Error('Invalid bucket name: reserved for object versions');
     if (ref === 'test_mock') {
       const existing = mockBuckets.get(bucketId);
       mockBuckets.set(bucketId, { id: bucketId, name, public: isPublic, file_size_limit: fileSizeLimit || null, allowed_mime_types: allowedMimeTypes || null, versioning_status: versioningStatus ?? existing?.versioning_status ?? 'DISABLED', lifecycle_rules: existing?.lifecycle_rules, created_at: existing?.created_at ?? new Date().toISOString(), updated_at: new Date().toISOString() });
@@ -118,6 +120,7 @@ export class StorageRLS {
               public: isPublic,
               fileSizeLimit,
               allowedMimeTypes,
+              versioningStatus,
             });
         });
     } catch (e: unknown) {
@@ -126,6 +129,7 @@ export class StorageRLS {
   }
 
   static async createLogicalBucketAsAdmin(ref: string, bucket: LogicalBucketInput): Promise<boolean> {
+    if (bucket.id === STORAGE_VERSION_BUCKET) throw new Error('Invalid bucket name: reserved for object versions');
     if (ref === 'test_mock') {
       if (mockBuckets.has(bucket.id)) return false;
       mockBuckets.set(bucket.id, {
@@ -153,12 +157,14 @@ export class StorageRLS {
 
   static async listLogicalBucketsAsAdmin(ref: string): Promise<Record<string, unknown>[]> {
     if (ref === 'test_mock') return Array.from(mockBuckets.values());
+    await ensureStorageVersioningSchema(ref);
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
     return await db`
       SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status,
         FLOOR(EXTRACT(EPOCH FROM COALESCE(updated_at, created_at, TIMESTAMPTZ 'epoch')) * 1000000)::bigint::text AS revision
       FROM storage.buckets
+      WHERE id <> ${STORAGE_VERSION_BUCKET}
       ORDER BY name ASC
     `;
   }
@@ -196,10 +202,10 @@ export class StorageRLS {
     if (ref === 'test_mock') return Array.from(mockBuckets.values());
 
     return await this.withBucketRLS(ref, token, async (tx) => {
-        let query = tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status FROM storage.buckets`;
+        let query = tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types, versioning_status FROM storage.buckets WHERE id <> ${STORAGE_VERSION_BUCKET}`;
         if (options?.search) {
              const searchTerm = `%${options.search}%`;
-             query = tx`${query} WHERE name ILIKE ${searchTerm}`;
+             query = tx`${query} AND name ILIKE ${searchTerm}`;
         }
         const col = options?.sortBy?.column || 'name';
         const ord = (options?.sortBy?.order || 'asc').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
@@ -235,7 +241,9 @@ export class StorageRLS {
 
   
   static async getLogicalBucket(ref: string, bucketId: string, token: string | undefined, adminOverride = false): Promise<Record<string, unknown> | null> {
+    if (bucketId === STORAGE_VERSION_BUCKET) return null;
     if (ref === 'test_mock') return mockBuckets.get(bucketId) || null;
+    await ensureStorageVersioningSchema(ref);
 
     if (adminOverride) {
         const dbName = await resolveDbName(ref);
@@ -428,15 +436,21 @@ export class StorageRLS {
     try {
       return await this.withBucketRLS(ref, token, async (tx, payload) => {
         const rows = await tx`
-          SELECT owner FROM storage.object_versions
+          SELECT owner, owner_id FROM storage.object_versions
           WHERE bucket_id = ${bucketId} AND name = ${objectName} AND version_id = ${versionId}
+          UNION ALL
+          SELECT owner, owner_id FROM storage.objects
+          WHERE bucket_id = ${bucketId} AND name = ${objectName} AND version::text = ${versionId}
           LIMIT 1
         `;
         if (rows.length === 0) return false;
         if (action === 'download' || payload.role === 'service_role') return true;
         return payload.role === 'authenticated'
           && payload.sub != null
-          && String(rows[0]?.["owner"] || '') === String(payload.sub);
+          && (
+            String(rows[0]?.["owner"] || '') === String(payload.sub)
+            || String(rows[0]?.["owner_id"] || '') === String(payload.sub)
+          );
       });
     } catch {
       return false;
@@ -527,6 +541,7 @@ export class StorageRLS {
     token: string | null | undefined,
     callback: (tx: import("bun").SQL, payload: Record<string, unknown>) => Promise<T>
   ): Promise<T> {
+    await ensureStorageVersioningSchema(ref);
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
     
@@ -559,6 +574,7 @@ export class StorageRLS {
     physicalAction?: () => Promise<void>,
     compensatePhysicalAction?: () => Promise<void>
   ): Promise<{ permitted: boolean, error?: string }> {
+    if (bucketId === STORAGE_VERSION_BUCKET) return { permitted: false, error: 'Bucket not found' };
     let physicalActionCompleted = false;
     if (ref === 'test_mock') {
        if (!mockBuckets.has(bucketId)) return { permitted: false, error: 'Bucket not found' };
@@ -615,16 +631,18 @@ export class StorageRLS {
         // storage.object_versions. Delete operations additionally create a delete marker.
         let versioningStatus: string = 'DISABLED';
         if (action === 'upload' || action === 'update' || action === 'delete') {
+          if (!dryRun) await lockStorageObject(tx, bucketId, objectName);
           const bucketRows = await tx`SELECT versioning_status FROM storage.buckets WHERE id = ${bucketId} LIMIT 1`;
           versioningStatus = String(bucketRows[0]?.["versioning_status"] || 'DISABLED');
         }
         let currentVersionRow: Record<string, unknown> | null = null;
-        if (versioningStatus === 'ENABLED') {
+        if (versioningStatus === 'ENABLED' && !dryRun) {
           const current = await tx`
-            SELECT id, bucket_id, name, owner, metadata, version, created_at
+            SELECT id, bucket_id, name, owner, owner_id, metadata, version, created_at
             FROM storage.objects
             WHERE bucket_id = ${bucketId} AND name = ${objectName}
             LIMIT 1
+            FOR UPDATE
           `;
           currentVersionRow = (current[0] as Record<string, unknown> | undefined) || null;
           if (currentVersionRow) {
@@ -640,10 +658,10 @@ export class StorageRLS {
             if (!copied) throw new Error('PHYSICAL_UPLOAD_FAILED');
             await tx`
               INSERT INTO storage.object_versions
-                (bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at)
+                (bucket_id, name, version_id, owner, owner_id, metadata, is_delete_marker, created_at, archived_at)
               VALUES (
                 ${bucketId}, ${objectName}, ${versionId},
-                ${currentVersionRow["owner"] || null}, ${currentVersionRow["metadata"] || {}},
+                ${currentVersionRow["owner"] || null}, ${currentVersionRow["owner_id"] || null}, ${currentVersionRow["metadata"] || {}},
                 false, ${currentVersionRow["created_at"] || new Date()}, now()
               )
               ON CONFLICT (bucket_id, name, version_id) DO NOTHING
@@ -652,10 +670,10 @@ export class StorageRLS {
               const markerId = crypto.randomUUID();
               await tx`
                 INSERT INTO storage.object_versions
-                  (bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at)
+                  (bucket_id, name, version_id, owner, owner_id, metadata, is_delete_marker, created_at, archived_at)
                 VALUES (
                   ${bucketId}, ${objectName}, ${markerId},
-                  ${currentVersionRow["owner"] || null}, '{}'::jsonb,
+                  ${currentVersionRow["owner"] || null}, ${currentVersionRow["owner_id"] || null}, '{}'::jsonb,
                   true, now(), now() + interval '1 millisecond'
                 )
               `;

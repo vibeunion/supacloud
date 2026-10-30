@@ -37,6 +37,15 @@
   `noncurrentVersionExpiration` 生命周期清理 worker。已有租户首次访问时执行幂等
   schema 补齐；恢复与过期行为由 `storage-versioning.test.ts` 覆盖。生命周期过滤
   仍只支持上游当前的空 filter，版本能力仅面向 standard bucket。
+  旧 bucket 默认保持 `DISABLED`，旧对象的 bytes、version、metadata、owner 和既有
+  RLS 不做批量重写。首次 bucket 读取/写入前在事务内补齐 schema，失败会回滚并允许
+  重试；部署前也可运行已有 tenant schema migration。启用版本管理后，首次真实覆盖
+  或删除才归档旧文件，dry-run 不复制文件。升级前应同时备份租户数据库和底层对象存储。
+  回退到不支持版本管理的旧程序前，应停止 Storage 写入及生命周期清理，并保留
+  `storage.object_versions` 与内部 `.supacloud_versions` 桶；仅回退二进制不会恢复
+  已清理的历史文件，也不能保证之后的覆盖写入继续保留历史。
+  `.supacloud_versions` 是保留命名空间；若旧库已有同名用户 bucket，归档会拒绝执行，
+  不会复用并覆盖该 bucket。应先备份并迁出同名用户 bucket，再启用版本管理。
 - 官方 Supabase CLI 推荐版本更新到 2.122.0。适配器放行 `PGSSL*` TLS 配置并继续
   阻断密码、连接 URL 和 `PGPASSFILE`；`supabase/supabase.lock` 由官方 CLI 在
   workdir 内直接读取，不复制到控制面。

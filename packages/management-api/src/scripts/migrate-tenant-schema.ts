@@ -328,6 +328,7 @@ DO $$ BEGIN
     FOR DELETE TO authenticated USING (auth.uid() = owner);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 GRANT ALL ON storage.object_versions TO service_role;
+GRANT SELECT ON storage.object_versions TO anon;
 GRANT SELECT, INSERT, DELETE ON storage.object_versions TO authenticated;
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
     id TEXT PRIMARY KEY,

@@ -30,6 +30,7 @@ export type StoredObjectVersion = {
   name: string;
   version_id: string;
   owner?: string | null;
+  owner_id?: string | null;
   metadata: Record<string, unknown>;
   is_delete_marker: boolean;
   created_at: string;
@@ -37,7 +38,7 @@ export type StoredObjectVersion = {
 };
 
 const VERSION_COLUMNS = `
-  id, bucket_id, name, version_id, owner, metadata,
+  id, bucket_id, name, version_id, owner, owner_id, metadata,
   is_delete_marker, created_at, archived_at
 `;
 
@@ -122,6 +123,10 @@ export function objectVersionStorageKey(bucketId: string, name: string, versionI
   return `${bucketId}/${name}/${versionId}`;
 }
 
+export async function lockStorageObject(db: import("bun").SQL, bucketId: string, name: string): Promise<void> {
+  await db`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([bucketId, name])}, 0))`;
+}
+
 export async function ensureStorageVersioningSchema(ref: string): Promise<void> {
   if (ref === "test_mock") return;
   if (schemaReady.has(ref)) return;
@@ -130,7 +135,9 @@ export async function ensureStorageVersioningSchema(ref: string): Promise<void> 
     pending = (async () => {
       const dbName = await resolveDbName(ref);
       const db = getProjectDb(dbName);
-      await db.unsafe(`
+      await db.begin(async (tx) => {
+        await tx`SELECT pg_advisory_xact_lock(hashtextextended('supacloud.storage-versioning-schema.v1', 0))`;
+        await tx.unsafe(`
         ALTER TABLE storage.buckets
           ADD COLUMN IF NOT EXISTS versioning_status TEXT NOT NULL DEFAULT 'DISABLED';
         ALTER TABLE storage.buckets
@@ -170,8 +177,10 @@ export async function ensureStorageVersioningSchema(ref: string): Promise<void> 
             FOR DELETE TO authenticated USING (auth.uid() = owner);
         EXCEPTION WHEN duplicate_object THEN NULL; END $$;
         GRANT ALL ON storage.object_versions TO service_role;
+        GRANT SELECT ON storage.object_versions TO anon;
         GRANT SELECT, INSERT, DELETE ON storage.object_versions TO authenticated;
-      `);
+        `);
+      });
     })();
     schemaPromises.set(ref, pending);
   }
@@ -185,6 +194,12 @@ export async function ensureStorageVersioningSchema(ref: string): Promise<void> 
 }
 
 export async function ensureVersionBucket(ref: string): Promise<boolean> {
+  const db = getProjectDb(await resolveDbName(ref));
+  const collision = await db`SELECT id FROM storage.buckets WHERE id = ${STORAGE_VERSION_BUCKET} LIMIT 1`;
+  if (collision.length > 0) {
+    logger.error("[StorageVersioning] Reserved bucket conflicts with an existing user bucket", { ref });
+    return false;
+  }
   if (versionBucketReady.has(ref)) return true;
   const result = await StorageService.createBucket(ref, STORAGE_VERSION_BUCKET);
   if (!result.success) {
@@ -196,6 +211,7 @@ export async function ensureVersionBucket(ref: string): Promise<boolean> {
 }
 
 export async function getBucketVersioningStatus(ref: string, bucketId: string): Promise<StorageVersioningStatus> {
+  await ensureStorageVersioningSchema(ref);
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
   const rows = await db`
@@ -205,6 +221,7 @@ export async function getBucketVersioningStatus(ref: string, bucketId: string): 
 }
 
 export async function getLifecycleConfiguration(ref: string, bucketId: string): Promise<StorageLifecycleConfiguration | null> {
+  await ensureStorageVersioningSchema(ref);
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
   const rows = await db`
@@ -216,6 +233,7 @@ export async function getLifecycleConfiguration(ref: string, bucketId: string): 
 }
 
 export async function setLifecycleConfiguration(ref: string, bucketId: string, value: unknown): Promise<StorageLifecycleConfiguration> {
+  await ensureStorageVersioningSchema(ref);
   const rules = validateLifecycleConfiguration(value);
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
@@ -230,6 +248,7 @@ export async function setLifecycleConfiguration(ref: string, bucketId: string, v
 }
 
 export async function deleteLifecycleConfiguration(ref: string, bucketId: string): Promise<void> {
+  await ensureStorageVersioningSchema(ref);
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
   const updated = await db`
@@ -245,6 +264,7 @@ export async function listObjectVersions(
   options: { prefix?: string; limit?: number; offset?: number; search?: string; sortBy?: { column?: string; order?: string } } = {},
 ): Promise<StoredObjectVersion[]> {
   if (ref === "test_mock") return [];
+  await ensureStorageVersioningSchema(ref);
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
   const prefix = options.prefix || "";
@@ -271,15 +291,24 @@ export async function getObjectVersion(
   versionId: string,
 ): Promise<StoredObjectVersion | null> {
   if (ref === "test_mock") return null;
+  await ensureStorageVersioningSchema(ref);
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
   const rows = await db`
-    SELECT id, bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at
+    SELECT id, bucket_id, name, version_id, owner, owner_id, metadata, is_delete_marker, created_at, archived_at
     FROM storage.object_versions
     WHERE bucket_id = ${bucketId} AND name = ${name} AND version_id = ${versionId}
     LIMIT 1
   `;
-  return rows.length > 0 ? mapVersionRow(rows[0] as Record<string, unknown>) : null;
+  if (rows.length > 0) return mapVersionRow(rows[0] as Record<string, unknown>);
+  const current = await db`
+    SELECT id, bucket_id, name, version::text AS version_id, owner, owner_id, metadata,
+      false AS is_delete_marker, created_at, updated_at AS archived_at
+    FROM storage.objects
+    WHERE bucket_id = ${bucketId} AND name = ${name} AND version::text = ${versionId}
+    LIMIT 1
+  `;
+  return current.length > 0 ? mapVersionRow(current[0] as Record<string, unknown>) : null;
 }
 
 export async function getVersionInfo(
@@ -299,13 +328,29 @@ export async function getVersionDownloadResponse(
   name: string,
   versionId: string,
 ): Promise<Response | null> {
-  const version = await getObjectVersion(ref, bucketId, name, versionId);
-  if (!version || version.is_delete_marker) return null;
-  return await StorageService.getDownloadResponse(
-    ref,
-    STORAGE_VERSION_BUCKET,
-    objectVersionStorageKey(bucketId, name, version.version_id),
-  );
+  await ensureStorageVersioningSchema(ref);
+  const db = getProjectDb(await resolveDbName(ref));
+  return await db.begin(async (tx) => {
+    await lockStorageObject(tx, bucketId, name);
+    const current = await tx`
+      SELECT id FROM storage.objects
+      WHERE bucket_id = ${bucketId} AND name = ${name} AND version::text = ${versionId}
+    `;
+    if (current.length === 0) {
+      const archived = await tx`
+        SELECT id FROM storage.object_versions
+        WHERE bucket_id = ${bucketId} AND name = ${name} AND version_id = ${versionId} AND is_delete_marker = false
+      `;
+      if (archived.length === 0) return null;
+    }
+    const response = await StorageService.getDownloadResponse(
+      ref,
+      current.length > 0 ? bucketId : STORAGE_VERSION_BUCKET,
+      current.length > 0 ? name : objectVersionStorageKey(bucketId, name, versionId),
+    );
+    if (!response) return null;
+    return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
+  });
 }
 
 export function versionInfo(version: StoredObjectVersion): Record<string, unknown> {
@@ -348,29 +393,41 @@ export async function deleteExactVersion(
 ): Promise<boolean> {
   if (ref === "test_mock") return false;
   await ensureStorageVersioningSchema(ref);
-  const version = await getObjectVersion(ref, bucketId, name, versionId);
-  if (!version) return false;
-
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
-
-  if (version.is_delete_marker) {
-    const newer = await db`
+  return await db.begin(async (tx) => {
+    await lockStorageObject(tx, bucketId, name);
+    const rows = await tx`
+      SELECT id, bucket_id, name, version_id, owner, owner_id, metadata, is_delete_marker, created_at, archived_at
+      FROM storage.object_versions
+      WHERE bucket_id = ${bucketId} AND name = ${name} AND version_id = ${versionId}
+      FOR UPDATE
+    `;
+    if (rows.length === 0) return false;
+    const version = mapVersionRow(rows[0] as Record<string, unknown>);
+    if (version.is_delete_marker) {
+      const current = await tx`
+      SELECT id FROM storage.objects
+      WHERE bucket_id = ${bucketId} AND name = ${name}
+      LIMIT 1
+      `;
+      const newer = await tx`
       SELECT id FROM storage.object_versions
       WHERE bucket_id = ${bucketId} AND name = ${name} AND id <> ${version.id}
         AND archived_at > ${version.archived_at}
       LIMIT 1
-    `;
-    if (newer.length > 0) {
-      await db`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
-      return true;
+      `;
+      if (current.length > 0 || newer.length > 0) {
+        await tx`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
+        return true;
+      }
+      return await restorePreviousVersion(ref, tx, version);
     }
-    return await restorePreviousVersion(ref, db, version);
-  }
-
-  await db`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
-  await StorageService.deleteFile(ref, STORAGE_VERSION_BUCKET, objectVersionStorageKey(bucketId, name, versionId));
-  return true;
+    const deleted = await StorageService.deleteFile(ref, STORAGE_VERSION_BUCKET, objectVersionStorageKey(bucketId, name, versionId));
+    if (!deleted) return false;
+    await tx`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
+    return true;
+  });
 }
 
 async function restorePreviousVersion(
@@ -378,9 +435,9 @@ async function restorePreviousVersion(
   db: ReturnType<typeof getProjectDb>,
   marker: StoredObjectVersion,
 ): Promise<boolean> {
-  await ensureVersionBucket(ref);
+  if (!(await ensureVersionBucket(ref))) return false;
   const previous = await db`
-    SELECT id, bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at
+    SELECT id, bucket_id, name, version_id, owner, owner_id, metadata, is_delete_marker, created_at, archived_at
     FROM storage.object_versions
     WHERE bucket_id = ${marker.bucket_id} AND name = ${marker.name}
       AND archived_at < ${marker.archived_at} AND is_delete_marker = false
@@ -401,16 +458,12 @@ async function restorePreviousVersion(
   );
   if (!copied) return false;
 
-  await db.begin(async (tx) => {
-    await tx`
-      INSERT INTO storage.objects (bucket_id, name, owner, metadata)
-      VALUES (${version.bucket_id}, ${version.name}, ${version.owner || null}, ${version.metadata})
-      ON CONFLICT (bucket_id, name)
-      DO UPDATE SET metadata = EXCLUDED.metadata, owner = EXCLUDED.owner, updated_at = now(), version = ${version.version_id}
-    `;
-    await tx`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
-    await tx`DELETE FROM storage.object_versions WHERE id = ${marker.id}`;
-  });
+  await db`
+    INSERT INTO storage.objects (bucket_id, name, owner, owner_id, metadata, version)
+    VALUES (${version.bucket_id}, ${version.name}, ${version.owner || null}, ${version.owner_id || null}, ${version.metadata}, ${version.version_id})
+  `;
+  await db`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
+  await db`DELETE FROM storage.object_versions WHERE id = ${marker.id}`;
   return true;
 }
 
@@ -420,21 +473,22 @@ export async function purgeBucketVersions(ref: string, bucketId: string): Promis
   const dbName = await resolveDbName(ref);
   const db = getProjectDb(dbName);
   const versions = await db`
-    SELECT version_id, name FROM storage.object_versions WHERE bucket_id = ${bucketId}
+    SELECT id, version_id, name, is_delete_marker FROM storage.object_versions WHERE bucket_id = ${bucketId}
   `;
   let deleted = 0;
   for (const row of versions) {
     const versionId = String(row["version_id"]);
     const name = String(row["name"]);
-    await StorageService.deleteFile(
-      ref,
-      STORAGE_VERSION_BUCKET,
-      objectVersionStorageKey(bucketId, name, versionId),
-    );
+    if (row["is_delete_marker"] !== true) {
+      const deletedBytes = await StorageService.deleteFile(
+        ref,
+        STORAGE_VERSION_BUCKET,
+        objectVersionStorageKey(bucketId, name, versionId),
+      );
+      if (!deletedBytes) throw new Error("Failed to delete archived object bytes");
+    }
+    await db`DELETE FROM storage.object_versions WHERE id = ${row["id"]}`;
     deleted++;
-  }
-  if (versions.length > 0) {
-    await db`DELETE FROM storage.object_versions WHERE bucket_id = ${bucketId}`;
   }
   return deleted;
 }
@@ -476,10 +530,14 @@ export async function cleanupProjectVersions(ref: string): Promise<{ versionsDel
       const days = rule.noncurrentVersionExpiration.noncurrentDays;
       const keepNewest = rule.noncurrentVersionExpiration.newerNoncurrentVersions ?? 0;
       const candidates = await db`
+        WITH ranked AS (
+          SELECT *, row_number() OVER (PARTITION BY name ORDER BY archived_at DESC, id DESC) AS recency
+          FROM storage.object_versions
+          WHERE bucket_id = ${bucketId} AND is_delete_marker = false
+        )
         SELECT id, bucket_id, name, version_id, owner, metadata, is_delete_marker, created_at, archived_at
-        FROM storage.object_versions
-        WHERE bucket_id = ${bucketId}
-          AND archived_at < now() - (${days} * interval '1 day')
+        FROM ranked
+        WHERE archived_at < now() - (${days} * interval '1 day') AND recency > ${keepNewest}
         ORDER BY name ASC, archived_at DESC
       `;
       const grouped = new Map<string, StoredObjectVersion[]>();
@@ -490,14 +548,10 @@ export async function cleanupProjectVersions(ref: string): Promise<{ versionsDel
         grouped.set(version.name, list);
       }
       for (const versions of grouped.values()) {
-        for (const version of versions.slice(keepNewest)) {
+        for (const version of versions) {
           try {
-            await db`DELETE FROM storage.object_versions WHERE id = ${version.id}`;
-            await StorageService.deleteFile(
-              ref,
-              STORAGE_VERSION_BUCKET,
-              objectVersionStorageKey(version.bucket_id, version.name, version.version_id),
-            );
+            const deleted = await deleteExactVersion(ref, version.bucket_id, version.name, version.version_id);
+            if (!deleted) throw new Error("Failed to delete archived object bytes");
             if (version.is_delete_marker) markersDeleted++;
             else versionsDeleted++;
           } catch (e) {
@@ -566,6 +620,7 @@ function mapVersionRow(row: Record<string, unknown>): StoredObjectVersion {
     name: String(row["name"]),
     version_id: String(row["version_id"]),
     owner: row["owner"] ? String(row["owner"]) : null,
+    owner_id: row["owner_id"] ? String(row["owner_id"]) : null,
     metadata: isRecord(row["metadata"]) ? row["metadata"] : {},
     is_delete_marker: row["is_delete_marker"] === true,
     created_at: toIsoTimestamp(row["created_at"]),

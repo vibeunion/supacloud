@@ -1,5 +1,5 @@
 // @supacloud-test-isolate
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { SQL } from "bun";
 import { startStarterPostgres } from "../../../../scripts/lib/starter-postgres";
 import * as projectDb from "../../src/db";
@@ -11,6 +11,7 @@ import {
   ensureStorageVersioningSchema,
   getObjectVersion,
   getVersionDownloadResponse,
+  purgeBucketVersions,
   setLifecycleConfiguration,
 } from "../../src/services/storage-versioning";
 
@@ -20,6 +21,130 @@ const objectName = "docs/report.txt";
 
 function physicalKey(bucket: string, key: string): string {
   return `${bucket}/${key}`;
+}
+
+for (const versionType of ["text", "uuid"] as const) {
+  test.skipIf(!bin)(`legacy Storage with ${versionType} versions upgrades before its first read and preserves existing objects`, async () => {
+    const postgres = await startStarterPostgres(bin!);
+    let database: SQL | undefined;
+    const spies: Array<{ mockRestore(): void }> = [];
+    const ref = `native-legacy-${versionType}`;
+    const legacyVersion = crypto.randomUUID();
+    const owner = crypto.randomUUID();
+    const metadata = { size: 6, mimetype: "text/plain", cacheControl: "120", userMetadata: { legacy: true } };
+    const physical = new Map([[physicalKey(bucketId, objectName), "legacy"]]);
+    try {
+      database = await postgres.withConnection((connection) => new SQL(connection));
+      const db = database;
+      await db.unsafe(`
+        CREATE ROLE anon NOLOGIN;
+        CREATE ROLE ${versionType === "uuid" ? "legacy_placeholder" : "authenticated"} NOLOGIN;
+        CREATE ROLE service_role NOLOGIN BYPASSRLS;
+        CREATE SCHEMA auth;
+        CREATE FUNCTION auth.uid() RETURNS uuid AS $$ SELECT NULL::uuid $$ LANGUAGE SQL STABLE;
+        CREATE SCHEMA storage;
+        CREATE TABLE storage.buckets (
+          id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false,
+          file_size_limit bigint, allowed_mime_types text[],
+          created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE TABLE storage.objects (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text REFERENCES storage.buckets(id),
+          name text NOT NULL, owner uuid, owner_id text, metadata jsonb, user_metadata jsonb,
+          version ${versionType} DEFAULT gen_random_uuid(), created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(), last_accessed_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (bucket_id, name)
+        );
+        ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY legacy_read_policy ON storage.objects FOR SELECT USING (name LIKE 'docs/%');
+        GRANT USAGE ON SCHEMA storage TO anon, service_role;
+        GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role;
+      `);
+      await db`INSERT INTO storage.buckets (id, name) VALUES (${bucketId}, ${bucketId})`;
+      await db`
+        INSERT INTO storage.objects (bucket_id, name, owner, owner_id, metadata, version)
+        VALUES (${bucketId}, ${objectName}, ${owner}, ${owner}, ${metadata}, ${legacyVersion})
+      `;
+      const original = await db`SELECT * FROM storage.objects`;
+      const policies = await db`SELECT policyname, qual FROM pg_policies WHERE tablename = 'objects' AND schemaname = 'storage'`;
+      spies.push(spyOn(projectDb, "resolveDbName").mockResolvedValue("postgres"));
+      spies.push(spyOn(projectDb, "getProjectDb").mockReturnValue(db));
+      spies.push(spyOn(StorageRLS, "verifyToken").mockResolvedValue({ role: "service_role", __allow_service_role: true }));
+      const createBucket = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
+      spies.push(createBucket);
+      const copy = spyOn(StorageService, "copyFile").mockImplementation(async (_ref, sourceBucket, source, targetBucket, target) => {
+        const bytes = physical.get(physicalKey(sourceBucket, source));
+        if (bytes === undefined) return false;
+        physical.set(physicalKey(targetBucket, target), bytes);
+        return true;
+      });
+      spies.push(copy);
+      spies.push(spyOn(StorageService, "getDownloadResponse").mockImplementation(async (_ref, bucket, key) => {
+        const bytes = physical.get(physicalKey(bucket, key));
+        return bytes === undefined ? null : new Response(bytes);
+      }));
+
+      if (versionType === "uuid") {
+        await expect(StorageRLS.listLogicalBucketsAsAdmin(ref)).rejects.toThrow('authenticated');
+        const [partialMigration] = await db`
+          SELECT to_regclass('storage.object_versions')::text AS history,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'storage' AND table_name = 'buckets' AND column_name = 'versioning_status') AS has_status
+        `;
+        expect(partialMigration).toMatchObject({ history: null, has_status: false });
+        await db.unsafe('CREATE ROLE authenticated NOLOGIN');
+      }
+      const buckets = versionType === "text"
+        ? await StorageRLS.listLogicalBuckets(ref, "fixture-token")
+        : await StorageRLS.listLogicalBucketsAsAdmin(ref);
+      expect(buckets).toHaveLength(1);
+      expect(buckets[0]?.versioning_status).toBe("DISABLED");
+      expect(await StorageRLS.listLogicalBuckets(ref, "fixture-token", { search: "version" })).toHaveLength(1);
+      expect(await StorageRLS.getLogicalBucket(ref, bucketId, "fixture-token")).not.toBeNull();
+      await ensureStorageVersioningSchema(ref);
+      expect(Array.from(await db`SELECT * FROM storage.objects`)).toEqual(Array.from(original));
+      expect(Array.from(await db`SELECT policyname, qual FROM pg_policies WHERE tablename = 'objects' AND schemaname = 'storage'`)).toEqual(Array.from(policies));
+      expect(createBucket).not.toHaveBeenCalled();
+      expect(physical.get(physicalKey(bucketId, objectName))).toBe("legacy");
+
+      await StorageRLS.registerLogicalBucket(ref, "fixture-token", bucketId, bucketId, false, undefined, undefined, "ENABLED");
+      expect((await StorageRLS.getLogicalBucket(ref, bucketId, "fixture-token"))?.versioning_status).toBe("ENABLED");
+      const preview = await StorageRLS.authorizeAction(ref, "fixture-token", "update", bucketId, objectName, metadata, true);
+      expect(preview.permitted).toBe(true);
+      expect(copy).not.toHaveBeenCalled();
+      expect(createBucket).not.toHaveBeenCalled();
+
+      const overwritten = await StorageRLS.authorizeAction(ref, "fixture-token", "update", bucketId, objectName, { ...metadata, size: 3 }, false, true, undefined, undefined, async () => {
+        physical.set(physicalKey(bucketId, objectName), "new");
+      });
+      expect(overwritten.permitted).toBe(true);
+      const archived = await getObjectVersion(ref, bucketId, objectName, legacyVersion);
+      expect(archived?.metadata).toEqual(metadata);
+      const [archivedOwner] = await db`SELECT owner_id FROM storage.object_versions WHERE version_id = ${legacyVersion}`;
+      expect(archivedOwner?.owner_id).toBe(owner);
+      const download = await getVersionDownloadResponse(ref, bucketId, objectName, legacyVersion);
+      expect(download && await download.text()).toBe("legacy");
+      expect(physical.get(physicalKey(bucketId, objectName))).toBe("new");
+      await expect(StorageRLS.registerLogicalBucket(ref, "fixture-token", ".supacloud_versions", "reserved", false)).rejects.toThrow("reserved");
+      await db`INSERT INTO storage.buckets (id, name) VALUES ('.supacloud_versions', 'legacy-customer-bucket')`;
+      const rejected = await StorageRLS.authorizeAction(ref, "fixture-token", "update", bucketId, objectName, metadata, false, true, undefined, undefined, async () => {
+        physical.set(physicalKey(bucketId, objectName), "must-not-write");
+      });
+      expect(rejected.permitted).toBe(false);
+      expect(physical.get(physicalKey(bucketId, objectName))).toBe("new");
+      const remove = spyOn(StorageService, "deleteFile").mockResolvedValue(false);
+      spies.push(remove);
+      expect(await deleteExactVersion(ref, bucketId, objectName, legacyVersion)).toBe(false);
+      expect(await getObjectVersion(ref, bucketId, objectName, legacyVersion)).not.toBeNull();
+      remove.mockImplementation(async (_ref, bucket, key) => physical.delete(physicalKey(bucket, key)));
+      expect(await deleteExactVersion(ref, bucketId, objectName, legacyVersion)).toBe(true);
+      expect(await getObjectVersion(ref, bucketId, objectName, legacyVersion)).toBeNull();
+      expect(physical.get(physicalKey(bucketId, objectName))).toBe("new");
+    } finally {
+      for (const spy of spies.reverse()) spy.mockRestore();
+      try { await database?.close({ timeout: 1 }); }
+      finally { await postgres.close(); }
+    }
+  }, 60_000);
 }
 
 test.skipIf(!bin)("object versioning archives noncurrent bytes, creates delete markers and restores versions", async () => {
@@ -138,6 +263,9 @@ test.skipIf(!bin)("object versioning archives noncurrent bytes, creates delete m
     `;
     const firstVersion = String(first.version);
     expect(firstVersion).toBeTruthy();
+    const exactCurrent = await getVersionDownloadResponse("native-versioning", bucketId, objectName, firstVersion);
+    expect(exactCurrent && await exactCurrent.text()).toBe("v1");
+    expect(await StorageRLS.authorizeObjectVersion("native-versioning", "fixture-token", "download", bucketId, objectName, firstVersion)).toBe(true);
     expect(physical.get(physicalKey(bucketId, objectName))).toEqual(new TextEncoder().encode("v1"));
 
     await upload("v2");
@@ -177,6 +305,38 @@ test.skipIf(!bin)("object versioning archives noncurrent bytes, creates delete m
     expect(restored?.version).not.toBe(firstVersion);
     const restoredDownload = await StorageService.getDownloadResponse("native-versioning", bucketId, objectName);
     expect(restoredDownload && await restoredDownload.text()).toBe("v2");
+
+    const deletedAgain = await StorageRLS.authorizeAction(
+      "native-versioning", "fixture-token", "delete", bucketId, objectName, {}, false, true,
+      undefined, undefined, async () => { physical.delete(physicalKey(bucketId, objectName)); },
+    );
+    expect(deletedAgain.permitted).toBe(true);
+    const [oldMarker] = await db`
+      SELECT version_id FROM storage.object_versions
+      WHERE bucket_id = ${bucketId} AND name = ${objectName} AND is_delete_marker
+      ORDER BY archived_at DESC LIMIT 1
+    `;
+    await upload("v3");
+    expect(await deleteExactVersion("native-versioning", bucketId, objectName, String(oldMarker.version_id))).toBe(true);
+    const newCurrent = await StorageService.getDownloadResponse("native-versioning", bucketId, objectName);
+    expect(newCurrent && await newCurrent.text()).toBe("v3");
+    await Promise.all([upload("v4"), upload("v5")]);
+    const history = await db`SELECT version_id, metadata FROM storage.object_versions WHERE is_delete_marker = false`;
+    const historyBytes: string[] = [];
+    for (const version of history) {
+      const bytes = await getVersionDownloadResponse("native-versioning", bucketId, objectName, String(version.version_id));
+      expect(bytes).not.toBeNull();
+      const text = await bytes!.text();
+      expect(text).toBe((version.metadata as { userMetadata: { revision: string } }).userMetadata.revision);
+      historyBytes.push(text);
+    }
+    const currentBytes = physical.get(physicalKey(bucketId, objectName));
+    expect([...historyBytes, new TextDecoder().decode(currentBytes)]).toEqual(expect.arrayContaining(["v3", "v4", "v5"]));
+
+    const purged = await purgeBucketVersions("native-versioning", bucketId);
+    expect(purged).toBeGreaterThan(0);
+    expect(await db`SELECT id FROM storage.object_versions WHERE bucket_id = ${bucketId}`).toHaveLength(0);
+    expect(physical.has(physicalKey(".supacloud_versions", `${bucketId}/${objectName}/${firstVersion}`))).toBe(false);
   } finally {
     for (const spy of spies.reverse()) spy.mockRestore();
     try {
@@ -278,13 +438,13 @@ test.skipIf(!bin)("lifecycle expiration deletes old noncurrent versions and hono
     }
 
     const result = await cleanupProjectVersions("native-lifecycle");
-    expect(result.versionsDeleted).toBe(1);
+    expect(result.versionsDeleted).toBe(2);
     const remaining = await db`
       SELECT version_id FROM storage.object_versions
       WHERE bucket_id = ${bucketId} AND name = ${objectName}
       ORDER BY archived_at DESC
     `;
-    expect(remaining.map((row) => row.version_id)).toEqual(["version-2", "version-1"]);
+    expect(remaining.map((row) => row.version_id)).toEqual(["version-2"]);
     expect(deletedKeys).toContain(`.supacloud_versions/${bucketId}/${objectName}/version-0`);
     expect(deletedKeys).not.toContain(`.supacloud_versions/${bucketId}/${objectName}/version-2`);
   } finally {
