@@ -1,17 +1,23 @@
-# Repository-only Nx tooling
+# Repository workspace tooling
 
 ## Contract and boundaries
 
-Nx schedules repository engineering tasks; SupaCloud Compiler still owns application
-semantics. Root development tooling pins Nx 24.0.2.
-Package-local locks and runtime dependencies remain independent. Generated customer
-applications do not require Nx. The launcher resolves Nx through public bin metadata;
-`tsconfig.base.json` is a discovery path map, not a shared application configuration.
+Bun runs package scripts. A small repository runner orders those scripts across
+local `file:` and `link:` dependencies. SupaCloud Compiler still owns application
+semantics. Package-local locks and runtime dependencies remain independent.
+Generated customer applications do not use this runner. `tsconfig.base.json` is a
+discovery path map, not a shared application configuration.
 
-This rollout adds one owned starter-metadata synchronizer and enables local result
-caching only for the reviewed contracts build. No remote cache, distributed execution,
-CI pruning, customer-source migration, deployment or replacement release engine is
-introduced. Full validation and packed/generated-consumer acceptance remain required.
+This tooling does not add a remote cache, distributed execution, CI pruning,
+customer-source migration, deployment, or a replacement release engine. Full
+validation and packed/generated-consumer acceptance remain required.
+
+`bun --filter` is not the scheduler. It selects packages inside one Bun workspace
+and runs one script name in dependency order. This repository is not a Bun
+workspace: each package has its own lockfile, and turning the root into a
+workspace would change `bun install`. Verification-only edges, source-only
+installs, and prepare-without-building-the-consumer are also outside package
+dependency order. The runner walks those edges explicitly and then invokes Bun.
 
 ## Commands
 
@@ -26,8 +32,7 @@ bun run workspace:build --project app
 bun run workspace:sync
 bun run check:workspace-sync
 bun run test:workspace
-bun run test:nx-acceptance
-bun run test:nx-cache
+bun run test:workspace-acceptance
 bun run check:source-boundaries
 bun run check:source-regressions
 ```
@@ -47,7 +52,10 @@ edges (source CLI, target producer). A producer change affects CLI validation wi
 adding a runtime dependency.
 Missing producers fail discovery. These edges do not install or build the producers.
 
-Nx owns execution ordering and shared-task deduplication:
+The runner owns execution ordering and shared-task deduplication. It runs one
+package command at a time and stops on the first failure. Graph preparation
+targets still include `params: ignore`; the runner does not forward arguments
+to dependencies:
 
 ```
 B:repo-install -> B:repo-build -> A:repo-install -> A:repo-build
@@ -59,9 +67,20 @@ The package-local installation policy stays
 `bun install --force --ignore-scripts --frozen-lockfile`. Native hooks and scripts
 that rebuild other packages require explicit adapters and consumer acceptance.
 
-The app/contracts build and SDK prerequisite preparation are migrated paths. The SDK
+The app/contracts build and SDK prerequisite preparation use this runner. The SDK
 keeps all its original install, type, build, consumer and test checks. Other legacy
-preparation chains remain unchanged. No automatic fallback hides an Nx failure.
+preparation chains remain unchanged. A failed Bun command is not hidden or retried.
+
+Compiler `build` and `typecheck` stay exclusive because their lifecycle hooks
+rewrite shared contracts and DB outputs. Sequential execution is stricter than the
+old scheduler, which could run unrelated packages beside each other: independent
+branches no longer overlap. That keeps Windows package installs from racing the
+shared extraction cache as well.
+
+There is no local result cache. `@supacloud/contracts` builds run live on every
+request. The previous single-target cache, its dotenv preflight, and
+`test:nx-cache` are gone. An environment-specific build is `bun run build` in the
+package directory.
 
 ## Starter synchronization and release consistency
 
@@ -99,40 +118,12 @@ The generated file and updated CLI imports are covered by real packed/generated-
 consumer acceptance. This synchronizer does not modify customer projects, regenerate
 business code, migrate databases or claim to synchronize every SupaCloud artifact.
 
-## Restricted local result cache
-
-Only `@supacloud/contracts:repo-build` is eligible. Its package name, project name,
-root and full sorted script fingerprint must match the reviewed policy. Any script
-contract change disables caching until reviewed. Installs, tests, type checks,
-external-service checks and all other package builds stay uncached.
-
-The key covers project inputs, dependency inputs, shared scripts and build policies,
-Node/Bun versions, operating system/architecture, effective environment and ignored
-Bun/environment configuration. The context helper emits a digest, never configuration
-or environment values. This conservative policy may miss reuse when unrelated
-environment values change; it intentionally favors correctness over hit rate.
-Cache contents are local to the workspace and must not be shared with untrusted
-writers. No remote result store is configured.
-
-`test:nx-cache` runs the actual contracts build in a fresh temporary workspace. It
-checks a cold build, a hot hit after deleting outputs, exact output restoration,
-stale-output removal, source/lock/shared-script/config/environment invalidation,
-failure behavior and explicit cache bypass. It installs from the existing frozen
-contracts lock; it is not a mock build. The regular full tests still execute live.
-
-```sh
-bun run nx run @supacloud/contracts:repo-build --skipNxCache
-```
-
-No measured speedup or universal cache validity is promised. Other targets require
-separate output and input acceptance before joining the cache policy.
-
 ## Required CI and source debt
 
-The reusable Nx workflow is part of Management API CI's stable Required Checks.
-Failure, missing results, cancellation and skipping block that aggregate. It has no
-second PR trigger, write permission or advisory source gate. Synchronization checks
-and actual cache acceptance are now part of the same mandatory workflow.
+The reusable workspace workflow is part of Management API CI's stable Required Checks
+aggregate. Failure, missing results, cancellation and skipping block that aggregate.
+It has no second PR trigger, write permission or advisory source gate. The aggregate
+check name stays `Required Checks`. The member job is `workspace-tooling`.
 
 `check:source-boundaries` returns all current diagnostics and fails on violations.
 `check:source-regressions` performs the same fresh scan, then compares exact findings
@@ -140,12 +131,11 @@ against reviewed count-limited AST fingerprints. Every new diagnostic or unverif
 coverage note fails; known findings remain visible with reasons. A passing budget
 is not a clean architecture report. No automatic baseline refresh is provided.
 
-This continuation removes 17 starter-metadata allowances by removing their offending
-imports, not by relaxing the scanner. Remaining admin compatibility/release helpers,
-console type bridges, generated framework configuration and runtime-selected loaders
-still require targeted review. The initial 33 diagnostics and 8 notes were not 33
-independent architecture defects: one import can produce multiple diagnostics.
-Unused allowances are reported and should be removed rather than reused as a budget.
+Removing starter-metadata allowances means removing their offending imports, not
+relaxing the scanner. Remaining admin compatibility/release helpers, console type
+bridges, generated framework configuration and runtime-selected loaders still
+require targeted review. Unused allowances are reported and should be removed
+rather than reused as a budget.
 
 ## Coverage, acceptance and rollback
 
@@ -157,13 +147,15 @@ this scan. It is not whole-program resolution or proof of runtime isolation.
 
 Affected remains `mode: shadow`, `safeToSkip: false`. It handles dirty/untracked inputs,
 rename sides, deletion and invalid baselines; generation edges add starter coverage,
-not complete application semantics. Neither a passing debt budget nor a cache hit
-authorizes pruning CI. Unknown inputs still require conservative full validation.
+not complete application semantics. Neither a passing debt budget nor a successful
+package build authorizes pruning CI. Unknown inputs still require conservative full
+validation.
 
-CI keeps small graph, scan, affected, cache-acceptance and tool-version evidence;
-source snapshots, node_modules and executable archives are not uploaded. Existing
-consumer, ESM and full repository acceptance remain separate required evidence.
+CI keeps small graph, scan, affected and tool-version evidence; source snapshots,
+node_modules and executable archives are not uploaded. Existing consumer, ESM and
+full repository acceptance remain separate required evidence. Packed consumer
+acceptance stays the app-generation workflow.
 
-Rollback these tooling changes to restore uncached contracts builds and the original
-CLI manifest reads, along with their prior explicitly reviewed source allowances.
-No database schema, deployed resource or customer application requires rollback.
+Rollback of this runner restores direct package installs and builds. No database
+schema, deployed resource or customer application requires rollback. Merging this
+tooling does not deploy or publish packages.

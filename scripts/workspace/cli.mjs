@@ -2,8 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { affectedReport, graphReport, readWorkspace, resolveProject } from './model.mjs';
-
-import { runNx } from './nx.mjs';
+import { runTask } from './run.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
@@ -48,7 +47,7 @@ export function main(args = process.argv.slice(2), cwd = root) {
   if (command === 'build' || command === 'prepare') {
     const project = resolveProject(workspace, options['--project']);
     if (command === 'build' && typeof project.scripts.build !== 'string') throw new Error(`No build script: ${project.name}`);
-    runNx(['run', `${project.name}:repo-${command}`, '--outputStyle=static'], cwd);
+    runTask(cwd, project.name, `repo-${command}`);
     return;
   }
   let report = graphReport(workspace);
