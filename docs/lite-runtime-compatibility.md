@@ -176,7 +176,9 @@ native databases and default snapshot restores use major 18. For an existing
 major 17 database or physical snapshot, keep selecting its PostgreSQL 17
 installation with `--postgres-dir` until a logical migration to a new major 18
 database is complete. PostgreSQL 17 data directories and physical snapshots
-cannot be opened directly by the new default.
+cannot be opened directly by the new default. See the
+[PostgreSQL 17 to 18 migration runbook (中文)](./lite-postgres17-to18-migration.md)
+for backup, logical export/restore, cutover checks and rollback boundaries.
 
 ### Migration Compatibility
 
