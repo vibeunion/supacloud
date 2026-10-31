@@ -440,6 +440,7 @@ supacloud-lite doctor --json
 ### PostgreSQL 扩展生态
 
 默认 native 下载包使用 PostgreSQL 18。已有 PostgreSQL 17 数据目录和物理快照须继续通过 `--postgres-dir` 选择原 17 安装，完成逻辑迁移后才能使用 18；不能直接替换二进制打开旧数据。
+完整步骤见 [PostgreSQL 17 → 18 迁移方案](../../docs/lite-postgres17-to18-migration.md)。
 
 Lite 默认把一组常用扩展打进 PGlite：`uuid-ossp`、`pgcrypto`、`citext`、
 `pg_trgm`、`ltree`、`hstore`、`fuzzystrmatch`、`pgvector`、
@@ -1018,6 +1019,7 @@ The default native download uses PostgreSQL 18. Keep selecting the original
 PostgreSQL 17 installation with `--postgres-dir` for existing major 17 data
 directories and physical snapshots until a logical migration to 18 is complete.
 Replacing binaries cannot upgrade an existing data directory.
+See the [PostgreSQL 17 to 18 migration runbook (中文)](../../docs/lite-postgres17-to18-migration.md).
 
 Lite ships a PostgreSQL-shaped default extension set in PGlite. New databases
 install `uuid-ossp`, `pgcrypto`, `citext`, `pg_trgm`, `ltree`, `hstore`,
