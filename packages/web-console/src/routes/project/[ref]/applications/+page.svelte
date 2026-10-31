@@ -5,6 +5,11 @@
   import { t } from "svelte-i18n";
   import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-svelte";
   import Button from "@svadmin/ui/components/ui/button/button.svelte";
+  import Input from "@svadmin/ui/components/ui/input/input.svelte";
+  import * as Table from "@svadmin/ui/components/ui/table/index.js";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
+  import DescriptionList from "@svadmin/ui/components/content/DescriptionList.svelte";
   import { apiClient } from "$lib/api";
   import {
     ApplicationRuntimeChanged, validApplicationScope, loadApplicationRuntime, loadApplicationReleases,
@@ -241,65 +246,66 @@
 </script>
 
 <svelte:head><title>{$t("Applications.title")} | SupaCloud</title></svelte:head>
-<div class="space-y-6">
-  <header class="flex flex-wrap items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">{$t("Applications.title")}</h1>
+<PagePattern kind="workspace" pageId="application-runtime" title={$t("Applications.title")}>
+  {#snippet actions()}
     <Button variant="outline" onclick={refresh} disabled={!valid} aria-label={$t("Common.refresh")} title={$t("Common.refresh")}>
       <RefreshCw class="h-4 w-4" />
     </Button>
-  </header>
-  <form onsubmit={select} class="flex flex-wrap items-end gap-3">
-    <label class="grid min-w-0 gap-1 text-sm">{$t("Applications.application")}
-      <input class="h-9 w-full rounded-md border bg-background px-3" bind:value={application} required pattern={"[A-Za-z0-9_\\-]{1,64}"} maxlength="64" name="application" />
-    </label>
-    <label class="grid min-w-0 gap-1 text-sm">{$t("Applications.environment")}
-      <input class="h-9 w-full rounded-md border bg-background px-3" bind:value={environment} required pattern={"[A-Za-z0-9_\\-]{1,64}"} maxlength="64" name="environment" />
-    </label>
-    <Button type="submit">{$t("Applications.open")}</Button>
-  </form>
+  {/snippet}
+  {#snippet toolbar()}
+    <form onsubmit={select} class="flex flex-wrap items-end gap-3">
+      <label for="application-id" class="grid min-w-0 gap-1 text-sm">{$t("Applications.application")}
+        <Input id="application-id" bind:value={application} required pattern={"[A-Za-z0-9_\\-]{1,64}"} maxlength={64} name="application" />
+      </label>
+      <label for="environment-id" class="grid min-w-0 gap-1 text-sm">{$t("Applications.environment")}
+        <Input id="environment-id" bind:value={environment} required pattern={"[A-Za-z0-9_\\-]{1,64}"} maxlength={64} name="environment" />
+      </label>
+      <Button type="submit">{$t("Applications.open")}</Button>
+    </form>
+  {/snippet}
   {#if !valid}
-    <p role="status" class="text-sm text-muted-foreground">{$t("Applications.scope_required")}</p>
+    <DataState state="empty" title={$t("Applications.scope_required")} description="" />
   {:else}
     <section class="space-y-3" aria-busy={runtimeState === "loading"}>
       <h2 class="text-base font-semibold">{$t("Applications.runtime")}</h2>
-      {#if runtimeState === "loading"}<p role="status">{$t("Applications.loading")}</p>
+      {#if runtimeState === "loading"}<DataState state="loading" loadingLabel={$t("Applications.loading")} />
       {:else if runtimeState === "error" || runtimeState === "changed"}
-        <p role="alert">{$t(runtimeState === "changed" ? "Applications.changed" : "Applications.unavailable")}</p>
+        <DataState state="error" title={$t(runtimeState === "changed" ? "Applications.changed" : "Applications.unavailable")} description="" retry={refresh} retryLabel={$t("Common.retry")} />
       {:else if runtime}
-        {#if runtime.readiness === null}<p>{$t("Applications.no_active")}</p>
+        {#if runtime.readiness === null}<DataState state="empty" title={$t("Applications.no_active")} description="" />
         {:else}
           <p class="text-sm font-medium">{$t(runtime.readiness.ready ? "Applications.ready" : "Applications.not_ready")}</p>
-          <dl class="grid gap-2 text-sm">
-            <div><dt>{$t("Applications.release")}</dt><dd class="break-all font-mono">{runtime.readiness.release_id}</dd></div>
-            <div><dt>{$t("Applications.activation")}</dt><dd class="break-all font-mono">{runtime.readiness.activation_id}</dd></div>
-            {#if runtime.configuration_id}<div><dt>{$t("Applications.configuration")}</dt><dd class="break-all font-mono">{runtime.configuration_id}</dd></div>{/if}
-          </dl>
-          <div class="overflow-x-auto">
-            <table class="w-full table-fixed text-left text-sm">
-              <thead><tr class="border-b"><th class="p-2">{$t("Applications.target")}</th><th class="p-2">{$t("Applications.kind")}</th><th class="p-2">{$t("Applications.status")}</th><th class="p-2">PID</th></tr></thead>
-              <tbody>{#each runtime.readiness.targets as target (target.target)}
-                <tr class="border-b"><td class="break-all p-2">{target.target}</td><td class="break-all p-2">{target.kind}</td><td class="break-all p-2">{target.code}</td><td class="break-all p-2">{target.pid}</td></tr>
-              {/each}</tbody>
-            </table>
+          <DescriptionList columns={3} items={[
+            { label: $t("Applications.release"), value: runtime.readiness.release_id },
+            { label: $t("Applications.activation"), value: runtime.readiness.activation_id },
+            ...(runtime.configuration_id ? [{ label: $t("Applications.configuration"), value: runtime.configuration_id }] : []),
+          ]} />
+          <div class="min-w-0">
+            <Table.Root class="w-full table-fixed text-left text-sm">
+              <Table.Header><Table.Row class="border-b"><Table.Head class="p-2">{$t("Applications.target")}</Table.Head><Table.Head class="p-2">{$t("Applications.kind")}</Table.Head><Table.Head class="p-2">{$t("Applications.status")}</Table.Head><Table.Head class="p-2">PID</Table.Head></Table.Row></Table.Header>
+              <Table.Body>{#each runtime.readiness.targets as target (target.target)}
+                <Table.Row class="border-b"><Table.Cell class="break-all p-2">{target.target}</Table.Cell><Table.Cell class="break-all p-2">{target.kind}</Table.Cell><Table.Cell class="break-all p-2">{target.code}</Table.Cell><Table.Cell class="break-all p-2">{target.pid}</Table.Cell></Table.Row>
+              {/each}</Table.Body>
+            </Table.Root>
           </div>
         {/if}
       {/if}
     </section>
     <section class="space-y-3" aria-busy={evidenceState === "loading"}>
       <h2 class="text-base font-semibold">Deployment evidence</h2>
-      {#if evidenceState === "loading"}<p role="status">{$t("Applications.loading")}</p>
-      {:else if evidenceState === "error"}<p role="alert">{$t("Applications.unavailable")}</p>
-      {:else if evidence?.evidence === null}<p>{$t("Applications.no_evidence")}</p>
+      {#if evidenceState === "loading"}<DataState state="loading" loadingLabel={$t("Applications.loading")} />
+      {:else if evidenceState === "error"}<DataState state="error" title={$t("Applications.unavailable")} description="" retry={refresh} retryLabel={$t("Common.retry")} />
+      {:else if evidence?.evidence === null}<DataState state="empty" title={$t("Applications.no_evidence")} description="" />
       {:else if evidence?.evidence}
         <p class="text-sm font-medium">Status: <span class="font-mono">{evidence.evidence.status}</span></p>
-        <dl class="grid gap-2 text-sm sm:grid-cols-3">
-          <div><dt class="text-muted-foreground">Migration</dt><dd class="font-mono">{evidence.evidence.database.migration.status}</dd></div>
-          <div><dt class="text-muted-foreground">Backup</dt><dd class="font-mono">{evidence.evidence.database.backup.status}</dd></div>
-          <div><dt class="text-muted-foreground">Recovery</dt><dd class="font-mono">{evidence.evidence.database.recovery.status}</dd></div>
-          <div><dt class="text-muted-foreground">Authenticated smoke</dt><dd class="font-mono">{evidence.evidence.health.authenticated_smoke}</dd></div>
-          <div><dt class="text-muted-foreground">Rollback</dt><dd class="font-mono">{evidence.evidence.rollback.status}</dd></div>
-          <div><dt class="text-muted-foreground">Recorded</dt><dd>{evidence.evidence.recorded_at}</dd></div>
-        </dl>
+        <DescriptionList columns={3} items={[
+          { label: "Migration", value: evidence.evidence.database.migration.status },
+          { label: "Backup", value: evidence.evidence.database.backup.status },
+          { label: "Recovery", value: evidence.evidence.database.recovery.status },
+          { label: "Authenticated smoke", value: evidence.evidence.health.authenticated_smoke },
+          { label: "Rollback", value: evidence.evidence.rollback.status },
+          { label: "Recorded", value: evidence.evidence.recorded_at },
+        ]} />
       {/if}
     </section>
     <section class="space-y-3" aria-busy={capacityState === "loading"}>
@@ -307,40 +313,40 @@
         <h2 class="text-base font-semibold">{$t("Applications.capacity")}</h2>
         {#if capacity}<span class="text-xs font-medium uppercase text-muted-foreground">{capacity.pressure}</span>{/if}
       </div>
-      {#if capacityState === "loading"}<p role="status">{$t("Applications.loading")}</p>
-      {:else if capacityState === "error"}<p role="alert">{$t("Applications.capacity_unavailable")}</p>
+      {#if capacityState === "loading"}<DataState state="loading" loadingLabel={$t("Applications.loading")} />
+      {:else if capacityState === "error"}<DataState state="error" title={$t("Applications.capacity_unavailable")} description="" retry={refresh} retryLabel={$t("Common.retry")} />
       {:else if capacity}
-        <dl class="grid gap-2 text-sm sm:grid-cols-3">
-          <div><dt class="text-muted-foreground">{$t("Applications.active_allocations")}</dt><dd>{capacity.activeAllocations}</dd></div>
-          <div><dt class="text-muted-foreground">{$t("Applications.project_allocations")}</dt><dd>{capacity.projectAllocations}</dd></div>
-          <div><dt class="text-muted-foreground">{$t("Applications.active_ports")}</dt><dd>{capacity.activePorts} / {capacity.usage.ports + (capacity.remaining?.ports ?? 0)}</dd></div>
-          <div><dt class="text-muted-foreground">CPU</dt><dd>{capacity.usage.cpu} / {capacity.usage.cpu + (capacity.remaining?.cpu ?? 0)}</dd></div>
-          <div><dt class="text-muted-foreground">{$t("Applications.memory")}</dt><dd>{capacity.usage.memoryMiB} MiB / {capacity.usage.memoryMiB + (capacity.remaining?.memoryMiB ?? 0)} MiB</dd></div>
-          <div><dt class="text-muted-foreground">{$t("Applications.concurrency")}</dt><dd>{capacity.usage.concurrency} / {capacity.usage.concurrency + (capacity.remaining?.concurrency ?? 0)}</dd></div>
-        </dl>
+        <DescriptionList columns={3} items={[
+          { label: $t("Applications.active_allocations"), value: capacity.activeAllocations },
+          { label: $t("Applications.project_allocations"), value: capacity.projectAllocations },
+          { label: $t("Applications.active_ports"), value: `${capacity.activePorts} / ${capacity.usage.ports + (capacity.remaining?.ports ?? 0)}` },
+          { label: "CPU", value: `${capacity.usage.cpu} / ${capacity.usage.cpu + (capacity.remaining?.cpu ?? 0)}` },
+          { label: $t("Applications.memory"), value: `${capacity.usage.memoryMiB} MiB / ${capacity.usage.memoryMiB + (capacity.remaining?.memoryMiB ?? 0)} MiB` },
+          { label: $t("Applications.concurrency"), value: `${capacity.usage.concurrency} / ${capacity.usage.concurrency + (capacity.remaining?.concurrency ?? 0)}` },
+        ]} />
         <p class="text-xs text-muted-foreground">{$t("Applications.capacity_note")}</p>
         {#if capacityHistory.length > 0}
           <div class="border-t pt-3">
             <h3 class="text-sm font-semibold">{$t("Applications.capacity_history")}</h3>
-            <div class="mt-2 overflow-x-auto">
-              <table class="w-full text-left text-xs">
-                <thead><tr class="border-b">
-                  <th class="p-2">{$t("Applications.time")}</th>
-                  <th class="p-2">{$t("Applications.status")}</th>
-                  <th class="p-2">CPU</th>
-                  <th class="p-2">{$t("Applications.memory")}</th>
-                  <th class="p-2">{$t("Applications.active_ports")}</th>
-                </tr></thead>
-                <tbody>{#each capacityHistory.slice(0, 6) as item (item.generatedAt)}
-                  <tr class="border-b">
-                    <td class="p-2">{item.generatedAt}</td>
-                    <td class="p-2">{item.pressure}</td>
-                    <td class="p-2">{item.usage.cpu}</td>
-                    <td class="p-2">{item.usage.memoryMiB} MiB</td>
-                    <td class="p-2">{item.activePorts}</td>
-                  </tr>
-                {/each}</tbody>
-              </table>
+            <div class="mt-2 min-w-0">
+              <Table.Root class="w-full text-left text-xs">
+                <Table.Header><Table.Row class="border-b">
+                  <Table.Head class="p-2">{$t("Applications.time")}</Table.Head>
+                  <Table.Head class="p-2">{$t("Applications.status")}</Table.Head>
+                  <Table.Head class="p-2">CPU</Table.Head>
+                  <Table.Head class="p-2">{$t("Applications.memory")}</Table.Head>
+                  <Table.Head class="p-2">{$t("Applications.active_ports")}</Table.Head>
+                </Table.Row></Table.Header>
+                <Table.Body>{#each capacityHistory.slice(0, 6) as item (item.generatedAt)}
+                  <Table.Row class="border-b">
+                    <Table.Cell class="p-2">{item.generatedAt}</Table.Cell>
+                    <Table.Cell class="p-2">{item.pressure}</Table.Cell>
+                    <Table.Cell class="p-2">{item.usage.cpu}</Table.Cell>
+                    <Table.Cell class="p-2">{item.usage.memoryMiB} MiB</Table.Cell>
+                    <Table.Cell class="p-2">{item.activePorts}</Table.Cell>
+                  </Table.Row>
+                {/each}</Table.Body>
+              </Table.Root>
             </div>
           </div>
         {/if}
@@ -354,51 +360,51 @@
           {$t("Applications.create_preview")}
         </Button>
       </div>
-      {#if previewState === "loading"}<p role="status">{$t("Applications.loading")}</p>
-      {:else if previewState === "error"}<p role="alert">{$t("Applications.preview_unavailable")}</p>
-      {:else if previews.length === 0}<p class="text-sm text-muted-foreground">{$t("Applications.no_previews")}</p>
+      {#if previewState === "loading"}<DataState state="loading" loadingLabel={$t("Applications.loading")} />
+      {:else if previewState === "error"}<DataState state="error" title={$t("Applications.preview_unavailable")} description="" retry={refresh} retryLabel={$t("Common.retry")} />
+      {:else if previews.length === 0}<DataState state="empty" title={$t("Applications.no_previews")} description="" />
       {:else}
-        <div class="overflow-x-auto">
-          <table class="w-full min-w-[720px] text-left text-sm">
-            <thead><tr class="border-b">
-              <th class="p-2">{$t("Applications.preview")}</th><th class="p-2">{$t("Applications.status")}</th>
-              <th class="p-2">{$t("Applications.branch")}</th><th class="p-2">{$t("Applications.smoke_test")}</th><th class="p-2"></th>
-            </tr></thead>
-            <tbody>{#each previews as preview (preview.preview_id)}
-              <tr class="border-b">
-                <td class="p-2 font-mono text-xs">{preview.preview_id.slice(0, 12)}</td>
-                <td class="p-2">{preview.status}</td>
-                <td class="p-2 font-mono text-xs">{preview.resources.database_branch.branch_ref}</td>
-                <td class="p-2">{preview.resources.smoke_test.status}</td>
-                <td class="p-2 text-right">
+        <div class="min-w-0">
+          <Table.Root class="w-full min-w-[720px] text-left text-sm">
+            <Table.Header><Table.Row class="border-b">
+              <Table.Head class="p-2">{$t("Applications.preview")}</Table.Head><Table.Head class="p-2">{$t("Applications.status")}</Table.Head>
+              <Table.Head class="p-2">{$t("Applications.branch")}</Table.Head><Table.Head class="p-2">{$t("Applications.smoke_test")}</Table.Head><Table.Head class="p-2"></Table.Head>
+            </Table.Row></Table.Header>
+            <Table.Body>{#each previews as preview (preview.preview_id)}
+              <Table.Row class="border-b">
+                <Table.Cell class="p-2 font-mono text-xs">{preview.preview_id.slice(0, 12)}</Table.Cell>
+                <Table.Cell class="p-2">{preview.status}</Table.Cell>
+                <Table.Cell class="p-2 font-mono text-xs">{preview.resources.database_branch.branch_ref}</Table.Cell>
+                <Table.Cell class="p-2">{preview.resources.smoke_test.status}</Table.Cell>
+                <Table.Cell class="p-2 text-right">
                   <Button variant="outline" onclick={() => cleanupPreview(preview.preview_id)} disabled={previewMutation || preview.status === "cleaned"} aria-label={$t("Applications.cleanup_preview")} title={$t("Applications.cleanup_preview")}>
                     <Trash2 class="h-4 w-4" />
                   </Button>
-                </td>
-              </tr>
-            {/each}</tbody>
-          </table>
+                </Table.Cell>
+              </Table.Row>
+            {/each}</Table.Body>
+          </Table.Root>
         </div>
       {/if}
     </section>
     <section class="space-y-3" aria-busy={releaseState === "loading"}>
       <h2 class="text-base font-semibold">{$t("Applications.releases")}</h2>
-      {#if releaseState === "loading"}<p role="status">{$t("Applications.loading")}</p>
-      {:else if releaseState === "error"}<p role="alert">{$t("Applications.unavailable")}</p>
+      {#if releaseState === "loading"}<DataState state="loading" loadingLabel={$t("Applications.loading")} />
+      {:else if releaseState === "error"}<DataState state="error" title={$t("Applications.unavailable")} description="" retry={refresh} retryLabel={$t("Common.retry")} />
       {:else if releases}
-        {#if releases.releases.length === 0}<p>{$t("Applications.no_releases")}</p>
+        {#if releases.releases.length === 0}<DataState state="empty" title={$t("Applications.no_releases")} description="" />
         {:else}
-          <div class="overflow-x-auto">
-            <table class="w-full table-fixed text-left text-sm">
-              <thead><tr class="border-b"><th class="p-2">{$t("Applications.release")}</th><th class="p-2">{$t("Applications.stored_at")}</th><th class="p-2">{$t("Applications.target")}</th><th class="p-2">{$t("Applications.development")}</th></tr></thead>
-              <tbody>{#each releases.releases as release (release.release_id)}
-                <tr class="border-b align-top"><td class="break-all p-2 font-mono">{release.release_id}</td><td class="break-all p-2">{release.created_at}</td><td class="break-all p-2">{release.targets.map(target => `${target.name} (${target.kind})`).join(", ")}</td>
-                  <td class="p-2"><div class="flex flex-wrap gap-1">{#each release.targets as target (target.name)}
+          <div class="min-w-0">
+            <Table.Root class="w-full table-fixed text-left text-sm">
+              <Table.Header><Table.Row class="border-b"><Table.Head class="p-2">{$t("Applications.release")}</Table.Head><Table.Head class="p-2">{$t("Applications.stored_at")}</Table.Head><Table.Head class="p-2">{$t("Applications.target")}</Table.Head><Table.Head class="p-2">{$t("Applications.development")}</Table.Head></Table.Row></Table.Header>
+              <Table.Body>{#each releases.releases as release (release.release_id)}
+                <Table.Row class="border-b align-top"><Table.Cell class="break-all p-2 font-mono">{release.release_id}</Table.Cell><Table.Cell class="break-all p-2">{release.created_at}</Table.Cell><Table.Cell class="break-all p-2">{release.targets.map(target => `${target.name} (${target.kind})`).join(", ")}</Table.Cell>
+                  <Table.Cell class="p-2"><div class="flex flex-wrap gap-1">{#each release.targets as target (target.name)}
                     <Button variant="outline" disabled={developmentState === "loading"} onclick={() => inspect(release.release_id, target.name, target.object_id)}>{target.name}</Button>
-                  {/each}</div></td>
-                </tr>
-              {/each}</tbody>
-            </table>
+                  {/each}</div></Table.Cell>
+                </Table.Row>
+              {/each}</Table.Body>
+            </Table.Root>
           </div>
         {/if}
       {/if}
@@ -414,70 +420,73 @@
     {#if developmentState !== "idle"}
       <section class="space-y-3" aria-busy={developmentState === "loading"}>
         <h2 class="text-base font-semibold">{$t("Applications.development")}</h2>
-        {#if developmentState === "loading"}<p role="status">{$t("Applications.loading")}</p>
-        {:else if developmentState === "error"}<p role="alert">{$t("Applications.development_unavailable")}</p>
+        {#if developmentState === "loading"}<DataState state="loading" loadingLabel={$t("Applications.loading")} />
+        {:else if developmentState === "error"}
+          <DataState state="error" title={$t("Applications.development_unavailable")} description="" retryLabel={$t("Common.retry")} retry={() => {
+            if (developmentSelection) inspect(developmentSelection.releaseId, developmentSelection.target, developmentSelection.objectId);
+          }} />
         {:else if development}
           <p class="text-sm font-medium">{$t("Applications.development_verified")}: <span class="font-mono">{development.target}</span> · <span class="break-all font-mono">{development.object_id.slice(0, 12)}</span></p>
           <p class="break-all text-sm">{$t("Applications.release")}: <span class="font-mono">{development.release_id}</span></p>
-          <dl class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
-            <div><dt class="text-muted-foreground">{$t("Applications.modules")}</dt><dd>{development.context.modules.length}</dd></div>
-            <div><dt class="text-muted-foreground">{$t("Applications.routes")}</dt><dd>{development.context.routes.length}</dd></div>
-            <div><dt class="text-muted-foreground">{$t("Applications.commands")}</dt><dd>{development.context.commands.length}</dd></div>
-            <div><dt class="text-muted-foreground">{$t("Applications.jobs")}</dt><dd>{development.context.jobs.length}</dd></div>
-            <div><dt class="text-muted-foreground">{$t("Applications.resources")}</dt><dd>{development.context.resources.length}</dd></div>
-          </dl>
+          <DescriptionList columns={3} items={[
+            { label: $t("Applications.modules"), value: development.context.modules.length },
+            { label: $t("Applications.routes"), value: development.context.routes.length },
+            { label: $t("Applications.commands"), value: development.context.commands.length },
+            { label: $t("Applications.jobs"), value: development.context.jobs.length },
+            { label: $t("Applications.resources"), value: development.context.resources.length },
+          ]} />
           <div class="space-y-2">
             <h3 class="text-sm font-semibold">{$t("Applications.relationships")}</h3>
             {#if development.context.routes.length === 0 && development.context.jobs.length === 0}
-              <p class="text-sm text-muted-foreground">{$t("Applications.no_relationships")}</p>
+              <DataState state="empty" title={$t("Applications.no_relationships")} description="" />
             {:else}
-              <div class="overflow-x-auto rounded-md border">
-                <table class="w-full min-w-[720px] text-left text-xs">
-                  <thead class="bg-muted/50">
-                    <tr>
-                      <th class="p-2 font-medium">{$t("Applications.api")}</th>
-                      <th class="p-2 font-medium">{$t("Applications.command")}</th>
-                      <th class="p-2 font-medium">{$t("Applications.job")}</th>
-                      <th class="p-2 font-medium">{$t("Applications.resources")}</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y">
+              <div class="min-w-0 rounded-md border">
+                <Table.Root class="w-full min-w-[720px] text-left text-xs">
+                  <Table.Header class="bg-muted/50">
+                    <Table.Row>
+                      <Table.Head class="p-2 font-medium">{$t("Applications.api")}</Table.Head>
+                      <Table.Head class="p-2 font-medium">{$t("Applications.command")}</Table.Head>
+                      <Table.Head class="p-2 font-medium">{$t("Applications.job")}</Table.Head>
+                      <Table.Head class="p-2 font-medium">{$t("Applications.resources")}</Table.Head>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body class="divide-y">
                     {#each development.context.routes as route (`${route.method}:${route.path}`)}
                       {@const command = route.command ? development.context.commands.find(candidate => candidate.module === route.module && candidate.name === route.command) : undefined}
-                      <tr>
-                        <td class="p-2 font-mono">{route.method} {route.path}</td>
-                        <td class="p-2">{route.command ?? "—"}</td>
-                        <td class="p-2">—</td>
-                        <td class="p-2">{command?.resources.map(resource => resource.resource).join(", ") || "—"}</td>
-                      </tr>
+                      <Table.Row>
+                        <Table.Cell class="p-2 font-mono">{route.method} {route.path}</Table.Cell>
+                        <Table.Cell class="p-2">{route.command ?? "—"}</Table.Cell>
+                        <Table.Cell class="p-2">—</Table.Cell>
+                        <Table.Cell class="p-2">{command?.resources.map(resource => resource.resource).join(", ") || "—"}</Table.Cell>
+                      </Table.Row>
                     {/each}
                     {#each development.context.jobs as job (`job:${job.module}:${job.name}`)}
-                      <tr>
-                        <td class="p-2">—</td>
-                        <td class="p-2">—</td>
-                        <td class="p-2 font-mono">{job.module}.{job.name}</td>
-                        <td class="p-2">{job.resources.map(resource => resource.resource).join(", ") || "—"}</td>
-                      </tr>
+                      <Table.Row>
+                        <Table.Cell class="p-2">—</Table.Cell>
+                        <Table.Cell class="p-2">—</Table.Cell>
+                        <Table.Cell class="p-2 font-mono">{job.module}.{job.name}</Table.Cell>
+                        <Table.Cell class="p-2">{job.resources.map(resource => resource.resource).join(", ") || "—"}</Table.Cell>
+                      </Table.Row>
                     {/each}
-                  </tbody>
-                </table>
+                  </Table.Body>
+                </Table.Root>
               </div>
             {/if}
           </div>
           <h3 class="text-sm font-semibold">{$t("Applications.diagnostics")}</h3>
-          {#if development.context.diagnostics.length === 0}<p class="text-sm text-muted-foreground">{$t("Applications.no_diagnostics")}</p>
+          {#if development.context.diagnostics.length === 0}<DataState state="empty" title={$t("Applications.no_diagnostics")} description="" />
           {:else}
-            <div class="overflow-x-auto">
-              <table class="w-full table-fixed text-left text-sm">
-                <thead><tr class="border-b"><th class="p-2">{$t("Applications.status")}</th><th class="p-2">Code</th><th class="p-2">File</th></tr></thead>
-                <tbody>{#each development.context.diagnostics as diagnostic, index (index)}
-                  <tr class="border-b"><td class="break-all p-2">{diagnostic.severity}</td><td class="break-all p-2 font-mono">{diagnostic.code}</td><td class="break-all p-2">{diagnostic.file ?? ""}{diagnostic.line === undefined ? "" : `:${diagnostic.line}`}</td></tr>
-                {/each}</tbody>
-              </table>
+            <div class="min-w-0">
+              <Table.Root class="w-full table-fixed text-left text-sm">
+                <Table.Header><Table.Row class="border-b"><Table.Head class="p-2">{$t("Applications.status")}</Table.Head><Table.Head class="p-2">Code</Table.Head><Table.Head class="p-2">File</Table.Head></Table.Row></Table.Header>
+                <Table.Body>{#each development.context.diagnostics as diagnostic, index (index)}
+                  <Table.Row class="border-b"><Table.Cell class="break-all p-2">{diagnostic.severity}</Table.Cell><Table.Cell class="break-all p-2 font-mono">{diagnostic.code}</Table.Cell><Table.Cell class="break-all p-2">{diagnostic.file ?? ""}{diagnostic.line === undefined ? "" : `:${diagnostic.line}`}</Table.Cell></Table.Row>
+                {/each}</Table.Body>
+              </Table.Root>
             </div>
           {/if}
         {/if}
       </section>
     {/if}
   {/if}
-</div>
+</PagePattern>

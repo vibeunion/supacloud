@@ -105,10 +105,10 @@
     "@angular/core": "^22.2.2"
   },
   "devDependencies": {
-    "@angular/core": "22.2.3",
+    "@angular/core": "22.2.4",
     "@types/bun": "^1.4.4",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "@angular/compiler": "22.2.3"
+    "@angular/compiler": "22.2.4"
   }
 }

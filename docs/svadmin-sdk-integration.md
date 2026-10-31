@@ -239,17 +239,70 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 
 ### Web Console upgrade baseline
 
-The Web Console currently tracks the published SVAdmin line:
+The Web Console tracks this published SVAdmin line, verified on November 1, 2026:
 
-- `@svadmin/core` `0.67.0`
-- `@svadmin/ui` `0.102.0`
-- `@svadmin/elysia` `0.14.15`
-- `@svadmin/sveltekit` `0.13.12`
-- `@svadmin/ai-elements` `0.13.0`
+- `@svadmin/core` `0.69.2`
+- `@svadmin/ui` `0.108.2`
+- `@svadmin/elysia` `0.14.19`
+- `@svadmin/sveltekit` `0.13.16`
+- `@svadmin/ai-elements` `0.13.4`
 
 List and settings pages that repeated a local loading, empty, and error shell now
 use `PagePattern`. Pages with a client-side search use `FilterToolbar`. The
 Management API requests and mutation payloads are unchanged.
+
+The application runtime page uses `PagePattern`, `Input`, `DataState`,
+`DescriptionList` and the SVAdmin table primitives. Operators still choose an
+application and environment, inspect independently loaded runtime/release data,
+and open the corresponding development snapshot. The scope form remains visible
+when no application is selected. Each section owns its loading, empty and error
+state; a failed runtime read must not hide available releases. Read failures offer
+the existing refresh action. Preview creation and cleanup keep their explicit
+buttons and single-attempt requests.
+
+Acceptance scenarios for this migration:
+
+```gherkin
+Scenario: Choose an application scope
+  Given no application or environment is selected
+  When the operator opens the application runtime page
+  Then the SVAdmin scope inputs remain available beside the empty state
+  And submitting a valid scope updates the URL and loads that scope
+
+Scenario: Independent sections and recovery
+  Given application data is loading
+  When the runtime read fails but releases load successfully
+  Then the runtime section offers retry and the releases remain usable
+  And retry refreshes reads without repeating a preview mutation
+
+Scenario: Release and development navigation
+  Given multiple release pages and a stored development snapshot
+  When the operator changes release pages or inspects a target
+  Then pagination and the verified development details remain available
+  And an empty release page displays the SVAdmin empty state
+
+Scenario: Scope changes and unmount
+  Given a request is pending for the current project and application
+  When the operator switches scope or leaves the page
+  Then the request is cancelled and late data cannot replace the current view
+```
+
+`@supacloud/app` is the source package in this repository, currently `0.34.1`.
+Its `file:../contracts` dependency stays linked to the local contracts package;
+upgrading its Angular development pair does not replace it with a registry copy.
+The Svelte binding retains TypeScript 6 for `svelte-check`, as does the Console
+alongside its TypeScript 7 alias.
+
+The November 1 refresh was verified with frozen installs for the three changed
+packages, registry/outdated checks and the single compiled DOM fixture below.
+Its mocked HTTP scenarios cover the acceptance criteria above, including form
+validation and duplicate preview submission suppression. It does not verify a
+deployed backend or authenticated browser session.
+
+```sh
+# From packages/web-console
+bun test 'src/routes/project/[ref]/applications/page.test.ts'
+```
 
 This release line requires SvelteKit 3, so the Console also migrated its
 adapter configuration into the Vite `sveltekit` plugin and moved page state
@@ -257,10 +310,11 @@ consumers from `$app/stores` to `$app/state`. The legacy TypeBox 0.34 marker
 bridge was removed because SVAdmin now consumes TypeBox 1.x directly.
 Fixed schemas use the strict `defineResource` entrypoint; only schemas built
 from live database column metadata retain a separate dynamic boundary.
-`bun run check` and `bun run build` are the upgrade gates; the latter may still
+`bun run check` and `bun run build` remain release gates and were not rerun for
+this focused migration. The latter may still
 report existing bundle-size and ineffective dynamic-import warnings.
 
-Local Chromium acceptance used mocked HTTP responses, not production data:
+Earlier baseline Chromium acceptance used mocked HTTP responses, not production data:
 the Auth user list rendered, a valid create submission closed the form and
 showed success, and an invite response with a numeric ID retained the draft
 and showed failure. These checks are not deployment or live backend acceptance.

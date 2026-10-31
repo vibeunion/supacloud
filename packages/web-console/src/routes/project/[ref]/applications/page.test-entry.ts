@@ -74,6 +74,12 @@ function button(label: string) {
   ok(found, `Missing button ${label}`);
   return found;
 }
+function section(title: string) {
+  const found = [...document.querySelectorAll("section")].find(node =>
+    node.querySelector("h2")?.textContent === title);
+  ok(found, `Missing section ${title}`);
+  return found;
+}
 const target = document.body.appendChild(document.createElement("div"));
 let component: ReturnType<typeof mount> | undefined;
 try {
@@ -90,12 +96,16 @@ try {
   });
   component = mount(Dashboard, { target });
   await eventually(() => strictEqual(signals.length, 6));
+  ok(document.querySelector('[data-svadmin-content-page="application-runtime"]'));
+  strictEqual(document.querySelectorAll('[data-svadmin-data-state="loading"]').length, 5);
   page.params.ref = "other";
   page.url = new URL("http://localhost/project/other/applications?application=next-app&environment=prod");
   await eventually(() => ok(text().includes(a)));
   ok(signals.every(signal => signal.aborted));
   ok(text().includes("Data unavailable"));
   ok(!text().includes("private-error"));
+  ok(section("Runtime").querySelector('[data-svadmin-data-state="error"] button'));
+  ok(section("Stored releases").querySelector('table[data-slot="table"]'));
   late.resolve(Response.json(inventory("demo", "reviews", "f".repeat(64))));
   await tick();
   ok(!text().includes("f".repeat(64)));
@@ -111,7 +121,7 @@ try {
     ? Response.json(runtime("other", "next-app", "prod"))
     : url.endsWith("/deployment-evidence") ? Response.json(evidence("other", "next-app", "prod"))
     : new Response("{"));
-  button("Refresh").click();
+  section("Runtime").querySelector<HTMLButtonElement>('[data-svadmin-data-state="error"] button')!.click();
   await eventually(() => ok(text().includes("No active activation record")));
   await eventually(() => ok(text().includes("Data unavailable")));
   ok(!text().includes(a));
@@ -130,11 +140,12 @@ try {
   await eventually(() => ok(text().includes("Verified build snapshot")));
   strictEqual(text().match(/SC8103/g)?.length, 2);
   ok(text().includes("src/reviews.ts:10") && text().includes("src/reviews.ts:20"));
+  ok(section("Application development").querySelector('table[data-slot="table"]'));
   ok(urls.some(url => url.includes(`/releases/${a}/development?target=api`)));
 
   network(async () => Response.json({ ...development("other", "next-app"), object_id: "d".repeat(64) }));
   button("api").click();
-  await eventually(() => ok(document.querySelector('[role="alert"]')));
+  await eventually(() => ok(section("Application development").querySelector('[data-svadmin-data-state="error"]')));
   ok(!text().includes("Verified build snapshot"));
 
   const pendingDevelopment = Promise.withResolvers<Response>();
@@ -145,7 +156,7 @@ try {
     if (url.endsWith("/deployment-evidence")) return Response.json(evidence("third", "third-app", "prod"));
     return Response.json(inventory("third", "third-app", b));
   });
-  button("api").click();
+  section("Application development").querySelector<HTMLButtonElement>('[data-svadmin-data-state="error"] button')!.click();
   await eventually(() => strictEqual(developmentSignals.length, 1));
   page.params.ref = "third";
   page.url = new URL("http://localhost/project/third/applications?application=third-app&environment=prod");
@@ -155,6 +166,69 @@ try {
   await tick();
   ok(!text().includes("SC8103"));
   ok(!text().includes("Verified build snapshot"));
+
+  page.url = new URL("http://localhost/project/third/applications");
+  await eventually(() => ok(text().includes("Application and environment IDs are required.")));
+  const applicationInput = document.querySelector<HTMLInputElement>('input[name="application"]');
+  const environmentInput = document.querySelector<HTMLInputElement>('input[name="environment"]');
+  ok(applicationInput && environmentInput);
+  strictEqual(applicationInput.getAttribute("data-slot"), "input");
+  strictEqual(environmentInput.getAttribute("data-slot"), "input");
+  strictEqual(button("Refresh").disabled, true);
+  applicationInput.value = "invalid app";
+  applicationInput.dispatchEvent(new Event("input", { bubbles: true }));
+  environmentInput.value = "prod";
+  environmentInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await tick();
+  button("Open").click();
+  await tick();
+  strictEqual(page.url.search, "");
+
+  let emptyReads = 0;
+  network(async url => {
+    emptyReads += 1;
+    if (url.endsWith("/runtime")) return Response.json(runtime("third", "selected-app", "prod"));
+    if (url.endsWith("/deployment-evidence")) return Response.json({
+      project_ref: "third", application_id: "selected-app", environment_id: "prod", evidence: null,
+    });
+    if (url.includes("/releases?")) return Response.json({
+      project_ref: "third", application_id: "selected-app", next_cursor: null, releases: [],
+    });
+    return Response.json({ previews: [] });
+  });
+  applicationInput.value = "selected-app";
+  applicationInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await tick();
+  button("Open").click();
+  await eventually(() => ok(text().includes("No stored releases")));
+  strictEqual(page.url.searchParams.get("application"), "selected-app");
+  strictEqual(page.url.searchParams.get("environment"), "prod");
+  strictEqual(emptyReads, 6);
+  ok(section("Stored releases").querySelector('[data-svadmin-data-state="empty"]'));
+  ok(section("Application previews").querySelector('[data-svadmin-data-state="empty"]'));
+  strictEqual(button("Create preview").disabled, true);
+
+  const pendingPreview = Promise.withResolvers<Response>();
+  const writes: RequestInit[] = [];
+  network(async (url, init) => {
+    if (init.method === "POST") { writes.push(init); return pendingPreview.promise; }
+    if (url.endsWith("/runtime")) return Response.json(runtime("third", "selected-app", "prod"));
+    if (url.endsWith("/deployment-evidence")) return Response.json(evidence("third", "selected-app", "prod"));
+    if (url.includes("/releases?")) return Response.json(inventory("third", "selected-app"));
+    return Response.json({ previews: [] });
+  });
+  button("Refresh").click();
+  await eventually(() => strictEqual(button("Create preview").disabled, false));
+  button("Create preview").click();
+  button("Create preview").click();
+  await eventually(() => strictEqual(writes.length, 1));
+  strictEqual(writes[0]?.body, JSON.stringify({ release_id: a, data_mode: "schema_only" }));
+  pendingPreview.resolve(Response.json({ error: "private-preview-error" }, { status: 503 }));
+  await eventually(() => ok(section("Application previews").querySelector('[data-svadmin-data-state="error"]')));
+  ok(!text().includes("private-preview-error"));
+  section("Application previews").querySelector<HTMLButtonElement>('[data-svadmin-data-state="error"] button')!.click();
+  await eventually(() => ok(section("Application previews").querySelector('[data-svadmin-data-state="empty"]')));
+  strictEqual(writes.length, 1);
 
   const hanging = Promise.withResolvers<Response>();
   const unmountSignals: AbortSignal[] = [];
