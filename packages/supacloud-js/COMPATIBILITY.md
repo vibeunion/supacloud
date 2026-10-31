@@ -28,7 +28,7 @@ const { createCommandScope } = require('@supacloud/js/contracts');
 
 The supported SDK Node floor remains **22.12.0**; native CJS output does not
 lower dependency runtime requirements. CI also covers Node 24, Node 26 and
-Bun 1.4.3. These checks do not certify older Node, Electron, React Native/Hermes
+Bun 1.4.4. These checks do not certify older Node, Electron, React Native/Hermes
 or every browser/bundler combination.
 
 Client creation remains synchronous. Network methods retain their Promise

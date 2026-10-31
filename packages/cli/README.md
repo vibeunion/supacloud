@@ -492,7 +492,7 @@ Example configuration write file:
   "configuration_id": "01234567-89ab-4def-8123-456789abcdef",
   "expected_configuration_id": null,
   "configuration": {
-    "bun_version": "1.4.3",
+    "bun_version": "1.4.4",
     "targets": [
       {
         "name": "api",

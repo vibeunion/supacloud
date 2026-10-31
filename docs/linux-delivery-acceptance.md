@@ -7,11 +7,11 @@ ports 80, 443 and 2019. It never installs the full platform.
 
 ## Build
 
-Run sequentially from the repository root with Bun 1.4.2:
+Run sequentially from the repository root with Bun 1.4.4:
 
 ```sh
-npm exec --yes --package=bun@1.4.2 -- bun run --cwd packages/compiler build
-npm exec --yes --package=bun@1.4.2 -- bun scripts/build-linux-delivery-acceptance.ts
+npm exec --yes --package=bun@1.4.4 -- bun run --cwd packages/compiler build
+npm exec --yes --package=bun@1.4.4 -- bun scripts/build-linux-delivery-acceptance.ts
 ```
 
 The second command prints a temporary directory containing a detached HTTP and
@@ -35,8 +35,8 @@ machine. The destination below is `/tmp/<bundle-directory-name>`.
 
 ## Linux Prerequisites
 
-Inside the dedicated machine, install a Linux Bun 1.4.2 binary at
-`/opt/supacloud/bun/1.4.2/bun` and Caddy at `/usr/local/bin/supacloud-caddy`.
+Inside the dedicated machine, install a Linux Bun 1.4.4 binary at
+`/opt/supacloud/bun/1.4.4/bun` and Caddy at `/usr/local/bin/supacloud-caddy`.
 The September 26 run used binaries from the already cached arm64
 `oven/bun:1.4.2` and `caddy:2.11.7-alpine` images, not a platform image.
 
@@ -48,7 +48,7 @@ install -D -m 0755 "$BUNDLE/systemd-unit" /usr/local/libexec/supacloud/systemd-u
 install -D -m 0644 "$BUNDLE/supacloud-systemd-unit@.service" /etc/systemd/system/supacloud-systemd-unit@.service
 systemctl daemon-reload
 env SUPACLOUD_LINUX_ACCEPTANCE=1 SUPACLOUD_CADDY_TLS_ISSUER=internal \
-  /opt/supacloud/bun/1.4.2/bun --no-env-file "$BUNDLE/linux-delivery-acceptance.js"
+  /opt/supacloud/bun/1.4.4/bun --no-env-file "$BUNDLE/linux-delivery-acceptance.js"
 ```
 
 Create the tenant once, not before every rerun. No credentials are needed; the

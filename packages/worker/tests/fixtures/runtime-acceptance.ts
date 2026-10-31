@@ -188,7 +188,7 @@ export async function runtimeAcceptance() {
           "-e", "SUPACLOUD_WORKER_CONCURRENCY=2", "-e", "SUPACLOUD_WORKER_PG_CONNECTIONS=3",
           "-e", "SUPACLOUD_WORKER_VISIBILITY_SECONDS=15", "-e", "SUPACLOUD_WORKER_RETRY_LIMIT=2",
           "-e", `SCW_TEST_HOLD_AFTER=${hold}`, "-e", "EDGE_WORKER_LOG_LEVEL=error",
-          "oven/bun:1.4.3", "bun", "--no-env-file", "reporting-worker.js"]);
+          "oven/bun:1.4.4", "bun", "--no-env-file", "reporting-worker.js"]);
         return name;
       };
       const health = (name: string, path: string) => command(["docker", "exec", name, "bun", "-e",

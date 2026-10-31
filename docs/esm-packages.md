@@ -87,7 +87,7 @@ contract. Some Node versions can load eligible synchronous ESM graphs through
 `require()`, but consumers must not depend on that behavior. Migrate old direct
 `dist/index.cjs` references and tooling that requires a separate CJS build.
 
-The application/compiler baseline remains Node 24 and Bun 1.4.2. SDK loader
+The application/compiler baseline remains Node 24 and Bun 1.4.4. SDK loader
 acceptance also covers Node 22.12.0 and Node 26. SDK-specific TypeScript
 NodeNext checks cover both `.cts` and `.mts` consumers: TypeScript 5.8.3 checks
 the full declaration graph; TypeScript 7 checks consumers with skipLibCheck=true
