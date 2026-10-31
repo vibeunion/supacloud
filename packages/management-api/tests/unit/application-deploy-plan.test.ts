@@ -91,7 +91,7 @@ async function fixture(active = true) {
       return {
         environment: Object.fromEntries(release.targets.map((target): [string, Record<string, string>] =>
           [target.name, target.name === "api" ? { SETTING: state.badEnvironment ? "drift" : "private-fixture" } : {}])),
-        bunVersion: state.badBun ? "1.0.0" : "1.4.3",
+        bunVersion: state.badBun ? "1.0.0" : "1.4.4",
         hosts: { api: [state.badHosts ? "drift.example.test" : "reviews.example.test"] },
       };
     } },

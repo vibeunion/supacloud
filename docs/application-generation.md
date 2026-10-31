@@ -255,7 +255,7 @@ RPC delegation and redacted errors from unbound ports. Its pass-through RPC is
 test-only: it proves no transaction, replay protection, audit persistence,
 tenant isolation or concurrency behavior.
 
-`App Generation Acceptance` runs on pinned Bun 1.4.3 with contents-read-only
+`App Generation Acceptance` runs on pinned Bun 1.4.4 with contents-read-only
 permissions. It also runs CLI typecheck, original generator regressions, filesystem
 safety and new composition tests. Dependency changes in commands/db/delivery also
 trigger it. Elysia policy runs even when another step fails (unless cancelled).

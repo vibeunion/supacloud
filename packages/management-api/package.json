@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.118.0",
-    "@types/bun": "^1.4.3",
+    "@types/bun": "^1.4.4",
     "@types/yauzl": "3.4.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

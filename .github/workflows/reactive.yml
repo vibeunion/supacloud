@@ -51,7 +51,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
       - name: App build, types and tests
         run: |
           bun run scripts/build-command-dependencies.ts app

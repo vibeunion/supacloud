@@ -48,7 +48,7 @@ export interface ApplicationRuntimePlan {
 /** Concrete paths contain no mutable "current" pointer: one activation owns all targets. */
 export function applicationRuntimePlan(input: ApplicationRuntimeInput): ApplicationRuntimePlan {
   const release = parseApplicationReleaseRecord(input.release);
-  const bunVersion = input.bunVersion ?? "1.4.3";
+  const bunVersion = input.bunVersion ?? "1.4.4";
   if (!/^[a-z0-9-]{1,20}$/.test(release.project_ref) || !ACTIVATION_ID.test(input.activationId)
     || !Value.Check(ApplicationIdSchema, input.environmentId) || !/^\d+\.\d+\.\d+$/.test(bunVersion)) {
     throw new Error("Invalid application runtime identity");

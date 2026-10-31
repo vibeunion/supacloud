@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Only this audited browser contract build is enabled. Tests, installs, packaging,
 // network verification, deployment and user-defined commands remain uncached.
-export const CONTRACT_RECIPE = '8cda5ff727627733ac2e4f0bc644bc9def8d30973be4ddbbf2f7788a9490f337';
+export const CONTRACT_RECIPE = '9327259a32b5be66c61aff2a647a7896b16b3df315e270e77a7cf0140cbed238';
 export function recipeHash(manifest) {
   const recipe = { scripts: manifest.scripts, dependencies: manifest.dependencies ?? {},
     devDependencies: manifest.devDependencies ?? {}, peerDependencies: manifest.peerDependencies ?? {},

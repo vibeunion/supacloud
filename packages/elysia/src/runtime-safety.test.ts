@@ -66,10 +66,10 @@ suite("real HTTP and PostgreSQL runtime safety", () => {
       headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000),
     });
     const state = async () => ({
-      business: await sql.unsafe<unknown>(
-        "SELECT tenant_id,writes FROM public.webhook_module_example WHERE id=$1 ORDER BY tenant_id", [id]),
-      receipts: await sql.unsafe<unknown>(
-        "SELECT count(*)::integer AS count FROM supacloud_commands.execution_audit WHERE operation_key=$1", [key]),
+      business: Array.from(await sql.unsafe<{ tenant_id: string; writes: number }[]>(
+        "SELECT tenant_id,writes FROM public.webhook_module_example WHERE id=$1 ORDER BY tenant_id", [id])),
+      receipts: Array.from(await sql.unsafe<{ count: number }[]>(
+        "SELECT count(*)::integer AS count FROM supacloud_commands.execution_audit WHERE operation_key=$1", [key])),
     });
     return {
       tenantA, tenantB, key, id, request, lookup, state,

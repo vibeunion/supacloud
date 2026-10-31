@@ -11,7 +11,7 @@ is a separately authorized business command, never an assumed rollback.
 The Elysia peer and development dependency are pinned to `2.0.0-rc.0`.
 The runtime adapter pins Effect `4.0.5` and consumes its `Exit`-based
 execution boundary.
-`compatibility.json` records the acceptance target: Bun 1.4.3, Elysia
+`compatibility.json` records the acceptance target: Bun 1.4.4, Elysia
 2.0.0-rc.0, Effect 4.0.5, `typebox` 1.4.3, `exact-mirror` 1.2.6,
 TypeScript CLI 7.0.2 and the compiler's separate TypeScript 6 semantic API 6.0.2.
 The matrix is a

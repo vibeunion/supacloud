@@ -613,7 +613,7 @@ export interface ApplicationOptions<Http extends AnyElysia = Elysia, RequestCont
   /** Native plugin. Use scoped/global derive/resolve hooks to extend compiled routes. */
   http?: Http;
   /** Startup-compiled policies selected by route.data.httpPolicies, in declaration order. */
-  httpPolicies?: HttpPolicyRegistry<Http>;
+  httpPolicies?: HttpPolicyRegistry<NoInfer<Http>>;
   /** Runs after validation and HTTP resolvers, with the validated native context. */
   requestContext?: HttpRequestContextFactory<Http, RequestContext>;
   /** Enforces permission/audit/idempotency policy for command-bound routes. */
