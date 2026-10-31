@@ -1090,6 +1090,13 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             const hasFunctionConfig = () => Object.keys(functionConfig()).length > 0;
 
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
+                const suppressionMatch = sourceCode.match(/\/\/\s*@ts-(?:ignore|nocheck|expect-error)\b|\/\*\s*@ts-(?:ignore|nocheck|expect-error)\b/);
+                if (suppressionMatch) {
+                    return {
+                        ok: false,
+                        err: `Vibecoding guardrail violation: Type suppression directive '${suppressionMatch[0]}' is disallowed in Edge Functions. Please fix the underlying type mismatch instead of suppressing it.`,
+                    };
+                }
                 const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-edge-check-"));
                 const tmpFile = join(tmpDir, "index.ts");
                 writeFileSync(tmpFile, sourceCode);
