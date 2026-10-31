@@ -19,7 +19,7 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Pull official Supabase configuration | `supabase config_pull` | Preview by default; local write requires `dry_run=false` and `yes`; not SupaCloud settings |
 | Run the official local stack | `supabase stack_start`, `stack_prepare`, `stack_status`, `stack_stop` | Docker default; native alpha requires `SUPACLOUD_ENABLE_NATIVE_STACK=1` |
 | Remove the official local stack | `supabase stack_destroy` | Local data loss; requires `confirm_destroy` and `yes` |
-| Capture Lite drift | `lite db_diff`, `lite db_pull` | Draft outside migrations; only reviewed already-present DDL may use `baseline` |
+| Capture Lite drift | `lite db_diff`, `lite db_pull`, `lite db_check` | Draft outside migrations; only reviewed already-present DDL may use `baseline`; `db_check` is read-only |
 | Rebuild local database | `supabase db_reset` | Local only; preserve required seed behavior |
 | Inspect or back up a remote database | `supabase db_pull`, `migration_list`, `db_dump`, `gen_types` | Requires explicit PostgreSQL DSN; redact it |
 | Replay the release-canary fixture stage receipt | `release release_canary_fixture_stage_replay` | Dual-bind Management project context and that project's service-role application origin; accepts only the exact subject/request UUID pair and a strict idempotent receipt |

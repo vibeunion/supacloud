@@ -202,6 +202,7 @@ test('loadFunctions maps config.toml limits/capabilities onto LoadedFunction', a
 framework = "elysia"
 timeout_ms = 15000
 max_request_body_bytes = 1048576
+max_heap_bytes = 134217728
 outbound_hosts = ["api.example.com"]
 secrets = ["OPENAI_API_KEY"]
 `
@@ -211,6 +212,7 @@ secrets = ["OPENAI_API_KEY"]
       framework: 'elysia',
       timeoutMs: 15000,
       maxRequestBodyBytes: 1048576,
+      maxHeapBytes: 134217728,
       outboundHosts: ['api.example.com'],
       secrets: ['OPENAI_API_KEY'],
     })
@@ -219,7 +221,7 @@ secrets = ["OPENAI_API_KEY"]
     const fn = loaded.get('api')
     expect(fn).toBeDefined()
     expect(fn!.framework).toBe('elysia')
-    expect(fn!.limits).toEqual({ timeoutMs: 15000, maxRequestBodyBytes: 1048576 })
+    expect(fn!.limits).toEqual({ timeoutMs: 15000, maxRequestBodyBytes: 1048576, maxHeapBytes: 134217728 })
     expect(fn!.capabilities).toEqual({ outboundHosts: ['api.example.com'], secrets: ['OPENAI_API_KEY'] })
     expect(typeof fn!.handler).toBe('function')
   } finally {

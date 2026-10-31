@@ -254,13 +254,22 @@ response limits, and a 300-second background waiting limit. Declared limits may
 be lower but not exceed these caps. Background work requires explicit
 `background = true`. Malformed declarations, missing declared functions and
 failed imports prevent startup. Explicit secret/outbound-host allowlists retain
-their existing meaning.
+their existing meaning. `max_heap_bytes` is not given a default and is not
+one of those enforced caps.
 
 These are compatibility checks for trusted in-process application code, not
 worker isolation. A blocked event loop cannot be preempted; module-level
 side effects, direct process APIs and detached tasks are not sandboxed.
 Production worker termination and atomic multi-function release manifests are
 not reproduced. `doctor` reports project release manifests as unsupported.
+
+`max_heap_bytes` uses the Edge Runtime declaration range, 1 byte through
+512 MiB. An omitted value stays omitted. Strict mode rejects zero, fractional,
+or larger values before the function starts. Lite keeps a valid declared
+number on the loaded function and does not sample `bun:jsc` or retire the
+process: there is no Worker isolate for that budget. The host-level
+`EDGE_WORKER_HEAP_BUDGET_BYTES` default is an Edge Runtime pool setting and
+is not applied here.
 
 ## Verification
 

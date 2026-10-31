@@ -1002,9 +1002,13 @@ supacloud lite db_pull --project_dir . --file remote_schema
 supacloud lite db_pull --project_dir . --file reviewed_schema --baseline
 supacloud lite gen_types --project_dir . --output src/database.types.ts
 supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud lite doctor --project_dir . --json
-supacloud lite start --project_dir . --port 54321
+supacloud lite doctor --project_dir . --json --production --runtime_mode strict
+supacloud lite db_check --project_dir . --module_file supabase/db/modules.ts
+supacloud lite start --project_dir . --port 54321 --runtime_mode strict
 ```
+
+`auth create-user` is not exposed here. The standalone `supacloud-lite` binary
+reads the password from stdin and rejects password arguments.
 
 The adapter resolves the executable in this order:
 

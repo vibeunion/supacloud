@@ -21,6 +21,33 @@ describe("SupaCloud Lite CLI adapter", () => {
         })).toEqual(["db", "pull", "remote_schema", "--project-dir", "/workspace/project"]);
         expect(buildLiteArgs({ action: "db_pull", baseline: true })).toEqual(["db", "pull", "--baseline"]);
         expect(() => buildLiteArgs({ action: "db_diff", baseline: true })).toThrow("baseline requires");
+        expect(buildLiteArgs({
+            action: "doctor",
+            project_dir: "/workspace/project",
+            json: true,
+            production: true,
+            runtime_mode: "strict",
+            postgres_dir: "/usr/lib/postgresql/18",
+            identity_module: "/workspace/project/lite.identity.ts",
+            external_auth_proxy_issuer: "https://auth.example.com/auth/v1",
+            external_auth_proxy_redirect_origin: "https://app.example.com",
+        })).toEqual([
+            "doctor",
+            "--project-dir", "/workspace/project",
+            "--json",
+            "--production",
+            "--runtime-mode", "strict",
+            "--postgres-dir", "/usr/lib/postgresql/18",
+            "--identity-module", "/workspace/project/lite.identity.ts",
+            "--external-auth-proxy-issuer", "https://auth.example.com/auth/v1",
+            "--external-auth-proxy-redirect-origin", "https://app.example.com",
+        ]);
+        expect(() => buildLiteArgs({ action: "start", production: true })).toThrow("production requires doctor");
+        expect(buildLiteArgs({
+            action: "db_check",
+            module_file: "supabase/db/modules.ts",
+        })).toEqual(["db", "check", "--module-file", "supabase/db/modules.ts"]);
+        expect(() => buildLiteArgs({ action: "status", module_file: "supabase/db/modules.ts" })).toThrow("module_file requires db_check");
 
         expect(buildLiteArgs({
             action: "snapshot_restore",
