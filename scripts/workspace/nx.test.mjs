@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { nxExecutable } from './nx.mjs';
 
 function fixture(t) {
-  const root = mkdtempSync(resolve(tmpdir(), 'supacloud-nx-bin-'));
+  const root = realpathSync(mkdtempSync(resolve(tmpdir(), 'supacloud-nx-bin-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const put = (file, value) => {
     mkdirSync(dirname(resolve(root, file)), { recursive: true });
