@@ -1094,6 +1094,17 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 const tmpFile = join(tmpDir, "index.ts");
                 writeFileSync(tmpFile, sourceCode);
                 try {
+                    if (/@ts-(?:ignore|nocheck|expect-error)\b/.test(sourceCode)) {
+                        const { scanProductionSource } = await import("@supacloud/compiler");
+                        const suppression = scanProductionSource({ rootDir: tmpDir, include: ["index.ts"] })
+                            .find((diagnostic) => diagnostic.code === "source-type-suppression");
+                        if (suppression) {
+                            return {
+                                ok: false,
+                                err: `Vibecoding guardrail violation: Type suppression directive at line ${suppression.line} is disallowed in Edge Functions. Please fix the underlying type mismatch instead of suppressing it.`,
+                            };
+                        }
+                    }
                     await runBunBuild([tmpFile, "--external", "*"]);
                     return { ok: true };
                 } catch (error: unknown) {
