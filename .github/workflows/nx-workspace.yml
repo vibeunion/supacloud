@@ -33,12 +33,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.4'
+      # copyfile: Bun 1.4.4 hardlinks workspace manifests into node_modules, which starter sync rejects.
       - name: Install pinned repository tooling
-        run: bun install --ignore-scripts --frozen-lockfile
+        run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile
       - name: Install local delivery dependencies
-        run: bun install --ignore-scripts --frozen-lockfile --cwd packages/delivery
+        run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile --cwd packages/delivery
       - name: Install existing Compiler parser
-        run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
+        run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile --cwd packages/compiler
       - name: Workspace and source-boundary regression tests
         run: |
           bun run test:workspace
