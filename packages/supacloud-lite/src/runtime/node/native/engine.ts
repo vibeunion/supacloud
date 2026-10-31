@@ -1,6 +1,6 @@
 /**
  * Native embedded Postgres engine - PocketBase-class footprint with real
- * Postgres semantics. Downloads platform binaries once (~12 MB from
+ * Postgres semantics. Downloads platform binaries once (~40–90 MB from
  * theseus-rs/postgresql-binaries), runs initdb with memory-lean settings,
  * and manages the postgres child process. Trust auth over a private unix
  * socket directory (0700), never TCP.
@@ -22,10 +22,10 @@ import {
 import { PgWireClient } from './wire.js'
 import { buildWireEngine } from './wire-engine.js'
 
-const DEFAULT_PG_VERSION = '17.7.0'
+const DEFAULT_PG_VERSION = '18.6.1'
 const POSTGRES_MIRROR_URL_ERROR =
   'SUPACLOUD_LITE_POSTGRES_MIRROR must be an absolute HTTPS URL or a loopback HTTP URL'
-export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0] ?? '17'
+export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0] ?? '18'
 
 export function nativePostgresMajor(installDir = process.env.SUPACLOUD_LITE_POSTGRES_DIR): string {
   if (!installDir) return NATIVE_POSTGRES_MAJOR
@@ -131,12 +131,12 @@ function isCompleteInstall(dir: string): boolean {
  * truncated downloads and mismatched redirects.
  */
 const PINNED_SHA256: Record<string, string> = {
-  // theseus-rs/postgresql-binaries 17.7.0 (the DEFAULT_PG_VERSION). Refresh
+  // theseus-rs/postgresql-binaries 18.6.1 (the DEFAULT_PG_VERSION). Refresh
   // these from the release *.sha256 files whenever DEFAULT_PG_VERSION changes.
-  'postgresql-17.7.0-x86_64-unknown-linux-gnu': '66ad03281a43624f955c8e16ac975cb0ab751e7edf8ba35308e3b08dd7d065c3',
-  'postgresql-17.7.0-aarch64-unknown-linux-gnu': '89cc2f089880cc8e5e6b7a29387829ec4e4779427855bc0b9fa187c8fce33c8b',
-  'postgresql-17.7.0-x86_64-apple-darwin': '0dd8c25173524bad4ae8ef6b970da1ac40f4c1f231150c416ccb8cd06feff8f2',
-  'postgresql-17.7.0-aarch64-apple-darwin': '727ac08d20a704014a0d51eb3300aa0c8e292c1cf0a1c99d4f4b1002e1420220',
+  'postgresql-18.6.1-x86_64-unknown-linux-gnu': 'e84b02dd8d0ce5879fb697330a789231c8b8f8d958dae3ad4d90fecc710b1315',
+  'postgresql-18.6.1-aarch64-unknown-linux-gnu': '1ab47fa2f06ff70454309ad02e5d89c46488300d43977231481fd6b160b9d556',
+  'postgresql-18.6.1-x86_64-apple-darwin': '4229812543e19c91864ebdf5d8f78883c5816d51d4cc5d065298260c1f64d37e',
+  'postgresql-18.6.1-aarch64-apple-darwin': '89e91cc80650a43d22c018b95ca356a0c9e15838a1182fed2880bfb5d7d9c9a6',
 }
 
 /** Verify `tarball` against a pinned digest, else the release's published .sha256. */
