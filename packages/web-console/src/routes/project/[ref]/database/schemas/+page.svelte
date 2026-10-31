@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, FolderOpen, Table2, Braces } from "lucide-svelte";
+  import { FolderOpen, Table2, Braces } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface SchemaInfo {
     schema_name: string;
@@ -43,6 +46,21 @@
   const schemas = $derived((schemasQuery.data as SchemaInfo[]) || []);
   const isLoading = $derived(schemasQuery.isPending);
   const error = $derived(schemasQuery.error?.message || null);
+  let schemaQuery = $state("");
+  const normalizedSchemaQuery = $derived(schemaQuery.trim().toLocaleLowerCase());
+  const filteredSchemas = $derived(
+    normalizedSchemaQuery
+      ? schemas.filter((schema) =>
+          [schema.schema_name, schema.schema_owner].join(" ").toLocaleLowerCase().includes(normalizedSchemaQuery),
+        )
+      : schemas,
+  );
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error) return "error" as const;
+    if (schemas.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   const SCHEMA_DESCRIPTION_KEYS: Record<string, string> = {
     public: "Schemas.public_description",
@@ -57,22 +75,26 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div>
-    <h1 class="text-2xl font-bold">{$t("Schemas.title")}</h1>
-    <p class="text-sm text-muted-foreground mt-1">{$t("Schemas.subtitle")}</p>
-  </div>
+<PagePattern
+  kind="list"
+  pageId="database-schemas"
+  title={$t("Schemas.title")}
+  description={$t("Schemas.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "error" ? (error || $t("Common.error")) : pageState === "empty" ? $t("Schemas.empty") : $t("Schemas.loading")}
+  stateDescription={pageState === "error" ? error || undefined : undefined}
+  retry={() => { void schemasQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={schemaQuery} placeholder={$t("Schemas.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
-  {#if isLoading}
-    <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-      <p class="text-xs font-mono uppercase tracking-widest">{$t("Schemas.loading")}</p>
-    </div>
-  {:else if error}
-    <div class="p-4"><div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div></div>
+  {#if filteredSchemas.length === 0}
+    <DataState state="filtered-empty" title={$t("Common.no_matches")} description={$t("Common.no_matches_hint")} />
   {:else}
     <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {#each schemas as schema}
+      {#each filteredSchemas as schema (schema.schema_name)}
         <div class="p-5 rounded-xl border bg-card hover:border-brand/30 transition-all group">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-9 h-9 rounded-lg bg-brand/10 text-brand flex items-center justify-center">
@@ -100,4 +122,4 @@
       {/each}
     </div>
   {/if}
-</div>
+</PagePattern>

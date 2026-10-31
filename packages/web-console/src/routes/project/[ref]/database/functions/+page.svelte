@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, FunctionSquare, Search, Braces } from "lucide-svelte";
+  import { FunctionSquare } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface DbFunction {
     function_name: string;
@@ -59,6 +62,12 @@
   const functions = $derived((functionsQuery.data as DbFunction[]) || []);
   const isLoading = $derived(functionsQuery.isPending);
   const error = $derived(functionsQuery.error?.message || null);
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error && functions.length === 0) return "error" as const;
+    if (functions.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
   const schemaOptions = $derived([...new Set(functions.map((fn) => fn.schema_name))].sort((a, b) => a.localeCompare(b)));
 
   const filteredFunctions = $derived(
@@ -126,54 +135,49 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">{$t("DbFunctions.title")}</h1>
-      <p class="text-sm text-muted-foreground mt-1">{$t("DbFunctions.subtitle")}</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="database-functions"
+  title={$t("DbFunctions.title")}
+  description={$t("DbFunctions.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "error" ? (error || $t("Common.error")) : pageState === "empty" ? $t("DbFunctions.no_functions") : $t("DbFunctions.loading")}
+  stateDescription={pageState === "error" ? error || undefined : $t("DbFunctions.default_schema_hint")}
+  retry={() => { void functionsQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet actions()}
     {#if !isLoading}
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{functions.length}</span>
     {/if}
-  </div>
-
-  <!-- Search -->
-  <div class="relative w-64">
-    <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-    <input
-      bind:value={searchQuery}
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar
+      bind:query={searchQuery}
       placeholder={$t("DbFunctions.search")}
-      class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
-    />
-  </div>
+      clearLabel={$t("Common.clear_search")}
+      activeFilterCount={schemaFilter === "public" ? 0 : 1}
+    >
+      {#snippet filters()}
+        <label for="function-schema-filter" class="text-xs text-muted-foreground">{$t("DbFunctions.schema_filter")}</label>
+        <select id="function-schema-filter" bind:value={schemaFilter} class="px-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand">
+          <option value="all">{$t("DbFunctions.all_schemas")}</option>
+          {#each schemaOptions as schemaName (schemaName)}
+            <option value={schemaName}>{schemaName}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </FilterToolbar>
+  {/snippet}
 
-  <div class="flex items-center gap-2">
-    <label for="function-schema-filter" class="text-xs text-muted-foreground">{$t("DbFunctions.schema_filter")}</label>
-    <select id="function-schema-filter" bind:value={schemaFilter} class="px-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand">
-      <option value="all">{$t("DbFunctions.all_schemas")}</option>
-      {#each schemaOptions as schemaName (schemaName)}
-        <option value={schemaName}>{schemaName}</option>
-      {/each}
-    </select>
-    <span class="text-[10px] text-muted-foreground">{$t("DbFunctions.default_schema_hint")}</span>
-  </div>
-
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("DbFunctions.loading")}</p>
-      </div>
-    {:else if error}
-      <div class="p-4">
-        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
-      </div>
-    {:else if filteredFunctions.length === 0}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3 opacity-40">
-        <Braces size={40} strokeWidth={1} />
-        <p class="text-sm">{functions.length === 0 ? $t("DbFunctions.no_functions") : $t("DbFunctions.no_matching_functions")}</p>
-      </div>
-    {:else}
+  <p class="text-[10px] text-muted-foreground">{$t("DbFunctions.default_schema_hint")}</p>
+  {#if error}
+    <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
+  {/if}
+  {#if filteredFunctions.length === 0}
+    <DataState state="filtered-empty" title={$t("DbFunctions.no_matching_functions")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -212,6 +216,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

@@ -758,7 +758,8 @@
     "enable": "Enable",
     "disable": "Disable",
     "official_description": "{description}",
-    "search": "Search extensions..."
+    "search": "Search extensions...",
+    "empty": "No extensions are available."
   },
   "Triggers": {
     "title": "Database Triggers",
@@ -778,7 +779,8 @@
     "event_delete": "Delete (DELETE)",
     "timing_before": "Before (BEFORE)",
     "timing_after": "After (AFTER)",
-    "timing_instead_of": "Instead of (INSTEAD OF)"
+    "timing_instead_of": "Instead of (INSTEAD OF)",
+    "search": "Search trigger or table..."
   },
   "ExplainVisualizer": {
     "title": "Explain Visualizer",
@@ -872,7 +874,8 @@
     "type_spgist": "Space-partitioned GiST index",
     "type_gin": "Generalized Inverted Index",
     "type_brin": "Block Range Index",
-    "search": "Search indexes..."
+    "search": "Search indexes...",
+    "empty": "No indexes found in the public schema."
   },
   "Schemas": {
     "title": "Database Schemas",
@@ -886,7 +889,9 @@
     "auth_description": "Authentication users, sessions, and authorization data managed by Supabase Auth.",
     "storage_description": "Storage bucket and object metadata managed by Supabase Storage.",
     "extensions_description": "Objects supplied by installed PostgreSQL extensions.",
-    "custom_description": "Custom database schema."
+    "custom_description": "Custom database schema.",
+    "search": "Search schema or owner...",
+    "empty": "No schemas found."
   },
   "CronJobs": {
     "title": "Cron Jobs",
@@ -914,7 +919,8 @@
     "delete": "DELETE",
     "truncate": "TRUNCATE",
     "tables": "Tables",
-    "all_tables_value": "ALL"
+    "all_tables_value": "ALL",
+    "search": "Search publication, owner, or table..."
   },
   "Hooks": {
     "title": "Database Webhooks",
@@ -942,7 +948,8 @@
     "delete_confirm": "Delete webhook \"{name}\"?",
     "no_hooks_title": "No database webhooks",
     "no_hooks_description": "Add a table trigger that sends requests with pg_net.",
-    "on_table": "on {table}"
+    "on_table": "on {table}",
+    "search": "Search name, table, or events..."
   },
   "Migrations": {
     "title": "Migration History",
@@ -956,7 +963,8 @@
     "checksum": "Checksum",
     "empty": "No migration history is available.",
     "load_failed": "Failed to load migration history",
-    "technical_names_note": "Migration names are retained as original technical identifiers."
+    "technical_names_note": "Migration names are retained as original technical identifiers.",
+    "search": "Search version, name, or checksum..."
   },
   "EnumTypes": {
     "title": "Enumerated Types",
@@ -1946,6 +1954,9 @@
     "previous": "Previous",
     "next": "Next",
     "search": "Search...",
+    "no_matches": "No matching results",
+    "no_matches_hint": "Adjust or clear the search.",
+    "clear_search": "Clear search",
     "close": "Close",
     "ago_minutes": "minutes ago",
     "ago_hours": "hours ago",

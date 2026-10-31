@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Tag, ListOrdered, Search } from "lucide-svelte";
+  import { Tag } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface EnumType {
     type_name: string;
@@ -49,6 +52,12 @@
   const types = $derived((typesQuery.data as EnumType[]) || []);
   const isLoading = $derived(typesQuery.isPending);
   const error = $derived(typesQuery.error?.message || null);
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error && types.length === 0) return "error" as const;
+    if (types.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
   const schemaOptions = $derived([...new Set(types.map((typ) => typ.schema_name))].sort((a, b) => a.localeCompare(b)));
   const filteredTypes = $derived(types.filter((typ) => {
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
@@ -59,50 +68,48 @@
   }));
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">{$t("EnumTypes.title")}</h1>
-      <p class="text-sm text-muted-foreground mt-1">{$t("EnumTypes.subtitle")}</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="database-enum-types"
+  title={$t("EnumTypes.title")}
+  description={$t("EnumTypes.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "error" ? (error || $t("Common.error")) : pageState === "empty" ? $t("EnumTypes.no_types") : $t("EnumTypes.loading")}
+  stateDescription={pageState === "empty" ? $t("EnumTypes.values_hint") : pageState === "error" ? error || undefined : undefined}
+  retry={() => { void typesQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet actions()}
     {#if !isLoading && types.length > 0}
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{filteredTypes.length}</span>
     {/if}
-  </div>
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar
+      bind:query={searchQuery}
+      placeholder={$t("EnumTypes.search")}
+      clearLabel={$t("Common.clear_search")}
+      activeFilterCount={schemaFilter === "all" ? 0 : 1}
+    >
+      {#snippet filters()}
+        <select bind:value={schemaFilter} aria-label={$t("EnumTypes.schema_filter")} class="px-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand">
+          <option value="all">{$t("EnumTypes.all_schemas")}</option>
+          {#each schemaOptions as schemaName (schemaName)}
+            <option value={schemaName}>{schemaName}</option>
+          {/each}
+        </select>
+      {/snippet}
+    </FilterToolbar>
+  {/snippet}
 
-  <div class="flex flex-wrap items-center gap-2">
-    <label class="relative block min-w-52 flex-1 sm:flex-none">
-      <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-      <input
-        bind:value={searchQuery}
-        aria-label={$t("EnumTypes.search")}
-        placeholder={$t("EnumTypes.search")}
-        class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
-      />
-    </label>
-    <select bind:value={schemaFilter} aria-label={$t("EnumTypes.schema_filter")} class="px-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand">
-      <option value="all">{$t("EnumTypes.all_schemas")}</option>
-      {#each schemaOptions as schemaName (schemaName)}
-        <option value={schemaName}>{schemaName}</option>
-      {/each}
-    </select>
-    <p class="w-full text-[10px] text-muted-foreground">{$t("EnumTypes.values_hint")}</p>
-  </div>
-
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("EnumTypes.loading")}</p>
-      </div>
-    {:else if error}
-      <div class="p-4"><div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div></div>
-    {:else if filteredTypes.length === 0}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3 opacity-40">
-        <ListOrdered size={40} strokeWidth={1} />
-        <p class="text-sm">{types.length === 0 ? $t("EnumTypes.no_types") : $t("EnumTypes.no_matching_types")}</p>
-      </div>
-    {:else}
+  <p class="text-[10px] text-muted-foreground">{$t("EnumTypes.values_hint")}</p>
+  {#if error}
+    <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
+  {/if}
+  {#if filteredTypes.length === 0}
+    <DataState state="filtered-empty" title={$t("EnumTypes.no_matching_types")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -136,6 +143,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>
