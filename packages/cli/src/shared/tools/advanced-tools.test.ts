@@ -109,7 +109,7 @@ describe("edge_functions CLI tool", () => {
                 }
                 const startupValue = process.env.FUNCTION_RUNTIME_VALUE;
                 export const app = new Elysia()
-                    .onBeforeHandle(({ request, status }) =>
+                    .beforeHandle(({ request, status }) =>
                         request.headers.get("authorization") === "Bearer test" ? undefined : status(401))
                     .post("/hello/:name", { body: t.Object({ count: t.Number() }) }, ({ params, body }) => ({
                         name: params.name, count: body.count, value: process.env.FUNCTION_RUNTIME_VALUE, startupValue,
@@ -366,6 +366,31 @@ describe("edge_functions CLI tool", () => {
             version: "4",
             activation_id: COMMITTED_ACTIVATION_ID,
         });
+    });
+
+    test("aborts deploy and check when source contains type suppression directives", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => confirmedFunctionMutation("api"),
+        });
+
+        const checkRes = await callback({
+            action: "check",
+            code: "// @ts-ignore\nexport default () => new Response('ok');",
+        });
+        expect(checkRes.content[0].text).toContain("❌ Syntax check failed");
+        expect(checkRes.content[0].text).toContain("Vibecoding guardrail violation: Type suppression directive");
+
+        const deployRes = await callback({
+            action: "deploy",
+            ref: "proj",
+            slug: "api",
+            code: "/* @ts-nocheck */\nexport default () => new Response('ok');",
+            framework: "fetch",
+            "expected-active-version": "3",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+        expect(deployRes.content[0].text).toContain("❌ Deployment aborted. Syntax check failed");
+        expect(deployRes.content[0].text).toContain("Vibecoding guardrail violation: Type suppression directive");
     });
 
     test("parses a bundle file map from a CLI JSON string", () => {
