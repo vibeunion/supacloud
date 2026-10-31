@@ -170,6 +170,14 @@ Changing the PostgreSQL major version of an existing data directory is rejected.
 Use a logical migration with separately validated binaries/extensions; do not
 swap PostgreSQL installations in place as a database upgrade.
 
+The default native download is Theseus PostgreSQL `18.6.1` (PostgreSQL 18.6
+with the packaging revision that bundles transitive runtime libraries). New
+native databases and default snapshot restores use major 18. For an existing
+major 17 database or physical snapshot, keep selecting its PostgreSQL 17
+installation with `--postgres-dir` until a logical migration to a new major 18
+database is complete. PostgreSQL 17 data directories and physical snapshots
+cannot be opened directly by the new default.
+
 ### Migration Compatibility
 
 Both `supabase/migrations/123_name.sql` and

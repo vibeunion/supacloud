@@ -30,11 +30,11 @@ extension archives are embedded in the standalone binary.
 
 ## Native PostgreSQL binaries
 
-Linux/macOS 上的可选 native 引擎会按需下载 Theseus 发布的 PostgreSQL 17.7.0 预编译包；该二进制不会内嵌到 npm 包或 Lite 单文件发布物中。
+Linux/macOS 上的可选 native 引擎会按需下载 Theseus 发布的 PostgreSQL 18.6.1 预编译包（PostgreSQL 18.6 的打包修订，包含传递运行库）；该二进制不会内嵌到 npm 包或 Lite 单文件发布物中。
 
 - PostgreSQL license: PostgreSQL License
 - Binary source: `https://github.com/theseus-rs/postgresql-binaries`
-- PostgreSQL copyright copy: `LICENSES/POSTGRESQL-17-COPYRIGHT.txt`
+- PostgreSQL copyright copy: `LICENSES/POSTGRESQL-18-COPYRIGHT.txt`
 - Theseus distribution license copy: `LICENSES/THESEUS-POSTGRESQL-LICENSE.txt`
 - Integrity: Lite 对默认版本的四个平台归档使用内置 SHA-256 固定校验和
 
