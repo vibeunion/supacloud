@@ -149,6 +149,11 @@ against those three released SDK lines. At the time of writing, the upstream
 declared peer range; do not treat the repository version as an adapter
 compatibility claim.
 
+A `0.45.3` transport probe passes against the task endpoints, but that line
+requires `@supabase/supabase-js` 2.118.0 and its nested auth-js types currently
+fail the strict consumer type check. Do not widen the peer range until the
+auth-js patch and type matrix are updated.
+
 Adding a new SDK line requires updating the peer range and rerunning the real
 SDK-backed fixtures for submit, metadata, wait, list, cancellation, retry,
 subscription delivery and cleanup. CRUD/auth providers need not change.
