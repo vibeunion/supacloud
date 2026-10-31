@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.8.2...app-svelte-v0.9.0) (2026-10-31)
+
+
+### Features
+
+* **web-console:** migrate applications page to svadmin ([#2320](https://github.com/vibeunion/supacloud/issues/2320)) ([b643a27](https://github.com/vibeunion/supacloud/commit/b643a279debe862c3feb71e4da10c7d65bdb8769))
+
 ## [0.8.2](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.8.1...app-svelte-v0.8.2) (2026-10-31)
 
 

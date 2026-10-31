@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.37.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.37.1...edge-runtime-v0.37.2) (2026-10-31)
+
+
+### Performance Improvements
+
+* **edge-runtime:** eliminate allocation churn in worker pool queue and project lookup ([#2317](https://github.com/vibeunion/supacloud/issues/2317)) ([cc60ff6](https://github.com/vibeunion/supacloud/commit/cc60ff670bc8737d9940116c3c2dff24277cab5d))
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.37.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.37.0...edge-runtime-v0.37.1) (2026-10-31)
 
 

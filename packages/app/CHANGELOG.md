@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.35.0](https://github.com/vibeunion/supacloud/compare/app-v0.34.1...app-v0.35.0) (2026-10-31)
+
+
+### Features
+
+* **web-console:** migrate applications page to svadmin ([#2320](https://github.com/vibeunion/supacloud/issues/2320)) ([b643a27](https://github.com/vibeunion/supacloud/commit/b643a279debe862c3feb71e4da10c7d65bdb8769))
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.34.1](https://github.com/vibeunion/supacloud/compare/app-v0.34.0...app-v0.34.1) (2026-10-31)
 
 
