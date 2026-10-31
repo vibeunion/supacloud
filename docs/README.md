@@ -62,6 +62,7 @@
 
 ## Development
 
+- [Workspace Tooling](./workspace-tooling.md) - Bun task order for local package builds, starter sync, and source-boundary checks
 - [Edge Runtime Guide](./edge-runtime-guide.md) - Bun + Elysia Edge Functions runtime architecture
 - [Observability](./observability.md) - VictoriaLogs + 内置采集器基线、Grafana 可选运行方式，以及禁止 Logflare 的规范
 - [Background Functions](./background-functions.md) - Async Edge Function tasks, retries, logs, and cancellation

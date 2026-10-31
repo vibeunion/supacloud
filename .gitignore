@@ -167,8 +167,5 @@ OPENCODE.md
 .zed/CONVENTIONS.md
 CODEBUDDY.md
 
-# Repository-only Nx graph, cache and audit evidence
-.nx/
-
-# Lock repository-only Nx tooling independently of package-local locks
-!/bun.lock
+# Repository workspace audit evidence
+.workspace/
