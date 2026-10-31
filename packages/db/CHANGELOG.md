@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.2](https://github.com/vibeunion/supacloud/compare/db-v0.20.1...db-v0.20.2) (2026-10-31)
+
+
+### Documentation
+
+* **svadmin:** refresh task adapter compatibility ([#2309](https://github.com/vibeunion/supacloud/issues/2309)) ([728e04f](https://github.com/vibeunion/supacloud/commit/728e04fb576ddf62fb2954dffa5e5e694d2837b9))
+
+
+### Miscellaneous Chores
+
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+* **schema:** align TypeBox 1.4.3 across the compatibility graph ([#2298](https://github.com/vibeunion/supacloud/issues/2298)) ([cd909da](https://github.com/vibeunion/supacloud/commit/cd909dacc7a77178fbe17210745df2160885bdd6))
+
 ## [0.20.1](https://github.com/vibeunion/supacloud/compare/db-v0.20.0...db-v0.20.1) (2026-10-25)
 
 

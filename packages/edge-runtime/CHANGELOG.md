@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.37.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.37.0...edge-runtime-v0.37.1) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+* **schema:** align TypeBox 1.4.3 across the compatibility graph ([#2298](https://github.com/vibeunion/supacloud/issues/2298)) ([cd909da](https://github.com/vibeunion/supacloud/commit/cd909dacc7a77178fbe17210745df2160885bdd6))
+* **web-console:** update jsdom and stabilize worker stress reports ([#2302](https://github.com/vibeunion/supacloud/issues/2302)) ([76d5e35](https://github.com/vibeunion/supacloud/commit/76d5e355edcaf7a515dc09d5a687bd6878ee2418))
+
 ## [0.37.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.36.4...edge-runtime-v0.37.0) (2026-10-27)
 
 

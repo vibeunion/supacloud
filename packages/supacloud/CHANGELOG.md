@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.17](https://github.com/vibeunion/supacloud/compare/supacloud-v0.18.16...supacloud-v0.18.17) (2026-10-31)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2293](https://github.com/vibeunion/supacloud/issues/2293)) ([9b0d515](https://github.com/vibeunion/supacloud/commit/9b0d515d1f35c806ad4e6986d38d7f5e1f827250))
+
+
+### Miscellaneous Chores
+
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+
 ## [0.18.16](https://github.com/vibeunion/supacloud/compare/supacloud-v0.18.15...supacloud-v0.18.16) (2026-10-29)
 
 

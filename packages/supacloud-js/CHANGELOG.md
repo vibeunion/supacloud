@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.45.4](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.3...supacloud-js-v0.45.4) (2026-10-31)
+
+
+### Bug Fixes
+
+* **sdk:** align Query core with Svelte Query 6.3.6 ([#2303](https://github.com/vibeunion/supacloud/issues/2303)) ([54c9261](https://github.com/vibeunion/supacloud/commit/54c92618260035e9dd6170621f9e0e01a3d76e6a))
+
+
+### Documentation
+
+* **sveltekit:** add request-scoped SupaCloud integration ([#2310](https://github.com/vibeunion/supacloud/issues/2310)) ([f647768](https://github.com/vibeunion/supacloud/commit/f6477684ca2509c4de86af35cd228485fe891166))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump svelte in /packages/supacloud-js ([#2300](https://github.com/vibeunion/supacloud/issues/2300)) ([4760ba2](https://github.com/vibeunion/supacloud/commit/4760ba2ae6c68dc87433fa9c05f7cebce8d353a8))
+* **deps-dev:** bump typebox in /packages/supacloud-js ([#2295](https://github.com/vibeunion/supacloud/issues/2295)) ([1637fc8](https://github.com/vibeunion/supacloud/commit/1637fc8227b468136b3df3216dabcd7debf30539))
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+
 ## [0.45.3](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.2...supacloud-js-v0.45.3) (2026-10-30)
 
 

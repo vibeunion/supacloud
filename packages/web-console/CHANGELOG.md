@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.54.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.54.2...web-console-v0.54.3) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump svelte in /packages/web-console ([#2296](https://github.com/vibeunion/supacloud/issues/2296)) ([2b6861b](https://github.com/vibeunion/supacloud/commit/2b6861b2210492c51a41c38b05a73dc9416ca5d3))
+* **deps-dev:** bump svelte-sonner in /packages/web-console ([#2304](https://github.com/vibeunion/supacloud/issues/2304)) ([8a42bb6](https://github.com/vibeunion/supacloud/commit/8a42bb6ac44749bcf6208077fea0835c0caf9852))
+* **deps-dev:** bump vite from 8.3.4 to 8.3.5 in /packages/web-console ([#2301](https://github.com/vibeunion/supacloud/issues/2301)) ([d084737](https://github.com/vibeunion/supacloud/commit/d084737ffbdb82350f75def3534f3f1ba396ff2a))
+* **deps:** bump @tanstack/svelte-query in /packages/web-console ([#2305](https://github.com/vibeunion/supacloud/issues/2305)) ([d17519a](https://github.com/vibeunion/supacloud/commit/d17519a2bebff1e6846534f0c04664cb15b6ba86))
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+* **schema:** align TypeBox 1.4.3 across the compatibility graph ([#2298](https://github.com/vibeunion/supacloud/issues/2298)) ([cd909da](https://github.com/vibeunion/supacloud/commit/cd909dacc7a77178fbe17210745df2160885bdd6))
+* **web-console:** update jsdom and stabilize worker stress reports ([#2302](https://github.com/vibeunion/supacloud/issues/2302)) ([76d5e35](https://github.com/vibeunion/supacloud/commit/76d5e355edcaf7a515dc09d5a687bd6878ee2418))
+* **web-console:** upgrade svadmin and adopt product page primitives ([#2311](https://github.com/vibeunion/supacloud/issues/2311)) ([37c42e0](https://github.com/vibeunion/supacloud/commit/37c42e0beaa0a2f08298067bfa75ce724f636b2e))
+
 ## [0.54.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.54.1...web-console-v0.54.2) (2026-10-28)
 
 
