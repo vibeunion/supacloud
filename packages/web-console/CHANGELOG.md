@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.55.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.54.3...web-console-v0.55.0) (2026-10-31)
+
+
+### Features
+
+* **web-console:** migrate applications page to svadmin ([#2320](https://github.com/vibeunion/supacloud/issues/2320)) ([b643a27](https://github.com/vibeunion/supacloud/commit/b643a279debe862c3feb71e4da10c7d65bdb8769))
+
+
+### Miscellaneous Chores
+
+* **web-console:** remove unused markdown and highlighting dependencies ([#2319](https://github.com/vibeunion/supacloud/issues/2319)) ([254067b](https://github.com/vibeunion/supacloud/commit/254067b21e9c7be88c910c75d1346943a008f900))
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.54.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.54.2...web-console-v0.54.3) (2026-10-31)
 
 

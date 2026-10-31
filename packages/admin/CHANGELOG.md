@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.4](https://github.com/vibeunion/supacloud/compare/admin-v0.30.3...admin-v0.30.4) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.30.3](https://github.com/vibeunion/supacloud/compare/admin-v0.30.2...admin-v0.30.3) (2026-10-31)
 
 
