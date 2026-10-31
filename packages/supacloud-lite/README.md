@@ -13,7 +13,7 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 ### 状态
 
 - 运行时：npm 包需要 Bun 1.4.4+；单二进制发行版已内嵌 Bun 和 PGlite 资源
-- 数据库：PGlite 0.5.10，或 native PostgreSQL
+- 数据库：PGlite 0.5.10，或 native PostgreSQL 18（默认下载 Theseus 18.6.1）
 - 项目模型：单进程、单项目，内部 project ref 固定为 `local`
 - 客户端：直接使用官方 `@supabase/supabase-js`
 - 数据目录：`.supacloud-lite/db`
@@ -439,6 +439,9 @@ supacloud-lite doctor --json
 
 ### PostgreSQL 扩展生态
 
+默认 native 下载包使用 PostgreSQL 18。已有 PostgreSQL 17 数据目录和物理快照须继续通过 `--postgres-dir` 选择原 17 安装，完成逻辑迁移后才能使用 18；不能直接替换二进制打开旧数据。
+完整步骤见 [PostgreSQL 17 → 18 迁移方案](../../docs/lite-postgres17-to18-migration.md)。
+
 Lite 默认把一组常用扩展打进 PGlite：`uuid-ossp`、`pgcrypto`、`citext`、
 `pg_trgm`、`ltree`、`hstore`、`fuzzystrmatch`、`pgvector`、
 `pg_textsearch`、PostGIS 和官方 `pgmq`。其中 PostGIS 是上游实验性包，
@@ -449,11 +452,11 @@ PostgreSQL 主版本、操作系统、CPU 架构和 ABI 匹配的 PostgreSQL 安
 ```bash
 supacloud-lite migrate \
   --engine native \
-  --postgres-dir /opt/postgresql/17
+  --postgres-dir /opt/postgresql/18
 
 supacloud-lite doctor \
   --engine native \
-  --postgres-dir /opt/postgresql/17 \
+  --postgres-dir /opt/postgresql/18 \
   --json
 ```
 
@@ -609,7 +612,7 @@ The goal of V1 is not to replicate the full Supabase platform control plane, but
 ### Status
 
 - Runtime: the npm package requires Bun 1.4.4+; the single-binary release embeds Bun and PGlite assets
-- Database: PGlite 0.5.10, or native PostgreSQL
+- Database: PGlite 0.5.10, or native PostgreSQL 18 (Theseus 18.6.1 by default)
 - Project model: single process, single project, with an internal project ref fixed as `local`
 - Client: uses the official `@supabase/supabase-js` directly
 - Data directory: `.supacloud-lite/db`
@@ -1012,6 +1015,12 @@ It uses Realtime's `messages` envelope: at most 100 messages per request, each `
 
 ### PostgreSQL extension ecosystem
 
+The default native download uses PostgreSQL 18. Keep selecting the original
+PostgreSQL 17 installation with `--postgres-dir` for existing major 17 data
+directories and physical snapshots until a logical migration to 18 is complete.
+Replacing binaries cannot upgrade an existing data directory.
+See the [PostgreSQL 17 to 18 migration runbook (中文)](../../docs/lite-postgres17-to18-migration.md).
+
 Lite ships a PostgreSQL-shaped default extension set in PGlite. New databases
 install `uuid-ossp`, `pgcrypto`, `citext`, `pg_trgm`, `ltree`, `hstore`,
 `fuzzystrmatch`, `pgvector`, `pg_textsearch`, PostGIS, and the official PGMQ
@@ -1027,11 +1036,11 @@ match the Lite process:
 ```bash
 supacloud-lite migrate \
   --engine native \
-  --postgres-dir /opt/postgresql/17
+  --postgres-dir /opt/postgresql/18
 
 supacloud-lite doctor \
   --engine native \
-  --postgres-dir /opt/postgresql/17 \
+  --postgres-dir /opt/postgresql/18 \
   --json
 ```
 
