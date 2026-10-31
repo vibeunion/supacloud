@@ -58,12 +58,12 @@
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.57.0",
     "svelte-i18n": "^4.0.1",
-    "typebox": "1.4.2"
+    "typebox": "1.4.3"
   },
   "overrides": {
     "dompurify": "3.4.17",
     "esbuild": "0.28.2",
-    "joi": "18.2.9",
+    "joi": "18.3.1",
     "undici": "8.12.3",
     "source-map-js": "^1.2.2",
     "zod": "4.6.7"

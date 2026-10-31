@@ -55,7 +55,7 @@
     "effect": "4.0.5",
     "exact-mirror": "1.2.6",
     "jose": "^6.2.13",
-    "typebox": "1.4.2"
+    "typebox": "1.4.3"
   },
   "overrides": {
     "@supacloud/delivery": "file:../delivery",

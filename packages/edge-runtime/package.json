@@ -27,7 +27,7 @@
     "es-module-lexer": "3.0.4",
     "exact-mirror": "1.2.6",
     "jose": "^6.2.13",
-    "typebox": "1.4.2"
+    "typebox": "1.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",

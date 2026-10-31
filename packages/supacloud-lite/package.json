@@ -64,7 +64,7 @@
     "exact-mirror": "1.2.6",
     "fast-xml-parser": "5.11.2",
     "tar": "^7.5.22",
-    "typebox": "1.4.2"
+    "typebox": "1.4.3"
   },
   "devDependencies": {
     "@supacloud/app": "file:../app",

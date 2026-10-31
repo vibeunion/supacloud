@@ -4,7 +4,7 @@
     "elysia": "2.0.0-rc.0",
     "effect": "4.0.5",
     "typescript": "7.0.2",
-    "typebox": "1.4.2",
+    "typebox": "1.4.3",
     "exact-mirror": "1.2.6",
     "@typescript/typescript6": "6.0.2"
   }
