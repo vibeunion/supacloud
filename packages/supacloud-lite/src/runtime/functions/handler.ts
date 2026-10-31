@@ -41,8 +41,10 @@ export type FunctionHandler = EdgeFunction | FrameworkObjectHandler
 /**
  * Per-invocation resource limits, aligned with the Edge Runtime Manifest v2
  * `limits` block (timeout_ms / max_request_body_bytes /
- * max_response_body_bytes / wait_until_timeout_ms). Lite defaults to no
- * limit when undeclared; production caps at 900s / 30MB.
+ * max_response_body_bytes / wait_until_timeout_ms / max_heap_bytes). Lite
+ * defaults to no limit when undeclared; production caps wall time and body
+ * size at 900s / 30MB. `maxHeapBytes` is accepted for the same declaration
+ * range as Edge Runtime and is not a process heap sandbox.
  */
 export interface FunctionLimits {
   /** limits.timeout_ms: max wall time per invocation; on expiry the request is aborted and a 504 returned. */
@@ -53,6 +55,11 @@ export interface FunctionLimits {
   maxResponseBodyBytes?: number
   /** limits.wait_until_timeout_ms: max time to wait for EdgeRuntime.waitUntil tasks after the response. */
   waitUntilTimeoutMs?: number
+  /**
+   * limits.max_heap_bytes: declared Worker heap budget (1 byte through 512 MiB).
+   * Strict mode rejects an invalid value. Lite runs functions in-process and does not sample or retire on this budget.
+   */
+  maxHeapBytes?: number
 }
 
 /**

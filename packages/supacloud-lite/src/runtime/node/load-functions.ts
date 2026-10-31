@@ -52,6 +52,8 @@ export interface LoadFunctionOptions {
   maxResponseBodyBytes?: number
   /** Max wait for EdgeRuntime.waitUntil tasks after the response (Edge Runtime limits.wait_until_timeout_ms). */
   waitUntilTimeoutMs?: number
+  /** Declared Worker heap budget (Edge Runtime limits.max_heap_bytes). Validated in strict mode and not enforced in-process. */
+  maxHeapBytes?: number
   /** Outbound fetch host allowlist (Edge Runtime capabilities.outbound_hosts). */
   outboundHosts?: string[]
   /** Env keys exposed to the function beyond the SUPABASE_* base trio (Edge Runtime capabilities.secrets). */
@@ -173,12 +175,14 @@ async function loadFunctionsUnlocked(
             (opts.timeoutMs !== undefined ||
               opts.maxRequestBodyBytes !== undefined ||
               opts.maxResponseBodyBytes !== undefined ||
-              opts.waitUntilTimeoutMs !== undefined)
+              opts.waitUntilTimeoutMs !== undefined ||
+              opts.maxHeapBytes !== undefined)
               ? {
                   ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
                   ...(opts.maxRequestBodyBytes !== undefined ? { maxRequestBodyBytes: opts.maxRequestBodyBytes } : {}),
                   ...(opts.maxResponseBodyBytes !== undefined ? { maxResponseBodyBytes: opts.maxResponseBodyBytes } : {}),
                   ...(opts.waitUntilTimeoutMs !== undefined ? { waitUntilTimeoutMs: opts.waitUntilTimeoutMs } : {}),
+                  ...(opts.maxHeapBytes !== undefined ? { maxHeapBytes: opts.maxHeapBytes } : {}),
                 }
               : undefined
           const capabilities =

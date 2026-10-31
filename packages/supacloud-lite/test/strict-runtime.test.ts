@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createBackend } from '../src/runtime/index.js'
-import { strictFunction } from '../src/runtime/functions/profile.js'
+import { MAX_DECLARED_FUNCTION_HEAP_BYTES, strictFunction } from '../src/runtime/functions/profile.js'
 import { loadProjectConfig } from '../src/runtime/node/load-config.js'
 import { loadFunctions } from '../src/runtime/node/load-functions.js'
 import assert from 'node:assert/strict'
@@ -23,6 +23,11 @@ test('strict defaults and invalid limits are deterministic', () => {
   for (const value of [-1, 0, 1.2, Number.NaN, 900_001]) {
     expect(() => strictFunction({ handler: () => new Response(), limits: { timeoutMs: value } })).toThrow()
   }
+  const declaredHeap = 128 * 1024 * 1024
+  expect(strictFunction({ handler: () => new Response(), limits: { maxHeapBytes: declaredHeap } }).limits?.maxHeapBytes).toBe(declaredHeap)
+  for (const value of [0, -1, 1.2, MAX_DECLARED_FUNCTION_HEAP_BYTES + 1]) {
+    expect(() => strictFunction({ handler: () => new Response(), limits: { maxHeapBytes: value } })).toThrow('maxHeapBytes')
+  }
 })
 
 test('strict mode denies undeclared background work and retains explicit opt-in', async () => {
@@ -40,6 +45,17 @@ test('strict mode denies undeclared background work and retains explicit opt-in'
     expect((await request('denied')).status).toBe(500)
     expect((await request('allowed')).status).toBe(200)
     expect(() => backend.functions.register('bad', { handler: () => new Response(), limits: { timeoutMs: -1 } })).toThrow('invalid')
+    const heap = await createBackend({
+      runtimeMode: 'strict', startRuntimeServices: false,
+      functions: { heap: { handler: () => new Response('ok'), limits: { maxHeapBytes: 1 } } },
+    })
+    try {
+      expect((await heap.fetch('http://local/functions/v1/heap', { headers: { apikey: heap.anonKey } })).status).toBe(200)
+    } finally { await heap.close() }
+    await expect(createBackend({
+      runtimeMode: 'strict', startRuntimeServices: false,
+      functions: { heap: { handler: () => new Response('ok'), limits: { maxHeapBytes: MAX_DECLARED_FUNCTION_HEAP_BYTES + 1 } } },
+    })).rejects.toThrow('maxHeapBytes')
   } finally { await backend.close() }
 })
 
@@ -51,6 +67,12 @@ test('strict config and broken function imports fail closed', async () => {
       await writeFile(join(root, 'supabase/config.toml'), `[lite]\nruntime_mode = "strict"\n[functions.api]\ntimeout_ms = ${value}\n`)
       expect(() => loadProjectConfig(root)).toThrow('invalid strict function limit')
     }
+    for (const value of ['0', '-1', '1.5']) {
+      await writeFile(join(root, 'supabase/config.toml'), `[lite]\nruntime_mode = "strict"\n[functions.api]\nmax_heap_bytes = ${value}\n`)
+      expect(() => loadProjectConfig(root)).toThrow('invalid strict function limit')
+    }
+    await writeFile(join(root, 'supabase/config.toml'), `[lite]\nruntime_mode = "strict"\n[functions.api]\nmax_heap_bytes = ${MAX_DECLARED_FUNCTION_HEAP_BYTES}\n`)
+    expect(loadProjectConfig(root).functions.api?.maxHeapBytes).toBe(MAX_DECLARED_FUNCTION_HEAP_BYTES)
     await writeFile(join(root, 'supabase/functions/api/index.ts'), 'throw new Error("broken fixture"); export default () => new Response();')
     await expect(loadFunctions(root, {}, 'strict')).rejects.toThrow('failed to load strict function')
     await expect(loadFunctions(root, { missing: {} }, 'strict')).rejects.toThrow()

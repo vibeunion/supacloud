@@ -114,6 +114,11 @@ export interface FunctionOptions {
   maxResponseBodyBytes?: number
   /** [functions.<name>].wait_until_timeout_ms (Edge Runtime limits.wait_until_timeout_ms) */
   waitUntilTimeoutMs?: number
+  /**
+   * [functions.<name>].max_heap_bytes (Edge Runtime limits.max_heap_bytes).
+   * Recorded for contract compatibility. Lite does not enforce a Worker heap.
+   */
+  maxHeapBytes?: number
   /** [functions.<name>].outbound_hosts: fetch host allowlist (Edge Runtime capabilities.outbound_hosts) */
   outboundHosts?: string[]
   /** [functions.<name>].secrets: env keys exposed to the function (Edge Runtime capabilities.secrets) */
@@ -439,7 +444,7 @@ function readFunctions(root: ConfigTable, mode: RuntimeMode): Record<string, Fun
       }
     }
     if (mode === 'strict') {
-      for (const key of ['timeout_ms', 'max_request_body_bytes', 'max_response_body_bytes', 'wait_until_timeout_ms']) {
+      for (const key of ['timeout_ms', 'max_request_body_bytes', 'max_response_body_bytes', 'wait_until_timeout_ms', 'max_heap_bytes']) {
         if (t.values.has(key)) {
           const value = t.values.get(key)
           if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) {
@@ -462,6 +467,8 @@ function readFunctions(root: ConfigTable, mode: RuntimeMode): Record<string, Fun
     if (maxResponseBodyBytes !== undefined && maxResponseBodyBytes > 0) opts.maxResponseBodyBytes = maxResponseBodyBytes
     const waitUntilTimeoutMs = getInt(t, 'wait_until_timeout_ms')
     if (waitUntilTimeoutMs !== undefined && waitUntilTimeoutMs > 0) opts.waitUntilTimeoutMs = waitUntilTimeoutMs
+    const maxHeapBytes = getInt(t, 'max_heap_bytes')
+    if (maxHeapBytes !== undefined && maxHeapBytes > 0) opts.maxHeapBytes = maxHeapBytes
     const outboundHosts = getStringArray(t, 'outbound_hosts')
     if (outboundHosts !== undefined) opts.outboundHosts = outboundHosts
     const secrets = getStringArray(t, 'secrets')
