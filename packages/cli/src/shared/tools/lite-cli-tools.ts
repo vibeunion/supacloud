@@ -9,7 +9,7 @@ import { registerTool, type ToolServer } from "../tool-server";
 
 export type LiteCliAction =
     | "version" | "start" | "migrate" | "status" | "keys" | "gen_types"
-    | "db_reset" | "db_diff" | "db_pull" | "snapshot_create" | "snapshot_restore"
+    | "db_reset" | "db_diff" | "db_pull" | "db_check" | "snapshot_create" | "snapshot_restore"
     | "upgrade" | "inspect" | "doctor";
 
 export interface LiteCliArgs {
@@ -41,6 +41,13 @@ export interface LiteCliArgs {
     memory?: boolean;
     json?: boolean;
     baseline?: boolean;
+    production?: boolean;
+    runtime_mode?: "development" | "strict";
+    postgres_dir?: string;
+    identity_module?: string;
+    external_auth_proxy_issuer?: string;
+    external_auth_proxy_redirect_origin?: string;
+    module_file?: string;
 }
 
 export interface LiteCliExecutionResult {
@@ -88,6 +95,7 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
             args.push("db", "pull");
             if (request.file) args.push(request.file);
             break;
+        case "db_check": args.push("db", "check"); break;
         case "snapshot_create": args.push("snapshot", "create"); break;
         case "snapshot_restore":
             if (!request.snapshot_file) throw new Error("snapshot_restore requires --snapshot_file");
@@ -122,6 +130,15 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     booleanFlag(args, "--json", request.json);
     if (request.baseline && request.action !== "db_pull") throw new Error("baseline requires db_pull");
     booleanFlag(args, "--baseline", request.baseline);
+    if (request.production && request.action !== "doctor") throw new Error("production requires doctor");
+    booleanFlag(args, "--production", request.production);
+    if (request.module_file && request.action !== "db_check") throw new Error("module_file requires db_check");
+    optionalFlag(args, "--module-file", request.module_file);
+    optionalFlag(args, "--runtime-mode", request.runtime_mode);
+    optionalFlag(args, "--postgres-dir", request.postgres_dir);
+    optionalFlag(args, "--identity-module", request.identity_module);
+    optionalFlag(args, "--external-auth-proxy-issuer", request.external_auth_proxy_issuer);
+    optionalFlag(args, "--external-auth-proxy-redirect-origin", request.external_auth_proxy_redirect_origin);
     return args;
 }
 
@@ -209,7 +226,7 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
         {
             action: withDescription(stringEnum([
                 "version", "start", "migrate", "status", "keys", "gen_types", "db_reset", "db_diff", "db_pull",
-                "snapshot_create", "snapshot_restore", "upgrade", "inspect", "doctor",
+                "snapshot_create", "snapshot_restore", "upgrade", "inspect", "doctor", "db_check",
             ]), "Lite CLI action"),
             workdir: optional(Type.String(), "[*] Process working directory (default: current directory)"),
             project_dir: optional(Type.String(), "[*] Project containing supabase/"),
@@ -238,6 +255,13 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             memory: optional(Type.Boolean(), "[*] Use an in-memory PGlite database"),
             json: optional(Type.Boolean(), "[doctor] Emit machine-readable output"),
             baseline: optional(Type.Boolean(), "[db_pull] Record already-present schema in local migration history after review"),
+            production: optional(Type.Boolean(), "[doctor] Add single-node production readiness checks"),
+            runtime_mode: optional(stringEnum(["development", "strict"]), "[*] Lite runtime mode"),
+            postgres_dir: optional(Type.String(), "[native] Operator-managed PostgreSQL installation"),
+            identity_module: optional(Type.String(), "[*] Trusted external identity bridge module"),
+            external_auth_proxy_issuer: optional(Type.String(), "[start] Same-origin OAuth proxy issuer"),
+            external_auth_proxy_redirect_origin: optional(Type.String(), "[start] Allowed logout redirect origins"),
+            module_file: optional(Type.String(), "[db_check] Database module manifest"),
         },
         async (request) => {
             buildLiteArgs(request);

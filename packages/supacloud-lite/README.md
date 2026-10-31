@@ -106,6 +106,7 @@ timeout_ms = 15000                        # limits.timeout_ms
 max_request_body_bytes = 1048576          # limits.max_request_body_bytes
 max_response_body_bytes = 524288          # limits.max_response_body_bytes
 wait_until_timeout_ms = 2000              # limits.wait_until_timeout_ms
+max_heap_bytes = 134217728                # limits.max_heap_bytes（校验，不强制隔离）
 outbound_hosts = ["api.example.com"]      # capabilities.outbound_hosts
 secrets = ["OPENAI_API_KEY"]              # capabilities.secrets
 background = true                         # capabilities.background
@@ -117,6 +118,7 @@ background = true                         # capabilities.background
 | `max_request_body_bytes` | integer | 请求体上限；content-length 超限返回 413，无长度声明的流式 body 超限则中断读取 | `limits.max_request_body_bytes` |
 | `max_response_body_bytes` | integer | 响应体上限；content-length 超限直接替换为 502，流式 body 超限则在传输中截断（状态行已提交，客户端看到流中断） | `limits.max_response_body_bytes` |
 | `wait_until_timeout_ms` | integer | 响应返回后等待 `EdgeRuntime.waitUntil` 后台任务的最长时间；超时不再等待（任务继续运行，记录警告） | `limits.wait_until_timeout_ms` |
+| `max_heap_bytes` | integer | 1 字节到 512 MiB。strict 模式拒绝非法值。Lite 没有 Worker 隔离，不会按该值采样堆或回收进程 | `limits.max_heap_bytes` |
 | `outbound_hosts` | string[] | `fetch` 出站 host 白名单（精确匹配，不含端口）；loopback（localhost/127.0.0.1/::1）始终放行，未声明的 host 直接抛错 | `capabilities.outbound_hosts` |
 | `secrets` | string[] | 函数可见的环境变量白名单：基础三键（`SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`）+ 声明的 key，同时约束 `Deno.env` 与 `ctx.env` | `capabilities.secrets` |
 | `background` | boolean | 是否允许 `EdgeRuntime.waitUntil`；设为 `false` 时调用抛出与生产一致的错误 | `capabilities.background` |
@@ -162,7 +164,7 @@ sso_domains = ["acme.example"]
 
 ### 新版应用兼容
 
-Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重复版本和已应用 SQL 的内容漂移；目标绑定复用 `@supacloud/db`，`migrate --json` 可输出不含参数值的校验记录。`--runtime-mode strict` 对齐函数默认限制并拒绝无效配置、缺失函数和未声明的后台任务。
+Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重复版本和已应用 SQL 的内容漂移；目标绑定复用 `@supacloud/db`，`migrate --json` 可输出不含参数值的校验记录。`--runtime-mode strict` 对齐函数默认限制并拒绝无效配置、缺失函数和未声明的后台任务。`max_heap_bytes` 接受与生产 Edge Runtime 相同的 1 字节到 512 MiB 声明；strict 模式拒绝非法值。Lite 在进程内执行函数，不按该预算采样堆或回收进程。
 
 `/graphql/v1` 使用真正的 `pg_graphql` 扩展和调用者的数据库角色/RLS，不模拟扩展。默认 PGlite 和标准 native 下载包均不包含该扩展；native 可通过 `--postgres-dir` 选择已经安装匹配扩展的 PostgreSQL。配置 `[lite.graphql] enabled = true` 会在运行时启动前验证扩展，`doctor --json` 区分已支持、缺失与尚未验证。
 
@@ -907,6 +909,9 @@ duplicate versions and applied SQL drift before pending migrations, and reuses
 `@supacloud/db` for reviewed target bindings. `migrate --json` emits a hash-only
 binding attestation. Strict mode enforces bounded function defaults and rejects
 invalid declarations, missing functions and undeclared background work.
+`max_heap_bytes` accepts the production range of 1 byte through 512 MiB and
+is rejected when invalid in strict mode. Lite does not sample or retire on
+that budget, because functions run in-process.
 
 `/graphql/v1` requires real `pg_graphql` and uses the caller's role/RLS. Neither
 bundled PGlite nor stock native downloads include the extension. Native can use
