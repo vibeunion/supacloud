@@ -347,9 +347,19 @@ supacloud lite db_diff --project_dir . --file add_accounts
 supacloud lite db_pull --project_dir . --file remote_schema
 supacloud lite gen_types --project_dir . --output src/database.types.ts
 supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud lite doctor --project_dir . --json
-supacloud lite start --project_dir . --port 54321
+supacloud lite doctor --project_dir . --json --production --runtime_mode strict
+supacloud lite db_check --project_dir . --module_file supabase/db/modules.ts
+supacloud lite start --project_dir . --port 54321 --runtime_mode strict \
+  --identity_module ./lite.identity.ts \
+  --external_auth_proxy_issuer https://auth.example.com/auth/v1 \
+  --external_auth_proxy_redirect_origin https://app.example.com
 ```
+
+The adapter forwards the existing Lite flags for runtime mode, an
+operator-managed `--postgres_dir`, the identity module, the same-origin auth
+proxy, `doctor --production`, and `db check`. It does not accept Auth
+passwords: `auth create-user` stays on the `supacloud-lite` binary, which
+reads one password line from stdin.
 
 Executable resolution is `SUPACLOUD_LITE_CLI_BIN`, then the project-local
 `@supacloud/lite` launcher, then `supacloud-lite` on `PATH`. The `supabase`
