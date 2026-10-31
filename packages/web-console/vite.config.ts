@@ -28,7 +28,6 @@ export default defineConfig({
 			'@tanstack/svelte-query',
 			'clsx',
 			'tailwind-merge',
-			'marked',
 			'svelte-i18n',
 			'mode-watcher',
 			'next-themes'
