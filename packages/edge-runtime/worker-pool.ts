@@ -693,6 +693,15 @@ export class WorkerPool {
     return assignedProjectRef === undefined || assignedProjectRef === projectRef;
   }
 
+  private hasActiveWorkerForProject(projectRef: string): boolean {
+    for (const candidate of this.activeWorkers) {
+      if (this.workerProjectRef(candidate) === projectRef && !this.tainted.has(candidate)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private assignWorkerProject(worker: Worker, projectRef: string): void {
     const metadata = this.workerMetadata.get(worker);
     if (!metadata) throw new Error("Missing worker metadata");
@@ -840,7 +849,10 @@ export class WorkerPool {
     if (!entry) throw new Error(`Empty dispatch queue for project ${projectRef}`);
 
     this.queuedCount--;
-    this.queuedProjects = this.queuedProjects.filter((queuedProject) => queuedProject !== projectRef);
+    const projectIndex = this.queuedProjects.indexOf(projectRef);
+    if (projectIndex !== -1) {
+      this.queuedProjects.splice(projectIndex, 1);
+    }
     if (projectQueue.length === 0) {
       this.queuedDispatches.delete(projectRef);
     } else {
@@ -1181,9 +1193,7 @@ export class WorkerPool {
     // Preserve warm slots when every queued project already has capacity.
     // An unrepresented project gets the next completed slot, even under load.
     const uncoveredProject = this.queuedProjects.find(projectRef => (
-      projectRef !== assignedProjectRef && ![...this.activeWorkers].some(
-        candidate => this.workerProjectRef(candidate) === projectRef && !this.tainted.has(candidate),
-      )
+      projectRef !== assignedProjectRef && !this.hasActiveWorkerForProject(projectRef)
     ));
     const targetProject = uncoveredProject
       ?? (assignedProjectRef && this.queuedDispatches.has(assignedProjectRef)
