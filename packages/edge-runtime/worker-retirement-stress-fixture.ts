@@ -89,7 +89,7 @@ async function runStress(): Promise<void> {
     await waitForNaturalExits(pool, expectedRetirements);
     await waitForIdleWorkers(pool, 2);
     const metrics = pool.snapshotMetrics("stress");
-    console.log(JSON.stringify({
+    console.log("SUPACLOUD_RETIREMENT_REPORT " + JSON.stringify({
       survived: true,
       retirements: metrics.stress_total_worker_retirements,
       naturalExits: metrics.stress_total_natural_worker_exits,
