@@ -241,11 +241,15 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 
 The Web Console currently tracks the published SVAdmin line:
 
-- `@svadmin/core` `0.66.0`
-- `@svadmin/ui` `0.92.0`
-- `@svadmin/elysia` `0.14.11`
-- `@svadmin/sveltekit` `0.13.8`
-- `@svadmin/ai-elements` `0.12.4`
+- `@svadmin/core` `0.67.0`
+- `@svadmin/ui` `0.102.0`
+- `@svadmin/elysia` `0.14.15`
+- `@svadmin/sveltekit` `0.13.12`
+- `@svadmin/ai-elements` `0.13.0`
+
+List and settings pages that repeated a local loading, empty, and error shell now
+use `PagePattern`. Pages with a client-side search use `FilterToolbar`. The
+Management API requests and mutation payloads are unchanged.
 
 This release line requires SvelteKit 3, so the Console also migrated its
 adapter configuration into the Vite `sveltekit` plugin and moved page state

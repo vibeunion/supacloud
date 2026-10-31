@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Zap, ZapOff } from "lucide-svelte";
+  import { Zap } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface Trigger {
     trigger_name: string;
@@ -56,6 +59,24 @@
   const triggers = $derived((triggersQuery.data as Trigger[]) || []);
   const isLoading = $derived(triggersQuery.isPending);
   const error = $derived(triggersQuery.error?.message || null);
+  let triggerQuery = $state("");
+  const normalizedTriggerQuery = $derived(triggerQuery.trim().toLocaleLowerCase());
+  const filteredTriggers = $derived(
+    normalizedTriggerQuery
+      ? triggers.filter((trigger) =>
+          [trigger.trigger_name, trigger.event_object_table, trigger.event_manipulation, trigger.action_statement]
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(normalizedTriggerQuery),
+        )
+      : triggers,
+  );
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error) return "error" as const;
+    if (triggers.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   const TRIGGER_EVENT_KEYS: Record<string, string> = {
     INSERT: "Triggers.event_insert",
@@ -92,28 +113,25 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div>
-    <h1 class="text-2xl font-bold">{$t("Triggers.title")}</h1>
-    <p class="text-sm text-muted-foreground mt-1">{$t("Triggers.subtitle")}</p>
-  </div>
+<PagePattern
+  kind="list"
+  pageId="database-triggers"
+  title={$t("Triggers.title")}
+  description={$t("Triggers.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "error" ? (error || $t("Common.error")) : pageState === "empty" ? $t("Triggers.no_triggers") : $t("Triggers.loading")}
+  stateDescription={pageState === "error" ? error || undefined : undefined}
+  retry={() => { void triggersQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={triggerQuery} placeholder={$t("Triggers.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("Triggers.loading")}</p>
-      </div>
-    {:else if error}
-      <div class="p-4">
-        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
-      </div>
-    {:else if triggers.length === 0}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3 opacity-40">
-        <ZapOff size={40} strokeWidth={1} />
-        <p class="text-sm">{$t("Triggers.no_triggers")}</p>
-      </div>
-    {:else}
+  {#if filteredTriggers.length === 0}
+    <DataState state="filtered-empty" title={$t("Common.no_matches")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -127,7 +145,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each triggers as trg}
+            {#each filteredTriggers as trg (`${trg.event_object_table}:${trg.trigger_name}:${trg.event_manipulation}`)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
@@ -155,6 +173,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

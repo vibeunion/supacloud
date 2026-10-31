@@ -2,9 +2,10 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
-  import { Loader2, Shield, Search } from "lucide-svelte";
-  import { toast } from "svelte-sonner";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface StoragePolicy {
     policyname: string;
@@ -49,6 +50,13 @@
 
   const policies = $derived(policiesQuery.data || []);
   const isLoading = $derived(policiesQuery.isPending);
+  const loadError = $derived(policiesQuery.error?.message || null);
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (loadError && policies.length === 0) return "error" as const;
+    if (policies.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   const filteredPolicies = $derived(
     searchQuery.trim()
@@ -67,30 +75,28 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div>
-    <h1 class="text-2xl font-bold">Storage 策略</h1>
-    <p class="text-sm text-muted-foreground mt-1">Storage schema 上的 RLS 策略管理（objects / buckets 表）</p>
-  </div>
+<PagePattern
+  kind="list"
+  pageId="storage-policies"
+  title="Storage 策略"
+  description="Storage schema 上的 RLS 策略管理（objects / buckets 表）"
+  state={pageState}
+  stateTitle={pageState === "error" ? (loadError || "加载失败") : pageState === "empty" ? "暂无 Storage RLS 策略" : "加载中..."}
+  stateDescription={pageState === "empty" ? "为 storage.objects 和 storage.buckets 表创建 RLS 策略" : pageState === "error" ? loadError || undefined : undefined}
+  retry={() => { void policiesQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={searchQuery} placeholder="搜索策略名或表名..." clearLabel="清除搜索" />
+  {/snippet}
 
-  <div class="relative max-w-sm">
-    <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-    <input type="text" bind:value={searchQuery} placeholder="搜索策略名或表名..."
-      class="w-full pl-9 pr-3 py-2 text-xs rounded-lg border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
-  </div>
-
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-      </div>
-    {:else if policies.length === 0}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Shield size={40} class="opacity-20" />
-        <p class="text-sm">暂无 Storage RLS 策略</p>
-        <p class="text-xs">为 storage.objects 和 storage.buckets 表创建 RLS 策略</p>
-      </div>
-    {:else}
+  {#if loadError && policies.length > 0}
+    <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{loadError}</div>
+  {/if}
+  {#if filteredPolicies.length === 0}
+    <DataState state="filtered-empty" title="没有匹配结果" description="请调整或清除搜索条件。" />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto max-h-[65vh]">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -115,6 +121,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

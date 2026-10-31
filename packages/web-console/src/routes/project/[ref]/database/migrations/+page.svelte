@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, GitCommitVertical, FileCode2 } from "lucide-svelte";
+  import { GitCommitVertical } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface Migration {
     version: string;
@@ -46,7 +49,24 @@
   const migrations = $derived(migrationsQuery.data || []);
   const isLoading = $derived(migrationsQuery.isPending);
   const error = $derived(migrationsQuery.error?.message || null);
-  const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? $t("Migrations.empty") : null);
+  let migrationQuery = $state("");
+  const normalizedMigrationQuery = $derived(migrationQuery.trim().toLocaleLowerCase());
+  const filteredMigrations = $derived(
+    normalizedMigrationQuery
+      ? migrations.filter((migration) =>
+          [migration.version, migration.name || "", migration.checksum]
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(normalizedMigrationQuery),
+        )
+      : migrations,
+  );
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error) return "error" as const;
+    if (migrations.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   function formatTime(ts: string | null): string {
     if (!ts) return "—";
@@ -55,32 +75,30 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">{$t("Migrations.title")}</h1>
-      <p class="text-sm text-muted-foreground mt-1">{$t("Migrations.subtitle")}</p>
-      <p class="text-[11px] text-muted-foreground mt-1">{$t("Migrations.technical_names_note")}</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="database-migrations"
+  title={$t("Migrations.title")}
+  description={`${$t("Migrations.subtitle")} ${$t("Migrations.technical_names_note")}`}
+  state={pageState}
+  stateTitle={pageState === "error" ? $t("Migrations.load_failed") : pageState === "empty" ? $t("Migrations.empty") : $t("Migrations.loading")}
+  stateDescription={pageState === "error" ? error || undefined : pageState === "empty" ? $t("Migrations.no_migrations") : undefined}
+  retry={() => { void migrationsQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet actions()}
     {#if !isLoading && migrations.length > 0}
-      <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{migrations.length}</span>
+      <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{filteredMigrations.length}</span>
     {/if}
-  </div>
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={migrationQuery} placeholder={$t("Migrations.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("Migrations.loading")}</p>
-      </div>
-    {:else if error}
-      <div class="p-4"><div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div></div>
-    {:else if fallbackMsg}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-4 opacity-40">
-        <FileCode2 size={48} strokeWidth={1} />
-        <p class="text-sm">{fallbackMsg}</p>
-      </div>
-    {:else}
+  {#if filteredMigrations.length === 0}
+    <DataState state="filtered-empty" title={$t("Common.no_matches")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -93,7 +111,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each migrations as mig (mig.version)}
+            {#each filteredMigrations as mig (mig.version)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
@@ -114,6 +132,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

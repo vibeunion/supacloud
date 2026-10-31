@@ -3,9 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Webhook, Plus, Globe, Trash2, Loader2 } from "lucide-svelte";
-  import { toast } from "svelte-sonner";
+  import { Webhook, Plus, Trash2, Loader2 } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   const projectRef = $derived(page.params.ref);
 
@@ -87,6 +89,24 @@
   const endpoints = $derived(webhooksQuery.data?.endpoints || []);
   const tables = $derived(webhooksQuery.data?.tables || []);
   const isLoading = $derived(webhooksQuery.isPending);
+  let webhookQuery = $state("");
+  const normalizedWebhookQuery = $derived(webhookQuery.trim().toLocaleLowerCase());
+  const filteredEndpoints = $derived(
+    normalizedWebhookQuery
+      ? endpoints.filter((endpoint) =>
+          [endpoint.id, endpoint.table, ...endpoint.events]
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(normalizedWebhookQuery),
+        )
+      : endpoints,
+  );
+  const pageState = $derived.by(() => {
+    if (showAdd) return "ready" as const;
+    if (isLoading) return "loading" as const;
+    if (endpoints.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   const saveMutation = createMutation(() => ({
     mutationFn: async () => {
@@ -178,22 +198,30 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">{$t("Hooks.title")}</h1>
-      <p class="text-sm text-muted-foreground mt-1">{$t("Hooks.subtitle")}</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="database-webhooks"
+  title={$t("Hooks.title")}
+  description={$t("Hooks.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "empty" ? $t("Hooks.no_hooks_title") : $t("Hooks.loading")}
+  stateDescription={pageState === "empty" ? $t("Hooks.no_hooks_description") : undefined}
+  class="h-full"
+>
+  {#snippet actions()}
     <div class="flex items-center gap-3">
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{$t("Hooks.count", { values: { count: endpoints.length } })}</span>
-      <button 
+      <button
         onclick={() => showAdd = !showAdd}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors"
       >
         <Plus size={14} /> {$t("Hooks.add")}
       </button>
     </div>
-  </div>
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={webhookQuery} placeholder={$t("Hooks.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
   {#if showAdd}
     <div class="rounded-xl border bg-card p-5 space-y-4">
@@ -251,21 +279,18 @@
     </div>
   {/if}
 
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("Hooks.loading")}</p>
-      </div>
-    {:else if endpoints.length === 0}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Webhook size={40} class="opacity-20" />
-        <p class="text-sm">{$t("Hooks.no_hooks_title")}</p>
-        <p class="text-xs">{$t("Hooks.no_hooks_description")}</p>
-      </div>
-    {:else}
+  {#if isLoading}
+    <p class="text-xs font-mono uppercase tracking-widest text-muted-foreground">{$t("Hooks.loading")}</p>
+  {:else if filteredEndpoints.length === 0}
+    <DataState
+      state={endpoints.length === 0 ? "empty" : "filtered-empty"}
+      title={endpoints.length === 0 ? $t("Hooks.no_hooks_title") : $t("Common.no_matches")}
+      description={endpoints.length === 0 ? $t("Hooks.no_hooks_description") : $t("Common.no_matches_hint")}
+    />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="divide-y divide-border/20">
-        {#each endpoints as endpoint}
+        {#each filteredEndpoints as endpoint (endpoint.id)}
           <div class="flex items-center justify-between px-5 py-4 hover:bg-muted/10 transition-colors">
             <div class="flex items-center gap-3">
               <Webhook size={16} class="text-brand" />
@@ -291,6 +316,6 @@
           </div>
         {/each}
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

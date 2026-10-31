@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Package, Check, X, Search } from "lucide-svelte";
+  import { Loader2, Package, Check, X } from "lucide-svelte";
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface Extension {
     name: string;
@@ -42,7 +45,14 @@
 
   const extensions = $derived((extensionsQuery.data as Extension[]) || []);
   const isLoading = $derived(extensionsQuery.isPending);
-  const error = $derived(extensionsQuery.error?.message || toggleError);
+  const loadError = $derived(extensionsQuery.error?.message || null);
+  const error = $derived(loadError || toggleError);
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (loadError && extensions.length === 0) return "error" as const;
+    if (extensions.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   let togglingExt = $state<string | null>(null);
 
@@ -89,41 +99,36 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">{$t("Extensions.title")}</h1>
-      <p class="text-sm text-muted-foreground mt-1">{$t("Extensions.subtitle")}</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="database-extensions"
+  title={$t("Extensions.title")}
+  description={$t("Extensions.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "error" ? (loadError || $t("Common.error")) : pageState === "empty" ? $t("Extensions.empty") : $t("Extensions.loading")}
+  stateDescription={pageState === "error" ? loadError || undefined : undefined}
+  retry={() => { void extensionsQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet actions()}
     {#if !isLoading}
       <div class="flex items-center gap-3 text-xs text-muted-foreground">
         <span class="px-2 py-1 rounded bg-green-500/10 text-green-600 font-bold">{enabledCount} {$t("Extensions.enabled")}</span>
         <span class="px-2 py-1 rounded bg-muted text-muted-foreground font-bold">{extensions.length - enabledCount} {$t("Extensions.disabled")}</span>
       </div>
     {/if}
-  </div>
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={searchQuery} placeholder={$t("Extensions.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
-  <div class="relative w-64">
-    <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-    <input
-      bind:value={searchQuery}
-      placeholder={$t("Extensions.search")}
-      class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
-    />
-  </div>
-
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden flex flex-col">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("Extensions.loading")}</p>
-      </div>
-    {:else}
-      {#if error}
-        <div class="p-4 border-b">
-          <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
-        </div>
-      {/if}
+  {#if error}
+    <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
+  {/if}
+  {#if filteredExtensions.length === 0}
+    <DataState state="filtered-empty" title={$t("Common.no_matches")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden flex flex-col">
       <div class="overflow-auto flex-1">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0 z-10">
@@ -180,6 +185,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>
