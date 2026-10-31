@@ -77,14 +77,20 @@ describe("SVAdmin stylesheet migration", () => {
       fileURLToPath(import.meta.resolve("@svadmin/ui/components/AutoTable.svelte")),
       "utf8",
     );
-    const aliases = new Set(tableSource.match(/\bsvadmin-u-[a-f0-9]+\b/g));
+    // @svadmin/ui 0.108 writes AutoTable with Tailwind utilities and
+    // svadmin-auto-table hooks. Hashed svadmin-u-* aliases stay in the
+    // precompiled theme, which the host must keep without scanning @svadmin/ui.
+    expect(tableSource).not.toMatch(/\bsvadmin-u-[a-f0-9]+\b/);
+    expect(tableSource).toContain("svadmin-auto-table__desktop");
+    const aliases = new Set(uiThemeSource.match(/\.svadmin-u-[a-f0-9]+\b/g));
     expect(aliases.size).toBeGreaterThan(0);
     for (const alias of aliases) {
-      expect(uiThemeSource).toContain(`.${alias}`);
-      expect(css).toContain(`.${alias}`);
+      expect(css).toContain(alias);
     }
     expect(css).toContain(".svadmin-button");
     expect(css).toContain(".svadmin-table");
+    expect(css).toContain(".h-7");
+    expect(css).toContain(".space-y-3");
     expect(css).toContain("--color-background: var(--background)");
     expect(css).toContain("--background: hsl(0 0% 100%)");
     expect(css).toContain("--background: hsl(240 10% 3.9%)");
