@@ -31,9 +31,9 @@
     "next-themes": "^0.4.6",
     "paneforge": "^1.0.2",
     "postcss": "^8.5.30",
-    "svelte": "^5.57.2",
+    "svelte": "^5.57.3",
     "svelte-check": "^4.7.7",
-    "svelte-sonner": "^1.2.1",
+    "svelte-sonner": "^1.2.2",
     "sveltekit-superforms": "^3.0.0",
     "tailwind-animate": "^0.2.10",
     "tailwind-merge": "^3.7.0",
@@ -41,7 +41,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
     "vaul-svelte": "^0.3.2",
-    "vite": "8.3.4"
+    "vite": "8.3.5"
   },
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
@@ -50,7 +50,7 @@
     "@svadmin/elysia": "0.14.11",
     "@svadmin/sveltekit": "0.13.8",
     "@svadmin/ui": "0.92.0",
-    "@tanstack/svelte-query": "^6.3.5",
+    "@tanstack/svelte-query": "^6.3.6",
     "highlight.js": "^11.12.0",
     "isomorphic-dompurify": "^4.5.0",
     "lucide-svelte": "^1.0.1",

@@ -69,7 +69,9 @@ beforeAll(async () => {
     CREATE TABLE app.settings(id text PRIMARY KEY, tenant_id text NOT NULL,
       enabled boolean NOT NULL DEFAULT false, version integer NOT NULL DEFAULT 0)`);
   db = drizzle({ client: pool });
-}, 30_000);
+  // A cold ghcr.io/pgmq/pg18-pgmq pull exceeds the 30s hook budget and fails
+  // the suite before PostgreSQL is listening.
+}, 180_000);
 
 afterAll(async () => {
   try { await pool?.close(); }
