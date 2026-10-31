@@ -33,7 +33,7 @@
     "postcss": "^8.5.30",
     "svelte": "^5.57.2",
     "svelte-check": "^4.7.7",
-    "svelte-sonner": "^1.2.1",
+    "svelte-sonner": "^1.2.2",
     "sveltekit-superforms": "^3.0.0",
     "tailwind-animate": "^0.2.10",
     "tailwind-merge": "^3.7.0",
