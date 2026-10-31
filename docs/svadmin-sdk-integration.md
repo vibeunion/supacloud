@@ -16,6 +16,11 @@ command RPCs.
 | Domain authorization, idempotency and receipts | Trusted application server / database |
 | Query invalidation, form layout and notifications | svadmin / application UI |
 
+For a framework-level reference that keeps this ownership model, including
+request-scoped SupaCloud clients, read-only SSR snapshots and SPA task centers,
+see [SvelteKit Integration](./sveltekit-integration.md). It is a transport and
+lifecycle recipe, not a default SvelteKit host.
+
 `@supacloud/js/contracts` is a facade over the existing
 `@supacloud/contracts/client`, not another implementation. It is separate from the
 SDK root and does not expose platform commands or persistent browser locks.
@@ -140,19 +145,27 @@ the DOM view, with strict Svelte diagnostics enabled. This verifies those
 components and the reference binding, not every SVAdmin provider or the deployed
 customer UI. Neither the template nor the SDK gains a hard UI dependency.
 
-## Compatibility before upgrading the task adapter
+## Task adapter compatibility
 
-At the integration baseline, svadmin pins SDK `0.23.1` for tests and declares
-`^0.23.1` as an optional peer; SupaCloud source is `0.33.0`. Those ranges do not
-overlap. This new subpath is not available in the old SDK. Do not widen the peer
-range or update installation instructions until a released SDK containing it has
-passed the adapter's consumer tests.
+The `@svadmin/supabase` task subpath declares `@supacloud/js` as an optional peer
+with the tested range `^0.33.0 || ^0.34.0 || ^0.36.0`. Its consumer fixtures run
+against those three released SDK lines. At the time of writing, the upstream
+`packages/supacloud-js` source tree is `0.45.3`, so source is ahead of the
+declared peer range; do not treat the repository version as an adapter
+compatibility claim.
 
-In particular, the current SDK defaults task subscriptions to Management API
-polling. Realtime requires an explicitly published application-owned table; do
-not assume an internal `public.tasks` table exists. Re-run the real SDK-backed
-svadmin fixtures for submit, metadata, wait, list, cancellation, retry, subscription
-delivery and cleanup when upgrading. CRUD/auth providers need not change.
+A `0.45.3` transport probe passes against the task endpoints, but that line
+requires `@supabase/supabase-js` 2.118.0 and its nested auth-js types currently
+fail the strict consumer type check. Do not widen the peer range until the
+auth-js patch and type matrix are updated.
+
+Adding a new SDK line requires updating the peer range and rerunning the real
+SDK-backed fixtures for submit, metadata, wait, list, cancellation, retry,
+subscription delivery and cleanup. CRUD/auth providers need not change.
+
+The SDK defaults task subscriptions to Management API polling. Realtime requires
+an explicitly published application-owned table; do not assume an internal
+`public.tasks` table exists.
 
 ## Next integration steps
 
