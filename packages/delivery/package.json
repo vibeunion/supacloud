@@ -88,7 +88,7 @@
   },
   "dependencies": {
     "tar-stream": "^3.2.2",
-    "typebox": "1.4.2"
+    "typebox": "1.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",
