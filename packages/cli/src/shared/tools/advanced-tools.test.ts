@@ -109,7 +109,7 @@ describe("edge_functions CLI tool", () => {
                 }
                 const startupValue = process.env.FUNCTION_RUNTIME_VALUE;
                 export const app = new Elysia()
-                    .beforeHandle(({ request, status }) =>
+                    .onBeforeHandle(({ request, status }) =>
                         request.headers.get("authorization") === "Bearer test" ? undefined : status(401))
                     .post("/hello/:name", { body: t.Object({ count: t.Number() }) }, ({ params, body }) => ({
                         name: params.name, count: body.count, value: process.env.FUNCTION_RUNTIME_VALUE, startupValue,
