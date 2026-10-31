@@ -38,6 +38,6 @@
     "test:nx-cache": "node scripts/workspace/cache.acceptance.mjs"
   },
   "devDependencies": {
-    "nx": "23.3.0"
+    "nx": "24.0.2"
   }
 }

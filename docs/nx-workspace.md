@@ -3,7 +3,7 @@
 ## Contract and boundaries
 
 Nx schedules repository engineering tasks; SupaCloud Compiler still owns application
-semantics. Root development tooling pins Nx 23.2.1 with a Bun 1.4.2-generated lock.
+semantics. Root development tooling pins Nx 24.0.2.
 Package-local locks and runtime dependencies remain independent. Generated customer
 applications do not require Nx. The launcher resolves Nx through public bin metadata;
 `tsconfig.base.json` is a discovery path map, not a shared application configuration.
