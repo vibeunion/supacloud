@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/vibeunion/supacloud/compare/contracts-v0.15.1...contracts-v0.15.2) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+
 ## [0.15.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.15.0...contracts-v0.15.1) (2026-10-25)
 
 

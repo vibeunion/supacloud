@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.112.1](https://github.com/vibeunion/supacloud/compare/cli-v0.112.0...cli-v0.112.1) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+* **schema:** align TypeBox 1.4.3 across the compatibility graph ([#2298](https://github.com/vibeunion/supacloud/issues/2298)) ([cd909da](https://github.com/vibeunion/supacloud/commit/cd909dacc7a77178fbe17210745df2160885bdd6))
+
 ## [0.112.0](https://github.com/vibeunion/supacloud/compare/cli-v0.111.0...cli-v0.112.0) (2026-10-30)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.3](https://github.com/vibeunion/supacloud/compare/admin-v0.30.2...admin-v0.30.3) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **runtime:** align Bun 1.4.4 runtime and type baseline ([#2294](https://github.com/vibeunion/supacloud/issues/2294)) ([0f08651](https://github.com/vibeunion/supacloud/commit/0f0865192720f09d693a803fb1e506e79a2a9b83))
+* **schema:** align TypeBox 1.4.3 across the compatibility graph ([#2298](https://github.com/vibeunion/supacloud/issues/2298)) ([cd909da](https://github.com/vibeunion/supacloud/commit/cd909dacc7a77178fbe17210745df2160885bdd6))
+
 ## [0.30.2](https://github.com/vibeunion/supacloud/compare/admin-v0.30.1...admin-v0.30.2) (2026-10-26)
 
 
