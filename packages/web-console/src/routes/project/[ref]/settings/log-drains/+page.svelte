@@ -1,8 +1,11 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Plus, Trash2, Send, Loader2, Save, Webhook } from "lucide-svelte";
+  import { Plus, Trash2, Send, Loader2, Save } from "lucide-svelte";
   import { apiClient } from "$lib/api";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface LogDrain {
     id: string;
@@ -45,6 +48,22 @@
   const drains = $derived((drainsQuery.data as LogDrain[]) || []);
   const isLoading = $derived(drainsQuery.isPending);
   const loadError = $derived(drainsQuery.error?.message || null);
+  let drainQuery = $state("");
+  const normalizedDrainQuery = $derived(drainQuery.trim().toLocaleLowerCase());
+  const filteredDrains = $derived(
+    normalizedDrainQuery
+      ? drains.filter((drain) =>
+          [drain.name, drain.type, drain.url].join(" ").toLocaleLowerCase().includes(normalizedDrainQuery),
+        )
+      : drains,
+  );
+  const pageState = $derived.by(() => {
+    if (showAdd) return "ready" as const;
+    if (isLoading) return "loading" as const;
+    if (loadError) return "error" as const;
+    if (drains.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   const createDrainMutation = createMutation(() => ({
     mutationFn: async () => {
@@ -120,19 +139,28 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">日志转发</h1>
-      <p class="text-sm text-muted-foreground mt-1">将项目日志转发到外部日志服务进行聚合和分析</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="log-drains"
+  title="日志转发"
+  description="将项目日志转发到外部日志服务进行聚合和分析"
+  state={pageState}
+  stateTitle={pageState === "error" ? (loadError || "加载失败") : pageState === "empty" ? "暂无日志转发目标" : "加载中..."}
+  stateDescription={pageState === "empty" ? "点击上方按钮添加第一个日志转发目标" : pageState === "error" ? loadError || undefined : undefined}
+  retry={() => { void drainsQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet actions()}
     <button
       onclick={() => (showAdd = !showAdd)}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors"
     >
       <Plus size={14} /> 添加目标
     </button>
-  </div>
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={drainQuery} placeholder="搜索名称、类型或地址" clearLabel="清除搜索" />
+  {/snippet}
 
   {#if msg}
     <div class="rounded-lg border px-4 py-2 text-xs font-medium bg-green-500/5 border-green-500/20 text-green-700">{msg}</div>
@@ -203,25 +231,18 @@
     <p class="text-xs text-blue-700">日志转发支持将 PostgreSQL 查询日志、Auth 事件、Storage Access 日志等实时推送到外部服务。支持 Webhook、Datadog、Grafana Loki、Elasticsearch 等目标。</p>
   </div>
 
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">加载中...</p>
-      </div>
-    {:else if loadError}
-      <div class="p-4">
-        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{loadError}</div>
-      </div>
-    {:else if drains.length === 0}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Webhook size={40} class="opacity-20" />
-        <p class="text-sm">暂无日志转发目标</p>
-        <p class="text-xs">点击上方按钮添加第一个日志转发目标</p>
-      </div>
-    {:else}
+  {#if isLoading}
+    <p class="text-xs font-mono uppercase tracking-widest text-muted-foreground">加载中...</p>
+  {:else if filteredDrains.length === 0}
+    <DataState
+      state={drains.length === 0 ? "empty" : "filtered-empty"}
+      title={drains.length === 0 ? "暂无日志转发目标" : "没有匹配结果"}
+      description={drains.length === 0 ? "点击上方按钮添加第一个日志转发目标" : "请调整或清除搜索条件。"}
+    />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="divide-y divide-border/20">
-        {#each drains as drain (drain.id)}
+        {#each filteredDrains as drain (drain.id)}
           <div class="flex items-center justify-between px-5 py-4 hover:bg-muted/10 transition-colors group">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg {drain.enabled ? 'bg-brand/10' : 'bg-muted/50'}">
@@ -254,6 +275,6 @@
           </div>
         {/each}
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

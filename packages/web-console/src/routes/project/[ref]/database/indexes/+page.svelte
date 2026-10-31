@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Search, Hash, Check, X } from "lucide-svelte";
+  import { Hash, Check, X } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface DbIndex {
     schemaname: string;
@@ -64,6 +67,12 @@
   const indexes = $derived((indexesQuery.data as DbIndex[]) || []);
   const isLoading = $derived(indexesQuery.isPending);
   const error = $derived(indexesQuery.error?.message || null);
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error && indexes.length === 0) return "error" as const;
+    if (indexes.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   const filteredIndexes = $derived(
     searchQuery
@@ -83,32 +92,33 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">{$t("Indexes.title")}</h1>
-      <p class="text-sm text-muted-foreground mt-1">{$t("Indexes.subtitle")}</p>
-      <p class="text-xs text-muted-foreground mt-1">{$t("Indexes.type_help")}</p>
-    </div>
+<PagePattern
+  kind="list"
+  pageId="database-indexes"
+  title={$t("Indexes.title")}
+  description={`${$t("Indexes.subtitle")} ${$t("Indexes.type_help")}`}
+  state={pageState}
+  stateTitle={pageState === "error" ? (error || $t("Common.error")) : pageState === "empty" ? $t("Indexes.empty") : $t("Indexes.loading")}
+  stateDescription={pageState === "error" ? error || undefined : undefined}
+  retry={() => { void indexesQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet actions()}
     {#if !isLoading}
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{indexes.length}</span>
     {/if}
-  </div>
+  {/snippet}
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={searchQuery} placeholder={$t("Indexes.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
-  <div class="relative w-64">
-    <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-    <input bind:value={searchQuery} placeholder={$t("Indexes.search")} class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
-  </div>
-
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("Indexes.loading")}</p>
-      </div>
-    {:else if error}
-      <div class="p-4"><div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div></div>
-    {:else}
+  {#if error}
+    <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div>
+  {/if}
+  {#if filteredIndexes.length === 0}
+    <DataState state="filtered-empty" title={$t("Common.no_matches")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -150,6 +160,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

@@ -3,8 +3,11 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Webhook, Zap } from "lucide-svelte";
+  import { Zap } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import PagePattern from "@svadmin/ui/components/PagePattern.svelte";
+  import FilterToolbar from "@svadmin/ui/components/content/FilterToolbar.svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
 
   interface DbHook {
     trigger_name: string;
@@ -52,7 +55,24 @@
   const hooks = $derived((hooksQuery.data as DbHook[]) || []);
   const isLoading = $derived(hooksQuery.isPending);
   const error = $derived(hooksQuery.error?.message || null);
-  const fallbackMsg = $derived(!isLoading && !error && hooks.length === 0 ? $t("Hooks.no_hooks") : null);
+  let hookQuery = $state("");
+  const normalizedHookQuery = $derived(hookQuery.trim().toLocaleLowerCase());
+  const filteredHooks = $derived(
+    normalizedHookQuery
+      ? hooks.filter((hook) =>
+          [hook.trigger_name, hook.event_object_table, hook.events, hook.action_statement]
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(normalizedHookQuery),
+        )
+      : hooks,
+  );
+  const pageState = $derived.by(() => {
+    if (isLoading) return "loading" as const;
+    if (error) return "error" as const;
+    if (hooks.length === 0) return "empty" as const;
+    return "ready" as const;
+  });
 
   function getEventColor(event: string): string {
     if (event.includes("INSERT")) return "text-green-600 bg-green-500/10";
@@ -62,26 +82,25 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-4">
-  <div>
-    <h1 class="text-2xl font-bold">{$t("Hooks.title")}</h1>
-    <p class="text-sm text-muted-foreground mt-1">{$t("Hooks.subtitle")}</p>
-  </div>
+<PagePattern
+  kind="list"
+  pageId="database-hooks"
+  title={$t("Hooks.title")}
+  description={$t("Hooks.subtitle")}
+  state={pageState}
+  stateTitle={pageState === "error" ? (error || $t("Common.error")) : pageState === "empty" ? $t("Hooks.no_hooks") : $t("Hooks.loading")}
+  stateDescription={pageState === "error" ? error || undefined : undefined}
+  retry={() => { void hooksQuery.refetch(); }}
+  class="h-full"
+>
+  {#snippet toolbar()}
+    <FilterToolbar bind:query={hookQuery} placeholder={$t("Hooks.search")} clearLabel={$t("Common.clear_search")} />
+  {/snippet}
 
-  <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">{$t("Hooks.loading")}</p>
-      </div>
-    {:else if error}
-      <div class="p-4"><div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div></div>
-    {:else if fallbackMsg}
-      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-4 opacity-40">
-        <Webhook size={48} strokeWidth={1} />
-        <p class="text-sm">{fallbackMsg}</p>
-      </div>
-    {:else}
+  {#if filteredHooks.length === 0}
+    <DataState state="filtered-empty" title={$t("Common.no_matches")} description={$t("Common.no_matches_hint")} />
+  {:else}
+    <div class="rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
       <div class="overflow-auto">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
@@ -94,7 +113,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each hooks as hook}
+            {#each filteredHooks as hook (hook.trigger_name)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
@@ -123,6 +142,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-  </div>
-</div>
+    </div>
+  {/if}
+</PagePattern>

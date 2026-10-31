@@ -758,7 +758,8 @@
     "enable": "启用",
     "disable": "禁用",
     "official_description": "PostgreSQL 扩展 {name} 的官方技术说明（悬停可查看英文原文）",
-    "search": "搜索扩展..."
+    "search": "搜索扩展...",
+    "empty": "暂无可用扩展。"
   },
   "Triggers": {
     "title": "数据库触发器",
@@ -778,7 +779,8 @@
     "event_delete": "删除（DELETE）",
     "timing_before": "之前（BEFORE）",
     "timing_after": "之后（AFTER）",
-    "timing_instead_of": "替代（INSTEAD OF）"
+    "timing_instead_of": "替代（INSTEAD OF）",
+    "search": "搜索触发器或表..."
   },
   "ExplainVisualizer": {
     "title": "Explain 可视化",
@@ -872,7 +874,8 @@
     "type_spgist": "空间分区 GiST 索引",
     "type_gin": "广义倒排索引",
     "type_brin": "块范围索引",
-    "search": "搜索索引..."
+    "search": "搜索索引...",
+    "empty": "在 public schema 中未发现索引。"
   },
   "Schemas": {
     "title": "数据库 Schema",
@@ -886,7 +889,9 @@
     "auth_description": "由 Supabase Auth 管理的认证用户、会话和授权数据。",
     "storage_description": "由 Supabase Storage 管理的存储桶和对象元数据。",
     "extensions_description": "由已安装 PostgreSQL 扩展提供的对象。",
-    "custom_description": "自定义数据库 Schema。"
+    "custom_description": "自定义数据库 Schema。",
+    "search": "搜索 Schema 或所有者...",
+    "empty": "未发现 Schema。"
   },
   "CronJobs": {
     "title": "定时任务",
@@ -914,7 +919,8 @@
     "delete": "DELETE",
     "truncate": "TRUNCATE",
     "tables": "表",
-    "all_tables_value": "全部"
+    "all_tables_value": "全部",
+    "search": "搜索发布、所有者或表..."
   },
   "Hooks": {
     "title": "数据库 Webhooks",
@@ -942,7 +948,8 @@
     "delete_confirm": "要删除 Webhook “{name}”吗？",
     "no_hooks_title": "暂无数据库 Webhook",
     "no_hooks_description": "添加包含 pg_net 请求的表级触发器。",
-    "on_table": "位于 {table}"
+    "on_table": "位于 {table}",
+    "search": "搜索名称、表或事件..."
   },
   "Migrations": {
     "title": "迁移历史",
@@ -956,7 +963,8 @@
     "checksum": "校验和",
     "empty": "暂无迁移历史。",
     "load_failed": "加载迁移历史失败",
-    "technical_names_note": "迁移名称作为技术标识保留原文。"
+    "technical_names_note": "迁移名称作为技术标识保留原文。",
+    "search": "搜索版本、名称或校验和..."
   },
   "EnumTypes": {
     "title": "枚举类型",
@@ -1946,6 +1954,9 @@
     "previous": "上一页",
     "next": "下一页",
     "search": "搜索...",
+    "no_matches": "没有匹配结果",
+    "no_matches_hint": "请调整或清除搜索条件。",
+    "clear_search": "清除搜索",
     "close": "关闭",
     "ago_minutes": "分钟前",
     "ago_hours": "小时前",
