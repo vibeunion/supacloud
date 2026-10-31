@@ -16,6 +16,11 @@ command RPCs.
 | Domain authorization, idempotency and receipts | Trusted application server / database |
 | Query invalidation, form layout and notifications | svadmin / application UI |
 
+For a framework-level reference that keeps this ownership model, including
+request-scoped SupaCloud clients, read-only SSR snapshots and SPA task centers,
+see [SvelteKit Integration](./sveltekit-integration.md). It is a transport and
+lifecycle recipe, not a default SvelteKit host.
+
 `@supacloud/js/contracts` is a facade over the existing
 `@supacloud/contracts/client`, not another implementation. It is separate from the
 SDK root and does not expose platform commands or persistent browser locks.
