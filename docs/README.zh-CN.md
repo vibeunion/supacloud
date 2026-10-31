@@ -55,6 +55,7 @@
 
 ## 开发框架与运行时
 
+- [工作区工具](./workspace-tooling.md) - 用 Bun 按本地依赖顺序构建包、同步 starter，并检查源码边界
 - [Edge Runtime 指南](./edge-runtime-guide.md) - Bun + Elysia Worker 线程池云函数运行时架构
 - [后台异步云函数](./background-functions.md) - 异步函数任务执行、状态轮询、重试与死信队列（DLQ）
 - [基于 supabase-js 的后台函数教程](./background-functions-supabase-js-tutorial.md) - 租户 SDK 调用、轮询、取消、DLQ、生命周期 Webhook 与队列

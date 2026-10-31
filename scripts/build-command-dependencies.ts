@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 
-// Compatibility entrypoint for existing CI and acceptance scripts. Nx owns
-// prerequisite ordering and deduplication; verification-only dependencies live
-// separately from runtime dependencies in scripts/workspace/verification.mjs.
+// Compatibility entrypoint for existing CI and acceptance scripts. The workspace
+// runner owns prerequisite ordering and deduplication; verification-only
+// dependencies live separately from runtime dependencies in scripts/workspace/verification.mjs.
 const consumer = process.argv[2];
 if (process.argv.length !== 3 || consumer === undefined) {
   throw new Error("Expected exactly one command consumer package name");

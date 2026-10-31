@@ -1,6 +1,5 @@
 {
   "name": "@supacloud/management-api",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "tags": ["scope:cloud", "type:api"],
   "projectType": "application",
   "sourceRoot": "packages/management-api/src"

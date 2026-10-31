@@ -4,7 +4,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { graphReport, readWorkspace, affectedReport } from './model.mjs';
 import { changedInputs } from './cli.mjs';
 import { verificationRelations } from './verification.mjs';
-import { cacheEligible } from './cache.mjs';
 
 /** One read model for CLI/editor/agent clients; task edges never become runtime dependencies. */
 export function contextReport(workspace, source, changed = { files: [], fallbackReason: 'No baseline supplied.' }) {
@@ -18,9 +17,10 @@ export function contextReport(workspace, source, changed = { files: [], fallback
   return {
     schemaVersion: 1, kind: 'supacloud-workspace-context',
     graph: graphReport(workspace), source, verification, affected,
-    caches: Object.values(workspace.projects).map((project) => ({ project: project.name, build: cacheEligible(project), remote: false })),
+    caches: Object.values(workspace.projects).map((project) => ({ project: project.name, build: false, remote: false })),
     limitations: ['Static JS/TS coverage is not whole-program analysis.', 'No report authorizes CI skipping.',
-      'Known source debt remains visible; successful budget checks do not prove a clean architecture.'],
+      'Known source debt remains visible; successful budget checks do not prove a clean architecture.',
+      'Package builds run live. There is no local or remote result cache.'],
   };
 }
 async function main() {

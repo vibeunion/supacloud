@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readWorkspace, resolveProject } from './model.mjs';
-import { runNx } from './nx.mjs';
+import { runTask } from './run.mjs';
 
 export function prepareVerification(root, alias) {
   const project = resolveProject(readWorkspace(root), alias);
@@ -11,10 +11,9 @@ export function prepareVerification(root, alias) {
   const install = spawnSync('bun', ['install', '--ignore-scripts', '--frozen-lockfile'], { cwd: root, stdio: 'inherit' });
   if (install.error) throw install.error;
   if (install.status !== 0) throw new Error('Frozen repository tooling installation failed.');
-  runNx(['run', `${project.name}:repo-verify-prepare`, '--outputStyle=static',
-    // Windows file locking makes concurrent `bun install --force` runs race while
-    // populating the shared extraction cache; serialize them there.
-    ...(process.platform === 'win32' ? ['--parallel=1'] : [])], root);
+  // Package installs run one at a time, including on Windows where concurrent
+  // `bun install --force` runs race the shared extraction cache.
+  runTask(root, project.name, 'repo-verify-prepare');
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
