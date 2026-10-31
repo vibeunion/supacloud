@@ -81,7 +81,9 @@ implicitly install function transport guards.
 In SSR, create these clients per request using that request's credentials.
 Never put a user's session into a shared server singleton. A session read in the
 browser is not server identity verification; the trusted host verifies tokens
-and resolves current application access.
+and resolves current application access. See
+[SvelteKit Integration](./sveltekit-integration.md) for a request-scoped client,
+SSR snapshot, server-action and SPA task-center reference.
 
 ## Failure And Trust Boundaries
 
