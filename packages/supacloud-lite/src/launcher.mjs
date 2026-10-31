@@ -25,7 +25,7 @@ function cleanup() {
 bunProcess.once('error', (error) => {
   cleanup()
   if (error.code === 'ENOENT') {
-    console.error('Bun executable not found on PATH. Install Bun 1.4.3 or newer, then retry.')
+    console.error('Bun executable not found on PATH. Install Bun 1.4.4 or newer, then retry.')
   } else {
     console.error(`Unable to start Bun: ${error.message}`)
   }

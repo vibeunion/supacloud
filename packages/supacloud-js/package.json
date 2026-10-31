@@ -110,7 +110,7 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.3",
+    "@types/bun": "^1.4.4",
     "@supabase/supabase-js": "^2.118.0",
     "typescript": "^7.0.2",
     "@tanstack/query-core": "5.104.5",

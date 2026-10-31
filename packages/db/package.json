@@ -74,7 +74,7 @@
     "@sinclair/typebox": "0.34.52",
     "drizzle-orm": "1.0.0-rc.5-5935859",
     "drizzle-kit": "1.0.0-rc.5-5935859",
-    "@types/bun": "^1.4.3",
+    "@types/bun": "^1.4.4",
     "typescript": "^7.0.2"
   },
   "dependencies": {

@@ -29,6 +29,10 @@ export function projectTargets(workspace, project) {
     targets[`repo-${script.replaceAll(':', '-')}`] = {
       executor: 'nx:run-commands', cache: false,
       options: { command: `bun run ${script}`, cwd: project.root },
+      // Compiler lifecycle hooks rebuild shared contracts/DB outputs. Keep those
+      // tasks exclusive so sibling consumers never read half-written artifacts.
+      ...(project.name === '@supacloud/compiler' && ['build', 'typecheck'].includes(script)
+        ? { parallelism: false } : {}),
       dependsOn: [{ target: script === 'build' && cacheEligible(project) ? 'repo-cache-guard' : 'repo-install', params: 'ignore' }],
       inputs: ['default', '^default'],
       ...(script === 'build' ? { outputs: ['{projectRoot}/dist'] } : {}),

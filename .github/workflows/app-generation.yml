@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
       - name: Build, pack, install and exercise the consumer path
         run: bun run scripts/check_app_generation.ts
       - name: Generator safety and existing CLI regressions

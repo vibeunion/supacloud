@@ -54,7 +54,7 @@ try {
   await writeFile(join(project, "package.json"), JSON.stringify({
     name: "angular-consumer", private: true, type: "module",
     dependencies: { ...overrides, "@angular/core": angularVersion, rxjs: app.dependencies.rxjs },
-  devDependencies: { typescript: app.devDependencies.typescript, "@types/node": app.devDependencies["@types/node"], "@types/bun": "^1.4.3" },
+  devDependencies: { typescript: app.devDependencies.typescript, "@types/node": app.devDependencies["@types/node"], "@types/bun": "^1.4.4" },
     overrides,
   }, null, 2));
   await writeFile(join(project, "tsconfig.json"), JSON.stringify({

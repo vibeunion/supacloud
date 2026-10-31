@@ -30,7 +30,7 @@
     "typebox": "1.4.3"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.3",
+    "@types/bun": "^1.4.4",
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
   }

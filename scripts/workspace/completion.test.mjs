@@ -119,6 +119,19 @@ test('verification-only dependency targets preserve the old extra build contract
   assert.equal(verificationTargets(w,find('elysia'))[1].projects[0],'@supacloud/js');
   assert.ok(!projectTargets(w,find('db'))['repo-build'].dependsOn.some(x=>x.target==='repo-verify-prepare'));
 });
+test('compiler lifecycle rebuilds cannot overlap shared-output consumers', () => {
+  const workspace=readWorkspace(resolve(import.meta.dirname,'../..'));
+  const compiler=workspace.projects['@supacloud/compiler'];
+  const targets=projectTargets(workspace,compiler);
+  for(const script of ['build','typecheck']) {
+    assert.equal(compiler.scripts[`pre${script}`],'bun run prepare:db');
+    assert.equal(targets[`repo-${script}`].parallelism,false);
+    assert.equal(targets[`repo-${script}`].options.command,`bun run ${script}`);
+  }
+  assert.ok(targets['repo-install'].dependsOn.some(dep=>dep.projects.includes('@supacloud/contracts')));
+  assert.ok(targets['repo-install'].dependsOn.some(dep=>dep.projects.includes('@supacloud/db')));
+  assert.notEqual(projectTargets(workspace,workspace.projects['@supacloud/js'])['repo-build'].parallelism,false);
+});
 test('cache refuses dangling output links and symlinked nested output paths', (t) => {
   const {root,put}=fixture(t);put('packages/contracts/src/a.ts','source');
   const dist=resolve(root,'packages/contracts/dist');symlinkSync(resolve(root,'missing'),dist);

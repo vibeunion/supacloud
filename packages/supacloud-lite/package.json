@@ -72,7 +72,7 @@
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/elysia": "file:../elysia",
     "@supabase/supabase-js": "^2.118.0",
-    "@types/bun": "^1.4.3",
+    "@types/bun": "^1.4.4",
     "effect": "4.0.5",
     "elysia": "2.0.0-rc.0",
     "jose": "^6.2.13",
@@ -89,7 +89,7 @@
     "@graphql-tools/utils": "^12.0.4"
   },
   "engines": {
-    "bun": ">=1.4.3"
+    "bun": ">=1.4.4"
   },
   "publishConfig": {
     "access": "public",

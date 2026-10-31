@@ -1,4 +1,4 @@
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.4
 FROM oven/bun:${BUN_VERSION}
 
 WORKDIR /app/packages/pgredis-runtime
