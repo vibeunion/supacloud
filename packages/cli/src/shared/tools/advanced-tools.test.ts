@@ -369,8 +369,9 @@ describe("edge_functions CLI tool", () => {
     });
 
     test("aborts deploy and check when source contains type suppression directives", async () => {
+        let mutationCount = 0;
         const { callback } = captureEdgeFunctionsTool({
-            post: async () => confirmedFunctionMutation("api"),
+            post: async () => { mutationCount += 1; return confirmedFunctionMutation("api"); },
         });
 
         const checkRes = await callback({
@@ -391,6 +392,22 @@ describe("edge_functions CLI tool", () => {
         });
         expect(deployRes.content[0].text).toContain("❌ Deployment aborted. Syntax check failed");
         expect(deployRes.content[0].text).toContain("Vibecoding guardrail violation: Type suppression directive");
+        expect(mutationCount).toBe(0);
+    });
+
+    test("accepts quoted suppression examples while rejecting actual directive comments", async () => {
+        const { callback } = captureEdgeFunctionsTool({});
+        for (const example of ["// @ts-ignore", "/* @ts-nocheck */", "// @ts-expect-error"]) {
+            const response = await callback({
+                action: "check",
+                code: `export default () => new Response(${JSON.stringify(example)});`,
+            });
+            expect(response.content[0].text).toContain("✅ Syntax check passed");
+        }
+        for (const comment of ["// @ts-expect-error", "/**\n * @ts-ignore\n */"]) {
+            const response = await callback({ action: "check", code: `${comment}\nexport default () => new Response('ok');` });
+            expect(response.content[0].text).toContain("Vibecoding guardrail violation: Type suppression directive");
+        }
     });
 
     test("parses a bundle file map from a CLI JSON string", () => {
