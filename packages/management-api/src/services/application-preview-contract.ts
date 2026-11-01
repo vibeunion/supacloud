@@ -63,9 +63,10 @@ export function buildApplicationPreviewReceipt(input: {
       test_secret: { status: "pending", name: `PREVIEW_TOKEN_${normalizedId.toUpperCase()}`, value_issued: false },
       configuration_revision: { status: "pending", configuration_id: null },
       application_activation: { status: "pending", activation_id: null },
+      functions: { status: "pending", slugs: [] },
       smoke_test: {
       status: "pending",
-      checks: ["release_artifact", "database_branch", "queue_namespace", "storage_namespace", "test_secret", "configuration_revision", "application_activation", "application_readiness"],
+      checks: ["release_artifact", "database_branch", "queue_namespace", "storage_namespace", "test_secret", "functions", "configuration_revision", "application_activation", "application_readiness"],
         passed: [],
         failed: [],
       },
