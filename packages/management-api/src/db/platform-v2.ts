@@ -12,6 +12,7 @@ import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { ensureApplicationConfigurationSchema } from "./application-configuration-schema";
 import { ensureApplicationRuntimeAllocationSchema } from "./application-runtime-allocation-schema";
 import { ensureApplicationCapacitySchema } from "./application-capacity-schema";
+import { ensureUsageMeterSchema } from "./usage-meter-schema";
 import { executeSqlStatements } from "./sql-statements";
 
 function configuredAuthAuthoritySql(): { backfill: string; expected: string; constant: string } {
@@ -611,6 +612,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
   await ensureApplicationConfigurationSchema(transaction);
   await ensureApplicationRuntimeAllocationSchema(transaction);
   await ensureApplicationCapacitySchema(transaction);
+  await ensureUsageMeterSchema(transaction);
 }
 
 export async function ensurePlatformV2SchemaInTransaction(controlPlaneDb: SQL): Promise<void> {
