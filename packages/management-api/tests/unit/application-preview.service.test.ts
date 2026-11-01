@@ -20,10 +20,16 @@ import { tmpdir } from "node:os";
 import { resolveBucketName } from "../../src/db";
 
 const configurationId = "91234567-89ab-4def-8123-456789abcdef";
-const testLifecycle: Pick<ApplicationPreviewServiceDependencies, "lifecycle" | "branchLifecycle" | "storage"> = {
+const testLifecycle: Pick<ApplicationPreviewServiceDependencies, "lifecycle" | "branchLifecycle" | "storage" | "functions"> = {
   lifecycle: async (_projectRef, _previewId, operation) => operation(),
   branchLifecycle: async (_projectRef, operation) => operation(),
   storage: { createBucket: async () => ({ success: true }) },
+  functions: {
+    list: async () => [],
+    isolate: async () => {},
+    remove: async () => {},
+    listIsolated: async () => [],
+  },
 };
 
 function releases(): ApplicationPreviewServiceDependencies["releases"] {
@@ -111,6 +117,7 @@ test("preview provisioning reaches ready only after all isolated resources and s
   expect(receipts[0]).toMatchObject({ status: "ready", resources: { smoke_test: { status: "ready", failed: [] } } });
   expect(receipts[0]?.resources.configuration_revision).toEqual({ status: "ready", configuration_id: expect.any(String) });
   expect(receipts[0]?.resources.application_activation.status).toBe("ready");
+  expect(receipts[0]?.resources.functions).toEqual({ status: "ready", slugs: [] });
   expect(receipts[0]?.resources.smoke_test.passed).toEqual(expect.arrayContaining(receipts[0]?.resources.smoke_test.checks ?? []));
   expect(calls).toEqual(["branch:create", "queue:create", "secret:create"]);
 });

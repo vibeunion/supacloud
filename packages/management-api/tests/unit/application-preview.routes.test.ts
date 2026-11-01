@@ -114,8 +114,15 @@ test("authorization precedes preview reads and writes", async () => {
   for (const [method, url] of [
     ["GET", base], ["GET", `${base}/${previewId}`],
     ["POST", `${base}/${previewId}/reconcile`], ["DELETE", `${base}/${previewId}`],
+    ["POST", base.replace(/\/previews$/, "/preview-pull-requests")],
   ]) {
-    const response = await api.handle(new Request(url, { method }));
+    const response = await api.handle(new Request(url, {
+      method,
+      headers: url.endsWith("/preview-pull-requests") ? { "content-type": "application/json" } : undefined,
+      body: url.endsWith("/preview-pull-requests")
+        ? JSON.stringify({ action: "opened", repository: "acme/app", number: 7, release_id: "a".repeat(64) })
+        : undefined,
+    }));
     expect(response.status).toBe(403);
   }
   expect(calls).toEqual([]);
@@ -138,4 +145,67 @@ test("stable ID conflicts are explicit and provider failures are redacted", asyn
     expect(response.status).toBe(expected);
     expect(await response.text()).not.toContain("private-provider-credential");
   }
+});
+
+function readyReceipt(): StoredApplicationPreview {
+  const receipt = stored();
+  const checks = [
+    "release_artifact", "database_branch", "queue_namespace", "storage_namespace", "test_secret", "functions",
+    "configuration_revision", "application_activation", "application_readiness", "tenant_runtime",
+  ];
+  receipt.status = "ready";
+  receipt.resources.build_artifact.status = "ready";
+  receipt.resources.database_branch.status = "ready";
+  receipt.resources.queue_namespace.status = "ready";
+  receipt.resources.storage_namespace.status = "ready";
+  receipt.resources.test_secret.status = "ready";
+  receipt.resources.configuration_revision = { status: "ready", configuration_id: "11234567-89ab-4def-8123-456789abcdef" };
+  receipt.resources.application_activation = { status: "ready", activation_id: "21234567-89ab-4def-8123-456789abcdef" };
+  receipt.resources.functions = { status: "ready", slugs: ["hello"] };
+  receipt.resources.smoke_test = { status: "ready", checks, passed: [...checks], failed: [] };
+  return receipt;
+}
+
+test("pull request open reconciles and close reclaims without a GitHub call", async () => {
+  const calls: string[] = [];
+  let receipt = readyReceipt();
+  const previews: NonNullable<Previews> = {
+    list: async () => [receipt],
+    get: async () => receipt,
+    create: async () => { calls.push("create"); return receipt; },
+    reconcile: async () => { calls.push("reconcile"); return receipt; },
+    cleanup: async (_project, _id, options) => {
+      calls.push(options?.reclaim ? "reclaim" : "cleanup");
+      receipt = {
+        ...receipt,
+        status: "cleaned",
+        cleanup: { required: false, completed: true, error: null },
+        resources: {
+          ...receipt.resources,
+          database_branch: { ...receipt.resources.database_branch, status: "cleaned" },
+          queue_namespace: { ...receipt.resources.queue_namespace, status: "cleaned" },
+          storage_namespace: { ...receipt.resources.storage_namespace, status: "cleaned" },
+          test_secret: { ...receipt.resources.test_secret, status: "cleaned" },
+          functions: { status: "cleaned", slugs: ["hello"] },
+        },
+      };
+      return receipt;
+    },
+  };
+  const api = createApplicationRoutes({ authorize: async () => undefined, projectExists: async () => true, previews });
+  const url = base.replace(/\/previews$/, "/preview-pull-requests");
+  const opened = await api.handle(new Request(url, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "opened", repository: "acme/app", number: 7, release_id: "a".repeat(64) }),
+  }));
+  expect(opened.status).toBe(202);
+  expect(await opened.json()).toMatchObject({ action: "opened", status: "ready", leftovers: [] });
+  const closed = await api.handle(new Request(url, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "closed", repository: "acme/app", number: 7, release_id: "a".repeat(64) }),
+  }));
+  expect(closed.status).toBe(200);
+  expect(await closed.json()).toMatchObject({ action: "closed", status: "cleaned", leftovers: [] });
+  expect(calls).toEqual(["create", "reconcile", "reclaim"]);
+  expect(JSON.stringify(calls)).not.toContain("github");
 });
