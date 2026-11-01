@@ -58,7 +58,7 @@ Legend:
 | Managed branching / preview environments | **Built-in** (API + UI + Git auto-branch) | **Built-in** | Cloud only |
 | Passkey sign-in | **Built-in** (experimental, GoTrue v2.194+; not Lite) | **Built-in** (experimental) | Version/config dependent |
 | Custom OAuth/OIDC providers | **Built-in** | **Built-in** | Version/config dependent |
-| Storage Vector Buckets API + current `supabase-js` client | **Experimental** (bounded JSONB exact scan; 1,000,000 scalar values/index, not ANN) | **Built-in** (alpha) | External / manual |
+| Storage Vector Buckets API + current `supabase-js` client | **Experimental** (pgvector HNSW default and IVFFlat; project `QueryVectors` is ANN SQL, not an exact scan. ANN recall is unmeasured without Postgres. Embeddings are not synthesized. See [Vector ANN](vector-ann.md)) | **Built-in** (alpha) | External / manual |
 | RLS Tester | **Built-in** (experimental, bounded read-only role impersonation + policy trace) | **Built-in** (preview) | External / manual |
 | Temporary database access | **Built-in** (expiring isolated login roles + IPv4/IPv6 CIDR TCP gateway + branch inheritance) | **Built-in** (preview, PAT/JWT JIT) | External / manual |
 | Declarative schema / pg-delta CLI workflow | **Built-in** through official CLI adapter | **Built-in** (alpha) | CLI-dependent |
@@ -196,6 +196,7 @@ Known project-level gaps are tracked rather than treated as exclusions: AWS Priv
 - [Temporary database access routes](../packages/management-api/src/routes/database-jit.ts)
 - [Pipelines routes](../packages/management-api/src/routes/pipelines.ts)
 - [Storage Vector compatibility routes](../packages/management-api/src/routes/storage-compat.ts)
+- [Vector ANN](./vector-ann.md)
 
 ### Supabase official documentation
 

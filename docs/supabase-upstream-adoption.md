@@ -61,8 +61,14 @@ when a framework-specific SSR entrypoint is generated.
   by `packages/management-api/tests/integration/storage-versioning.test.ts`.
   Lifecycle filters remain limited to the upstream-supported empty filter and
   object-version operations are limited to standard buckets.
-- Vector Buckets are exposed through the existing compatibility surface; they
-  do not replace the current `pgvector` plus PostgreSQL hybrid-search path.
+- Vector Buckets are exposed through the existing compatibility surface.
+  Project `QueryVectors` uses a pgvector HNSW (default) or IVFFlat index. That
+  path does not fall back to the previous JSONB exact scan. ANN recall has not
+  been measured in an environment without Postgres. The in-memory `test_mock`
+  harness still ranks distances for API-shape tests and reports
+  `queryEngine: "exact-scan-harness"`. Embeddings are not generated in-process;
+  `POST /v1/embeddings` calls a configured platform model or returns 503.
+  Vector Buckets do not replace application-owned `pgvector` hybrid search.
 
 ## Acceptance
 

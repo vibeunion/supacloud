@@ -1,7 +1,29 @@
 import type { SQL } from "bun";
 import { getProjectDb, resolveDbName } from "../db";
+import { embeddingProviderRequiredMessage } from "./ai-embeddings";
+import {
+  DEFAULT_IVFFLAT_LISTS,
+  PGVECTOR_ANN_MAX_DIMENSION,
+  VECTOR_REGISTRY_SQL,
+  type AnnAlgorithm,
+  type DistanceMetric,
+  buildAnnQuery,
+  copyLegacyVectorsSql,
+  countVectorsSql,
+  createAnnIndexSql,
+  createVectorDataTableSql,
+  deleteVectorKeysSql,
+  dropVectorDataTableSql,
+  formatVectorLiteral,
+  listVectorRowsSql,
+  newVectorIndexId,
+  parseVectorText,
+  selectVectorKeysSql,
+  upsertVectorSql,
+  vectorQueryEngine,
+} from "./storage-vector-ann";
 
-type DistanceMetric = "cosine" | "euclidean" | "dotproduct";
+export type { AnnAlgorithm, DistanceMetric, VectorQueryEngine } from "./storage-vector-ann";
 type VectorMetadata = Record<string, string | number | boolean | Array<string | number | boolean>>;
 type VectorData = { float32: number[] };
 
@@ -17,6 +39,10 @@ type IndexRecord = {
   dataType: "float32";
   dimension: number;
   distanceMetric: DistanceMetric;
+  indexAlgorithm: AnnAlgorithm;
+  ivfflatLists?: number;
+  indexId?: string;
+  annReady: boolean;
   metadataConfiguration?: { nonFilterableMetadataKeys: string[] };
   createdAt: Date;
   vectors: Map<string, VectorRecord>;
@@ -35,6 +61,8 @@ export type CreateVectorIndexInput = {
   dataType: "float32";
   dimension: number;
   distanceMetric: DistanceMetric;
+  indexAlgorithm?: AnnAlgorithm;
+  ivfflatLists?: number;
   metadataConfiguration?: { nonFilterableMetadataKeys: string[] };
 };
 
@@ -67,7 +95,6 @@ const MAX_BATCH_SIZE = 500;
 const DEFAULT_LIST_PAGE_SIZE = 100;
 const DEFAULT_VECTOR_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 1000;
-const MAX_DIMENSION = 4096;
 export const MAX_VECTOR_VALUES_PER_INDEX = 1_000_000;
 const INDEX_NAME = /^[a-z0-9](?:[a-z0-9.-]{1,61})?[a-z0-9]$/;
 
@@ -79,7 +106,7 @@ function ensureVectorCapacity(currentCount: number, newKeyCount: number, dimensi
   const limit = maxVectorsForDimension(dimension);
   if (currentCount + newKeyCount > limit) {
     throw new StorageVectorError(
-      `Vector index capacity exceeded: dimension ${dimension} supports at most ${limit} vectors in the experimental exact-scan data plane`,
+      `Vector index capacity exceeded: dimension ${dimension} supports at most ${limit} vectors`,
       409,
       "MaxVectorsExceededException",
     );
@@ -109,11 +136,23 @@ function validateIndexInput(input: CreateVectorIndexInput): void {
   validateResourceName(input.vectorBucketName, "vectorBucketName");
   validateResourceName(input.indexName, "indexName");
   if (input.dataType !== "float32") badRequest("dataType must be 'float32'");
-  if (!Number.isInteger(input.dimension) || input.dimension < 1 || input.dimension > MAX_DIMENSION) {
-    badRequest(`dimension must be an integer between 1 and ${MAX_DIMENSION}`);
+  if (!Number.isInteger(input.dimension) || input.dimension < 1 || input.dimension > PGVECTOR_ANN_MAX_DIMENSION) {
+    badRequest(`dimension must be an integer between 1 and ${PGVECTOR_ANN_MAX_DIMENSION}; pgvector HNSW and IVFFlat indexes do not support a higher dimension, and QueryVectors will not fall back to an exact scan`);
   }
   if (!["cosine", "euclidean", "dotproduct"].includes(input.distanceMetric)) {
     badRequest("distanceMetric must be 'cosine', 'euclidean', or 'dotproduct'");
+  }
+  if (input.indexAlgorithm !== undefined && input.indexAlgorithm !== "hnsw" && input.indexAlgorithm !== "ivfflat") {
+    badRequest("indexAlgorithm must be 'hnsw' or 'ivfflat'");
+  }
+  const algorithm = input.indexAlgorithm ?? "hnsw";
+  if (input.ivfflatLists !== undefined && algorithm !== "ivfflat") {
+    badRequest("ivfflatLists is only valid when indexAlgorithm is 'ivfflat'");
+  }
+  if (input.ivfflatLists !== undefined && (
+    !Number.isInteger(input.ivfflatLists) || input.ivfflatLists < 1 || input.ivfflatLists > 32_768
+  )) {
+    badRequest("ivfflatLists must be an integer from 1 to 32768");
   }
   const metadataConfiguration = input.metadataConfiguration as unknown;
   if (metadataConfiguration !== undefined && (
@@ -239,6 +278,101 @@ function normalizeStoredDistanceMetric(value: unknown): DistanceMetric {
   return value === "euclidean" || value === "dotproduct" ? value : "cosine";
 }
 
+function normalizeStoredAlgorithm(value: unknown): AnnAlgorithm {
+  return value === "ivfflat" ? "ivfflat" : "hnsw";
+}
+
+function indexFromRow(row: Record<string, unknown>): IndexRecord {
+  const lists = row.ivfflat_lists == null ? undefined : Number(row.ivfflat_lists);
+  return {
+    bucketName: String(row.bucket_name),
+    name: String(row.name),
+    dataType: "float32",
+    dimension: Number(row.dimension),
+    distanceMetric: normalizeStoredDistanceMetric(row.distance_metric),
+    indexAlgorithm: normalizeStoredAlgorithm(row.index_algorithm),
+    ...(Number.isInteger(lists) ? { ivfflatLists: lists } : {}),
+    ...(typeof row.index_id === "string" && row.index_id ? { indexId: row.index_id } : {}),
+    annReady: row.ann_ready === true,
+    metadataConfiguration: row.metadata_configuration as IndexRecord["metadataConfiguration"],
+    createdAt: new Date(row.created_at as string | number | Date),
+    vectors: new Map(),
+  };
+}
+
+function vectorExtensionFailure(error: unknown): StorageVectorError {
+  const message = error instanceof Error ? error.message : String(error);
+  const detail = message.split("\n")[0]?.slice(0, 300) || "pgvector ANN index failed";
+  return new StorageVectorError(
+    `pgvector ANN index is unavailable (${detail}). QueryVectors will not fall back to an exact scan.`,
+    503,
+    "VectorExtensionUnavailable",
+  );
+}
+
+async function buildPgvectorAnn(db: SQL, index: IndexRecord, bucketName: string, indexName: string): Promise<void> {
+  if (!index.indexId) throw new StorageVectorError("Vector index has no pgvector relation", 503, "VectorIndexNotAnn");
+  try {
+    await db.unsafe("CREATE EXTENSION IF NOT EXISTS vector");
+    await db.unsafe(createVectorDataTableSql(index.indexId, index.dimension));
+    await db.unsafe(copyLegacyVectorsSql(index.indexId), [bucketName, indexName]);
+    await db.unsafe(createAnnIndexSql({
+      indexId: index.indexId,
+      metric: index.distanceMetric,
+      algorithm: index.indexAlgorithm,
+      ...(index.indexAlgorithm === "ivfflat" ? { lists: index.ivfflatLists ?? DEFAULT_IVFFLAT_LISTS } : {}),
+    }));
+    await db`
+      UPDATE storage.vector_indexes
+      SET ann_ready = true
+      WHERE bucket_name = ${bucketName} AND name = ${indexName}
+    `;
+    index.annReady = true;
+  } catch (error) {
+    if (error instanceof StorageVectorError) throw error;
+    throw vectorExtensionFailure(error);
+  }
+}
+
+async function ensureIndexIdentity(db: SQL, index: IndexRecord): Promise<void> {
+  if (index.indexId) return;
+  const indexId = newVectorIndexId();
+  const algorithm = index.indexAlgorithm ?? "hnsw";
+  const lists = algorithm === "ivfflat" ? index.ivfflatLists ?? DEFAULT_IVFFLAT_LISTS : null;
+  const assigned = await db`
+    UPDATE storage.vector_indexes
+    SET index_id = ${indexId},
+        index_algorithm = COALESCE(index_algorithm, ${algorithm}),
+        ivfflat_lists = COALESCE(ivfflat_lists, ${lists})
+    WHERE bucket_name = ${index.bucketName} AND name = ${index.name}
+      AND index_id IS NULL
+    RETURNING index_id, index_algorithm, ivfflat_lists
+  ` as Array<Record<string, unknown>>;
+  const row = assigned[0] ?? (await db`
+    SELECT index_id, index_algorithm, ivfflat_lists
+    FROM storage.vector_indexes
+    WHERE bucket_name = ${index.bucketName} AND name = ${index.name}
+    LIMIT 1
+  ` as Array<Record<string, unknown>>)[0];
+  if (!row || typeof row.index_id !== "string" || !row.index_id) {
+    throw new StorageVectorError(
+      "Vector index has no pgvector ANN relation. QueryVectors will not fall back to an exact scan.",
+      409,
+      "VectorIndexNotAnn",
+    );
+  }
+  index.indexId = row.index_id;
+  index.indexAlgorithm = normalizeStoredAlgorithm(row.index_algorithm);
+  const storedLists = row.ivfflat_lists == null ? undefined : Number(row.ivfflat_lists);
+  if (Number.isInteger(storedLists)) index.ivfflatLists = storedLists;
+}
+
+async function requirePgvectorAnn(db: SQL, index: IndexRecord): Promise<void> {
+  if (index.annReady && index.indexId) return;
+  await ensureIndexIdentity(db, index);
+  await buildPgvectorAnn(db, index, index.bucketName, index.name);
+}
+
 function normalizeSegment(input: SegmentInput): { count: number; index: number } | undefined {
   if (input.segmentCount === undefined && input.segmentIndex === undefined) return undefined;
   if (!Number.isInteger(input.segmentCount) || Number(input.segmentCount) < 1 || Number(input.segmentCount) > 16) {
@@ -296,36 +430,7 @@ async function projectDb(ref: string): Promise<SQL> {
   const db = getProjectDb(dbName);
   let initialization = initializedDatabases.get(dbName);
   if (!initialization) {
-    initialization = db.unsafe(`
-      CREATE SCHEMA IF NOT EXISTS storage;
-      CREATE TABLE IF NOT EXISTS storage.vector_buckets (
-        name text PRIMARY KEY,
-        created_at timestamptz NOT NULL DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS storage.vector_indexes (
-        bucket_name text NOT NULL REFERENCES storage.vector_buckets(name) ON DELETE CASCADE,
-        name text NOT NULL,
-        data_type text NOT NULL,
-        dimension integer NOT NULL,
-        distance_metric text NOT NULL,
-        metadata_configuration jsonb,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (bucket_name, name)
-      );
-      CREATE TABLE IF NOT EXISTS storage.vectors (
-        bucket_name text NOT NULL,
-        index_name text NOT NULL,
-        key text NOT NULL,
-        data jsonb NOT NULL,
-        metadata jsonb,
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (bucket_name, index_name, key),
-        FOREIGN KEY (bucket_name, index_name)
-          REFERENCES storage.vector_indexes(bucket_name, name) ON DELETE CASCADE
-      );
-      CREATE INDEX IF NOT EXISTS storage_vectors_listing_idx
-        ON storage.vectors(bucket_name, index_name, key);
-    `).then(() => undefined);
+    initialization = db.unsafe(VECTOR_REGISTRY_SQL).then(() => undefined);
     initializedDatabases.set(dbName, initialization);
   }
   try {
@@ -348,23 +453,15 @@ async function getMockIndex(ref: string, bucketName: string, indexName: string):
 async function getDatabaseIndex(ref: string, bucketName: string, indexName: string): Promise<IndexRecord> {
   const db = await projectDb(ref);
   const rows = await db`
-    SELECT bucket_name, name, data_type, dimension, distance_metric, metadata_configuration, created_at
+    SELECT bucket_name, name, data_type, dimension, distance_metric, metadata_configuration, created_at,
+      index_id, index_algorithm, ivfflat_lists, ann_ready
     FROM storage.vector_indexes
     WHERE bucket_name = ${bucketName} AND name = ${indexName}
     LIMIT 1
   `;
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row) notFound("Vector index", indexName);
-  return {
-    bucketName: String(row.bucket_name),
-    name: String(row.name),
-    dataType: "float32",
-    dimension: Number(row.dimension),
-    distanceMetric: normalizeStoredDistanceMetric(row.distance_metric),
-    metadataConfiguration: row.metadata_configuration as IndexRecord["metadataConfiguration"],
-    createdAt: new Date(row.created_at as string | number | Date),
-    vectors: new Map(),
-  };
+  return indexFromRow(row);
 }
 
 async function getIndex(ref: string, bucketName: string, indexName: string): Promise<IndexRecord> {
@@ -456,22 +553,33 @@ function shapeVector(
   };
 }
 
+function vectorRecordFromRow(row: Record<string, unknown>, data: number[]): VectorRecord {
+  return {
+    key: String(row.key),
+    data,
+    metadata: row.metadata == null ? undefined : row.metadata as VectorMetadata,
+    updatedAt: new Date(row.updated_at as string | number | Date),
+  };
+}
+
 async function loadVectors(ref: string, location: VectorLocation): Promise<VectorRecord[]> {
   if (ref === "test_mock") return [...(await getMockIndex(ref, location.vectorBucketName, location.indexName)).vectors.values()];
-  await getDatabaseIndex(ref, location.vectorBucketName, location.indexName);
+  const index = await getDatabaseIndex(ref, location.vectorBucketName, location.indexName);
   const db = await projectDb(ref);
+  if (index.annReady && index.indexId) {
+    const rows = await db.unsafe(listVectorRowsSql(index.indexId)) as Array<Record<string, unknown>>;
+    return rows.map((row) => vectorRecordFromRow(row, parseVectorText(row.embedding)));
+  }
   const rows = await db`
     SELECT key, data, metadata, updated_at
     FROM storage.vectors
     WHERE bucket_name = ${location.vectorBucketName} AND index_name = ${location.indexName}
     ORDER BY key ASC
   `;
-  return rows.map((row: Record<string, unknown>) => ({
-    key: String(row.key),
-    data: Array.isArray(row.data) ? row.data.map(Number) : JSON.parse(String(row.data)),
-    metadata: row.metadata as VectorMetadata | undefined,
-    updatedAt: new Date(row.updated_at as string | number | Date),
-  }));
+  return rows.map((row: Record<string, unknown>) => vectorRecordFromRow(
+    row,
+    Array.isArray(row.data) ? row.data.map(Number) : JSON.parse(String(row.data)),
+  ));
 }
 
 export class StorageVectorService {
@@ -556,12 +664,16 @@ export class StorageVectorService {
       if (!bucket) notFound("Vector bucket", input.vectorBucketName);
       if (bucket.indexes.has(input.indexName)) conflict("Vector index", input.indexName);
       if (bucket.indexes.size >= MAX_INDEXES_PER_BUCKET) throw new StorageVectorError("Maximum vector index count exceeded", 409, "MaxIndexesExceededException");
+      const algorithm = input.indexAlgorithm ?? "hnsw";
       bucket.indexes.set(input.indexName, {
         bucketName: input.vectorBucketName,
         name: input.indexName,
         dataType: input.dataType,
         dimension: input.dimension,
         distanceMetric: input.distanceMetric,
+        indexAlgorithm: algorithm,
+        ...(algorithm === "ivfflat" ? { ivfflatLists: input.ivfflatLists ?? DEFAULT_IVFFLAT_LISTS } : {}),
+        annReady: false,
         metadataConfiguration: input.metadataConfiguration,
         createdAt: new Date(),
         vectors: new Map(),
@@ -573,16 +685,40 @@ export class StorageVectorService {
     if (!buckets[0]) notFound("Vector bucket", input.vectorBucketName);
     const [{ count }] = await db`SELECT count(*)::integer AS count FROM storage.vector_indexes WHERE bucket_name = ${input.vectorBucketName}`;
     if (Number(count) >= MAX_INDEXES_PER_BUCKET) throw new StorageVectorError("Maximum vector index count exceeded", 409, "MaxIndexesExceededException");
+    const algorithm = input.indexAlgorithm ?? "hnsw";
+    const lists = algorithm === "ivfflat" ? input.ivfflatLists ?? DEFAULT_IVFFLAT_LISTS : null;
+    const indexId = newVectorIndexId();
+    let inserted = false;
     try {
       await db`
         INSERT INTO storage.vector_indexes
-          (bucket_name, name, data_type, dimension, distance_metric, metadata_configuration)
+          (bucket_name, name, data_type, dimension, distance_metric, metadata_configuration, index_id, index_algorithm, ivfflat_lists, ann_ready)
         VALUES
-          (${input.vectorBucketName}, ${input.indexName}, ${input.dataType}, ${input.dimension}, ${input.distanceMetric}, ${input.metadataConfiguration ? JSON.stringify(input.metadataConfiguration) : null}::jsonb)
+          (${input.vectorBucketName}, ${input.indexName}, ${input.dataType}, ${input.dimension}, ${input.distanceMetric}, ${input.metadataConfiguration ? JSON.stringify(input.metadataConfiguration) : null}::jsonb, ${indexId}, ${algorithm}, ${lists}, false)
       `;
+      inserted = true;
+      await buildPgvectorAnn(db, {
+        bucketName: input.vectorBucketName,
+        name: input.indexName,
+        dataType: "float32",
+        dimension: input.dimension,
+        distanceMetric: input.distanceMetric,
+        indexAlgorithm: algorithm,
+        ...(lists != null ? { ivfflatLists: lists } : {}),
+        indexId,
+        annReady: false,
+        metadataConfiguration: input.metadataConfiguration,
+        createdAt: new Date(),
+        vectors: new Map(),
+      }, input.vectorBucketName, input.indexName);
     } catch (error: unknown) {
       if ((error as { code?: string }).code === "23505") conflict("Vector index", input.indexName);
-      throw error;
+      if (inserted) {
+        await db.unsafe(dropVectorDataTableSql(indexId)).catch(() => undefined);
+        await db`DELETE FROM storage.vector_indexes WHERE bucket_name = ${input.vectorBucketName} AND name = ${input.indexName} AND index_id = ${indexId}`;
+      }
+      if (error instanceof StorageVectorError) throw error;
+      throw vectorExtensionFailure(error);
     }
   }
 
@@ -596,8 +732,16 @@ export class StorageVectorService {
       return;
     }
     const db = await projectDb(ref);
-    const rows = await db`DELETE FROM storage.vector_indexes WHERE bucket_name = ${vectorBucketName} AND name = ${indexName} RETURNING name`;
-    if (!rows[0]) notFound("Vector index", indexName);
+    await db.begin(async (tx) => {
+      const rows = await tx`
+        DELETE FROM storage.vector_indexes
+        WHERE bucket_name = ${vectorBucketName} AND name = ${indexName}
+        RETURNING index_id
+      `;
+      const indexId = rows[0]?.index_id;
+      if (!rows[0]) notFound("Vector index", indexName);
+      if (typeof indexId === "string" && indexId) await tx.unsafe(dropVectorDataTableSql(indexId));
+    });
   }
 
   static async getIndex(ref: string, vectorBucketName: string, indexName: string) {
@@ -611,6 +755,10 @@ export class StorageVectorService {
         dataType: index.dataType,
         dimension: index.dimension,
         distanceMetric: index.distanceMetric,
+        indexAlgorithm: index.indexAlgorithm,
+        ...(index.ivfflatLists !== undefined ? { ivfflatLists: index.ivfflatLists } : {}),
+        queryEngine: vectorQueryEngine(ref),
+        annReady: vectorQueryEngine(ref) === "pgvector-ann" && index.annReady,
         ...(index.metadataConfiguration ? { metadataConfiguration: index.metadataConfiguration } : {}),
         creationTime: epochSeconds(index.createdAt),
       },
@@ -632,17 +780,13 @@ export class StorageVectorService {
       const buckets = await db`SELECT 1 FROM storage.vector_buckets WHERE name = ${input.vectorBucketName} LIMIT 1`;
       if (!buckets[0]) notFound("Vector bucket", input.vectorBucketName);
       const rows = await db`
-        SELECT bucket_name, name, data_type, dimension, distance_metric, metadata_configuration, created_at
+        SELECT bucket_name, name, data_type, dimension, distance_metric, metadata_configuration, created_at,
+          index_id, index_algorithm, ivfflat_lists, ann_ready
         FROM storage.vector_indexes
         WHERE bucket_name = ${input.vectorBucketName} AND name LIKE ${`${prefix}%`} AND name > ${after ?? ""}
         ORDER BY name ASC LIMIT ${maxResults + 1}
       `;
-      indexes = rows.map((row: Record<string, unknown>) => ({
-        bucketName: String(row.bucket_name), name: String(row.name), dataType: "float32",
-        dimension: Number(row.dimension), distanceMetric: normalizeStoredDistanceMetric(row.distance_metric),
-        metadataConfiguration: row.metadata_configuration as IndexRecord["metadataConfiguration"],
-        createdAt: new Date(row.created_at as Date), vectors: new Map(),
-      }));
+      indexes = rows.map((row: Record<string, unknown>) => indexFromRow(row));
     }
     const filtered = indexes.filter((index) => index.name.startsWith(prefix) && (!after || index.name > after)).sort((a, b) => a.name.localeCompare(b.name));
     const page = filtered.slice(0, maxResults);
@@ -675,30 +819,29 @@ export class StorageVectorService {
       return;
     }
     const db = await projectDb(ref);
+    await requirePgvectorAnn(db, index);
+    if (!index.indexId) {
+      throw new StorageVectorError("Vector index has no pgvector ANN relation", 503, "VectorIndexNotAnn");
+    }
+    const indexId = index.indexId;
     await db.begin(async (tx) => {
       await tx`
         SELECT 1 FROM storage.vector_indexes
         WHERE bucket_name = ${input.vectorBucketName} AND name = ${input.indexName}
         FOR UPDATE
       `;
-      const [{ count }] = await tx`
-        SELECT count(*)::integer AS count FROM storage.vectors
-        WHERE bucket_name = ${input.vectorBucketName} AND index_name = ${input.indexName}
-      `;
-      const existingRows = await tx`
-        SELECT key FROM storage.vectors
-        WHERE bucket_name = ${input.vectorBucketName}
-          AND index_name = ${input.indexName}
-          AND key IN ${tx(normalized.map((vector) => vector.key))}
-      `;
-      ensureVectorCapacity(Number(count), normalized.length - existingRows.length, index.dimension);
+      const counted = await tx.unsafe(countVectorsSql(indexId)) as Array<{ count: number }>;
+      const existingRows = await tx.unsafe(
+        selectVectorKeysSql(indexId, normalized.length),
+        normalized.map((vector) => vector.key),
+      ) as Array<{ key: string }>;
+      ensureVectorCapacity(Number(counted[0]?.count ?? 0), normalized.length - existingRows.length, index.dimension);
       for (const vector of normalized) {
-        await tx`
-          INSERT INTO storage.vectors (bucket_name, index_name, key, data, metadata, updated_at)
-          VALUES (${input.vectorBucketName}, ${input.indexName}, ${vector.key}, ${JSON.stringify(vector.data)}::jsonb, ${vector.metadata ? JSON.stringify(vector.metadata) : null}::jsonb, now())
-          ON CONFLICT (bucket_name, index_name, key)
-          DO UPDATE SET data = EXCLUDED.data, metadata = EXCLUDED.metadata, updated_at = now()
-        `;
+        await tx.unsafe(upsertVectorSql(indexId), [
+          vector.key,
+          formatVectorLiteral(vector.data),
+          vector.metadata ? JSON.stringify(vector.metadata) : null,
+        ]);
       }
     });
   }
@@ -711,6 +854,9 @@ export class StorageVectorService {
       return;
     }
     const db = await projectDb(ref);
+    if (index.annReady && index.indexId) {
+      await db.unsafe(deleteVectorKeysSql(index.indexId, input.keys.length), input.keys);
+    }
     await db`DELETE FROM storage.vectors WHERE bucket_name = ${input.vectorBucketName} AND index_name = ${input.indexName} AND key IN ${db(input.keys)}`;
   }
 
@@ -744,7 +890,12 @@ export class StorageVectorService {
     filter?: unknown;
     returnDistance?: boolean;
     returnMetadata?: boolean;
+    queryText?: unknown;
+    text?: unknown;
   }) {
+    if (input.queryText !== undefined || input.text !== undefined) {
+      throw new StorageVectorError(embeddingProviderRequiredMessage(), 400, "EmbeddingProviderRequired");
+    }
     const index = await getIndex(ref, input.vectorBucketName, input.indexName);
     const query = validateVectorData(input.queryVector, index.dimension, "queryVector");
     validateFilter(input.filter);
@@ -754,19 +905,70 @@ export class StorageVectorService {
     for (const key of collectFilterKeys(input.filter)) {
       if (nonFilterable.has(key)) badRequest(`Metadata key '${key}' is configured as non-filterable`);
     }
-    const vectors = (await loadVectors(ref, input))
-      .filter((vector) => matchesFilter(vector.metadata, input.filter))
-      .map((vector) => ({ vector, distance: distance(index.distanceMetric, query, vector.data) }))
-      .sort((a, b) => a.distance - b.distance || a.vector.key.localeCompare(b.vector.key))
-      .slice(0, topK);
-    return {
-      vectors: vectors.map(({ vector, distance: vectorDistance }) => ({
-        key: vector.key,
-        ...(input.returnDistance ? { distance: vectorDistance } : {}),
-        ...(input.returnMetadata && vector.metadata !== undefined ? { metadata: vector.metadata } : {}),
-      })),
-    };
+    if (vectorQueryEngine(ref) === "exact-scan-harness") {
+      return queryVectorsExactScanHarness(index, query, topK, input.filter, input.returnDistance, input.returnMetadata);
+    }
+    return queryVectorsPgvectorAnn(ref, index, query, topK, input);
   }
+}
+
+/**
+ * Contract harness for `test_mock` only. Distance ranking here is exact and is
+ * not an ANN index. Project refs never enter this function.
+ */
+function queryVectorsExactScanHarness(
+  index: IndexRecord,
+  query: number[],
+  topK: number,
+  filter: unknown,
+  returnDistance?: boolean,
+  returnMetadata?: boolean,
+) {
+  const vectors = [...index.vectors.values()]
+    .filter((vector) => matchesFilter(vector.metadata, filter))
+    .map((vector) => ({ vector, distance: distance(index.distanceMetric, query, vector.data) }))
+    .sort((a, b) => a.distance - b.distance || a.vector.key.localeCompare(b.vector.key))
+    .slice(0, topK);
+  return {
+    vectors: vectors.map(({ vector, distance: vectorDistance }) => ({
+      key: vector.key,
+      ...(returnDistance ? { distance: vectorDistance } : {}),
+      ...(returnMetadata && vector.metadata !== undefined ? { metadata: vector.metadata } : {}),
+    })),
+  };
+}
+
+async function queryVectorsPgvectorAnn(
+  ref: string,
+  index: IndexRecord,
+  query: number[],
+  topK: number,
+  input: { filter?: unknown; returnDistance?: boolean; returnMetadata?: boolean; vectorBucketName: string; indexName: string },
+) {
+  const db = await projectDb(ref);
+  await requirePgvectorAnn(db, index);
+  if (!index.indexId || !index.annReady) {
+    throw new StorageVectorError(
+      "Vector index is not a pgvector ANN index. QueryVectors will not fall back to an exact scan.",
+      409,
+      "VectorIndexNotAnn",
+    );
+  }
+  const plan = buildAnnQuery({
+    indexId: index.indexId,
+    metric: index.distanceMetric,
+    queryVector: query,
+    topK,
+    filter: input.filter,
+  });
+  const rows = await db.unsafe(plan.sql, plan.params) as Array<Record<string, unknown>>;
+  return {
+    vectors: rows.map((row) => ({
+      key: String(row.key),
+      ...(input.returnDistance ? { distance: Number(row.distance) } : {}),
+      ...(input.returnMetadata && row.metadata != null ? { metadata: row.metadata as VectorMetadata } : {}),
+    })),
+  };
 }
 
 export const storageVectorInternals = {
