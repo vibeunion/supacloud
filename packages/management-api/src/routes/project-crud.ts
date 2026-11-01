@@ -32,6 +32,7 @@ import {
 } from "../utils/auth-email-templates";
 import { validationErrorResponse } from "../utils/http-validation";
 import { ProjectStateTransitionLockedError } from "../services/project-database-lock";
+import { AVAILABLE_REGIONS } from "../regions";
 import { isRecord, recordOrEmpty } from "../utils/record";
 
 type ProjectResponseInput = Record<string, unknown>;
@@ -43,18 +44,6 @@ function projectResponseRecord(value: unknown): ProjectResponseInput {
   }
   return value;
 }
-// Available regions list
-const AVAILABLE_REGIONS = [
-  { code: "local", name: "Local", continent: "local" },
-  { code: "us-east-1", name: "US East (N. Virginia)", continent: "americas" },
-  { code: "us-west-1", name: "US West (N. California)", continent: "americas" },
-  { code: "eu-west-1", name: "EU (Ireland)", continent: "emea" },
-  {
-    code: "ap-southeast-1",
-    name: "Asia Pacific (Singapore)",
-    continent: "apac",
-  },
-];
 const SERVICE_ROLE_JWT = /^[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{8,8192}\.[A-Za-z0-9_-]{8,2048}$/;
 const SERVICE_ROLE_JWT_ALGORITHMS = new Set(["HS256", "ES256"]);
 

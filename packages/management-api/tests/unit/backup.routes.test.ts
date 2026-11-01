@@ -63,6 +63,29 @@ const restoreLogicalBackupSpy = spyOn(logicalBackupModule, "restoreLogicalBackup
 const restoreSpy = spyOn(backupModule, "restore").mockImplementation(
   restore as typeof backupModule.restore,
 );
+const regionShipRecord = {
+  schema: "supacloud.region-ship.v1" as const,
+  project_ref: "project_a",
+  backup_id: logicalBackupIdentity.backup_id,
+  database: "canonical_project_database",
+  source_region: "local",
+  target_region: "us-east-1",
+  bytes: logicalBackupIdentity.bytes,
+  sha256: logicalBackupIdentity.sha256,
+  shipped_at: "2026-08-05T00:00:02.000Z",
+  transport: "loopback" as const,
+  target_apply: "not executed" as const,
+};
+const shipVerifiedLogicalBackupToRegion = mock(() => Promise.resolve(regionShipRecord));
+const readRegionShip = mock(() => Promise.resolve(regionShipRecord));
+const regionShipModule = await import("../../src/services/region-ship.service");
+const shipVerifiedLogicalBackupToRegionSpy = spyOn(
+  regionShipModule,
+  "shipVerifiedLogicalBackupToRegion",
+).mockImplementation(shipVerifiedLogicalBackupToRegion as typeof regionShipModule.shipVerifiedLogicalBackupToRegion);
+const readRegionShipSpy = spyOn(regionShipModule, "readRegionShip").mockImplementation(
+  readRegionShip as typeof regionShipModule.readRegionShip,
+);
 
 const { backupRoutes } = await import("../../src/routes/backups");
 const { projectConfigRoutes } = await import("../../src/routes/project-config");
@@ -108,6 +131,10 @@ describe("physical backup routes", () => {
     restoreLogicalBackup.mockResolvedValue(logicalBackupIdentity);
     restore.mockReset();
     restore.mockResolvedValue({ message: "PITR restore completed" });
+    shipVerifiedLogicalBackupToRegion.mockReset();
+    shipVerifiedLogicalBackupToRegion.mockResolvedValue(regionShipRecord);
+    readRegionShip.mockReset();
+    readRegionShip.mockResolvedValue(regionShipRecord);
     delete process.env.SUPACLOUD_PITR_ENABLED;
     delete process.env.PITR_ENABLED;
   });
@@ -123,6 +150,8 @@ describe("physical backup routes", () => {
     readLogicalBackupSpy.mockRestore();
     restoreLogicalBackupSpy.mockRestore();
     restoreSpy.mockRestore();
+    shipVerifiedLogicalBackupToRegionSpy.mockRestore();
+    readRegionShipSpy.mockRestore();
   });
 
   test("lists cluster inventory under the persisted project database name", async () => {
@@ -445,6 +474,48 @@ describe("physical backup routes", () => {
       expected_sha256: expectedSha256,
       confirmation: `RESTORE_PROJECT:project_a:${backupId}:${expectedSha256}`,
     });
+  });
+
+  test("copies a verified logical backup into a target region directory", async () => {
+    const response = await request(
+      `/v1/projects/project_a/database/backups/logical/${logicalBackupIdentity.backup_id}/region-ship`,
+      { method: "POST", body: JSON.stringify({ target_region: "us-east-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ship: regionShipRecord });
+    expect(regionShipRecord.target_apply).toBe("not executed");
+    expect(shipVerifiedLogicalBackupToRegion).toHaveBeenCalledWith(
+      "project_a",
+      logicalBackupIdentity.backup_id,
+      "us-east-1",
+    );
+  });
+
+  test("reads one region ship receipt", async () => {
+    const response = await request(
+      `/v1/projects/project_a/database/backups/logical/${logicalBackupIdentity.backup_id}/region-ship/us-east-1`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ship: regionShipRecord });
+    expect(readRegionShip).toHaveBeenCalledWith(
+      "project_a",
+      logicalBackupIdentity.backup_id,
+      "us-east-1",
+    );
+    expect(shipVerifiedLogicalBackupToRegion).not.toHaveBeenCalled();
+  });
+
+  test("region ship rejects admin failure before copying", async () => {
+    requireAdminAuth.mockResolvedValueOnce({ status: 401, body: { error: "Unauthorized" } } as never);
+    const response = await request(
+      `/v1/projects/project_a/database/backups/logical/${logicalBackupIdentity.backup_id}/region-ship`,
+      { method: "POST", body: JSON.stringify({ target_region: "us-east-1" }) },
+    );
+
+    expect(response.status).toBe(401);
+    expect(shipVerifiedLogicalBackupToRegion).not.toHaveBeenCalled();
   });
 
   test("does not leave a second backup or restore contract in project config routes", () => {
