@@ -59,6 +59,7 @@
 - [Historical Pigsty 4.4 compatibility migration](./upgrade-to-pigsty-4.4.md) - Analytics and Supabase compatibility migration background
 - [Docker PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Docker-specific compatibility, backup, and major-version safety guide
 - [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting
+- [AWS PrivateLink](./aws-privatelink.md) - Local single-region attachment plan. The shipped provider does not call AWS.
 
 ## Development
 
