@@ -31,6 +31,8 @@ import {
 import { createSnapshot, restoreSnapshot } from './snapshot.js'
 import { waitForShutdown } from './shutdown.js'
 import { createLocalAuthUser } from './auth-cli.js'
+import { buildVersionMatrix } from './compat-matrix.js'
+import { formatImportReport, runSupabaseImport } from './import-lab.js'
 
 interface CliOptions extends ProjectRuntimeOptions {
   command: string
@@ -48,6 +50,8 @@ interface CliOptions extends ProjectRuntimeOptions {
   email?: string
   passwordStdin?: boolean
   emailConfirm?: boolean
+  sourceDir?: string
+  reportPath?: string
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -111,6 +115,8 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--email') options.email = next()
     else if (argument === '--password-stdin') options.passwordStdin = true
     else if (argument === '--email-confirm') options.emailConfirm = true
+    else if (argument === '--from') options.sourceDir = resolve(next())
+    else if (argument === '--report') options.reportPath = resolve(next())
     else if (argument.startsWith('--password')) {
       throw new Error('password arguments are not supported; use --password-stdin')
     }
@@ -132,7 +138,28 @@ async function main(): Promise<void> {
   if (options.command !== 'auth' && (options.email !== undefined || options.passwordStdin || options.emailConfirm)) {
     throw new Error('--email, --password-stdin and --email-confirm are only supported by auth create-user')
   }
+  if (options.sourceDir && options.command !== 'import') throw new Error('--from is only valid with import')
+  if (options.reportPath && options.command !== 'import') throw new Error('--report is only valid with import')
   const paths = resolveProjectPaths(options)
+
+  if (options.command === 'compat') {
+    const matrix = await buildVersionMatrix({ supabaseJsExercised: false })
+    await writeStandardOutput(options.json ? `${JSON.stringify({ deployed: false, version_matrix: matrix }, null, 2)}\n` : formatCompat(matrix))
+    return
+  }
+
+  if (options.command === 'import') {
+    if (!options.sourceDir) throw new Error('import requires --from <supabase-project-directory>')
+    const report = await runSupabaseImport({ ...options, projectDir: paths.projectDir, sourceDir: options.sourceDir })
+    const output = options.json ? `${JSON.stringify(report, null, 2)}\n` : formatImportReport(report)
+    await writeStandardOutput(output)
+    if (options.reportPath) {
+      await mkdir(dirname(options.reportPath), { recursive: true })
+      await writeFile(options.reportPath, output)
+    }
+    if (report.exit_code !== 0) process.exitCode = report.exit_code
+    return
+  }
 
   if (options.command === 'auth') {
     if (options.positionals.length !== 1 || options.positionals[0] !== 'create-user') {
@@ -606,6 +633,15 @@ function commaSeparated(value: string): string[] {
   return value.split(',').map((entry) => entry.trim()).filter(Boolean)
 }
 
+function formatCompat(matrix: Awaited<ReturnType<typeof buildVersionMatrix>>): string {
+  const lines = ['Supabase compatibility matrix (not deployed)']
+  for (const row of matrix) {
+    lines.push(`- [${row.checked ? 'x' : ' '}] ${row.component} ${row.declared_version}${row.blocker ? ` — ${row.blocker}` : ''}`)
+  }
+  lines.push('deployed: false')
+  return `${lines.join('\n')}\n`
+}
+
 function printHelp(): void {
   console.log(`supacloud-lite - Bun-native Supabase-compatible backend on PGlite or native PostgreSQL
 
@@ -628,6 +664,8 @@ Commands:
   upgrade               snapshot first, then apply pending migrations
   inspect               show table rows and sizes
   doctor                report Lite capability and replication readiness
+  import                import a local Supabase project and print a verify checklist
+  compat                print the supabase-js, CLI, Realtime, Storage, and Edge Functions matrix
   version               print the package version
 
 Fresh projects must run "supacloud-lite migrate" before "db reset".
@@ -653,6 +691,8 @@ Options:
       --replication-tls-key <p> PostgreSQL TLS private key
       --memory            use an in-memory PGlite database
       --json              emit machine-readable doctor/migrate/status/auth output
+      --from <dir>        import: Supabase project directory to read
+      --report <file>     import: also write the JSON report to this path
       --email <email>     auth create-user: account email
       --password-stdin    auth create-user: read one password line from redirected stdin
       --email-confirm     auth create-user: explicitly mark the email as confirmed
