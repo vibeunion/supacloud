@@ -19,6 +19,7 @@ COPY packages/supacloud-js ./packages/supacloud-js
 COPY packages/worker/scripts/roles.ts packages/worker/scripts/scheduler.ts packages/worker/scripts/control.ts ./packages/worker/scripts/
 COPY packages/web-console ./packages/web-console
 COPY --chmod=0755 scripts/lib/postgres_major_upgrade_executor.sh /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh
+COPY --chmod=0755 scripts/lib/postgres_major_upgrade_provider.sh /opt/supacloud/scripts/lib/postgres_major_upgrade_provider.sh
 COPY --chmod=0755 docker/self-host/management-api-entrypoint.sh /usr/local/bin/supacloud-management-entrypoint
 
 RUN cd /app/packages/management-api && bun install --frozen-lockfile
