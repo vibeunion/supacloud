@@ -173,6 +173,8 @@ export interface Config {
   edgeRuntimePort: number;
   edgeRuntimeInternal: string;
   edgeRuntimeBackgroundInternal: string;
+  storageDataPlanePort: number;
+  storageDataPlaneInternal: string;
   edgeRuntimeMasterKey: string;
   edgeRuntimeUser: string;
   edgeRuntimeGroup: string;
@@ -215,6 +217,11 @@ const rawPgPassword = getEnv("PGPASSWORD");
 const pgPassword = rawPgPassword === "" ? getEnv("PG_PASSWORD", "postgres") : rawPgPassword;
 const pgDatabase = getEnv("PG_DATABASE", "postgres");
 const edgeRuntimeInternal = getEnv("EDGE_RUNTIME_INTERNAL", `127.0.0.1:${edgeRuntimePort}`);
+const storageDataPlanePort = Number(getEnv("STORAGE_DATA_PLANE_PORT", "9108"));
+const storageDataPlaneInternal = getEnv(
+  "STORAGE_DATA_PLANE_INTERNAL",
+  `127.0.0.1:${storageDataPlanePort}`,
+);
 const dockerHostIp = getEnv("DOCKER_HOST_IP").trim()
   || getEnv("INTERNAL_IP").trim()
   || "127.0.0.1";
@@ -384,6 +391,8 @@ export const config: Config = {
   edgeRuntimePort,
   edgeRuntimeInternal,
   edgeRuntimeBackgroundInternal: getEnv("EDGE_RUNTIME_BACKGROUND_INTERNAL", edgeRuntimeInternal),
+  storageDataPlanePort,
+  storageDataPlaneInternal,
   edgeRuntimeMasterKey: getEnv(
     "EDGE_RUNTIME_MASTER_KEY",
     getEnv(
@@ -434,6 +443,9 @@ function validateConfig() {
   }
   if (!Number.isFinite(config.restProxyTimeoutMs) || config.restProxyTimeoutMs <= 0) {
     throw new Error("Invalid REST_PROXY_TIMEOUT_MS configuration. Must be a positive integer.");
+  }
+  if (!Number.isInteger(config.storageDataPlanePort) || config.storageDataPlanePort <= 0 || config.storageDataPlanePort > 65535) {
+    throw new Error("Invalid STORAGE_DATA_PLANE_PORT configuration. Must be a TCP port.");
   }
   if (!Number.isInteger(config.postgrestDbPool) || config.postgrestDbPool <= 0) {
     throw new Error("Invalid POSTGREST_DB_POOL configuration. Must be a positive integer.");
