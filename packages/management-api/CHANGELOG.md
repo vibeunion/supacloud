@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.126.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.126.1...management-api-v0.126.2) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.126.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.126.0...management-api-v0.126.1) (2026-10-31)
 
 

@@ -14,6 +14,19 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.112.2](https://github.com/vibeunion/supacloud/compare/cli-v0.112.1...cli-v0.112.2) (2026-10-31)
+
+
+### Bug Fixes
+
+* **cli:** reject suppression comments in inline function checks ([#2314](https://github.com/vibeunion/supacloud/issues/2314)) ([dfaaeef](https://github.com/vibeunion/supacloud/commit/dfaaeefeaf9c8fc7a8af1820f306dd22862e8b7d))
+* **cli:** sync published compiler dependency ([#2316](https://github.com/vibeunion/supacloud/issues/2316)) ([47f83a2](https://github.com/vibeunion/supacloud/commit/47f83a24e14a7f2d0577ca3949c0070b172a2f75))
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.112.1](https://github.com/vibeunion/supacloud/compare/cli-v0.112.0...cli-v0.112.1) (2026-10-31)
 
 

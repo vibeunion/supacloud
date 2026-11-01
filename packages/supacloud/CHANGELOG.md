@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.18](https://github.com/vibeunion/supacloud/compare/supacloud-v0.18.17...supacloud-v0.18.18) (2026-10-31)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2315](https://github.com/vibeunion/supacloud/issues/2315)) ([9feb615](https://github.com/vibeunion/supacloud/commit/9feb615b24ade49bd7324335f3167d4157efd09c))
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.18.17](https://github.com/vibeunion/supacloud/compare/supacloud-v0.18.16...supacloud-v0.18.17) (2026-10-31)
 
 
