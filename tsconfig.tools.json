@@ -18,6 +18,7 @@
       "@supacloud/contracts/browser": ["./packages/contracts/src/browser.ts"],
       "@supacloud/delivery": ["./packages/delivery/src/index.ts"],
       "@supacloud/delivery/worker-execution": ["./packages/delivery/src/worker-execution.ts"],
+      "@supacloud/delivery/tenant-capacity": ["./packages/delivery/src/tenant-capacity.ts"],
       "@supacloud/delivery/schema": ["./packages/delivery/src/delivery-schema.ts"],
       "@supacloud/delivery/build-schema": ["./packages/delivery/src/delivery-build-schema.ts"],
       "@supacloud/delivery/files": ["./packages/delivery/src/delivery-files.ts"],

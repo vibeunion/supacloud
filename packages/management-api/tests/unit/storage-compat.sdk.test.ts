@@ -1268,4 +1268,35 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(body.tus_chunk_max_size_bytes).toBeGreaterThan(0);
     expect(body.streaming_upload_supported).toBe(true);
   });
+
+  test("rejects an upload that would exceed the tenant storage budget", async () => {
+    const { clearTenantCapacityOverrides, setTenantCapacityOverride } = await import("../../src/services/tenant-capacity");
+    setTenantCapacityOverride("test_mock", {
+      cpu: 1, memoryMiB: 256, connections: 4, queue: 4, storageBytes: 4, functionConcurrency: 1,
+    });
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+    try {
+      const accepted = await request("/storage/v1/object/avatars/small.txt", {
+        method: "POST",
+        headers: { apikey: "test-token", "content-type": "text/plain", "content-length": "3" },
+        body: "abc",
+      });
+      expect(accepted.status).toBe(200);
+      const rejected = await request("/storage/v1/object/avatars/large.txt", {
+        method: "POST",
+        headers: { apikey: "test-token", "content-type": "text/plain", "content-length": "3", "x-request-id": "req-storage-1" },
+        body: "def",
+      });
+      expect(rejected.status).toBe(429);
+      expect(await rejected.json()).toMatchObject({
+        code: "TENANT_CAPACITY_EXCEEDED",
+        projectRef: "test_mock",
+        dimension: "storageBytes",
+      });
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      uploadSpy.mockRestore();
+      clearTenantCapacityOverrides();
+    }
+  });
 });
