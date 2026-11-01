@@ -20,6 +20,7 @@ test("preview receipt names every isolated resource and never contains a secret 
       queue_namespace: { namespace: "preview_0123456789ab4def8123456789abcdef" },
       storage_namespace: { namespace: "branch-1" },
       test_secret: { name: "PREVIEW_TOKEN_0123456789AB4DEF8123456789ABCDEF", value_issued: false },
+      functions: { status: "pending", slugs: [] },
       smoke_test: { status: "pending" },
     },
     cleanup: { required: true, completed: false },

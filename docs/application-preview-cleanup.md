@@ -71,7 +71,20 @@ Scenario: Do not infer cleanup from a soft-deleted project
 
 An activated preview still needs explicit application deactivation/retirement
 before resource cleanup. Unknown activation outcomes require reconciliation.
-Storage containing objects is not automatically emptied. Expiry never restores
+Storage containing objects is not emptied by expiry. Expiry never restores
 a database, reverses a migration, promotes an environment or authorizes
 production deployment. Local tests, PR creation, merge, rollout and online
 acceptance remain separate evidence.
+
+## Pull request scenario
+
+`POST .../preview-pull-requests` is a local stand-in for pull request open and
+close. It does not call GitHub, install a GitHub App, or deploy. `opened`
+provisions one isolated application, function namespace, database branch,
+queue, Storage namespace and test secret. `closed` reclaims that preview and
+refuses to report success when the reclaim audit still sees any of those
+resources. A repeated open of the same repository and number reuses the
+receipt. A different release identity conflicts instead of creating a second
+environment. Refreshing a preview onto a new commit, hosted GitHub delivery,
+and non-local Storage backends remain separate work. Expiry still does not
+delete occupied Storage.
