@@ -21,4 +21,6 @@ test("capacity report remains behind the existing project authorization boundary
   }));
   const response = await app.handle(new Request("http://localhost/v1/projects/demo/capacity"));
   expect([401, 403]).toContain(response.status);
+  const tenant = await app.handle(new Request("http://localhost/v1/projects/demo/capacity/tenant"));
+  expect([401, 403]).toContain(tenant.status);
 });

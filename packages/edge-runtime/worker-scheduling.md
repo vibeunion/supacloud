@@ -8,6 +8,20 @@ retaining module state without occupying an execution slot. Queued projects
 without a slot receive the next available slot; each project keeps FIFO request
 order.
 
+When `WorkerPool` is given a tenant budget, or the process is started with
+`SUPACLOUD_TENANT_CAPACITY_JSON`, a project that is already at
+`functionConcurrency` is queued instead of taking another idle slot. Further
+requests past `queue` are rejected with `429` and `TENANT_CAPACITY_EXCEEDED`.
+The rejection names the project and echoes `x-request-id`. Other projects keep
+their own caps. Recorded worker heap is checked against `memoryMiB`.
+
+`cpu`, database `connections`, and `storageBytes` are not isolated inside this
+shared process. Application allocation reserves CPU, memory, connections, queue
+admission, and function concurrency from the same budget shape. Storage uploads
+enforce `storageBytes`. Dedicated workers still use systemd `CPUQuota` and
+`MemoryMax`. The gaps are `sharedRuntimeCapacityGaps` in
+`@supacloud/delivery/tenant-capacity`.
+
 Each pool independently supports these host settings:
 
 | Setting | Default | Meaning |

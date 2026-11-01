@@ -16,6 +16,7 @@ import { projectStorageService } from "../services/project-storage.service";
 import { getLegacyStorageDriver } from "../services/storage.adapter";
 import { ProjectStorageError } from "../services/project-storage-contract";
 import { StorageRLS } from "../services/storage-rls";
+import { storageCapacityRejection } from "../services/tenant-capacity";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
@@ -403,7 +404,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             400: ErrorResponse,
             401: ErrorResponse,
             403: ErrorResponse,
+            429: ErrorResponse,
             500: ErrorResponse,
+            503: ErrorResponse,
         },
         detail: { tags: ["storage"], summary: "Upload a file to a storage bucket" },
     }, async ({ params, body, request }) => {
@@ -415,6 +418,10 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             ? body.path.replace(/^\/+/, '')
             : file.name;
         if (!targetPath) return status(400, { message: 'No file path provided', code: '400' });
+        const capacity = await storageCapacityRejection({
+            ref: params.ref, bucket: params.name, objectName: targetPath, additionalBytes: file.size,
+        });
+        if (capacity) return status(capacity.status, { message: String(capacity.body.message), code: String(capacity.body.code) });
         const fileData = typeof file.stream === 'function' ? file.stream() : file;
         const success = await StorageService.uploadFile(
             params.ref,
