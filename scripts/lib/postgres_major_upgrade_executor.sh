@@ -3,8 +3,10 @@
 #
 # The Management API deliberately does not guess whether a deployment is
 # Pigsty/Patroni, Docker, or a separately managed PostgreSQL cluster. Configure
-# SUPACLOUD_POSTGRES_MAJOR_UPGRADE_EXECUTOR with an absolute, root-owned provider
-# executable. This wrapper validates the state-machine arguments and delegates
+# SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR with an absolute, root-owned
+# provider executable. The in-repo provider is postgres_major_upgrade_provider.sh:
+# it plans a new data directory or volume and does not cut a cluster over.
+# This wrapper validates the state-machine arguments and delegates
 # the provider-specific preflight/execute/rollback operation.
 
 set -euo pipefail
