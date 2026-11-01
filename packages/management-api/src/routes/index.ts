@@ -62,6 +62,7 @@ export { projectWebhookRoutes } from "./project-webhooks";
 export { projectAuditRoutes } from "./project-audit";
 export { projectEventRoutes } from "./project-events";
 export { createProjectCapacityRoutes, projectCapacityRoutes } from "./project-capacity";
+export { createProjectUsageRoutes, projectUsageRoutes } from "./project-usage";
 export { projectCapabilityRoutes } from "./project-capabilities";
 export { projectAuthHookRuntimeRoutes } from "./project-auth-hook-runtime";
 export { projectOrganizationRoutes } from "./project-organizations";
