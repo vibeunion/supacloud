@@ -577,9 +577,30 @@ describe("CaddyGatewayProvider", () => {
         const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(restProxy?.flush_interval).toBe(-1);
         expect(functions?.match?.[0]?.path).toEqual(["/functions/v1*"]);
+        const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(functionsProxy?.upstreams).toEqual([
+            { dial: "127.0.0.1:9090" },
+            { dial: config.edgeRuntimeInternal },
+        ]);
+        expect(functionsProxy?.load_balancing).toEqual({
+            selection_policy: { policy: "first" },
+            retries: 1,
+        });
+        expect(functionsProxy?.health_checks?.passive).toEqual({
+            fail_duration: "1s",
+            max_fails: 1,
+        });
+        expect(storageProxy?.upstreams).toEqual([
+            { dial: "127.0.0.1:9090" },
+            { dial: config.storageDataPlaneInternal },
+        ]);
+        expect(storageResumable?.handle?.find((handler: { handler?: string }) => handler.handler === "reverse_proxy")?.upstreams)
+            .toEqual(storageProxy?.upstreams);
+        expect(realtime?.handle?.find((handler: { handler?: string }) => handler.handler === "reverse_proxy")?.upstreams)
+            .toEqual([{ dial: "127.0.0.1:9090" }]);
+        expect(opaqueRest?.handle?.at(-1)?.upstreams).toEqual([{ dial: "127.0.0.1:9090" }]);
         expect(findCorsSubroute(functions)).toBeDefined();
         expect(functions?.handle?.[0]?.errors).toBeUndefined();
-        const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(functionsProxy?.headers?.response?.delete).toContain("Access-Control-Allow-Origin");
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
         expect(management?.match?.[0]?.path).toEqual(["/v1/projects/testref123", "/v1/projects/testref123/*"]);

@@ -561,6 +561,38 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     route["handle"] = corsSubroute ? [corsSubroute, ...withoutCors] : withoutCors;
 }
 
+/** How long Caddy skips a Management API upstream after one refused connection. */
+export const CONTROL_PLANE_FAILOVER_FAIL_DURATION = "1s";
+
+/**
+ * Prefer the control-plane dial, then the data-plane dial when the connection
+ * is refused. Caddy retries dial errors for every method. A successful response
+ * is not retried. This is a single-node outage path, not standby promotion.
+ */
+export function attachControlPlaneFailover(
+    proxy: Record<string, unknown>,
+    failoverUpstream: string | undefined,
+): void {
+    const secondary = failoverUpstream ? caddyDial(failoverUpstream) : "";
+    const upstreams = Array.isArray(proxy["upstreams"])
+        ? proxy["upstreams"] as Array<Record<string, unknown>>
+        : [];
+    const primary = typeof upstreams[0]?.["dial"] === "string" ? String(upstreams[0]["dial"]) : "";
+    if (!secondary || !primary || primary === secondary) return;
+    if (upstreams.some((upstream) => upstream["dial"] === secondary)) return;
+    proxy["upstreams"] = [...upstreams, { dial: secondary }];
+    proxy["load_balancing"] = {
+        selection_policy: { policy: "first" },
+        retries: 1,
+    };
+    proxy["health_checks"] = {
+        passive: {
+            fail_duration: CONTROL_PLANE_FAILOVER_FAIL_DURATION,
+            max_fails: 1,
+        },
+    };
+}
+
 export function makeReverseProxy(
     upstream: string,
     headers: Record<string, CaddyHeaderValue>,

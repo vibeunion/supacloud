@@ -63,7 +63,7 @@ Caddy 与 GoTrue 仍是独立的升级面。
 | `arm64` 与其他操作系统 | 特定部署方式支持／需单独验收 | 必须针对选定组合提供明确的安装、升级和恢复证据 |
 | 项目级外部 S3 存储 | 特定部署方式支持／需单独验收 | 需要显式项目绑定，以及针对提供方的可达性、持久性和恢复证据 |
 | 有状态协同升级中的嵌入式 Edge Runtime | 实验性／需单独验收 | 首要协同升级证据使用持久化的 `EDGE_RUNTIME_MODE=external` |
-| 控制面故障后的数据面存活 | 实验性目标 | 当前不作保证，必须通过故障演练实测哪些项目流量可以继续 |
+| 控制面短时中断 | 本地服务契约 | 已认证的 REST、Auth、同步 Functions 和存储数据面。不是高可用。Realtime、不透明密钥和嵌入式 Edge Runtime 仍依赖 Management API。见 [control-plane outage](control-plane-outage.md)。 |
 | 高可用、多节点调度和多区域运行 | 单机基线范围外 | 需要独立的故障转移、容量、升级和恢复证据 |
 | 应用框架、编译器、SDK 与 AI 工具 | 可选开发层 | 用于增强应用交付与契约，但不是运行平台项目的前置条件 |
 
@@ -100,9 +100,11 @@ Caddy 与 GoTrue 仍是独立的升级面。
 数据面通过网关承载项目的数据库、REST、Auth、Storage、Realtime、Functions
 和 Worker 流量。
 
-当前部分公开 Functions、Realtime 和 Storage 请求仍经过 Management API。因此，
-“控制面故障时已运行项目仍可服务”是目标验收属性，不是当前默认保证。第一步应先
-逻辑分离权限、连接池、并发预算和生命周期，再根据真实故障传播结果决定是否拆进程。
+已认证的 REST 和 Auth 直接发布到 PostgREST 与 GoTrue。Functions 和 Storage
+优先进入 Management API，并在该监听拒绝连接时转到 Edge Runtime 和存储数据面。
+Realtime 仍进入 Management API。本地契约、边界和唯一一次实测见
+[control-plane brief outage](control-plane-outage.md)。这不是生产故障证明，
+也不把单机基线说成高可用。
 
 ### 基础设施
 
@@ -202,7 +204,7 @@ PostgreSQL 分开升级，但发布说明必须明确写出边界。
 
 - 所有 Linux 发行版或 CPU 架构
 - 单机基线上的高可用或多节点调度
-- 未经故障演练证明的控制面故障存活
+- 超出[控制面短时中断契约](control-plane-outage.md)的存活，包括 Realtime、不透明密钥、嵌入式 Edge Runtime，以及备份 RPO/RTO
 - 数据库迁移或外部副作用的自动回滚
 - 从集群级物理备份直接执行单项目 PITR
 - 完整 Supabase Cloud 功能对等

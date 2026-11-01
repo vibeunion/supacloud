@@ -54,6 +54,7 @@
 - [Project Endpoint Projection](./project-endpoint-projection.md) - Fixed endpoint schema, commands, and readiness limitations
 - [PostgREST Runtime Lifecycle](./postgrest-runtime-lifecycle.md) - Component-level PostgREST desired state, pause/resume/status, and reconciliation
 - [pgredis Runtime](./pgredis-runtime.md) - Private cache data plane, control-plane APIs, Web Console operations, and safety boundaries
+- [Control-plane brief outage](./control-plane-outage.md) - Single-node SLO for authenticated REST, Auth, Storage, and Functions while the Management API listener is down
 - [Platform Component Upgrade Notes](./platform-component-upgrade-notes.md) - Breaking changes, migrations, optional features, and rollback notes for current runtime components
 - [Upgrade to Pigsty 4.5](./upgrade-to-pigsty-4.5.md) - Current Pigsty version pin and upgrade validation
 - [Historical Pigsty 4.4 compatibility migration](./upgrade-to-pigsty-4.4.md) - Analytics and Supabase compatibility migration background
