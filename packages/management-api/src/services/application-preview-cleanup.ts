@@ -1,4 +1,4 @@
-import { lstat, open, realpath, rmdir } from "node:fs/promises";
+import { lstat, open, readdir, realpath, rm, rmdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { config } from "../config";
 import { generateDbName, resolveBucketName, sql } from "../db";
@@ -11,6 +11,8 @@ import { normalizeProjectConfig } from "../utils/project-config";
 import type { ApplicationDeploymentService } from "./application-deployment";
 import { databaseService } from "./database.service";
 import { PROJECT_STORAGE_SECRET } from "./project-storage-contract";
+import { createPreviewFunctionIsolation, listPreviewFunctionSlugs } from "./application-preview-isolation";
+import { pgmqService } from "./pgmq.service";
 
 function missing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
@@ -42,6 +44,39 @@ export async function cleanupEmptyPreviewStorage(branchRef: string, rootPath: st
   try { await lstat(directory); }
   catch (error) { if (missing(error)) return; throw error; }
   throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNCONFIRMED");
+}
+
+async function assertNoSymlinks(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
+    if (entry.isDirectory()) await assertNoSymlinks(join(directory, entry.name));
+  }
+}
+
+/** Delete one preview bucket directory after refusing symlinks. Expiry does not call this. */
+export async function reclaimPreviewStorage(branchRef: string, rootPath: string): Promise<void> {
+  if (!/^pv[a-f0-9]{18}$/.test(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH");
+  const root = resolve(rootPath);
+  const rootStat = await lstat(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || await realpath(root) !== root) {
+    throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
+  }
+  const directory = join(root, resolveBucketName(branchRef));
+  let stat;
+  try { stat = await lstat(directory); }
+  catch (error) { if (missing(error)) return; throw error; }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
+  await assertNoSymlinks(directory);
+  await rm(directory, { recursive: true, force: false });
+  await cleanupEmptyPreviewStorage(branchRef, root);
+}
+
+async function previewStorageBound(branchRef: string): Promise<boolean> {
+  const [binding] = await sql`
+    SELECT 1 FROM project_control_secrets WHERE project_ref = ${branchRef}
+      AND scope = ${PROJECT_STORAGE_SECRET.scope} AND name = ${PROJECT_STORAGE_SECRET.name}
+  `;
+  return !!binding || !["juicefs", "local"].includes(config.storageType);
 }
 
 export function createApplicationPreviewCleanupChecks(
@@ -105,14 +140,13 @@ export function createApplicationPreviewCleanupChecks(
     },
     async cleanupStorage(receipt) {
       const branchRef = receipt.resources.database_branch.branch_ref;
-      const [binding] = await sql`
-        SELECT 1 FROM project_control_secrets WHERE project_ref = ${branchRef}
-          AND scope = ${PROJECT_STORAGE_SECRET.scope} AND name = ${PROJECT_STORAGE_SECRET.name}
-      `;
-      if (binding || !["juicefs", "local"].includes(config.storageType)) {
-        throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
-      }
+      if (await previewStorageBound(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
       await cleanupEmptyPreviewStorage(branchRef, config.storageMountPoint);
+    },
+    async reclaimStorage(receipt) {
+      const branchRef = receipt.resources.database_branch.branch_ref;
+      if (await previewStorageBound(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
+      await reclaimPreviewStorage(branchRef, config.storageMountPoint);
     },
     async verifySecretDeleted(receipt) {
       const [secret] = await sql`
@@ -142,6 +176,46 @@ export const previewBranches: NonNullable<ApplicationPreviewServiceDependencies[
   createBranch: input => branchService.createBranch(input),
   deleteBranch: branchRef => branchService.deletePreviewBranch(branchRef),
 };
+
+export function previewFunctionIsolation(): NonNullable<ApplicationPreviewServiceDependencies["functions"]> {
+  return createPreviewFunctionIsolation(config.edgeFunctionsDir);
+}
+
+export function createPreviewReclaimAudit(
+  active: Pick<ApplicationActiveStorage, "readForApplication">,
+): NonNullable<ApplicationPreviewServiceDependencies["reclaimAudit"]> {
+  return async receipt => {
+    const branchRef = receipt.resources.database_branch.branch_ref;
+    if (!/^pv[a-f0-9]{18}$/.test(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH");
+    const [database] = await sql`SELECT 1 FROM pg_database WHERE datname = ${generateDbName(branchRef)}`;
+    const project = await projectRepository.findByRef(branchRef);
+    const queuePresent = database
+      ? (await pgmqService.listQueues(branchRef)).some(queue => queue.queue_name === receipt.queue_name)
+      : false;
+    const [secret] = await sql`
+      SELECT 1 FROM project_secrets
+      WHERE project_ref = ${branchRef} AND name = ${receipt.test_secret_name}
+    `;
+    if (await previewStorageBound(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
+    let storage = false;
+    try {
+      await lstat(join(resolve(config.storageMountPoint), resolveBucketName(branchRef)));
+      storage = true;
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+    const slugs = await listPreviewFunctionSlugs(config.edgeFunctionsDir, branchRef);
+    const activation = await active.readForApplication(branchRef, receipt.application_id, receipt.environment_id);
+    const leftovers: string[] = [];
+    if (activation) leftovers.push("app");
+    if (slugs.length > 0) leftovers.push("functions");
+    if (database || project) leftovers.push("database");
+    if (queuePresent) leftovers.push("queue");
+    if (storage) leftovers.push("storage");
+    if (secret) leftovers.push("secret");
+    return leftovers;
+  };
+}
 
 export const previewSecrets: NonNullable<ApplicationPreviewServiceDependencies["secrets"]> = {
   upsertSecrets: async (ref, values) => {
