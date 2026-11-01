@@ -27,7 +27,7 @@ async function retryTransientSchemaFetch(
   await sleep(delayMs);
 }
 
-async function fetchOfficialOpenApiSchema(): Promise<any> {
+async function fetchOfficialOpenApiSchema(): Promise<unknown> {
   let lastError: Error = new Error("Failed to fetch schema");
 
   for (let attempt = 1; attempt <= SCHEMA_FETCH_MAX_ATTEMPTS; attempt++) {
