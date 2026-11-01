@@ -74,7 +74,7 @@ Caddy runs as a native systemd service, fully managed via the Caddy Admin API:
 - No manual config editing or daemon reload workflow — all changes take effect via Admin API publishing.
 
 ### 3. Storage API
-SupaCloud serves Supabase-compatible Storage through Management API storage routes. Binary data is written to the configured physical backend, while metadata is written to the tenant database with Row Level Security context applied.
+SupaCloud serves Supabase-compatible Storage through the storage compatibility routes. The public gateway tries the Management API first and, if that listener refuses the connection, uses the storage data-plane process on `STORAGE_DATA_PLANE_INTERNAL`. Binary data is written to the configured physical backend, while metadata is written to the tenant database with Row Level Security context applied. This process split is not a standby database.
 
 Current safeguards:
 

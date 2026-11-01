@@ -131,11 +131,10 @@ Embedded Edge Runtime is managed by `supacloud.service`; external mode uses `sup
 
 Caddy routing is published as validated JSON through its Admin API, not by hand-editing a production Caddyfile. See [gateway ownership and recovery](gateway-customization.md). [pgredis-runtime](pgredis-runtime.md) is a private data plane: browsers do not call its internal port and workers do not receive PostgreSQL credentials. PGMQ remains the platform queue.
 
-The current data-plane boundary is not yet an outage-survival guarantee:
-public Functions and Realtime requests enter Management API, and Storage is
-served through Management API routes. A future control-plane failure drill
-must prove which already-running project traffic survives and which traffic is
-expected to stop.
+Authenticated REST and Auth do not enter the Management API. Functions and
+Storage try it first and fail over when the connection is refused. Realtime
+still enters it. The declared single-node contract and the local drill are in
+[control-plane brief outage](control-plane-outage.md). This is not HA.
 
 ## Storage, recovery and observability
 
