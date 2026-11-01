@@ -216,7 +216,7 @@ type AuditExportRequest = Record<string, unknown> & {
   limit?: number;
 };
 
-async function createAuditExport(ref: string, body: AuditExportRequest, actor: string) {
+export async function createProjectAuditExport(ref: string, body: AuditExportRequest, actor: string) {
   const format = body.format || "jsonl";
   const filters = filtersFromQuery(body);
   const rowLimit = Math.min(50_000, Math.max(1, body.limit || 10_000));
@@ -397,7 +397,7 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
   }, async ({ params, body, request, set }) => {
     try {
       const principal = authorizedActor(request);
-      const record = await createAuditExport(params.ref, body, principal.id);
+      const record = await createProjectAuditExport(params.ref, body, principal.id);
       set.status = 201;
       return { ...record, download_url: `/v1/projects/${params.ref}/audit/exports/${record.id}/download` };
     } catch (error) {

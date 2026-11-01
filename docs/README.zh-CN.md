@@ -33,6 +33,7 @@
 
 - [OAuth 提供商配置](./oauth-providers.md) - 常用 OAuth Provider 配置
 - [OAuth 2.1 / OIDC 服务端](./oauth-oidc-provider.md) - 项目级 OAuth 服务端迁移、Discovery、JWKS 与客户端管理
+- [企业治理](./enterprise-governance.md) - 组织团队、协作者能力允许列表、审计导出、密钥轮换，以及 SSO、SCIM 与 BYOK 的缺口
 - [GoTrue v2.193 升级基线](./gotrue-v2.193-upgrade.md) - 历史 Checksum、增量迁移回读、MFA 验收与回滚边界
 - [国内 OAuth 集成](./china-oauth-integration.md) - 微信、支付宝、钉钉第三方登录集成
 - [微信登录集成](./wechat-auth-integration.md) - 微信开放平台、公众号与小程序登录方案

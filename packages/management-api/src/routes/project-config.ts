@@ -23,6 +23,8 @@ import {
 } from "../utils/openapi-defaults.gen";
 import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import { logAuditEvent, markRequestAuditCommitted } from "../services/audit.service";
+import { keyRotationAuditMetadata, type KeyRotationKind } from "../services/enterprise-governance";
 import { projectNetworkRestrictionRoutes } from "./project-network-restrictions";
 import {
   getAuthRuntimeManagedError,
@@ -86,6 +88,17 @@ import {
 } from "../utils/postgrest-schema-config";
 
 type ProjectSettings = Record<string, unknown>;
+
+async function auditKeyRotation(request: Request, ref: string, kind: KeyRotationKind): Promise<void> {
+  const plan = keyRotationAuditMetadata(kind, ref);
+  await logAuditEvent({
+    request,
+    status: 200,
+    action: plan.action,
+    metadata: plan.metadata,
+  });
+  markRequestAuditCommitted(request);
+}
 
 interface PostgrestSchemaPatchRequest {
   exposed_schemas: string[];
@@ -1019,6 +1032,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!keys) {
         return status(404, { message: "Project not found", code: "404" });
       }
+      await auditKeyRotation(request, params.ref, "legacy_jwt");
       return {
         anon_key: keys.anon_key,
         service_role_key: keys.service_role_key ? "********" : "",
@@ -1043,6 +1057,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!keys) {
         return status(404, { message: "Project not found", code: "404" });
       }
+      await auditKeyRotation(request, params.ref, "opaque");
       return keys;
     },
   )

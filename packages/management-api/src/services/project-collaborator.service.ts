@@ -5,88 +5,23 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { InvitationPrincipal } from "./invitation-principal.service";
 import type { TrustedPrincipal } from "./bff-proof.service";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
+import {
+  effectiveCollaboratorCapabilities,
+  isTeamGrantActor,
+  normalizeCapabilityAllowlist,
+  ROLE_CAPABILITIES,
+  teamGrantActor,
+  type CollaboratorCapability,
+  type CollaboratorRole,
+} from "./collaborator-capabilities";
 
-export type CollaboratorRole = "owner" | "admin" | "member" | "viewer";
-export type CollaboratorCapability =
-  | "applications.read"
-  | "applications.manage"
-  | "users.read"
-  | "users.manage"
-  | "roles.read"
-  | "roles.manage"
-  | "connectors.read"
-  | "connectors.manage"
-  | "tenant.members.read"
-  | "tenant.members.manage"
-  | "tenant.owner.transfer"
-  | "tenant.config.read"
-  | "tenant.config.manage"
-  | "tenant.capabilities.read"
-  | "tenant.capabilities.manage"
-  | "tenant.domains.read"
-  | "tenant.domains.manage"
-  | "organizations.read"
-  | "organizations.manage"
-  | "webhooks.read"
-  | "webhooks.manage"
-  | "webhooks.replay"
-  | "audit.read"
-  | "audit.write"
-  | "audit.export"
-  | "audit.read_sensitive"
-  | "security.read"
-  | "security.manage"
-  | "operations.read"
-  | "operations.manage"
-  | "database.migrations.read"
-  | "database.migrations.manage"
-  | "project.read"
-  | "project.manage";
+export type { CollaboratorCapability, CollaboratorRole } from "./collaborator-capabilities";
 
 type AcceptCollaboratorInvitationInput = {
   ref: string;
   invitationId: string;
   token: string;
   principal: InvitationPrincipal;
-};
-
-const ROLE_CAPABILITIES: Record<CollaboratorRole, CollaboratorCapability[]> = {
-  owner: [
-    "applications.read", "applications.manage",
-    "users.read", "users.manage",
-    "roles.read", "roles.manage",
-    "connectors.read", "connectors.manage",
-    "tenant.members.read", "tenant.members.manage", "tenant.owner.transfer",
-    "tenant.config.read", "tenant.config.manage",
-    "tenant.capabilities.read", "tenant.capabilities.manage",
-    "tenant.domains.read", "tenant.domains.manage",
-    "organizations.read", "organizations.manage",
-    "webhooks.read", "webhooks.manage", "webhooks.replay",
-    "audit.read", "audit.write", "audit.export", "audit.read_sensitive",
-    "security.read", "security.manage",
-    "operations.read", "operations.manage",
-    "database.migrations.read", "database.migrations.manage",
-    "project.read", "project.manage",
-  ],
-  admin: [
-    "applications.read", "applications.manage",
-    "users.read", "users.manage",
-    "roles.read", "roles.manage",
-    "connectors.read", "connectors.manage",
-    "tenant.members.read", "tenant.members.manage",
-    "tenant.config.read", "tenant.config.manage",
-    "tenant.capabilities.read", "tenant.capabilities.manage",
-    "tenant.domains.read", "tenant.domains.manage",
-    "organizations.read", "organizations.manage",
-    "webhooks.read", "webhooks.manage", "webhooks.replay",
-    "audit.read", "audit.write", "audit.export",
-    "security.read", "security.manage",
-    "operations.read", "operations.manage",
-    "database.migrations.read", "database.migrations.manage",
-    "project.read", "project.manage",
-  ],
-  member: ["tenant.members.read", "organizations.read", "webhooks.read", "audit.read"],
-  viewer: ["tenant.members.read", "organizations.read", "webhooks.read", "audit.read"],
 };
 
 function normalizeRole(value: string, allowOwner = true): CollaboratorRole {
@@ -113,12 +48,21 @@ function invitationToken(): string {
   return `collabinv_${randomBytes(32).toString("base64url")}`;
 }
 
+function allowlistFromRow(row: Record<string, unknown>): string[] | null {
+  const value = row["capability_allowlist"];
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
 function publicCollaborator(row: Record<string, unknown>) {
   const role = row["role"] as CollaboratorRole;
+  const allowlist = allowlistFromRow(row);
   return {
     ...row,
     scope: "project",
-    capabilities: ROLE_CAPABILITIES[role] || [],
+    capability_allowlist: allowlist,
+    capabilities: effectiveCollaboratorCapabilities(role, allowlist),
   };
 }
 
@@ -131,12 +75,15 @@ async function projectOrThrow(ref: string) {
 async function actorCapabilities(ref: string, actor: TrustedPrincipal): Promise<Set<string>> {
   if (actor.platformAdmin) return new Set(ROLE_CAPABILITIES.owner);
   const [collaborator] = await sql`
-    SELECT role FROM project_collaborators
+    SELECT role, capability_allowlist FROM project_collaborators
     WHERE project_ref = ${ref} AND principal_id = ${actor.id} AND status = 'active'
     LIMIT 1
   `;
   if (!collaborator) throw new ForbiddenError("The current principal is not an active project collaborator");
-  return new Set(ROLE_CAPABILITIES[collaborator.role as CollaboratorRole] || []);
+  return new Set(effectiveCollaboratorCapabilities(
+    collaborator.role as CollaboratorRole,
+    allowlistFromRow(collaborator),
+  ));
 }
 
 function assertCapabilityPresent(capabilities: Set<string>, capability: CollaboratorCapability): void {
@@ -222,6 +169,94 @@ async function assertActiveOwnerRemains(tx: SQL, ref: string, message: string): 
     WHERE project_ref = ${ref} AND role = 'owner' AND status = 'active'
   `;
   if (Number(count?.count || 0) <= 1) throw new ConflictError(message);
+}
+
+export type TeamGrantEnforcement =
+  | "linked"
+  | "released"
+  | "principal_missing"
+  | "skipped_existing_collaborator"
+  | "skipped_owner"
+  | "not_team_managed";
+
+export async function applyTeamProjectGrant(input: {
+  ref: string;
+  principalId: string;
+  email: string | null;
+  role: string;
+  teamId: string;
+  allowlist: readonly string[] | null;
+}): Promise<{ enforcement: TeamGrantEnforcement; collaborator_id?: string }> {
+  await projectOrThrow(input.ref);
+  const role = normalizeRole(input.role, false);
+  const allowlist = normalizeCapabilityAllowlist(role, input.allowlist);
+  const marker = teamGrantActor(input.teamId);
+  const principalId = input.principalId.trim();
+  if (!principalId) throw new ValidationError("principal_id is required");
+  try {
+    await assertPrincipalExists(input.ref, principalId);
+  } catch (error) {
+    if (error instanceof NotFoundError) return { enforcement: "principal_missing" };
+    throw error;
+  }
+  const [existing] = await sql`
+    SELECT id, role, status, created_by
+    FROM project_collaborators
+    WHERE project_ref = ${input.ref} AND principal_id = ${principalId}
+    LIMIT 1
+  ` as Array<Record<string, unknown>>;
+  if (existing) {
+    if (!isTeamGrantActor(existing["created_by"], input.teamId)) {
+      return { enforcement: "skipped_existing_collaborator" };
+    }
+    if (existing["role"] === "owner") return { enforcement: "skipped_owner" };
+  }
+  const [row] = await sql`
+    INSERT INTO project_collaborators (
+      project_ref, principal_id, email, role, created_by, capability_allowlist
+    ) VALUES (
+      ${input.ref}, ${principalId}, ${input.email}, ${role}, ${marker}, ${allowlist}::text[]
+    )
+    ON CONFLICT (project_ref, principal_id) DO UPDATE SET
+      email = EXCLUDED.email,
+      role = EXCLUDED.role,
+      capability_allowlist = EXCLUDED.capability_allowlist,
+      status = 'active',
+      updated_at = NOW()
+    WHERE project_collaborators.created_by = EXCLUDED.created_by
+      AND project_collaborators.role <> 'owner'
+    RETURNING id
+  ` as Array<{ id?: string }>;
+  if (!row?.id) return { enforcement: "skipped_existing_collaborator" };
+  return { enforcement: "linked", collaborator_id: String(row.id) };
+}
+
+export async function releaseTeamProjectGrant(input: {
+  ref: string;
+  principalId: string;
+  teamId: string;
+}): Promise<{ enforcement: TeamGrantEnforcement }> {
+  const marker = teamGrantActor(input.teamId);
+  const principalId = input.principalId.trim();
+  const [existing] = await sql`
+    SELECT id, role, created_by
+    FROM project_collaborators
+    WHERE project_ref = ${input.ref} AND principal_id = ${principalId}
+    LIMIT 1
+  ` as Array<Record<string, unknown>>;
+  if (!existing || !isTeamGrantActor(existing["created_by"], input.teamId)) {
+    return { enforcement: "not_team_managed" };
+  }
+  if (existing["role"] === "owner") return { enforcement: "skipped_owner" };
+  const [row] = await sql`
+    DELETE FROM project_collaborators
+    WHERE project_ref = ${input.ref}
+      AND principal_id = ${principalId}
+      AND created_by = ${marker}
+      AND role <> 'owner'
+    RETURNING id
+  ` as Array<{ id?: string }>;
+  return { enforcement: row?.id ? "released" : "not_team_managed" };
 }
 
 export const projectCollaboratorService = {

@@ -82,6 +82,15 @@ describe("SAML provider management", () => {
     });
   });
 
+  test("project SCIM routes stay an explicit stub", async () => {
+    const response = await request("/v1/projects/proj_1/auth/scim/Users", { method: "POST", body: "{}" });
+    expect(response.status).toBe(501);
+    expect(await response.json()).toMatchObject({
+      reason_code: "scim_not_implemented",
+      available: false,
+    });
+  });
+
   test("rejects create requests without the required SAML type", async () => {
     const upstreamFetch = mock(async () => Response.json({ id: "unexpected" }));
     globalThis.fetch = upstreamFetch as typeof fetch;

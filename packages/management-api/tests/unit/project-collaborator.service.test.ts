@@ -10,6 +10,8 @@ let acceptedExistingRole: "owner" | "admin" | "member" | "viewer" | null = "owne
 let acceptedExistingStatus: "active" | "suspended" | null = "active";
 let gotrueUserExists = true;
 let resolvedAuthorityRefs: string[] = [];
+let actorAllowlist: string[] | null = null;
+let teamGrantExisting: Record<string, unknown> | null = null;
 
 const platformAdmin: TrustedPrincipal = {
   id: "platform-admin",
@@ -79,12 +81,24 @@ const sqlMock = Object.assign(
   mock((strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings.join("?");
     if (text.includes("FROM projects")) return Promise.resolve([{ ref: "proj_1" }]);
+    if (text.includes("SELECT role, capability_allowlist FROM project_collaborators")) {
+      return Promise.resolve(actorRole ? [{ role: actorRole, capability_allowlist: actorAllowlist }] : []);
+    }
+    if (text.includes("SELECT id, role, status, created_by")) {
+      return Promise.resolve(teamGrantExisting ? [teamGrantExisting] : []);
+    }
+    if (text.includes("SELECT id, role, created_by")) {
+      return Promise.resolve(teamGrantExisting ? [teamGrantExisting] : []);
+    }
     if (text.includes("SELECT role FROM project_collaborators")) {
       return Promise.resolve(actorRole ? [{ role: actorRole }] : []);
     }
     if (text.includes("SELECT * FROM project_collaborators")) return Promise.resolve([]);
     if (text.includes("INSERT INTO project_collaborators")) {
       return Promise.resolve([{ id: "created-one", role: values[3], status: "active" }]);
+    }
+    if (text.includes("DELETE FROM project_collaborators")) {
+      return Promise.resolve([{ id: "released" }]);
     }
     return Promise.resolve([]);
   }),
@@ -105,7 +119,7 @@ mock.module("../../src/db", () => ({
     return `supa_${ref}`;
   },
 }));
-const { projectCollaboratorService } = await import("../../src/services/project-collaborator.service");
+const { applyTeamProjectGrant, projectCollaboratorService, releaseTeamProjectGrant } = await import("../../src/services/project-collaborator.service");
 const { config } = await import("../../src/config");
 const originalOwnerRef = config.authRuntimeOwnerRef;
 
@@ -123,6 +137,8 @@ describe("project collaborator authorization and owner protection", () => {
     acceptedExistingStatus = "active";
     gotrueUserExists = true;
     resolvedAuthorityRefs = [];
+    actorAllowlist = null;
+    teamGrantExisting = null;
     config.authRuntimeOwnerRef = "";
     txMock.mockClear();
     sqlMock.mockClear();
@@ -236,6 +252,73 @@ describe("project collaborator authorization and owner protection", () => {
       token: "valid-token",
       principal: { id: "owner", email: "owner@example.test" },
     })).rejects.toThrow("must be reactivated by an authorized project owner or admin");
+  });
+
+  test("capability allowlist narrows an admin without changing the role row", async () => {
+    actorRole = "admin";
+    actorAllowlist = ["tenant.members.read"];
+    await expect(projectCollaboratorService.list("proj_1", delegatedActor)).resolves.toMatchObject({
+      scope: "project",
+    });
+    await expect(projectCollaboratorService.invite(
+      "proj_1",
+      { email: "new@example.test", role: "member" },
+      delegatedActor,
+    )).rejects.toThrow("tenant.members.manage");
+  });
+
+  test("links a team grant only when the GoTrue principal is free", async () => {
+    const linked = await applyTeamProjectGrant({
+      ref: "proj_1",
+      principalId: "new-owner",
+      email: "member@example.test",
+      role: "member",
+      teamId: "11111111-1111-4111-8111-111111111111",
+      allowlist: ["audit.read"],
+    });
+    expect(linked.enforcement).toBe("linked");
+
+    teamGrantExisting = {
+      id: "existing",
+      role: "admin",
+      status: "active",
+      created_by: "someone-else",
+    };
+    const skipped = await applyTeamProjectGrant({
+      ref: "proj_1",
+      principalId: "new-owner",
+      email: "member@example.test",
+      role: "member",
+      teamId: "11111111-1111-4111-8111-111111111111",
+      allowlist: null,
+    });
+    expect(skipped.enforcement).toBe("skipped_existing_collaborator");
+  });
+
+  test("releases a collaborator row created by the same team", async () => {
+    teamGrantExisting = {
+      id: "existing",
+      role: "member",
+      created_by: "organization-team:11111111-1111-4111-8111-111111111111",
+    };
+    await expect(releaseTeamProjectGrant({
+      ref: "proj_1",
+      principalId: "new-owner",
+      teamId: "11111111-1111-4111-8111-111111111111",
+    })).resolves.toEqual({ enforcement: "released" });
+  });
+
+  test("does not release a collaborator the team does not own", async () => {
+    teamGrantExisting = {
+      id: "existing",
+      role: "member",
+      created_by: "someone-else",
+    };
+    await expect(releaseTeamProjectGrant({
+      ref: "proj_1",
+      principalId: "new-owner",
+      teamId: "11111111-1111-4111-8111-111111111111",
+    })).resolves.toEqual({ enforcement: "not_team_managed" });
   });
 
   test("does not change an existing collaborator role through invitation acceptance", async () => {

@@ -10,6 +10,7 @@ export { projectSecretsRoutes } from "./project-secrets";
 export { projectControlSecretsRoutes } from "./project-control-secrets";
 export { projectFunctionsRoutes } from "./project-functions";
 export { organizationRoutes } from "./organizations";
+export { organizationGovernanceRoutes } from "./organization-governance";
 export { userRoutes } from "./user";
 export { backupRoutes } from "./backups";
 export { monitorRoutes } from "./monitor";
