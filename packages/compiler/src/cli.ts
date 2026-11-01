@@ -20,6 +20,7 @@ import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
 import { applyDiagnosticFix } from "./fixes";
+import { runPreviewFixCommand } from "./preview-fix-cli";
 import { createDiagnosticReport, toEditorDiagnostics, createEditorCodeActions } from "./diagnostics";
 import { GraphqlConfigurationError } from "./graphql-options";
 import { planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
@@ -76,6 +77,7 @@ Usage:
   supacloud-compiler graph   [rootDir] [options]
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <name> [rootDir] [options]
+  supacloud-compiler preview-fix --production <dir> --preview <dir> --preview-id <uuid> --project-ref <ref> --application-id <id> --environment-id <id> --property transaction|idempotency --value required|none [--json]
   supacloud-compiler dev-context [rootDir] [options]
   supacloud-compiler environment-bindings [rootDir] [options]
   supacloud-compiler release-evidence --delivery-manifest <file> --delivery-target <name> [--json]
@@ -101,6 +103,7 @@ Commands:
   graph               Print the discovered application graph
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
+  preview-fix         Edit, compile, invoke, and record a timeline inside one isolated preview. Does not deploy or write production.
   dev-context         Print the read-only application development context for tooling/console/MCP consumers
   environment-bindings Resolve static per-environment resource bindings without credentials
   release-evidence    Summarize one immutable target without loading project configuration
@@ -224,6 +227,10 @@ async function run(): Promise<void> {
 
   const command = args[0];
   if (await runGraphqlGovernanceCommand(args)) return;
+  if (command === "preview-fix") {
+    await runPreviewFixCommand(args.slice(1));
+    return;
+  }
   if (command === "release-evidence") {
     const { runReleaseEvidenceCommand } = await import("./release-evidence-cli");
     await runReleaseEvidenceCommand(args.slice(1));
