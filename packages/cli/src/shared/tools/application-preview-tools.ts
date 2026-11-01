@@ -48,6 +48,10 @@ const receiptSchema = Type.Object({
     test_secret: Type.Object({ status: phase, name: Type.String({ pattern: "^[A-Z0-9_-]{1,128}$" }), value_issued: Type.Literal(false) }, strict),
     configuration_revision: Type.Object({ status: phase, configuration_id: revision }, strict),
     application_activation: Type.Object({ status: phase, activation_id: Type.Union([previewIdSchema, Type.Null()]) }, strict),
+    functions: Type.Optional(Type.Object({
+      status: phase,
+      slugs: Type.Array(Type.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }), { maxItems: 64, uniqueItems: true }),
+    }, strict)),
     smoke_test: Type.Object({ status: phase, checks, passed: checks, failed: checks }, strict),
   }, strict),
   cleanup: Type.Object({
@@ -112,6 +116,7 @@ function receipt(value: unknown, identity: { ref: string; id: string; environmen
     }
   }
   if (value.status === "cleaned" && (!value.cleanup.completed || value.cleanup.required
+    || value.resources.functions !== undefined && value.resources.functions.status !== "cleaned"
     || [value.resources.database_branch, value.resources.queue_namespace,
       value.resources.storage_namespace, value.resources.test_secret].some(resource => resource.status !== "cleaned"))) {
     throw new Error("Incomplete preview cleanup");

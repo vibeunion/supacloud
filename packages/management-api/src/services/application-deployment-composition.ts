@@ -19,7 +19,9 @@ import { ApplicationRuntimeFiles } from "./application-runtime-files";
 import { createApplicationCompatibilityVerifier } from "./application-compatibility";
 import { createApplicationWorkerRetirementChecks } from "./application-worker-retirement";
 import { ApplicationPreviewService } from "./application-preview.service";
-import { createApplicationPreviewCleanupChecks, previewBranches, previewSecrets } from "./application-preview-cleanup";
+import {
+  createApplicationPreviewCleanupChecks, createPreviewReclaimAudit, previewBranches, previewFunctionIsolation, previewSecrets,
+} from "./application-preview-cleanup";
 import { withApplicationProjectLifecycle } from "./application-lifecycle-lock";
 import { StorageService } from "./storage.service";
 import { createApplicationPreviewReadiness } from "./application-preview-readiness";
@@ -181,6 +183,8 @@ export function createDefaultApplicationRouteComposition(
     configurations,
     smokeTest: createApplicationPreviewReadiness({ active, readiness }),
     branches: previewBranches,
+    functions: previewFunctionIsolation(),
+    reclaimAudit: createPreviewReclaimAudit(active),
     cleanupChecks: createApplicationPreviewCleanupChecks(active, deployment),
     storage: {
       createBucket: (ref) => StorageService.createBucket(ref),
