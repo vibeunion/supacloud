@@ -31,6 +31,7 @@ import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
+import { loadTenantCapacityBudget, storageCapacityRejection } from "../services/tenant-capacity";
 import {
     deleteExactVersion,
     ensureStorageVersioningSchema,
@@ -865,7 +866,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (bucket.file_size_limit && size > Number(bucket.file_size_limit)) {
                 return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size', max_bytes: Number(bucket.file_size_limit) });
             }
-            
+            const capacity = await storageCapacityRejection({ ref, bucket: params.bucket, objectName: filePath, additionalBytes: size });
+            if (capacity) return status(capacity.status, capacity.body);
+
             // Check allowed mime types
             const allowedMimes = bucket.allowed_mime_types as string[] | null;
             if (allowedMimes && Array.isArray(allowedMimes) && allowedMimes.length > 0) {
@@ -923,6 +926,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         try {
             const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, headers['content-type'], headers["content-length"], STORAGE_UPLOAD_MAX_BYTES);
+            const capacity = await storageCapacityRejection({ ref, bucket: params.bucket, objectName: filePath, additionalBytes: size });
+            if (capacity) return status(capacity.status, capacity.body);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
             const contentEncoding = headers['content-encoding']?.trim() || (customMetadata?.contentEncoding as string | undefined);
@@ -1899,6 +1904,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         try {
+            const capacityBudget = await loadTenantCapacityBudget(ref);
+            if (capacityBudget) {
+                const source = await StorageRLS.getObjectInfo(ref, srcBucket, srcKey, auth, true);
+                const capacity = await storageCapacityRejection({
+                    ref, bucket: destBucket, objectName: destKey, additionalBytes: normalizeStorageObjectSize(source?.size),
+                });
+                if (capacity) return status(capacity.status, capacity.body);
+            }
+
             // Check RLS Download on source
             const permittedSrc = await StorageRLS.authorizeAction(ref, auth, 'download', srcBucket, srcKey);
             if (!permittedSrc.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permittedSrc.error || 'Access Denied' });
@@ -1994,6 +2008,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (logicalBucket.file_size_limit && uploadLength > Number(logicalBucket.file_size_limit)) {
             return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size', max_bytes: Number(logicalBucket.file_size_limit) });
         }
+        const capacity = await storageCapacityRejection({ ref, bucket, objectName, additionalBytes: uploadLength });
+        if (capacity) return status(capacity.status, capacity.body);
 
         const allowedMimes = logicalBucket.allowed_mime_types as string[] | null;
         if (allowedMimes && Array.isArray(allowedMimes) && allowedMimes.length > 0) {

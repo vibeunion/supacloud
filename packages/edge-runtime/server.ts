@@ -72,6 +72,7 @@ import {
   type EdgeFunctionActivationState,
 } from "./function-activation";
 import { runtimeSourceIdentity } from "./runtime-source-identity";
+import { tenantCapacityFromEnvironment } from "@supacloud/delivery/tenant-capacity";
 import {
   createMemoryPressureMonitor,
   sampleRuntimeMemory,
@@ -119,6 +120,7 @@ const WORKER_REPLACEMENT_BUDGET_OPTIONS = WORKER_REPLACEMENT_BUDGET === undefine
   ? {}
   : { maxWorkerReplacementsBeforeRecycle: WORKER_REPLACEMENT_BUDGET };
 const PROJECT_WORKER_CACHE_OPTIONS = resolveProjectWorkerCacheOptions(process.env);
+const TENANT_CAPACITY = tenantCapacityFromEnvironment(process.env);
 const MAX_CONCURRENT_EXECUTIONS = resolveMaxConcurrentExecutions(POOL_SIZE, process.env);
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const RUNTIME_INSTANCE_ID = process.env.EDGE_RUNTIME_INSTANCE_ID?.trim() || crypto.randomUUID();
@@ -369,6 +371,7 @@ const pool = new WorkerPool({
   maxConcurrentExecutions: AOT_CAPTURE ? 0 : MAX_CONCURRENT_EXECUTIONS,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
   ...PROJECT_WORKER_CACHE_OPTIONS,
+  ...(TENANT_CAPACITY ? { tenantCapacity: TENANT_CAPACITY } : {}),
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
@@ -377,6 +380,7 @@ const backgroundPool = new WorkerPool({
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
   ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
+  ...(TENANT_CAPACITY ? { tenantCapacity: TENANT_CAPACITY } : {}),
   ...PROJECT_WORKER_CACHE_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });

@@ -12,6 +12,12 @@
       "bun": "./src/worker-execution.ts",
       "import": "./dist/worker-execution.js"
     },
+    "./tenant-capacity": {
+      "types": "./src/tenant-capacity.ts",
+      "supacloud-source": "./src/tenant-capacity.ts",
+      "bun": "./src/tenant-capacity.ts",
+      "import": "./dist/tenant-capacity.js"
+    },
     ".": {
       "types": "./src/index.ts",
       "supacloud-source": "./src/index.ts",
@@ -81,7 +87,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/frontend-archive.ts src/frontend-archive-reader.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts src/delivery-tuple.ts src/contract-matrix.ts src/fa-stability.ts src/release-contract.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
+    "build": "bun build src/index.ts src/worker-execution.ts src/tenant-capacity.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/frontend-archive.ts src/frontend-archive-reader.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts src/delivery-tuple.ts src/contract-matrix.ts src/fa-stability.ts src/release-contract.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"
