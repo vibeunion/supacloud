@@ -6,6 +6,62 @@ import { sql } from "../../src/db";
 const SUPA_OPENAPI_URL = "https://api.supabase.com/api/v1-json";
 const LOCAL_API_URL = "http://127.0.0.1:9090";
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "test";
+const SCHEMA_FETCH_MAX_ATTEMPTS = 4;
+const SCHEMA_FETCH_BACKOFF_MS = [1000, 2000, 4000];
+const TRANSIENT_SCHEMA_HTTP_STATUSES = new Set([502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryTransientSchemaFetch(
+  error: Error,
+  attempt: number,
+  retryable: boolean,
+): Promise<void> {
+  if (!retryable || attempt >= SCHEMA_FETCH_MAX_ATTEMPTS) throw error;
+  const delayMs = SCHEMA_FETCH_BACKOFF_MS[attempt - 1] ?? 4000;
+  console.warn(
+    `⚠️ Schema fetch attempt ${attempt}/${SCHEMA_FETCH_MAX_ATTEMPTS} failed: ${error.message}; retrying in ${delayMs}ms`,
+  );
+  await sleep(delayMs);
+}
+
+async function fetchOfficialOpenApiSchema(): Promise<any> {
+  let lastError: Error = new Error("Failed to fetch schema");
+
+  for (let attempt = 1; attempt <= SCHEMA_FETCH_MAX_ATTEMPTS; attempt++) {
+    console.log(
+      `📥 Fetching official OpenAPI Schema from ${SUPA_OPENAPI_URL} (attempt ${attempt}/${SCHEMA_FETCH_MAX_ATTEMPTS})...`,
+    );
+
+    let res: Response;
+    try {
+      res = await fetch(SUPA_OPENAPI_URL);
+    } catch (e: unknown) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+      await retryTransientSchemaFetch(lastError, attempt, true);
+      continue;
+    }
+
+    if (!res.ok) {
+      const detail = [String(res.status), res.statusText]
+        .filter((part) => part.length > 0)
+        .join(" ");
+      lastError = new Error(`Failed to fetch schema: ${detail}`);
+      await retryTransientSchemaFetch(
+        lastError,
+        attempt,
+        TRANSIENT_SCHEMA_HTTP_STATUSES.has(res.status),
+      );
+      continue;
+    }
+
+    return await res.json();
+  }
+
+  throw lastError;
+}
 
 interface SchemaRegistry {
   schemas: Record<string, any>;
@@ -65,14 +121,9 @@ async function run() {
     "\n🚀 [OpenAPI Fuzzer] Initializing Strict OpenAPI Schema Compliance Checker...",
   );
 
-  console.log(
-    `📥 Fetching official OpenAPI Schema from ${SUPA_OPENAPI_URL}...`,
-  );
   let openApi: any;
   try {
-    const res = await fetch(SUPA_OPENAPI_URL);
-    if (!res.ok) throw new Error(`Failed to fetch schema: ${res.statusText}`);
-    openApi = await res.json();
+    openApi = await fetchOfficialOpenApiSchema();
     const schemaCount = Object.keys(openApi.components?.schemas || {}).length;
     console.log(
       `✅ Successfully loaded Supabase OpenAPI v1 Schema (${schemaCount} schemas)`,
