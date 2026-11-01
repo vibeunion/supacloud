@@ -78,9 +78,17 @@ function storedReceipt(
   };
 }
 
+type PreviewFunctions = NonNullable<ApplicationPreviewServiceDependencies["functions"]>;
+const previewFunctionsUnavailable: PreviewFunctions = {
+  list: async () => { throw new Error("APPLICATION_PREVIEW_FUNCTIONS_REQUIRED"); },
+  isolate: async () => { throw new Error("APPLICATION_PREVIEW_FUNCTIONS_REQUIRED"); },
+  remove: async () => { throw new Error("APPLICATION_PREVIEW_FUNCTIONS_REQUIRED"); },
+  listIsolated: async () => { throw new Error("APPLICATION_PREVIEW_FUNCTIONS_REQUIRED"); },
+};
+
 type PreviewDependencies = Omit<ApplicationPreviewServiceDependencies,
   "branches" | "queues" | "projects" | "secrets" | "invalidateEnv" | "runtime" | "storage"
-  | "lifecycle" | "branchLifecycle" | "now">
+  | "lifecycle" | "branchLifecycle" | "now" | "functions">
   & {
     branches: NonNullable<ApplicationPreviewServiceDependencies["branches"]>;
     queues: NonNullable<ApplicationPreviewServiceDependencies["queues"]>;
@@ -89,6 +97,7 @@ type PreviewDependencies = Omit<ApplicationPreviewServiceDependencies,
     invalidateEnv: NonNullable<ApplicationPreviewServiceDependencies["invalidateEnv"]>;
     runtime: NonNullable<ApplicationPreviewServiceDependencies["runtime"]>;
     storage: NonNullable<ApplicationPreviewServiceDependencies["storage"]>;
+    functions: PreviewFunctions;
     smokeTest: NonNullable<ApplicationPreviewServiceDependencies["smokeTest"]>;
     lifecycle: NonNullable<ApplicationPreviewServiceDependencies["lifecycle"]>;
     branchLifecycle: NonNullable<ApplicationPreviewServiceDependencies["branchLifecycle"]>;
@@ -115,6 +124,13 @@ export interface ApplicationPreviewServiceDependencies {
     activationId: string;
   }) => Promise<{ activation_id: string }>;
   smokeTest?: (input: ApplicationPreviewProbeInput) => Promise<{ passed: string[]; failed: string[] }>;
+  functions?: {
+    list(projectRef: string): Promise<string[]>;
+    isolate(input: { sourceRef: string; targetRef: string; slugs: readonly string[] }): Promise<void>;
+    remove(targetRef: string, slugs: readonly string[]): Promise<void>;
+    listIsolated(targetRef: string): Promise<string[]>;
+  };
+  reclaimAudit?: (receipt: StoredApplicationPreview) => Promise<string[]>;
   lifecycle?: typeof withApplicationPreviewLifecycle;
   branchLifecycle?: typeof withApplicationProjectLifecycle;
   now?: () => number;
@@ -122,6 +138,7 @@ export interface ApplicationPreviewServiceDependencies {
     assertSafe(receipt: StoredApplicationPreview, automatic: boolean): Promise<void>;
     deactivateApplication?(receipt: StoredApplicationPreview): Promise<void>;
     cleanupStorage(receipt: StoredApplicationPreview): Promise<void>;
+    reclaimStorage?(receipt: StoredApplicationPreview): Promise<void>;
     verifySecretDeleted(receipt: StoredApplicationPreview): Promise<void>;
     verifyBranchDeleted(receipt: StoredApplicationPreview): Promise<void>;
     databaseExists?(receipt: StoredApplicationPreview): Promise<boolean>;
@@ -145,6 +162,7 @@ export class ApplicationPreviewService {
       branchLifecycle: withApplicationProjectLifecycle,
       now: Date.now,
       ...dependencies,
+      functions: dependencies.functions ?? previewFunctionsUnavailable,
       smokeTest: dependencies.smokeTest ?? (async () => ({ passed: [], failed: ["application_readiness"] })),
     };
   }
@@ -248,24 +266,36 @@ export class ApplicationPreviewService {
   }
 
   async cleanup(
-    projectRef: string, previewId: string, options: { automatic?: boolean } = {},
+    projectRef: string, previewId: string, options: { automatic?: boolean; reclaim?: boolean } = {},
   ): Promise<StoredApplicationPreview | null> {
     const pending = this.provisioning.get(`${projectRef}:${previewId}`);
     if (pending) await pending;
     return this.dependencies.lifecycle(projectRef, previewId, async () => {
       const current = await this.read(projectRef, previewId);
-      if (!current || current.status === "cleaned") return current;
+      if (!current) return current;
+      if (current.status === "cleaned") return this.recheckCleaned(current, options.reclaim === true);
       const expiresAt = current.expires_at;
       if (options.automatic && (expiresAt === null || expiresAt === undefined
         || !Number.isFinite(Date.parse(expiresAt))
         || Date.parse(expiresAt) > this.dependencies.now())) return current;
       return this.dependencies.branchLifecycle(current.resources.database_branch.branch_ref,
-        () => this.cleanupUnderLock(projectRef, current, options.automatic === true));
+        () => this.cleanupUnderLock(projectRef, current, options.automatic === true, options.reclaim === true));
     });
   }
 
+  private async recheckCleaned(
+    current: StoredApplicationPreview, reclaim: boolean,
+  ): Promise<StoredApplicationPreview> {
+    if (!reclaim) return current;
+    if (!this.dependencies.reclaimAudit) throw new Error("APPLICATION_PREVIEW_RECLAIM_AUDIT_REQUIRED");
+    const leftovers = await this.dependencies.reclaimAudit(structuredClone(current));
+    if (leftovers.length === 0) return current;
+    // A cleaned receipt is immutable. Report the failed recheck without rewriting it.
+    throw new Error("APPLICATION_PREVIEW_RECLAIM_INCOMPLETE");
+  }
+
   private async cleanupUnderLock(
-    projectRef: string, current: StoredApplicationPreview, automatic: boolean,
+    projectRef: string, current: StoredApplicationPreview, automatic: boolean, reclaim: boolean,
   ): Promise<StoredApplicationPreview> {
     if (!current || current.status === "cleaned") return current;
     const next = structuredClone(current);
@@ -277,7 +307,11 @@ export class ApplicationPreviewService {
         || next.resources.storage_namespace.namespace !== branchRef) {
         throw new Error("APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH");
       }
+      if (automatic && reclaim) throw new Error("APPLICATION_PREVIEW_RECLAIM_AUTOMATIC_FORBIDDEN");
       if (!this.dependencies.cleanupChecks) throw new Error("APPLICATION_PREVIEW_CLEANUP_VERIFIER_REQUIRED");
+      if (reclaim && (!this.dependencies.cleanupChecks.reclaimStorage || !this.dependencies.reclaimAudit)) {
+        throw new Error("APPLICATION_PREVIEW_RECLAIM_AUDIT_REQUIRED");
+      }
       if (next.resources.application_activation.activation_id !== null
         && !this.dependencies.cleanupChecks.deactivateApplication) {
         throw new Error("APPLICATION_PREVIEW_CLEANUP_VERIFIER_REQUIRED");
@@ -318,7 +352,16 @@ export class ApplicationPreviewService {
         next.resources.test_secret.status = "cleaned";
         await this.save(projectRef, next);
       }
+      if (next.resources.functions && next.resources.functions.status !== "cleaned") {
+        await this.dependencies.functions.remove(branchRef, next.resources.functions.slugs);
+        if ((await this.dependencies.functions.listIsolated(branchRef)).length > 0) {
+          throw new Error("APPLICATION_PREVIEW_CLEANUP_FAILED");
+        }
+        next.resources.functions.status = "cleaned";
+        await this.save(projectRef, next);
+      }
       if (next.resources.storage_namespace.status !== "cleaned") {
+        if (reclaim) await this.dependencies.cleanupChecks.reclaimStorage!(structuredClone(next));
         await this.dependencies.cleanupChecks.cleanupStorage(structuredClone(next));
         next.resources.storage_namespace.status = "cleaned";
         await this.save(projectRef, next);
@@ -327,6 +370,10 @@ export class ApplicationPreviewService {
         await this.dependencies.branches.deleteBranch(branchRef);
         await this.dependencies.cleanupChecks.verifyBranchDeleted(structuredClone(next));
         next.resources.database_branch.status = "cleaned";
+      }
+      if (reclaim) {
+        const leftovers = await this.dependencies.reclaimAudit!(structuredClone(next));
+        if (leftovers.length > 0) throw new Error("APPLICATION_PREVIEW_RECLAIM_INCOMPLETE");
       }
       next.status = "cleaned";
       next.cleanup = { required: false, completed: true, error: null };
@@ -342,6 +389,9 @@ export class ApplicationPreviewService {
           "APPLICATION_PREVIEW_CLEANUP_ACTIVE", "APPLICATION_PREVIEW_CLEANUP_STORAGE_OCCUPIED",
           "APPLICATION_PREVIEW_CLEANUP_ACTIVATION_UNRESOLVED",
           "APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED",
+          "APPLICATION_PREVIEW_RECLAIM_AUDIT_REQUIRED", "APPLICATION_PREVIEW_RECLAIM_INCOMPLETE",
+          "APPLICATION_PREVIEW_RECLAIM_AUTOMATIC_FORBIDDEN", "APPLICATION_PREVIEW_FUNCTIONS_UNSUPPORTED",
+          "APPLICATION_PREVIEW_FUNCTIONS_IDENTITY_MISMATCH",
         ].includes(code) ? code : "APPLICATION_PREVIEW_CLEANUP_FAILED",
       };
       if (code !== "APPLICATION_PREVIEW_CLEANUP_ACTIVE") next.status = "failed";
@@ -382,6 +432,7 @@ export class ApplicationPreviewService {
       }
       receipt.resources.database_branch.status = "ready";
       await this.save(projectRef, receipt);
+      await this.isolateFunctions(projectRef, receipt);
 
       if (receipt.resources.configuration_revision.status !== "ready" && receipt.source_configuration_id !== null
         && this.dependencies.configurations) {
@@ -460,13 +511,14 @@ export class ApplicationPreviewService {
       const runtimeReady = runtime.status === "running" && runtime.health === "healthy";
       const passed = [
         "release_artifact", "database_branch", "queue_namespace", "storage_namespace", "test_secret",
+        ...(receipt.resources.functions?.status === "ready" ? ["functions"] : []),
         ...(receipt.resources.configuration_revision.status === "ready" && configurationId ? ["configuration_revision"] : []),
         ...(receipt.resources.application_activation.status === "ready" && activationId ? ["application_activation"] : []),
         ...(runtimeReady ? ["tenant_runtime"] : []),
         ...(smoke.passed.includes("application_readiness") && !smoke.failed.includes("application_readiness")
           ? ["application_readiness"] : []),
       ];
-      const checks = [...new Set([...receipt.resources.smoke_test.checks,
+      const checks = [...new Set([...receipt.resources.smoke_test.checks, "functions",
         "configuration_revision", "application_activation", "application_readiness", "tenant_runtime"])];
       receipt.resources.smoke_test.checks = checks;
       receipt.resources.smoke_test.failed = [...new Set([...checks.filter(check => !passed.includes(check)), ...smoke.failed])];
@@ -484,6 +536,33 @@ export class ApplicationPreviewService {
       receipt.cleanup = { required: true, completed: false, error: "APPLICATION_PREVIEW_PROVISIONING_FAILED" };
       await this.save(projectRef, receipt);
     }
+  }
+
+  private async isolateFunctions(projectRef: string, receipt: StoredApplicationPreview): Promise<void> {
+    if (receipt.resources.functions?.status === "ready") return;
+    const slugPattern = /^[A-Za-z0-9_-]{1,128}$/;
+    // An empty pending list is the plan placeholder, not a snapshot of the parent.
+    if (!receipt.resources.functions || receipt.resources.functions.slugs.length === 0) {
+      const listed = await this.dependencies.functions.list(projectRef);
+      if (listed.length > 64 || new Set(listed).size !== listed.length
+        || listed.some(slug => !slugPattern.test(slug))) {
+        throw new Error("APPLICATION_PREVIEW_FUNCTIONS_IDENTITY_MISMATCH");
+      }
+      receipt.resources.functions = { status: "pending", slugs: [...listed].sort() };
+      await this.save(projectRef, receipt);
+    }
+    const slugs = receipt.resources.functions.slugs;
+    await this.dependencies.functions.isolate({
+      sourceRef: projectRef,
+      targetRef: receipt.resources.database_branch.branch_ref,
+      slugs,
+    });
+    const isolated = await this.dependencies.functions.listIsolated(receipt.resources.database_branch.branch_ref);
+    if (isolated.length !== slugs.length || slugs.some(slug => !isolated.includes(slug))) {
+      throw new Error("APPLICATION_PREVIEW_FUNCTIONS_IDENTITY_MISMATCH");
+    }
+    receipt.resources.functions.status = "ready";
+    await this.save(projectRef, receipt);
   }
 
   private startProvisioning(projectRef: string, receipt: StoredApplicationPreview): void {

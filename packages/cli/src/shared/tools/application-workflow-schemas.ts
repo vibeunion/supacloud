@@ -52,6 +52,10 @@ export const ApplicationPreviewReceiptSchema = Type.Object({
     test_secret: Type.Object({ status: phase, name, value_issued: Type.Literal(false) }, closed),
     configuration_revision: Type.Object({ status: phase, configuration_id: Type.Union([ApplicationConfigurationIdSchema, Type.Null()]) }, closed),
     application_activation: Type.Object({ status: phase, activation_id: nullableUuid }, closed),
+    functions: Type.Optional(Type.Object({
+      status: phase,
+      slugs: Type.Array(Type.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }), { maxItems: 64, uniqueItems: true }),
+    }, closed)),
     smoke_test: Type.Object({ status: phase, checks, passed: checks, failed: checks }, closed),
   }, closed),
   cleanup: Type.Object({
