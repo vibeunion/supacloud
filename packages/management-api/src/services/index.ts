@@ -11,3 +11,7 @@ export { edgeFunctionService } from "./edge-function.service";
 export { backgroundTaskService } from "./background-task.service";
 export { backgroundFunctionWorker } from "./background-function-worker";
 export { certificateService } from "./certificate.service";
+export {
+  createUnavailableAwsPrivateLinkProvider,
+  unavailableAwsPrivateLink,
+} from "./aws-privatelink.adapter";
