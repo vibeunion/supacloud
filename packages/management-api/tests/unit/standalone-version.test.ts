@@ -8,6 +8,7 @@ import {
   isPostgrestProcessIdentityProbeCommand,
   isPostgrestProcessIdentityTerminationCommand,
   isStandaloneVersionCommand,
+  isStorageDataPlaneCommand,
   isSystemdUnitBrokerDigestCommand,
 } from "../../src/standalone";
 import {
@@ -50,6 +51,8 @@ describe("standalone version command", () => {
     expect(isStandaloneVersionCommand(["-v"])).toBe(true);
     expect(isStandaloneVersionCommand(["upgrade", "--version", "0.51.0"])).toBe(false);
     expect(isStandaloneVersionCommand(["project", "--version"])).toBe(false);
+    expect(isStorageDataPlaneCommand(["--storage-data-plane"])).toBe(true);
+    expect(isStorageDataPlaneCommand(["--storage-data-plane", "--version"])).toBe(false);
     expect(isSystemdUnitBrokerDigestCommand(["--systemd-unit-helper-sha256"])).toBe(true);
     expect(isSystemdUnitBrokerDigestCommand(["upgrade", "--systemd-unit-helper-sha256"])).toBe(false);
     expect(isPostgrestLauncherDigestCommand(["--postgrest-launcher-sha256"])).toBe(true);
