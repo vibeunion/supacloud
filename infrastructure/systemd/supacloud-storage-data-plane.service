@@ -1,0 +1,27 @@
+[Unit]
+Description=SupaCloud Storage Data Plane
+Documentation=https://github.com/vibeunion/supacloud
+After=network-online.target
+Wants=network-online.target
+# Do not Require=supacloud.service. This process is the storage failover target
+# while the Management API listener is down. It is not a database standby.
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/supacloud
+ExecStart=/usr/local/bin/bun packages/management-api/src/storage-data-plane.ts
+Restart=on-failure
+RestartSec=2
+EnvironmentFile=-/etc/supabase/management-api.env
+Environment=STORAGE_DATA_PLANE_HOST=127.0.0.1
+Environment=STORAGE_DATA_PLANE_PORT=9108
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud-storage-data-plane
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
