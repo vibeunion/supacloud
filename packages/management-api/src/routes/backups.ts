@@ -15,11 +15,27 @@ import {
     LogicalBackupContractError,
     restoreLogicalBackup,
 } from "../services/logical-backup.service";
+import {
+    readRegionShip,
+    RegionShipError,
+    shipVerifiedLogicalBackupToRegion,
+} from "../services/region-ship.service";
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 import { projectRepository } from '../repositories/project.repository';
 import { disableLogicalBackupMutationIdleTimeout } from "../utils/logical-backup-request-timeout";
 
 const ErrorResponse = t.Object({ message: t.String() });
+
+function regionShipErrorResponse(error: unknown) {
+    if (!(error instanceof RegionShipError)) throw error;
+    const errorStatus = {
+        invalid_request: 400,
+        not_found: 404,
+        conflict: 409,
+        unavailable: 503,
+    }[error.kind] as 400 | 404 | 409 | 503;
+    return status(errorStatus, { message: error.message });
+}
 
 function logicalBackupErrorResponse(error: unknown) {
     if (!(error instanceof LogicalBackupContractError)) throw error;
@@ -115,6 +131,40 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             return { backup: await readLogicalBackup(ref, backupId) };
         } catch (error: unknown) {
             return logicalBackupErrorResponse(error);
+        }
+    })
+    .post('/logical/:backupId/region-ship', {
+        params: t.Object({ ref: t.String({ maxLength: 64 }), backupId: t.String({ maxLength: 110 }) }),
+        body: t.Object({
+            target_region: t.String({ minLength: 1, maxLength: 64 }),
+        }, { additionalProperties: false }),
+        response: { 200: jsonResponseSchema, 400: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "Copy a verified logical backup into a target region directory" },
+    }, async ({ params: { ref, backupId }, body, request, set }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) { set.status = authError.status; return authError.body; }
+        disableLogicalBackupMutationIdleTimeout(request);
+        try {
+            return { ship: await shipVerifiedLogicalBackupToRegion(ref, backupId, body.target_region) };
+        } catch (error: unknown) {
+            return regionShipErrorResponse(error);
+        }
+    })
+    .get('/logical/:backupId/region-ship/:targetRegion', {
+        params: t.Object({
+            ref: t.String({ maxLength: 64 }),
+            backupId: t.String({ maxLength: 110 }),
+            targetRegion: t.String({ minLength: 1, maxLength: 64 }),
+        }),
+        response: { 200: jsonResponseSchema, 400: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "Read one region ship receipt" },
+    }, async ({ params: { ref, backupId, targetRegion }, request, set }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) { set.status = authError.status; return authError.body; }
+        try {
+            return { ship: await readRegionShip(ref, backupId, targetRegion) };
+        } catch (error: unknown) {
+            return regionShipErrorResponse(error);
         }
     })
     .post('/logical/restore', {
