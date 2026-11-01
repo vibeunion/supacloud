@@ -44,6 +44,10 @@ export const ApplicationPreviewReceiptSchema = Type.Object({
     application_activation: Type.Object({
       status: phaseStatus, activation_id: Type.Union([ApplicationActivationIdSchema, Type.Null()]),
     }, closed),
+    functions: Type.Optional(Type.Object({
+      status: phaseStatus,
+      slugs: Type.Array(Type.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }), { maxItems: 64 }),
+    }, closed)),
     smoke_test: Type.Object({
       status: phaseStatus,
       checks: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 32 }),
@@ -69,21 +73,25 @@ export function parseApplicationPreviewReceipt(value: unknown): ApplicationPrevi
     throw new Error("Invalid application preview receipt");
   }
   const resources = value.resources, smoke = resources.smoke_test;
+  const functions = resources.functions;
   if (resources.build_artifact.release_id !== value.release_id
     || resources.storage_namespace.namespace !== resources.database_branch.branch_ref
     || value.expires_at != null && (!Number.isFinite(Date.parse(value.expires_at))
       || new Date(value.expires_at).toISOString() !== value.expires_at)
     || [smoke.checks, smoke.passed, smoke.failed].some(items => new Set(items).size !== items.length)
     || smoke.passed.some(check => smoke.failed.includes(check))
+    || functions !== undefined && new Set(functions.slugs).size !== functions.slugs.length
     || value.status === "ready" && (Object.values(resources).some(resource => resource.status !== "ready")
       || resources.configuration_revision.configuration_id === null
       || resources.application_activation.activation_id === null
+      || functions !== undefined && !smoke.checks.includes("functions")
       || smoke.failed.length > 0 || smoke.checks.some(check => !smoke.passed.includes(check))
       || !["release_artifact", "database_branch", "queue_namespace", "storage_namespace", "test_secret",
         "configuration_revision", "application_activation", "application_readiness", "tenant_runtime"]
         .every(check => smoke.checks.includes(check)))
     || value.status === "cleaned" && (!value.cleanup.completed || value.cleanup.required
       || value.cleanup.error !== null
+      || functions !== undefined && functions.status !== "cleaned"
       || [resources.database_branch, resources.queue_namespace, resources.storage_namespace, resources.test_secret]
         .some(resource => resource.status !== "cleaned"))) {
     throw new Error("Invalid application preview state");

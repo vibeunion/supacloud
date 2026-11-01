@@ -76,6 +76,16 @@ Scenario: 清理需要退役证据
 
 当前实现不承诺自动数据恢复、生产 smoke 验收、旧平台兼容或线上性能。
 完整预览退役执行、资源保留策略和独立业务验收必须继续补齐。
-对象存储非空时暂不强制删除，需独立的资源保留/清理策略。
+到期回收仍不删除非空对象存储。显式的本地 PR close 回收会清空该预览自己的
+存储命名空间，并在审计仍看到应用、函数、数据库、队列、存储或 Secret 时拒绝报成功。
 分支项目存在但 provisioning 完成尚未落盘时，也不会推断数据库已准备完成；
 数据库删除或项目软删除已成功但最终预览回执落盘失败的窗口仍需独立恢复机制。
+
+## 本地 Pull Request 场景
+
+`POST /v1/projects/:ref/applications/:id/environments/:environmentId/preview-pull-requests`
+用 `opened` / `closed` 代表 PR 打开和关闭。它不调用 GitHub，不安装 GitHub App，
+也不部署。`opened` 为同一仓库和 PR 号准备一套隔离的应用、函数命名空间、数据库、
+队列、Storage 与测试 Secret。`closed` 回收这套资源；审计发现残留时不报告成功。
+同一身份重复打开只复用回执。换一个 release 身份会冲突，不会再开出第二套环境。
+新提交刷新预览、托管 GitHub 投递，以及非本地对象存储后端仍未包含。
