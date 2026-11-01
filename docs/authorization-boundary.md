@@ -38,6 +38,19 @@ Unified identity does not imply shared business permissions across applications.
 - Revocation of business relationships takes effect with the application
   transaction and must not wait for JWT refresh.
 
+## Control-plane slice
+
+Organization teams can grant an existing project collaborator role to a project
+in that organization and optionally narrow it with a capability allowlist.
+That grant writes a `project_collaborators` row only when the organization
+member has a GoTrue `user_id` and no other collaborator row already exists.
+It is platform membership, not a copy of application ReBAC.
+
+SAML administration is the existing GoTrue provider proxy. SCIM is not
+implemented. AWS KMS appears only as an `aws:kms:arn` field on a project JWT
+signing key; SupaCloud does not call a KMS provider. See
+[Enterprise governance](enterprise-governance.md).
+
 ## Explicit Non-Goals
 
 SupaCloud must not:
