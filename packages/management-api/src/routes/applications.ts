@@ -31,6 +31,7 @@ import { victoriaLogsService } from "../services/victorialogs.service";
 import { applicationRuntimePlan } from "../services/application-runtime";
 import { buildApplicationPreviewReceipt, publicApplicationPreviewReceipt } from "../services/application-preview-contract";
 import { ApplicationPreviewService, APPLICATION_PREVIEW_MIN_TTL_SECONDS, APPLICATION_PREVIEW_MAX_TTL_SECONDS } from "../services/application-preview.service";
+import { applyPreviewPullRequest } from "../services/application-preview-pull-request";
 import { ApplicationDeployPlans, ApplicationDeployPlanError } from "../services/application-deploy-plan";
 import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
 import { ApplicationRollbackError, ApplicationRollbackSnapshots } from "../services/application-rollback";
@@ -536,6 +537,67 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       const cleaned = await previews.cleanup(values.ref, values.previewId);
       if (!cleaned) return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
       return publicApplicationPreviewReceipt(cleaned);
+    })
+    .post("/:id/environments/:environmentId/preview-pull-requests", {
+      params: environmentParams,
+      body: t.Object({
+        action: t.Union([t.Literal("opened"), t.Literal("closed")]),
+        repository: t.String({ pattern: "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$" }),
+        number: t.Integer({ minimum: 1, maximum: 1_000_000_000 }),
+        release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+      }),
+      detail: {
+        tags: ["applications"],
+        summary: "Provision or reclaim an isolated preview for a local pull request scenario",
+      },
+    }, async ({ params: values, body }) => {
+      try {
+        const outcome = await applyPreviewPullRequest({
+          create: (input) => previews.create(input),
+          reconcile: (projectRef, id) => previews.reconcile(projectRef, id),
+          cleanup: (projectRef, id, options) => previews.cleanup(projectRef, id, options),
+          read: (projectRef, id) => readPreview(projectRef, id),
+        }, {
+          action: body.action,
+          repository: body.repository,
+          number: body.number,
+          projectRef: values.ref,
+          applicationId: values.id,
+          environmentId: values.environmentId,
+          releaseId: body.release_id,
+        });
+        const payload = {
+          action: outcome.action,
+          preview_id: outcome.preview_id,
+          status: outcome.status,
+          leftovers: outcome.leftovers,
+          receipt: outcome.receipt ? publicApplicationPreviewReceipt(outcome.receipt) : null,
+        };
+        if (outcome.action === "closed" && outcome.status === "absent") {
+          return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found", ...payload });
+        }
+        if (outcome.action === "closed" && (outcome.status !== "cleaned" || outcome.leftovers.length > 0)) {
+          return status(409, {
+            code: outcome.receipt?.cleanup.error ?? "APPLICATION_PREVIEW_RECLAIM_INCOMPLETE",
+            error: "Preview reclaim is incomplete",
+            ...payload,
+          });
+        }
+        if (outcome.action === "opened" && outcome.status !== "ready") {
+          return status(409, {
+            code: outcome.receipt?.cleanup.error ?? "APPLICATION_PREVIEW_PROVISIONING_FAILED",
+            error: "Preview provisioning is incomplete",
+            ...payload,
+          });
+        }
+        return outcome.action === "opened" ? status(202, payload) : payload;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "";
+        if (code === "APPLICATION_PREVIEW_REPOSITORY_INVALID" || code === "APPLICATION_PREVIEW_PULL_REQUEST_INVALID") {
+          return status(422, { code, error: "Invalid preview pull request" });
+        }
+        throw error;
+      }
     })
     .put("/:id/environments/:environmentId/deployment-evidence", {
       params: environmentParams,
