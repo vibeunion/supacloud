@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.5](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.4...supacloud-js-v0.45.5) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.45.4](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.3...supacloud-js-v0.45.4) (2026-10-31)
 
 

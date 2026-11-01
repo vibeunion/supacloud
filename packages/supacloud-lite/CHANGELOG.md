@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.35.2...supacloud-lite-v0.36.0) (2026-10-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lite:** new native databases and default physical snapshot restores target PostgreSQL 18. Existing PostgreSQL 17 state requires an explicitly selected PostgreSQL 17 installation until logical migration.
+
+### Features
+
+* **lite:** upgrade default native PostgreSQL to 18 ([#2313](https://github.com/vibeunion/supacloud/issues/2313)) ([325ff75](https://github.com/vibeunion/supacloud/commit/325ff75bbc81249bc5fb4c1e8cf249185f1e6065))
+* **web-console:** migrate applications page to svadmin ([#2320](https://github.com/vibeunion/supacloud/issues/2320)) ([b643a27](https://github.com/vibeunion/supacloud/commit/b643a279debe862c3feb71e4da10c7d65bdb8769))
+
+
+### Miscellaneous Chores
+
+* **workspace:** replace Nx scheduling with Bun ([#2321](https://github.com/vibeunion/supacloud/issues/2321)) ([c2d5b27](https://github.com/vibeunion/supacloud/commit/c2d5b270ca0d0d8e04e4547f270c9750b44a0096))
+
 ## [0.35.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.35.1...supacloud-lite-v0.35.2) (2026-10-31)
 
 
