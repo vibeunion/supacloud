@@ -5,6 +5,7 @@ import {
   ApplicationConfigurationIdSchema, parseApplicationReleaseRecord, workerResourceUsage, assertWorkerBudget,
   type WorkerResourceUsage,
 } from "@supacloud/delivery";
+import { evaluateTenantReservation, parseTenantCapacityBudget } from "@supacloud/delivery/tenant-capacity";
 import { config } from "../config";
 import { sql } from "../db";
 import { stableSha256, stableStringify } from "../utils/stable-json";
@@ -360,6 +361,27 @@ export class ApplicationRuntimeAllocations {
         assertCapacityBudget(addUsage(totalUsage, requested),
           Number(activePorts[0]?.count ?? 0) + input.runtime.release.targets.filter(target => target.kind === "http").length,
           policyBudget);
+      }
+      const [tenantPolicy] = await transaction`
+        SELECT budget FROM tenant_capacity_policies
+        WHERE project_ref = ${input.runtime.release.project_ref}
+      `;
+      if (tenantPolicy) {
+        const tenantBudget = parseTenantCapacityBudget(tenantPolicy.budget);
+        if (!tenantBudget) throw new ApplicationRuntimeAllocationError("TENANT_CAPACITY_POLICY_INVALID");
+        const projectActive = await transaction`
+          SELECT runtime FROM application_runtime_allocations
+          WHERE retired_at IS NULL AND project_ref = ${input.runtime.release.project_ref}
+        ` as Array<{ runtime: ApplicationRuntimeInput }>;
+        const decision = evaluateTenantReservation({
+          projectRef: input.runtime.release.project_ref,
+          budget: tenantBudget,
+          active: projectActive.map(row => parseApplicationReleaseRecord(row.runtime.release)),
+          requested: input.runtime.release,
+        });
+        if (!decision.admitted) {
+          throw new ApplicationRuntimeAllocationError(`TENANT_CAPACITY_EXCEEDED:${decision.dimension ?? "invalid"}`);
+        }
       }
       const claimed: { port: number }[] = await transaction`SELECT port FROM application_runtime_ports`;
       const unavailable = new Set<number>([

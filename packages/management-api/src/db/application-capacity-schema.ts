@@ -22,5 +22,12 @@ export async function ensureApplicationCapacitySchema(transaction: SQL): Promise
     );
     CREATE INDEX IF NOT EXISTS application_capacity_history_project_idx
       ON application_capacity_history(project_ref, generated_at DESC, id DESC);
+    CREATE TABLE IF NOT EXISTS tenant_capacity_policies (
+      project_ref varchar(20) PRIMARY KEY REFERENCES projects(ref) ON DELETE CASCADE,
+      budget jsonb NOT NULL CHECK (jsonb_typeof(budget) = 'object'),
+      updated_by text,
+      created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+      updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+    );
   `);
 }
