@@ -48,7 +48,7 @@ beforeAll(async () => {
   database = await postgres.withConnection(async url => new SQL({ url, max: 8 }));
   await executeSqlStatements(database, `
     CREATE TABLE organizations(id uuid PRIMARY KEY, owner_id text);
-    CREATE TABLE organization_members(organization_id uuid, user_id text);
+    CREATE TABLE organization_members(id uuid PRIMARY KEY, organization_id uuid, user_id text);
     CREATE TABLE projects(ref varchar(20) PRIMARY KEY, organization_id uuid, deleted_at timestamptz, config jsonb);
     CREATE TABLE project_tasks(project_ref varchar(20), status text, payload jsonb);
     CREATE TABLE audit_logs(id uuid PRIMARY KEY, project_ref varchar(50), created_at timestamptz);

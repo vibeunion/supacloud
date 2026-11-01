@@ -126,6 +126,45 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS project_collaborators_project_idx
       ON project_collaborators(project_ref, status, created_at ASC);
+    ALTER TABLE project_collaborators
+      ADD COLUMN IF NOT EXISTS capability_allowlist TEXT[];
+
+    CREATE TABLE IF NOT EXISTS organization_teams (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      slug VARCHAR(100) NOT NULL,
+      description TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (organization_id, slug)
+    );
+    CREATE INDEX IF NOT EXISTS organization_teams_org_idx
+      ON organization_teams(organization_id, name ASC);
+
+    CREATE TABLE IF NOT EXISTS organization_team_members (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      team_id UUID NOT NULL REFERENCES organization_teams(id) ON DELETE CASCADE,
+      member_id UUID NOT NULL REFERENCES organization_members(id) ON DELETE CASCADE,
+      role VARCHAR(20) NOT NULL DEFAULT 'member'
+        CHECK (role IN ('maintainer', 'member')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (team_id, member_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS organization_team_project_grants (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      team_id UUID NOT NULL REFERENCES organization_teams(id) ON DELETE CASCADE,
+      project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
+      role VARCHAR(20) NOT NULL
+        CHECK (role IN ('admin', 'member', 'viewer')),
+      capability_allowlist TEXT[],
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (team_id, project_ref)
+    );
+    CREATE INDEX IF NOT EXISTS organization_team_project_grants_project_idx
+      ON organization_team_project_grants(project_ref, team_id);
 
     CREATE TABLE IF NOT EXISTS project_collaborator_invitations (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

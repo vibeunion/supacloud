@@ -783,6 +783,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectControlSecretsRoutes,
     projectFunctionsRoutes,
     organizationRoutes,
+    organizationGovernanceRoutes,
     userRoutes,
     backupRoutes,
     monitorRoutes,
@@ -914,6 +915,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectControlSecretsRoutes)
       .use(projectFunctionsRoutes)
       .use(organizationRoutes)
+      .use(organizationGovernanceRoutes)
       .use(userRoutes)
       .use(backupRoutes)
       .use(monitorRoutes)
