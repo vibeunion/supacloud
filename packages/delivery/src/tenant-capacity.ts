@@ -109,6 +109,13 @@ export function tenantReservationFromRelease(release: ApplicationReleaseRecord):
   };
 }
 
+function withProject(
+  projectRef: string | undefined,
+  decision: Omit<TenantCapacityDecision, "projectRef">,
+): TenantCapacityDecision {
+  return projectRef === undefined ? decision : { ...decision, projectRef };
+}
+
 export function evaluateTenantCapacity(input: {
   projectRef?: string;
   budget: TenantCapacityBudget;
@@ -118,7 +125,7 @@ export function evaluateTenantCapacity(input: {
 }): TenantCapacityDecision {
   const budget = parseTenantCapacityBudget(input.budget);
   if (!budget) {
-    return { admitted: false, projectRef: input.projectRef, reason: "invalid" };
+    return withProject(input.projectRef, { admitted: false, reason: "invalid" });
   }
   const enforce = new Set(input.enforce ?? tenantCapacityDimensions);
   for (const dimension of tenantCapacityDimensions) {
@@ -129,22 +136,21 @@ export function evaluateTenantCapacity(input: {
       ? Number.isFinite(used) && used >= 0 && Number.isFinite(requested) && requested >= 0
       : Number.isSafeInteger(used) && used >= 0 && Number.isSafeInteger(requested) && requested >= 0;
     if (!numeric) {
-      return { admitted: false, projectRef: input.projectRef, dimension, reason: "invalid", usage: used, requested };
+      return withProject(input.projectRef, { admitted: false, dimension, reason: "invalid", usage: used, requested });
     }
     const next = dimension === "cpu" ? Math.round((used + requested) * 10) / 10 : used + requested;
     if (next > budget[dimension]) {
-      return {
+      return withProject(input.projectRef, {
         admitted: false,
-        projectRef: input.projectRef,
         dimension,
         limit: budget[dimension],
         usage: used,
         requested,
         reason: "exceeded",
-      };
+      });
     }
   }
-  return { admitted: true, projectRef: input.projectRef };
+  return withProject(input.projectRef, { admitted: true });
 }
 
 export function evaluateTenantReservation(input: {
@@ -255,7 +261,7 @@ export function parseTenantCapacityMap(value: unknown): Map<string, TenantCapaci
 export function tenantCapacityFromEnvironment(
   env: Record<string, string | undefined>,
 ): ((projectRef: string) => TenantCapacityBudget | null) | undefined {
-  const raw = env.SUPACLOUD_TENANT_CAPACITY_JSON;
+  const raw = env["SUPACLOUD_TENANT_CAPACITY_JSON"];
   if (raw === undefined || raw.trim() === "") return undefined;
   let value: unknown;
   try {
