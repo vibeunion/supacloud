@@ -139,6 +139,15 @@ Feature: Enterprise recovery readiness
     And the quota event is observable by project and request ID
 ```
 
+The function scheduler enforces per-tenant function concurrency and queue depth:
+the noisy tenant is delayed or rejected, and the other tenant still runs. The
+rejection is observable by project and request id. Recorded heap is checked
+against `memoryMiB`. Application allocation reserves CPU, memory, database
+connections, queue admission, and function concurrency. Storage uploads enforce
+`storageBytes`. A shared Edge Runtime process still has no per-tenant CPU
+controller or live function connection meter, and the noisy-neighbor test does
+not measure a latency SLO. Those remain gaps.
+
 ## Implementation Order
 
 1. Complete the [Self-Hosted Stable Baseline](self-hosted-stable-baseline.md):
