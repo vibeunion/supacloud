@@ -71,7 +71,7 @@ equivalent upgrade evidence. Caddy and GoTrue remain separate upgrade surfaces.
 | `arm64` and other operating systems | Deployment-specific / separate acceptance | Require explicit installation, upgrade, and recovery evidence for the selected combination |
 | External S3 project storage | Deployment-specific / separate acceptance | Requires an explicit project binding and provider-specific reachability, durability, and recovery evidence |
 | Embedded Edge Runtime in a coordinated upgrade | Experimental / separate acceptance | The primary coordinated upgrade evidence uses persisted `EDGE_RUNTIME_MODE=external` |
-| Control-plane outage survival | Experimental target | Not a current guarantee; requires a failure drill that measures which project traffic survives |
+| Control-plane brief outage | Local serving contract | Authenticated REST, Auth, synchronous Functions, and the storage data plane. Not HA. Realtime, opaque keys, and embedded Edge Runtime stay coupled to the Management API. See [control-plane outage](control-plane-outage.md). |
 | HA, multi-node scheduling, and multi-region operation | Out of scope for the single-host baseline | Require independent failover, capacity, upgrade, and recovery evidence |
 | Application framework, compiler, SDK, and AI tooling | Optional development layer | Useful for application delivery and contracts, but not required to operate a platform project |
 
@@ -110,12 +110,14 @@ general workflow engine merely to unify names.
 The data plane carries project traffic through the gateway to project database,
 REST, Auth, Storage, Realtime, Functions, and worker resources.
 
-The current platform still routes some public Functions, Realtime, and Storage
-requests through Management API. Therefore, independent data-plane survival
-during a control-plane outage is a target acceptance property, not a current
-guarantee. The first implementation step is logical separation of permissions,
-connection pools, concurrency budgets, and lifecycles. Process separation
-should follow measured failure propagation rather than an architecture diagram.
+Authenticated REST and Auth are published directly to PostgREST and GoTrue.
+Functions and Storage prefer the Management API and fail over to Edge Runtime
+and the storage data-plane process when that listener refuses the connection.
+Realtime still enters the Management API. The local contract, its limits, and
+the measurements from the only executed drill are in
+[control-plane brief outage](control-plane-outage.md). That drill is not a
+production failure test and does not make the single-node baseline highly
+available.
 
 ### Infrastructure
 
@@ -232,7 +234,7 @@ The baseline does not promise:
 
 - every Linux distribution or CPU architecture
 - HA or multi-node scheduling on the single-host profile
-- control-plane outage survival before a failure drill proves it
+- control-plane survival beyond the [brief-outage contract](control-plane-outage.md), including Realtime, opaque keys, embedded Edge Runtime, and backup RPO/RTO
 - automatic rollback of database migrations or external side effects
 - single-project PITR from a cluster-level physical backup
 - full upstream Supabase Cloud feature parity
@@ -290,6 +292,7 @@ The baseline should reuse these existing surfaces:
 - [Application release contract](application-release-contract.md)
 - [Project restore drills](project-restore-drill.md)
 - [Enterprise architecture readiness](enterprise-architecture-readiness.md)
+- [Control-plane brief outage](control-plane-outage.md)
 - `scripts/linux-delivery-acceptance.ts`
 - `scripts/test-project-restore-drill.ts`
 

@@ -64,7 +64,7 @@ provider-neutral health, backup, restore, scaling, and failover state.
 
 The platform must define and publish at least:
 
-- Control-plane availability and latency
+- Control-plane availability and latency. The [brief-outage contract](control-plane-outage.md) covers one single-node case and is not an alert loop.
 - Tenant REST/Auth/Storage availability
 - Edge Function success rate, latency, cold-start rate, and queue delay
 - Database failover duration and replication lag
