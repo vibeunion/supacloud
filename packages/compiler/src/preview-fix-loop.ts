@@ -300,7 +300,6 @@ export async function runPreviewFixLoop(input: PreviewFixLoopInput): Promise<Pre
   if (!inside(previewRoot, sourceReal)) return fail("PRODUCTION_APPROVAL_REQUIRED");
   const started = performance.now();
   // The evaluator runs in a child process so this file has no computed import().
-  let status = 1;
   try {
     const child = Bun.spawn([
       process.versions.bun ? process.execPath : "bun",
@@ -325,11 +324,12 @@ export async function runPreviewFixLoop(input: PreviewFixLoopInput): Promise<Pre
       stderr: "ignore",
     });
     const timer = setTimeout(() => child.kill(), 10_000);
-    status = await child.exited.finally(() => clearTimeout(timer));
-  } catch {
+    const status = await child.exited.finally(() => clearTimeout(timer));
+    if (status !== 0) return fail("PREVIEW_FIX_INVOKE_FAILED");
+  } catch (error) {
+    if (error instanceof PreviewFixError) throw error;
     return fail("PREVIEW_FIX_INVOKE_FAILED");
   }
-  if (status !== 0) return fail("PREVIEW_FIX_INVOKE_FAILED");
   const durationMs = Math.max(0, performance.now() - started);
   const requestId = `preview-${input.previewId}`;
   const events = {
