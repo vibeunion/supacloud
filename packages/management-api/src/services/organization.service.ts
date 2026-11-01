@@ -208,6 +208,12 @@ export async function removeMember(slug: string, id: string): Promise<Organizati
   if (!org) {
     throw new OrganizationServiceError(404, "404", "Organization not found");
   }
+  const existing = await organizationRepository.findMemberById(org.id, id);
+  if (!existing) {
+    throw new OrganizationServiceError(404, "404", "Organization member not found");
+  }
+  const { releaseOrganizationMemberTeamAccess } = await import("./organization-team.service");
+  await releaseOrganizationMemberTeamAccess(existing);
   const deleted = await organizationRepository.deleteMember(org.id, id);
   if (!deleted) {
     throw new OrganizationServiceError(404, "404", "Organization member not found");
