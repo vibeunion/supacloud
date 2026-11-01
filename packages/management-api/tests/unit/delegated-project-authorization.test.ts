@@ -18,9 +18,9 @@ const transaction = mock((strings: TemplateStringsArray, ...values: unknown[]) =
 const sql = Object.assign(
   mock((strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join("?");
-    if (query.includes("SELECT role FROM project_collaborators")) {
+    if (query.includes("SELECT role, capability_allowlist FROM project_collaborators")) {
       const role = collaboratorRoles.get(String(values[1]));
-      return Promise.resolve(role ? [{ role }] : []);
+      return Promise.resolve(role ? [{ role, capability_allowlist: null }] : []);
     }
     return Promise.resolve([]);
   }),
