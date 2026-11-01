@@ -493,10 +493,10 @@ assign_plan_steps() {
     match_status="failed"
     match_detail="requested PostgreSQL ${CURRENT_MAJOR} to ${TARGET_MAJOR} does not match the deploy representation"
   fi
-  set_step read-deploy done "$READ_DEPLOY_DETAIL"
+  set_step read-deploy "done" "$READ_DEPLOY_DETAIL"
   set_step match-majors "$match_status" "$match_detail"
   if [[ -n "$TARGET_DATADIR" ]]; then
-    set_step refuse-datadir-reuse done "target ${TARGET_DATADIR} is a new directory; live data directories and Docker volumes are not reused"
+    set_step refuse-datadir-reuse "done" "target ${TARGET_DATADIR} is a new directory; live data directories and Docker volumes are not reused"
   else
     set_step refuse-datadir-reuse planned "a major upgrade uses a new data directory or a new Docker volume and does not reuse postgres-data, pgdata${TARGET_MAJOR}, or the deploy data directory"
   fi
@@ -560,7 +560,7 @@ run_isolated_drill() {
   fi
   printf '%s\n' "$UPGRADE_ID" > "$TARGET_DATADIR/.supacloud-major-upgrade-drill"
   DRILL_PREPARED="true"
-  set_step prepare-target done "initdb created an isolated PostgreSQL ${TARGET_MAJOR} data directory"
+  set_step prepare-target "done" "initdb created an isolated PostgreSQL ${TARGET_MAJOR} data directory"
   target_major=$(read_regular_major_file "$TARGET_DATADIR/PG_VERSION" || true)
   if [[ "$target_major" != "$TARGET_MAJOR" ]]; then
     add_blocker target-pg-version-mismatch
@@ -572,7 +572,7 @@ run_isolated_drill() {
   if has_blocker source-binaries-missing || has_blocker pg-upgrade-missing || has_blocker drill-source-missing \
     || ! tool_in_bin "$TARGET_BIN" pg_upgrade || ! tool_in_bin "$SOURCE_BIN" postgres; then
     TRANSFER_CHECK="blocked"
-    set_step validate-pg-version done "isolated PG_VERSION reads ${TARGET_MAJOR}; deploy data directory was not modified"
+    set_step validate-pg-version "done" "isolated PG_VERSION reads ${TARGET_MAJOR}; deploy data directory was not modified"
     EXECUTION="isolated-drill"
     return 0
   fi
@@ -591,13 +591,13 @@ run_isolated_drill() {
     add_blocker pg-upgrade-check-failed
     TRANSFER_CHECK="failed"
     set_step transfer-check failed "pg_upgrade --check failed inside the isolated work directory"
-    set_step validate-pg-version done "isolated PG_VERSION reads ${TARGET_MAJOR}; deploy data directory was not modified"
+    set_step validate-pg-version "done" "isolated PG_VERSION reads ${TARGET_MAJOR}; deploy data directory was not modified"
     EXECUTION="isolated-drill-failed"
     return 1
   fi
   TRANSFER_CHECK="passed"
-  set_step transfer-check done "pg_upgrade --check passed for the isolated copy; cluster cutover was not performed"
-  set_step validate-pg-version done "isolated PG_VERSION reads ${TARGET_MAJOR}; deploy data directory was not modified"
+  set_step transfer-check "done" "pg_upgrade --check passed for the isolated copy; cluster cutover was not performed"
+  set_step validate-pg-version "done" "isolated PG_VERSION reads ${TARGET_MAJOR}; deploy data directory was not modified"
   EXECUTION="isolated-drill"
   return 0
 }
@@ -616,7 +616,7 @@ remove_matching_drill() {
   rm -rf -- "$resolved"
   DRILL_REMOVED="true"
   EXECUTION="drill-cleaned"
-  set_step prepare-target done "removed the isolated drill directory for this upgrade id"
+  set_step prepare-target "done" "removed the isolated drill directory for this upgrade id"
 }
 
 emit() {
