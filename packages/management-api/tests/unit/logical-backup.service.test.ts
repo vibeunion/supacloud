@@ -109,6 +109,7 @@ mock.module("../../src/utils/logger", () => ({
 }));
 
 const {
+  copyVerifiedLogicalBackupArchive,
   createLogicalBackup,
   listLogicalBackups,
   readLogicalBackup,
@@ -265,6 +266,26 @@ describe("verified logical-full backup service", () => {
     expect(JSON.stringify(spawnInvocations.map(({ cmd }) => cmd))).not.toContain(logicalBackupDirectory);
     expect(spawnInvocations[0]?.env?.PGPASSWORD).toBe("admin-secret");
     expect(JSON.stringify(spawnInvocations.map(({ cmd }) => cmd))).not.toContain("admin-secret");
+  });
+
+  test("copies verified archive bytes to the caller without a second dump", async () => {
+    const archivePayload = "verified archive for region copy";
+    dumpPayloads.push(archivePayload);
+    const identity = await createLogicalBackup("project-a");
+    spawnInvocations.length = 0;
+    const chunks: Buffer[] = [];
+
+    const copied = await copyVerifiedLogicalBackupArchive(
+      "project-a",
+      identity.backup_id,
+      async (chunk: Uint8Array) => {
+        chunks.push(Buffer.from(chunk));
+      },
+    );
+
+    expect(copied).toEqual(identity);
+    expect(Buffer.concat(chunks).toString("utf8")).toBe(archivePayload);
+    expect(spawnInvocations.map(({ cmd }) => cmd[0])).toEqual(["pg_restore"]);
   });
 
   test("reuses a requested backup id after an idempotent retry", async () => {
