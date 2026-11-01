@@ -65,7 +65,7 @@ Legend:
 | Declarative schema / pg-delta CLI workflow | **Built-in** through official CLI adapter | **Built-in** (alpha) | CLI-dependent |
 | CDC Pipelines to BigQuery | **Built-in on host systemd/Podman installs** (pinned official Supabase ETL runtime; explicit 501 in Compose profiles) | **Built-in** (public alpha) | External / manual |
 | Stripe and MongoDB Wrappers | **Built-in** in the generated self-host profile (Vault-backed; explicit 501 when Vault is unavailable) | **Built-in** | Extension/manual SQL |
-| AWS PrivateLink project connectivity | **Not yet implemented** | **Built-in** (AWS projects) | External / manual |
+| AWS PrivateLink project connectivity | **Partial** (local plan and unavailable provider; AWS APIs are not called) | **Built-in** (AWS projects) | External / manual |
 | Automated PostgreSQL major version upgrades | **Workflow built-in** (cluster-scoped preflight, full-backup gate, approval, provider executor, validation and rollback journal; executor must be configured per deployment) | **Built-in** | Operator responsibility |
 | Shared-infra multi-tenancy to improve self-host density | **Built-in** | N/A to end users | External / manual |
 | Official Docker self-host quickstart | **Built-in** (`docker/self-host`) | N/A | **Built-in** |
@@ -176,7 +176,7 @@ In that model, adding your own project control plane, routing model, logs UI, te
 
 The compatibility target covers Supabase Cloud's project products and project management workflows. Organization/team governance, billing, Analytics/Logflare, and Analytics/Iceberg buckets are explicitly out of the current implementation scope. Hosted SLA and globally managed infrastructure are service-delivery properties and are not represented as local feature parity.
 
-Known project-level gaps are tracked rather than treated as exclusions: AWS PrivateLink needs provider-side provisioning and PostgreSQL major-upgrade execution still requires a deployment-specific provider executor. Storage object versioning and noncurrent lifecycle are implemented for standard buckets with the upstream-supported empty filter. The control-plane workflow fails closed until the required provider executor passes preflight.
+Known project-level gaps are tracked rather than treated as exclusions: AWS PrivateLink has a local adapter that validates one single-region attachment and returns `not_provisioned` without calling AWS ([AWS PrivateLink](./aws-privatelink.md)). PostgreSQL major-upgrade execution still requires a deployment-specific provider executor. Storage object versioning and noncurrent lifecycle are implemented for standard buckets with the upstream-supported empty filter. The control-plane workflow fails closed until the required provider executor passes preflight.
 
 ## Source basis
 
@@ -187,6 +187,7 @@ Known project-level gaps are tracked rather than treated as exclusions: AWS Priv
 - [Frontend Hosting](./frontend-hosting.md)
 - [Background Functions](./background-functions.md)
 - [Edge Runtime Guide](./edge-runtime-guide.md)
+- [AWS PrivateLink adapter](./aws-privatelink.md)
 - [Management API project routes](../packages/management-api/src/routes/project-crud.ts)
 - [Management API project settings routes](../packages/management-api/src/routes/project-config.ts)
 - [Frontend deployment routes](../packages/management-api/src/routes/frontend.ts)
