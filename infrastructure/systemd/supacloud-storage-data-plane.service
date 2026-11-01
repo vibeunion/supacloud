@@ -3,13 +3,13 @@ Description=SupaCloud Storage Data Plane
 Documentation=https://github.com/vibeunion/supacloud
 After=network-online.target
 Wants=network-online.target
-# Do not Require=supacloud.service. This process is the storage failover target
-# while the Management API listener is down. It is not a database standby.
+# Own systemd cgroup. Do not Require=, BindsTo=, PartOf=, or
+# JoinsNamespaceOf= supacloud.service. Stopping the Management API must not
+# stop this process. This is not a database standby and not multi-node HA.
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/supacloud
-ExecStart=/usr/local/bin/bun packages/management-api/src/storage-data-plane.ts
+ExecStart=/usr/local/bin/supacloud --storage-data-plane
 Restart=on-failure
 RestartSec=2
 EnvironmentFile=-/etc/supabase/management-api.env

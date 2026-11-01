@@ -34,34 +34,44 @@ external unit uses `Wants=supacloud.service`, not `Requires=`, so stopping the
 Management API unit does not stop that Edge Runtime process. Re-rendering the
 unit is an operator step; this change was not installed on a host.
 
-`infrastructure/systemd/supacloud-storage-data-plane.service` is the storage
-process contract. It does not `Require=` the Management API. `install.sh` does
-not enable it. Without that process, storage failover has nowhere to go.
+`install.sh` enables `supacloud-storage-data-plane.service` after the Management
+API binary is installed. The unit runs `/usr/local/bin/supacloud
+--storage-data-plane` in its own systemd cgroup. It does not `Require=`,
+`BindsTo=`, `PartOf=`, or `JoinsNamespaceOf=` `supacloud.service`, so stopping
+the Management API does not stop storage. Without that process, storage
+failover has nowhere to go.
 
 ## Local measurement
 
 Command, from `packages/management-api`, on 2026-11-01:
 
 ```sh
-bun test tests/unit/control-plane-outage.test.ts tests/unit/gateway.service.test.ts
+bun test tests/unit/storage-data-plane-unit.test.ts tests/unit/control-plane-outage.test.ts tests/unit/gateway.service.test.ts
 ```
 
-The outage test passed and the gateway suite passed with 89 tests and 1
-pre-existing skip. Caddy v2.11.7 served the routes `setupUpstream` publishes.
-The Management API listener was closed until `connect` was refused (179 ms in
-the 2026-11-01T01:06:49.381Z run). Ten authenticated requests then ran for each
-in-scope path. PostgREST and GoTrue
-were JWT-verifying stand-ins on the published dials. Their binaries were not
-executed. Edge Runtime and the storage data-plane entrypoint were the real
-processes.
+That command passed on 2026-11-01: 91 tests, 1 pre-existing gateway skip, 0
+failures. Caddy v2.11.7 served the routes `setupUpstream` publishes. The
+Management API listener was closed until `connect` was refused (184 ms in the
+2026-11-01T01:11:18.830Z run). Ten authenticated requests then ran for each
+in-scope path. PostgREST and GoTrue were JWT-verifying stand-ins on the
+published dials. Their binaries were not executed. Edge Runtime and the storage
+data-plane entrypoint were the real processes. `psql` is not installed here, so
+the gateway storage request cannot resolve a project row.
 
 | Path | Result in this run | Latency |
 | --- | --- | --- |
 | REST JWT | 10/10 succeeded | min 1 ms, p50 1 ms, max 1 ms |
 | Auth JWT | 10/10 succeeded | min 1 ms, p50 1 ms, max 1 ms |
-| Functions JWT | 10/10 returned `served-by-edge` | min 2 ms, p50 3 ms, max 20 ms; first success 24 ms after the listener refused connections |
+| Functions JWT | 10/10 returned `served-by-edge` | min 2 ms, p50 3 ms, max 21 ms; first success 24 ms after the listener refused connections |
 | Storage data plane, direct `test_mock` list | HTTP 200, JSON array | not a PostgreSQL measurement |
 | Storage through the gateway | HTTP 400 `Missing or invalid project reference` from the storage data plane, not a gateway 502 | PostgreSQL-backed storage success is **unmeasured** |
+
+PostgreSQL-backed storage through the gateway stays **unmeasured**. This
+environment has no PostgreSQL server and no `psql`. The gateway forwards the
+canonical project Host, and storage resolves that project with a `projects`
+query. The query fails closed, so the data plane returns HTTP 400. That is the
+storage process answering, not a gateway 502. A successful authenticated object
+call still needs a project database, which was not available to measure.
 | Realtime | HTTP 502 | still requires the Management API |
 | Opaque REST key | HTTP 502 | still requires the Management API |
 
@@ -77,6 +87,5 @@ These are named and not implemented here:
 - offsite backup
 - full tenant restore
 - Realtime that does not enter the Management API
-- enabling the storage data-plane unit from the installer
 - AWS PrivateLink provider provisioning
 - PostgreSQL major-upgrade executor

@@ -18,8 +18,12 @@ export function createStorageDataPlaneApp(): Elysia {
         .group("/storage/v1", (group) => group.use(storageCompatRoutes));
 }
 
-if (import.meta.main) {
+export function startStorageDataPlane(): void {
     const app = createStorageDataPlaneApp();
     app.listen({ hostname, port: config.storageDataPlanePort });
     console.log(`[storage-data-plane] listening on ${hostname}:${config.storageDataPlanePort}`);
+}
+
+if (import.meta.main) {
+    startStorageDataPlane();
 }
