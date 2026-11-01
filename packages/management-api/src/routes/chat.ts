@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { logger } from "../utils/logger";
+import { handleEmbeddingRequest } from "../services/ai-embeddings";
 import { getPlatformSetting } from "../services/platform-settings.service";
 
 /**
@@ -12,6 +13,7 @@ import { getPlatformSetting } from "../services/platform-settings.service";
  *   - ai_api_base   (e.g. "https://api.openai.com/v1")
  *   - ai_api_key    (e.g. "sk-...")
  *   - ai_model      (e.g. "gpt-4o-mini", used as fallback if client omits model)
+ *   - ai_embedding_model (required for POST /v1/embeddings; no model is bundled)
  */
 export const chatRoutes = new Elysia({ name: "chat-proxy" })
 
@@ -99,6 +101,30 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
         },
       };
     }
+  })
+
+  // ─── POST /v1/embeddings ───────────────────────────────────────
+  // Uses the same platform AI settings as chat. Refuses when ai_embedding_model
+  // is unset instead of inventing vectors. Does not retrieve from Vector Buckets.
+  .post("/v1/embeddings", {
+    body: t.Object({
+      model: t.Optional(t.String()),
+      input: t.Optional(t.Union([t.String(), t.Array(t.String())])),
+    }, { additionalProperties: true }),
+    detail: { tags: ["tasks"], summary: "Proxy an OpenAI-compatible embeddings request" },
+  }, async ({ body, set }) => {
+    const [aiApiBase, aiApiKey, aiEmbeddingModel] = await Promise.all([
+      getPlatformSetting("ai_api_base"),
+      getPlatformSetting("ai_api_key"),
+      getPlatformSetting("ai_embedding_model"),
+    ]);
+    const result = await handleEmbeddingRequest(
+      { apiBase: aiApiBase, apiKey: aiApiKey, embeddingModel: aiEmbeddingModel },
+      body,
+    );
+    logger.info(`[Embeddings] configured=${Boolean(aiEmbeddingModel)} status=${result.status}`);
+    set.status = result.status;
+    return result.body;
   })
 
   // ─── GET /v1/chat/config ───────────────────────────────────────

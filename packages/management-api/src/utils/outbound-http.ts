@@ -126,17 +126,18 @@ function appendResponseChunk(
   incoming: IncomingMessage,
   state: ResponseReadState,
   chunk: unknown,
+  maxResponseBytes: number,
   reject: (reason: Error) => void,
 ): void {
   if (state.settled) return;
   const bytes = Buffer.from(chunk as Uint8Array);
   state.receivedBytes += bytes.length;
-  if (state.receivedBytes <= MAX_OUTBOUND_RESPONSE_BYTES) {
+  if (state.receivedBytes <= maxResponseBytes) {
     state.chunks.push(bytes);
     return;
   }
   state.settled = true;
-  const error = new Error(`outbound response exceeds ${MAX_OUTBOUND_RESPONSE_BYTES} bytes`);
+  const error = new Error(`outbound response exceeds ${maxResponseBytes} bytes`);
   incoming.destroy(error);
   reject(error);
 }
@@ -164,10 +165,13 @@ function completeResponseRead(
   }));
 }
 
-export function responseFromIncoming(incoming: IncomingMessage): Promise<Response> {
+export function responseFromIncoming(
+  incoming: IncomingMessage,
+  maxResponseBytes = MAX_OUTBOUND_RESPONSE_BYTES,
+): Promise<Response> {
   return new Promise((resolve, reject) => {
     const state: ResponseReadState = { chunks: [], receivedBytes: 0, settled: false };
-    incoming.on("data", (chunk) => appendResponseChunk(incoming, state, chunk, reject));
+    incoming.on("data", (chunk) => appendResponseChunk(incoming, state, chunk, maxResponseBytes, reject));
     incoming.on("error", (error) => rejectResponseRead(state, error, reject));
     incoming.on("end", () => completeResponseRead(incoming, state, resolve));
   });
@@ -179,13 +183,18 @@ function outboundBody(body: BodyInit | null | undefined): string | Uint8Array | 
   throw new TypeError("safeOutboundFetch supports string or Uint8Array request bodies");
 }
 
-export async function safeOutboundFetch(urlValue: string, init: RequestInit = {}): Promise<Response> {
+export async function safeOutboundFetch(
+  urlValue: string,
+  init: RequestInit = {},
+  options: { maxResponseBytes?: number } = {},
+): Promise<Response> {
+  const maxResponseBytes = options.maxResponseBytes ?? MAX_OUTBOUND_RESPONSE_BYTES;
   const target = await resolveTarget(urlValue);
   const request = target.url.protocol === "https:" ? httpsRequest : httpRequest;
   const body = outboundBody(init.body);
   return new Promise<Response>((resolve, reject) => {
     const outbound = request(outboundOptions(target, init), (incoming) => {
-      responseFromIncoming(incoming).then(resolve, reject);
+      responseFromIncoming(incoming, maxResponseBytes).then(resolve, reject);
     });
     outbound.on("error", reject);
     init.signal?.addEventListener("abort", () => outbound.destroy(init.signal?.reason), { once: true });

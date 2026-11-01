@@ -136,6 +136,11 @@ describe("StorageVectorService", () => {
     expect(query.vectors.map((vector) => vector.key)).toEqual(["a", "c"]);
     expect(query.vectors[0]?.distance).toBe(0);
     expect(query.vectors[0]?.metadata).toEqual({ category: "docs", score: 10, tags: ["laptop", "portable"] });
+    expect((await StorageVectorService.getIndex(REF, "embeddings", "documents-openai")).index).toMatchObject({
+      indexAlgorithm: "hnsw",
+      queryEngine: "exact-scan-harness",
+      annReady: false,
+    });
 
     expect((await StorageVectorService.queryVectors(REF, {
       vectorBucketName: "embeddings",
@@ -226,6 +231,36 @@ describe("StorageVectorService", () => {
       topK: 5,
       filter: { private: { $eq: "secret" } },
     })).rejects.toMatchObject({ statusCode: 400 });
+
+    await expect(StorageVectorService.createIndex(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "too-wide",
+      dataType: "float32",
+      dimension: 2001,
+      distanceMetric: "cosine",
+    })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(StorageVectorService.queryVectors(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      queryVector: { float32: [1, 2, 3] },
+      queryText: "embed this",
+    })).rejects.toMatchObject({ statusCode: 400, code: "EmbeddingProviderRequired" });
+
+    await StorageVectorService.createIndex(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "ivf-documents",
+      dataType: "float32",
+      dimension: 3,
+      distanceMetric: "cosine",
+      indexAlgorithm: "ivfflat",
+      ivfflatLists: 8,
+    });
+    expect((await StorageVectorService.getIndex(REF, "embeddings", "ivf-documents")).index).toMatchObject({
+      indexAlgorithm: "ivfflat",
+      ivfflatLists: 8,
+      queryEngine: "exact-scan-harness",
+      annReady: false,
+    });
 
     for (const filter of [
       { $and: [] },
