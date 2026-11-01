@@ -24,6 +24,10 @@ export function isPostgrestProcessIdentityTerminationCommand(args: string[]): bo
   return args.length === 5 && args[0] === "--postgrest-process-identity-terminate-v1";
 }
 
+export function isStorageDataPlaneCommand(args: string[]): boolean {
+  return args.length === 1 && args[0] === "--storage-data-plane";
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   if (isStandaloneVersionCommand(args)) {
@@ -40,6 +44,9 @@ if (import.meta.main) {
   } else if (isPostgrestProcessIdentityTerminationCommand(args)) {
     const { runPostgrestProcessIdentityTermination } = await import("./services/postgrest-process-identity");
     process.exitCode = await runPostgrestProcessIdentityTermination(args.slice(1));
+  } else if (isStorageDataPlaneCommand(args)) {
+    const { startStorageDataPlane } = await import("./storage-data-plane");
+    startStorageDataPlane();
   } else {
     const { startManagementApi } = await import("./index");
     startManagementApi();
