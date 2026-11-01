@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.23.1...delivery-v0.24.0) (2026-11-01)
+
+
+### Features
+
+* **preview:** reclaim isolated pull request environments ([#2324](https://github.com/vibeunion/supacloud/issues/2324)) ([04f57d3](https://github.com/vibeunion/supacloud/commit/04f57d321def83e7cce60eb02657ae1751120f0a))
+
 ## [0.23.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.23.0...delivery-v0.23.1) (2026-10-31)
 
 
