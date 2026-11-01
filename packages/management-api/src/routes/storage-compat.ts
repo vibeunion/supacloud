@@ -390,6 +390,15 @@ function optionalVectorNumber(input: unknown, key: string): number | undefined {
     return requiredVectorNumber(input, key);
 }
 
+function optionalVectorAlgorithm(input: unknown): 'hnsw' | 'ivfflat' | undefined {
+    const value = optionalVectorString(input, 'indexAlgorithm');
+    if (value === undefined) return undefined;
+    if (value !== 'hnsw' && value !== 'ivfflat') {
+        throw new StorageVectorError("indexAlgorithm must be 'hnsw' or 'ivfflat'", 400, 'ValidationException');
+    }
+    return value;
+}
+
 function optionalVectorBoolean(input: unknown, key: string): boolean {
     const value = vectorInputRecord(input)[key];
     if (value === undefined) return false;
@@ -2203,6 +2212,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 dataType: requiredVectorString(input, 'dataType') as 'float32',
                 dimension: requiredVectorNumber(input, 'dimension'),
                 distanceMetric: requiredVectorString(input, 'distanceMetric') as 'cosine' | 'euclidean' | 'dotproduct',
+                indexAlgorithm: optionalVectorAlgorithm(input),
+                ivfflatLists: optionalVectorNumber(input, 'ivfflatLists'),
                 metadataConfiguration: input.metadataConfiguration as { nonFilterableMetadataKeys: string[] } | undefined,
             }),
         );
@@ -2314,6 +2325,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 queryVector: input.queryVector as { float32: number[] },
                 topK: optionalVectorNumber(input, 'topK'),
                 filter: input.filter,
+                queryText: input.queryText,
+                text: input.text,
                 returnDistance: optionalVectorBoolean(input, 'returnDistance'),
                 returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
