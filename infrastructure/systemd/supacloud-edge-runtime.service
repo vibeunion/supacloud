@@ -2,7 +2,10 @@
 Description=SupaCloud Edge Runtime
 Documentation=https://github.com/supacloud/supacloud
 After=network.target supacloud.service supacloud-pgredis-runtime.service
-Requires=supacloud.service supacloud-pgredis-runtime.service
+# Wants, not Requires: stopping supacloud.service must not stop function serving.
+# This is a single-node process split, not multi-node HA.
+Wants=supacloud.service
+Requires=supacloud-pgredis-runtime.service
 
 [Service]
 Type=simple

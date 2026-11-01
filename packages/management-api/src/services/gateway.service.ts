@@ -34,6 +34,7 @@ import {
     buildTenantCorsOrigins,
     isCorsSubroute,
     isCustomGatewayRouteId,
+    attachControlPlaneFailover,
     makeFunctionCorsErrorFallback,
     makeCorsSubroute,
     makeCustomGatewayRoute,
@@ -675,9 +676,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
             headers["response"] = response;
             delete response["delete"];
             delete proxy["flush_interval"];
+            const primaryDial = Array.isArray(proxy["upstreams"])
+                ? String((proxy["upstreams"] as Array<Record<string, unknown>>)[0]?.["dial"] || "")
+                : "";
+            if (primaryDial.endsWith(`:${config.port}`)) {
+                attachControlPlaneFailover(proxy, config.storageDataPlaneInternal);
+            }
         }
 
         if (isFunctionsRoute) {
+            attachControlPlaneFailover(proxy, config.edgeRuntimeInternal);
             if (config.edgeFunctionsCorsMode === "auto") {
                 setRouteCors(migrated, buildTenantCorsOrigins(
                     projectRef,
@@ -1433,6 +1441,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         streaming?: boolean;
         upstreamTls?: boolean;
         upstreamTlsInsecureSkipVerify?: boolean;
+        failoverUpstream?: string;
         methods?: string[];
         pathRegexp?: string;
         encodeMigrationInventory?: boolean;
@@ -1469,7 +1478,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 handle: [this.makeEncodeHandler()],
             }],
         });
-        handle.push(makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify));
+        const proxy = makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify);
+        attachControlPlaneFailover(proxy, opts.failoverUpstream);
+        handle.push(proxy);
 
         return {
             "@id": opts.id,
@@ -1899,6 +1910,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     hosts,
                     path: "/functions/v1*",
                     upstream: `${hostIp}:${config.port}`,
+                    failoverUpstream: config.edgeRuntimeInternal,
                     projectRef,
                     headers: [
                         `Host:${projectRef}.api.${config.baseDomain}`,
@@ -1914,6 +1926,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     hosts,
                     path: "/storage/v1/upload/resumable*",
                     upstream: `${hostIp}:${opts?.storagePort || config.port}`,
+                    ...(opts?.storagePort ? {} : { failoverUpstream: config.storageDataPlaneInternal }),
                     projectRef,
                     headers: [
                         `Host:${projectRef}.api.${config.baseDomain}`,
@@ -1929,6 +1942,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     hosts,
                     path: "/storage/v1*",
                     upstream: `${hostIp}:${opts?.storagePort || config.port}`,
+                    ...(opts?.storagePort ? {} : { failoverUpstream: config.storageDataPlaneInternal }),
                     projectRef,
                     headers: [
                         `Host:${projectRef}.api.${config.baseDomain}`,
