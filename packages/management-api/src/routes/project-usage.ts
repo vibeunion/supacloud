@@ -53,7 +53,8 @@ function failed(error: unknown) {
 export function createProjectUsageRoutes(dependencies: ProjectUsageRouteDependencies = {}) {
   const authorize = dependencies.authorize ?? authMiddleware.requireProjectOrAdminAuth;
   const meter = () => dependencies.meter ?? defaultMeter();
-  return new Elysia({ name: "project-usage", prefix: "/v1/projects/:ref/usage" })
+  // /v1/projects/:ref/usage stays the pg_stat metrics route in project-services.
+  return new Elysia({ name: "project-usage", prefix: "/v1/projects/:ref/usage-meter" })
     .onBeforeHandle(async ({ params, request }) => {
       const authError = await authorize(request, params.ref);
       if (authError) return status(authError.status, authError.body);
