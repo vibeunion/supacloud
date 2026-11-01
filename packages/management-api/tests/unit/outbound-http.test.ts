@@ -47,6 +47,14 @@ describe("outbound HTTP SSRF boundary", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  test("accepts a caller-specific response limit without changing the default", async () => {
+    const stream = new PassThrough();
+    Object.assign(stream, { statusCode: 200, headers: {} });
+    const response = responseFromIncoming(stream as unknown as IncomingMessage, 4);
+    stream.write(Buffer.from("12345"));
+    await expect(response).rejects.toThrow("exceeds 4 bytes");
+  });
+
   test("accepts a response exactly at the 64KiB boundary", async () => {
     const stream = new PassThrough();
     Object.assign(stream, { statusCode: 200, headers: {} });
