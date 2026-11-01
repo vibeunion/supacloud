@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:t
 
 const repositoryModule = await import("../../src/repositories/organization.repository");
 const serviceModule = await import("../../src/services/organization.service");
+const teamModule = await import("../../src/services/organization-team.service");
 
 const findAll = mock(() => Promise.resolve([]));
 const findBySlug = mock(() => Promise.resolve(null));
@@ -13,6 +14,11 @@ const findMembers = mock(() => Promise.resolve([]));
 const upsertMember = mock(() => Promise.resolve(null));
 const deleteMember = mock(() => Promise.resolve(null));
 const ensureDefaultOrganization = mock(() => Promise.resolve(null));
+const findMemberById = mock(() => Promise.resolve(null));
+const releaseOrganizationMemberTeamAccess = spyOn(
+  teamModule,
+  "releaseOrganizationMemberTeamAccess",
+).mockResolvedValue(undefined);
 
 const repositorySpies = [
   spyOn(repositoryModule.organizationRepository, "findAll").mockImplementation(
@@ -45,6 +51,10 @@ const repositorySpies = [
   spyOn(repositoryModule.organizationRepository, "ensureDefaultOrganization").mockImplementation(
     ensureDefaultOrganization as typeof repositoryModule.organizationRepository.ensureDefaultOrganization,
   ),
+  spyOn(repositoryModule.organizationRepository, "findMemberById").mockImplementation(
+    findMemberById as typeof repositoryModule.organizationRepository.findMemberById,
+  ),
+  releaseOrganizationMemberTeamAccess,
 ];
 
 const org = {
@@ -85,6 +95,9 @@ describe("organizationService", () => {
     upsertMember.mockReset();
     deleteMember.mockReset();
     ensureDefaultOrganization.mockReset();
+    findMemberById.mockReset();
+    releaseOrganizationMemberTeamAccess.mockReset();
+    releaseOrganizationMemberTeamAccess.mockResolvedValue(undefined);
 
     findBySlug.mockResolvedValue(null);
     create.mockResolvedValue(org as never);
@@ -147,6 +160,15 @@ describe("organizationService", () => {
       role: "owner",
       user_id: null,
     });
+  });
+
+  test("removeMember releases team-managed project access before deleting the member", async () => {
+    findBySlug.mockResolvedValueOnce(org as never);
+    findMemberById.mockResolvedValueOnce(member as never);
+
+    await expect(serviceModule.removeMember("acme", "member-1")).resolves.toBe(member);
+    expect(releaseOrganizationMemberTeamAccess).toHaveBeenCalledWith(member);
+    expect(deleteMember).toHaveBeenCalledWith("org-1", "member-1");
   });
 
   test("addMember rejects invalid roles", async () => {
