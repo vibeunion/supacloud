@@ -29,6 +29,9 @@ describe("platform v2 schema contract", () => {
       "project_business_organization_invitations",
       "project_business_organization_applications",
       "project_collaborators",
+      "organization_teams",
+      "organization_team_members",
+      "organization_team_project_grants",
       "project_collaborator_invitations",
       "project_control_secrets",
       "secret_encryption_checkpoints",
@@ -41,6 +44,7 @@ describe("platform v2 schema contract", () => {
       "audit_log_checkpoints",
       "audit_exports",
     ]) expect(schema).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
+    expect(schema).toContain("ADD COLUMN IF NOT EXISTS capability_allowlist TEXT[]");
   });
 
   test("keeps recoverable project mutations fenced, bounded, and free of credential columns", () => {

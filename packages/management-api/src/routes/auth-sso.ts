@@ -5,6 +5,44 @@ import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
+import { scimGovernanceGap } from "../services/enterprise-governance";
+
+function scimUnavailable() {
+  return status(501, scimGovernanceGap());
+}
+
+export async function listProjectSsoProviders(ref: string): Promise<{ status: number; body: unknown }> {
+  const ctx = await getGoTrueHeaders(ref);
+  if (!ctx) return { status: 404, body: { message: "Project not found", code: "404" } };
+
+  try {
+    const res = await fetch(`${ctx.apiUrl}/admin/sso/providers`, {
+      headers: {
+        "apikey": ctx.serviceRoleKey,
+        "Authorization": `Bearer ${ctx.serviceRoleKey}`,
+        "x-project-ref": ctx.ref,
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { msg?: string; message?: string };
+      return {
+        status: res.status,
+        body: { message: err.msg || err.message || "Failed to list SSO providers" },
+      };
+    }
+    return { status: 200, body: await res.json() };
+  } catch (err: unknown) {
+    logger.warn("[auth-sso] Failed to list SSO providers", { error: err instanceof Error ? err.message : String(err) });
+    return {
+      status: 503,
+      body: {
+        message: "GoTrue SSO provider service is unavailable",
+        code: "SERVICE_UNAVAILABLE",
+        reason_code: "gotrue_sso_unavailable",
+      },
+    };
+  }
+}
 
 async function getGoTrueHeaders(ref: string) {
   const project = await projectService.getProject(ref);
@@ -29,31 +67,9 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers",
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List SSO providers" } },
     async ({ params, set }) => {
-      const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { message: "Project not found", code: "404" });
-
-      try {
-        const res = await fetch(`${ctx.apiUrl}/admin/sso/providers`, {
-          headers: {
-            "apikey": ctx.serviceRoleKey,
-            "Authorization": `Bearer ${ctx.serviceRoleKey}`,
-            "x-project-ref": ctx.ref
-          }
-        });
-        if (!res.ok) {
-          set.status = res.status;
-          const err = await res.json().catch(() => ({}));
-          return { message: err.msg || err.message || "Failed to list SSO providers" };
-        }
-        return res.json();
-      } catch (err: unknown) {
-        logger.warn("[auth-sso] Failed to list SSO providers", { error: err instanceof Error ? err.message : String(err) });
-        return status(503, {
-          message: "GoTrue SSO provider service is unavailable",
-          code: "SERVICE_UNAVAILABLE",
-          reason_code: "gotrue_sso_unavailable",
-        });
-      }
+      const result = await listProjectSsoProviders(params.ref);
+      set.status = result.status;
+      return result.body;
     }
   )
 
@@ -196,4 +212,10 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: "Failed to delete SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     }
-  );
+  )
+  .get("/:ref/auth/scim", { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "SCIM is not implemented" } }, () => scimUnavailable())
+  .post("/:ref/auth/scim", { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "SCIM is not implemented" } }, () => scimUnavailable())
+  .get("/:ref/auth/scim/Users", { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "SCIM users are not implemented" } }, () => scimUnavailable())
+  .post("/:ref/auth/scim/Users", { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "SCIM users are not implemented" } }, () => scimUnavailable())
+  .get("/:ref/auth/scim/Groups", { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "SCIM groups are not implemented" } }, () => scimUnavailable())
+  .post("/:ref/auth/scim/Groups", { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "SCIM groups are not implemented" } }, () => scimUnavailable());
