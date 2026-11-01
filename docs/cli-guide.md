@@ -525,6 +525,8 @@ LIMIT 5;
 
 `push_migrations --dry_run` checks pending migration files and warns when pgvector usage is detected while the `vector` extension is not enabled.
 
+Storage Vector Buckets use the same pgvector operators on a managed HNSW or IVFFlat index. That API does not embed text. See [Vector ANN](vector-ann.md).
+
 ### Transaction boundary
 
 Supported:
