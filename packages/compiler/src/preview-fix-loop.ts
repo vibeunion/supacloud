@@ -298,21 +298,38 @@ export async function runPreviewFixLoop(input: PreviewFixLoopInput): Promise<Pre
   const sourceFile = join(previewRoot, fix.targetFile);
   const sourceReal = await realpath(sourceFile).catch(() => fail("PREVIEW_FIX_INVOKE_FAILED"));
   if (!inside(previewRoot, sourceReal)) return fail("PRODUCTION_APPROVAL_REQUIRED");
-  let ok = false;
   const started = performance.now();
+  // The evaluator runs in a child process so this file has no computed import().
+  let status = 1;
   try {
-    const imported = await import(pathToFileURL(sourceReal).href) as Record<string, unknown>;
-    const ctor = imported[fix.command];
-    if (typeof ctor !== "function") return fail("PREVIEW_FIX_INVOKE_FAILED");
-    const instance = new (ctor as new () => { execute?: () => unknown })();
-    if (typeof instance.execute !== "function") return fail("PREVIEW_FIX_INVOKE_FAILED");
-    const output = await instance.execute();
-    ok = !!output && typeof output === "object" && "ok" in output && (output as { ok?: unknown }).ok === true;
-  } catch (error) {
-    if (error instanceof PreviewFixError) throw error;
+    const child = Bun.spawn([
+      process.versions.bun ? process.execPath : "bun",
+      "--no-env-file",
+      "-e",
+      [
+        "const imported = await import(process.argv[1]);",
+        "const ctor = imported[process.argv[2]];",
+        "if (typeof ctor !== \"function\") process.exit(2);",
+        "const instance = new ctor();",
+        "if (typeof instance.execute !== \"function\") process.exit(3);",
+        "const output = await instance.execute();",
+        "process.exit(output && typeof output === \"object\" && output.ok === true ? 0 : 4);",
+      ].join("\n"),
+      "--",
+      pathToFileURL(sourceReal).href,
+      fix.command,
+    ], {
+      cwd: previewRoot,
+      env: { PATH: process.env.PATH ?? "" },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const timer = setTimeout(() => child.kill(), 10_000);
+    status = await child.exited.finally(() => clearTimeout(timer));
+  } catch {
     return fail("PREVIEW_FIX_INVOKE_FAILED");
   }
-  if (!ok) return fail("PREVIEW_FIX_INVOKE_FAILED");
+  if (status !== 0) return fail("PREVIEW_FIX_INVOKE_FAILED");
   const durationMs = Math.max(0, performance.now() - started);
   const requestId = `preview-${input.previewId}`;
   const events = {
