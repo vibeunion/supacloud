@@ -53,6 +53,7 @@
 - [Pigsty 4.4 兼容性迁移历史](./upgrade-to-pigsty-4.4.md) - 分析组件与 Supabase 兼容迁移背景
 - [Docker PostgreSQL 4.4 升级](./upgrade-postgres-docker-4.4.md) - Docker 容器化兼容性、备份与大版本安全指南
 - [Podman DNS 故障排查](./troubleshooting-podman-dns.md) - Podman 容器内 DNS 解析问题定位与修复
+- [AWS PrivateLink](./aws-privatelink.md) - 单区域接入计划。当前 provider 不调用 AWS。
 
 ## 开发框架与运行时
 
