@@ -808,6 +808,64 @@ export async function createLogicalBackup(
   }
 }
 
+async function streamVerifiedArchive(
+  openedArchive: OpenArchive,
+  identity: LogicalBackupIdentity,
+  write: (chunk: Uint8Array) => Promise<void>,
+): Promise<void> {
+  const digest = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(Math.min(HASH_BUFFER_BYTES, identity.bytes));
+  let position = 0;
+  while (position < identity.bytes) {
+    const requestedBytes = Math.min(buffer.length, identity.bytes - position);
+    const { bytesRead } = await openedArchive.file.read(buffer, 0, requestedBytes, position);
+    if (bytesRead === 0) throw new Error("Logical backup archive ended during copy");
+    const chunk = Buffer.from(buffer.subarray(0, bytesRead));
+    digest.update(chunk);
+    await write(chunk);
+    position += bytesRead;
+  }
+  await assertOpenFileStable(openedArchive);
+  if (position !== identity.bytes || digest.digest("hex") !== identity.sha256) {
+    throw new Error("Logical backup archive changed during copy");
+  }
+}
+
+export async function copyVerifiedLogicalBackupArchive(
+  projectRef: string,
+  backupId: string,
+  write: (chunk: Uint8Array) => Promise<void>,
+): Promise<LogicalBackupIdentity> {
+  assertProjectRef(projectRef);
+  assertBackupIdForProject(backupId, projectRef);
+  const project = await requiredProject(projectRef);
+  let root: FileHandle | null = null;
+  try {
+    root = await logicalBackupRoot(false);
+    if (!await optionalFileMetadata(directoryEntryPath(root, receiptFilename(backupId)))) {
+      if (await optionalFileMetadata(directoryEntryPath(root, pendingReceiptFilename(backupId)))
+        || await optionalFileMetadata(directoryEntryPath(root, archiveFilename(backupId)))) {
+        throw conflict("Logical backup publication is incomplete");
+      }
+      throw notFound("Logical backup not found");
+    }
+    const identity = await verifiedBackup(root, backupId, projectRef, project.db_name);
+    const openedArchive = await openPrivateFile(root, archiveFilename(backupId));
+    try {
+      await streamVerifiedArchive(openedArchive, identity, write);
+      return identity;
+    } finally {
+      await openedArchive.file.close();
+    }
+  } catch (error: unknown) {
+    if (error instanceof LogicalBackupContractError) throw error;
+    if (isMissingPathError(error) && root === null) throw notFound("Logical backup not found");
+    throw unavailable("archive copy", error);
+  } finally {
+    await root?.close();
+  }
+}
+
 export async function readLogicalBackup(projectRef: string, backupId: string): Promise<LogicalBackupIdentity> {
   assertProjectRef(projectRef);
   assertBackupIdForProject(backupId, projectRef);
