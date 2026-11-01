@@ -19,8 +19,8 @@ SupaCloud (:9090)             Edge Runtime (EDGE_RUNTIME_PORT, default :9005)
 Caddy Gateway (Admin API-driven):
   Automatic HTTPS, security headers, route JSON publishing, CORS, rate limiting
   /api/*        → :9090 (Management API)
-  /functions/*  → :9090 (Management API sdk-proxy)
-  /realtime/*   → :9090 (Management API websocket proxy)
+  /functions/*  → :9090, then Edge Runtime if that listener refuses the connection
+  /realtime/*   → :9090 (Management API websocket proxy; not part of the brief-outage SLO)
 ```
 
 ## Runtime Ownership

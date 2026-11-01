@@ -3561,6 +3561,35 @@ ensure_management_privilege_tools_available() {
     return 0
 }
 
+install_storage_data_plane() {
+    log_step "Enabling the storage data plane outside the Management API cgroup..."
+    local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-storage-data-plane.service"
+    local unit_dst="/etc/systemd/system/supacloud-storage-data-plane.service"
+    local binary="/usr/local/bin/supacloud"
+    local port="${STORAGE_DATA_PLANE_PORT:-9108}"
+    if [[ ! -f "$unit_src" ]]; then
+        log_error "Missing storage data-plane unit: $unit_src"
+        return 1
+    fi
+    if [[ ! -x "$binary" ]]; then
+        log_error "Storage data plane requires the installed binary at $binary"
+        return 1
+    fi
+    sed \
+        -e "s|^ExecStart=.*|ExecStart=${binary} --storage-data-plane|" \
+        -e "s|^Environment=STORAGE_DATA_PLANE_PORT=.*|Environment=STORAGE_DATA_PLANE_PORT=${port}|" \
+        "$unit_src" > "$unit_dst"
+    if grep -E '^(Requires|BindsTo|PartOf|JoinsNamespaceOf)=.*supacloud\.service' "$unit_dst"; then
+        log_error "Storage data-plane unit must not join supacloud.service"
+        return 1
+    fi
+    systemctl daemon-reload || return 1
+    systemctl enable supacloud-storage-data-plane || return 1
+    systemctl restart supacloud-storage-data-plane || return 1
+    supacloud_wait_http_health "http://127.0.0.1:${port}/health" || return 1
+    log_info "Storage data plane is listening on 127.0.0.1:${port} as supacloud-storage-data-plane.service"
+}
+
 install_management_api() {
     log_step "Preparing to deploy SupaCloud Control Plane binary..."
 
@@ -5510,6 +5539,7 @@ main() {
     trap 'abort_pgredis_install_transaction 143' TERM
     install_pgredis_runtime
     install_management_api
+    install_storage_data_plane
     if [[ -f "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
         # Pigsty exports PGUSER=dbuser_dba globally; ${PGUSER:-postgres} would inherit the
         # wrong DBA role and make the compat script authenticate as dbuser_dba (auth fail
