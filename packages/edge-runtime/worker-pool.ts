@@ -15,6 +15,13 @@ import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 import { EMBEDDED_WORKER_HASH, EMBEDDED_WORKER_SOURCE } from "./generated/embedded-worker";
 import { assertCanonicalPositiveFunctionVersion } from "./function-version";
 import {
+  edgeTenantAdmission,
+  edgeTenantQueueAdmission,
+  parseTenantCapacityBudget,
+  type TenantCapacityBudget,
+  type TenantCapacityDecision,
+} from "@supacloud/delivery/tenant-capacity";
+import {
   isEdgeRuntimePreheatAttestation,
   preheatAttestationMatches,
   type EdgeRuntimePreheatAttestation,
@@ -169,6 +176,26 @@ function cancelledResponse(): Response {
     status: 499,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function tenantCapacityResponse(opts: DispatchOptions, decision: TenantCapacityDecision): Response {
+  const invalid = decision.reason === "invalid";
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "Retry-After": "1",
+  });
+  if (decision.projectRef) headers.set("x-supacloud-project-ref", decision.projectRef);
+  const requestId = opts.request.headers.get("x-request-id");
+  if (requestId && /^[\w.-]{1,128}$/.test(requestId)) headers.set("x-request-id", requestId);
+  return new Response(JSON.stringify({
+    error: invalid ? "Tenant capacity policy is invalid" : "Tenant capacity exceeded",
+    code: invalid ? "TENANT_CAPACITY_POLICY_INVALID" : "TENANT_CAPACITY_EXCEEDED",
+    projectRef: decision.projectRef,
+    dimension: decision.dimension,
+    limit: decision.limit,
+    usage: decision.usage,
+    requested: decision.requested,
+  }), { status: invalid ? 503 : 429, headers });
 }
 
 function admissionBlockedResponse(): Response {
@@ -364,6 +391,8 @@ type WorkerPoolConfig = {
    * `size`, which keeps the historical queueing behaviour.
    */
   maxConcurrentExecutions?: number;
+  /** Per-tenant budget. Absent or a null result leaves the historical scheduler unchanged. */
+  tenantCapacity?: (projectRef: string) => TenantCapacityBudget | null | undefined;
 };
 
 type RetiredWorker = {
@@ -469,6 +498,7 @@ export class WorkerPool {
   private workerRecycleNotificationDeferred = false;
   private admissionBlocked = false;
   private totalAdmissionRejected = 0;
+  private totalTenantCapacityRejected = 0;
   private activeWorkers = new Set<Worker>();
   private retiredWorkers = new Map<Worker, RetiredWorker>();
   private workerMetadata = new Map<
@@ -662,9 +692,48 @@ export class WorkerPool {
         return;
       }
 
-      const worker = this.takeIdleWorker(this.projectKey(opts));
+      const projectRef = this.projectKey(opts);
+      const budget = this.tenantBudget(projectRef);
+      if (budget === "invalid") {
+        this.totalTenantCapacityRejected++;
+        resolve(tenantCapacityResponse(opts, { admitted: false, projectRef, reason: "invalid" }));
+        return;
+      }
+      let worker: Worker | undefined;
+      if (budget) {
+        const queued = this.queuedDispatches.get(projectRef)?.length ?? 0;
+        const admission = edgeTenantAdmission({
+          projectRef,
+          budget,
+          inflight: this.executingCount(projectRef),
+          queued,
+          heapBytes: this.projectHeapBytes(projectRef),
+        });
+        if (admission.action === "reject") {
+          this.totalTenantCapacityRejected++;
+          resolve(tenantCapacityResponse(opts, admission.decision));
+          return;
+        }
+        if (admission.action === "run") worker = this.takeIdleWorker(projectRef);
+        if (!worker) {
+          const queueDecision = admission.action === "delay"
+            ? { admitted: true as const }
+            : edgeTenantQueueAdmission({ projectRef, budget, queued });
+          if (!queueDecision.admitted) {
+            this.totalTenantCapacityRejected++;
+            resolve(tenantCapacityResponse(opts, queueDecision));
+            return;
+          }
+          this.totalQueuedRequests++;
+          this.enqueueQueued({ opts, enqueuedAt, resolve, reject });
+          this.ensureCapacityForQueuedWork();
+          return;
+        }
+      } else {
+        worker = this.takeIdleWorker(projectRef);
+      }
       if (worker) {
-        this.lastDispatchedProjectRef = this.projectKey(opts);
+        this.lastDispatchedProjectRef = projectRef;
         this.execute(worker, opts, null, resolve).catch(reject);
       } else {
         this.totalQueuedRequests++;
@@ -676,6 +745,37 @@ export class WorkerPool {
 
   private projectKey(opts: DispatchOptions): string {
     return opts.projectRef;
+  }
+
+  private tenantBudget(projectRef: string): TenantCapacityBudget | "invalid" | null {
+    if (!this.config.tenantCapacity) return null;
+    const raw = this.config.tenantCapacity(projectRef);
+    if (raw == null) return null;
+    return parseTenantCapacityBudget(raw) ?? "invalid";
+  }
+
+  private executingCount(projectRef: string, except?: Worker): number {
+    let count = 0;
+    for (const candidate of this.activeWorkers) {
+      if (candidate === except || this.idle.includes(candidate)) continue;
+      if (this.workerProjectRef(candidate) === projectRef) count++;
+    }
+    return count;
+  }
+
+  private projectHeapBytes(projectRef: string): number {
+    let bytes = 0;
+    for (const [worker, memory] of this.workerMemory) {
+      if (this.workerProjectRef(worker) === projectRef) bytes += memory.heapSize + memory.extraMemorySize;
+    }
+    return bytes;
+  }
+
+  private projectWithinFunctionCap(projectRef: string, except?: Worker): boolean {
+    const budget = this.tenantBudget(projectRef);
+    if (budget === null) return true;
+    if (budget === "invalid") return false;
+    return this.executingCount(projectRef, except) < budget.functionConcurrency;
   }
 
   private rejectAdmission(): boolean {
@@ -1192,12 +1292,15 @@ export class WorkerPool {
     const assignedProjectRef = this.workerProjectRef(worker);
     // Preserve warm slots when every queued project already has capacity.
     // An unrepresented project gets the next completed slot, even under load.
+    // A configured function-concurrency budget also stops a tenant from taking
+    // another slot while it is already at its cap.
+    const withinCap = (projectRef: string) => this.projectWithinFunctionCap(projectRef, worker);
     const uncoveredProject = this.queuedProjects.find(projectRef => (
-      projectRef !== assignedProjectRef && !this.hasActiveWorkerForProject(projectRef)
+      projectRef !== assignedProjectRef && withinCap(projectRef) && !this.hasActiveWorkerForProject(projectRef)
     ));
     const targetProject = uncoveredProject
-      ?? (assignedProjectRef && this.queuedDispatches.has(assignedProjectRef)
-        ? assignedProjectRef : this.queuedProjects[0]);
+      ?? (assignedProjectRef && this.queuedDispatches.has(assignedProjectRef) && withinCap(assignedProjectRef)
+        ? assignedProjectRef : this.queuedProjects.find(withinCap));
     if (targetProject === undefined) {
       this.idle.push(worker);
       return;
@@ -1987,6 +2090,7 @@ export class WorkerPool {
       [`${prefix}_admission_blocked`]: this.admissionBlocked ? 1 : 0,
       [`${prefix}_admission_recovering`]: this.admissionRecovering ? 1 : 0,
       [`${prefix}_total_admission_rejected`]: this.totalAdmissionRejected,
+      [`${prefix}_total_tenant_capacity_rejected`]: this.totalTenantCapacityRejected,
       [`${prefix}_avg_worker_exec_ms`]: this.totalRequests > 0 ? Math.round(this.totalWorkerExecMs / this.totalRequests) : 0,
     };
   }
