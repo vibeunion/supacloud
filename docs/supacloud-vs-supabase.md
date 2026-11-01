@@ -10,7 +10,7 @@ It is intentionally focused on what each option **ships as a built-in capability
 - **Choose Supabase Cloud** when you want the most complete **managed** Supabase experience, including hosted branching, managed backups/PITR, hosted logs explorer, and multi-region managed operations.
 - **Choose Supabase Self-Hosted** when you want the official Supabase stack on your own infrastructure and are willing to operate Docker/services directly. Supabase Self-Hosted gives you the core products, but not a multi-tenant control plane out of the box.
 
-Current scope exclusions are deliberate: organization/team governance, platform billing, Supabase Analytics/Logflare, and Analytics/Iceberg buckets. Project logs remain in scope, implemented independently with the embedded collector and VictoriaLogs.
+Current scope exclusions are deliberate: platform billing, Supabase Analytics/Logflare, and Analytics/Iceberg buckets. Organization and team governance has a control-plane slice (members, teams, project collaborator grants, and capability allowlists) documented in [Enterprise governance](enterprise-governance.md). SAML assertion validation stays in GoTrue. SCIM and customer-key provider calls are not implemented. Project logs remain in scope, implemented independently with the embedded collector and VictoriaLogs.
 
 ## Positioning
 
@@ -35,6 +35,7 @@ Legend:
 | OAuth 2.1 / OIDC Provider | **Built-in** (project-scoped, Supabase-compatible beta surface) | **Built-in** (beta) | Partial / operator-configured |
 | Edge Functions runtime | **Built-in** (Bun-based, Deno-compat layer) | **Built-in** | **Built-in** |
 | Multi-project control plane on one cluster/server | **Built-in** | **Built-in** | **External / manual** |
+| Organization, team, and project member governance | **Partial** (control-plane members, teams, collaborator capability allowlists, project audit export, API key rotation; no SCIM and no KMS API calls) | **Built-in** | **External / manual** |
 | Project lifecycle API (create/pause/restore/restart/settings) | **Built-in** | **Built-in** via Management API | **External / manual** |
 | Self-host operator web console | **Built-in** | N/A as self-host control plane | **External / manual** |
 | Project-user CLI + operator CLI split | **Built-in** (`supacloud`, `supacloud-admin`; optional `supacloudctl` dispatcher) | Partial (`supabase` CLI + hosted dashboard) | Partial (`supabase` CLI + manual ops) |
