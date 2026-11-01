@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.36.0...supacloud-lite-v0.37.0) (2026-11-01)
+
+
+### Features
+
+* **lite:** add a local Supabase import and compatibility lab ([#2325](https://github.com/vibeunion/supacloud/issues/2325)) ([aa739cb](https://github.com/vibeunion/supacloud/commit/aa739cb0fe47811833294bcfbcb90fded4116b83))
+
 ## [0.36.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.35.2...supacloud-lite-v0.36.0) (2026-10-31)
 
 

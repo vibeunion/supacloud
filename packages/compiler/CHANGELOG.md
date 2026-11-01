@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.52.2...compiler-v0.53.0) (2026-11-01)
+
+
+### Features
+
+* **compiler:** run a fix loop inside an isolated preview ([#2328](https://github.com/vibeunion/supacloud/issues/2328)) ([dac2a75](https://github.com/vibeunion/supacloud/commit/dac2a75f77ed7bb12fe8cd8c1aec55ed988c828e))
+
 ## [0.52.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.52.1...compiler-v0.52.2) (2026-10-31)
 
 

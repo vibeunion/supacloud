@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.127.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.126.2...management-api-v0.127.0) (2026-11-01)
+
+
+### Features
+
+* **management-api:** add an AWS PrivateLink adapter that does not call AWS ([#2331](https://github.com/vibeunion/supacloud/issues/2331)) ([b09375f](https://github.com/vibeunion/supacloud/commit/b09375f23ff4445ab32449a4779fdd2793f5397b))
+* **management-api:** ship verified logical backups to a region directory ([#2332](https://github.com/vibeunion/supacloud/issues/2332)) ([4f7e73b](https://github.com/vibeunion/supacloud/commit/4f7e73b4bd2bde7c050a58d7335a65bf3b7b6bf8))
+* **preview:** reclaim isolated pull request environments ([#2324](https://github.com/vibeunion/supacloud/issues/2324)) ([04f57d3](https://github.com/vibeunion/supacloud/commit/04f57d321def83e7cce60eb02657ae1751120f0a))
+* **storage:** query vector buckets with pgvector ANN ([#2329](https://github.com/vibeunion/supacloud/issues/2329)) ([76888f5](https://github.com/vibeunion/supacloud/commit/76888f5220720fce4b1b044c2e2009a4a381150c))
+
+
+### Bug Fixes
+
+* **ci:** type the OpenAPI schema retry helper ([#2336](https://github.com/vibeunion/supacloud/issues/2336)) ([6190962](https://github.com/vibeunion/supacloud/commit/619096269f68976c73251a3531e424b736a8f4c8))
+* **cli:** sync published compiler dependency ([#2323](https://github.com/vibeunion/supacloud/issues/2323)) ([c0477be](https://github.com/vibeunion/supacloud/commit/c0477be18685201d65fb0883f9980a68f9a9aaf9))
+
 ## [0.126.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.126.1...management-api-v0.126.2) (2026-10-31)
 
 
