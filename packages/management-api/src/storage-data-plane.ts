@@ -11,7 +11,7 @@ import { storageCompatRoutes } from "./routes/storage-compat";
 
 const hostname = process.env.STORAGE_DATA_PLANE_HOST || "127.0.0.1";
 
-export function createStorageDataPlaneApp(): Elysia {
+export function createStorageDataPlaneApp() {
     return new Elysia()
         .get("/health", () => ({ status: "ok", role: "storage-data-plane" }))
         .use(storageCompatRoutes)
