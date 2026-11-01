@@ -205,8 +205,12 @@ supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
 supacloud-lite doctor [--json] [--production]
+supacloud-lite import --from <supabase-project> [--json]
+supacloud-lite compat [--json]
 supacloud-lite version
 ```
+
+`import` 把本地 Supabase 项目的 config、migrations、seed / `import/data.sql`、Auth 用户、Storage 对象和 Functions 导入 Lite，并打印验收清单。无法在本机核对的行保持未勾选并写明原因。这不是部署。详见 `docs/supabase-import-lab.md`。
 
 首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。
 
@@ -727,8 +731,12 @@ supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
 supacloud-lite doctor [--json] [--production]
+supacloud-lite import --from <supabase-project> [--json]
+supacloud-lite compat [--json]
 supacloud-lite version
 ```
+
+`import` loads a local Supabase project's config, migrations, seed or `import/data.sql`, Auth users, Storage objects, and Functions into Lite, then prints a verify checklist. Rows that this machine cannot check stay unchecked with a blocker. This is not a deployment. See `docs/supabase-import-lab.md`.
 
 Run `supacloud-lite migrate` first when initializing a project or when the state directory is missing or empty. `db reset` only accepts initialized state with a valid `secrets.json` marker; it never creates or replaces project secrets for a reset.
 
