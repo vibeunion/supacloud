@@ -11,8 +11,9 @@ existing SupaCloud admin or project-scoped credential.
 
 - Endpoint: `POST /mcp` for platform administrators.
 - Endpoint: `POST /mcp/projects/{project_ref}` for a project-scoped client.
-- Endpoint: `POST /mcp/developer/projects/{project_ref}` for the read-only
-  Developer MCP surface (application development context only).
+- Endpoint: `POST /mcp/developer/projects/{project_ref}` for the project-scoped
+  Developer MCP surface. It is read-only and exposes one GET/HEAD loopback smoke
+  tool only outside production.
 - Protocol: `2025-06-18`.
 - Transport: JSON-RPC over `application/json`.
 - State model: stateless. SupaCloud does not return `Mcp-Session-Id`, keep a
@@ -24,14 +25,22 @@ existing SupaCloud admin or project-scoped credential.
 
 ## Developer MCP surface
 
-The Developer MCP is a separate, project-scoped, read-only surface. It exposes
-only `supacloud.get_capabilities` and
-`supacloud.get_application_development`, reports
-`write_policy: "read_only"`, and never lists backup or metrics resources. It
-does not replace the plan-only operations surface, and the operations endpoint
-does not expose the development tool. Both surfaces read the same
-`supacloud.application-development.v1` contract that the application developer
-console consumes, so AI and the console cannot drift.
+The Developer MCP is a separate, project-scoped surface. It exposes
+`supacloud.get_capabilities`, `supacloud.get_application_development`,
+`supacloud.get_deployment_evidence`, and the optional
+`supacloud.invoke_application_route` test tool. It never lists backup or metrics
+resources. It does not replace the plan-only operations surface, and the
+operations endpoint does not expose development tools. The development tools
+read the same `supacloud.application-development.v1` contract that the
+application developer console consumes, so AI and the console cannot drift.
+
+Invocation follows deployment convention instead of extra configuration: it is
+available only when the Management API runs with `NODE_ENV=development` or
+`test`, and only for GET/HEAD. Application environments named `production` or
+`prod` are always rejected. The tool calls the active application's loopback
+HTTP target, forwards no caller credentials, arbitrary headers or request body,
+follows no redirects, and never returns response cookies.
+
 
 `supacloud.get_application_development` reads one immutable application
 release target and returns the validated development contract (modules,
@@ -77,6 +86,14 @@ plan records the project, target, prerequisites, approval requirement, and
 confirmation string. Execution remains behind the normal backup API workflow,
 maker-checker approval, idempotency, audit, operation receipt, and post-restore
 health verification.
+
+### `supacloud.invoke_application_route` (Developer MCP only)
+
+Available only outside production. Inputs: `application_id`, `environment_id`,
+`target`, `method` (GET/HEAD), and `path`. The response contains the active
+`release_id`/`activation_id`, status, duration, content type, and a bounded body.
+It is a loopback test smoke path, not production replay, credentials forwarding,
+or a replacement for focused tests.
 
 ### `supacloud.get_application_development` (Developer MCP only)
 
