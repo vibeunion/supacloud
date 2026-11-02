@@ -170,11 +170,11 @@ export async function runCompiledEffect(
     program = Effect.timeout(program, Duration.millis(descriptor.timeoutMs));
   }
   const retry = descriptor?.retry ?? DEFAULT_EFFECT_RETRY;
-  if (retry === "explicit" && descriptor?.maxAttempts !== undefined && descriptor.maxAttempts > 1) {
-    const policy = descriptor;
+  const maxAttempts = descriptor?.maxAttempts;
+  if (retry === "explicit" && maxAttempts !== undefined && maxAttempts > 1 && descriptor) {
     program = Effect.retry(program, {
-      times: policy.maxAttempts - 1,
-      while: (error) => isFrameworkRetryable(error, policy),
+      times: maxAttempts - 1,
+      while: (error) => isFrameworkRetryable(error, descriptor),
     });
   }
   const exit = await runtime.run(program);
