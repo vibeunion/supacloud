@@ -24,10 +24,11 @@ for (const [template, feature, source] of [
         expect(root).toContain(`imports: [${feature}]`);
         expect(root).not.toContain("createApplication");
         expect(files[`src/${source.slice(2)}.ts`]).toContain(`export const ${feature}`);
-        expect(files["supacloud.config.ts"]).toContain('moduleBoundaryPreset: "modular-monolith"');
-        expect(files["supacloud.config.ts"]).toContain("detectOrphanModules: true");
+        expect(files["supacloud.config.ts"]).toContain("defineSupacloudConfig()");
+        expect(files["supacloud.config.ts"]).not.toContain("moduleBoundaryPreset");
+        expect(files["supacloud.config.ts"]).not.toContain("effect:");
         const manifest = JSON.parse(files["package.json"]!);
-        expect(manifest.dependencies.elysia).toBe("2.0.0-rc.0");
+        expect(manifest.dependencies.elysia).toBe("2.0.0-rc.1");
         expect(manifest.dependencies.effect).toBe("4.0.5");
         expect(manifest.scripts.inspect).toBe("bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js graph --json");
         expect(files["README.md"]).toContain("--register-in src/app.module.ts");

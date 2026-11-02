@@ -115,7 +115,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         effect: "4.0.5",
-        elysia: "2.0.0-rc.0",
+        elysia: "2.0.0-rc.1",
         ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
       devDependencies: {
@@ -144,26 +144,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
     ".env.production.example": "APP_ENV=production\n# Inject credentials using the deployment platform.\n",
     "supacloud.config.ts": `import { defineSupacloudConfig } from "@supacloud/compiler";
 
-export default defineSupacloudConfig({
-  root: "src",
-  outDir: "generated",
-  strict: true,
-  moduleBoundaryPreset: "modular-monolith",
-  effect: {
-    requireRouteEffects: true,
-    requireErrorMappings: true,
-    requireDependencies: true,
-    requireTaggedErrorTypes: true,
-    requireExactDependencyTypes: true,
-    requireTimeoutForDependencies: true,
-    forbidDirectRuntimeExecution: true,
-    forbidDirectThrows: true,
-  },
-  typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
-  disallowControllerDirectDb: true,
-  detectOrphanModules: true,
-  commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
-});
+export default defineSupacloudConfig();
 `,
     "src/application.ts": APPLICATION_SOURCE(name),
     "generated/application.ts": GENERATED_BOOTSTRAP,

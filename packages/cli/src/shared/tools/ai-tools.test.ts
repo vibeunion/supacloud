@@ -13,6 +13,7 @@ import {
     installSkill,
     resolveBundledSkillDirectory,
     resolveDefaultCodexSkillRoot,
+    resolveSkillTargetRoot,
 } from "./ai-tools";
 
 const temporaryDirectories: string[] = [];
@@ -46,6 +47,26 @@ describe("SupaCloud CLI AI skill installer", () => {
             .toBe(join(resolve(codexHome), "skills"));
         expect(resolveDefaultCodexSkillRoot({}, homeDirectory))
             .toBe(join(resolve(homeDirectory, ".codex"), "skills"));
+    });
+
+    test("resolves named Agent Skill roots without treating them as relative paths", () => {
+        const homeDirectory = join(tmpdir(), "skill-home");
+        const workingDirectory = join(tmpdir(), "skill-project");
+        const environment = {
+            CODEX_HOME: join(homeDirectory, "codex"),
+            CLAUDE_CONFIG_DIR: join(homeDirectory, "claude"),
+            AGENTS_HOME: join(homeDirectory, "agents"),
+        };
+        expect(resolveSkillTargetRoot(undefined, { environment, homeDirectory, workingDirectory }))
+            .toBe(join(homeDirectory, "codex", "skills"));
+        expect(resolveSkillTargetRoot("claude", { environment, homeDirectory, workingDirectory }))
+            .toBe(join(homeDirectory, "claude", "skills"));
+        expect(resolveSkillTargetRoot("agents", { environment, homeDirectory, workingDirectory }))
+            .toBe(join(homeDirectory, "agents", "skills"));
+        expect(resolveSkillTargetRoot("project", { environment, homeDirectory, workingDirectory }))
+            .toBe(join(resolve(workingDirectory), ".agents", "skills"));
+        expect(resolveSkillTargetRoot("./custom-skills", { environment, homeDirectory, workingDirectory }))
+            .toBe(resolve("./custom-skills"));
     });
 
     test("reports a new installation during dry-run without writing files", () => {

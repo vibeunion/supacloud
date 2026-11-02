@@ -202,13 +202,26 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
     if (args.force) throw new Error("app init never overwrites files; choose an empty directory");
     const template = args.template ?? "minimal";
     const { root, name, files } = await initializeAppProject({ root: args.root, name: args.name, template });
-    return textResult([
-        `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
-        `cd '${root.replaceAll("'", "'\\''")}'`,
+    const next = [
         "bun install",
         ...(template === "command" ? ["bun run db:generate"] : []),
         "bun run check",
         "bun run dev",
+    ];
+    if (args.format === "json") return textResult(JSON.stringify({
+        version: 1,
+        ok: true,
+        root,
+        name,
+        template,
+        files,
+        next,
+        note: "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
+    }, null, 2));
+    return textResult([
+        `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
+        `cd '${root.replaceAll("'", "'\\''")}'`,
+        ...next,
         "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
     ].join("\n"));
 }
@@ -691,9 +704,9 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
 
 function doctorFixPlan(doctor: ReturnType<typeof doctorProject>) {
     return createDiagnosticRepairPlan(doctor.diagnostics ?? [])
-        .map((repair) => ({
+        .map((repair, index) => ({
             ...repair,
-            command: "supacloud app fix --fix <fix.json>",
+            command: `supacloud app fix --from-doctor <doctor.json> --fix-index ${index}`,
         }));
 }
 
@@ -761,6 +774,13 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const autoFixable = fixPlan.filter((repair) => repair.readiness === "preview").length;
     const inputRequired = fixPlan.filter((repair) => repair.readiness === "input-required").length;
     const manualFixes = fixPlan.filter((repair) => repair.readiness === "manual").length;
+    const next = doctor.errors === 0
+        ? ["supacloud app compile", "supacloud app verify-plan --target <module>"]
+        : [
+            ...fixPlan.filter((repair) => repair.readiness === "preview").slice(0, 1).map((repair) => repair.command),
+            "supacloud app check --format json",
+            "supacloud app doctor --format json",
+        ];
     const unwiredContracts = context ? [] : await findUnwiredContracts(root);
     const scope = context ? {
         target: context.subject, files: context.files,
@@ -770,7 +790,7 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     } : undefined;
     if (args.format === "json") {
         return textResult(
-            JSON.stringify({ ok: doctor.errors === 0, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts,
+            JSON.stringify({ ok: doctor.errors === 0, next, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts,
                 ...(scope ? { scope } : {}), ...doctor }, null, 2),
             doctor.errors > 0,
         );
@@ -1026,10 +1046,15 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
         strict: args.strict ?? loadedConfig.strict ?? false,
     }, root);
     const result = await checkProject(config);
-    const hasError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
-        || result.mismatches.length > 0 || database?.ok === false;
+    const diagnosticError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+    const hasError = diagnosticError || result.mismatches.length > 0 || database?.ok === false;
+    const next = hasError
+        ? diagnosticError || database?.ok === false
+            ? ["supacloud app doctor --format json"]
+            : ["supacloud app compile", "supacloud app check --format json"]
+        : ["supacloud app verify-plan --target <module>"];
     if (args.format === "json") return textResult(JSON.stringify({
-        version: 1, ok: !hasError, source: "declaration", diagnostics: result.diagnostics,
+        version: 1, ok: !hasError, next, source: "declaration", diagnostics: result.diagnostics,
         mismatches: result.mismatches, upToDate: result.upToDate, written: [],
         modules: result.graph.modules.map((module) => module.name),
         ...(database ? { database } : {}),

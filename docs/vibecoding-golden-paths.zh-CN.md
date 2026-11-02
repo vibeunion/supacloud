@@ -17,7 +17,7 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 ## 快速开始
 
 ```bash
-supacloud app init --name orders-api --template http   # 或 command / edge
+supacloud app init --root ./orders-api --name orders-api   # 默认最小项目；也可显式选择 http/command/edge
 cd orders-api && bun install && bun run check
 
 supacloud context --format json > context.json   # AI 读取已编译的项目图
@@ -30,14 +30,16 @@ supacloud fix --fix fix.json --write             # 应用一个 DiagnosticFix �
 开发者与 AI 只面对一套 CLI，不需要记住底层包：
 
 ```bash
-supacloud app init
-supacloud dev
-supacloud generate ...
-supacloud check
+supacloud app init        # 最小项目；业务切片位于 src/features/<feature>
+supacloud app dev         # 运行项目现有的本地开发脚本
+supacloud app watch       # 仅编译器 watch
+supacloud app verify-plan --target health  # 聚焦测试，不默认回退到全量测试
+supacloud generate ...        # 生成器
+supacloud check               # 编译器治理检查
 supacloud context --format json
-supacloud doctor
-supacloud fix --fix fix.json   # 默认预览，--write 落盘
-supacloud deploy
+supacloud doctor              # 可执行健康报告
+supacloud fix --fix fix.json  # 应用 DiagnosticFix（默认预览；--write 落盘）
+supacloud deploy              # 交付
 ```
 
 `app` 命名空间作为底层形式保留（`supacloud app <verb>`），顶层动词是同一实现与执行策略的别名。
@@ -51,14 +53,18 @@ supacloud deploy
 
 ```text
 src/
-  app/        # 应用入口与装配（受保护）
-  modules/    # 业务模块（feature slice）
+  application.ts # host factory
+  app.module.ts  # application composition
+  features/   # 业务切片与同目录测试
   shared/     # token、跨模块契约与工具
 generated/    # 编译器产物（不要手改；会做漂移校验）
 supacloud.config.ts
 ```
 
-当前脚手架入口是 `src/application.ts`，业务模块按模板位于 `src/review/`、`src/orders/` 或 `src/sync/`。生成器默认使用 `src/features/`，可通过 `--dir` 指定其他模块目录。上面的布局是目标，不代表当前生成目录，也不要求已有项目迁移。
+最小 starter 和生成器使用 `src/features/`。显式兼容模板保留 `src/review/`、
+`src/orders/` 和 `src/sync/`；不要为了采用默认布局而搬动已有项目文件。
+普通读取继续使用 RLS 保护的 PostgREST client；GraphQL 仍是显式启用的契约管线。
+`generated/**` 由编译器生成并提交，以便 `supacloud check` 检测漂移；不要直接编辑。
 
 ## 生成器优先
 
@@ -88,7 +94,9 @@ Query、受治理 Command、状态声明、异步任务边界、HTTP 路由、�
 
 ## AI 专用上下文
 
-`supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。
+`supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。`app check --format json` 与
+`app doctor --format json` 还会返回 `next` 命令列表，Agent 可以从失败检查或
+preview-ready 修复直接进入下一步验证，不必自行猜测命令。
 
 数据库任务使用同样的边界化上下文：
 
