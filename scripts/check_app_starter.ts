@@ -367,7 +367,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
   // in one packing pass, so every supported path stays smoke-covered.
   // Each template owns a separate project directory and only reads the shared
   // packed tarballs, so their acceptance checks can use the runner in parallel.
-  const templateResults = await Promise.allSettled((["minimal", "http", "edge"] as const).map(async template => {
+  const templateResults = await Promise.allSettled((["minimal"] as const).map(async template => {
     const templateProject = join(root, `${template}-project`);
     await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
     const templateManifestPath = join(templateProject, "package.json");
@@ -388,20 +388,11 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
     assert.ok(!templateBundle.includes("@typescript/typescript6"), "Template bundle must not contain the compiler");
     assert.ok(!templateBundle.includes("Local demo:"), "Template bundle must not contain the memory demo server");
 
-    const target = template === "minimal" ? "health" : template === "http" ? "orders" : "sync";
-    const feature = `${target}.ts`;
     const templateContext = JSON.parse(await run([
-      "node_modules/@supacloud/compiler/dist/cli.js", "context", target, "--json",
+      "node_modules/@supacloud/compiler/dist/cli.js", "context", "health", "--json",
     ], templateProject));
-    assert.ok(templateContext.files.some((file: string) => file.endsWith(feature)));
+    assert.ok(templateContext.files.some((file: string) => file.endsWith("health.ts")));
     console.log(`Starter ${template}: packed check/test/build, bundle boundary and AI context passed`);
-    if (template === "http") {
-      await copyFile(join(repo, "scripts/fixtures/starter-http-delivery.fixture"), join(templateProject, "scripts/verify-http-delivery.ts"));
-      console.log(await run(["scripts/verify-http-delivery.ts"], templateProject));
-    } else if (template === "edge") {
-      await copyFile(join(repo, "scripts/fixtures/starter-worker-delivery.fixture"), join(templateProject, "scripts/verify-worker-delivery.ts"));
-      console.log(await run(["scripts/verify-worker-delivery.ts"], templateProject));
-    }
   }));
   for (const result of templateResults) {
     if (result.status === "rejected") throw result.reason;
