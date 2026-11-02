@@ -239,13 +239,13 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 
 ### Web Console upgrade baseline
 
-The Web Console tracks this published SVAdmin line, verified on November 1, 2026:
+The Web Console tracks this published SVAdmin line, verified on November 2, 2026:
 
-- `@svadmin/core` `0.69.2`
-- `@svadmin/ui` `0.108.2`
-- `@svadmin/elysia` `0.14.19`
-- `@svadmin/sveltekit` `0.13.16`
-- `@svadmin/ai-elements` `0.13.4`
+- `@svadmin/core` `0.71.0`
+- `@svadmin/ui` `0.110.0`
+- `@svadmin/elysia` `0.14.22`
+- `@svadmin/sveltekit` `0.13.19`
+- `@svadmin/ai-elements` `0.13.7`
 
 List and settings pages that repeated a local loading, empty, and error shell now
 use `PagePattern`. Pages with a client-side search use `FilterToolbar`. The
