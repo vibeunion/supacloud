@@ -39,11 +39,12 @@ test("default checks run before regeneration and Drizzle candidate paths never r
   expect(files[".gitignore"]).toContain("output/database-audit/");
   expect(files["AGENTS.md"]).toContain("Drizzle owns table declarations");
   expect(files["AGENTS.md"]).toContain("Do not introduce any/@ts-ignore");
-  for (const template of ["http", "edge"] as const) {
-    const plain = appTemplateFiles("example", template);
-    expect(plain["package.json"]).not.toContain("drizzle");
-    expect(plain["database.sources.json"]).toBeUndefined();
-  }
+  const plain = appTemplateFiles("example", "minimal", {
+    "@supacloud/js": "^0.40.0",
+    "@supabase/supabase-js": "^2.118.0",
+  });
+  expect(plain["package.json"]).not.toContain("drizzle");
+  expect(plain["database.sources.json"]).toBeUndefined();
 });
 test("generated database module loads real Drizzle names and its SQL passes governance", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-module-"));
