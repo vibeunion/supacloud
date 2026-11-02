@@ -852,11 +852,12 @@ async function runFix(args: AppToolArguments): Promise<ToolResult> {
         if (!entry || typeof entry !== "object" || !("fix" in entry)) {
             throw new Error(`fixPlan[${rawIndex}] does not contain a fix payload`);
         }
-        repair = entry as typeof repair;
-        if (repair.readiness !== undefined && repair.readiness !== "preview") {
-            throw new Error(`fixPlan[${rawIndex}] is ${repair.readiness}; only preview-ready repairs can be applied automatically`);
+        const repairEntry = entry as { code?: string; readiness?: string; fix?: unknown };
+        if (repairEntry.readiness !== undefined && repairEntry.readiness !== "preview") {
+            throw new Error(`fixPlan[${rawIndex}] is ${repairEntry.readiness}; only preview-ready repairs can be applied automatically`);
         }
-        parsed = repair.fix;
+        repair = repairEntry;
+        parsed = repairEntry.fix;
         source = "doctor";
     } else {
         parsed = JSON.parse(await readFile(resolve(root, fixPath!), "utf8")) as unknown;
