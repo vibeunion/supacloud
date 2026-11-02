@@ -68,10 +68,16 @@ function parseCliFlags(args: string[], startIndex: number, schema: ToolSchema): 
         const flag = cliFlagAt(args, index);
         if (!flag) continue;
         index = flag.nextIndex;
-        if (Object.hasOwn(parsedFlags, flag.name)) throw new Error(DUPLICATE_CLI_FLAG_MESSAGE);
-        parsedFlags[flag.name] = flag.rawValue === undefined
+        // The CLI accepts kebab-case flags; tool schemas declare snake_case fields.
+        // Resolve one schema field instead of every tool maintaining alias entries.
+        const normalizedName = flag.name.replaceAll("-", "_");
+        const schemaName = Object.hasOwn(fields, flag.name)
+            ? flag.name
+            : Object.hasOwn(fields, normalizedName) ? normalizedName : flag.name;
+        if (Object.hasOwn(parsedFlags, schemaName)) throw new Error(DUPLICATE_CLI_FLAG_MESSAGE);
+        parsedFlags[schemaName] = flag.rawValue === undefined
             ? true
-            : schemaCompatibleCliValue(fields[flag.name], flag.rawValue);
+            : schemaCompatibleCliValue(fields[schemaName], flag.rawValue);
     }
     return parsedFlags;
 }

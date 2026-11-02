@@ -66,7 +66,7 @@ test("explicit parent registration imports the feature factory, not a fabricated
 @Module({ name: "app", tags: ["type:app"], imports: [] })
 export class AppModule {}
 `);
-    const result = await runAppTool({ ...feature, root, "register-in": "src/app.module.ts" });
+    const result = await runAppTool({ ...feature, root, register_in: "src/app.module.ts" });
     expect(result.isError, JSON.stringify(data(result))).toBe(false);
     const source = await readFile(join(root, "src/app.module.ts"), "utf8");
     expect(source).toContain("CaseApprovalFeature");
@@ -91,23 +91,12 @@ test("both CLI tool surfaces expose feature and explicit governance", () => {
     for (const name of ["app", "generate"]) {
         expect(JSON.stringify(schemas[name]?.kind)).toContain("feature");
         expect(schemas[name]).toHaveProperty("permission");
-        expect(schemas[name]).toHaveProperty("read-permission");
+        expect(schemas[name]).toHaveProperty("read_permission");
         expect(schemas[name]).toHaveProperty("rpc");
         expect(schemas[name]).toHaveProperty("database_source");
         expect(schemas[name]).toHaveProperty("database_table");
         expect(schemas[name]).toHaveProperty("database_type");
     }
-});
-
-test("hyphenated read permission is an equivalent CLI alias", async () => {
-    const root = await fixture();
-    const result = data(await runAppTool({
-        ...feature,
-        root,
-        read_permission: undefined,
-        "read-permission": "cases:read",
-    }));
-    expect(result).toMatchObject({ ok: true, written: true });
 });
 
 async function generatedFixture(options: { bindAdapters?: boolean } = { bindAdapters: true }) {
