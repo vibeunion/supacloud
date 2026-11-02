@@ -67,11 +67,12 @@ npm 入口默认使用 Node.js。需要显式使用 Bun 时，包括 Windows 终
 bunx --bun --package @supacloud/cli supacloud status
 ```
 
-AI Agent 可先预览，再安装 CLI 随包提供的 migration-first Skill：
+AI Agent 可先预览，再安装 CLI 随包提供的应用/迁移 Skill：
 
 ```bash
 supacloud ai install_skill --dry_run
-supacloud ai install_skill
+supacloud ai install_skill                  # 默认 Codex
+supacloud ai install_skill --target claude  # 或 agents/project
 ```
 
 按 [CLI 指南](cli-guide.md)配置运维连接后，使用 Admin 执行主机与平台操作：
