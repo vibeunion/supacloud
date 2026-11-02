@@ -91,7 +91,7 @@ exits 1. Rows are not marked passed because a file was copied.
 | CLI | 2.122.0 | never, by this command. It does not execute the official Supabase CLI |
 | Realtime | v2.150.0 | never, by this command. It does not open a WebSocket |
 | Storage | repository-owned | never. Object bytes are on the objects checklist. This repo does not pin an upstream storage-api image |
-| Edge Functions | 0.37.2 (`@supacloud/edge-runtime`) | never, by this command. Function files run in-process in Lite. The hosted edge-runtime process is not started |
+| Edge Functions | 0.37.3 (`@supacloud/edge-runtime`) | never, by this command. Function files run in-process in Lite. The hosted edge-runtime process is not started |
 
 `compat` by itself leaves every row unchecked. Printing a pin is not a passing
 check.
