@@ -135,8 +135,9 @@ Shutdown waits for an already-running recompile to finish; it does not abort a
 write midway. Cancellation during startup and watcher-setup failures settle
 without leaving a pending `ready` promise or live watcher behind.
 
-Both `--database-url` and the existing `--database_url` are accepted, but not
-together. The explicit flag takes precedence over `SUPACLOUD_DEV_DATABASE_URL`;
+The CLI resolves `--database-url` to the declared `database_url` field; supplying
+both spellings is rejected as a duplicate. The explicit flag takes precedence
+over `SUPACLOUD_DEV_DATABASE_URL`;
 an explicitly empty flag is rejected rather than falling back to the environment.
 Integration accepts only `postgres://` or `postgresql://` URLs with a host, omits
 userinfo, query parameters and fragments from reports, and never echoes an

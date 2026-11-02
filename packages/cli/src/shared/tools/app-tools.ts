@@ -154,20 +154,14 @@ export interface AppToolArguments {
     module?: string;
     permission?: string;
     read_permission?: string;
-    "read-permission"?: string;
     rpc?: string;
     database_source?: string;
     database_table?: string;
     database_type?: string;
-    "database-source"?: string;
-    "database-table"?: string;
-    "database-type"?: string;
     dir?: string;
     force?: boolean;
     dry_run?: boolean;
     register_in?: string;
-    "dry-run"?: boolean;
-    "register-in"?: string;
     root?: string;
     include?: string;
     out_dir?: string;
@@ -177,9 +171,7 @@ export interface AppToolArguments {
     target?: string;
     fix?: string;
     from_doctor?: string;
-    "from-doctor"?: string;
     fix_index?: number;
-    "fix-index"?: number;
     write?: boolean;
     /** `app dev` local profile. `fast` is local/ephemeral; `integration` requires an explicit database URL. */
     profile?: "fast" | "integration";
@@ -189,7 +181,6 @@ export interface AppToolArguments {
     watch?: boolean;
     /** Integration dev verifies an explicit loopback database before running dev:integration. */
     database_url?: string;
-    "database-url"?: string;
     offset?: number;
     service?: string;
     search?: string;
@@ -199,7 +190,6 @@ export interface AppToolArguments {
     events?: string;
     /** `app context`: exact opaque request ID to correlate from events. */
     request_id?: string;
-    "request-id"?: string;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
@@ -831,14 +821,14 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
 async function runFix(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
     const fixPath = args.fix?.trim();
-    const doctorPath = (args.from_doctor ?? args["from-doctor"])?.trim();
+    const doctorPath = args.from_doctor?.trim();
     if (fixPath && doctorPath) throw new Error("app fix accepts either --fix or --from-doctor, not both");
     if (!fixPath && !doctorPath) throw new Error("app fix requires --fix <fix.json> or --from-doctor <doctor.json> --fix-index <n>");
     let parsed: unknown;
     let source: "fix" | "doctor" = "fix";
     let repair: { code?: string; readiness?: string; fix?: unknown } | undefined;
     if (doctorPath) {
-        const rawIndex = args.fix_index ?? args["fix-index"];
+        const rawIndex = args.fix_index;
         if (!Number.isSafeInteger(rawIndex) || rawIndex === undefined || rawIndex < 0) {
             throw new Error("app fix --from-doctor requires a non-negative --fix-index <n>");
         }
@@ -868,7 +858,7 @@ async function runFix(args: AppToolArguments): Promise<ToolResult> {
         ok: true,
         source,
         ...(source === "doctor" ? {
-            index: args.fix_index ?? args["fix-index"],
+            index: args.fix_index,
             ...(repair?.code === undefined ? {} : { code: repair.code }),
         } : {}),
         written: write,
@@ -1771,27 +1761,6 @@ async function runPromotion(
 }
 
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
-    if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
-        || (request.register_in !== undefined && request["register-in"] !== undefined)
-        || (request.database_url !== undefined && request["database-url"] !== undefined)
-        || (request.database_source !== undefined && request["database-source"] !== undefined)
-        || (request.database_table !== undefined && request["database-table"] !== undefined)
-        || (request.database_type !== undefined && request["database-type"] !== undefined)
-        || (request.read_permission !== undefined && request["read-permission"] !== undefined)
-        || (request.request_id !== undefined && request["request-id"] !== undefined)) {
-        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
-    }
-    request = {
-        ...request,
-        ...(request["dry-run"] === undefined ? {} : { dry_run: request["dry-run"] }),
-        ...(request["register-in"] === undefined ? {} : { register_in: request["register-in"] }),
-        ...(request["database-url"] === undefined ? {} : { database_url: request["database-url"] }),
-        ...(request["database-source"] === undefined ? {} : { database_source: request["database-source"] }),
-        ...(request["database-table"] === undefined ? {} : { database_table: request["database-table"] }),
-        ...(request["database-type"] === undefined ? {} : { database_type: request["database-type"] }),
-        ...(request["read-permission"] === undefined ? {} : { read_permission: request["read-permission"] }),
-        ...(request["request-id"] === undefined ? {} : { request_id: request["request-id"] }),
-    };
     if (request.events !== undefined || request.request_id !== undefined) {
         if (request.action !== "context" || !request.events?.trim() || !request.target?.trim()
             || !request.request_id || !/^[A-Za-z0-9._:-]{1,256}$/.test(request.request_id)
@@ -1922,20 +1891,14 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
             read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
-            "read-permission": optional(Type.String(), "[generate feature] CLI alias of read_permission"),
             rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
             database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
             database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),
             database_type: optional(Type.String(), "[generate feature] Exported row type derived from the database source"),
-            "database-source": optional(Type.String(), "[generate feature] CLI alias of database_source"),
-            "database-table": optional(Type.String(), "[generate feature] CLI alias of database_table"),
-            "database-type": optional(Type.String(), "[generate feature] CLI alias of database_type"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
             force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/feature/controller never overwrite"),
             dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
-            "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
             register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource/feature; uses the compiler AST editor"),
-            "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
             root: optional(Type.String(), "[dev/plan/build/release/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
             include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
@@ -1946,16 +1909,12 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),
             database_url: optional(Type.String(), "[dev] Explicit loopback integration URL; watch/once only inspect its shape"),
-            "database-url": optional(Type.String(), "[dev] CLI alias of database_url"),
             target: optional(Type.String(), "[explain/context/verify-plan] Provider class name / token name / command name / job name / module name"),
             events: optional(Type.String(), "[context] Project-relative execution metadata JSON or generated JSON-lines file"),
             request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
-            "request-id": optional(Type.String(), "[context] CLI alias of request_id"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             from_doctor: optional(Type.String(), "[fix] Read one fix from a doctor --format json output"),
-            "from-doctor": optional(Type.String(), "[fix] CLI alias of from_doctor"),
             fix_index: optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] Zero-based fixPlan index used with --from-doctor"),
-            "fix-index": optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] CLI alias of fix_index"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
             skip_build: optional(Type.Boolean(), "[release] Reuse --manifest_path instead of running the local delivery build"),
         },

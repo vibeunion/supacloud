@@ -601,7 +601,7 @@ describe("app tools", () => {
 
             const manualIndex = report.fixPlan.indexOf(manualRepair);
             await expect(app({
-                action: "fix", root: isolatedRoot, "from-doctor": "doctor.json", "fix-index": manualIndex,
+                action: "fix", root: isolatedRoot, from_doctor: "doctor.json", fix_index: manualIndex,
             })).rejects.toThrow("only preview-ready");
             await expect(app({
                 action: "fix", root: isolatedRoot, fix: "fix.json", from_doctor: "doctor.json", fix_index: previewIndex,
