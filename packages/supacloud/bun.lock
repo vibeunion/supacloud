@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.30.4",
-        "@supacloud/cli": "^0.112.2",
+        "@supacloud/cli": "^0.113.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
@@ -65,7 +65,7 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.30.4", "", { "dependencies": { "@supacloud/cli": "0.112.2", "@supacloud/delivery": "0.23.1", "ssh2": "^1.17.0", "typebox": "1.4.3" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-SuZpJEMMSH0Z5s2/oLpsdo86Z57GNP68VExyc0u6os6ymrlAcOBDOuH+z1Rq9r/+fuUxfsbd4y4bZdkRM567lg=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.112.2", "", { "dependencies": { "@supacloud/compiler": "^0.52.2", "@supacloud/db": "0.20.3", "@supacloud/delivery": "0.23.1", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-K5DGhwt1XpDnV6Ec+TY1WrulMEAWmPbjPCwS2GFUEaHJU/A/8xMyc8IzNG8S49aVKdns6nzxGHRu5oGQ5kH2Og=="],
+    "@supacloud/cli": ["@supacloud/cli@0.113.0", "", { "dependencies": { "@supacloud/compiler": "^0.53.0", "@supacloud/db": "0.20.3", "@supacloud/delivery": "0.24.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-h65lR4CAqrJNeo4/KdQiK6V4JtH7xxBXLWXU/87UpKaP5icmLWErOP01mZ10sgm4OHzw2cAuvuZ/zR9Xa9lbHg=="],
 
     "@supacloud/contracts": ["@supacloud/contracts@0.15.2", "", {}, "sha512-n4CMgleJf68zpWuy+v+mtmG5VtDBSJONLI2YEIZic9wdislvuE3QZU6EV/sX5xMyKuX0J/YNEt4Gl78WTNz2Rw=="],
 
@@ -229,6 +229,8 @@
 
     "undici-types": ["undici-types@8.12.3", "", {}, "sha512-EXE4ydL3S76dFb27UFjNVZHTyv/TLdATj/KUe29ptdcg6qXL48J2tZ3126E5kICj5jn781OR+XlVH1N6Mz8jbA=="],
 
+    "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.112.2", "", { "dependencies": { "@supacloud/compiler": "^0.52.2", "@supacloud/db": "0.20.3", "@supacloud/delivery": "0.23.1", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-K5DGhwt1XpDnV6Ec+TY1WrulMEAWmPbjPCwS2GFUEaHJU/A/8xMyc8IzNG8S49aVKdns6nzxGHRu5oGQ5kH2Og=="],
+
     "@supacloud/admin/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" }, "devDependencies": { "@types/bun": "^1.4.4", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
 
     "@supacloud/cli/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.4.3" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "drizzle-orm": "1.0.0-rc.5-5935859", "typescript": "^7.0.2" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
@@ -237,8 +239,16 @@
 
     "@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
+    "@supacloud/admin/@supacloud/cli/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.4.3" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "drizzle-orm": "1.0.0-rc.5-5935859", "typescript": "^7.0.2" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" }, "devDependencies": { "@types/bun": "^1.4.4", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
+
     "@supacloud/cli/@supacloud/compiler/@supacloud/db": ["@supacloud/db@file:../db", {}],
 
     "@supacloud/cli/@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" }, "devDependencies": { "@types/bun": "^1.4.4", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/compiler/@supacloud/db": ["@supacloud/db@file:../db", {}],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" }, "devDependencies": { "@types/bun": "^1.4.4", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
   }
 }
