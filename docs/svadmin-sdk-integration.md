@@ -330,8 +330,23 @@ and showed failure. These checks are not deployment or live backend acceptance.
    outcomes, target switching and late results. Keep UI metadata application-owned.
 
 This PR delivers the SDK facade, public-entrypoint consumer/type checks and browser
-bundle isolation. It does not deliver automatic svadmin schema generation, a
-svadmin SDK upgrade, a production authorization integration or a release.
+bundle isolation. It does not generate SVAdmin UI components, upgrade the SVAdmin
+SDK, integrate production authorization, or publish a release.
+
+## Database metadata for SVAdmin generation
+
+`database` action `export_svadmin_schema` reads column metadata, primary keys, and
+foreign-key targets. JSON mode returns a `databaseColumns` payload that can be
+passed to a separate `svadmin_generateResource` call. The CLI does not generate
+the resource or UI itself.
+
+```sh
+database action="export_svadmin_schema" table="orders" json=true
+```
+
+Schema and table names must be unquoted PostgreSQL identifiers. A column named
+`id` is reported as a primary key when no primary-key constraint is present, and
+a `*_id` column is reported as a foreign key when no constraint names its target.
 
 ## Local verification
 
