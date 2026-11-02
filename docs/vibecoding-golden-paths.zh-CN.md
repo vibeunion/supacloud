@@ -156,6 +156,16 @@ supacloud fix --fix fix.json --write  # 应用
 
 CLI 在仓库开发时依赖本地 compiler，确保测试覆盖配套实现。发布时须通过现有 `sync-compiler-dependency.mjs` 将本地引用转换为已发布版本范围。本地构建通过不等于 npm 已发布或生产验收通过。
 
+### Database 到 SVAdmin 的列元数据导出
+
+CLI `database` 的 `export_svadmin_schema` 只导出列、主键和外键元数据，供后续的 `@svadmin/mcp` `svadmin_generateResource` 使用。它本身不生成契约或 Svelte 组件，也不能替代数据库验收。
+
+```bash
+database action="export_svadmin_schema" table="orders" json=true
+```
+
+schema 和 table 必须是未加引号的 PostgreSQL 标识符。没有主键约束时，名为 `id` 的列会被标记为主键；没有外键约束时，以 `_id` 结尾的列会被标记为外键。
+
 ## 不建议做的事
 
 - 不照搬 Angular 的 NgModule 与装饰器体系。
