@@ -71,11 +71,12 @@ The npm entry defaults to Node.js. To explicitly use Bun, including from Windows
 bunx --bun --package @supacloud/cli supacloud status
 ```
 
-AI agents can inspect and install the CLI's migration-first Skill:
+AI agents can inspect and install the CLI's application and migration Skill:
 
 ```bash
 supacloud ai install_skill --dry_run
-supacloud ai install_skill
+supacloud ai install_skill                  # Codex default
+supacloud ai install_skill --target claude  # or agents/project
 ```
 
 Configure the operator connection in the [CLI guide](cli-guide.md), then use Admin for host/platform operations:

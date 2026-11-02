@@ -96,7 +96,18 @@ supacloud generate --kind command  --module orders --name accept
 supacloud generate --kind query    --module orders --name list
 supacloud generate --kind job      --module orders --name sync-orders
 supacloud generate --kind contract --module orders --name accept
+supacloud generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase \
+  --database-source db/schema.ts --database-table public.reviews --database-type ReviewRow
 ```
+
+The `feature` generator emits an approval slice with HTTP contracts, a query,
+a governed command, state declarations, an async job boundary, an HTTP route,
+fail-closed tests and a delivery checklist. Permission, durable RPC, database
+source, table and row type remain explicit inputs; the framework does not infer
+business authorization or database ownership. It does not create a second
+database model or fabricate database, identity or production receipts.
+Database version checks, authorization, transactions and the job host still need
+to be wired; generated tests are not database or E2E acceptance.
 
 ## Compiler does more of the reasoning
 
@@ -115,7 +126,10 @@ The returned `subject` remains the canonical module name; ambiguous owners requi
 an explicit module target. Existing module queries keep the same version-1 shape.
 Agents read
 structured context instead of scanning the repository, and never receive
-credentials or live user data.
+credentials or live user data. `app check --format json` and `app doctor
+--format json` also return a `next` command list, so an agent can move from a
+failed check or preview-ready repair to the next verification step without
+inventing commands.
 
 Database changes use the same bounded-context rule:
 

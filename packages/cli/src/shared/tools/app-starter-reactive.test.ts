@@ -13,6 +13,9 @@ test("all official starters install the same RxJS version and emit the reactive 
     expect(files["AGENTS.md"]).toContain("@supacloud/app/angular");
     expect(files["REACTIVE.md"]).toContain("onCursor");
     expect(files["AGENTS.md"]).toContain("REACTIVE.md");
+    expect(files["AGENTS.md"]).toContain("supacloud app context --format json");
+    expect(files["AGENTS.md"]).toContain("supacloud app doctor --format json");
+    expect(files["AGENTS.md"]).toContain("supacloud app fix --fix <file>");
     expect(files["tests/reactive.test.ts"]).toContain("takeUntilAborted");
   }
 });

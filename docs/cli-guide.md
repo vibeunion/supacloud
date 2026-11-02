@@ -312,9 +312,17 @@ supacloud ai install_skill --dry_run
 # Install into $CODEX_HOME/skills or ~/.codex/skills.
 supacloud ai install_skill
 
-# Install into another agent's explicit Skill root.
+# Install into a named agent root: codex, claude, agents or project.
+supacloud ai install_skill --target claude
+supacloud ai install_skill --target project
+
+# Or use an explicit Skill root.
 supacloud ai install_skill --target /path/to/skills
 ```
+
+Aliases resolve to `$CODEX_HOME/skills`, `$CLAUDE_CONFIG_DIR/skills`,
+`$AGENTS_HOME/skills`, or `<project>/.agents/skills` respectively. The default
+remains the Codex root.
 
 Installation is idempotent. If an existing `supacloud` Skill differs, the
 CLI refuses to overwrite it. `--force` creates a timestamped adjacent backup
@@ -322,6 +330,7 @@ before replacement; combine it with `--dry_run` to preview the backup path.
 
 The packaged Skill enforces these defaults for agents:
 
+- local application work uses the `app init/context/generate/check/doctor/fix/verify-plan` loop;
 - database schema, functions/RPC, triggers, RLS, indexes, grants, extensions,
   and reference-data changes are migration-first;
 - `database query` is read-only by default;

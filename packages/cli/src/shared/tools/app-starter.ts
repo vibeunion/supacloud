@@ -62,7 +62,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 effect: "4.0.5",
-                elysia: "2.0.0-rc.0",
+                elysia: "2.0.0-rc.1",
                 rxjs: appMetadata.dependencies.rxjs,
             },
             devDependencies: {
@@ -95,25 +95,7 @@ export function appStarterFiles(name: string): Record<string, string> {
         "supacloud.config.ts": `import { defineSupacloudConfig } from "@supacloud/compiler";
 
 export default defineSupacloudConfig({
-  root: "src",
-  outDir: "generated",
-  strict: true,
-  moduleBoundaryPreset: "modular-monolith",
-  databaseGovernance: { mode: "check", moduleFile: "db/modules.ts", databaseUrlEnv: "DATABASE_URL" },
-  effect: {
-    requireRouteEffects: true,
-    requireErrorMappings: true,
-    requireDependencies: true,
-    requireTaggedErrorTypes: true,
-    requireExactDependencyTypes: true,
-    requireTimeoutForDependencies: true,
-    forbidDirectRuntimeExecution: true,
-    forbidDirectThrows: true,
-  },
-  typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
-  disallowControllerDirectDb: true,
-  detectOrphanModules: true,
-  commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
+  databaseGovernance: { mode: "check" },
   delivery: {
     version: 1,
     build: {
