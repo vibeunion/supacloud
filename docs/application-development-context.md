@@ -181,18 +181,17 @@ same contract, so AI and the UI cannot drift.
 
 ## Developer MCP test invocation
 
-`supacloud.invoke_application_route` invokes one route on the active
-application's loopback HTTP target. It is disabled unless an operator sets
-`SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS` to an explicit comma-separated
-environment allowlist. `SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS` defaults to
-`GET,HEAD`; non-read methods must be listed explicitly.
+`supacloud.invoke_application_route` invokes one GET/HEAD route on the active
+application's loopback HTTP target. The convention is simple: it is enabled only
+when the Management API runs with `NODE_ENV=development` or `NODE_ENV=test`, and
+an application `environment_id` named `production` or `prod` is always rejected.
+There is no separate invocation configuration or write-method option.
 
-The tool accepts only `application_id`, `environment_id`, `target`, `method`,
-`path`, an optional bounded `body`, and an allowlisted `content_type`. It never
-forwards caller credentials or arbitrary headers, never follows redirects, and
-returns only status, timing, content type and a bounded response body without
-response cookies. This is a local/test smoke path, not production traffic
-replay or a substitute for focused tests.
+The tool accepts only `application_id`, `environment_id`, `target`, `method` and
+`path`. It never forwards caller credentials, arbitrary headers or a request
+body, never follows redirects, and returns only status, timing, content type and
+a bounded response body without response cookies. This is a local/test smoke
+path, not production traffic replay or a substitute for focused tests.
 
 ## Next steps
 

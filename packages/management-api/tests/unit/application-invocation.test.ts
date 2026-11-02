@@ -18,12 +18,6 @@ beforeAll(() => {
       if (url.pathname === "/health") {
         return Response.json({ ok: true, authorization: request.headers.get("authorization") });
       }
-      if (url.pathname === "/echo") {
-        return request.text().then((body) => Response.json({
-          body,
-          content_type: request.headers.get("content-type"),
-        }));
-      }
       if (url.pathname === "/redirect") return Response.redirect("/health", 302);
       if (url.pathname === "/large") {
         return new Response("x".repeat(300 * 1024), { headers: { "content-type": "text/plain" } });
@@ -57,11 +51,7 @@ function activeRecord(): ApplicationActiveRecord {
   } as unknown as ApplicationActiveRecord;
 }
 
-const policy: DeveloperInvocationPolicy = {
-  enabled: true,
-  environments: ["test"],
-  methods: ["GET", "POST"],
-};
+const policy: DeveloperInvocationPolicy = { enabled: true, methods: ["GET", "HEAD"] };
 
 function invoke(overrides: Record<string, unknown> = {}) {
   return invokeApplicationRoute({
@@ -77,19 +67,18 @@ function invoke(overrides: Record<string, unknown> = {}) {
   });
 }
 
-test("policy is disabled until an operator names test environments", () => {
-  expect(developerInvocationPolicy({})).toEqual({ enabled: false, environments: [], methods: ["GET", "HEAD"] });
-  expect(developerInvocationPolicy({
-    SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS: "test, staging,test",
-    SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS: "get,POST",
-  })).toEqual({ enabled: true, environments: ["test", "staging"], methods: ["GET", "POST"] });
+test("policy follows the non-production convention without extra configuration", () => {
+  expect(developerInvocationPolicy({})).toEqual({ enabled: false, methods: ["GET", "HEAD"] });
+  expect(developerInvocationPolicy({ NODE_ENV: "production" })).toEqual({ enabled: false, methods: ["GET", "HEAD"] });
+  expect(developerInvocationPolicy({ NODE_ENV: "test" })).toEqual({ enabled: true, methods: ["GET", "HEAD"] });
+  expect(developerInvocationPolicy({ NODE_ENV: "development" })).toEqual({ enabled: true, methods: ["GET", "HEAD"] });
 });
 
 test("invokes an active loopback target without forwarding caller credentials", async () => {
   const result = await invoke();
   expect(result).toMatchObject({
     schema: "supacloud.application-invocation.v1",
-    mode: "allowlisted_test_invocation",
+    mode: "non_production_loopback",
     project_ref: "demo",
     application_id: "app",
     environment_id: "test",
@@ -103,25 +92,13 @@ test("invokes an active loopback target without forwarding caller credentials", 
   expect(JSON.parse(String(result["body"]))).toEqual({ ok: true, authorization: null });
 });
 
-test("forwards a bounded body only to an allowlisted method", async () => {
-  const result = await invoke({
-    method: "POST",
-    path: "/echo",
-    body: JSON.stringify({ case_id: "c1" }),
-    contentType: "application/json",
-  });
-  expect(result["status"]).toBe(200);
-  expect(JSON.parse(String(result["body"]))).toEqual({
-    body: JSON.stringify({ case_id: "c1" }),
-    content_type: "application/json",
-  });
-  await expect(invoke({ method: "GET", body: "not allowed" })).rejects.toThrow("cannot include a body");
-  await expect(invoke({ method: "POST", body: "x".repeat(64 * 1024 + 1) }))
-    .rejects.toThrow("exceeds the Developer MCP invocation limit");
+test("write methods are rejected", async () => {
+  await expect(invoke({ method: "POST", path: "/health" })).rejects.toThrow("method is not allowlisted");
 });
 
-test("rejects environments, methods, targets and paths outside the allowlist", async () => {
-  await expect(invoke({ environmentId: "production" })).rejects.toThrow("not allowlisted");
+test("rejects production environments, methods, targets and paths", async () => {
+  await expect(invoke({ environmentId: "production" })).rejects.toThrow("not invocable");
+  await expect(invoke({ environmentId: "prod" })).rejects.toThrow("not invocable");
   await expect(invoke({ method: "DELETE" })).rejects.toThrow("not allowlisted");
   await expect(invoke({ target: "worker" })).rejects.toThrow("not an active HTTP target");
   await expect(invoke({ path: "//evil.example/health" })).rejects.toThrow("loopback origin");

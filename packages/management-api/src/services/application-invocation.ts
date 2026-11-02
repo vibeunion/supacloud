@@ -1,20 +1,14 @@
 import { ApplicationActiveStorage } from "./application-active-storage";
 import type { ApplicationActiveRecord } from "./application-activation";
 
-const MAX_BODY_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_PATH_LENGTH = 2048;
 const DEFAULT_TIMEOUT_MS = 5_000;
-const DEFAULT_METHODS = ["GET", "HEAD"] as const;
-const CONTENT_TYPES = new Set([
-  "application/json",
-  "text/plain",
-  "application/x-www-form-urlencoded",
-]);
+const METHODS = ["GET", "HEAD"] as const;
+const NON_PRODUCTION = new Set(["development", "test"]);
 
 export interface DeveloperInvocationPolicy {
   enabled: boolean;
-  environments: string[];
   methods: string[];
 }
 
@@ -25,8 +19,6 @@ export interface DeveloperInvocationInput {
   target: string;
   method: string;
   path: string;
-  body?: string;
-  contentType?: string;
 }
 
 export interface DeveloperInvocationDependencies {
@@ -35,16 +27,10 @@ export interface DeveloperInvocationDependencies {
   timeoutMs?: number;
 }
 
-function csv(value: string | undefined): string[] {
-  return [...new Set((value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean))];
-}
-
-/** Invocation is disabled unless an operator names the test environments. */
+/** Convention: loopback smoke invocation exists only outside production. */
 export function developerInvocationPolicy(environment: NodeJS.ProcessEnv = process.env): DeveloperInvocationPolicy {
-  const environments = csv(environment.SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS);
-  const configuredMethods = csv(environment.SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS).map((method) => method.toUpperCase());
-  const methods = configuredMethods.length > 0 ? configuredMethods : [...DEFAULT_METHODS];
-  return { enabled: environments.length > 0, environments, methods };
+  const nodeEnv = (environment.NODE_ENV ?? environment.BUN_ENV ?? "production").toLowerCase();
+  return { enabled: NON_PRODUCTION.has(nodeEnv), methods: [...METHODS] };
 }
 
 function identifier(value: string, label: string): string {
@@ -63,13 +49,6 @@ function requestPath(path: string): string {
     throw new Error("path must stay on the application loopback origin");
   }
   return `${parsed.pathname}${parsed.search}`;
-}
-
-function safeContentType(value: string | undefined, body: string | undefined): string | undefined {
-  if (body === undefined) return undefined;
-  const contentType = (value ?? "application/json").toLowerCase().split(";", 1)[0]!.trim();
-  if (!CONTENT_TYPES.has(contentType)) throw new Error("content_type is not allowlisted");
-  return contentType;
 }
 
 async function boundedText(response: Response): Promise<{ text: string | null; truncated: boolean; omitted?: string }> {
@@ -108,7 +87,7 @@ async function boundedText(response: Response): Promise<{ text: string | null; t
 
 /**
  * Invoke a route on the active application's loopback HTTP target.
- * Only operator-allowlisted test environments and methods are reachable.
+ * Only non-production management hosts and GET/HEAD are reachable.
  * Caller credentials and arbitrary headers are never forwarded.
  */
 export async function invokeApplicationRoute(
@@ -121,20 +100,12 @@ export async function invokeApplicationRoute(
   const applicationId = identifier(input.applicationId, "application_id");
   const environmentId = identifier(input.environmentId, "environment_id");
   const target = identifier(input.target, "target");
-  if (!policy.environments.includes(environmentId)) {
-    throw new Error("environment_id is not allowlisted for Developer MCP invocation");
+  if (environmentId.toLowerCase() === "production" || environmentId.toLowerCase() === "prod") {
+    throw new Error("production environments are not invocable");
   }
   const method = input.method.toUpperCase();
   if (!policy.methods.includes(method)) throw new Error("method is not allowlisted for Developer MCP invocation");
   const path = requestPath(input.path);
-  const body = input.body;
-  if (body !== undefined && Buffer.byteLength(body, "utf8") > MAX_BODY_BYTES) {
-    throw new Error("body exceeds the Developer MCP invocation limit");
-  }
-  if (body !== undefined && (method === "GET" || method === "HEAD")) {
-    throw new Error("GET and HEAD requests cannot include a body");
-  }
-  const contentType = safeContentType(input.contentType, body);
 
   const readActive = dependencies.readActive
     ?? ((ref: string, app: string, env: string) => new ApplicationActiveStorage().readForApplication(ref, app, env));
@@ -151,15 +122,13 @@ export async function invokeApplicationRoute(
   try {
     const response = await (dependencies.fetch ?? fetch)(`http://127.0.0.1:${port}${path}`, {
       method,
-      headers: contentType === undefined ? undefined : { "content-type": contentType },
-      ...(body === undefined ? {} : { body }),
       redirect: "error",
       signal: controller.signal,
     });
     const responseBody = await boundedText(response);
     return {
       schema: "supacloud.application-invocation.v1",
-      mode: "allowlisted_test_invocation",
+      mode: "non_production_loopback",
       project_ref: projectRef,
       application_id: applicationId,
       environment_id: environmentId,

@@ -7,36 +7,29 @@ async function call(method: string, params: Record<string, unknown>, surface: "o
   return await processMessage({ jsonrpc: "2.0", id: 1, method, params }, { role: "project", ref: "demo" }, surface) as Reply | null;
 }
 
-async function withInvocationEnvironment<T>(value: Record<string, string | undefined>, work: () => Promise<T>): Promise<T> {
-  const keys = [
-    "SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS",
-    "SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS",
-  ] as const;
-  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+async function withNodeEnv<T>(value: string, work: () => Promise<T>): Promise<T> {
+  const previous = process.env.NODE_ENV;
   try {
-    for (const key of keys) {
-      if (value[key] === undefined) delete process.env[key];
-      else process.env[key] = value[key];
-    }
+    process.env.NODE_ENV = value;
     return await work();
   } finally {
-    for (const key of keys) {
-      if (previous[key] === undefined) delete process.env[key];
-      else process.env[key] = previous[key];
-    }
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
   }
 }
 
-test("developer surface exposes only read-only development tools", async () => {
-  const reply = await call("tools/list", {}, "developer");
-  const names = reply?.result?.tools?.map((tool) => tool.name) ?? [];
-  expect(names).toContain("supacloud.get_capabilities");
-  expect(names).toContain("supacloud.get_application_development");
-  expect(names).toContain("supacloud.get_deployment_evidence");
-  expect(names).not.toContain("supacloud.invoke_application_route");
-  expect(names).not.toContain("supacloud.get_backup_readiness");
-  expect(names).not.toContain("supacloud.plan_pitr_restore");
-  expect(names).not.toContain("supacloud.get_request_metrics");
+test("developer surface hides invocation in production", async () => {
+  await withNodeEnv("production", async () => {
+    const reply = await call("tools/list", {}, "developer");
+    const names = reply?.result?.tools?.map((tool) => tool.name) ?? [];
+    expect(names).toContain("supacloud.get_capabilities");
+    expect(names).toContain("supacloud.get_application_development");
+    expect(names).toContain("supacloud.get_deployment_evidence");
+    expect(names).not.toContain("supacloud.invoke_application_route");
+    expect(names).not.toContain("supacloud.get_backup_readiness");
+    expect(names).not.toContain("supacloud.plan_pitr_restore");
+    expect(names).not.toContain("supacloud.get_request_metrics");
+  });
 });
 
 test("operations surface does not expose the development tool", async () => {
@@ -68,30 +61,28 @@ test("development tool requires an application, release, and target", async () =
   }, "developer")).rejects.toThrow("target is required");
 });
 
-test("invocation is disabled until an operator allowlists an environment", async () => {
-  await expect(call("tools/call", {
-    name: "supacloud.invoke_application_route",
-    arguments: {
-      application_id: "app", environment_id: "test", target: "api", method: "GET", path: "/health",
-    },
-  }, "developer")).rejects.toThrow("not enabled");
+test("invocation follows NODE_ENV without extra configuration", async () => {
+  await withNodeEnv("production", async () => {
+    await expect(call("tools/call", {
+      name: "supacloud.invoke_application_route",
+      arguments: {
+        application_id: "app", environment_id: "test", target: "api", method: "GET", path: "/health",
+      },
+    }, "developer")).rejects.toThrow("not enabled");
+  });
 });
 
-test("allowlisted invocation is exposed with explicit environment and method boundaries", async () => {
-  await withInvocationEnvironment({
-    SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS: "test,staging",
-    SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS: "GET,POST",
-  }, async () => {
+test("non-production invocation exposes only GET/HEAD and rejects production environments", async () => {
+  await withNodeEnv("test", async () => {
     const list = await call("tools/list", {}, "developer");
     expect(list?.result?.tools?.map((tool) => tool.name)).toContain("supacloud.invoke_application_route");
     const capabilitiesReply = await call("tools/call", { name: "supacloud.get_capabilities", arguments: {} }, "developer");
     const contract = JSON.parse(capabilitiesReply?.result?.content?.[0]?.text ?? "{}");
-    expect(contract.write_policy).toBe("allowlisted_test_invocation");
+    expect(contract.write_policy).toBe("read_only");
     expect(contract.invocation).toEqual({
-      mode: "allowlisted_test_invocation",
+      mode: "non_production_loopback",
       enabled: true,
-      environments: ["test", "staging"],
-      methods: ["GET", "POST"],
+      methods: ["GET", "HEAD"],
       credentials_forwarded: false,
       redirects_followed: false,
       transport: "application_loopback",
@@ -101,6 +92,6 @@ test("allowlisted invocation is exposed with explicit environment and method bou
       arguments: {
         application_id: "app", environment_id: "production", target: "api", method: "GET", path: "/health",
       },
-    }, "developer")).rejects.toThrow("not allowlisted");
+    }, "developer")).rejects.toThrow("not invocable");
   });
 });

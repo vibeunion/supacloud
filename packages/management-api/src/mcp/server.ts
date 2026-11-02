@@ -96,11 +96,6 @@ function capabilities(scope: McpScope, surface: McpSurface) {
   const developerTools = invocation?.enabled
     ? DEVELOPER_TOOLS
     : DEVELOPER_TOOLS.filter((tool) => tool !== "supacloud.invoke_application_route");
-  const writePolicy = developer
-    ? invocation?.enabled && invocation.methods.some((method) => method !== "GET" && method !== "HEAD")
-      ? "allowlisted_test_invocation"
-      : "read_only"
-    : "plan_only";
   return {
     schema: "supacloud.mcp-capabilities.v1",
     surface,
@@ -113,12 +108,11 @@ function capabilities(scope: McpScope, surface: McpSurface) {
       session: "none",
     },
     scopes: developer ? ["project.read"] : scope.ref ? ["project.read"] : ["platform.read", "project.read"],
-    write_policy: writePolicy,
+    write_policy: developer ? "read_only" : "plan_only",
     ...(invocation === undefined ? {} : {
       invocation: {
-        mode: "allowlisted_test_invocation",
+        mode: "non_production_loopback",
         enabled: invocation.enabled,
-        environments: invocation.environments,
         methods: invocation.methods,
         credentials_forwarded: false,
         redirects_followed: false,
@@ -280,12 +274,6 @@ async function callTool(
     const target = requiredIdentifier(params, "target");
     const method = requiredIdentifier(params, "method");
     if (typeof params.path !== "string") throw new Error("path is required");
-    const body = params.body === undefined ? undefined : params.body;
-    if (body !== undefined && typeof body !== "string") throw new Error("body must be a string");
-    const contentType = params.content_type;
-    if (contentType !== undefined && typeof contentType !== "string") {
-      throw new Error("content_type must be a string");
-    }
     const result = await invokeApplicationRoute({
       projectRef: ref,
       applicationId,
@@ -293,8 +281,6 @@ async function callTool(
       target,
       method,
       path: params.path,
-      ...(body === undefined ? {} : { body }),
-      ...(contentType === undefined ? {} : { contentType }),
     });
     return { content: textContent(JSON.stringify(result, null, 2)) };
   }
@@ -451,7 +437,7 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
         },
         {
           name: "supacloud.invoke_application_route",
-          description: "Invoke one allowlisted loopback test route on the active application. Operator-enabled environments and methods only; no credentials or arbitrary headers are forwarded.",
+          description: "Invoke one GET/HEAD loopback test route on the active non-production application. No credentials or arbitrary headers are forwarded.",
           inputSchema: {
             type: "object",
             properties: {
@@ -461,8 +447,6 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
               target: { type: "string", description: "Active HTTP target name" },
               method: { type: "string" },
               path: { type: "string", description: "Project-relative request path and query" },
-              body: { type: "string", description: "Optional bounded UTF-8 request body" },
-              content_type: { type: "string", enum: ["application/json", "text/plain", "application/x-www-form-urlencoded"] },
             },
             required: ["application_id", "environment_id", "target", "method", "path"],
             additionalProperties: false,

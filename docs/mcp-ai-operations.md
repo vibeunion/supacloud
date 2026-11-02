@@ -12,8 +12,8 @@ existing SupaCloud admin or project-scoped credential.
 - Endpoint: `POST /mcp` for platform administrators.
 - Endpoint: `POST /mcp/projects/{project_ref}` for a project-scoped client.
 - Endpoint: `POST /mcp/developer/projects/{project_ref}` for the project-scoped
-  Developer MCP surface. It is read-only by default and can expose one explicit
-  loopback test invocation tool when an operator allowlists environments.
+  Developer MCP surface. It is read-only and exposes one GET/HEAD loopback smoke
+  tool only outside production.
 - Protocol: `2025-06-18`.
 - Transport: JSON-RPC over `application/json`.
 - State model: stateless. SupaCloud does not return `Mcp-Session-Id`, keep a
@@ -34,13 +34,12 @@ operations endpoint does not expose development tools. The development tools
 read the same `supacloud.application-development.v1` contract that the
 application developer console consumes, so AI and the console cannot drift.
 
-Invocation is disabled by default. Set
-`SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS` to an explicit comma-separated
-environment allowlist to enable it. `SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS`
-defaults to `GET,HEAD`; add write methods only for named local/test
-environments. The tool calls the active application's loopback HTTP target,
-forwards no caller credentials or arbitrary headers, follows no redirects, and
-never returns response cookies.`
+Invocation follows deployment convention instead of extra configuration: it is
+available only when the Management API runs with `NODE_ENV=development` or
+`test`, and only for GET/HEAD. Application environments named `production` or
+`prod` are always rejected. The tool calls the active application's loopback
+HTTP target, forwards no caller credentials, arbitrary headers or request body,
+follows no redirects, and never returns response cookies.`
 
 
 `supacloud.get_application_development` reads one immutable application
@@ -90,9 +89,8 @@ health verification.
 
 ### `supacloud.invoke_application_route` (Developer MCP only)
 
-Available only when the operator allowlist is configured. Inputs:
-`application_id`, `environment_id`, `target`, `method`, `path`, optional bounded
-`body`, and allowlisted `content_type`. The response contains the active
+Available only outside production. Inputs: `application_id`, `environment_id`,
+`target`, `method` (GET/HEAD), and `path`. The response contains the active
 `release_id`/`activation_id`, status, duration, content type, and a bounded body.
 It is a loopback test smoke path, not production replay, credentials forwarding,
 or a replacement for focused tests.

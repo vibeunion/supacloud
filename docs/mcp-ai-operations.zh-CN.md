@@ -8,7 +8,7 @@ SupaCloud 通过 Streamable HTTP MCP 协议提供可选的、面向客户的 AI 
 
 - 平台管理员端点：`POST /mcp`。
 - 项目级客户端端点：`POST /mcp/projects/{project_ref}`。
-- Developer MCP 端点：`POST /mcp/developer/projects/{project_ref}`。默认只读；操作员显式允许环境后可暴露一个回环测试调用工具。
+- Developer MCP 端点：`POST /mcp/developer/projects/{project_ref}`。只读；仅在非 production 环境暴露一个 GET/HEAD 回环 smoke 工具。
 - 协议版本：`2025-06-18`。
 - 传输格式：基于 `application/json` 的 JSON-RPC 2.0。
 - 状态模型：完全无状态。SupaCloud 不返回 `Mcp-Session-Id`，不维护会话映射表，也不保存大模型的对话状态。
@@ -22,7 +22,7 @@ SupaCloud 通过 Streamable HTTP MCP 协议提供可选的、面向客户的 AI 
 
 Developer MCP 是独立、项目限域的接口，暴露 `supacloud.get_capabilities`、`supacloud.get_application_development`、`supacloud.get_deployment_evidence`，以及可选的 `supacloud.invoke_application_route` 测试工具；不列出备份或指标资源。它不替代仅生成计划的运维接口，运维端点也不暴露开发工具。开发工具消费同一份 `supacloud.application-development.v1` 契约，确保 AI 与应用开发者控制台不会出现数据漂移。
 
-调用工具默认关闭。操作员必须通过 `SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS` 显式列出允许的测试环境；`SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS` 默认仅 `GET,HEAD`，写方法必须显式加入。该工具只访问当前激活应用的 loopback HTTP target，不转发调用方凭据或任意请求头，不跟随重定向，也不返回响应 Cookie。
+调用工具遵循部署约定而不是额外配置：仅当 Management API 以 `NODE_ENV=development` 或 `test` 运行时启用，且只允许 `GET/HEAD`。应用 `environment_id` 为 `production` 或 `prod` 时始终拒绝。该工具只访问当前激活应用的 loopback HTTP target，不转发调用方凭据、任意请求头或请求体，不跟随重定向，也不返回响应 Cookie。
 
 `supacloud.get_application_development` 读取一个不可变的应用 release target，返回经过校验的开发契约（模块、路由、资源、资源使用、执行计划与诊断信息），并附带 `correlation: "verified-build-snapshot"`。字节来自 `ApplicationReleaseStorage` 已完成哈希校验的 release 归档，因此结果是构建证据，而非对当前源码的重新推断。
 
@@ -53,7 +53,7 @@ Developer MCP 是独立、项目限域的接口，暴露 `supacloud.get_capabili
 
 ### `supacloud.invoke_application_route`（仅 Developer MCP）
 
-仅在操作员配置 allowlist 后可用。入参为 `application_id`、`environment_id`、`target`、`method`、`path`、可选的有界 `body` 与允许的 `content_type`。响应包含当前 `release_id`/`activation_id`、状态码、耗时、内容类型与有界响应体。它是本地/测试 smoke 路径，不是生产流量回放、凭据转发，也不替代聚焦测试。
+仅在非 production 环境可用。入参为 `application_id`、`environment_id`、`target`、`method`（GET/HEAD）与 `path`。响应包含当前 `release_id`/`activation_id`、状态码、耗时、内容类型与有界响应体。它是本地/测试 smoke 路径，不是生产流量回放、凭据转发，也不替代聚焦测试。
 
 ### `supacloud.get_application_development`（仅 Developer MCP）
 
