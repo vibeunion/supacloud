@@ -14,6 +14,49 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.115.0](https://github.com/vibeunion/supacloud/compare/cli-v0.114.0...cli-v0.115.0) (2026-11-02)
+
+
+### Features
+
+* **cli:** add JSON output for app init ([#2351](https://github.com/vibeunion/supacloud/issues/2351)) ([e039b50](https://github.com/vibeunion/supacloud/commit/e039b50f02a4eafdddf5c33d3f83bceaaf173be8))
+* **cli:** add named agent roots for skill installation ([#2355](https://github.com/vibeunion/supacloud/issues/2355)) ([bf09d25](https://github.com/vibeunion/supacloud/commit/bf09d25308f94328d71fd6a19e9473f8b665b9f5))
+* **cli:** apply reviewed fixes directly from doctor output ([#2354](https://github.com/vibeunion/supacloud/issues/2354)) ([7319512](https://github.com/vibeunion/supacloud/commit/731951283712a19fdd784ac1859adbffbff687cf))
+* **cli:** return next commands from check and doctor ([#2357](https://github.com/vibeunion/supacloud/issues/2357)) ([07450bf](https://github.com/vibeunion/supacloud/commit/07450bf8d817fb1b579b53d8fbc658e949b9947d))
+* **database:** add managed remote module governance checks ([#2345](https://github.com/vibeunion/supacloud/issues/2345)) ([6a99987](https://github.com/vibeunion/supacloud/commit/6a999876d1f51ed883f60bc88b34b7580e4f73da))
+* **database:** add managed remote role boundary checks ([#2350](https://github.com/vibeunion/supacloud/issues/2350)) ([450c306](https://github.com/vibeunion/supacloud/commit/450c306bd01d8867f91c0c44f861073bc41fc2b0))
+* **effect:** let declared error mappings opt into instance code/message/status ([#2348](https://github.com/vibeunion/supacloud/issues/2348)) ([994787a](https://github.com/vibeunion/supacloud/commit/994787a9345c41ca57672e7e1ec78c54c3386af8))
+
+
+### Bug Fixes
+
+* repair CLI JSON output, schema export, and effect mappings ([#2371](https://github.com/vibeunion/supacloud/issues/2371)) ([b5e2e2f](https://github.com/vibeunion/supacloud/commit/b5e2e2f46caded161054ff2ddfee828f0724a6dd))
+
+
+### Elegance & Refactoring
+
+* **cli:** default database shadow to PostgreSQL 18 ([#2368](https://github.com/vibeunion/supacloud/issues/2368)) ([18ff4be](https://github.com/vibeunion/supacloud/commit/18ff4beb9371f921ced8673823c98b301721a621))
+* **cli:** hide the internal applications command ([#2365](https://github.com/vibeunion/supacloud/issues/2365)) ([ec54181](https://github.com/vibeunion/supacloud/commit/ec541817990bcc9160e1f56a2501614b5933fe9c))
+* **cli:** move project init under deploy ([#2366](https://github.com/vibeunion/supacloud/issues/2366)) ([a2c5de1](https://github.com/vibeunion/supacloud/commit/a2c5de15ec2209961c56ec8eddd31aa93b178219))
+* **cli:** rely on governance defaults in starter config ([#2349](https://github.com/vibeunion/supacloud/issues/2349)) ([ba7d3b6](https://github.com/vibeunion/supacloud/commit/ba7d3b6809921f7f829e677c2ba922cf125e83e9))
+* **cli:** remove context environment aliases ([#2361](https://github.com/vibeunion/supacloud/issues/2361)) ([b3cd573](https://github.com/vibeunion/supacloud/commit/b3cd5730923df49ba09a8bed4ddd428c8442a865))
+* **cli:** remove http and edge starter templates ([#2363](https://github.com/vibeunion/supacloud/issues/2363)) ([32d6a98](https://github.com/vibeunion/supacloud/commit/32d6a980bee3324089ac49a40012e9ababa8d46f))
+* **cli:** remove inverse TLS environment alias ([#2367](https://github.com/vibeunion/supacloud/issues/2367)) ([1638ba4](https://github.com/vibeunion/supacloud/commit/1638ba411a36a8eb88e78bed5f139983bc522a5e))
+* **cli:** remove top-level app verb aliases ([#2362](https://github.com/vibeunion/supacloud/issues/2362)) ([7da9e45](https://github.com/vibeunion/supacloud/commit/7da9e4511b2b959f89763755a5703acd6e45e823))
+* **cli:** resolve kebab flags to one schema field ([#2360](https://github.com/vibeunion/supacloud/issues/2360)) ([c015536](https://github.com/vibeunion/supacloud/commit/c0155360d83db55641d6fc976d9ed4426669cc69))
+* **cli:** standardize machine output on format ([#2370](https://github.com/vibeunion/supacloud/issues/2370)) ([6afaf08](https://github.com/vibeunion/supacloud/commit/6afaf08f6dcab3b4a821abd462f3bca6301a62da))
+
+
+### Documentation
+
+* **cli:** cover application authoring in the bundled agent skill ([#2352](https://github.com/vibeunion/supacloud/issues/2352)) ([b67ffcd](https://github.com/vibeunion/supacloud/commit/b67ffcdfdebbdc3c9624a27fd53d47f46c9bea4a))
+* **cli:** point generated agents at the app context loop ([#2353](https://github.com/vibeunion/supacloud/issues/2353)) ([1328c82](https://github.com/vibeunion/supacloud/commit/1328c82e3792294ba4ea7fcdebe23c39f33b3426))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade elysia to 2.0.0-rc.1 ([#2347](https://github.com/vibeunion/supacloud/issues/2347)) ([b5539bc](https://github.com/vibeunion/supacloud/commit/b5539bc4c839fb319f5f073cc1dfbebe3487ff17))
+
 ## [0.114.0](https://github.com/vibeunion/supacloud/compare/cli-v0.113.0...cli-v0.114.0) (2026-11-02)
 
 

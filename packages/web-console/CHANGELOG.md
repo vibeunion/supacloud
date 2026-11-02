@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.55.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.55.0...web-console-v0.55.1) (2026-11-02)
+
+
+### Elegance & Refactoring
+
+* **web-console:** reuse svadmin content primitives ([#2373](https://github.com/vibeunion/supacloud/issues/2373)) ([9471da1](https://github.com/vibeunion/supacloud/commit/9471da1b06bc1ac1d4ebe2f58ab612f0f4aa5b77))
+
+
+### Miscellaneous Chores
+
+* **web-console:** upgrade svadmin to latest release ([#2372](https://github.com/vibeunion/supacloud/issues/2372)) ([e8d49f3](https://github.com/vibeunion/supacloud/commit/e8d49f3dec6db981760b56622a40d8822519f4e2))
+
 ## [0.55.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.54.3...web-console-v0.55.0) (2026-10-31)
 
 

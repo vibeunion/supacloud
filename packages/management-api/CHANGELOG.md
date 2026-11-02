@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.128.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.127.0...management-api-v0.128.0) (2026-11-02)
+
+
+### Features
+
+* **database:** add managed remote module governance checks ([#2345](https://github.com/vibeunion/supacloud/issues/2345)) ([6a99987](https://github.com/vibeunion/supacloud/commit/6a999876d1f51ed883f60bc88b34b7580e4f73da))
+* **database:** add managed remote role boundary checks ([#2350](https://github.com/vibeunion/supacloud/issues/2350)) ([450c306](https://github.com/vibeunion/supacloud/commit/450c306bd01d8867f91c0c44f861073bc41fc2b0))
+* **mcp:** add non-production developer smoke invocation ([#2359](https://github.com/vibeunion/supacloud/issues/2359)) ([f80c9c2](https://github.com/vibeunion/supacloud/commit/f80c9c267e00f57068bfc5b77c40ae89cb07eefa))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade elysia to 2.0.0-rc.1 ([#2347](https://github.com/vibeunion/supacloud/issues/2347)) ([b5539bc](https://github.com/vibeunion/supacloud/commit/b5539bc4c839fb319f5f073cc1dfbebe3487ff17))
+
 ## [0.127.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.126.2...management-api-v0.127.0) (2026-11-01)
 
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/app-v0.35.0...app-v0.36.0) (2026-11-02)
+
+
+### Features
+
+* **effect:** require an explicit retry policy ([#2374](https://github.com/vibeunion/supacloud/issues/2374)) ([132acb5](https://github.com/vibeunion/supacloud/commit/132acb5b5dcaf944713713bb0c75eb6d17267f84))
+
+
+### Bug Fixes
+
+* repair CLI JSON output, schema export, and effect mappings ([#2371](https://github.com/vibeunion/supacloud/issues/2371)) ([b5e2e2f](https://github.com/vibeunion/supacloud/commit/b5e2e2f46caded161054ff2ddfee828f0724a6dd))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade elysia to 2.0.0-rc.1 ([#2347](https://github.com/vibeunion/supacloud/issues/2347)) ([b5539bc](https://github.com/vibeunion/supacloud/commit/b5539bc4c839fb319f5f073cc1dfbebe3487ff17))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/app-v0.34.1...app-v0.35.0) (2026-10-31)
 
 

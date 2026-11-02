@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.4](https://github.com/vibeunion/supacloud/compare/db-v0.20.3...db-v0.20.4) (2026-11-02)
+
+
+### Elegance & Refactoring
+
+* **cli:** remove http and edge starter templates ([#2363](https://github.com/vibeunion/supacloud/issues/2363)) ([32d6a98](https://github.com/vibeunion/supacloud/commit/32d6a980bee3324089ac49a40012e9ababa8d46f))
+
 ## [0.20.3](https://github.com/vibeunion/supacloud/compare/db-v0.20.2...db-v0.20.3) (2026-10-31)
 
 

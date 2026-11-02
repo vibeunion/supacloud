@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.54.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.53.1...compiler-v0.54.0) (2026-11-02)
+
+
+### Features
+
+* **compiler:** resolve shared const Effect declarations ([#2343](https://github.com/vibeunion/supacloud/issues/2343)) ([354e188](https://github.com/vibeunion/supacloud/commit/354e188699772fbd78c2cb725e1d11adb7cf8192))
+* **effect:** let declared error mappings opt into instance code/message/status ([#2348](https://github.com/vibeunion/supacloud/issues/2348)) ([994787a](https://github.com/vibeunion/supacloud/commit/994787a9345c41ca57672e7e1ec78c54c3386af8))
+* **effect:** require an explicit retry policy ([#2374](https://github.com/vibeunion/supacloud/issues/2374)) ([132acb5](https://github.com/vibeunion/supacloud/commit/132acb5b5dcaf944713713bb0c75eb6d17267f84))
+
+
+### Bug Fixes
+
+* **compiler:** resolve only const Effect catalogs ([#2369](https://github.com/vibeunion/supacloud/issues/2369)) ([8ae2c83](https://github.com/vibeunion/supacloud/commit/8ae2c833a379e28b90ed6f5da640eeaa48948c55))
+
+
+### Documentation
+
+* **database-governance:** document compiler governance modes ([#2344](https://github.com/vibeunion/supacloud/issues/2344)) ([71ac583](https://github.com/vibeunion/supacloud/commit/71ac583b516d848f47ea051d89be8a4c21df3c93))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade elysia to 2.0.0-rc.1 ([#2347](https://github.com/vibeunion/supacloud/issues/2347)) ([b5539bc](https://github.com/vibeunion/supacloud/commit/b5539bc4c839fb319f5f073cc1dfbebe3487ff17))
+
 ## [0.53.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.53.0...compiler-v0.53.1) (2026-11-02)
 
 
