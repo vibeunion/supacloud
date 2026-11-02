@@ -1224,11 +1224,11 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         return { content: [{ type: "text" as const, text: `❌ Database module check failed (${r.status})` }], isError: true };
                     }
                     const result = recordPayload(r.data);
-                    if (!result || typeof result.ok !== "boolean" || !Array.isArray(result.reports)) {
+                    if (!result || typeof result["ok"] !== "boolean" || !Array.isArray(result["reports"])) {
                         throw new Error("Invalid database module check response");
                     }
                     text = formatModuleCheckReport(r.data);
-                    if (!result.ok) {
+                    if (!result["ok"]) {
                         return { content: [{ type: "text" as const, text }], isError: true };
                     }
                     break;
