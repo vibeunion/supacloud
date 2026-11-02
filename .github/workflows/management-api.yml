@@ -1443,8 +1443,18 @@ jobs:
             caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-binaries-
             caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-
 
-      - name: Install Management API dependencies
-        run: bash scripts/prepare_management_api_dependencies.sh
+      - name: Install delivery dependencies
+        working-directory: packages/delivery
+        run: bun install --frozen-lockfile
+
+      - name: Build database governance dependencies
+        run: |
+          (cd packages/contracts && bun install --frozen-lockfile && bun run build)
+          (cd packages/db && bun install --frozen-lockfile && bun run build)
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install --frozen-lockfile
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
