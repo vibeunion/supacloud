@@ -322,9 +322,8 @@ This setting only affects HTTPS requests made by the CLI transport. It does not
 change server-side SupaCloud, Caddy, Edge Runtime, or browser certificate
 verification. Keep the default only on trusted internal networks; use a
 trusted CA and `SUPACLOUD_TLS_VERIFY=true` for public or untrusted networks.
-The legacy inverse setting `SUPACLOUD_TLS_INSECURE=false` is also accepted.
-`SUPACLOUD_TLS_VERIFY` takes precedence if both are present. Both settings use
-the selected context source, not a mix of profile and process variables.
+The setting uses the selected context source, not a mix of profile and process
+variables.
 Values accept `true/false`, `1/0`, `yes/no`, and `on/off` (case-insensitive).
 Invalid or empty values stop the command before requests are sent.
 Skipping verification accepts any certificate, not just a private CA, and
