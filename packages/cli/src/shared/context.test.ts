@@ -48,7 +48,7 @@ describe("resolveSupaCloudContext", () => {
         expect(context.insecureTls).toBe(false);
     });
 
-    test("supports the previous inverse-named setting for compatibility", () => {
+    test("ignores the removed inverse-named TLS setting", () => {
         const context = resolveSupaCloudContext({
             SUPACLOUD_ENV: "test",
             SUPACLOUD_API_URL: "https://management.internal.example",
@@ -57,7 +57,7 @@ describe("resolveSupaCloudContext", () => {
             SUPACLOUD_TLS_INSECURE: "false",
         }, "/tmp/no-such-supacloud-context");
 
-        expect(context.insecureTls).toBe(false);
+        expect(context.insecureTls).toBe(true);
     });
 
     test("keeps custom project application credentials out of Management context", () => {
