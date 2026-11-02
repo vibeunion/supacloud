@@ -179,12 +179,25 @@ stored release. Selecting a target loads the endpoint above through
 counts plus the development diagnostics. The console and the MCP consume the
 same contract, so AI and the UI cannot drift.
 
+## Developer MCP test invocation
+
+`supacloud.invoke_application_route` invokes one route on the active
+application's loopback HTTP target. It is disabled unless an operator sets
+`SUPACLOUD_DEVELOPER_MCP_INVOKE_ENVIRONMENTS` to an explicit comma-separated
+environment allowlist. `SUPACLOUD_DEVELOPER_MCP_INVOKE_METHODS` defaults to
+`GET,HEAD`; non-read methods must be listed explicitly.
+
+The tool accepts only `application_id`, `environment_id`, `target`, `method`,
+`path`, an optional bounded `body`, and an allowlisted `content_type`. It never
+forwards caller credentials or arbitrary headers, never follows redirects, and
+returns only status, timing, content type and a bounded response body without
+response cookies. This is a local/test smoke path, not production traffic
+replay or a substitute for focused tests.
+
 ## Next steps
 
 1. Connect a selected route to its static execution plan and, when available, a
    business execution timeline record.
-2. Extend the Developer MCP with explicitly local/test-only invocation tools
-   bound to a named environment.
 
 ## Verification
 

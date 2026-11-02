@@ -10,6 +10,7 @@ import {
 import { ApplicationReleaseStorage } from "../services/application-release-storage";
 import { ApplicationDeploymentEvidenceStorage } from "../services/application-deployment-evidence";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
+import { developerInvocationPolicy, invokeApplicationRoute } from "../services/application-invocation";
 import {
   requireAdminAuth,
   requireProjectOrAdminAuth,
@@ -46,6 +47,7 @@ const DEVELOPER_TOOLS = [
   "supacloud.get_capabilities",
   "supacloud.get_application_development",
   "supacloud.get_deployment_evidence",
+  "supacloud.invoke_application_route",
 ] as const;
 
 function rpcResult(id: JsonRpcId | undefined, result: unknown): Record<string, unknown> {
@@ -90,6 +92,15 @@ function requiredIdentifier(params: Record<string, unknown>, key: string): strin
 
 function capabilities(scope: McpScope, surface: McpSurface) {
   const developer = surface === "developer";
+  const invocation = developer ? developerInvocationPolicy() : undefined;
+  const developerTools = invocation?.enabled
+    ? DEVELOPER_TOOLS
+    : DEVELOPER_TOOLS.filter((tool) => tool !== "supacloud.invoke_application_route");
+  const writePolicy = developer
+    ? invocation?.enabled && invocation.methods.some((method) => method !== "GET" && method !== "HEAD")
+      ? "allowlisted_test_invocation"
+      : "read_only"
+    : "plan_only";
   return {
     schema: "supacloud.mcp-capabilities.v1",
     surface,
@@ -102,8 +113,19 @@ function capabilities(scope: McpScope, surface: McpSurface) {
       session: "none",
     },
     scopes: developer ? ["project.read"] : scope.ref ? ["project.read"] : ["platform.read", "project.read"],
-    write_policy: developer ? "read_only" : "plan_only",
-    tools: [...(developer ? DEVELOPER_TOOLS : OPERATIONS_TOOLS)],
+    write_policy: writePolicy,
+    ...(invocation === undefined ? {} : {
+      invocation: {
+        mode: "allowlisted_test_invocation",
+        enabled: invocation.enabled,
+        environments: invocation.environments,
+        methods: invocation.methods,
+        credentials_forwarded: false,
+        redirects_followed: false,
+        transport: "application_loopback",
+      },
+    }),
+    tools: [...(developer ? developerTools : OPERATIONS_TOOLS)],
     resources: [
       "supacloud://capabilities",
       ...(developer ? [] : [
@@ -248,6 +270,33 @@ async function callTool(
       if (error instanceof ApplicationDevelopmentError) throw new Error(error.code);
       throw error;
     }
+  }
+
+  if (name === "supacloud.invoke_application_route") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for application invocation");
+    const applicationId = requiredIdentifier(params, "application_id");
+    const environmentId = requiredIdentifier(params, "environment_id");
+    const target = requiredIdentifier(params, "target");
+    const method = requiredIdentifier(params, "method");
+    if (typeof params.path !== "string") throw new Error("path is required");
+    const body = params.body === undefined ? undefined : params.body;
+    if (body !== undefined && typeof body !== "string") throw new Error("body must be a string");
+    const contentType = params.content_type;
+    if (contentType !== undefined && typeof contentType !== "string") {
+      throw new Error("content_type must be a string");
+    }
+    const result = await invokeApplicationRoute({
+      projectRef: ref,
+      applicationId,
+      environmentId,
+      target,
+      method,
+      path: params.path,
+      ...(body === undefined ? {} : { body }),
+      ...(contentType === undefined ? {} : { contentType }),
+    });
+    return { content: textContent(JSON.stringify(result, null, 2)) };
   }
 
   if (name === "supacloud.get_deployment_evidence") {
@@ -401,6 +450,25 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
           },
         },
         {
+          name: "supacloud.invoke_application_route",
+          description: "Invoke one allowlisted loopback test route on the active application. Operator-enabled environments and methods only; no credentials or arbitrary headers are forwarded.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              project_ref: { type: "string" },
+              application_id: { type: "string" },
+              environment_id: { type: "string" },
+              target: { type: "string", description: "Active HTTP target name" },
+              method: { type: "string" },
+              path: { type: "string", description: "Project-relative request path and query" },
+              body: { type: "string", description: "Optional bounded UTF-8 request body" },
+              content_type: { type: "string", enum: ["application/json", "text/plain", "application/x-www-form-urlencoded"] },
+            },
+            required: ["application_id", "environment_id", "target", "method", "path"],
+            additionalProperties: false,
+          },
+        },
+        {
           name: "supacloud.get_deployment_evidence",
           description: "Read the project-scoped single-node deployment evidence without executing an operation.",
           inputSchema: {
@@ -427,7 +495,8 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
             additionalProperties: false,
           },
         },
-    ].filter((tool) => allowed.includes(tool.name));
+    ].filter((tool) => allowed.includes(tool.name)
+      && (tool.name !== "supacloud.invoke_application_route" || developerInvocationPolicy().enabled));
     return rpcResult(message.id, { tools });
   }
   if (message.method === "resources/list") {
