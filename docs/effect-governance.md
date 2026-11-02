@@ -101,6 +101,35 @@ compiler does not attempt to reimplement Effect's runtime type system; it
 ensures that the route's public declaration, generated descriptor and
 application governance stay aligned.
 
+`errors` and `dependencies` may also reference a module-level, imported `const`
+initialized with an array literal (including `as const` and `satisfies`), so a
+project can keep one reviewed error catalog instead of repeating it per route:
+
+```ts
+export const ORDER_DEPENDENCIES = ["OrderApi"] as const;
+export const ORDER_ERRORS = [
+  { tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" },
+] as const;
+```
+
+```ts
+@Get("/:id", {
+  params: OrderParams,
+  responses: { 200: OrderResponse },
+  effect: {
+    required: true,
+    dependencies: ORDER_DEPENDENCIES,
+    errors: ORDER_ERRORS,
+    retry: "none",
+    timeoutMs: 1000,
+  },
+})
+```
+
+Resolution is static. Entries must still be literals (string literals for
+`dependencies`, object literals with literal `tag`, `code` and `status` for
+`errors`); computed values, spreads or runtime expressions remain errors.
+
 ## Runtime Adapter
 
 Provide the environment once at the Elysia boundary:

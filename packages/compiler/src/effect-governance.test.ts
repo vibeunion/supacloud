@@ -399,3 +399,82 @@ test("rejects retrying jobs without an idempotency contract", () => {
   graph.modules[0]!.jobs[0]!.idempotency = "required";
   expect(validateJobPolicies(graph)).toEqual([]);
 });
+
+async function analyzeSharedEffectDeclarationsFixture(source: string, declarations: string) {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-shared-"));
+  await writeFixtureProject(root, {
+    "tsconfig.json": FIXTURE_TSCONFIG,
+    "src/runtime.ts": RUNTIME_SOURCE,
+    "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+    "src/order-declarations.ts": declarations,
+    "src/orders.module.ts": source,
+  });
+  return { root, graph: await analyzeProject(root) };
+}
+
+test("resolves shared const declarations for Effect dependencies and error mappings", async () => {
+  const { root, graph } = await analyzeSharedEffectDeclarationsFixture(
+    `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+import { ORDER_DEPENDENCIES, ORDER_ERRORS } from "./order-declarations";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: ORDER_DEPENDENCIES, errors: ORDER_ERRORS, retry: "none", timeoutMs: 1000 } })
+  list(): Effect<string, { _tag: "OrderNotFound" }, "OrderApi"> {
+    return {} as Effect<string, { _tag: "OrderNotFound" }, "OrderApi">;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    `export const ORDER_DEPENDENCIES = ["OrderApi"] as const;
+export const ORDER_ERRORS = [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }] as const;
+`,
+  );
+  try {
+    const route = graph.modules[0]?.controllers[0]?.routes[0];
+    expect(route?.effect).toEqual({
+      required: true,
+      dependencies: ["OrderApi"],
+      errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+      retry: "none",
+      timeoutMs: 1000,
+    });
+    expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects shared Effect declarations whose entries are not literal", async () => {
+  const { root, graph } = await analyzeSharedEffectDeclarationsFixture(
+    `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+import { ORDER_ERRORS } from "./order-declarations";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: ORDER_ERRORS, retry: "none" } })
+  list(): Effect<string, { _tag: "OrderNotFound" }, never> {
+    return {} as Effect<string, { _tag: "OrderNotFound" }, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    `const orderNotFoundTag = "OrderNotFound";
+export const ORDER_ERRORS = [{ tag: orderNotFoundTag, status: 404, code: "ORDER_NOT_FOUND" }];
+`,
+  );
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "invalid-effect-errors",
+      errorCode: "SC3034",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
