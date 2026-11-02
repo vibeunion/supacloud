@@ -14,6 +14,23 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.114.0](https://github.com/vibeunion/supacloud/compare/cli-v0.113.0...cli-v0.114.0) (2026-11-02)
+
+
+### Features
+
+* **cli:** add export_svadmin_schema action to database tool for vibecoding pipeline ([#2340](https://github.com/vibeunion/supacloud/issues/2340)) ([a767351](https://github.com/vibeunion/supacloud/commit/a7673514c77e69b3bf6b6074830bece0a29b7f46))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2338](https://github.com/vibeunion/supacloud/issues/2338)) ([00e6957](https://github.com/vibeunion/supacloud/commit/00e695757d36d30c7aab5a42710a18822aae48d5))
+
+
+### Miscellaneous Chores
+
+* release main ([#2341](https://github.com/vibeunion/supacloud/issues/2341)) ([8d27e03](https://github.com/vibeunion/supacloud/commit/8d27e03b0b732d382b278096103c0291cde0d096))
+
 ## [0.113.0](https://github.com/vibeunion/supacloud/compare/cli-v0.112.2...cli-v0.113.0) (2026-11-01)
 
 
