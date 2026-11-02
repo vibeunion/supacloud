@@ -176,6 +176,10 @@ export interface AppToolArguments {
     json?: boolean;
     target?: string;
     fix?: string;
+    from_doctor?: string;
+    "from-doctor"?: string;
+    fix_index?: number;
+    "fix-index"?: number;
     write?: boolean;
     /** `app dev` local profile. `fast` is local/ephemeral; `integration` requires an explicit database URL. */
     profile?: "fast" | "integration";
@@ -805,7 +809,7 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
         ? "No blocking issues. Run `supacloud app compile` to refresh generated artifacts."
         : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
     if (autoFixable > 0) {
-        lines.push(`${autoFixable} preview-ready fix(es): run \`supacloud app doctor --format json\`, save each \`fix\`, then preview with \`supacloud app fix --fix <fix.json>\`. Add --write only after review.`);
+        lines.push(`${autoFixable} preview-ready fix(es): run \`supacloud app doctor --format json > doctor.json\`, then preview with \`supacloud app fix --from-doctor doctor.json --fix-index <n>\`. Add --write only after review.`);
     }
     if (inputRequired > 0 || manualFixes > 0) {
         lines.push(`${inputRequired} fix(es) require explicit input; ${manualFixes} require manual implementation.`);
@@ -827,12 +831,45 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
 async function runFix(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
     const fixPath = args.fix?.trim();
-    if (!fixPath) throw new Error("app fix requires --fix <path-to-diagnostic-fix.json>");
-    const parsed = JSON.parse(await readFile(resolve(root, fixPath), "utf8")) as unknown;
+    const doctorPath = (args.from_doctor ?? args["from-doctor"])?.trim();
+    if (fixPath && doctorPath) throw new Error("app fix accepts either --fix or --from-doctor, not both");
+    if (!fixPath && !doctorPath) throw new Error("app fix requires --fix <fix.json> or --from-doctor <doctor.json> --fix-index <n>");
+    let parsed: unknown;
+    let source: "fix" | "doctor" = "fix";
+    let repair: { code?: string; readiness?: string; fix?: unknown } | undefined;
+    if (doctorPath) {
+        const rawIndex = args.fix_index ?? args["fix-index"];
+        if (!Number.isSafeInteger(rawIndex) || rawIndex === undefined || rawIndex < 0) {
+            throw new Error("app fix --from-doctor requires a non-negative --fix-index <n>");
+        }
+        const doctor = JSON.parse(await readFile(resolve(root, doctorPath), "utf8")) as unknown;
+        if (!doctor || typeof doctor !== "object" || !Array.isArray((doctor as { fixPlan?: unknown }).fixPlan)) {
+            throw new Error("Invalid doctor output: expected a fixPlan array");
+        }
+        const plan = (doctor as { fixPlan: unknown[] }).fixPlan;
+        if (rawIndex >= plan.length) throw new Error(`--fix-index ${rawIndex} is outside fixPlan (0..${plan.length - 1})`);
+        const entry = plan[rawIndex];
+        if (!entry || typeof entry !== "object" || !("fix" in entry)) {
+            throw new Error(`fixPlan[${rawIndex}] does not contain a fix payload`);
+        }
+        repair = entry as typeof repair;
+        if (repair.readiness !== undefined && repair.readiness !== "preview") {
+            throw new Error(`fixPlan[${rawIndex}] is ${repair.readiness}; only preview-ready repairs can be applied automatically`);
+        }
+        parsed = repair.fix;
+        source = "doctor";
+    } else {
+        parsed = JSON.parse(await readFile(resolve(root, fixPath!), "utf8")) as unknown;
+    }
     const write = args.write === true;
     const applied = await applyDiagnosticFix(parsed as Parameters<typeof applyDiagnosticFix>[0], { rootDir: root, dryRun: !write });
     return textResult(JSON.stringify({
         ok: true,
+        source,
+        ...(source === "doctor" ? {
+            index: args.fix_index ?? args["fix-index"],
+            ...(repair?.code === undefined ? {} : { code: repair.code }),
+        } : {}),
         written: write,
         file: applied.file,
         changed: applied.changed,
@@ -1914,6 +1951,10 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
             "request-id": optional(Type.String(), "[context] CLI alias of request_id"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
+            from_doctor: optional(Type.String(), "[fix] Read one fix from a doctor --format json output"),
+            "from-doctor": optional(Type.String(), "[fix] CLI alias of from_doctor"),
+            fix_index: optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] Zero-based fixPlan index used with --from-doctor"),
+            "fix-index": optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] CLI alias of fix_index"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
             skip_build: optional(Type.Boolean(), "[release] Reuse --manifest_path instead of running the local delivery build"),
         },
@@ -1959,6 +2000,10 @@ export function registerAppAliases(server: ToolServer): void {
         request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
         "request-id": optional(Type.String(), "[context] CLI alias of request_id"),
         fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
+        from_doctor: optional(Type.String(), "[fix] Read one fix from a doctor --format json output"),
+        "from-doctor": optional(Type.String(), "[fix] CLI alias of from_doctor"),
+        fix_index: optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] Zero-based fixPlan index used with --from-doctor"),
+        "fix-index": optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] CLI alias of fix_index"),
         write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
     } satisfies ToolSchema;
     for (const action of APP_ALIAS_ACTIONS) {

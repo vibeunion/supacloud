@@ -32,7 +32,7 @@ cd orders-api && bun install && bun run check
 
 supacloud context --format json > context.json   # AI reads the compiled project graph
 supacloud doctor --format json > doctor.json     # actionable diagnostics + fix plan
-supacloud fix --fix fix.json --write             # apply one DiagnosticFix, then recheck
+supacloud fix --from-doctor doctor.json --fix-index 0  # preview one fix from the report
 ```
 
 ## Single entry point
@@ -49,7 +49,7 @@ supacloud generate ...        # generators
 supacloud check               # compiler governance checks
 supacloud context --format json
 supacloud doctor              # actionable health report
-supacloud fix --fix fix.json  # apply a DiagnosticFix (preview; --write to apply)
+supacloud fix --from-doctor doctor.json --fix-index 0  # preview a fix from doctor output
 supacloud deploy              # delivery
 ```
 
@@ -180,8 +180,8 @@ An invalid policy is never automatically replaced with a weaker one.
 ```bash
 supacloud context --format json > context.json
 supacloud doctor --format json > doctor.json
-supacloud fix --fix fix.json          # preview
-supacloud fix --fix fix.json --write  # apply
+supacloud app fix --from-doctor doctor.json --fix-index 0          # preview
+supacloud app fix --from-doctor doctor.json --fix-index 0 --write  # apply after review
 ```
 
 ## Compatibility And Release
