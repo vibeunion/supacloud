@@ -571,6 +571,24 @@ describe("app tools", () => {
             expect(JSON.parse(preview.content[0].text).preview).toContain("imports: [AuditModule]");
             expect(readFileSync(moduleFile, "utf8")).toBe(before);
             expect(existsSync(join(isolatedRoot, "generated"))).toBe(false);
+
+            writeFileSync(join(isolatedRoot, "doctor.json"), JSON.stringify(report));
+            const previewIndex = report.fixPlan.indexOf(previewRepair);
+            const fromDoctor = await app({
+                action: "fix", root: isolatedRoot, from_doctor: "doctor.json", fix_index: previewIndex,
+            });
+            const fromDoctorResult = JSON.parse(fromDoctor.content[0].text);
+            expect(fromDoctorResult).toMatchObject({ source: "doctor", index: previewIndex, written: false });
+            expect(fromDoctorResult.preview).toContain("imports: [AuditModule]");
+            expect(readFileSync(moduleFile, "utf8")).toBe(before);
+
+            const manualIndex = report.fixPlan.indexOf(manualRepair);
+            await expect(app({
+                action: "fix", root: isolatedRoot, "from-doctor": "doctor.json", "fix-index": manualIndex,
+            })).rejects.toThrow("only preview-ready");
+            await expect(app({
+                action: "fix", root: isolatedRoot, fix: "fix.json", from_doctor: "doctor.json", fix_index: previewIndex,
+            })).rejects.toThrow("either --fix or --from-doctor");
         } finally {
             rmSync(isolatedRoot, { recursive: true, force: true });
         }
