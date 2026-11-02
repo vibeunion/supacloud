@@ -341,6 +341,9 @@ describe("app tools", () => {
         expect(requireValue(result.content[0]).text).toContain("generated artifact mismatch");
         expect(requireValue(result.content[0]).text).toContain("no files written");
         expect(existsSync(join(root, "generated"))).toBe(false);
+        const json = await app({ action: "check", root, format: "json" });
+        expect(JSON.parse(json.content[0].text).next)
+            .toEqual(["supacloud app compile", "supacloud app check --format json"]);
     });
 
     test("compile writes application.ts and app.manifest.json", async () => {
@@ -350,6 +353,9 @@ describe("app tools", () => {
         expect(existsSync(join(root, "generated", "app.manifest.json"))).toBe(true);
         expect(existsSync(join(root, "generated", "graphql.ts"))).toBe(false);
         expect((await app({ action: "check", root })).isError).toBe(false);
+        const clean = await app({ action: "check", root, format: "json" });
+        expect(JSON.parse(clean.content[0].text).next)
+            .toEqual(["supacloud app verify-plan --target <module>"]);
     });
 
     test("client schema boundaries reject runtime imports without replacing valid artifacts", async () => {
@@ -500,6 +506,7 @@ describe("app tools", () => {
         expect(doctor.inputRequired).toBe(0);
         expect(doctor.manualFixes).toBe(0);
         expect(doctor.fixPlan).toEqual([]);
+        expect(doctor.next).toEqual(["supacloud app compile", "supacloud app verify-plan --target <module>"]);
         expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
         expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
         expect(doctor.unwiredContracts.some((entry: { file: string }) => entry.file.includes("issue-invoice.contract.ts"))).toBe(true);
@@ -559,6 +566,7 @@ describe("app tools", () => {
             const previewRepair = report.fixPlan.find((entry: { type: string }) => entry.type === "add_module_import");
             const manualRepair = report.fixPlan.find((entry: { type: string }) => entry.type === "change_provider_scope");
             expect(previewRepair.readiness).toBe("preview");
+            expect(previewRepair.command).toContain("--from-doctor <doctor.json>");
             expect(manualRepair.readiness).toBe("manual");
             expect(report.autoFixable).toBe(1);
             expect(report.manualFixes).toBe(1);
