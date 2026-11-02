@@ -151,6 +151,12 @@ function releaseBasePath(projectRef: string, deploymentId: string): string {
 }
 
 describe("supacloud process contract", () => {
+    test("does not expose the internal applications release surface", async () => {
+        const response = await runProjectCli(["applications", "--help"]);
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Unknown command: applications");
+    });
+
     test("rolls back to the platform previous release without a release_id flag", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-previous-rollback-"));
         temporaryDirectories.push(workspace);
