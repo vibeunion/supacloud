@@ -289,6 +289,25 @@ describe("app tools", () => {
         }
     });
 
+    test("init --format json returns a machine-readable project handoff", async () => {
+        const root = mkdtempSync(join(tmpdir(), "supacloud-init-json-"));
+        try {
+            const result = await app({ action: "init", root, name: "orders", format: "json" });
+            expect(result.isError).toBe(false);
+            expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+                version: 1,
+                ok: true,
+                root,
+                name: "orders",
+                template: "minimal",
+                files: expect.arrayContaining(["src/app.module.ts", "supacloud.config.ts", "AGENTS.md"]),
+                next: ["bun install", "bun run check", "bun run dev"],
+            });
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     test("init supports http and edge golden-path templates", async () => {
         const httpRoot = mkdtempSync(join(tmpdir(), "supacloud-init-http-"));
         const edgeRoot = mkdtempSync(join(tmpdir(), "supacloud-init-edge-"));
