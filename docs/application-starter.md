@@ -82,9 +82,10 @@ The default command template includes database tooling. HTTP/Edge templates do n
 install Drizzle or require `db:generate`. For the command template, `db:generate`
 is an explicit first-use setup step after installation; commit `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
-New command projects generate `db/modules.ts` and register it as the compiler
-`databaseGovernance.moduleFile`; the default `mode` stays `check`, so
-compile/check/build run the offline source-contract gate without a database.
+New command projects generate `db/modules.ts` at the compiler's default
+`databaseGovernance.moduleFile` path; the generated config fixes `mode` to
+`check`, so compile/check/build run the offline source-contract gate without a
+database.
 `dev:integration` requires the CLI's explicit loopback database URL and runs SQL
 lint plus live Catalog reconciliation; selecting `enforce` explicitly does the
 same for compile/check/build against an explicitly supplied `DATABASE_URL`.
