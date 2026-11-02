@@ -64,14 +64,14 @@
     "@graphql-tools/utils": "^12.0.4"
   },
   "peerDependencies": {
-    "elysia": "2.0.0-rc.0"
+    "elysia": "2.0.0-rc.1"
   },
   "devDependencies": {
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "file:../db",
     "@types/bun": "^1.4.4",
-    "elysia": "2.0.0-rc.0",
+    "elysia": "2.0.0-rc.1",
     "typescript": "^7.0.2"
   }
 }
