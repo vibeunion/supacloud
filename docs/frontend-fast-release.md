@@ -96,7 +96,7 @@ production latency improvement is claimed by the local tests.
 The active snapshot checks unresolved mutation state, current artifact integrity
 and the live static route in one deployment lock. A matching archive identity
 with a contradictory tree digest is an error, not a no-op.
-With `deploy --json`, build stdout and stderr are streamed to stderr; stdout
+With `deploy --format json`, build stdout and stderr are streamed to stderr; stdout
 contains only the final JSON result.
 
 ## Developer Experience Contract

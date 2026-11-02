@@ -876,9 +876,6 @@ test("app transfer defaults to a concise result and JSON keeps the full receipt"
   expect(text).not.toContain('"schema"');
   const json = (await runAppTool({ ...args, format: "json" }, options)).content[0]!.text;
   expect(JSON.parse(json)).toMatchObject({ ok: true, transfer: transferReceipt(), no_op: false });
-  expect(JSON.parse((await runAppTool({ ...args, json: true }, options)).content[0]!.text))
-    .toMatchObject({ ok: true, transfer: transferReceipt() });
-  await expect(runAppTool({ ...args, json: true, format: "text" }, options)).rejects.toThrow("cannot be combined");
   const noOp = tool({ ...transferPlan(transferSource), action: "no-op" });
   expect((await runAppTool(args, { ...options, getApplications: () => noOp })).content[0]!.text).toContain("No changes");
 });
@@ -1033,7 +1030,7 @@ test("CLI subprocess plans in read-only production and enforces confirmation bef
     const text = await run("transfer-plan");
     expect(text.code, text.stderr).toBe(0);
     expect(text.stdout).toContain("Transfer required");
-    for (const format of [["--json"], ["--format", "json"]]) {
+    for (const format of [["--format", "json"]]) {
       const json = await run("transfer-plan", format);
       expect(json.code, json.stderr).toBe(0);
       expect(JSON.parse(json.stdout)).toMatchObject({ ok: true, plan: transferPlan(transferSource) });

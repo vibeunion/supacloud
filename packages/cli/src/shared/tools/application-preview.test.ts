@@ -153,7 +153,7 @@ test("reads, recovery and cleanup use separate verbs and concise defaults", asyn
     expect((await runAppTool({ ...scope, action: "preview-list" }, options)).content[0]!.text).toContain(previewId);
     const status = await runAppTool({ ...scope, action: "preview-status", preview_id: previewId }, options);
     expect(status.content[0]!.text).toContain("demo/api/test: provisioning");
-    const json = await runAppTool({ ...scope, action: "preview-status", preview_id: previewId, json: true }, options);
+    const json = await runAppTool({ ...scope, action: "preview-status", preview_id: previewId, format: "json" }, options);
     expect(payload(json)).toMatchObject({ ok: true, preview: receipt() });
     const reconcile = await invoke({ ...scope, action: "reconcile_preview", preview_id: previewId });
     expect(payload(reconcile)).toMatchObject({ ok: true });

@@ -30,7 +30,7 @@ supacloud --env test deploy
 
 `init` creates `supacloud.json` and non-secret environment examples without
 overwriting an existing project configuration. `env list` and `env check` are
-local-only, redact credentials, and provide stable JSON with `--json` for CI or
+local-only, redact credentials, and provide stable JSON with `--format json` for CI or
 AI tooling. The real `.env.supacloud.*` files are added to `.gitignore`.
 Fill in the Management credentials and project/environment in the selected profile.
 Static frontends need only `frontend` build configuration; no application binding
@@ -822,7 +822,7 @@ requested version, name, baseline marker, and checksum.
 `database lint_migrations` is local-only and works without Management API
 credentials. Inspect one source with `--sql`, `--file`, or `--dir`; these inputs
 are mutually exclusive. `--strict` (or `--fail_on_high`) exits non-zero for HIGH
-findings, `--fail_on_medium` also fails on MEDIUM findings, and `--json` emits a
+findings, `--fail_on_medium` also fails on MEDIUM findings, and `--format json` emits a
 structured report. The analyzer detects destructive DDL (`DROP TABLE`,
 `DROP COLUMN`, `TRUNCATE`, `RENAME`), table-locking risks, opaque `DO` blocks,
 procedural definitions/calls that require manual review, and statements that
@@ -1005,7 +1005,7 @@ supacloud lite db_pull --project_dir . --file remote_schema
 supacloud lite db_pull --project_dir . --file reviewed_schema --baseline
 supacloud lite gen_types --project_dir . --output src/database.types.ts
 supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud lite doctor --project_dir . --json --production --runtime_mode strict
+supacloud lite doctor --project_dir . --format json --production --runtime_mode strict
 supacloud lite db_check --project_dir . --module_file supabase/db/modules.ts
 supacloud lite start --project_dir . --port 54321 --runtime_mode strict
 ```

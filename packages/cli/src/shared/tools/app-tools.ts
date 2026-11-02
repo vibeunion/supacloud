@@ -173,7 +173,6 @@ export interface AppToolArguments {
     out_dir?: string;
     strict?: boolean;
     format?: "text" | "json";
-    json?: boolean;
     target?: string;
     fix?: string;
     from_doctor?: string;
@@ -1537,7 +1536,7 @@ async function runAppRelease(
         ...(typeof deployReceipt.activation_id === "string" ? { activation_id: deployReceipt.activation_id } : {}),
         ...(deployReceipt.web === undefined ? {} : { web: deployReceipt.web }),
     };
-    return request.format === "json" || request.json === true
+    return request.format === "json"
         ? textResult(JSON.stringify(result, null, 2))
         : textResult([
             `${ref}/${id}/${environmentId}: ${deployReceipt.status === "accepted" ? "accepted" : result.no_op ? "no-op" : "released"}`,
@@ -1721,7 +1720,7 @@ async function runPromotion(
 ): Promise<ToolResult> {
     const ref = request.ref ?? options.projectRef;
     if (request.mutation_id !== undefined) throw new Error("app promote generates a new mutation ID; use promote-status or promote-reconcile to inspect an existing mutation");
-    const { format, json, ...remoteRequest } = request;
+    const { format, ...remoteRequest } = request;
     const planArgs = {
         ...remoteRequest, action: "get_promotion_plan", ref,
     };
@@ -1749,7 +1748,7 @@ async function runPromotion(
             project_ref: plan.project_ref, application_id: plan.application_id,
             environment_id: plan.environment_id, plan, no_op: true, execution_performed: false,
         });
-        return format === "json" || json ? noOp
+        return format === "json" ? noOp
             : textResult(`${plan.project_ref}/${plan.application_id}/${plan.environment_id}: no-op\nExecution: skipped`);
     }
     if (plan.blockers.some(code => !["MIGRATION_PENDING", "BACKUP_REQUIRED"].includes(code))) {
@@ -1766,7 +1765,7 @@ async function runPromotion(
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, executeArgs);
     const result = await delegate(executeArgs);
-    return format === "json" || json ? result : formatPromotionExecution(result);
+    return format === "json" ? result : formatPromotionExecution(result);
 }
 
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
@@ -1804,9 +1803,6 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
     if (request.database_url !== undefined && request.action !== "dev" && request.action !== "watch") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
     }
-    if (request.json !== undefined && !Object.hasOwn(REMOTE_APP_ACTIONS, request.action)
-        && request.action !== "promote" && request.action !== "release") throw new Error("--json applies only to remote app actions");
-    if (request.json && request.format === "text") throw new Error("--json and --format text cannot be combined");
     if (request.action === "promote") {
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
@@ -1826,13 +1822,13 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
             && request.source_release_id !== undefined;
         const action = promotionDiff ? "get_promotion_plan"
             : REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
-        const { format, json, ...remoteRequest } = request;
+        const { format, ...remoteRequest } = request;
         const args = {
             ...remoteRequest, action, ref: request.ref ?? options.projectRef,
         };
         validateToolArguments(APPLICATION_TOOL_SCHEMA, args);
         const result = await delegate(args);
-        if (request.action === "evidence" && format !== "json" && json !== true && !result.isError) {
+        if (request.action === "evidence" && format !== "json" && !result.isError) {
             try {
                 const payload: unknown = JSON.parse(result.content[0]!.text);
                 if (payload === null || typeof payload !== "object"
@@ -1851,7 +1847,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
                 return textResult("DEPLOYMENT unknown: invalid or mismatched evidence; no mutation was attempted.", true);
             }
         }
-        if (request.action === "history" && format !== "json" && json !== true) {
+        if (request.action === "history" && format !== "json") {
             return historyText(result, request, args.ref);
         }
         if ((request.action === "deploy-plan" || request.action === "diff") && format !== "json"
@@ -1862,10 +1858,10 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         if (request.action === "promote-plan" || (request.action === "diff"
             && request.source_ref !== undefined && request.source_environment_id !== undefined
             && request.source_release_id !== undefined)) {
-            if (!result.isError && format !== "json" && !json) return formatPromotionPlan(result);
+            if (!result.isError && format !== "json") return formatPromotionPlan(result);
         }
-        return (request.action === "transfer-plan" || request.action === "transfer") && format !== "json" && !json
-            ? formatReleaseTransfer(result) : format !== "json" && !json
+        return (request.action === "transfer-plan" || request.action === "transfer") && format !== "json"
+            ? formatReleaseTransfer(result) : format !== "json"
                 ? formatWorkflowObservation(result, request.action) : result;
     }
     switch (request.action) {
@@ -1939,8 +1935,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[dev/compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/release/deploy-plan/diff/history/promote-plan/graph/export-tools] Output format (default: text)"),
-            json: optional(Type.Boolean(), "[history/transfer-plan/transfer/promote-plan] Preserve or return the full machine-readable receipt"),
+            format: optional(stringEnum(["text", "json"]), "[*] Output format (default: text)"),
             profile: optional(stringEnum(["fast", "integration"]), "[dev] Run dev or dev:integration; integration verifies an explicit loopback database"),
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),

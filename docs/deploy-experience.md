@@ -62,7 +62,7 @@ provider implements the same queue or guarantees a particular deployment time.
 ```bash
 supacloud --env staging app deploy-plan \
   --id orders --environment_id staging \
-  --release_id <release-id> --configuration_id <configuration-id> --json
+  --release_id <release-id> --configuration_id <configuration-id> --format json
 ```
 
 The removed `deploy --dry_run`, `--plan` and `--diff` flags are not supported.
