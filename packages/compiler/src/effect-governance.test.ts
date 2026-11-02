@@ -461,3 +461,45 @@ export class OrdersModule {}
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("rejects non-literal Effect instance flags", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-instance-flag-"));
+  try {
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+      "src/orders.module.ts": `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+const useInstanceCode = true;
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND", codeFromError: useInstanceCode }],
+      retry: "none",
+    },
+  })
+  list(): Effect<string, { _tag: "OrderNotFound" }, never> {
+    return {} as Effect<string, { _tag: "OrderNotFound" }, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "invalid-effect-errors",
+      errorCode: "SC3034",
+      message: expect.stringContaining("boolean literals"),
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -111,7 +111,7 @@ errors: [{
 }],
 ```
 
-All three flags default to `false`, so the declared `code`, `message` and
+All three flags default to `false` and must be boolean literals, so the declared `code`, `message` and
 `status` stay authoritative unless a route opts in. Instance values are bounded
 (120 characters for `code`, 500 for `message`, and an integer from 400 to 599
 for `status`), must be non-empty, and never replace the declared tag. Keep

@@ -2404,6 +2404,20 @@ function parseController(
                   const codeFromError = booleanLiteralProp(errorExpr, "codeFromError");
                   const messageFromError = booleanLiteralProp(errorExpr, "messageFromError");
                   const statusFromError = booleanLiteralProp(errorExpr, "statusFromError");
+                  if (invalidBooleanProp(errorExpr, "codeFromError")
+                    || invalidBooleanProp(errorExpr, "messageFromError")
+                    || invalidBooleanProp(errorExpr, "statusFromError")) {
+                    ctx.diagnostics.push({
+                      severity: "error",
+                      code: "invalid-effect-errors",
+                      errorCode: "SC3034",
+                      docsUrl: "https://supacloud.dev/errors/SC3034",
+                      file,
+                      line: lineOf(errorExpr),
+                      message: `Route ${route.handler} effect.errors instance flags must be boolean literals.`,
+                    });
+                    continue;
+                  }
                   if (!tag || !code || status === undefined || !Number.isInteger(status) || status < 400 || status > 599) {
                     ctx.diagnostics.push({
                       severity: "error",
@@ -3321,10 +3335,17 @@ function numberLiteralProp(obj: ObjectLiteralExpression, name: string): number |
 
 function booleanLiteralProp(obj: ObjectLiteralExpression, name: string): boolean | undefined {
   const expr = getProp(obj, name);
-  if (!expr) return undefined;
-  if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
-  return undefined;
+  if (!expr || !isBooleanLiteral(expr)) return undefined;
+  return expr.kind === ts.SyntaxKind.TrueKeyword;
+}
+
+function isBooleanLiteral(expr: Expression): boolean {
+  return expr.kind === ts.SyntaxKind.TrueKeyword || expr.kind === ts.SyntaxKind.FalseKeyword;
+}
+
+function invalidBooleanProp(obj: ObjectLiteralExpression, name: string): boolean {
+  const expr = getProp(obj, name);
+  return expr !== undefined && !isBooleanLiteral(expr);
 }
 
 function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
