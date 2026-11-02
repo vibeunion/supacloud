@@ -22,7 +22,7 @@ cd orders-api && bun install && bun run check
 
 supacloud context --format json > context.json   # AI 读取已编译的项目图
 supacloud doctor --format json > doctor.json     # 可执行诊断 + 修复计划
-supacloud fix --fix fix.json --write             # 应用一个 DiagnosticFix 后复检
+supacloud fix --from-doctor doctor.json --fix-index 0  # 从诊断报告预览一个修复
 ```
 
 ## 单一入口
@@ -38,7 +38,7 @@ supacloud generate ...        # 生成器
 supacloud check               # 编译器治理检查
 supacloud context --format json
 supacloud doctor              # 可执行健康报告
-supacloud fix --fix fix.json  # 应用 DiagnosticFix（默认预览；--write 落盘）
+supacloud fix --from-doctor doctor.json --fix-index 0  # 默认预览，--write 落盘
 supacloud deploy              # 交付
 ```
 
@@ -131,8 +131,8 @@ supacloud db context --root . --module_file db/modules.ts --target public.case_c
 ```bash
 supacloud context --format json > context.json
 supacloud doctor --format json > doctor.json
-supacloud fix --fix fix.json          # 预览
-supacloud fix --fix fix.json --write  # 应用
+supacloud app fix --from-doctor doctor.json --fix-index 0          # 预览
+supacloud app fix --from-doctor doctor.json --fix-index 0 --write  # 审查后应用
 ```
 
 ## 共享 Command 装配
