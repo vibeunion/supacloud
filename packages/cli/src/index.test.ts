@@ -151,7 +151,7 @@ describe("supacloud process contract", () => {
     test("deploy init creates local deployment configuration without project context", async () => {
         const root = mkdtempSync(join(tmpdir(), "supacloud-deploy-init-"));
         temporaryDirectories.push(root);
-        const response = await runProjectCli(["deploy", "init", "--root", root, "--json"]);
+        const response = await runProjectCli(["deploy", "init", "--root", root, "--format", "json"]);
         expect(response.exitCode).toBe(0);
         const payload = JSON.parse(response.stdout);
         expect(payload).toMatchObject({ schema: "supacloud.developer-experience.init.v1", ok: true, root });
@@ -313,7 +313,7 @@ describe("supacloud process contract", () => {
         const response = await runProjectCli(["deploy", "--help"]);
 
         expect(response.exitCode).toBe(0);
-        expect(response.stderr).toContain("Usage: supacloud deploy [--flags]");
+        expect(response.stderr).toContain("Usage: supacloud deploy [action] [--flags]");
         expect(response.stderr).toContain("--skip_build");
         expect(response.stdout).toBe("");
     });
@@ -455,7 +455,7 @@ describe("supacloud process contract", () => {
         const response = await runProjectCli(["oauth_clients", "--help"], {}, workspace);
 
         expect(response.exitCode).toBe(0);
-        expect(response.stderr).toContain("oauth_clients <action>");
+        expect(response.stderr).toContain("Usage: supacloud oauth_clients [--flags]");
     });
 
     test("loads named environments with global flags after the command and keeps status secret-free", async () => {

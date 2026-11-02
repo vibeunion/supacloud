@@ -26,7 +26,7 @@ test("promote-plan action help documents every source, target and output flag wi
         expect(stderr).toContain("app promote-plan [--flags]");
         for (const flag of [
             "ref", "id", "environment_id", "configuration_id",
-            "source_ref", "source_release_id", "source_environment_id", "format", "json",
+            "source_ref", "source_release_id", "source_environment_id", "format",
         ]) expect(stderr).toContain(`--${flag}  `);
         expect(stderr).not.toContain("--activation_id  ");
         expect(stderr).not.toContain("--ttl_seconds  ");
