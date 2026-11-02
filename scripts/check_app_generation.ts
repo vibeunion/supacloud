@@ -92,8 +92,8 @@ try {
     assert.equal(conflict.ok, false);
     assert.equal(conflict.code, "SCAFFOLD_EXISTS");
 
-    // Validate the actual CLI alias/flag parser, not only runAppTool's direct API.
-    const alias = JSON.parse(await run([cli, "generate", "--kind", "module", "--name", "preview-only", "--dry-run", "--format", "json"]));
+    // Top-level app verb aliases were removed; exercise the supported parser entry.
+    const alias = JSON.parse(await run([cli, "app", "generate", "--kind", "module", "--name", "preview-only", "--dry-run", "--format", "json"]));
     assert.equal(alias.written, false);
     const compile = JSON.parse(await run([cli, "app", "compile", "--format", "json"]));
     assert.equal(compile.ok, true);
