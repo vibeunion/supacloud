@@ -22,6 +22,9 @@ export interface CompiledEffectError {
   readonly outcomeUnknown?: boolean;
 }
 
+/** An omitted retry policy means no retry; it never enables explicit retry. */
+export const DEFAULT_EFFECT_RETRY = "none" as const;
+
 export interface CompiledEffectDescriptor {
   readonly required: true;
   readonly errors?: readonly CompiledEffectError[];
@@ -166,7 +169,8 @@ export async function runCompiledEffect(
   if (descriptor?.timeoutMs !== undefined) {
     program = Effect.timeout(program, Duration.millis(descriptor.timeoutMs));
   }
-  if (descriptor?.retry === "explicit" && descriptor.maxAttempts !== undefined && descriptor.maxAttempts > 1) {
+  const retry = descriptor?.retry ?? DEFAULT_EFFECT_RETRY;
+  if (retry === "explicit" && descriptor?.maxAttempts !== undefined && descriptor.maxAttempts > 1) {
     const policy = descriptor;
     program = Effect.retry(program, {
       times: policy.maxAttempts - 1,

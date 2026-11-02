@@ -86,6 +86,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC3047](SC3047.md) | `effect-promise-return` | compiler |
 | [SC3048](SC3048.md) | `effect-retry-target-required` | compiler |
 | [SC3049](SC3049.md) | `effect-retryable-invalid` | compiler |
+| [SC3050](SC3050.md) | `effect-retry-required` | compiler |
 | [SC4001](SC4001.md) | `command-missing-permission` | compiler |
 | [SC4002](SC4002.md) | `duplicate-command` | compiler |
 | [SC4003](SC4003.md) | `route-command-unresolved` | compiler |

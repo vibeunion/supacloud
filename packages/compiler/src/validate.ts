@@ -116,6 +116,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "effect-promise-return": { code: "SC3047", docsUrl: "https://supacloud.dev/errors/SC3047" },
   "effect-retry-target-required": { code: "SC3048", docsUrl: "https://supacloud.dev/errors/SC3048" },
   "effect-retryable-invalid": { code: "SC3049", docsUrl: "https://supacloud.dev/errors/SC3049" },
+  "effect-retry-required": { code: "SC3050", docsUrl: "https://supacloud.dev/errors/SC3050" },
   "invalid-route-response-map": { code: "SC3024", docsUrl: "https://supacloud.dev/errors/SC3024" },
   "invalid-route-response-selector": { code: "SC3025", docsUrl: "https://supacloud.dev/errors/SC3025" },
   "conflicting-route-response-schema": { code: "SC3026", docsUrl: "https://supacloud.dev/errors/SC3026" },

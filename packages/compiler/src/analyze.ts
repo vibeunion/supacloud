@@ -145,6 +145,7 @@ interface RequiredEffectCompilerOptions {
   requireTimeoutForDependencies: boolean;
   forbidDirectRuntimeExecution: boolean;
   forbidDirectThrows: boolean;
+  requireRetryPolicy: boolean;
 }
 
 const DEFAULT_EFFECT_ANALYSIS_OPTIONS: RequiredEffectCompilerOptions = {
@@ -153,6 +154,7 @@ const DEFAULT_EFFECT_ANALYSIS_OPTIONS: RequiredEffectCompilerOptions = {
   requireTimeoutForDependencies: true,
   forbidDirectRuntimeExecution: true,
   forbidDirectThrows: true,
+  requireRetryPolicy: true,
 };
 
 function nodeText(node: ts.Node): string {
@@ -265,6 +267,7 @@ export async function analyzeProject(
       requireTimeoutForDependencies: effectOptions.requireTimeoutForDependencies ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.requireTimeoutForDependencies,
       forbidDirectRuntimeExecution: effectOptions.forbidDirectRuntimeExecution ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.forbidDirectRuntimeExecution,
       forbidDirectThrows: effectOptions.forbidDirectThrows ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.forbidDirectThrows,
+      requireRetryPolicy: effectOptions.requireRetryPolicy ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.requireRetryPolicy,
     },
   };
   if (ctx.effectOptions.forbidDirectRuntimeExecution) {
@@ -2286,7 +2289,7 @@ function parseController(
               file,
               line: lineOf(effectExpr),
               message: `Route ${route.handler} effect must be a statically resolvable object literal.`,
-              suggestion: "Use effect: { required: true, errors: [...], dependencies: [...] }.",
+              suggestion: 'Use effect: { required: true, errors: [...], dependencies: [...], retry: "none" }.',
             });
           } else {
             const effect: EffectRouteNode = { required: true };
@@ -2317,6 +2320,8 @@ function parseController(
               } else {
                 effect.retry = retry;
               }
+            } else if (ctx.effectOptions.requireRetryPolicy === false) {
+              effect.retry = "none";
             }
             const maxAttemptsExpr = getProp(effectObject, "maxAttempts");
             if (maxAttemptsExpr !== undefined) {

@@ -313,13 +313,20 @@ export interface EffectRouteOptions {
   errors?: readonly EffectErrorMapping[];
   /** Logical services required by the Effect environment. */
   dependencies?: readonly string[];
-  /** Retries are disabled by default and must be explicitly governed. */
-  retry?: EffectRetryPolicy;
+  /** Retry policy is mandatory; omitting it is not an implicit policy. */
+  retry: EffectRetryPolicy;
   /** Total execution attempts when retry is "explicit", including the first. */
   maxAttempts?: number;
   /** Optional execution timeout owned by the runtime adapter. */
   timeoutMs?: number;
 }
+
+export const DEFAULT_EFFECT_ROUTE_POLICY = {
+  required: true as const,
+  dependencies: [] as const,
+  errors: [] as const,
+  retry: "none" as const,
+};
 
 export type RouteDefinition<Schemas extends RouteContractSchemas = RouteContractSchemas> = RouteOptions<Schemas> & {
   method: HttpMethod;

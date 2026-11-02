@@ -565,6 +565,13 @@ export interface EffectCompilerOptions {
   forbidDirectRuntimeExecution?: boolean;
   /** Reject direct throw statements inside governed route handlers. */
   forbidDirectThrows?: boolean;
+  /** Require every route that declares an Effect contract to write an explicit retry policy. */
+  requireRetryPolicy?: boolean;
+  /**
+   * Materialize an omitted retry policy when requireRetryPolicy is disabled.
+   * The only project-level default is "none"; "explicit" stays route-local.
+   */
+  defaultRetry?: "none";
 }
 
 export interface GraphqlOptions {

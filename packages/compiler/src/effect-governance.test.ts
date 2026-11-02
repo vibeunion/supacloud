@@ -386,6 +386,79 @@ export class OrdersModule {}
   }
 });
 
+test("requires an explicit retry policy on every Effect contract by default", () => {
+  const diagnostics = validateEffectPolicies(graphWith({
+    required: true,
+    dependencies: [],
+    errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+  }), {
+    requireErrorMappings: true,
+    requireDependencies: true,
+  });
+  expect(diagnostics).toContainEqual(expect.objectContaining({
+    code: "effect-retry-required",
+    errorCode: "SC3050",
+    docsUrl: "https://supacloud.dev/errors/SC3050",
+    suggestion: 'Set effect.retry to "none". That is the required default; use "explicit" only with maxAttempts and a retryable 5xx allow-list.',
+  }));
+});
+
+test("allows an omitted retry policy when the requirement is disabled", () => {
+  const diagnostics = validateEffectPolicies(graphWith({
+    required: true,
+    dependencies: [],
+    errors: [],
+  }), {
+    requireErrorMappings: true,
+    requireDependencies: true,
+    requireRetryPolicy: false,
+  });
+  expect(diagnostics.map((diagnostic) => diagnostic.code)).toEqual([]);
+});
+
+test("materializes an omitted retry policy as none when the requirement is disabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-default-retry-"));
+  try {
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+      "src/orders.module.ts": `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [],
+    },
+  })
+  list(): Effect<string, never, never> {
+    return {} as Effect<string, never, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    });
+    const graph = await analyzeProject(root, undefined, undefined, undefined, {
+      requireRetryPolicy: false,
+    });
+    expect(graph.modules[0]?.controllers[0]?.routes[0]?.effect).toEqual({
+      required: true,
+      dependencies: [],
+      errors: [],
+      retry: "none",
+    });
+    expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects explicit retry without a transient allow-list", () => {
   const diagnostics = validateEffectPolicies(graphWith({
     required: true,

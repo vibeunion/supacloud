@@ -76,6 +76,8 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
     requireTimeoutForDependencies: true,
     forbidDirectRuntimeExecution: true,
     forbidDirectThrows: true,
+    requireRetryPolicy: true,
+    defaultRetry: "none",
   },
 };
 
@@ -175,6 +177,8 @@ function validateGovernanceConfig(config: {
         "requireTimeoutForDependencies",
         "forbidDirectRuntimeExecution",
         "forbidDirectThrows",
+        "requireRetryPolicy",
+        "defaultRetry",
       ].includes(key))) {
       throw new Error("effect contains an unsupported governance option.");
     }
@@ -187,10 +191,16 @@ function validateGovernanceConfig(config: {
       "requireTimeoutForDependencies",
       "forbidDirectRuntimeExecution",
       "forbidDirectThrows",
+      "requireRetryPolicy",
     ]) {
       if (config.effect[key] !== undefined && typeof config.effect[key] !== "boolean") {
         throw new Error(`effect.${key} must be boolean.`);
       }
+    }
+    if (config.effect["defaultRetry"] !== undefined && config.effect["defaultRetry"] !== "none") {
+      throw new Error(
+        "effect.defaultRetry must be \"none\". explicit can only be written on a route, with maxAttempts and a retryable 5xx allow-list.",
+      );
     }
   }
 }

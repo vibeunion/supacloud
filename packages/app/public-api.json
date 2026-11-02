@@ -329,6 +329,11 @@
       "signature": "export declare function decodeHttpContract<T>(decode: ContractDecoder<T>, value: unknown, boundary: \"request\" | \"response\"): T;"
     },
     {
+      "name": "DEFAULT_EFFECT_ROUTE_POLICY",
+      "kind": "value",
+      "signature": "export declare const DEFAULT_EFFECT_ROUTE_POLICY: {\n    required: true;\n    dependencies: readonly [];\n    errors: readonly [];\n    retry: \"none\";\n};"
+    },
+    {
       "name": "DEFAULT_SCOPE",
       "kind": "value",
       "signature": "export declare const DEFAULT_SCOPE: Scope;"
@@ -421,7 +426,7 @@
     {
       "name": "EffectRouteOptions",
       "kind": "type",
-      "signature": "export interface EffectRouteOptions {\n    required?: true;\n    errors?: readonly EffectErrorMapping[];\n    dependencies?: readonly string[];\n    retry?: EffectRetryPolicy;\n    maxAttempts?: number;\n    timeoutMs?: number;\n}"
+      "signature": "export interface EffectRouteOptions {\n    required?: true;\n    errors?: readonly EffectErrorMapping[];\n    dependencies?: readonly string[];\n    retry: EffectRetryPolicy;\n    maxAttempts?: number;\n    timeoutMs?: number;\n}"
     },
     {
       "name": "ENVIRONMENT_INITIALIZER",

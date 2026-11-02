@@ -43,9 +43,22 @@ export default defineSupacloudConfig({
     requireTimeoutForDependencies: true,
     forbidDirectRuntimeExecution: true,
     forbidDirectThrows: true,
+    requireRetryPolicy: true,
+    defaultRetry: "none",
   },
 });
 ```
+
+The resolved configuration defaults to `requireRetryPolicy: true` and
+`defaultRetry: "none"`. Every route that declares an Effect contract must
+write `retry`. `retry: "none"` is the required default policy, not evidence
+that a retry is running. `retry: "explicit"` remains a per-route opt-in that
+also needs `maxAttempts` and a retryable 5xx allow-list.
+
+When `requireRetryPolicy` is `false`, an omitted `retry` is materialized as
+`"none"` in the analyzed graph. It never enables retry. A project-level
+`defaultRetry` cannot be `"explicit"`; explicit retry belongs only on the
+route.
 
 All Effect governance checks default to `true`. `dependencies: []` and
 `errors: []` are valid explicit declarations for an Effect that has no
@@ -75,12 +88,14 @@ export default defineSupacloudConfig({
     requireTimeoutForDependencies: false,
     forbidDirectRuntimeExecution: false,
     forbidDirectThrows: false,
+    requireRetryPolicy: false,
+    defaultRetry: "none",
   },
 });
 ```
 
-When enabled, an Effect route must declare its logical environment and public
-failure mappings:
+When enabled, an Effect route must declare its logical environment, public
+failure mappings, and its retry policy:
 
 ```ts
 type OrderNotFound = { readonly _tag: "OrderNotFound" };

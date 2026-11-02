@@ -61,6 +61,14 @@ export function validateEffectPolicies(
             "Declare the logical services required by the Effect environment.",
           ));
         }
+        if (effect.retry === undefined && options.requireRetryPolicy !== false) {
+          diagnostics.push(diagnostic(
+            "effect-retry-required",
+            `Route ${label} declares an Effect contract but does not declare retry.`,
+            controller.file,
+            'Set effect.retry to "none". That is the required default; use "explicit" only with maxAttempts and a retryable 5xx allow-list.',
+          ));
+        }
         if (effect.retry === "explicit" && effect.maxAttempts === undefined) {
           diagnostics.push(diagnostic(
             "invalid-effect-retry",

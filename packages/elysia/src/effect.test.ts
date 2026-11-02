@@ -190,6 +190,23 @@ test("retries only a declared transient 5xx failure", async () => {
   expect(attempts).toBe(3);
 });
 
+test("does not retry when the descriptor omits the retry policy", async () => {
+  let attempts = 0;
+  const program = Effect.suspend(() => {
+    attempts += 1;
+    return Effect.fail({ _tag: "UpstreamUnavailable" });
+  });
+  await expect(runCompiledEffect(
+    program,
+    {
+      required: true,
+      errors: [{ tag: "UpstreamUnavailable", status: 503, code: "UPSTREAM_UNAVAILABLE", retryable: true }],
+    },
+    createDefaultEffectRuntime(),
+  )).rejects.toMatchObject({ status: 503, code: "UPSTREAM_UNAVAILABLE" });
+  expect(attempts).toBe(1);
+});
+
 test("does not retry client, outcome-unknown or unlisted failures", async () => {
   for (const descriptor of [
     { required: true as const, retry: "explicit" as const, maxAttempts: 3, errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND", retryable: true }] },

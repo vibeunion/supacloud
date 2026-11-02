@@ -278,6 +278,14 @@ accept(): Effect<{ ok: boolean }, { _tag: "CaseNotFound" }, never> {}`,
   },
 })
 accept(): Effect<{ ok: boolean }, { _tag: "CaseNotFound" }, never> {}`,
+  SC3050: `@Post("/cases", {
+  effect: {
+    required: true,
+    errors: [],
+    dependencies: [],
+  },
+})
+accept(): Effect<{ ok: boolean }, never, never> {}`,
   SC3027: `@Get("/items", { responses: { "4XX": ItemResponse, "4xx": ItemResponse } })
 list() {}`,
   SC3028: `@Post("/items", { idempotency: "sometimes" })
