@@ -6,6 +6,12 @@ Load this reference when selecting a command surface or when a user asks an AI t
 
 | Intent | Use | Guardrail |
 | --- | --- | --- |
+| Create a local application | `app init --format json` | Empty real directory; local-only, no dependency install |
+| Inspect the compiled application before edits | `app context --format json` | Read the module neighborhood; do not scan the whole repository |
+| Generate a module/feature/route/command/query/job/contract/resource | `app generate --kind <kind> --format json` | Explicit business inputs; never invent permissions, RPCs or database ownership |
+| Diagnose or repair application diagnostics | `app doctor --format json`, `app fix --fix <fix.json>` | Fix is preview-only by default; review and recheck after `--write` |
+| Focus application tests | `app verify-plan --target <module>` | Run the returned focused tests, not an unconditional full suite |
+| Compile or check application artifacts | `app compile`, `app check --format json` | Generated files are outputs; fix source and regenerate, never hand-edit |
 | Deploy the bound application | `supacloud --env <name> deploy` | Use current CLI/server and application delivery configuration; never fall back to standalone target or direct frontend activation commands |
 | Inspect current project binding | `supacloud status` | Read-only; run first |
 | Inspect selected project API/Auth/Studio origins | `supacloud project endpoints` | Uses the Management API's authoritative projection; do not reconstruct domains locally |
@@ -31,13 +37,15 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Configure project gateway routes | `gateway` | Requires an admin-capable project token; inspect before write |
 | Install/upgrade/debug SupaCloud servers | `supacloud-admin` | Platform boundary; not a project CLI action |
 
-If `status` reports missing project context, local migration authoring may still
-continue. Do not attempt remote inspection, baseline, push, or resource changes
-until a project-scoped context is resolved.
+If `status` reports missing project context, local application authoring
+(`app init/generate/context/check/doctor/verify-plan`) and migration authoring may
+still continue. Do not attempt remote inspection, baseline, push, deploy, or
+resource changes until a project-scoped context is resolved.
 
 ## Command groups
 
 - `status`: resolved context, Management API connectivity, authentication, and project reachability.
+- `app`: local application authoring and diagnostics: init, generate, dev/watch, verify-plan, compile/check, graph/explain, context, doctor and reviewed fix. Local actions do not require remote project credentials.
 - `project`: selected-project metadata, authoritative endpoint projection, health, logs, API keys/settings, background tasks, retry/cancel, DLQ, and background settings. `project list` deliberately redirects to `supacloud-admin`; cross-project enumeration is not a project CLI capability.
 - `database`: read/query, schema inspection, extensions, indexes, RLS, stats, migration push, controlled historical baseline, and SQL-file execution.
 - `supabase`: allowlisted official CLI adapter for initialization, declarative authoring, config pull, local stacks, reset/diff, explicit-DSN inspection/backup/type generation, and SupaCloud-controlled migration push.
