@@ -112,12 +112,10 @@ describe("current deployment only", () => {
 
     test("initialization makes application binding optional for static assets", async () => {
         const directory = await workspace();
+        const api = server();
         await rm(join(directory, "supacloud.json"));
-        const tools = new Map<string, ToolInvocation>();
-        registerDeveloperExperienceTools({
-            tool(name, _description, _schema, handler) { tools.set(name, handler); },
-        });
-        const result = await tools.get("init")!({ root: directory, json: true });
+        const tools = deploy(api.http, directory);
+        const result = await tools.run({ action: "init", root: directory, json: true });
         expect(result.content[0]?.text).toContain("SUPACLOUD_APPLICATION_ID");
         expect(await readFile(join(directory, ".env.supacloud.test.example"), "utf8"))
             .toContain("# Optional for executable application delivery: SUPACLOUD_APPLICATION_ID=<application-id>");

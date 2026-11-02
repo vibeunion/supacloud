@@ -22,13 +22,13 @@ are not supported.
 For an existing SupaCloud application with a frontend, the shortest path is:
 
 ```sh
-supacloud init
+supacloud deploy init
 cp .env.supacloud.test.example .env.supacloud.test
 supacloud env check
 supacloud --env test deploy
 ```
 
-`init` creates `supacloud.json` and non-secret environment examples without
+`deploy init` creates `supacloud.json` and non-secret environment examples without
 overwriting an existing project configuration. `env list` and `env check` are
 local-only, redact credentials, and provide stable JSON with `--json` for CI or
 AI tooling. The real `.env.supacloud.*` files are added to `.gitignore`.

@@ -35,13 +35,13 @@ For an existing SupaCloud application with a Vue/Vite, Svelte or static frontend
 initialize the project profiles once:
 
 ```bash
-supacloud init
+supacloud deploy init
 supacloud env list
 supacloud env check
 supacloud --env test deploy
 ```
 
-`init` creates `supacloud.json`, non-secret
+`deploy init` creates `supacloud.json`, non-secret
 `.env.supacloud.test.example` and `.env.supacloud.production.example` files,
 and adds ignore rules for real profile files. It never overwrites an existing
 `supacloud.json`. The output directory is inferred from the detected framework

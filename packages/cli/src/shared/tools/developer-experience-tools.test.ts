@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { registerDeveloperExperienceTools } from "./developer-experience-tools";
+import { initializeProject, registerDeveloperExperienceTools } from "./developer-experience-tools";
 
 const temporaryDirectories: string[] = [];
 
@@ -27,14 +27,14 @@ async function workspace(): Promise<string> {
 }
 
 describe("developer experience tools", () => {
-    test("init creates Web build config with optional application binding", async () => {
+    test("deployment init creates Web build config with optional application binding", async () => {
         const root = await workspace();
         await writeFile(join(root, "package.json"), JSON.stringify({
             scripts: { build: "vite build" },
             devDependencies: { vite: "^7.0.0" },
         }));
 
-        const response = await register().get("init")!({ root });
+        const response = await initializeProject({ root });
 
         expect(response.isError).not.toBe(true);
         expect(JSON.parse(await readFile(join(root, "supacloud.json"), "utf8"))).toEqual({
@@ -48,11 +48,11 @@ describe("developer experience tools", () => {
         expect(response.content[0].text).toContain("SUPACLOUD_APPLICATION_ID");
     });
 
-    test("init never overwrites existing deployment configuration", async () => {
+    test("deployment init never overwrites existing deployment configuration", async () => {
         const root = await workspace();
         await writeFile(join(root, "supacloud.json"), "{}\n");
 
-        await expect(register().get("init")!({ root })).rejects.toThrow("never overwrites");
+        await expect(initializeProject({ root })).rejects.toThrow("never overwrites");
         expect(await readFile(join(root, "supacloud.json"), "utf8")).toBe("{}\n");
     });
 

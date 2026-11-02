@@ -33,7 +33,7 @@ import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
-import { registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
+import { initializeProject, registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
 import { runProjectDeployment } from "./shared/tools/project-deployment";
 import type { ToolSchema } from "./shared/schema";
 import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
@@ -257,7 +257,7 @@ USAGE
 
   ${preferredCommand} [global flags] deploy [--flags]
   ${preferredCommand} [global flags] <module> <action> [--flags]
-  ${preferredCommand} init [--root <directory>]
+  ${preferredCommand} deploy init [--root <directory>]
   ${preferredCommand} env <list|check> [--root <directory>]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
@@ -291,7 +291,7 @@ DEFAULT CONTEXT
 
 EXAMPLES
 
-  ${preferredCommand} init
+  ${preferredCommand} deploy init
   ${preferredCommand} env check
   ${preferredCommand} env check --json
   ${preferredCommand} status
@@ -539,13 +539,21 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         registerContextAwareHelp();
         tools.deploy = {
             schema: deployToolSchema,
-            callback: async () => ({
-                isError: true,
-                content: [{
-                    type: "text" as const,
-                    text: `⚠️ Deploy requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`,
-                }],
-            }),
+            callback: async (args) => {
+                if (args.action === "init") {
+                    return initializeProject({
+                        ...(typeof args.root === "string" ? { root: args.root } : {}),
+                        ...(args.json === true ? { json: true } : {}),
+                    }, { cwd: process.cwd() });
+                }
+                return {
+                    isError: true,
+                    content: [{
+                        type: "text" as const,
+                        text: `⚠️ Deploy requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`,
+                    }],
+                };
+            },
         };
         Object.assign(tools, captureTools((server) => registerDatabaseTools(server, undefined, {
             localOnly: true,
@@ -712,7 +720,7 @@ async function main() {
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
     if (args.length === 1 && !["ai", "supabase", "lite", "app", "db", "env"].includes(args[0]) && cliTools[args[0]]) {
-        if ("action" in cliTools[args[0]].schema) {
+        if ("action" in cliTools[args[0]].schema && args[0] !== "deploy") {
             if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
                 console.error(`This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`);
                 process.exitCode = 1;

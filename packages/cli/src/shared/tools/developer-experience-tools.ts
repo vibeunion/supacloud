@@ -9,7 +9,7 @@ import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import { registerTool, type ToolResult, type ToolServer } from "../tool-server";
 
-interface InitRequest {
+export interface InitRequest {
     root?: string;
     json?: boolean;
 }
@@ -152,7 +152,7 @@ async function ensureGitignore(root: string): Promise<boolean> {
     return true;
 }
 
-async function initializeProject(request: InitRequest, options: DeveloperExperienceOptions): Promise<ToolResult> {
+export async function initializeProject(request: InitRequest, options: DeveloperExperienceOptions = {}): Promise<ToolResult> {
     const root = resolve(request.root || options.cwd || process.cwd());
     await mkdir(root, { recursive: true });
     const configPath = join(root, "supacloud.json");
@@ -343,7 +343,7 @@ async function inspectEnvironment(request: EnvironmentRequest, options: Develope
         };
         if (request.json === true) return jsonResult(result);
         if (profiles.length === 0) {
-            return textResult(`No .env.supacloud.<name> profiles found in ${root}.\nRun \`supacloud init\` to create safe examples.`);
+            return textResult(`No .env.supacloud.<name> profiles found in ${root}.\nRun \`supacloud deploy init\` to create safe examples.`);
         }
         return textResult([
             `Environment profiles in ${root}:`,
@@ -361,7 +361,7 @@ async function inspectEnvironment(request: EnvironmentRequest, options: Develope
     };
     if (request.json === true) return jsonResult(result, !result.ok);
     if (reports.length === 0) {
-        return textResult(`No environment profiles found in ${root}.\nRun \`supacloud init\` and copy an example profile.`, true);
+        return textResult(`No environment profiles found in ${root}.\nRun \`supacloud deploy init\` and copy an example profile.`, true);
     }
     const lines = reports.map((report) => {
         if (report.error) return `FAIL ${report.name}: ${report.error}`;
@@ -377,13 +377,6 @@ export function registerDeveloperExperienceTools(
     server: ToolServer,
     options: DeveloperExperienceOptions = {},
 ): void {
-    registerTool(
-        server,
-        "init",
-        "Create SupaCloud deployment configuration and non-secret environment examples without overwriting project files.",
-        initToolSchema,
-        (request) => initializeProject(request, options),
-    );
     registerTool(
         server,
         "env",

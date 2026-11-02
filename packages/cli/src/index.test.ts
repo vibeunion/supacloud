@@ -151,6 +151,16 @@ function releaseBasePath(projectRef: string, deploymentId: string): string {
 }
 
 describe("supacloud process contract", () => {
+    test("deploy init creates local deployment configuration without project context", async () => {
+        const root = mkdtempSync(join(tmpdir(), "supacloud-deploy-init-"));
+        temporaryDirectories.push(root);
+        const response = await runProjectCli(["deploy", "init", "--root", root, "--json"]);
+        expect(response.exitCode).toBe(0);
+        const payload = JSON.parse(response.stdout);
+        expect(payload).toMatchObject({ schema: "supacloud.developer-experience.init.v1", ok: true, root });
+        expect(existsSync(join(root, "supacloud.json"))).toBe(true);
+    });
+
     test("rolls back to the platform previous release without a release_id flag", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-previous-rollback-"));
         temporaryDirectories.push(workspace);
