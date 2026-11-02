@@ -17,7 +17,7 @@ import { registerOAuthClientTools } from "./shared/tools/oauth-client-tools";
 import { registerStorageTools } from "./shared/tools/storage-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
-import { APPLICATION_TOOL_SCHEMA, registerApplicationTools } from "./shared/tools/application-tools";
+import { registerApplicationTools } from "./shared/tools/application-tools";
 import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerQueueTools } from "./shared/tools/queue-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
@@ -499,7 +499,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 ],
             }),
         };
-        for (const name of ["database", "auth", "oauth_clients", "storage", "edge_functions", "secrets", "frontend", "applications", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
+        for (const name of ["database", "auth", "oauth_clients", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -526,7 +526,6 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
             tools.branch = { schema: branchHelpTool.schema, callback: branchContextCallback };
         }
         const frontendContextCallback = tools.frontend.callback;
-        tools.applications = { schema: APPLICATION_TOOL_SCHEMA, callback: tools.applications.callback };
         const frontendHelpTool = captureTools((server) => (
             registerFrontendTools(server, {} as HttpTransport)
         )).frontend;
@@ -648,9 +647,9 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
     assign(captureTools((server) => registerFrontendTools(server, http)));
-    assign(captureTools((server) => registerApplicationTools(server, http)));
+    const applicationTools = captureTools((server) => registerApplicationTools(server, http));
     Object.assign(tools, captureTools((server) => registerAppTools(server, {
-        getApplications: () => tools.applications?.callback,
+        getApplications: () => applicationTools.applications?.callback,
         onDevProgress: writeDevProgress,
         projectRef: context.projectRef || undefined,
         projectDeployment: args => runProjectDeployment(http, args),
