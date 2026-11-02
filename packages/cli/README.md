@@ -254,10 +254,12 @@ The default destination is `$CODEX_HOME/skills/supacloud` or
 Skill root. Different existing content is preserved unless `--force` is passed;
 forced replacement creates a timestamped adjacent backup first.
 
-The Skill directs agents to keep schema, functions/RPC, triggers, RLS, indexes,
-grants, extensions, and reference-data changes in migrations; use read-only SQL
-for ordinary inspection; dry-run remote migrations; and reconcile existing
-remote drift before touching migration history.
+The Skill directs agents through the local application loop (`app init`,
+`context`, `generate`, `check`, `doctor`, reviewed `fix`, `verify-plan`) and keeps
+schema, functions/RPC, triggers, RLS, indexes, grants, extensions, and
+reference-data changes in migrations; use read-only SQL for ordinary inspection;
+dry-run remote migrations; and reconcile existing remote drift before touching
+migration history.
 
 ## Environment profiles and production safety
 
