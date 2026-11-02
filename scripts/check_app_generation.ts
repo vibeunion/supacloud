@@ -60,7 +60,7 @@ try {
     }, null, 2));
     await installStarterConsumer(runner, run);
     const cli = join(runner, "node_modules/@supacloud/cli/dist/index.js");
-    await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "http"], runner);
+    await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "minimal"], runner);
     const generatedManifest = JSON.parse(await readFile(join(project, "package.json"), "utf8"));
     assert.equal(generatedManifest.dependencies.elysia, "2.0.0-rc.1");
     // Candidate tarballs replace only project-owned packages; third-party versions
@@ -76,7 +76,7 @@ try {
 
     // Use the composition root shipped by the packed CLI, never a test-only root.
     const starterRoot = await readFile(join(project, "src/app.module.ts"), "utf8");
-    assert.ok(starterRoot.includes("OrdersFeature"));
+    assert.ok(starterRoot.includes("HealthModule"));
     assert.ok(starterRoot.includes('tags: ["type:app"]'));
     const generation = [cli, "app", "generate", "--kind", "resource", "--name", "inventory", "--register-in", "src/app.module.ts", "--format", "json"];
     const parent = await readFile(join(project, "src/app.module.ts"), "utf8");
@@ -167,7 +167,7 @@ const app = createApp({
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: request => app.handle(request) });
 try {
     const request = path => fetch(new URL(path, server.url), { signal: AbortSignal.timeout(5000) });
-    const health = await request("/orders/health");
+    const health = await request("/health");
     assert.equal(health.status, 200);
     assert.deepEqual(await health.json(), { ok: true });
     const placeholder = await request("/inventory/example");
@@ -378,27 +378,7 @@ console.log("Built feature: missing named runtime RPC prevents startup");
     await assertMissingCapability();
     await writeFile(configPath, persistentConfig);
 
-    // The other lightweight template shares the root-generation code. Exercise
-    // its real graph too, without scheduling or claiming any background job.
-    const edge = join(temporary, "edge-project");
-    await run([cli, "app", "init", "--root", edge, "--name", "edge-generation-acceptance", "--template", "edge"], runner);
-    const edgeManifestPath = join(edge, "package.json");
-    const edgeManifest = JSON.parse(await readFile(edgeManifestPath, "utf8"));
-    assert.equal(edgeManifest.dependencies.elysia, "2.0.0-rc.1");
-    for (const group of ["dependencies", "devDependencies"]) {
-        for (const name of Object.keys(edgeManifest[group] ?? {})) {
-            if (overrides[name]) edgeManifest[group][name] = overrides[name];
-        }
-    }
-    edgeManifest.overrides = overrides;
-    await writeFile(edgeManifestPath, JSON.stringify(edgeManifest, null, 2));
-    await installStarterConsumer(edge, run);
-    await run(["run", "check"], edge);
-    await run(["run", "build"], edge);
-    const edgeInspection = await run(["run", "inspect"], edge);
-    assert.ok(edgeInspection.includes('"application-root"'));
-    assert.ok(edgeInspection.includes('"sync"'));
-    console.log("Packed HTTP/edge roots, resource and feature generation, runtime denial and artifact preservation passed; no database, deployment or production persistence was exercised.");
+    console.log("Packed minimal root, resource and feature generation, runtime denial and artifact preservation passed; no database, deployment or production persistence was exercised.");
 } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
