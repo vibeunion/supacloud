@@ -520,7 +520,7 @@ export function registerDatabaseTools(
 
     const localActions = ["lint_migrations", "lint", "rebase_migrations"] as const;
     const readActions = [
-        "query", "list_tables", "describe_columns", "list_indexes", "list_constraints",
+        "query", "list_tables", "describe_columns", "export_svadmin_schema", "list_indexes", "list_constraints",
         "list_extensions", "extension_catalog", "rls_status", "rls_policies",
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
@@ -707,6 +707,35 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     const sql = `SELECT column_name, data_type, is_nullable, column_default, character_maximum_length FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${args.table}' ORDER BY ordinal_position;`;
                     const r = await execSql(sql);
                     text = r.ok ? formatColumnsList(r.data, schema, args.table) : `❌ Failed (${r.status})`;
+                    break;
+                }
+                case "export_svadmin_schema": {
+                    if (!args.table) throw new Error("'table' required");
+                    const schemaLiteral = sqlStringLiteral(schema, "schema");
+                    const tableLiteral = sqlStringLiteral(args.table, "table");
+                    const qualifiedTable = `${quoteIdentifier(schema, "schema")}.${quoteIdentifier(args.table, "table")}`;
+                    const colSql = `SELECT column_name, data_type, is_nullable, column_default, character_maximum_length FROM information_schema.columns WHERE table_schema = ${schemaLiteral} AND table_name = ${tableLiteral} ORDER BY ordinal_position;`;
+                    const colRes = await execSql(colSql);
+                    if (!colRes.ok) throw new Error(`Failed to inspect columns (${colRes.status})`);
+
+                    const conSql = `SELECT conname as name, contype as type, pg_get_constraintdef(oid) as definition FROM pg_constraint WHERE connamespace = ${schemaLiteral}::regnamespace AND conrelid = ${qualifiedTable}::regclass;`;
+                    const conRes = await execSql(conSql);
+
+                    const cols = buildSvadminColumns(colRes.data, conRes.ok ? conRes.data : []);
+                    if (args.json) {
+                        return {
+                            content: [{
+                                type: "text" as const,
+                                text: JSON.stringify({
+                                    resource: args.table,
+                                    sourceType: "databaseColumns",
+                                    columns: cols,
+                                }, null, 2),
+                            }],
+                        };
+                    }
+
+                    text = formatSvadminSchemaExport(args.table, cols);
                     break;
                 }
                 case "list_indexes": {
@@ -1206,10 +1235,18 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
 }
 
 function quoteIdentifier(value: unknown, label: string): string {
+    return `"${validatedIdentifier(value, label)}"`;
+}
+
+function sqlStringLiteral(value: unknown, label: string): string {
+    return `'${validatedIdentifier(value, label)}'`;
+}
+
+function validatedIdentifier(value: unknown, label: string): string {
     if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value)) {
         throw new Error(`Invalid ${label} identifier`);
     }
-    return `"${value}"`;
+    return value;
 }
 
 function validateColumnDefinitions(value: unknown): string {
@@ -1403,6 +1440,80 @@ function formatConstraintList(data: unknown): string {
     if (!rows.length) return "No constraints.";
     const types: Record<string, string> = { p: "PK", f: "FK", u: "UNIQUE", c: "CHECK" };
     return "🔗 Constraints:\n\n" + rows.map((c) => `  - ${c.name} (${types[c.type] || c.type})\n    ${c.definition}\n`).join("\n");
+}
+
+export interface SvadminColumnMeta {
+    name: string;
+    type: string;
+    nullable: boolean;
+    isPrimary: boolean;
+    defaultValue?: string | null;
+    isForeignKey: boolean;
+    referencesResource?: string;
+}
+
+export function buildSvadminColumns(colData: unknown, conData: unknown): SvadminColumnMeta[] {
+    const colRows = responseRows(colData, Type.Object({
+        column_name: Type.String(),
+        data_type: Type.String(),
+        is_nullable: Type.String(),
+        character_maximum_length: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+        column_default: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    }));
+
+    const conRows = responseRows(conData, Type.Object({
+        name: Type.String(),
+        type: Type.String(),
+        definition: Type.String(),
+    }));
+
+    const pkConstraint = conRows.find((c) => c.type === "p");
+    const pkCols = new Set<string>();
+    if (pkConstraint) {
+        const match = pkConstraint.definition.match(/\(([^)]+)\)/);
+        if (match?.[1]) {
+            match[1].split(",").map((s) => s.trim().replace(/"/g, "")).forEach((c) => pkCols.add(c));
+        }
+    }
+
+    const fkMap = new Map<string, string>();
+    for (const c of conRows) {
+        if (c.type === "f") {
+            const match = c.definition.match(/FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s*([^(]+)/i);
+            if (match?.[1] && match?.[2]) {
+                const colName = match[1].trim().replace(/"/g, "");
+                const refTable = match[2].trim().split(".").pop()?.replace(/"/g, "") ?? "";
+                fkMap.set(colName, refTable);
+            }
+        }
+    }
+
+    return colRows.map((c) => {
+        const isPrimary = pkCols.has(c.column_name) || c.column_name === "id";
+        const ref = fkMap.get(c.column_name);
+        return {
+            name: c.column_name,
+            type: c.data_type,
+            nullable: c.is_nullable === "YES",
+            isPrimary,
+            ...(c.column_default ? { defaultValue: c.column_default } : {}),
+            isForeignKey: Boolean(ref || c.column_name.endsWith("_id")),
+            ...(ref ? { referencesResource: ref } : {}),
+        };
+    });
+}
+
+export function formatSvadminSchemaExport(table: string, columns: SvadminColumnMeta[]): string {
+    const jsonPayload = JSON.stringify(columns, null, 2);
+    return `🚀 SVAdmin Schema Definition for '${table}'\n\n` +
+        `Pass this payload directly to svadmin_generateResource to produce complete UI components:\n` +
+        `  svadmin_generateResource({\n` +
+        `    resource: '${table}',\n` +
+        `    sourceType: 'databaseColumns',\n` +
+        `    payload: ${JSON.stringify(jsonPayload)}\n` +
+        `  })\n\n` +
+        `Column Metadata (${columns.length} columns):\n` +
+        columns.map((c) => `  - ${c.name}: ${c.type}${c.isPrimary ? " [PK]" : ""}${c.isForeignKey ? ` [FK -> ${c.referencesResource ?? "inferred"}]` : ""}${c.nullable ? " (nullable)" : " (required)"}`).join("\n");
 }
 
 function formatExtensionList(data: unknown): string {
