@@ -104,6 +104,9 @@ test("rejects production environments, methods, targets and paths", async () => 
   await expect(invoke({ path: "//evil.example/health" })).rejects.toThrow("loopback origin");
   await expect(invoke({ path: "/health/../../secret" })).rejects.toThrow("request path");
   await expect(invoke({ path: "https://evil.example/health" })).rejects.toThrow("request path");
+  await expect(invoke({ path: "/%2e%2e/secret" })).rejects.toThrow("request path");
+  await expect(invoke({ path: "/health/%2e%2e%2fsecret" })).rejects.toThrow("request path");
+  await expect(invoke({ path: "/%252e%252e/secret" })).rejects.toThrow("request path");
 });
 
 test("does not follow redirects or return response cookies", async () => {

@@ -38,14 +38,28 @@ function identifier(value: string, label: string): string {
   return value;
 }
 
+function containsTraversal(value: string): boolean {
+  let current = value;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (current.includes("\\") || current.split("/").includes("..") || /[\u0000-\u001f\u007f]/.test(current)) return true;
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) return false;
+      current = decoded;
+    } catch {
+      return true;
+    }
+  }
+  return current.includes("\\") || current.split("/").includes("..");
+}
+
 function requestPath(path: string): string {
-  if (path.length === 0 || path.length > MAX_PATH_LENGTH || !path.startsWith("/") || path.includes("\\")
-    || path.includes("#") || path.split("/").includes("..") || /[\u0000-\u001f\u007f]/.test(path)) {
+  if (path.length === 0 || path.length > MAX_PATH_LENGTH || !path.startsWith("/") || path.includes("#") || containsTraversal(path)) {
     throw new Error("path must be a bounded project-relative request path");
   }
   const base = new URL("http://127.0.0.1");
   const parsed = new URL(path, base);
-  if (parsed.origin !== base.origin || parsed.username || parsed.password || parsed.hash) {
+  if (parsed.origin !== base.origin || parsed.username || parsed.password || parsed.hash || containsTraversal(parsed.pathname)) {
     throw new Error("path must stay on the application loopback origin");
   }
   return `${parsed.pathname}${parsed.search}`;

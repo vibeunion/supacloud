@@ -39,7 +39,7 @@ available only when the Management API runs with `NODE_ENV=development` or
 `test`, and only for GET/HEAD. Application environments named `production` or
 `prod` are always rejected. The tool calls the active application's loopback
 HTTP target, forwards no caller credentials, arbitrary headers or request body,
-follows no redirects, and never returns response cookies.`
+follows no redirects, and never returns response cookies.
 
 
 `supacloud.get_application_development` reads one immutable application
