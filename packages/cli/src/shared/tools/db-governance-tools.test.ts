@@ -377,9 +377,42 @@ describe("db governance tools", () => {
             .rejects.toThrow("Management API context");
     });
 
+    test("role_check --remote delegates to the project-scoped Management API", async () => {
+        const calls: Array<Record<string, unknown>> = [];
+        let callback: DbCallback | undefined;
+        registerDbGovernanceTools({
+            tool(_name, _description, _schema, registered) {
+                callback = registered as DbCallback;
+            },
+        }, {
+            environment: {},
+            projectRef: "project-ref",
+            apiUrl: "https://management.example.test",
+            runDatabase: () => async (args) => {
+                calls.push(args);
+                return {
+                    isError: false,
+                    content: [{ type: "text", text: JSON.stringify({ ok: true, state: { role: "app_user" } }) }],
+                };
+            },
+        });
+        if (!callback) throw new Error("db tool was not registered");
+
+        const result = await callback({ action: "role_check", remote: true, schema: "public,api" });
+
+        expect(result.isError).toBe(false);
+        expect(calls).toEqual([{ action: "role_check", ref: "project-ref", schemas: ["public", "api"] }]);
+    });
+
+    test("role_check --remote requires a Management API context", async () => {
+        await expect(db({ action: "role_check", root, remote: true }))
+            .rejects.toThrow("Management API context");
+    });
+
     test("db actions are classified in the execution policy", () => {
         expect(executionMode("db", "lint", {})).toBe("local");
         expect(executionMode("db", "explain", {})).toBe("local");
         expect(executionMode("db", "module_check", {})).toBe("read");
+        expect(executionMode("db", "role_check", {})).toBe("read");
     });
 });

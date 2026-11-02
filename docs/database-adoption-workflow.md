@@ -59,6 +59,8 @@ supacloud --env test db apply --dir supabase/migrations --approved_digest <diges
 
 # Use the actual ordinary application's DATABASE_URL for this check.
 supacloud db role_check --schema public
+# Or let the Management API inspect the managed project with internal credentials.
+supacloud db role_check --remote --schema public
 supacloud db role_sql --application_role app_user \
   --migration_role app_migrator --database app_db --schema public
 

@@ -2110,6 +2110,56 @@ describe("database migration helpers", () => {
     expect(result.content[0].text).toContain("error missing-policy public.cases");
   });
 
+  test("role_check posts schema selectors and reports a restricted role boundary", async () => {
+    const payload = {
+      ok: true,
+      schemas: ["public"],
+      state: {
+        role: "app_user",
+        superuser: false,
+        createDatabase: false,
+        createRole: false,
+        replication: false,
+        bypassRls: false,
+        databaseCreate: false,
+        schemaCreate: { public: false },
+        ownedRelations: [],
+        ownedObjects: [],
+        reachableRoles: ["app_user"],
+      },
+    };
+    const callback = captureDatabaseTool({
+      post: async (path: string, body: unknown) => {
+        expect(path).toBe("/v1/projects/proj/database/role-check");
+        expect(body).toEqual({ schemas: ["public", "api"] });
+        return { ok: true, status: 200, data: payload };
+      },
+    });
+
+    const result = await callback({ action: "role_check", ref: "proj", schemas: ["public", "api"] });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.content[0].text)).toMatchObject({ ok: true, state: { role: "app_user" } });
+  });
+
+  test("role_check returns a bounded failure when the role is not restricted", async () => {
+    const callback = captureDatabaseTool({
+      post: async () => ({
+        ok: true,
+        status: 200,
+        data: {
+          ok: false,
+          schemas: ["public"],
+          state: { role: "app_user", superuser: true },
+          error: "Application database role is not DDL-restricted: superuser",
+        },
+      }),
+    });
+
+    const result = await callback({ action: "role_check", ref: "proj" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("not DDL-restricted: superuser");
+  });
+
   test("database governance reads reject unsafe refs and do not reflect failed response bodies", async () => {
     let requests = 0;
     const callback = captureDatabaseTool({

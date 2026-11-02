@@ -51,6 +51,7 @@ import {
   normalizeGovernanceModules,
   runDatabaseModuleCheck,
 } from "../services/database-module-check.service";
+import { runDatabaseRoleCheck } from "../services/database-role-check.service";
 import { readRpcCatalog } from "../services/database-rpc-catalog.service";
 import { explainRlsAccess, explainRlsDatabaseError } from "../services/rls-explanation";
 
@@ -2138,6 +2139,58 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 });
                 set.status = 500;
                 return { message: "Database module check failed", code: "MODULE_CHECK_FAILED", status: 500 };
+            }
+        }
+    )
+    .post(
+        "/role-check",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                schemas: t.Optional(t.Array(t.String(), { maxItems: 16 })),
+            }),
+            detail: { tags: ["projects"], summary: "Inspect the project database role boundary" },
+        },
+        async ({ params, body, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+            let schemas: string[];
+            try {
+                schemas = normalizeRpcSchemas(body.schemas);
+            } catch (error: unknown) {
+                set.status = 400;
+                return {
+                    message: error instanceof Error ? error.message : "Invalid schemas",
+                    code: "INVALID_SCHEMAS",
+                    status: 400,
+                };
+            }
+            try {
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const result = await runDatabaseRoleCheck(projectDb, schemas);
+                return {
+                    ok: result.ok,
+                    schemas,
+                    state: result.state,
+                    ...(result.error === undefined ? {} : { error: result.error }),
+                };
+            } catch (error: unknown) {
+                logger.error("[database] role boundary check failed", {
+                    projectRef: params.ref,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                set.status = 500;
+                return { message: "Database role check failed", code: "ROLE_CHECK_FAILED", status: 500 };
             }
         }
     )
