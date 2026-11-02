@@ -373,7 +373,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
             lite: optional(Type.Boolean(), "[module_check] Reconcile against a local SupaCloud Lite project (runs supacloud-lite db check)"),
             project_dir: optional(Type.String(), "[module_check] Lite project directory (with --lite; default: --root)"),
             schema_dir: optional(Type.String(), "[diff] Maintained declarative SQL directory (default: supabase/schemas)"),
-            db_major_version: optional(Type.Number(), "[reverse/diff] PostgreSQL shadow major version (default: 17)"),
+            db_major_version: optional(Type.Number(), "[reverse/diff] PostgreSQL shadow major version (default: 18); set only when matching a non-18 source"),
             out: optional(Type.String(), "[reverse/diff] Candidate output path (reverse requires a new directory)"),
             dir: optional(Type.String(), "[diff/plan/apply] Reviewed forward migration directory"),
             ref: optional(Type.String(), "[plan/apply] Target project ref"),
