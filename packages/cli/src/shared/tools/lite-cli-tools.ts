@@ -39,7 +39,7 @@ export interface LiteCliArgs {
     service_role?: boolean;
     force?: boolean;
     memory?: boolean;
-    json?: boolean;
+    format?: "text" | "json";
     baseline?: boolean;
     production?: boolean;
     runtime_mode?: "development" | "strict";
@@ -127,7 +127,7 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     booleanFlag(args, "--service-role", request.service_role);
     booleanFlag(args, "--force", request.force);
     booleanFlag(args, "--memory", request.memory);
-    booleanFlag(args, "--json", request.json);
+    if (request.format === "json") args.push("--json");
     if (request.baseline && request.action !== "db_pull") throw new Error("baseline requires db_pull");
     booleanFlag(args, "--baseline", request.baseline);
     if (request.production && request.action !== "doctor") throw new Error("production requires doctor");
@@ -253,7 +253,7 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             service_role: optional(Type.Boolean(), "[keys] Also print the service_role key"),
             force: optional(Type.Boolean(), "[snapshot_restore] Replace non-empty restore targets"),
             memory: optional(Type.Boolean(), "[*] Use an in-memory PGlite database"),
-            json: optional(Type.Boolean(), "[doctor] Emit machine-readable output"),
+            format: optional(stringEnum(["text", "json"]), "[doctor] Output format (default: text)"),
             baseline: optional(Type.Boolean(), "[db_pull] Record already-present schema in local migration history after review"),
             production: optional(Type.Boolean(), "[doctor] Add single-node production readiness checks"),
             runtime_mode: optional(stringEnum(["development", "strict"]), "[*] Lite runtime mode"),

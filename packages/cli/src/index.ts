@@ -17,7 +17,7 @@ import { registerOAuthClientTools } from "./shared/tools/oauth-client-tools";
 import { registerStorageTools } from "./shared/tools/storage-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
-import { APPLICATION_TOOL_SCHEMA, registerApplicationTools } from "./shared/tools/application-tools";
+import { registerApplicationTools } from "./shared/tools/application-tools";
 import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerQueueTools } from "./shared/tools/queue-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
@@ -26,7 +26,7 @@ import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerLiteCliTools } from "./shared/tools/lite-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
 import { registerMcpTools } from "./shared/tools/mcp-tools";
-import { registerAppAliases, registerAppTools } from "./shared/tools/app-tools";
+import { registerAppTools } from "./shared/tools/app-tools";
 import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
@@ -378,13 +378,6 @@ EXAMPLES
   ${preferredCommand} app context --root . --target CaseModule --events execution.ndjson --request-id request-123 --format json
   ${preferredCommand} app doctor --root .
   ${preferredCommand} app fix --root . --fix fix.json --write
-  ${preferredCommand} generate --kind module --name billing
-  ${preferredCommand} generate --kind job --module billing --name sync-orders
-  ${preferredCommand} generate --kind contract --module billing --name issue-invoice
-  ${preferredCommand} check --root . --strict
-  ${preferredCommand} context --format json
-  ${preferredCommand} context --target CaseModule --format json
-  ${preferredCommand} doctor
   ${preferredCommand} db context --root . --module_file db/modules.ts --module cases
   ${preferredCommand} db context --root . --module_file db/modules.ts --target public.case_create
   ${preferredCommand} db lint --root . --module_file db/modules.ts
@@ -465,7 +458,6 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         activeContext: context,
     })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
-    Object.assign(tools, captureTools((server) => registerAppAliases(server)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
         projectRef: context.projectRef || undefined,
         apiUrl: context.apiUrl || undefined,
@@ -499,7 +491,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 ],
             }),
         };
-        for (const name of ["database", "auth", "oauth_clients", "storage", "edge_functions", "secrets", "frontend", "applications", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
+        for (const name of ["database", "auth", "oauth_clients", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -526,7 +518,6 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
             tools.branch = { schema: branchHelpTool.schema, callback: branchContextCallback };
         }
         const frontendContextCallback = tools.frontend.callback;
-        tools.applications = { schema: APPLICATION_TOOL_SCHEMA, callback: tools.applications.callback };
         const frontendHelpTool = captureTools((server) => (
             registerFrontendTools(server, {} as HttpTransport)
         )).frontend;
@@ -656,9 +647,9 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
     assign(captureTools((server) => registerFrontendTools(server, http)));
-    assign(captureTools((server) => registerApplicationTools(server, http)));
+    const applicationTools = captureTools((server) => registerApplicationTools(server, http));
     Object.assign(tools, captureTools((server) => registerAppTools(server, {
-        getApplications: () => tools.applications?.callback,
+        getApplications: () => applicationTools.applications?.callback,
         onDevProgress: writeDevProgress,
         projectRef: context.projectRef || undefined,
         projectDeployment: args => runProjectDeployment(http, args),

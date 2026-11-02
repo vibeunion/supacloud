@@ -179,7 +179,7 @@ test("real HTTP no-op and diff perform only plan reads, including JSON output", 
   } });
   try {
     const invoke = handler(new HttpTransport({ baseUrl: `http://127.0.0.1:${server.port}`, token: "fixture" }));
-    const json = await runAppTool({ ...args, action: "promote", json: true }, { getApplications: () => invoke });
+    const json = await runAppTool({ ...args, action: "promote", format: "json" }, { getApplications: () => invoke });
     expect(JSON.parse(json.content[0]!.text)).toMatchObject({ ok: true, no_op: true, execution_performed: false });
     expect(JSON.parse(json.content[0]!.text).mutation_id).toBeUndefined();
     const diff = await runAppTool({ ...args, action: "diff" }, { getApplications: () => invoke });
@@ -431,7 +431,7 @@ test("CLI subprocess protects production promote and preserves the unknown ID wi
     expect(denied.stderr).toContain("--confirm-production production");
     expect(requests).toEqual([]);
     selectedPlan = noOpPlan();
-    const noOp = await run("promote", ["--confirm-production", "production", "--json"]);
+    const noOp = await run("promote", ["--confirm-production", "production", "--format", "json"]);
     expect(noOp.code, noOp.stderr).toBe(0);
     expect(JSON.parse(noOp.stdout)).toMatchObject({ ok: true, no_op: true, execution_performed: false });
     expect(requests).toEqual(["GET"]);

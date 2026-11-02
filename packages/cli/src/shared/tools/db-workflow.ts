@@ -143,7 +143,7 @@ async function runOfficial(
     }
     if (code !== 0) throw new Error(`Official Supabase candidate generation failed (exit ${code}); no candidate was published. Select a compatible pinned CLI; no fallback engine is used.`);
 }
-async function initializeCandidate(stage: string, majorVersion = 17): Promise<void> {
+async function initializeCandidate(stage: string, majorVersion = 18): Promise<void> {
     if (![15, 16, 17, 18].includes(majorVersion)) throw new Error("Select a supported PostgreSQL major version (15-18)");
     await mkdir(join(stage, "supabase/migrations"), { recursive: true });
     await mkdir(join(stage, "supabase/schemas"), { recursive: true });

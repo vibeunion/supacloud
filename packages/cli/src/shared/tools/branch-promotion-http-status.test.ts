@@ -3,7 +3,7 @@ import { HttpTransport } from "../transports/http";
 import type { ToolInvocation } from "../tool-server";
 import { registerBranchTools } from "./branch-tools";
 
-const scope = { ref: "demo", branch_ref: "preview", json: true };
+const scope = { ref: "demo", branch_ref: "preview", format: "json" };
 const checksum = "a".repeat(64);
 const entry = { version: "1", name: "example", checksum: "b".repeat(64), statement_count: 1, destructive: false };
 function plan(pending = false) {

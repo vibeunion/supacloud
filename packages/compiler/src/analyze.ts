@@ -1230,7 +1230,9 @@ function resolveStaticArrayLiteral(
   }
   if (ts.isIdentifier(input)) {
     const declaration = resolveDeclaration(input, ctx).find(ts.isVariableDeclaration);
-    return declaration?.initializer
+    const list = declaration?.parent;
+    const isConst = Boolean(list && ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0);
+    return isConst && declaration?.initializer
       ? resolveStaticArrayLiteral(declaration.initializer, ctx, seen)
       : undefined;
   }

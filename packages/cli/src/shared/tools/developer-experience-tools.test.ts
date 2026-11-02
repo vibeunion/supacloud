@@ -89,7 +89,7 @@ describe("developer experience tools", () => {
             "",
         ].join("\n"));
 
-        const response = await register().get("env")!({ action: "check", root, json: true });
+        const response = await register().get("env")!({ action: "check", root, format: "json" });
         const result = JSON.parse(response.content[0].text) as {
             ok: boolean;
             environments: Array<{ name: string; statusReady: boolean; statusMissing: string[]; projectRef: string | null }>;

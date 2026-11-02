@@ -11,13 +11,13 @@ import { registerTool, type ToolResult, type ToolServer } from "../tool-server";
 
 export interface InitRequest {
     root?: string;
-    json?: boolean;
+    format?: "text" | "json";
 }
 
 interface EnvironmentRequest {
     action: "list" | "check";
     root?: string;
-    json?: boolean;
+    format?: "text" | "json";
 }
 
 export interface DeveloperExperienceOptions {
@@ -56,13 +56,13 @@ interface EnvironmentReport {
 
 export const initToolSchema: ToolSchema = {
     root: optional(Type.String(), "Project directory to initialize (default: current directory)"),
-    json: optional(Type.Boolean(), "Emit one machine-readable JSON result"),
+    format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
 };
 
 export const environmentToolSchema: ToolSchema = {
     action: withDescription(stringEnum(["list", "check"]), "Environment profile inspection action"),
     root: optional(Type.String(), "Project directory containing .env.supacloud.* files"),
-    json: optional(Type.Boolean(), "Emit one machine-readable JSON result"),
+    format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
 };
 
 const TEST_PROFILE = [
@@ -209,7 +209,7 @@ export async function initializeProject(request: InitRequest, options: Developer
             "supacloud --env test deploy",
         ],
     };
-    if (request.json === true) return jsonResult(result);
+    if (request.format === "json") return jsonResult(result);
     return textResult([
         `Initialized SupaCloud deployment in ${root}.`,
         `Created: ${created.join(", ")}.`,
@@ -341,7 +341,7 @@ async function inspectEnvironment(request: EnvironmentRequest, options: Develope
                 active: profile.name.toLowerCase() === active?.toLowerCase(),
             })),
         };
-        if (request.json === true) return jsonResult(result);
+        if (request.format === "json") return jsonResult(result);
         if (profiles.length === 0) {
             return textResult(`No .env.supacloud.<name> profiles found in ${root}.\nRun \`supacloud deploy init\` to create safe examples.`);
         }
@@ -359,7 +359,7 @@ async function inspectEnvironment(request: EnvironmentRequest, options: Develope
         active: options.activeContext?.environment || null,
         environments: reports,
     };
-    if (request.json === true) return jsonResult(result, !result.ok);
+    if (request.format === "json") return jsonResult(result, !result.ok);
     if (reports.length === 0) {
         return textResult(`No environment profiles found in ${root}.\nRun \`supacloud deploy init\` and copy an example profile.`, true);
     }

@@ -552,7 +552,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             strict: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Exit with error if high-risk issues or migrations are detected"),
             fail_on_high: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Alias for --strict"),
             fail_on_medium: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Exit with error if medium-risk or high-risk migrations are detected"),
-            json: optional(Type.Boolean(), "[lint_migrations/lint/database_lint/rpc_catalog] Output structured JSON analysis"),
+            format: optional(stringEnum(["text", "json"]), "[lint_migrations/lint/database_lint/rpc_catalog] Output format (default: text)"),
             // schema
             schema: optional(Type.String(), "[describe_columns/list_indexes/list_constraints/rls_status/rls_policies/create_table_rls/database_lint] Schema name (default: public)"),
             table: optional(Type.String(), "[describe_columns/indexes/constraints/rls_*] Table name"),
@@ -722,7 +722,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     const conRes = await execSql(conSql);
 
                     const cols = buildSvadminColumns(colRes.data, conRes.ok ? conRes.data : []);
-                    if (args.json) {
+                    if (args.format === "json") {
                         return {
                             content: [{
                                 type: "text" as const,
@@ -915,7 +915,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     }
 
                     const analysis = analyzeMigrationFiles(migrationFiles);
-                    if (args.json) {
+                    if (args.format === "json") {
                         text = JSON.stringify(analysis, null, 2);
                     } else {
                         text = formatMigrationRiskReport(analysis);
@@ -1197,7 +1197,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     if (!r.ok) {
                         return { content: [{ type: "text" as const, text: `❌ Database lint request failed (${r.status})` }], isError: true };
                     }
-                    if (args.json) {
+                    if (args.format === "json") {
                         text = JSON.stringify(r.data, null, 2);
                     } else {
                         text = formatDatabaseLintReport(r.data);
@@ -1220,7 +1220,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     if (!r.ok) {
                         return { content: [{ type: "text" as const, text: `❌ RPC catalog request failed (${r.status})` }], isError: true };
                     }
-                    if (args.json) {
+                    if (args.format === "json") {
                         text = JSON.stringify(r.data, null, 2);
                     } else {
                         text = formatRpcCatalog(r.data);

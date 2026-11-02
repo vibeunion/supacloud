@@ -54,7 +54,7 @@ Copy an example to a real profile and fill in credentials locally:
 
 ```bash
 cp .env.supacloud.test.example .env.supacloud.test
-supacloud env check --json
+supacloud env check --format json
 ```
 
 `env list` and `env check` are local-only. They never contact the Management API
@@ -356,7 +356,7 @@ supacloud lite db_diff --project_dir . --file add_accounts
 supacloud lite db_pull --project_dir . --file remote_schema
 supacloud lite gen_types --project_dir . --output src/database.types.ts
 supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud lite doctor --project_dir . --json --production --runtime_mode strict
+supacloud lite doctor --project_dir . --format json --production --runtime_mode strict
 supacloud lite db_check --project_dir . --module_file supabase/db/modules.ts
 supacloud lite start --project_dir . --port 54321 --runtime_mode strict \
   --identity_module ./lite.identity.ts \
@@ -597,7 +597,7 @@ is missing; check the deployment and upgrade the server. There is no historical-
 fallback for older servers.
 
 For immutable frontend deployments the platform retains previous artifacts.
-`deploy --json` returns the application receipt for executable application delivery,
+`deploy --format json` returns the application receipt for executable application delivery,
 or the immutable frontend receipt for assets-only delivery. Assets-only publication
 keeps the pre-upload CAS and exposes its mutation ID even on an unknown outcome.
 For an operator rollback,

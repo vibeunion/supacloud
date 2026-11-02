@@ -93,7 +93,6 @@ function isProtectedBuildEnv(name: string): boolean {
     return name.startsWith("SUPACLOUD_")
         || name === "SUPABASE_SERVICE_ROLE_KEY"
         || name === "SUPABASE_ACCESS_TOKEN"
-        || name === "MANAGEMENT_API_URL"
         || name === "MANAGEMENT_API_TOKEN";
 }
 
@@ -106,6 +105,7 @@ export const deployToolSchema = {
     assets_only: optional(Type.Boolean(), "Publish only configured static assets; leave backend Functions, schedules and migrations unchanged"),
     backend: optional(Type.Boolean(), "Publish the application backend independently; do not build or activate frontend assets"),
     status: optional(Type.String({ format: "uuid" }), "Read a backend deployment status without publishing"),
+    format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
 };
 
 function record(candidate: unknown): Record<string, unknown> | null {
@@ -645,7 +645,7 @@ export function registerDeployTools(
                 await requireProjectDeploymentProtocol(http, projectRef, environmentId);
                 const result = await publishConfiguredFrontend(
                     http, projectRef, configRoot,
-                    args.skip_build === true, args.json === true, options.environmentVariables,
+                    args.skip_build === true, args.format === "json", options.environmentVariables,
                 );
                 if (!result) throw new Error("Static asset deployment did not produce a receipt");
                 return result;
@@ -681,7 +681,7 @@ export function registerDeployTools(
                     ...(configurationId ? { configuration_id: configurationId } : {}),
                     ...(application.manifestPath ? { manifest_path: application.manifestPath } : {}),
                     ...(args.skip_build === true ? { skip_build: true } : {}),
-                    ...(args.json === true ? { format: "json", json: true } : {}),
+                    ...(args.format === "json" ? { format: "json" } : {}),
                 });
                 return result;
             }

@@ -92,10 +92,10 @@ describe("current deployment only", () => {
         const directory = await workspace({ application: { id: "orders", environmentId: "production" } });
         const api = server();
         const tool = deploy(api.http, directory);
-        await tool.run({ json: true });
+        await tool.run({ format: "json" });
         expect(tool.calls).toEqual([{
             action: "release", ref: "test-ref", id: "orders", environment_id: "test",
-            root: directory, format: "json", json: true,
+            root: directory, format: "json",
         }]);
         expect(api.requests).toEqual(["GET /v1/projects/test-ref/environments/test/deployments/protocol"]);
     });
@@ -115,7 +115,7 @@ describe("current deployment only", () => {
         const api = server();
         await rm(join(directory, "supacloud.json"));
         const tools = deploy(api.http, directory);
-        const result = await tools.run({ action: "init", root: directory, json: true });
+        const result = await tools.run({ action: "init", root: directory, format: "json" });
         expect(result.content[0]?.text).toContain("SUPACLOUD_APPLICATION_ID");
         expect(await readFile(join(directory, ".env.supacloud.test.example"), "utf8"))
             .toContain("# Optional for executable application delivery: SUPACLOUD_APPLICATION_ID=<application-id>");
@@ -134,7 +134,7 @@ describe("current deployment only", () => {
         registerDeveloperExperienceTools({
             tool(name, _description, _schema, handler) { tools.set(name, handler); },
         });
-        const result = await tools.get("env")!({ action: "check", root: directory, json: true });
+        const result = await tools.get("env")!({ action: "check", root: directory, format: "json" });
         expect(JSON.parse(result.content[0]!.text)).toMatchObject({
             environments: [{ deployReady: true, deployMissing: [] }],
         });
@@ -269,7 +269,7 @@ describe("current deployment only", () => {
         });
         const api = server();
         const tool = deploy(api.http, directory);
-        await tool.run({ backend: true, json: true });
+        await tool.run({ backend: true, format: "json" });
         expect(tool.calls).toHaveLength(1);
         expect(tool.calls[0]).not.toHaveProperty("web_release");
         expect(api.requests).toEqual([
@@ -374,7 +374,7 @@ describe("current deployment only", () => {
             const tool = deploy(api.http, directory);
             let result: ToolResult;
             if (mode === "cli") {
-                const processResult = await runCli(directory, api.url, ["deploy", "--json"]);
+                const processResult = await runCli(directory, api.url, ["deploy", "--format", "json"]);
                 expect(processResult.exitCode).toBe(0);
                 expect(processResult.stderr).toContain("build-output");
                 expect(processResult.stderr).toContain("build-diagnostic");

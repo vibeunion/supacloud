@@ -24,7 +24,7 @@ describe("SupaCloud Lite CLI adapter", () => {
         expect(buildLiteArgs({
             action: "doctor",
             project_dir: "/workspace/project",
-            json: true,
+            format: "json",
             production: true,
             runtime_mode: "strict",
             postgres_dir: "/usr/lib/postgresql/18",

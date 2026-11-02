@@ -13,12 +13,9 @@ const CONTEXT_KEYS = new Set([
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPACLOUD_API_URL",
-    "SUPACLOUD_MANAGEMENT_API_URL",
-    "MANAGEMENT_API_URL",
     "SUPACLOUD_API_TOKEN",
     "SUPACLOUD_PROJECT_REF",
     "SUPACLOUD_READ_ONLY",
-    "X_PROJECT_REF",
     "SUPACLOUD_HOST",
     "SUPACLOUD_ENV",
     "SUPACLOUD_READ_ONLY",
@@ -159,6 +156,12 @@ describe("supacloud process contract", () => {
         const payload = JSON.parse(response.stdout);
         expect(payload).toMatchObject({ schema: "supacloud.developer-experience.init.v1", ok: true, root });
         expect(existsSync(join(root, "supacloud.json"))).toBe(true);
+    });
+
+    test("does not expose the internal applications release surface", async () => {
+        const response = await runProjectCli(["applications", "--help"]);
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Unknown command: applications");
     });
 
     test("rolls back to the platform previous release without a release_id flag", async () => {
@@ -441,7 +444,7 @@ describe("supacloud process contract", () => {
         expect(response.stderr).toContain("--dir");
         expect(response.stderr).toContain("--strict");
         expect(response.stderr).toContain("--fail_on_medium");
-        expect(response.stderr).toContain("--json");
+        expect(response.stderr).toContain("--format");
         expect(response.stderr).not.toContain("--schema");
     });
 

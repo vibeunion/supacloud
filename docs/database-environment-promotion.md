@@ -88,11 +88,11 @@ Scenario: 成功收据必须对应本次审阅集合
   And 不自动重放 POST
 ```
 
-CI 可使用 `--json` 获取 `supacloud.cli.release-control.v1` 回执：
+CI 可使用 `--format json` 获取 `supacloud.cli.release-control.v1` 回执：
 
 ```bash
-supacloud branch promotion_plan --branch_ref <preview-ref> --json
-supacloud branch promote --branch_ref <preview-ref> --plan_checksum <sha256> --json
+supacloud branch promotion_plan --branch_ref <preview-ref> --format json
+supacloud branch promote --branch_ref <preview-ref> --plan_checksum <sha256> --format json
 ```
 
 CLI 校验父项目和分支归属、SHA-256 格式、迁移版本唯一性、阻断项及破坏性确认标志。成功回执必须明确 `branch_data_copied=false`，回读计划必须没有待执行迁移或阻断项；本次应用的迁移必须在回读账本摘要中以相同 checksum 出现。`reviewed_plan_checksum` 是提交时审阅的计划摘要，`plan.plan_checksum` 是执行后的账本摘要，二者可能不同。
@@ -108,7 +108,7 @@ CLI 校验父项目和分支归属、SHA-256 格式、迁移版本唯一性、�
 ```gherkin
 Scenario: 查看已绑定环境的计划
   Given 计划属于请求的父项目和 Preview 分支
-  When 用户执行 promotion_plan --json
+  When 用户执行 promotion_plan --format json
   Then CLI 返回经过校验的摘要并省略 SQL
 
 Scenario: 拒绝异域或矛盾计划
@@ -129,7 +129,7 @@ Scenario: 请求结果无法确定
 
 Scenario: 只读模式
   Given CLI 处于只读模式
-  When 用户执行 promote --json
+  When 用户执行 promote --format json
   Then CLI 返回 READ_ONLY 错误且不发出写请求
 ```
 

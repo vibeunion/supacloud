@@ -28,10 +28,11 @@ unrelated feature. No module-boundary policy is relaxed to make registration wor
 Existing projects and the full `command` starter are not automatically migrated;
 choose or create their explicit composition module before using `--register-in`.
 
-`supacloud generate` is the same generator's top-level alias. Hyphenated
-`--dry-run` / `--register-in` and tool-style `--dry_run` / `--register_in` are
-accepted. Supplying both aliases of a flag is an error. `--dry-run` is supported
-for generation, not init, compilation or deployment; misuse is rejected.
+`supacloud app generate` is the only generator entry point. The CLI resolves
+hyphenated flags such as `--dry-run` and `--register-in` to the tool's snake_case
+schema fields, so there is one declared flag rather than two aliases. Supplying
+both spellings of one flag is an error. `--dry-run` is supported for generation,
+not init, compilation or deployment; misuse is rejected.
 
 For an approval vertical-slice scaffold, use the feature generator with explicit
 capabilities. This is not a completed database-backed business application:

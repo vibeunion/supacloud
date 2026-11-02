@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerAppAliases, registerAppTools, runAppTool, type ToolResult } from "./app-tools";
+import { registerAppTools, runAppTool, type ToolResult } from "./app-tools";
 import { compileProject } from "@supacloud/compiler";
 
 const roots: string[] = [];
@@ -16,7 +16,7 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 
 test("resource preview contains all six wired files and creates nothing", async () => {
     const root = await fixture();
-    const result = await runAppTool({ action: "generate", kind: "resource", name: "inventory", root, "dry-run": true, format: "json" });
+    const result = await runAppTool({ action: "generate", kind: "resource", name: "inventory", root, dry_run: true, format: "json" });
     const plan = data(result);
     expect(result.isError).toBe(false);
     expect(plan).toMatchObject({ version: 1, ok: true, written: false, kind: "resource" });
@@ -106,8 +106,8 @@ test("explicit parent registration uses the existing compiler AST editor", async
     const original = 'import { Module } from "@supacloud/app";\n@Module({ name: "root", imports: [], providers: [] })\nexport class RootModule {}\n';
     await mkdir(join(root, "src"));
     await writeFile(join(root, "src/root.module.ts"), original);
-    const args = { action: "generate", kind: "resource", name: "inventory", root, "register-in": "src/root.module.ts", format: "json" } as const;
-    const preview = data(await runAppTool({ ...args, "dry-run": true }));
+    const args = { action: "generate", kind: "resource", name: "inventory", root, register_in: "src/root.module.ts", format: "json" } as const;
+    const preview = data(await runAppTool({ ...args, dry_run: true }));
     expect(preview.ok, JSON.stringify(preview)).toBe(true);
     expect(preview.changes).toHaveLength(7);
     expect(await readFile(join(root, "src/root.module.ts"), "utf8")).toBe(original);
@@ -149,27 +149,23 @@ test("all existing single-file kinds support dry-run", async () => {
     expect(await readdir(root)).toEqual([]);
 });
 
-test("outside directories and duplicate aliases fail without writing", async () => {
+test("outside directories and misplaced preview flags fail without writing", async () => {
     const root = await fixture();
     const result = await runAppTool({ action: "generate", kind: "resource", name: "inventory", root, dir: "../outside", format: "json" });
     expect(data(result)).toMatchObject({ ok: false, code: "SCAFFOLD_PATH_INVALID" });
-    await expect(runAppTool({ action: "generate", kind: "module", name: "inventory", root, "dry-run": true, dry_run: false }))
-        .rejects.toMatchObject({ code: "SCAFFOLD_OPTION_INVALID" });
     await expect(runAppTool({ action: "init", root, dry_run: true }))
         .rejects.toMatchObject({ code: "SCAFFOLD_OPTION_INVALID" });
     expect(await readdir(root)).toEqual([]);
 });
 
-test("app and top-level generate expose the same resource and preview options", () => {
+test("the app generate schema exposes resource and preview options", () => {
     const schemas: Record<string, Record<string, unknown>> = {};
     const server = { tool(name: string, _description: string, schema: Record<string, unknown>) { schemas[name] = schema; } };
     registerAppTools(server);
-    registerAppAliases(server);
-    for (const name of ["app", "generate"]) {
+    const name = "app";
+    {
         expect(schemas[name]).toHaveProperty("dry_run");
-        expect(schemas[name]).toHaveProperty("dry-run");
         expect(schemas[name]).toHaveProperty("register_in");
-        expect(schemas[name]).toHaveProperty("register-in");
         expect(JSON.stringify(schemas[name]!.kind)).toContain("resource");
     }
 });

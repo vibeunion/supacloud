@@ -30,7 +30,7 @@ supacloud --env test deploy
 
 `deploy init` creates `supacloud.json` and non-secret environment examples without
 overwriting an existing project configuration. `env list` and `env check` are
-local-only, redact credentials, and provide stable JSON with `--json` for CI or
+local-only, redact credentials, and provide stable JSON with `--format json` for CI or
 AI tooling. The real `.env.supacloud.*` files are added to `.gitignore`.
 Fill in the Management credentials and project/environment in the selected profile.
 Static frontends need only `frontend` build configuration; no application binding
@@ -97,8 +97,8 @@ Its topology digest is not a release digest or deployment approval. Build needs
 Bun and produces the compiler's immutable manifest beneath configured `outDir`.
 Build, upload and configure only prepare artifacts or configuration, never deploy.
 
-Remote actions delegate to `applications` and retain its original receipt,
-identity validation, read-only and production-confirmation checks. Upload returns
+Remote actions use the internal application release primitives and retain their
+original receipt, identity validation, read-only and production-confirmation checks. Upload returns
 the release ID; configuration writes use the existing JSON contract with an
 explicit revision and expected revision. Deploy and rollback require an explicit
 release, configuration, new activation ID and expected current activation ID.
@@ -322,9 +322,8 @@ This setting only affects HTTPS requests made by the CLI transport. It does not
 change server-side SupaCloud, Caddy, Edge Runtime, or browser certificate
 verification. Keep the default only on trusted internal networks; use a
 trusted CA and `SUPACLOUD_TLS_VERIFY=true` for public or untrusted networks.
-The legacy inverse setting `SUPACLOUD_TLS_INSECURE=false` is also accepted.
-`SUPACLOUD_TLS_VERIFY` takes precedence if both are present. Both settings use
-the selected context source, not a mix of profile and process variables.
+The setting uses the selected context source, not a mix of profile and process
+variables.
 Values accept `true/false`, `1/0`, `yes/no`, and `on/off` (case-insensitive).
 Invalid or empty values stop the command before requests are sent.
 Skipping verification accepts any certificate, not just a private CA, and
@@ -439,11 +438,9 @@ internally, retaining CAS checks and final readback.
 Store a compiler-built HTTP/Worker application as one immutable release:
 
 ```bash
-supacloud applications upload_release --ref abc123 --id reviews \
+supacloud app upload --ref abc123 --id reviews \
   --manifest_path ./generated/delivery/delivery.manifest.json
-supacloud applications list_releases --ref abc123 --id reviews --limit 50
-supacloud applications get_release --ref abc123 --id reviews --release_id <sha256>
-supacloud applications get_runtime --ref abc123 --id reviews --environment_id test
+supacloud app status --ref abc123 --id reviews --environment_id test
 ```
 
 Upload verifies executable objects, transfers their inventory with multipart
@@ -481,11 +478,8 @@ environment. Saving a revision does not allocate ports, start processes, change
 traffic or migrate data:
 
 ```bash
-supacloud applications get_configuration --ref abc123 --id reviews --environment_id test
-supacloud applications put_configuration --ref abc123 --id reviews --environment_id test \
+supacloud app configure --ref abc123 --id reviews --environment_id test \
   --configuration_path ./application.test.json
-supacloud applications get_configuration --ref abc123 --id reviews --environment_id test \
-  --configuration_id <uuid>
 ```
 
 Example configuration write file:
@@ -520,8 +514,8 @@ API and CLI reads return names only; keep local files with values out of version
 control. An identical retry with the same revision ID returns the original
 receipt and never moves a newer head backward. A changed request using the same
 ID or a stale expected revision returns a conflict. An unknown result preserves
-the revision ID for `get_configuration` verification; the CLI does not replay
-the write automatically. Reads without an ID show the current head.
+the revision ID for explicit verification; the CLI does not replay the write
+automatically.
 
 Writes follow the normal read-only and exact production-confirmation policy.
 Programmatic `activateConfigured` selects an explicit configuration revision,
@@ -544,15 +538,17 @@ Composed hosts can register `POST .../environments/:environmentId/activations`
 and `POST .../activations/:activationId/reconcile` by supplying an
 `ApplicationDeploymentService` with its required compatibility verifier.
 The default Management API instance does not yet enable these endpoints.
-For an explicitly composed test host:
+The low-level `applications` command group is an internal implementation detail
+and is not a user CLI or MCP surface. Use `app` for release operations. For an
+explicitly composed test host:
 
 ```bash
-supacloud applications activate_release --ref abc123 --id reviews --environment_id test \
+supacloud app deploy --ref abc123 --id reviews --environment_id test \
   --release_id <release-sha256> --configuration_id <configuration-uuid> \
   --activation_id <new-uuid> --expected_activation_id absent
-supacloud applications reconcile_activation --ref abc123 --id reviews --environment_id test \
+supacloud app reconcile --ref abc123 --id reviews --environment_id test \
   --release_id <release-sha256> --activation_id <same-uuid>
-supacloud applications retire_activation --ref abc123 --id reviews --environment_id test \
+supacloud app retire --ref abc123 --id reviews --environment_id test \
   --activation_id <stopped-and-unrouted-uuid>
 ```
 
@@ -822,7 +818,7 @@ requested version, name, baseline marker, and checksum.
 `database lint_migrations` is local-only and works without Management API
 credentials. Inspect one source with `--sql`, `--file`, or `--dir`; these inputs
 are mutually exclusive. `--strict` (or `--fail_on_high`) exits non-zero for HIGH
-findings, `--fail_on_medium` also fails on MEDIUM findings, and `--json` emits a
+findings, `--fail_on_medium` also fails on MEDIUM findings, and `--format json` emits a
 structured report. The analyzer detects destructive DDL (`DROP TABLE`,
 `DROP COLUMN`, `TRUNCATE`, `RENAME`), table-locking risks, opaque `DO` blocks,
 procedural definitions/calls that require manual review, and statements that
@@ -1005,7 +1001,7 @@ supacloud lite db_pull --project_dir . --file remote_schema
 supacloud lite db_pull --project_dir . --file reviewed_schema --baseline
 supacloud lite gen_types --project_dir . --output src/database.types.ts
 supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud lite doctor --project_dir . --json --production --runtime_mode strict
+supacloud lite doctor --project_dir . --format json --production --runtime_mode strict
 supacloud lite db_check --project_dir . --module_file supabase/db/modules.ts
 supacloud lite start --project_dir . --port 54321 --runtime_mode strict
 ```
