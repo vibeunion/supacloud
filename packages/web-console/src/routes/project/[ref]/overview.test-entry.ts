@@ -25,7 +25,10 @@ function refresh() {
   if (!(button instanceof HTMLButtonElement)) throw new Error("Missing refresh button");
   button.click();
 }
-function metric(name: string) { return document.querySelector(`[data-metric="${name}"]`)?.textContent; }
+function metric(name: string) {
+  const card = document.querySelector(`[data-metric="${name}"]`);
+  return card?.querySelector("[data-svadmin-metric-value]")?.textContent ?? undefined;
+}
 function text() { return document.body.textContent ?? ""; }
 async function mounted(run: () => Promise<void>) {
   page.params.ref = "a";

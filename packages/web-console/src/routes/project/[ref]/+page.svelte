@@ -2,7 +2,9 @@
   import { apiClient } from "$lib/api";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
-  import { RefreshCw, Loader2, Database, Users, HardDrive, ListChecks, Code2, Activity } from "lucide-svelte";
+  import { RefreshCw, Loader2, Users } from "lucide-svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
+  import MetricBlock from "@svadmin/ui/components/content/MetricBlock.svelte";
   import {
     loadProjectOverview,
     validOverviewProject,
@@ -83,23 +85,18 @@
   </div>
 
   {#if error}
-    <div role="alert" class="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-600">
-      Project overview is temporarily unavailable.
-    </div>
+    <DataState state="error" title="Project overview is temporarily unavailable." retry={refresh} />
   {:else if overview}
-    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-      <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground text-xs"><Database size={14} /> Database</div>
-        <span data-metric="database" class="mt-2 block text-xl font-semibold">{database?.size ?? "-"}</span>
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
+      <div data-metric="database">
+        <MetricBlock label="Database" value={database?.size ?? "-"} />
       </div>
-      <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground text-xs"><Activity size={14} /> Connections</div>
-        <span data-metric="connections" class="mt-2 block text-xl font-semibold">{database?.connections ?? "-"}</span>
+      <div data-metric="connections">
+        <MetricBlock label="Connections" value={database?.connections ?? "-"} />
       </div>
       {#if auth?.source === "local"}
-        <div class="rounded-xl border bg-card p-4">
-          <div class="flex items-center gap-2 text-muted-foreground text-xs"><Users size={14} /> Users</div>
-          <span data-metric="users" class="mt-2 block text-xl font-semibold">{auth.total_users ?? "-"}</span>
+        <div data-metric="users">
+          <MetricBlock label="Users" value={auth.total_users ?? "-"} />
         </div>
       {:else if auth?.source === "supauth"}
         <div class="rounded-xl border bg-card p-4">
@@ -115,17 +112,14 @@
           <span class="mt-2 block text-sm font-semibold">External Auth</span>
         </div>
       {/if}
-      <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground text-xs"><ListChecks size={14} /> Tasks</div>
-        <span data-metric="tasks" class="mt-2 block text-xl font-semibold">{tasks?.running ?? "-"}</span>
+      <div data-metric="tasks">
+        <MetricBlock label="Tasks" value={tasks?.running ?? "-"} />
       </div>
-      <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground text-xs"><HardDrive size={14} /> Storage</div>
-        <span data-metric="storage" class="mt-2 block text-xl font-semibold">{storage?.size ?? "-"}</span>
+      <div data-metric="storage">
+        <MetricBlock label="Storage" value={storage?.size ?? "-"} />
       </div>
-      <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground text-xs"><Code2 size={14} /> Functions</div>
-        <span data-metric="functions" class="mt-2 block text-xl font-semibold">{functions?.count ?? "-"}</span>
+      <div data-metric="functions">
+        <MetricBlock label="Functions" value={functions?.count ?? "-"} />
       </div>
     </div>
 
