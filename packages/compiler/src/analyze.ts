@@ -1217,6 +1217,26 @@ function resolveStaticObjectLiteral(
   return ts.isObjectLiteralExpression(input) ? input : undefined;
 }
 
+/** Resolves an array literal passed inline, through a const, or through `as const` / satisfies. */
+function resolveStaticArrayLiteral(
+  input: Expression | undefined,
+  ctx: AnalysisContext,
+  seen = new Set<ts.Node>(),
+): ts.ArrayLiteralExpression | undefined {
+  if (!input || seen.has(input)) return undefined;
+  seen.add(input);
+  if (ts.isAsExpression(input) || ts.isSatisfiesExpression(input) || ts.isParenthesizedExpression(input)) {
+    return resolveStaticArrayLiteral(input.expression, ctx, seen);
+  }
+  if (ts.isIdentifier(input)) {
+    const declaration = resolveDeclaration(input, ctx).find(ts.isVariableDeclaration);
+    return declaration?.initializer
+      ? resolveStaticArrayLiteral(declaration.initializer, ctx, seen)
+      : undefined;
+  }
+  return ts.isArrayLiteralExpression(input) ? input : undefined;
+}
+
 function routePolicyProperty(
   object: ObjectLiteralExpression,
   name: string,
@@ -2343,8 +2363,9 @@ function parseController(
             }
             const dependenciesExpr = getProp(effectObject, "dependencies");
             if (dependenciesExpr !== undefined) {
-              if (!ts.isArrayLiteralExpression(dependenciesExpr)
-                || dependenciesExpr.elements.some((element) => !ts.isStringLiteral(element) || element.text.trim().length === 0)) {
+              const dependenciesArray = resolveStaticArrayLiteral(dependenciesExpr, ctx);
+              if (!dependenciesArray
+                || dependenciesArray.elements.some((element) => !ts.isStringLiteral(element) || element.text.trim().length === 0)) {
                 ctx.diagnostics.push({
                   severity: "error",
                   code: "invalid-effect-dependencies",
@@ -2352,10 +2373,10 @@ function parseController(
                   docsUrl: "https://supacloud.dev/errors/SC3033",
                   file,
                   line: lineOf(dependenciesExpr),
-                  message: `Route ${route.handler} effect.dependencies must be an explicit string array.`,
+                  message: `Route ${route.handler} effect.dependencies must be a string array or a const initialized with one.`,
                 });
               } else {
-                effect.dependencies = dependenciesExpr.elements.map((element) => (element as ts.StringLiteral).text);
+                effect.dependencies = dependenciesArray.elements.map((element) => (element as ts.StringLiteral).text);
                 if (new Set(effect.dependencies).size !== effect.dependencies.length) {
                   ctx.diagnostics.push({
                     severity: "error",
@@ -2372,7 +2393,8 @@ function parseController(
             }
             const errorsExpr = getProp(effectObject, "errors");
             if (errorsExpr !== undefined) {
-              if (!ts.isArrayLiteralExpression(errorsExpr)) {
+              const errorsArray = resolveStaticArrayLiteral(errorsExpr, ctx);
+              if (!errorsArray) {
                 ctx.diagnostics.push({
                   severity: "error",
                   code: "invalid-effect-errors",
@@ -2380,11 +2402,11 @@ function parseController(
                   docsUrl: "https://supacloud.dev/errors/SC3034",
                   file,
                   line: lineOf(errorsExpr),
-                  message: `Route ${route.handler} effect.errors must be an explicit object array.`,
+                  message: `Route ${route.handler} effect.errors must be an object array or a const initialized with one.`,
                 });
               } else {
                 const errors: EffectErrorMappingNode[] = [];
-                for (const errorExpr of errorsExpr.elements) {
+                for (const errorExpr of errorsArray.elements) {
                   if (!ts.isObjectLiteralExpression(errorExpr)) {
                     ctx.diagnostics.push({
                       severity: "error",
