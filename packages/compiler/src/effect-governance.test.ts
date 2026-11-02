@@ -399,3 +399,65 @@ test("rejects retrying jobs without an idempotency contract", () => {
   graph.modules[0]!.jobs[0]!.idempotency = "required";
   expect(validateJobPolicies(graph)).toEqual([]);
 });
+
+test("preserves opt-in instance code and message mappings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-instance-values-"));
+  try {
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+      "src/orders.module.ts": `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+type ServiceRoleRequired = {
+  readonly _tag: "FA_SERVICE_ROLE_REQUIRED";
+  readonly code: string;
+  readonly message: string;
+};
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [{
+        tag: "FA_SERVICE_ROLE_REQUIRED",
+        status: 503,
+        code: "FA_SERVICE_ROLE_REQUIRED",
+        codeFromError: true,
+        messageFromError: true,
+        statusFromError: true,
+      }],
+      retry: "none",
+    },
+  })
+  list(): Effect<string, ServiceRoleRequired, never> {
+    return {} as Effect<string, ServiceRoleRequired, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.modules[0]?.controllers[0]?.routes[0]?.effect).toEqual({
+      required: true,
+      dependencies: [],
+      errors: [{
+        tag: "FA_SERVICE_ROLE_REQUIRED",
+        status: 503,
+        code: "FA_SERVICE_ROLE_REQUIRED",
+        codeFromError: true,
+        messageFromError: true,
+        statusFromError: true,
+      }],
+      retry: "none",
+    });
+    expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

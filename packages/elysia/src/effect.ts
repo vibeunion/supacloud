@@ -6,6 +6,9 @@ export interface CompiledEffectError {
   readonly status: number;
   readonly code: string;
   readonly message?: string;
+  readonly codeFromError?: boolean;
+  readonly messageFromError?: boolean;
+  readonly statusFromError?: boolean;
 }
 
 export interface CompiledEffectDescriptor {
@@ -72,6 +75,23 @@ function effectErrorTag(error: unknown): string | undefined {
   return undefined;
 }
 
+/** Instance values are opt-in and bounded so a failure cannot bypass the declared contract. */
+function boundedString(value: unknown, key: "code" | "message", maxLength: number): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const candidate = value[key];
+  if (typeof candidate !== "string") return undefined;
+  const trimmed = candidate.trim();
+  return trimmed.length === 0 ? undefined : trimmed.slice(0, maxLength);
+}
+
+function boundedStatus(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const candidate = value["status"];
+  return typeof candidate === "number" && Number.isInteger(candidate) && candidate >= 400 && candidate <= 599
+    ? candidate
+    : undefined;
+}
+
 function mapEffectFailure(
   error: unknown,
   descriptor: CompiledEffectDescriptor | undefined,
@@ -79,10 +99,13 @@ function mapEffectFailure(
   const tag = effectErrorTag(error);
   const mapping = tag && descriptor?.errors?.find((entry) => entry.tag === tag);
   if (mapping) {
+    const instanceCode = mapping.codeFromError ? boundedString(error, "code", 120) : undefined;
+    const instanceMessage = mapping.messageFromError ? boundedString(error, "message", 500) : undefined;
+    const instanceStatus = mapping.statusFromError ? boundedStatus(error) : undefined;
     return new EffectApplicationError(
-      mapping.message ?? mapping.code,
-      mapping.status,
-      mapping.code,
+      instanceMessage ?? mapping.message ?? instanceCode ?? mapping.code,
+      instanceStatus ?? mapping.status,
+      instanceCode ?? mapping.code,
     );
   }
   if (tag === "TimeoutException" || tag === "TimeoutError") {

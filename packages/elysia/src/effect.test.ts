@@ -29,6 +29,61 @@ test("maps tagged Effect failures to the declared public error", async () => {
   });
 });
 
+test("uses bounded instance code, message and status only when the mapping opts in", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail({
+      _tag: "FA_ROUTE_FAILURE",
+      code: "FA_SAVED_LIST_VIEW_NOT_FOUND",
+      message: "保存视图不存在或已删除。",
+      status: 404,
+    }),
+    {
+      required: true,
+      errors: [{
+        tag: "FA_ROUTE_FAILURE",
+        status: 500,
+        code: "FA_ROUTE_FAILURE",
+        codeFromError: true,
+        messageFromError: true,
+        statusFromError: true,
+      }],
+    },
+  )).rejects.toMatchObject({
+    status: 404,
+    code: "FA_SAVED_LIST_VIEW_NOT_FOUND",
+    message: "保存视图不存在或已删除。",
+  });
+});
+
+test("ignores out-of-range instance statuses", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail({ _tag: "FA_ROUTE_FAILURE", code: "X", message: "x", status: 200 }),
+    {
+      required: true,
+      errors: [{
+        tag: "FA_ROUTE_FAILURE",
+        status: 500,
+        code: "FA_ROUTE_FAILURE",
+        statusFromError: true,
+      }],
+    },
+  )).rejects.toMatchObject({ status: 500, code: "FA_ROUTE_FAILURE" });
+});
+
+test("keeps the declared mapping when instance values are not opted in", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail({ _tag: "OrderNotFound", code: "RAW_CODE", message: "raw message" }),
+    {
+      required: true,
+      errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND", message: "Not found." }],
+    },
+  )).rejects.toMatchObject({
+    status: 404,
+    code: "ORDER_NOT_FOUND",
+    message: "Not found.",
+  });
+});
+
 test("maps framework Feature operation errors through the declared route contract", async () => {
   await expect(runCompiledEffect(
     Effect.fail(new FeatureOperationError()),

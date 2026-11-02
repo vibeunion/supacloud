@@ -2401,6 +2401,9 @@ function parseController(
                   const code = stringLiteralProp(errorExpr, "code");
                   const status = numberLiteralProp(errorExpr, "status");
                   const message = stringLiteralProp(errorExpr, "message");
+                  const codeFromError = booleanLiteralProp(errorExpr, "codeFromError");
+                  const messageFromError = booleanLiteralProp(errorExpr, "messageFromError");
+                  const statusFromError = booleanLiteralProp(errorExpr, "statusFromError");
                   if (!tag || !code || status === undefined || !Number.isInteger(status) || status < 400 || status > 599) {
                     ctx.diagnostics.push({
                       severity: "error",
@@ -2413,7 +2416,13 @@ function parseController(
                     });
                     continue;
                   }
-                  errors.push({ tag, code, status, ...(message === undefined ? {} : { message }) });
+                  errors.push({
+                    tag, code, status,
+                    ...(message === undefined ? {} : { message }),
+                    ...(codeFromError === undefined ? {} : { codeFromError }),
+                    ...(messageFromError === undefined ? {} : { messageFromError }),
+                    ...(statusFromError === undefined ? {} : { statusFromError }),
+                  });
                 }
                 effect.errors = errors;
                 if (new Set(errors.map((entry) => entry.tag)).size !== errors.length) {
@@ -3308,6 +3317,14 @@ function numberLiteralProp(obj: ObjectLiteralExpression, name: string): number |
   if (!expr || !ts.isNumericLiteral(expr)) return undefined;
   const value = Number(expr.text);
   return Number.isFinite(value) ? value : undefined;
+}
+
+function booleanLiteralProp(obj: ObjectLiteralExpression, name: string): boolean | undefined {
+  const expr = getProp(obj, name);
+  if (!expr) return undefined;
+  if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
+  return undefined;
 }
 
 function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
