@@ -99,6 +99,7 @@ function isProtectedBuildEnv(name: string): boolean {
 export const deployToolSchema = {
     action: optional(stringEnum(["init"]), "[init] Create local deployment configuration and environment examples"),
     ...initToolSchema,
+    root: optional(Type.String(), "[init] Project directory to initialize (default: current directory)"),
     ref: optional(Type.String(), "Project ref (defaults to the linked project)"),
     cwd: optional(Type.String(), "Project directory (default: current directory)"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
@@ -611,7 +612,7 @@ export function registerDeployTools(
             if (args.action === "init") {
                 return initializeProject({
                     ...(typeof args.root === "string" ? { root: args.root } : {}),
-                    ...(args.json === true ? { json: true } : {}),
+                    ...(args.format === "json" ? { format: "json" } : {}),
                 }, { cwd: invocationDirectory });
             }
             const projectRef = String(args.ref || options.projectRef || "").trim();
