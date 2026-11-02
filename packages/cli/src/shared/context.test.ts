@@ -48,7 +48,7 @@ describe("resolveSupaCloudContext", () => {
         expect(context.insecureTls).toBe(false);
     });
 
-    test("supports the previous inverse-named setting for compatibility", () => {
+    test("ignores the removed inverse-named TLS setting", () => {
         const context = resolveSupaCloudContext({
             SUPACLOUD_ENV: "test",
             SUPACLOUD_API_URL: "https://management.internal.example",
@@ -57,7 +57,7 @@ describe("resolveSupaCloudContext", () => {
             SUPACLOUD_TLS_INSECURE: "false",
         }, "/tmp/no-such-supacloud-context");
 
-        expect(context.insecureTls).toBe(false);
+        expect(context.insecureTls).toBe(true);
     });
 
     test("keeps custom project application credentials out of Management context", () => {
@@ -377,6 +377,22 @@ describe("resolveSupaCloudContext", () => {
         expect(context.apiUrl).toBe("https://process.example.com");
         expect(context.apiToken).toBe("");
         expect(context.projectRef).toBe("");
+    });
+
+    test("ignores removed Management URL and project-ref aliases", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_MANAGEMENT_API_URL: "https://legacy-management.example.com",
+            MANAGEMENT_API_URL: "https://legacy-management.example.com",
+            X_PROJECT_REF: "legacy-ref",
+            SUPACLOUD_API_TOKEN: "token",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context).toMatchObject({
+            apiUrl: "",
+            projectRef: "",
+            host: "",
+            credentialScope: "management",
+        });
     });
 
     test("keeps legacy dotenv compatibility when process context is absent", () => {

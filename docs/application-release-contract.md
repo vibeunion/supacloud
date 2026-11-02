@@ -100,7 +100,7 @@ component and keep the same immutable identities:
 | --- | --- |
 | Migrations | `database push_migrations` or the application migration archive |
 | Functions | `POST /v1/projects/:ref/function-releases` after staging immutable versions |
-| Application backend | `applications deploy_release` with the reviewed configuration revision |
+| Application backend | `app deploy` with the reviewed configuration revision |
 | Web assets | `deploy` or `frontend` immutable release activation |
 
 A release controller must stop on an unknown mutation outcome and reconcile the

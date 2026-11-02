@@ -1922,47 +1922,6 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
     );
 }
 
-const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "context", "doctor", "fix"] as const;
-
-/**
- * Promotes the single-entry development verbs to top-level commands so an AI or
- * developer does not need to remember the `app` namespace. The `app` tool and
- * these aliases share one implementation and one execution-policy classification.
- */
-export function registerAppAliases(server: ToolServer): void {
-    const schema = {
-        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
-        name: optional(Type.String(), "[generate] Object name"),
-        module: optional(Type.String(), "[generate] Target feature module"),
-        permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
-        read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
-        rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),
-        database_source: optional(Type.String(), "[generate feature] Project-relative database source path"),
-        database_table: optional(Type.String(), "[generate feature] Schema-qualified table owned by the feature"),
-        database_type: optional(Type.String(), "[generate feature] Exported row type derived from the database source"),
-        dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
-        force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/feature/controller never overwrite"),
-        dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
-        register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource/feature; uses the compiler AST editor"),
-        root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
-        include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
-        out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
-        strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
-        format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
-        target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
-        events: optional(Type.String(), "[context] Project-relative execution metadata JSON or generated JSON-lines file"),
-        request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
-        fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
-        from_doctor: optional(Type.String(), "[fix] Read one fix from a doctor --format json output"),
-        fix_index: optional(Type.Number({ minimum: 0, multipleOf: 1 }), "[fix] Zero-based fixPlan index used with --from-doctor"),
-        write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
-    } satisfies ToolSchema;
-    for (const action of APP_ALIAS_ACTIONS) {
-        registerTool(server, action, `Top-level alias of \`app ${action}\`.`, schema,
-            (request) => runAppTool({ ...request, action }));
-    }
-}
-
 // For testing and internal reuse
 export const __internal = {
     pascalName,

@@ -28,7 +28,7 @@ unrelated feature. No module-boundary policy is relaxed to make registration wor
 Existing projects and the full `command` starter are not automatically migrated;
 choose or create their explicit composition module before using `--register-in`.
 
-`supacloud generate` is the same generator's top-level alias. The CLI resolves
+`supacloud app generate` is the only generator entry point. The CLI resolves
 hyphenated flags such as `--dry-run` and `--register-in` to the tool's snake_case
 schema fields, so there is one declared flag rather than two aliases. Supplying
 both spellings of one flag is an error. `--dry-run` is supported for generation,

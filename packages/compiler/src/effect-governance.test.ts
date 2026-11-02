@@ -581,3 +581,33 @@ export const ORDER_ERRORS = [{ tag: orderNotFoundTag, status: 404, code: "ORDER_
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("rejects mutable shared Effect declarations", async () => {
+  const { root, graph } = await analyzeSharedEffectDeclarationsFixture(
+    `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+import { ORDER_ERRORS } from "./order-declarations";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: ORDER_ERRORS, retry: "none" } })
+  list(): Effect<string, { _tag: "OrderNotFound" }, never> {
+    return {} as Effect<string, { _tag: "OrderNotFound" }, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    `export let ORDER_ERRORS = [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }];
+`,
+  );
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "invalid-effect-errors",
+      errorCode: "SC3034",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

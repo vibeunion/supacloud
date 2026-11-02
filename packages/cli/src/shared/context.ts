@@ -48,11 +48,8 @@ const CORE_CONTEXT_KEYS = [
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPACLOUD_API_URL",
-    "SUPACLOUD_MANAGEMENT_API_URL",
-    "MANAGEMENT_API_URL",
     "SUPACLOUD_API_TOKEN",
     "SUPACLOUD_PROJECT_REF",
-    "X_PROJECT_REF",
     "SUPACLOUD_HOST",
     "SUPACLOUD_APPLICATION_ID",
     "SUPACLOUD_APPLICATION_ENVIRONMENT_ID",
@@ -140,12 +137,9 @@ function sourceCredentialScope(
 
 function sourceProjectCore(values: Record<string, string>) {
     const supabaseUrl = canonicalApiOrigin(values.SUPABASE_URL || "");
-    const projectRef = (values.SUPACLOUD_PROJECT_REF || values.X_PROJECT_REF || "").trim()
+    const projectRef = (values.SUPACLOUD_PROJECT_REF || "").trim()
         || inferProjectRefFromSupabaseUrl(supabaseUrl);
-    const explicitApiUrl = values.SUPACLOUD_API_URL
-        || values.SUPACLOUD_MANAGEMENT_API_URL
-        || values.MANAGEMENT_API_URL
-        || "";
+    const explicitApiUrl = values.SUPACLOUD_API_URL || "";
     const credentialScope = sourceCredentialScope(values, explicitApiUrl, supabaseUrl);
     const managementUrl = explicitApiUrl
         || (values.SUPACLOUD_HOST ? `http://${values.SUPACLOUD_HOST}:9090` : "");
@@ -175,14 +169,11 @@ function completeProjectContext(values: Record<string, string>): boolean {
 }
 
 function parseInsecureTls(values: Record<string, string>): boolean {
-    for (const key of ["SUPACLOUD_TLS_VERIFY", "SUPACLOUD_TLS_INSECURE"]) {
-        const value = values[key]?.trim().toLowerCase();
-        if (value === undefined) continue;
-        if (["1", "true", "yes", "on"].includes(value)) return key === "SUPACLOUD_TLS_INSECURE";
-        if (["0", "false", "no", "off"].includes(value)) return key === "SUPACLOUD_TLS_VERIFY";
-        throw new Error(`${key} must be a boolean (true or false)`);
-    }
-    return true;
+    const value = values.SUPACLOUD_TLS_VERIFY?.trim().toLowerCase();
+    if (value === undefined) return true;
+    if (["1", "true", "yes", "on"].includes(value)) return false;
+    if (["0", "false", "no", "off"].includes(value)) return true;
+    throw new Error("SUPACLOUD_TLS_VERIFY must be a boolean (true or false)");
 }
 
 function namedEnvironmentSource(cwd: string, selector: string): ContextSource {

@@ -20,9 +20,9 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 supacloud app init --root ./orders-api --name orders-api   # 默认最小项目；也可显式选择 http/command/edge
 cd orders-api && bun install && bun run check
 
-supacloud context --format json > context.json   # AI 读取已编译的项目图
-supacloud doctor --format json > doctor.json     # 可执行诊断 + 修复计划
-supacloud fix --from-doctor doctor.json --fix-index 0  # 从诊断报告预览一个修复
+supacloud app context --format json > context.json   # AI 读取已编译的项目图
+supacloud app doctor --format json > doctor.json     # 可执行诊断 + 修复计划
+supacloud app fix --from-doctor doctor.json --fix-index 0  # 从诊断报告预览一个修复
 ```
 
 ## 单一入口
@@ -34,15 +34,15 @@ supacloud app init        # 最小项目；业务切片位于 src/features/<feat
 supacloud app dev         # 运行项目现有的本地开发脚本
 supacloud app watch       # 仅编译器 watch
 supacloud app verify-plan --target health  # 聚焦测试，不默认回退到全量测试
-supacloud generate ...        # 生成器
-supacloud check               # 编译器治理检查
-supacloud context --format json
-supacloud doctor              # 可执行健康报告
-supacloud fix --from-doctor doctor.json --fix-index 0  # 默认预览，--write 落盘
+supacloud app generate ...        # 生成器
+supacloud app check               # 编译器治理检查
+supacloud app context --format json
+supacloud app doctor              # 可执行健康报告
+supacloud app fix --from-doctor doctor.json --fix-index 0  # 默认预览，--write 落盘
 supacloud deploy              # 交付
 ```
 
-`app` 命名空间作为底层形式保留（`supacloud app <verb>`），顶层动词是同一实现与执行策略的别名。
+`app` 命名空间是唯一的应用开发入口；不再提供顶层动词别名，统一使用 `supacloud app <verb>`。
 
 > 生成项目中的本地开发循环是 `bun run dev`（watch、编译、重启）；
 > `supacloud dev ...` 是独立的远程项目 sync/watch/migrate 模块，二者不同。
@@ -64,20 +64,20 @@ supacloud.config.ts
 最小 starter 和生成器使用 `src/features/`。显式兼容模板保留 `src/review/`、
 `src/orders/` 和 `src/sync/`；不要为了采用默认布局而搬动已有项目文件。
 普通读取继续使用 RLS 保护的 PostgREST client；GraphQL 仍是显式启用的契约管线。
-`generated/**` 由编译器生成并提交，以便 `supacloud check` 检测漂移；不要直接编辑。
+`generated/**` 由编译器生成并提交，以便 `supacloud app check` 检测漂移；不要直接编辑。
 
 ## 生成器优先
 
 常见任务都有稳定、可重复的生成器，产物可读、可改、可重复生成，不是黑盒：
 
 ```bash
-supacloud generate --kind module   --name orders
-supacloud generate --kind controller --module orders
-supacloud generate --kind command  --module orders --name accept
-supacloud generate --kind query    --module orders --name list
-supacloud generate --kind job      --module orders --name sync-orders
-supacloud generate --kind contract --module orders --name accept
-supacloud generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase \
+supacloud app generate --kind module   --name orders
+supacloud app generate --kind controller --module orders
+supacloud app generate --kind command  --module orders --name accept
+supacloud app generate --kind query    --module orders --name list
+supacloud app generate --kind job      --module orders --name sync-orders
+supacloud app generate --kind contract --module orders --name accept
+supacloud app generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase \
   --database-source db/schema.ts --database-table public.reviews --database-type ReviewRow
 ```
 
@@ -94,7 +94,7 @@ Query、受治理 Command、状态声明、异步任务边界、HTTP 路由、�
 
 ## AI 专用上下文
 
-`supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。`app check --format json` 与
+`supacloud app context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。`app check --format json` 与
 `app doctor --format json` 还会返回 `next` 命令列表，Agent 可以从失败检查或
 preview-ready 修复直接进入下一步验证，不必自行猜测命令。
 
@@ -129,8 +129,8 @@ supacloud db context --root . --module_file db/modules.ts --target public.case_c
 `autoFixable` 仅统计可预览条目；`inputRequired` 和 `manualFixes` 分别统计其余建议。可预览不代表通过 AST 校验、获得写入授权或业务正确；不会自动推断权限或降低策略要求。
 
 ```bash
-supacloud context --format json > context.json
-supacloud doctor --format json > doctor.json
+supacloud app context --format json > context.json
+supacloud app doctor --format json > doctor.json
 supacloud app fix --from-doctor doctor.json --fix-index 0          # 预览
 supacloud app fix --from-doctor doctor.json --fix-index 0 --write  # 审查后应用
 ```

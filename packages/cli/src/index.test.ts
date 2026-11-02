@@ -13,12 +13,9 @@ const CONTEXT_KEYS = new Set([
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPACLOUD_API_URL",
-    "SUPACLOUD_MANAGEMENT_API_URL",
-    "MANAGEMENT_API_URL",
     "SUPACLOUD_API_TOKEN",
     "SUPACLOUD_PROJECT_REF",
     "SUPACLOUD_READ_ONLY",
-    "X_PROJECT_REF",
     "SUPACLOUD_HOST",
     "SUPACLOUD_ENV",
     "SUPACLOUD_READ_ONLY",
@@ -151,6 +148,12 @@ function releaseBasePath(projectRef: string, deploymentId: string): string {
 }
 
 describe("supacloud process contract", () => {
+    test("does not expose the internal applications release surface", async () => {
+        const response = await runProjectCli(["applications", "--help"]);
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Unknown command: applications");
+    });
+
     test("rolls back to the platform previous release without a release_id flag", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-previous-rollback-"));
         temporaryDirectories.push(workspace);
