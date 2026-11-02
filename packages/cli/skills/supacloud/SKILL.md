@@ -16,7 +16,7 @@ Use `supacloud` as the project-level control surface and keep durable changes re
    supacloud status
    ```
 
-   A missing remote project context does not block local `migration_new`, `db_diff`, or `db_reset`; it blocks remote inspection/apply until context is supplied.
+   A missing remote project context does not block local `app init/generate/context/check/doctor`, `migration_new`, `db_diff`, or `db_reset`; it blocks remote inspection/apply until context is supplied.
 
 2. Never place secrets, service-role keys, database URLs, passwords, or tokens in commands that will be logged, source files, migration files, or chat output.
 3. Treat schema, functions/RPC, triggers, RLS policies, indexes, grants, extensions, and seed/reference-data changes as migrations. Do not apply them through `database query`, `psql`, a dashboard SQL editor, or a raw Management API call.
@@ -39,8 +39,9 @@ and retry the unified command. Do not substitute a legacy endpoint when it fails
 The inspection and database-maintenance workflow below is not a deployment checklist.
 
 1. Classify the request using [references/command-map.md](references/command-map.md).
-2. For database work, load [references/database-workflow.md](references/database-workflow.md) and choose either new-change or historical-drift reconciliation.
-3. For AI-assisted database changes, first request bounded context:
+2. For application code changes, load [references/app-workflow.md](references/app-workflow.md) and use the init → context → generate → check → fix → verify loop.
+3. For database work, load [references/database-workflow.md](references/database-workflow.md) and choose either new-change or historical-drift reconciliation.
+4. For AI-assisted database changes, first request bounded context:
 
    ```bash
    supacloud db context --module_file db/modules.ts --module <module>
@@ -49,12 +50,30 @@ The inspection and database-maintenance workflow below is not a deployment check
 
    Use the returned source/test paths and ownership boundary; do not scan or
    edit the complete schema dump.
-4. Prefer the smallest read-only inspection that proves current state.
-5. Create or update version-controlled artifacts before remote writes.
-6. Verify locally, inspect the diff, and run the narrowest relevant tests.
-7. Preview remote changes with `--dry_run`.
-8. Apply only within the user-authorized environment and scope.
-9. Read back migration history and affected resources; report exact evidence and any remaining drift.
+5. Prefer the smallest read-only inspection that proves current state.
+6. Create or update version-controlled artifacts before remote writes.
+7. Verify locally, inspect the diff, and run the narrowest relevant tests.
+8. Preview remote changes with `--dry_run`.
+9. Apply only within the user-authorized environment and scope.
+10. Read back migration history and affected resources; report exact evidence and any remaining drift.
+
+## Application authoring
+
+Use the stable local loop when creating or changing application code:
+
+```bash
+supacloud app init --root ./orders-api --name orders-api --format json
+supacloud app context --format json
+supacloud app generate --kind feature --name case-approval --format json
+supacloud app check --format json
+supacloud app doctor --format json
+supacloud app verify-plan --target <module>
+```
+
+Read [references/app-workflow.md](references/app-workflow.md) for the full
+sequence and guardrails. `app fix` previews one reviewed diagnostic repair;
+`--write` applies it and requires a recheck. These local app actions do not need
+remote project credentials.
 
 ## Project endpoint inspection
 

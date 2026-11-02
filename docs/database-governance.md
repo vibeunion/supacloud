@@ -10,6 +10,37 @@ SQL 源文件（实现）
         -> reconcileModule（对账）+ lintSql（静态检查）
 ```
 
+## Compiler 治理模式
+
+`@supacloud/compiler` 的 `databaseGovernance.mode` 分为三档：
+
+| 模式 | 离线源契约与 SQL Lint | 实时 Catalog 对账 | 典型用途 |
+|---|---|---|---|
+| `off` | 否 | 否 | 仅限存量项目迁移例外 |
+| `check` | 是 | 否 | 日常开发、普通构建、离线 CI |
+| `enforce` | 是 | 是 | 发布/部署门禁，需要只读数据库连接 |
+
+新生成的数据库 starter 默认使用 `check`，因此普通 `compile/check/build`
+不要求数据库网络或凭据，构建保持确定性。生成的 integration 开发配置只在
+显式本地集成模式下切换为 `enforce`，并使用 loopback 数据库。
+
+推荐把 `check` 固定在 `supacloud.config.ts`，把 `enforce` 放到独立的发布门禁：
+
+```ts
+databaseGovernance: {
+  mode: "check",
+  projectRoot: ".",
+  moduleFile: "db/modules.ts",
+  databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
+  schemas: ["public"],
+}
+```
+
+发布环境由平台或 CI 注入只读连接，并执行 `enforce`；也可以使用
+`supacloud db module_check` 做同一套 Catalog 对账。业务仓库不应提交生产连接
+URL，也不应要求每个开发者手工准备生产数据库凭据。`enforce` 失败即阻止生成，
+不会自动生成契约、迁移或修复数据库。
+
 ## 目录约定
 
 数据库 starter 默认使用 Drizzle 维护结构，并通过 `supacloud-db check`

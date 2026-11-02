@@ -68,6 +68,10 @@ requirement and equivalent lifecycle tests.
 Bind subscriptions to an explicit owner and propagate cancellation to native I/O.
 Never automatically retry a write or turn observable delivery into durable ack.
 Do not bypass authorization, transactions, idempotency or audit to simplify code.
+Start with \`supacloud app context --format json\` and \`supacloud app doctor --format json\`;
+do not scan the whole repository first or treat generated/ as source. Apply only
+reviewed diagnostic fixes with \`supacloud app fix --fix <file>\`, then re-run check
+and doctor. Never weaken compiler governance to hide a diagnostic.
 Run bun run check; include negative and cleanup tests. Never store live credentials.
 `;
 
