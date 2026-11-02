@@ -17,8 +17,9 @@ Business persistence and authorization remain application-owned.
 The default is now `minimal`: a feature-local health endpoint, its test, compiler,
 Elysia host and frontend SDK dependencies. It does not generate approval,
 attachments, Worker or GraphQL examples. Use `--template command` for the complete
-durable reference described below, or explicitly select `http` / `edge`.
-Existing applications and explicit recipe layouts are not reorganized.
+durable reference described below. HTTP routes and background jobs are added
+through `app generate`; there are no separate `http` or `edge` starter templates.
+Existing applications are not reorganized.
 
 After the CLI release containing this command is published:
 
@@ -78,7 +79,7 @@ New compiler and runtime fixes must be published with the CLI feature. Before
 publication, `bun run scripts/check_app_starter.ts` tests locally packed artifacts
 together; this is not evidence that those versions already exist on npm.
 
-The default command template includes database tooling. HTTP/Edge templates do not
+The command template includes database tooling; the minimal template does not
 install Drizzle or require `db:generate`. For the command template, `db:generate`
 is an explicit first-use setup step after installation; commit `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
@@ -222,7 +223,7 @@ this production entry. The memory server refuses staging and production.
 
 ### Build Output Ownership
 
-New `minimal`, `http`, `command` and `edge` starters keep backend bundles in
+New `minimal` and `command` starters keep backend bundles in
 `output/supacloud/`, separate from a Vite frontend's default `dist/`.
 Vite normally empties its output directory when rebuilding. Placing an App or
 Function bundle under that directory can delete it on a later frontend build;

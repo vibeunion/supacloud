@@ -19,11 +19,10 @@ afterEach(async () => {
 test("official starters emit the enhanced strict TypeScript baseline", () => {
     const starters = [
         appStarterFiles("strict-command"),
-        ...(["minimal", "http", "edge"] as const)
-            .map((template) => appTemplateFiles("strict-app", template, {
-                "@supacloud/js": "^0.0.0",
-                "@supabase/supabase-js": "^0.0.0",
-            })),
+        appTemplateFiles("strict-app", "minimal", {
+            "@supacloud/js": "^0.0.0",
+            "@supabase/supabase-js": "^0.0.0",
+        }),
     ];
     for (const files of starters) {
         const config: unknown = JSON.parse(requireValue(files["tsconfig.json"]));
@@ -98,13 +97,11 @@ test("the database starter registers live Catalog governance while default check
     expect(appStarterFiles("governed")["db/modules.ts"]).toContain('name: "starter"');
     expect(appStarterFiles("governed")["scripts/dev.ts"])
         .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');
-    for (const template of ["minimal", "http", "edge"] as const) {
-        const files = appTemplateFiles("plain", template, {
-            "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
-        });
-        expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
-        expect(files["database.sources.json"]).toBeUndefined();
-    }
+    const files = appTemplateFiles("plain", "minimal", {
+        "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
+    });
+    expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
+    expect(files["database.sources.json"]).toBeUndefined();
 });
 
 test("starter routes use explicit status response maps", () => {
@@ -122,10 +119,6 @@ test("starter route schemas live in contract-only files", () => {
     expect(framework["src/review/review.ts"]).not.toContain("export const HealthResult");
     expect(framework["src/review/contracts.ts"]).toContain("export const HealthResult");
     expect(framework["src/review/uploads.ts"]).toContain('from "./contracts"');
-
-    const http = appTemplateFiles("example", "http");
-    expect(http["src/orders/orders.ts"]).toContain('from "./contracts"');
-    expect(http["src/orders/contracts.ts"]).toContain("export const OrderResult");
 
     const minimal = appTemplateFiles("example", "minimal", {
         "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
@@ -348,11 +341,10 @@ test("starter documents external unified identity without adding an identity run
 test("official starters emit the enhanced strict TypeScript baseline", () => {
     const starters = [
         appStarterFiles("strict-app"),
-        ...(["minimal", "http", "edge"] as const)
-            .map((template) => appTemplateFiles("strict-app", template, {
-                "@supacloud/js": "^0.0.0",
-                "@supabase/supabase-js": "^0.0.0",
-            })),
+        appTemplateFiles("strict-app", "minimal", {
+            "@supacloud/js": "^0.0.0",
+            "@supabase/supabase-js": "^0.0.0",
+        }),
         appStarterFiles("strict-command"),
     ];
     for (const files of starters) {

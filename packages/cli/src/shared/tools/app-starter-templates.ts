@@ -1,10 +1,9 @@
 import starterMetadata from "./starter-metadata.json" with { type: "json" };
-import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata } = starterMetadata.packages;
 
-export type StarterTemplate = "minimal" | "http" | "command" | "edge";
+export type StarterTemplate = "minimal" | "command";
 export interface StarterSdkDependencies {
   "@supacloud/js": string;
   "@supabase/supabase-js": string;
@@ -91,8 +90,7 @@ export function createCompiledModules(): never {
 }
 `;
 
-function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Record<string, string> {
-  const minimal = sdkDependencies !== undefined;
+function baseFiles(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
@@ -116,7 +114,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         effect: "4.0.5",
         elysia: "2.0.0-rc.1",
-        ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
+        ...sdkDependencies,
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
@@ -148,230 +146,10 @@ export default defineSupacloudConfig();
 `,
     "src/application.ts": APPLICATION_SOURCE(name),
     "generated/application.ts": GENERATED_BOOTSTRAP,
-    ...(minimal ? {} : {
-      "REACTIVE.md": STARTER_REACTIVE_GUIDE,
-      "AGENTS.md": STARTER_REACTIVE_AGENTS,
-      "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
-    }),
     "scripts/environment.ts": STARTER_ENVIRONMENT,
     "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
     "scripts/dev.ts": DEV_SCRIPT,
     "scripts/serve.ts": SERVE_SCRIPT,
-  };
-}
-
-function httpTemplate(name: string): Record<string, string> {
-  return {
-    ...baseFiles(name),
-    "src/orders/contracts.ts": `import { t } from "elysia";
-export const OrderParams = t.Object({ id: t.String({ minLength: 1 }) });
-export const CreateOrderBody = t.Object({ name: t.String({ minLength: 1 }) });
-export const OrderResult = t.Object({ id: t.String(), name: t.String() });
-export const HealthResult = t.Object({ ok: t.Boolean() });
-`,
-    "src/orders/orders.ts": `import { Effect } from "effect";
-import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
-import { status } from "elysia";
-import { OrderParams, CreateOrderBody, OrderResult, HealthResult } from "./contracts";
-@Controller("/orders")
-export class OrdersController {
-  @Get("/health", {
-    responses: { 200: HealthResult },
-    effect: { required: true, dependencies: [], errors: [], retry: "none" },
-  })
-  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
-
-  @Get("/:id", {
-    params: OrderParams,
-    responses: { 200: OrderResult },
-    effect: { required: true, dependencies: [], errors: [], retry: "none" },
-  })
-  get(@Param("id") id: string): Effect.Effect<{ id: string; name: string }, never, never> {
-    return Effect.succeed({ id, name: "demo" });
-  }
-
-  @Post("/", {
-    body: CreateOrderBody,
-    responses: { 201: OrderResult },
-    effect: { required: true, dependencies: [], errors: [], retry: "none" },
-  })
-  create(@Body() body: { name: string }) {
-    return Effect.succeed(status(201, { id: "demo", name: body.name }));
-  }
-}
-
-export const OrdersFeature = defineFeatureSlice({
-  name: "orders",
-  tags: ["type:feature"],
-  controllers: [OrdersController],
-});
-`,
-    "scripts/sandbox.ts": `import { createMemorySandbox } from "@supacloud/elysia";
-import { createCompiledModules } from "../generated/application";
-
-export function createDemo() {
-  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
-    throw new Error("Memory adapters are restricted to development and test");
-  }
-  return createMemorySandbox({
-    modules: createCompiledModules(),
-    identity: { authenticated: true, subject: "local-demo" },
-  });
-}
-`,
-    "tests/orders.test.ts": `import { expect, test } from "bun:test";
-import { createDemo } from "../scripts/sandbox";
-
-test("health, read and create routes follow the declared HTTP contract", async () => {
-  const sandbox = createDemo();
-  expect((await sandbox.request("/orders/health")).status).toBe(200);
-  expect((await sandbox.request("/orders/1")).status).toBe(200);
-  const created = await sandbox.request("/orders", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "first" }),
-  });
-  expect(created.status).toBe(201);
-  expect(await created.json()).toEqual({ id: "demo", name: "first" });
-  const invalid = await sandbox.request("/orders", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
-  });
-  expect(invalid.status).toBe(422);
-});
-`,
-    "README.md": `# ${name}
-
-HTTP API golden path.
-
-## Local Development
-
-\`\`\`sh
-bun install
-bun run check
-bun run dev
-\`\`\`
-
-The server binds only to 127.0.0.1:3000 by default.
-
-\`\`\`sh
-curl http://127.0.0.1:3000/orders/health
-curl http://127.0.0.1:3000/orders/1
-curl -X POST http://127.0.0.1:3000/orders \\
-  -H 'Content-Type: application/json' -d '{"name":"first"}'
-\`\`\`
-
-The generated feature declares explicit route schemas so the compiler can detect
-route/schema drift. Keep request and response shapes in \`src/orders/orders.ts\`;
-do not widen them to \`unknown\` just to accept unvalidated data.
-
-## Production Boundary
-
-\`bun run build\` emits an application factory, not a server. Import \`createApp\`
-from \`output/supacloud/application.js\` in your trusted host and supply real dependency,
-request-context and command-governance adapters. The memory sandbox is
-development/test only.
-
-Keep backend bundles outside the frontend output directory. Vite normally cleans
-\`dist/\` before building; server artifacts placed there can be deleted or included
-in a public frontend archive. Use disjoint output directories, not a disabled
-frontend clean step. Compiler source artifacts remain in \`generated/\`.
-
-## Inspection And Repair
-
-\`\`\`sh
-supacloud app context --root . --target orders --format json
-supacloud app doctor --root .
-\`\`\`
-`,
-  };
-}
-
-function edgeTemplate(name: string): Record<string, string> {
-  return {
-    ...baseFiles(name),
-    "src/sync/sync.ts": `import { Injectable, Job, defineFeatureSlice } from "@supacloud/app";
-
-/**
- * Worker/edge golden path: a declared, retry-bounded job with an explicit
- * idempotency requirement. The platform owns scheduling, retry and DLQ; the
- * handler stays side-effect explicit and must not assume exactly-once execution.
- */
-@Injectable()
-@Job({
-  name: "sync.orders",
-  mode: "task",
-  idempotency: "required",
-  timeoutSec: 60,
-  maxAttempts: 3,
-})
-export class SyncOrdersJob {
-  async run(): Promise<{ ok: boolean }> {
-    return { ok: true };
-  }
-}
-
-export const SyncFeature = defineFeatureSlice({
-  name: "sync",
-  tags: ["type:feature"],
-  providers: [SyncOrdersJob],
-  jobs: [SyncOrdersJob],
-});
-`,
-    "scripts/sandbox.ts": `import { createMemorySandbox } from "@supacloud/elysia";
-import { createCompiledModules } from "../generated/application";
-
-export function createDemo() {
-  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
-    throw new Error("Memory adapters are restricted to development and test");
-  }
-  return createMemorySandbox({
-    modules: createCompiledModules(),
-    identity: { authenticated: true, subject: "local-worker" },
-  });
-}
-`,
-    "tests/sync.test.ts": `import { expect, test } from "bun:test";
-import { SyncOrdersJob } from "../src/sync/sync";
-
-test("the declared job handler is deterministic and idempotent by construction", async () => {
-  const job = new SyncOrdersJob();
-  expect(await job.run()).toEqual({ ok: true });
-  expect(await job.run()).toEqual({ ok: true });
-});
-`,
-    "README.md": `# ${name}
-
-Worker / Edge golden path.
-
-## Local Development
-
-\`\`\`sh
-bun install
-bun run check
-bun run test
-\`\`\`
-
-\`src/sync/sync.ts\` declares a platform job with an explicit mode, timeout,
-attempt bound and idempotency requirement. The platform schedules and retries;
-the handler must be safe to run more than once and must not assume exactly-once
-execution.
-
-## Production Boundary
-
-The job runs through the platform worker/edge adapter, not the local memory
-sandbox. Bind persistence, authorization and audit to durable adapters before
-invoking it in production. Do not schedule destructive work without an
-idempotency key.
-
-\`bun run build\` emits \`output/supacloud/application.js\`, an application factory,
-not a deployed Worker. Keep it outside any frontend output directory such as
-\`dist/\`; frontend clean steps and public archives must not own server bundles.
-
-## Inspection And Repair
-
-\`\`\`sh
-supacloud app context --root . --target sync --format json
-supacloud app doctor --root .
-\`\`\`
-`,
   };
 }
 
@@ -468,8 +246,8 @@ Use fixed trusted HTTPS endpoints and never retry an uncertain write.
 
 GraphQL is optional; this starter has no synthetic GraphQL schema.
 For a complete persistent command/attachment example, create a separate reference
-project with app init --template command. The http and edge recipes also remain
-explicit options; do not install every recipe into this application.
+project with app init --template command. Do not install every recipe into this
+application.
 
 ## Integration and delivery
 
@@ -486,56 +264,8 @@ regeneration, then validate types, database permissions and authenticated behavi
   };
 }
 
-/** Explicit recipes retain their existing layouts; new projects default to minimal. */
-export function appTemplateFiles(name: string, template: StarterTemplate, sdkDependencies?: StarterSdkDependencies): Record<string, string> {
-  if (template === "minimal") {
-    if (!sdkDependencies) throw new Error("Minimal template requires the initializer's SDK dependency versions");
-    return minimalTemplate(name, sdkDependencies);
-  }
-  if (template !== "http" && template !== "edge") throw new Error("Use appStarterFiles for the command recipe");
-  const files = template === "http" ? httpTemplate(name) : edgeTemplate(name);
-  const feature = template === "http" ? "OrdersFeature" : "SyncFeature";
-  const source = template === "http" ? "./orders/orders" : "./sync/sync";
-  return {
-    ...files,
-    "src/app.module.ts": `import { Module } from "@supacloud/app";
-import { ${feature} } from "${source}";
-
-// Compose feature modules here. Do not make unrelated features import each other.
-@Module({
-  name: "application-root",
-  tags: ["type:app"],
-  imports: [${feature}],
-})
-export class AppModule {}
-`,
-    "README.md": files["README.md"] + `
-## Application Composition
-
-\`src/app.module.ts\` is the application composition root. Register additional
-feature modules there, rather than importing them from another feature.
-The compiler discovers this declaration; no runtime container lookup is needed.
-
-With the matching candidate/released CLI installed:
-
-\`\`\`sh
-supacloud app generate --kind resource --name inventory --register-in src/app.module.ts --dry-run --format json
-supacloud app generate --kind resource --name inventory --register-in src/app.module.ts
-bun run check
-bun run inspect
-\`\`\`
-
-The resource is an asynchronous read skeleton, not implemented CRUD. Its Service
-rejects until an authorized data adapter is supplied; implement it and replace the
-placeholder test together. Generation does not grant access or connect a database.
-
-\`bun run inspect\` delegates to the installed compiler and prints the current
-source graph as JSON without starting the app or regenerating artifacts. This is
-not a live mounted-route report. Configuration remains trusted project code.
-After changing source, compile before using artifact-backed CLI graph/explain.
-
-In CI, run \`bun run check:generated\` before commands that regenerate artifacts;
-\`bun run check\` is the convenient bootstrap path for a newly created project.
-`,
-  };
+/** New projects use the minimal layout; the command recipe is emitted separately. */
+export function appTemplateFiles(name: string, template: "minimal", sdkDependencies: StarterSdkDependencies): Record<string, string> {
+  if (template !== "minimal") throw new Error("Use appStarterFiles for the command recipe");
+  return minimalTemplate(name, sdkDependencies);
 }

@@ -17,7 +17,7 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 ## 快速开始
 
 ```bash
-supacloud app init --root ./orders-api --name orders-api   # 默认最小项目；也可显式选择 http/command/edge
+supacloud app init --root ./orders-api --name orders-api   # 默认最小项目；也可显式选择 command
 cd orders-api && bun install && bun run check
 
 supacloud app context --format json > context.json   # AI 读取已编译的项目图
