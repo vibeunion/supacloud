@@ -22,6 +22,27 @@ const tenantDb = Object.assign(
       if (query.includes("c.relkind = 'r'")) {
         return [{ schema: "public", name: "items", rls_enabled: true, rls_forced: false }];
       }
+      if (query.includes("bool_or(r.rolsuper)")) {
+        return [{
+          role: "app_user",
+          superuser: false,
+          create_database: false,
+          create_role: false,
+          replication: false,
+          bypass_rls: false,
+          database_create: false,
+          reachable_roles: ["app_user"],
+        }];
+      }
+      if (query.includes("has_schema_privilege(r.oid")) {
+        return [{ schema: "public", can_create: false }];
+      }
+      if (query.includes("pg_has_role(current_user, c.relowner")) {
+        return [];
+      }
+      if (query.includes("'schema:'")) {
+        return [];
+      }
       if (query.includes("pg_catalog.obj_description")) {
         return [{
           schema_name: "public",
@@ -74,6 +95,14 @@ function moduleRequest(body: unknown) {
   });
 }
 
+function roleRequest(body: unknown) {
+  return request("role-check", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("database governance routes", () => {
   beforeEach(() => {
     tenantQueries.length = 0;
@@ -98,6 +127,35 @@ describe("database governance routes", () => {
       reports: [{ module: "items", ok: true, issues: [] }],
     });
     expect(tenantQueries.some((query) => query.includes("FROM pg_class"))).toBe(true);
+  });
+
+  test("inspects the project role boundary without exposing credentials", async () => {
+    const response = await roleRequest({ schemas: ["public"] });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      ok: true,
+      schemas: ["public"],
+      state: {
+        role: "app_user",
+        superuser: false,
+        schemaCreate: { public: false },
+        ownedRelations: [],
+        ownedObjects: [],
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("test-password");
+    expect(tenantQueries.some((query) => query.includes("bool_or(r.rolsuper)"))).toBe(true);
+  });
+
+  test("rejects excessive role schemas before opening the tenant database", async () => {
+    const schemas = Array.from({ length: 17 }, (_, index) => `s${index}`);
+    const response = await roleRequest({ schemas });
+
+    expect(response.status).toBe(422);
+    expect(managementDb).not.toHaveBeenCalled();
+    expect(tenantQueries).toHaveLength(0);
   });
 
   test("rejects malformed module declarations before opening the tenant database", async () => {

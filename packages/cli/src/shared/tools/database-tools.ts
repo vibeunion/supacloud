@@ -526,6 +526,7 @@ export function registerDatabaseTools(
         "connections", "stats", "slow_queries",
         "list_migrations", "migration_inventory", "delivery_migration_plan", "project_url", "generate_types",
         "database_lint", "db_lint", "rpc_catalog", "list_rpcs", "migration_import", "governance_check",
+        "role_check",
     ] as const;
     const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"] as const;
     const remoteActions = [...readActions, ...localActions] as const;
@@ -556,7 +557,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             // schema
             schema: optional(Type.String(), "[describe_columns/list_indexes/list_constraints/rls_status/rls_policies/create_table_rls/database_lint] Schema name (default: public)"),
             table: optional(Type.String(), "[describe_columns/indexes/constraints/rls_*] Table name"),
-            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types/rpc_catalog/governance_check] Schemas array"),
+            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types/rpc_catalog/governance_check/role_check] Schemas array"),
             modules: optional(Type.Array(Type.Record(Type.String(), Type.Unknown()), { maxItems: 64 }), "[governance_check] JSON-safe database module declarations"),
             // auth users
             user_id: optional(Type.String(), "[get_auth_user] User UUID"),
@@ -1231,6 +1232,26 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         throw new Error("Invalid database module check response");
                     }
                     text = formatModuleCheckReport(r.data);
+                    if (!result["ok"]) {
+                        return { content: [{ type: "text" as const, text }], isError: true };
+                    }
+                    break;
+                }
+                case "role_check": {
+                    const schemasList = args.schemas && args.schemas.length > 0 ? args.schemas : (args.schema ? [args.schema] : ["public"]);
+                    const safeRef = projectRefPathSegment(ref, "role_check");
+                    const r = await managementHttp().post(`/v1/projects/${safeRef}/database/role-check`, {
+                        schemas: schemasList,
+                    });
+                    if (!r.ok) {
+                        return { content: [{ type: "text" as const, text: `❌ Database role check failed (${r.status})` }], isError: true };
+                    }
+                    const result = recordPayload(r.data);
+                    if (!result || typeof result["ok"] !== "boolean" || !recordPayload(result["state"])
+                        || (result["error"] !== undefined && typeof result["error"] !== "string")) {
+                        throw new Error("Invalid database role check response");
+                    }
+                    text = JSON.stringify(r.data, null, 2);
                     if (!result["ok"]) {
                         return { content: [{ type: "text" as const, text }], isError: true };
                     }
