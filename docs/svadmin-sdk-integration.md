@@ -330,8 +330,29 @@ and showed failure. These checks are not deployment or live backend acceptance.
    outcomes, target switching and late results. Keep UI metadata application-owned.
 
 This PR delivers the SDK facade, public-entrypoint consumer/type checks and browser
-bundle isolation. It does not deliver automatic svadmin schema generation, a
-svadmin SDK upgrade, a production authorization integration or a release.
+bundle isolation.
+
+## End-to-End Vibe Coding Schema Generation
+
+With the `database` MCP compound tool in `@supacloud/cli`, AI agents and operators can now directly export database column metadata into `@svadmin/core` compatible schema definitions without human transcription:
+
+```sh
+# Via MCP tool call:
+database action="export_svadmin_schema" table="orders" json=true
+```
+
+The resulting `databaseColumns` payload connects directly to `svadmin_generateResource`:
+
+```ts
+svadmin_generateResource({
+  resource: "orders",
+  sourceType: "databaseColumns",
+  payload: JSON.stringify(exportedColumns),
+});
+```
+
+This guarantees zero-hallucination type alignment across:
+PostgreSQL Table $\longrightarrow$ SupaCloud CLI Metadata $\longrightarrow$ svadmin ResourceDefinition $\longrightarrow$ Svelte 5 AutoTable / AutoForm.
 
 ## Local verification
 

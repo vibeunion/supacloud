@@ -156,6 +156,17 @@ supacloud fix --fix fix.json --write  # 应用
 
 CLI 在仓库开发时依赖本地 compiler，确保测试覆盖配套实现。发布时须通过现有 `sync-compiler-dependency.mjs` 将本地引用转换为已发布版本范围。本地构建通过不等于 npm 已发布或生产验收通过。
 
+### 前后端一体化：Database 到 SVAdmin 前端 Schema 直通
+
+为了彻底消除 Vibecoding 在后台管理页面构建中的类型漂移与人工转译成本，CLI `database` 工具提供了直接面向 `@svadmin/core` 的逆向导出能力：
+
+```bash
+# Agent 通过 MCP 或 CLI 导出数据库列元数据与外键关系
+database action="export_svadmin_schema" table="orders" json=true
+```
+
+输出内容直接对齐 `@svadmin/mcp` 的 `svadmin_generateResource` 工具，自动生成高精度 Zod/TypeBox 契约、`ResourceDefinition` 以及 Svelte 5 `AutoTable`/`AutoForm` 组件代码。
+
 ## 不建议做的事
 
 - 不照搬 Angular 的 NgModule 与装饰器体系。

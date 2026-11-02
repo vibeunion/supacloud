@@ -2223,4 +2223,66 @@ describe("database migration helpers", () => {
       sql: "INSERT INTO items VALUES (1)",
     })).rejects.toThrow("- action:");
   });
+
+  test("export_svadmin_schema exports structured SVAdmin column metadata", async () => {
+    const callback = captureDatabaseTool({
+      post: async (_path: string, body: { sql: string }) => {
+        if (body.sql.includes("information_schema.columns")) {
+          return {
+            ok: true,
+            status: 200,
+            data: {
+              rows: [
+                { column_name: "id", data_type: "bigint", is_nullable: "NO", column_default: null },
+                { column_name: "name", data_type: "text", is_nullable: "NO", column_default: null },
+                { column_name: "user_id", data_type: "bigint", is_nullable: "YES", column_default: null },
+              ],
+            },
+          };
+        }
+        if (body.sql.includes("pg_constraint")) {
+          return {
+            ok: true,
+            status: 200,
+            data: {
+              rows: [
+                { name: "posts_pkey", type: "p", definition: "PRIMARY KEY (id)" },
+                { name: "posts_user_id_fkey", type: "f", definition: "FOREIGN KEY (user_id) REFERENCES users(id)" },
+              ],
+            },
+          };
+        }
+        return { ok: true, status: 200, data: { rows: [] } };
+      },
+    });
+
+    // 1. Text mode
+    const textRes = await callback({
+      action: "export_svadmin_schema",
+      ref: "proj",
+      table: "posts",
+    });
+
+    expect(textRes.isError).toBeFalsy();
+    expect(textRes.content[0].text).toContain("SVAdmin Schema Definition for 'posts'");
+    expect(textRes.content[0].text).toContain("svadmin_generateResource");
+    expect(textRes.content[0].text).toContain("[PK]");
+    expect(textRes.content[0].text).toContain("[FK -> users]");
+
+    // 2. JSON mode
+    const jsonRes = await callback({
+      action: "export_svadmin_schema",
+      ref: "proj",
+      table: "posts",
+      json: true,
+    });
+
+    expect(jsonRes.isError).toBeFalsy();
+    const parsed = JSON.parse(jsonRes.content[0].text);
+    expect(parsed.resource).toBe("posts");
+    expect(parsed.sourceType).toBe("databaseColumns");
+    expect(parsed.columns).toHaveLength(3);
+    expect(parsed.columns[0]).toEqual({ name: "id", type: "bigint", nullable: false, isPrimary: true, isForeignKey: false });
+    expect(parsed.columns[2]).toEqual({ name: "user_id", type: "bigint", nullable: true, isPrimary: false, isForeignKey: true, referencesResource: "users" });
+  });
 });
