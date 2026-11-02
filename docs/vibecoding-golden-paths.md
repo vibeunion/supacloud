@@ -30,9 +30,9 @@ and verification obligations.
 supacloud app init --root ./orders-api --name orders-api   # minimal; explicit recipes
 cd orders-api && bun install && bun run check
 
-supacloud context --format json > context.json   # AI reads the compiled project graph
-supacloud doctor --format json > doctor.json     # actionable diagnostics + fix plan
-supacloud fix --from-doctor doctor.json --fix-index 0  # preview one fix from the report
+supacloud app context --format json > context.json   # AI reads the compiled project graph
+supacloud app doctor --format json > doctor.json     # actionable diagnostics + fix plan
+supacloud app fix --from-doctor doctor.json --fix-index 0  # preview one fix from the report
 ```
 
 ## Single entry point
@@ -45,16 +45,16 @@ supacloud app init        # minimal project; src/features/<feature>
 supacloud app dev         # run the project's existing local dev script
 supacloud app watch       # compiler-only watch
 supacloud app verify-plan --target health  # focused tests, never a full-suite fallback
-supacloud generate ...        # generators
-supacloud check               # compiler governance checks
-supacloud context --format json
-supacloud doctor              # actionable health report
-supacloud fix --from-doctor doctor.json --fix-index 0  # preview a fix from doctor output
+supacloud app generate ...        # generators
+supacloud app check               # compiler governance checks
+supacloud app context --format json
+supacloud app doctor              # actionable health report
+supacloud app fix --from-doctor doctor.json --fix-index 0  # preview a fix from doctor output
 supacloud deploy              # delivery
 ```
 
-The `app` namespace remains as the low-level form (`supacloud app <verb>`); the
-top-level verbs are aliases with the same implementation and execution policy.
+The `app` namespace is the only application-authoring surface. There are no
+top-level verb aliases; use `supacloud app <verb>` for every local action.
 
 > `app dev` delegates to `bun run dev` (watch, compile, restart).
 > `supacloud dev ...` is the separate remote project
@@ -82,7 +82,7 @@ Ordinary reads use the existing RLS-protected PostgREST client; GraphQL remains
 an opt-in contract pipeline and part of the explicit command reference.
 
 `generated/**` is produced by the compiler and is intentionally committed so
-`supacloud check` can detect drift. Never edit `generated/**` directly.
+`supacloud app check` can detect drift. Never edit `generated/**` directly.
 
 ## Generator-first
 
@@ -90,13 +90,13 @@ Common tasks have stable, re-runnable generators whose output is readable,
 editable and repeatable — never a black box:
 
 ```bash
-supacloud generate --kind module   --name orders
-supacloud generate --kind controller --module orders
-supacloud generate --kind command  --module orders --name accept
-supacloud generate --kind query    --module orders --name list
-supacloud generate --kind job      --module orders --name sync-orders
-supacloud generate --kind contract --module orders --name accept
-supacloud generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase \
+supacloud app generate --kind module   --name orders
+supacloud app generate --kind controller --module orders
+supacloud app generate --kind command  --module orders --name accept
+supacloud app generate --kind query    --module orders --name list
+supacloud app generate --kind job      --module orders --name sync-orders
+supacloud app generate --kind contract --module orders --name accept
+supacloud app generate --kind feature  --name case-approval --permission cases:approve --rpc approveCase \
   --database-source db/schema.ts --database-table public.reviews --database-type ReviewRow
 ```
 
@@ -118,7 +118,7 @@ cross-layer references and unconfigured provider capabilities.
 
 ## AI-native context
 
-`supacloud context --format json` returns the compiled module graph, providers,
+`supacloud app context --format json` returns the compiled module graph, providers,
 routes/commands/jobs, diagnostics and the commands an agent should run. A
 `--target <name>` narrows the result to one module neighborhood. Targets may be
 module names/classes or owned provider, controller, command, job and query names.
@@ -178,8 +178,8 @@ does not bypass AST checks, grant write permission, or prove business correctnes
 An invalid policy is never automatically replaced with a weaker one.
 
 ```bash
-supacloud context --format json > context.json
-supacloud doctor --format json > doctor.json
+supacloud app context --format json > context.json
+supacloud app doctor --format json > doctor.json
 supacloud app fix --from-doctor doctor.json --fix-index 0          # preview
 supacloud app fix --from-doctor doctor.json --fix-index 0 --write  # apply after review
 ```

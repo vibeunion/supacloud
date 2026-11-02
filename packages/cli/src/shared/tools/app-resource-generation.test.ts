@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerAppAliases, registerAppTools, runAppTool, type ToolResult } from "./app-tools";
+import { registerAppTools, runAppTool, type ToolResult } from "./app-tools";
 import { compileProject } from "@supacloud/compiler";
 
 const roots: string[] = [];
@@ -160,12 +160,12 @@ test("outside directories and duplicate aliases fail without writing", async () 
     expect(await readdir(root)).toEqual([]);
 });
 
-test("app and top-level generate expose the same resource and preview options", () => {
+test("the app generate schema exposes resource and preview options", () => {
     const schemas: Record<string, Record<string, unknown>> = {};
     const server = { tool(name: string, _description: string, schema: Record<string, unknown>) { schemas[name] = schema; } };
     registerAppTools(server);
-    registerAppAliases(server);
-    for (const name of ["app", "generate"]) {
+    const name = "app";
+    {
         expect(schemas[name]).toHaveProperty("dry_run");
         expect(schemas[name]).toHaveProperty("dry-run");
         expect(schemas[name]).toHaveProperty("register_in");

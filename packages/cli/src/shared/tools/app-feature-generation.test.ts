@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerAppAliases, registerAppTools, runAppTool, type ToolResult } from "./app-tools";
+import { registerAppTools, runAppTool, type ToolResult } from "./app-tools";
 
 const roots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -83,12 +83,12 @@ test("feature conflicts fail before writing siblings or changing a parent", asyn
     expect(await readdir(directory)).toEqual(["case-approval.model.ts"]);
 });
 
-test("both CLI tool surfaces expose feature and explicit governance", () => {
+test("the app tool exposes feature and explicit governance", () => {
     const schemas: Record<string, Record<string, unknown>> = {};
     const server = { tool(name: string, _description: string, schema: Record<string, unknown>) { schemas[name] = schema; } };
     registerAppTools(server);
-    registerAppAliases(server);
-    for (const name of ["app", "generate"]) {
+    const name = "app";
+    {
         expect(JSON.stringify(schemas[name]?.kind)).toContain("feature");
         expect(schemas[name]).toHaveProperty("permission");
         expect(schemas[name]).toHaveProperty("read-permission");

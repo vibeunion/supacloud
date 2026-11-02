@@ -277,8 +277,8 @@ frontend clean step. Compiler source artifacts remain in \`generated/\`.
 ## Inspection And Repair
 
 \`\`\`sh
-supacloud context --root . --target orders --format json
-supacloud doctor --root .
+supacloud app context --root . --target orders --format json
+supacloud app doctor --root .
 \`\`\`
 `,
   };
@@ -368,8 +368,8 @@ not a deployed Worker. Keep it outside any frontend output directory such as
 ## Inspection And Repair
 
 \`\`\`sh
-supacloud context --root . --target sync --format json
-supacloud doctor --root .
+supacloud app context --root . --target sync --format json
+supacloud app doctor --root .
 \`\`\`
 `,
   };

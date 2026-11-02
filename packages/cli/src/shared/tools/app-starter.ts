@@ -886,7 +886,7 @@ and static execution plans, without provider values or source expressions.
 The app context entry point retains its module workflow and adds a separate
 execution evidence block when --events and --request-id are provided together.
 It requires an explicit --target and --format json, rejects --write, and
-resolves relative event paths from --root. The top-level context alias supports
+resolves relative event paths from --root. The app context action supports
 the same flags. Omit both execution flags for the unchanged authoring context.
 The optional --events example expects a trusted host
 to capture approved onExecution metadata in { "version": 1, "events": [...] }.
