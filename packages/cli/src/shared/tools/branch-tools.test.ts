@@ -115,7 +115,7 @@ describe("branch CLI promotion", () => {
                 return ok(promotionPlan({ warnings: ["password=secret"], password: "secret" }));
             },
         });
-        const result = await callback({ ...PLAN, json: true });
+        const result = await callback({ ...PLAN, format: "json" });
         expect(payload(result)).toMatchObject({
             ok: true, operation: "branch.promotion_plan", project_ref: "parent", branch_ref: "preview",
             plan: { plan_checksum: PLAN_CHECKSUM },
@@ -167,7 +167,7 @@ describe("branch CLI promotion", () => {
         ["unknown block code", { safe_to_apply: false, blocked: [{ code: "password", version: "202607180001", name: null, message: "secret" }] }],
     ] satisfies Array<[string, Record<string, unknown>]>)("rejects %s plans before reporting success", async (_name, overrides) => {
         const callback = captureBranchTool({ get: async () => ok(promotionPlan(overrides)) });
-        const result = await callback({ ...PLAN, json: true });
+        const result = await callback({ ...PLAN, format: "json" });
         expect(result.isError).toBe(true);
         expect(payload(result).error).toEqual({ code: "INVALID_RESPONSE", http_status: 200 });
         expect(text(result)).not.toContain("secret");
@@ -211,7 +211,7 @@ describe("branch CLI promotion", () => {
 
     test("returns sanitized JSON success with reviewed and readback checksums kept separate", async () => {
         const callback = captureBranchTool({ post: async () => ok(promotionResult()) });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(payload(result)).toMatchObject({
             ok: true, operation: "branch.promote", project_ref: "parent", branch_ref: "preview",
             reviewed_plan_checksum: PLAN_CHECKSUM, plan: { plan_checksum: "c".repeat(64) },
@@ -229,7 +229,7 @@ describe("branch CLI promotion", () => {
             },
         });
         expect(text(await callback(PROMOTE))).toContain("unchanged");
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(result.isError).toBeUndefined();
         expect(reads).toBe(2);
         expect(payload(result)).toMatchObject({
@@ -253,7 +253,7 @@ describe("branch CLI promotion", () => {
         }), "DESTRUCTIVE_CONFIRMATION_REQUIRED"],
     ] satisfies Array<[string, Record<string, unknown>, string]>)("preflight stops %s without POST", async (_name, plan, reason) => {
         const callback = captureBranchTool({ get: async () => ok(plan) });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(result.isError).toBe(true);
         expect(payload(result)).toMatchObject({
             error: { code: "MUTATION_NOT_SUCCEEDED", http_status: null },
@@ -270,7 +270,7 @@ describe("branch CLI promotion", () => {
         ["foreign", ok(promotionPlan({ branch_ref: "foreign" })), "INVALID_RESPONSE", 200],
     ] satisfies Array<[string, HttpResult, string, number | null]>)("preflight %s is not an unknown mutation", async (_name, response, code, status) => {
         const callback = captureBranchTool({ get: async () => response });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(result.isError).toBe(true);
         expect(payload(result)).toMatchObject({
             error: { code, http_status: status }, mutation_sent: false,
@@ -289,7 +289,7 @@ describe("branch CLI promotion", () => {
                 return ok(promotionResult({ applied: [entry], plan: promotionPlan({ pending: [], applied: [entry] }) }));
             },
         });
-        const result = await callback({ ...PROMOTE, confirm_destructive: true, json: true });
+        const result = await callback({ ...PROMOTE, confirm_destructive: true, format: "json" });
         expect(payload(result)).toMatchObject({ ok: true, unchanged: false, mutation_sent: true });
         expect(writes).toBe(1);
     });
@@ -323,7 +323,7 @@ describe("branch CLI promotion", () => {
         const callback = captureBranchTool({
             post: async () => { calls += 1; return ok(body); },
         });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(calls).toBe(1);
         expect(result.isError).toBe(true);
         expect(payload(result)).toMatchObject({
@@ -347,7 +347,7 @@ describe("branch CLI promotion", () => {
                 return { ok: false, status, ...flags, data: { error: "password=secret", code: "secret", statements: ["drop table accounts"] } };
             },
         });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(calls).toBe(1);
         expect(payload(result)).toMatchObject({
             error: { code: "OUTCOME_UNKNOWN", http_status: expectedStatus },
@@ -380,7 +380,7 @@ describe("branch CLI promotion", () => {
                 data: { applied: [migrationEntry({ version: "secret\nversion" })] },
             }),
         });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(payload(result).reported_applied_versions).toEqual([]);
         expect(text(result)).not.toContain("secret");
     });
@@ -392,7 +392,7 @@ describe("branch CLI promotion", () => {
                 data: { code: "promotion_plan_changed", error: "password=secret", applied: [migrationEntry()] },
             }),
         });
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(payload(result)).toMatchObject({
             error: { code: "HTTP_ERROR", http_status: 409 },
             server_code: "promotion_plan_changed", reported_applied_versions: ["202607180001"],
@@ -404,7 +404,7 @@ describe("branch CLI promotion", () => {
         const callback = captureBranchTool({
             get: async () => ({ ok: false, status: 500, data: { error: "password=secret" } }),
         });
-        const result = await callback({ ...PLAN, json: true });
+        const result = await callback({ ...PLAN, format: "json" });
         expect(payload(result).error).toEqual({ code: "HTTP_ERROR", http_status: 500 });
         expect(text(result)).not.toContain("secret");
     });
@@ -422,7 +422,7 @@ describe("branch CLI promotion", () => {
     test("blocks read-only writes without invoking transport, including JSON", async () => {
         const callback = captureBranchTool({}, { projectRef: "parent", readOnly: true });
         expect(text(await callback(PROMOTE))).toContain("read-only");
-        const result = await callback({ ...PROMOTE, json: true });
+        const result = await callback({ ...PROMOTE, format: "json" });
         expect(result.isError).toBe(true);
         expect(payload(result)).toMatchObject({ ok: false, reason: "READ_ONLY", operation: "branch.promote" });
     });
@@ -438,7 +438,7 @@ describe("branch CLI promotion", () => {
         const stdout = spyOn(console, "log").mockImplementation(() => undefined);
         const stderr = spyOn(console, "error").mockImplementation(() => undefined);
         try {
-            await runCli(tools, ["branch", "promote", "--branch_ref", "preview", "--plan_checksum", PLAN_CHECKSUM, "--json"]);
+            await runCli(tools, ["branch", "promote", "--branch_ref", "preview", "--plan_checksum", PLAN_CHECKSUM, "--format", "json"]);
             expect(stdout).toHaveBeenCalledTimes(1);
             const output: unknown = stdout.mock.calls[0]?.[0];
             expect(typeof output).toBe("string");
@@ -495,7 +495,7 @@ describe("branch CLI promotion", () => {
         });
         try {
             const callback = register(new HttpTransport({ baseUrl: server.url.toString(), token: "local-test" }));
-            const result = await callback({ ...PROMOTE, json: true });
+            const result = await callback({ ...PROMOTE, format: "json" });
             expect(calls).toBe(1);
             expect(reads).toBe(1);
             expect(result.isError).toBe(true);
@@ -517,7 +517,7 @@ describe("branch CLI promotion", () => {
         });
         try {
             const callback = register(new HttpTransport({ baseUrl: server.url.toString(), token: "local-test" }));
-            expect(payload(await callback({ ...PROMOTE, json: true }))).toMatchObject({
+            expect(payload(await callback({ ...PROMOTE, format: "json" }))).toMatchObject({
                 ok: true, unchanged: true, promoted: false, mutation_sent: false,
             });
             expect(requests).toEqual(["GET /v1/projects/parent/branches/preview/promote/plan"]);

@@ -1855,7 +1855,7 @@ describe("database migration helpers", () => {
     const result = await callback({
       action: "lint_migrations",
       sql: "DROP TABLE public.temp_users;",
-      json: true,
+      format: "json",
     });
 
     const parsed = JSON.parse(result.content[0].text);
@@ -2024,7 +2024,7 @@ describe("database migration helpers", () => {
     expect(result.content[0].text).toContain("approve_order");
     expect(result.content[0].text).toContain("ALTER FUNCTION public.approve_order() SET search_path = pg_catalog;");
 
-    const jsonResult = await callback({ action: "db_lint", ref: "proj", json: true });
+    const jsonResult = await callback({ action: "db_lint", ref: "proj", format: "json" });
     expect(JSON.parse(jsonResult.content[0].text).total_issues).toBe(2);
 
     const strictResult = await callback({ action: "database_lint", ref: "proj", strict: true });
@@ -2080,7 +2080,7 @@ describe("database migration helpers", () => {
     expect(result.content[0].text).toContain("⚡ [COMMAND]");
     expect(result.content[0].text).toContain("🔍 [QUERY]");
 
-    const jsonResult = await callback({ action: "list_rpcs", ref: "proj", json: true });
+    const jsonResult = await callback({ action: "list_rpcs", ref: "proj", format: "json" });
     expect(JSON.parse(jsonResult.content[0].text).total_rpcs).toBe(2);
   });
 
@@ -2274,7 +2274,7 @@ describe("database migration helpers", () => {
       action: "export_svadmin_schema",
       ref: "proj",
       table: "posts",
-      json: true,
+      format: "json",
     });
 
     expect(jsonRes.isError).toBeFalsy();

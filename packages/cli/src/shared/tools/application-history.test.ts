@@ -164,11 +164,8 @@ test("app history defaults to a summary and JSON flags preserve full receipts", 
   expect(text).toContain(history.active_activation_id!);
   expect(text).toContain(`Next cursor: ${history.next_cursor}`);
   expect(text).not.toContain('"schema"');
-  for (const format of [{ json: true }, { format: "json" }]) {
-    const result = await handler({ ...args, ...format });
-    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ ok: true, history });
-  }
-  await expect(handler({ ...args, json: true, format: "text" })).rejects.toThrow("cannot be combined");
+  const result = await handler({ ...args, format: "json" });
+  expect(JSON.parse(result.content[0]!.text)).toMatchObject({ ok: true, history });
   const empty: ApplicationActivationHistory = { ...history, activations: [], next_cursor: null };
   const emptyText = await appTool(applicationTool(empty).handler)(args);
   expect(emptyText.content[0]!.text).toContain("No successful activations on this page.");
@@ -218,17 +215,15 @@ test("CLI process handles JSON flags, scoped help and read-only production", asy
     const text = await run(flags);
     if (text.code !== 0) throw new Error(`CLI history failed: ${text.stderr}\n${text.stdout}`);
     expect(text.stdout).toContain("Completed (UTC)");
-    for (const output of [["--json"], ["--format", "json"]]) {
-      const result = await run([...flags, ...output]);
-      expect(result.code).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, history });
-    }
+    const result = await run([...flags, "--format", "json"]);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, history });
     const help = await run(["--help"]);
-    expect(help.stderr).toContain("--json");
+    expect(help.stderr).toContain("--format");
     expect(help.stderr).toContain("--cursor");
     const foreign = await run([...flags, "--ref", "other"]);
     expect(foreign.code).toBe(1);
     expect(foreign.stderr).toContain("cannot target a different project");
-    expect(requests).toEqual(["GET", "GET", "GET"]);
+    expect(requests).toEqual(["GET", "GET"]);
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
 }, 30_000);

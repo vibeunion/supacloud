@@ -8,8 +8,8 @@ ID and whether it matches the current authority.
 
 ```bash
 supacloud --env test app history --id reviews --environment_id test
-supacloud --env test app history --id reviews --environment_id test --limit 20 --json
-supacloud --env test app history --id reviews --environment_id test --cursor <next_cursor> --json
+supacloud --env test app history --id reviews --environment_id test --limit 20 --format json
+supacloud --env test app history --id reviews --environment_id test --cursor <next_cursor> --format json
 ```
 
 The platform reuses the existing private mutation journal, validates successful
@@ -19,7 +19,7 @@ builds, allocates, migrates, activates, restores, or scans immutable artifacts.
 History is not proof of retained artifact availability, runtime health or rollback
 readiness; use runtime observations and the verified rollback snapshot for those.
 Text mode shows completion time, the current marker, full activation IDs and short
-release IDs. `--json` or `--format json` returns full identities and predecessor
+release IDs. `--format json` or `--format json` returns full identities and predecessor
 links. Empty pages are explicit; a next-page cursor is displayed only when present.
 Concurrent observations fail with 409; retry the read, never replay a write.
 

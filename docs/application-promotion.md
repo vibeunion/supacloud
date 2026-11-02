@@ -23,7 +23,7 @@ supacloud --env production app promote --id reviews \
 或在执行策略允许时使用 `--ref`。源项目、环境和不可变版本分别由必填的
 `--source_ref`、`--source_environment_id`、`--source_release_id` 指定。
 作用域帮助同时列出源、目标和输出参数，不需要先配置 API 凭据。
-`--json` 或 `--format json` 返回完整结构化计划，不能将 `--json` 与 `--format text` 混用。
+`--format json` 返回完整结构化计划；不要与 `--format text` 混用。
 
 平台验证源制品、当前激活、成功 mutation 回执、实时 readiness 和近期
 authenticated smoke 证据；目标使用自己的不可变配置版本、迁移账本和 CAS。

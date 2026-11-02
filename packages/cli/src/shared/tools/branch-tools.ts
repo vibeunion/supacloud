@@ -371,14 +371,14 @@ export function registerBranchTools(
             data_mode: optional(stringEnum(["schema_only", "full_clone"]), "[create] Preview data mode (default: schema_only)"),
             plan_checksum: optional(Type.String(), "[promote] Reviewed plan checksum from promotion_plan"),
             confirm_destructive: optional(Type.Boolean(), "[promote] Confirm reviewed destructive migrations"),
-            json: optional(Type.Boolean(), "[promotion_plan/promote] Return machine-readable JSON"),
+            format: optional(stringEnum(["text", "json"]), "[promotion_plan/promote] Output format (default: text)"),
         },
         async (args) => {
             const action = requireString(args.action, "action");
             const ref = resolveProjectRef(args.ref, options.projectRef);
             const writeAction = action === "create" || action === "delete" || action === "promote";
             if (writeAction && options.readOnly) {
-                return args.json && action === "promote"
+                return args.format === "json" && action === "promote"
                     ? releaseControlFailure("branch.promote", "MUTATION_NOT_SUCCEEDED", null, {
                         project_ref: ref, branch_ref: args.branch_ref, reason: "READ_ONLY",
                     })
@@ -406,14 +406,14 @@ export function registerBranchTools(
                 });
                 if (!result.ok) {
                     return promotionFailure(releaseControlFailure("branch.promotion_plan", "HTTP_ERROR",
-                        result.transportError ? null : result.status, scope), args.json === true, false);
+                        result.transportError ? null : result.status, scope), args.format === "json", false);
                 }
                 const plan = parsePromotionPlan(result.data, { parentRef: ref, branchRef });
                 if (result.status !== 200 || !plan) {
                     return promotionFailure(releaseControlFailure("branch.promotion_plan", "INVALID_RESPONSE",
-                        result.status, scope), args.json === true, false);
+                        result.status, scope), args.format === "json", false);
                 }
-                return args.json
+                return args.format === "json"
                     ? releaseControlSuccess("branch.promotion_plan", { ...scope, plan })
                     : { content: [{ type: "text", text: formatPromotionPlan(plan) }] };
             } else if (action === "promote") {
@@ -435,13 +435,13 @@ export function registerBranchTools(
                 if (!preflight.ok) {
                     return promotionFailure(releaseControlFailure("branch.promote", "HTTP_ERROR",
                         preflight.transportError ? null : preflight.status,
-                        { ...beforeMutation, reason: "PREFLIGHT_FAILED" }), args.json === true, false);
+                        { ...beforeMutation, reason: "PREFLIGHT_FAILED" }), args.format === "json", false);
                 }
                 const plan = parsePromotionPlan(preflight.data, { parentRef: ref, branchRef });
                 if (preflight.status !== 200 || !plan) {
                     return promotionFailure(releaseControlFailure("branch.promote", "INVALID_RESPONSE",
                         preflight.status, { ...beforeMutation, reason: "PREFLIGHT_UNVERIFIED" }),
-                        args.json === true, false);
+                        args.format === "json", false);
                 }
                 const preflightReason = plan.plan_checksum !== planChecksum ? "PLAN_CHANGED"
                     : !plan.safe_to_apply ? "PLAN_BLOCKED"
@@ -450,10 +450,10 @@ export function registerBranchTools(
                 if (preflightReason) {
                     return promotionFailure(releaseControlFailure("branch.promote", "MUTATION_NOT_SUCCEEDED",
                         null, { ...beforeMutation, reason: preflightReason, observed_plan_checksum: plan.plan_checksum }),
-                        args.json === true, false);
+                        args.format === "json", false);
                 }
                 if (plan.pending.length === 0) {
-                    return args.json
+                    return args.format === "json"
                         ? releaseControlSuccess("branch.promote", {
                             ...beforeMutation, promoted: false, unchanged: true, mode: "migrations",
                             applied: [], plan, branch_data_copied: false, reviewed_plan_checksum: planChecksum,
@@ -475,15 +475,15 @@ export function registerBranchTools(
                         mutation_sent: true,
                         reported_applied_versions: appliedVersions(result),
                         ...(safePromotionCode(result) ? { server_code: safePromotionCode(result) } : {}),
-                    }), args.json === true, result.transportError === true || result.responseReadError === true
+                    }), args.format === "json", result.transportError === true || result.responseReadError === true
                         || result.status === 408 || result.status >= 500);
                 }
                 const promoted = parsePromotionResult(result.data, { parentRef: ref, branchRef }, plan.pending);
                 if (result.status !== 200 || !promoted) {
                     return promotionFailure(releaseControlFailure("branch.promote", "OUTCOME_UNKNOWN",
-                        result.status, { ...state, mutation_sent: true }), args.json === true, true);
+                        result.status, { ...state, mutation_sent: true }), args.format === "json", true);
                 }
-                return args.json
+                return args.format === "json"
                     ? releaseControlSuccess("branch.promote", {
                         ...promoted, unchanged: false, mutation_sent: true, reviewed_plan_checksum: planChecksum,
                     })

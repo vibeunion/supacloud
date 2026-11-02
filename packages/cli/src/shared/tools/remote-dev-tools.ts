@@ -67,7 +67,6 @@ export const remoteDevToolSchema = {
     delete: optional(Type.Boolean(), "Delete remote files absent locally"),
     reload: optional(Type.Boolean(), "Reload the affected target after sync (default: true)"),
     interval_ms: optional(Type.Number(), "Watch debounce interval in milliseconds (default: 300)"),
-    json: optional(Type.Boolean(), "Emit machine-readable JSON"),
     apply: optional(Type.Boolean(), "Apply generated migrations to the selected test database"),
     drizzle_config: optional(Type.String(), "Drizzle config path"),
     migrations_dir: optional(Type.String(), "Migration directory"),

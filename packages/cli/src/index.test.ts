@@ -434,7 +434,7 @@ describe("supacloud process contract", () => {
         expect(response.stderr).toContain("--dir");
         expect(response.stderr).toContain("--strict");
         expect(response.stderr).toContain("--fail_on_medium");
-        expect(response.stderr).toContain("--json");
+        expect(response.stderr).toContain("--format");
         expect(response.stderr).not.toContain("--schema");
     });
 
