@@ -26,7 +26,7 @@ import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerLiteCliTools } from "./shared/tools/lite-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
 import { registerMcpTools } from "./shared/tools/mcp-tools";
-import { registerAppAliases, registerAppTools } from "./shared/tools/app-tools";
+import { registerAppTools } from "./shared/tools/app-tools";
 import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
@@ -378,13 +378,6 @@ EXAMPLES
   ${preferredCommand} app context --root . --target CaseModule --events execution.ndjson --request-id request-123 --format json
   ${preferredCommand} app doctor --root .
   ${preferredCommand} app fix --root . --fix fix.json --write
-  ${preferredCommand} generate --kind module --name billing
-  ${preferredCommand} generate --kind job --module billing --name sync-orders
-  ${preferredCommand} generate --kind contract --module billing --name issue-invoice
-  ${preferredCommand} check --root . --strict
-  ${preferredCommand} context --format json
-  ${preferredCommand} context --target CaseModule --format json
-  ${preferredCommand} doctor
   ${preferredCommand} db context --root . --module_file db/modules.ts --module cases
   ${preferredCommand} db context --root . --module_file db/modules.ts --target public.case_create
   ${preferredCommand} db lint --root . --module_file db/modules.ts
@@ -465,7 +458,6 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         activeContext: context,
     })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
-    Object.assign(tools, captureTools((server) => registerAppAliases(server)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
         projectRef: context.projectRef || undefined,
         apiUrl: context.apiUrl || undefined,

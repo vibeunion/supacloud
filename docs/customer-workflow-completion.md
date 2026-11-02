@@ -138,7 +138,7 @@ Scenario: Preserve the existing execution envelope
 
 Scenario: Correlate logs through the application entry point
   Given an explicit module target and bounded execution metadata
-  When app context or its top-level alias selects a request ID in JSON mode
+  When app context selects a request ID in JSON mode
   Then the existing module workflow is retained with a separate execution evidence block
   And source files and generated drift remain unchanged
 
@@ -634,12 +634,12 @@ correlating with a specific build. This does not prove live deployment identity.
 ### Application context entry point
 
 The same execution metadata is now available through the main authoring entry
-point and its top-level alias, without calling the compiler CLI directly:
+point, without calling the compiler CLI directly:
 
 ```sh
 supacloud app context --root . --target review \
   --events execution.ndjson --request-id request-123 --format json
-supacloud context --root . --target review \
+supacloud app context --root . --target review \
   --events execution.ndjson --request_id request-123 --format json
 ```
 
