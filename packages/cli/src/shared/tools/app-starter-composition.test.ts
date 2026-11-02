@@ -32,6 +32,9 @@ for (const [template, feature, source] of [
         expect(manifest.scripts.inspect).toBe("bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js graph --json");
         expect(files["README.md"]).toContain("--register-in src/app.module.ts");
         expect(files["README.md"]).toContain("not a live mounted-route report");
+        expect(files["AGENTS.md"]).toContain("supacloud app context --format json");
+        expect(files["AGENTS.md"]).toContain("supacloud app doctor --format json");
+        expect(files["AGENTS.md"]).toContain("supacloud app fix --fix <file>");
     });
 
     test(`${template} init writes the documented root and never rewrites an existing project`, async () => {
