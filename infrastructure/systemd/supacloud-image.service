@@ -1,0 +1,24 @@
+[Unit]
+Description=SupaCloud Image Service (Rust)
+Documentation=https://github.com/vibeunion/supacloud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=IMAGE_SERVICE_BINARY=/usr/local/bin/supacloud-image
+Environment=IMAGE_SERVICE_HOST=127.0.0.1
+Environment=IMAGE_SERVICE_PORT=9010
+EnvironmentFile=-/etc/supabase/image-service.env
+ExecStartPre=/bin/sh -ec 'test -x "$${IMAGE_SERVICE_BINARY}"'
+ExecStart=/bin/sh -ec 'exec "$${IMAGE_SERVICE_BINARY}"'
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+CapabilityBoundingSet=
+MemoryHigh=256M
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

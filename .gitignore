@@ -167,5 +167,9 @@ OPENCODE.md
 .zed/CONVENTIONS.md
 CODEBUDDY.md
 
+# Rust build artifacts
+target/
+**/target/
+
 # Repository workspace audit evidence
 .workspace/
