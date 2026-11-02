@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.53.0...compiler-v0.53.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **compiler:** accept canonical macOS temporary roots ([#2339](https://github.com/vibeunion/supacloud/issues/2339)) ([c9f5074](https://github.com/vibeunion/supacloud/commit/c9f5074947dfe701583b6a2bb11a18633eb77db2))
+
 ## [0.53.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.52.2...compiler-v0.53.0) (2026-11-01)
 
 
