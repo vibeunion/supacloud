@@ -149,8 +149,8 @@ The minimal default precedes these opt-in recipes; it does not install all three
 New business metadata uses `@supacloud/app/core`, while the frontend continues to
 use `@supacloud/js` with its existing Supabase session and selected UI framework.
 
-Support a small number of stable paths first, each with a template, generator,
-example, tests and a deployment flow:
+Support a small number of stable paths first, each with a generator, example,
+tests and a deployment flow:
 
 1. **HTTP API** — controllers, route contracts and request/response validation.
 2. **Database transaction and Command** — durable authorization, idempotency,

@@ -56,8 +56,9 @@ The initializer needs no platform credentials and never overwrites existing
 projects. The default minimal template includes a health feature with a colocated
 test, strict compilation, an Elysia service, SDK dependencies and explicit
 development/test/staging/production environment wrappers. Select
-`--template command` for the persistent governed-command reference, or `http` /
-`edge` for their existing recipes. The compiler is a development dependency.
+`--template command` for the persistent governed-command reference. Add HTTP
+routes and background jobs with `app generate`; there are no separate `http` or
+`edge` starter templates. The compiler is a development dependency.
 The demo binds to loopback and cannot run in staging/production. Production
 identity, persistence and durable governance must be supplied by the application.
 See [Application Starter](../../docs/application-starter.md) for the full contract.

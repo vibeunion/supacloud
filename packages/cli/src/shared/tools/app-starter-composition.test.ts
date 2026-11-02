@@ -1,54 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { initializeAppProject } from "./app-starter";
-import { appTemplateFiles } from "./app-starter-templates";
+import { expect, test } from "bun:test";
 import { resourceScaffold } from "./app-resource";
-
-const roots: string[] = [];
-afterEach(async () => {
-    for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
-});
-
-for (const [template, feature, source] of [
-    ["http", "OrdersFeature", "./orders/orders"],
-    ["edge", "SyncFeature", "./sync/sync"],
-] as const) {
-    test(`${template} starter declares its actual feature in an application composition root`, () => {
-        const files = appTemplateFiles("composition-test", template);
-        const root = files["src/app.module.ts"];
-        expect(root).toContain(`import { ${feature} } from "${source}"`);
-        expect(root).toContain('name: "application-root"');
-        expect(root).toContain('tags: ["type:app"]');
-        expect(root).toContain(`imports: [${feature}]`);
-        expect(root).not.toContain("createApplication");
-        expect(files[`src/${source.slice(2)}.ts`]).toContain(`export const ${feature}`);
-        expect(files["supacloud.config.ts"]).toContain("defineSupacloudConfig()");
-        expect(files["supacloud.config.ts"]).not.toContain("moduleBoundaryPreset");
-        expect(files["supacloud.config.ts"]).not.toContain("effect:");
-        const manifest = JSON.parse(files["package.json"]!);
-        expect(manifest.dependencies.elysia).toBe("2.0.0-rc.1");
-        expect(manifest.dependencies.effect).toBe("4.0.5");
-        expect(manifest.scripts.inspect).toBe("bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js graph --json");
-        expect(files["README.md"]).toContain("--register-in src/app.module.ts");
-        expect(files["README.md"]).toContain("not a live mounted-route report");
-        expect(files["AGENTS.md"]).toContain("supacloud app context --format json");
-        expect(files["AGENTS.md"]).toContain("supacloud app doctor --format json");
-        expect(files["AGENTS.md"]).toContain("supacloud app fix --fix <file>");
-    });
-
-    test(`${template} init writes the documented root and never rewrites an existing project`, async () => {
-        const root = await mkdtemp(join(tmpdir(), `starter-${template}-composition-`));
-        roots.push(root);
-        const expected = appTemplateFiles("composition-test", template);
-        await initializeAppProject({ root, name: "composition-test", template });
-        const actual = await readFile(join(root, "src/app.module.ts"), "utf8");
-        expect(actual).toBe(expected["src/app.module.ts"]);
-        await expect(initializeAppProject({ root, name: "composition-test", template })).rejects.toThrow();
-        expect(await readFile(join(root, "src/app.module.ts"), "utf8")).toBe(actual);
-    });
-}
 
 test("resource generation is async-ready without adding another validator or persistence library", () => {
     const files = resourceScaffold("inventory", "Inventory");

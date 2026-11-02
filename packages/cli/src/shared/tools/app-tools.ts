@@ -149,7 +149,7 @@ export interface AppToolArguments {
     wait?: boolean;
     timeout_seconds?: number;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource" | "feature";
-    template?: "minimal" | "http" | "command" | "edge";
+    template?: "minimal" | "command";
     name?: string;
     module?: string;
     permission?: string;
@@ -1882,7 +1882,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
-            template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
+            template: optional(stringEnum(["minimal", "command"]), "[init] Minimal application by default; command adds the persistent governed-command reference"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
