@@ -293,7 +293,7 @@ EXAMPLES
 
   ${preferredCommand} deploy init
   ${preferredCommand} env check
-  ${preferredCommand} env check --json
+  ${preferredCommand} env check --format json
   ${preferredCommand} status
   ${preferredCommand} deploy
   ${preferredCommand} --env test deploy
@@ -328,7 +328,7 @@ EXAMPLES
   ${preferredCommand} supabase db_dump --db_url "postgresql://..." --file backups/schema.sql
   ${preferredCommand} lite migrate --project_dir .
   ${preferredCommand} lite start --project_dir . --port 54321
-  ${preferredCommand} lite doctor --project_dir . --json
+  ${preferredCommand} lite doctor --project_dir . --format json
   ${preferredCommand} branch create --name feature-auth --data_mode schema_only
   ${preferredCommand} branch promotion_plan --branch_ref preview123
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>

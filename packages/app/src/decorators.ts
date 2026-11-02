@@ -298,6 +298,12 @@ export interface EffectErrorMapping {
   code: string;
   /** Optional safe public message; raw Effect failures are never exposed. */
   message?: string;
+  /** Use the failure value's own `code` string when it is non-empty and bounded. */
+  codeFromError?: boolean;
+  /** Use the failure value's own `message` string when it is non-empty and bounded. */
+  messageFromError?: boolean;
+  /** Use the failure value's own HTTP status when it is an integer from 400 to 599. */
+  statusFromError?: boolean;
 }
 
 export interface EffectRouteOptions {

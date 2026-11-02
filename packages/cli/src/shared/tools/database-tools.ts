@@ -713,17 +713,20 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                 }
                 case "export_svadmin_schema": {
                     if (!args.table) throw new Error("'table' required");
-                    const schemaLiteral = sqlStringLiteral(schema, "schema");
-                    const tableLiteral = sqlStringLiteral(args.table, "table");
-                    const qualifiedTable = `${quoteIdentifier(schema, "schema")}.${quoteIdentifier(args.table, "table")}`;
+                    const schemaName = validatedIdentifier(schema, "schema");
+                    const tableName = validatedIdentifier(args.table, "table");
+                    const schemaLiteral = `'${schemaName}'`;
+                    const tableLiteral = `'${tableName}'`;
+                    const regclassLiteral = `'${schemaName}.${tableName}'`;
                     const colSql = `SELECT column_name, data_type, is_nullable, column_default, character_maximum_length FROM information_schema.columns WHERE table_schema = ${schemaLiteral} AND table_name = ${tableLiteral} ORDER BY ordinal_position;`;
                     const colRes = await execSql(colSql);
                     if (!colRes.ok) throw new Error(`Failed to inspect columns (${colRes.status})`);
 
-                    const conSql = `SELECT conname as name, contype as type, pg_get_constraintdef(oid) as definition FROM pg_constraint WHERE connamespace = ${schemaLiteral}::regnamespace AND conrelid = ${qualifiedTable}::regclass;`;
+                    const conSql = `SELECT conname as name, contype as type, pg_get_constraintdef(oid) as definition FROM pg_constraint WHERE connamespace = ${schemaLiteral}::regnamespace AND conrelid = ${regclassLiteral}::regclass;`;
                     const conRes = await execSql(conSql);
+                    if (!conRes.ok) throw new Error(`Failed to inspect constraints (${conRes.status})`);
 
-                    const cols = buildSvadminColumns(colRes.data, conRes.ok ? conRes.data : []);
+                    const cols = buildSvadminColumns(colRes.data, conRes.data);
                     if (args.format === "json") {
                         return {
                             content: [{
@@ -1280,10 +1283,6 @@ function quoteIdentifier(value: unknown, label: string): string {
     return `"${validatedIdentifier(value, label)}"`;
 }
 
-function sqlStringLiteral(value: unknown, label: string): string {
-    return `'${validatedIdentifier(value, label)}'`;
-}
-
 function validatedIdentifier(value: unknown, label: string): string {
     if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value)) {
         throw new Error(`Invalid ${label} identifier`);
@@ -1571,15 +1570,15 @@ export function buildSvadminColumns(colData: unknown, conData: unknown): Svadmin
 }
 
 export function formatSvadminSchemaExport(table: string, columns: SvadminColumnMeta[]): string {
-    const jsonPayload = JSON.stringify(columns, null, 2);
-    return `🚀 SVAdmin Schema Definition for '${table}'\n\n` +
-        `Pass this payload directly to svadmin_generateResource to produce complete UI components:\n` +
-        `  svadmin_generateResource({\n` +
-        `    resource: '${table}',\n` +
-        `    sourceType: 'databaseColumns',\n` +
-        `    payload: ${JSON.stringify(jsonPayload)}\n` +
-        `  })\n\n` +
-        `Column Metadata (${columns.length} columns):\n` +
+    const payload = {
+        resource: table,
+        sourceType: "databaseColumns",
+        columns,
+    };
+    return `SVAdmin schema for '${table}'\n\n` +
+        `Pass this object to svadmin_generateResource. The CLI does not generate the resource.\n` +
+        `${JSON.stringify(payload, null, 2)}\n\n` +
+        `Column metadata (${columns.length}):\n` +
         columns.map((c) => `  - ${c.name}: ${c.type}${c.isPrimary ? " [PK]" : ""}${c.isForeignKey ? ` [FK -> ${c.referencesResource ?? "inferred"}]` : ""}${c.nullable ? " (nullable)" : " (required)"}`).join("\n");
 }
 
