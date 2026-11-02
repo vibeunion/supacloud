@@ -97,11 +97,8 @@ jobs:
           node --version
           bun --version
 
-      - name: Install dependencies
-        working-directory: packages/management-api
-        run: bun install --frozen-lockfile
-      - name: Install delivery dependencies
-        run: bun install --frozen-lockfile --cwd packages/delivery
+      - name: Install Management API dependencies
+        run: bash scripts/prepare_management_api_dependencies.sh
 
       - name: Type check
         working-directory: packages/management-api
@@ -632,8 +629,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
       - name: Install local test dependencies
         run: |
-          (cd packages/delivery && bun install --frozen-lockfile)
-          (cd packages/management-api && bun install --frozen-lockfile)
+          bash scripts/prepare_management_api_dependencies.sh
           sudo apt-get update
           sudo apt-get install -y ca-certificates curl
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -668,9 +664,7 @@ jobs:
           docker compose -f docker/self-host/docker-compose.yml config --quiet
 
       - name: Install systemd renderer test dependencies
-        run: |
-          (cd packages/delivery && bun install --frozen-lockfile)
-          (cd packages/management-api && bun install --frozen-lockfile)
+        run: bash scripts/prepare_management_api_dependencies.sh
 
       - name: Validate shell script syntax
         run: |
@@ -737,13 +731,8 @@ jobs:
           node --version
           bun --version
 
-      - name: Install delivery dependencies
-        working-directory: packages/delivery
-        run: bun install --frozen-lockfile
-
-      - name: Install management API dependencies
-        working-directory: packages/management-api
-        run: bun install --frozen-lockfile
+      - name: Install Management API dependencies
+        run: bash scripts/prepare_management_api_dependencies.sh
 
       - name: Install edge-runtime dependencies for cross-package unit fixtures
         working-directory: packages/edge-runtime
@@ -833,10 +822,7 @@ jobs:
           test "$ready" = "true"
 
       - name: Install Management API dependencies
-        working-directory: packages/management-api
-        run: |
-          bun install --frozen-lockfile --cwd ../delivery
-          bun install --frozen-lockfile
+        run: bash scripts/prepare_management_api_dependencies.sh
 
       - name: Initialize Docker metadata database
         working-directory: packages/management-api
@@ -1076,11 +1062,9 @@ jobs:
           bun --version
 
       - name: Install dependencies
-        working-directory: packages/management-api
         run: |
-          bun install --frozen-lockfile --cwd ../delivery
-          bun install --frozen-lockfile
-          cd ../edge-runtime && bun install --frozen-lockfile
+          bash scripts/prepare_management_api_dependencies.sh
+          (cd packages/edge-runtime && bun install --frozen-lockfile)
 
       - name: Initialize Database
         working-directory: packages/management-api
@@ -1324,8 +1308,9 @@ jobs:
       - name: Typecheck Caddy build contracts
         working-directory: packages/management-api
         run: |
-          bun install --frozen-lockfile --cwd ../delivery
-          bun install --frozen-lockfile
+          cd ../..
+          bash scripts/prepare_management_api_dependencies.sh
+          cd packages/management-api
           bun run typecheck:caddy-tests
 
       - name: Build Caddy Linux amd64 binary
@@ -1458,13 +1443,8 @@ jobs:
             caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-binaries-
             caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-
 
-      - name: Install delivery dependencies
-        working-directory: packages/delivery
-        run: bun install --frozen-lockfile
-
-      - name: Install dependencies
-        working-directory: packages/management-api
-        run: bun install --frozen-lockfile
+      - name: Install Management API dependencies
+        run: bash scripts/prepare_management_api_dependencies.sh
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
