@@ -96,6 +96,28 @@ getOrder(): Effect.Effect<Order, OrderNotFound, OrderApi> {
 }
 ```
 
+A mapping entry may also opt into values carried by the failure itself. This is
+for families of codes that cannot be enumerated statically (for example one
+service-role misconfiguration reported under several diagnostic codes):
+
+```ts
+errors: [{
+  tag: "FA_SERVICE_ROLE_REQUIRED",
+  status: 503,
+  code: "FA_SERVICE_ROLE_REQUIRED",
+  codeFromError: true,
+  messageFromError: true,
+  statusFromError: true,
+}],
+```
+
+All three flags default to `false` and must be boolean literals, so the declared `code`, `message` and
+`status` stay authoritative unless a route opts in. Instance values are bounded
+(120 characters for `code`, 500 for `message`, and an integer from 400 to 599
+for `status`), must be non-empty, and never replace the declared tag. Keep
+`codeFromError` limited to families whose codes are already part of the public
+API contract.
+
 `dependencies` is checked against the declared Effect environment text. The
 compiler does not attempt to reimplement Effect's runtime type system; it
 ensures that the route's public declaration, generated descriptor and

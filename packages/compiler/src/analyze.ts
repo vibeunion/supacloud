@@ -2423,6 +2423,23 @@ function parseController(
                   const code = stringLiteralProp(errorExpr, "code");
                   const status = numberLiteralProp(errorExpr, "status");
                   const message = stringLiteralProp(errorExpr, "message");
+                  const codeFromError = booleanLiteralProp(errorExpr, "codeFromError");
+                  const messageFromError = booleanLiteralProp(errorExpr, "messageFromError");
+                  const statusFromError = booleanLiteralProp(errorExpr, "statusFromError");
+                  if (invalidBooleanProp(errorExpr, "codeFromError")
+                    || invalidBooleanProp(errorExpr, "messageFromError")
+                    || invalidBooleanProp(errorExpr, "statusFromError")) {
+                    ctx.diagnostics.push({
+                      severity: "error",
+                      code: "invalid-effect-errors",
+                      errorCode: "SC3034",
+                      docsUrl: "https://supacloud.dev/errors/SC3034",
+                      file,
+                      line: lineOf(errorExpr),
+                      message: `Route ${route.handler} effect.errors instance flags must be boolean literals.`,
+                    });
+                    continue;
+                  }
                   if (!tag || !code || status === undefined || !Number.isInteger(status) || status < 400 || status > 599) {
                     ctx.diagnostics.push({
                       severity: "error",
@@ -2435,7 +2452,13 @@ function parseController(
                     });
                     continue;
                   }
-                  errors.push({ tag, code, status, ...(message === undefined ? {} : { message }) });
+                  errors.push({
+                    tag, code, status,
+                    ...(message === undefined ? {} : { message }),
+                    ...(codeFromError === undefined ? {} : { codeFromError }),
+                    ...(messageFromError === undefined ? {} : { messageFromError }),
+                    ...(statusFromError === undefined ? {} : { statusFromError }),
+                  });
                 }
                 effect.errors = errors;
                 if (new Set(errors.map((entry) => entry.tag)).size !== errors.length) {
@@ -3330,6 +3353,21 @@ function numberLiteralProp(obj: ObjectLiteralExpression, name: string): number |
   if (!expr || !ts.isNumericLiteral(expr)) return undefined;
   const value = Number(expr.text);
   return Number.isFinite(value) ? value : undefined;
+}
+
+function booleanLiteralProp(obj: ObjectLiteralExpression, name: string): boolean | undefined {
+  const expr = getProp(obj, name);
+  if (!expr || !isBooleanLiteral(expr)) return undefined;
+  return expr.kind === ts.SyntaxKind.TrueKeyword;
+}
+
+function isBooleanLiteral(expr: Expression): boolean {
+  return expr.kind === ts.SyntaxKind.TrueKeyword || expr.kind === ts.SyntaxKind.FalseKeyword;
+}
+
+function invalidBooleanProp(obj: ObjectLiteralExpression, name: string): boolean {
+  const expr = getProp(obj, name);
+  return expr !== undefined && !isBooleanLiteral(expr);
 }
 
 function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
