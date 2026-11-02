@@ -71,8 +71,8 @@ AI Agent 可先预览，再安装 CLI 随包提供的应用/迁移 Skill：
 
 ```bash
 supacloud ai install_skill --dry_run
-supacloud ai install_skill                  # 默认 Codex
-supacloud ai install_skill --target claude  # 或 agents/project
+supacloud ai install_skill                  # Codex default
+supacloud ai install_skill --target claude  # or agents/project
 ```
 
 按 [CLI 指南](cli-guide.md)配置运维连接后，使用 Admin 执行主机与平台操作：
