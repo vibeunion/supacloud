@@ -10,10 +10,20 @@ execution model: the framework boundary receives an `Exit`, maps
 `Runtime<R>` type or FiberFailure wrapper APIs.
 
 ```text
-TypeBox/Elysia schemas -> HTTP boundary
-SupaCloud Compiler      -> module, dependency, error and retry governance
-Effect                  -> runtime execution, cancellation, timeout and retry
+Framework boundary      -> request entry and exit, auth, idempotency, audit, response protocol
+Effect program          -> one execution: typed failure, timeout, cancellation, composition
+Pure functions          -> validation, mapping and domain calculation; not Effect
+Receipts and jobs       -> durable replay of writes whose outcome may be unknown
 ```
+
+The framework adapter in `@supacloud/elysia` is the only production interpreter.
+Application code returns an `Effect` program. `dependencies: []` and
+`retry: "none"` are explicit contracts, not evidence that a retry policy is
+active. In-process retry is opt-in per failure: `retry: "explicit"` retries
+only mappings marked `retryable: true`. Those mappings must be 5xx and must
+not be `outcomeUnknown` or `statusFromError`. A 4xx, an unmapped failure, a
+defect, or a write whose result is unconfirmed is never repeated by the
+adapter. Replaying that write belongs to the command receipt or job lease.
 
 ## Default Strict Checks
 
@@ -33,9 +43,22 @@ export default defineSupacloudConfig({
     requireTimeoutForDependencies: true,
     forbidDirectRuntimeExecution: true,
     forbidDirectThrows: true,
+    requireRetryPolicy: true,
+    defaultRetry: "none",
   },
 });
 ```
+
+The resolved configuration defaults to `requireRetryPolicy: true` and
+`defaultRetry: "none"`. Every route that declares an Effect contract must
+write `retry`. `retry: "none"` is the required default policy, not evidence
+that a retry is running. `retry: "explicit"` remains a per-route opt-in that
+also needs `maxAttempts` and a retryable 5xx allow-list.
+
+When `requireRetryPolicy` is `false`, an omitted `retry` is materialized as
+`"none"` in the analyzed graph. It never enables retry. A project-level
+`defaultRetry` cannot be `"explicit"`; explicit retry belongs only on the
+route.
 
 All Effect governance checks default to `true`. `dependencies: []` and
 `errors: []` are valid explicit declarations for an Effect that has no
@@ -65,12 +88,14 @@ export default defineSupacloudConfig({
     requireTimeoutForDependencies: false,
     forbidDirectRuntimeExecution: false,
     forbidDirectThrows: false,
+    requireRetryPolicy: false,
+    defaultRetry: "none",
   },
 });
 ```
 
-When enabled, an Effect route must declare its logical environment and public
-failure mappings:
+When enabled, an Effect route must declare its logical environment, public
+failure mappings, and its retry policy:
 
 ```ts
 type OrderNotFound = { readonly _tag: "OrderNotFound" };
@@ -170,8 +195,10 @@ The adapter:
 - executes only values recognized as Effect programs;
 - rejects a non-Effect value when the route declares `required: true`;
 - applies the declared timeout;
-- applies bounded retries only when `retry: "explicit"` and `maxAttempts` is
-  present;
+- applies bounded retries only when `retry: "explicit"`, `maxAttempts` is
+  present, and the failure tag is on the `retryable: true` allow-list;
+- does not retry 4xx mappings, `outcomeUnknown` mappings, unmapped failures
+  or defects;
 - maps tagged failures to public HTTP errors without exposing raw failure
   values;
 - refuses explicit retry on a command that does not require idempotency.

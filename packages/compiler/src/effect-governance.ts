@@ -61,6 +61,14 @@ export function validateEffectPolicies(
             "Declare the logical services required by the Effect environment.",
           ));
         }
+        if (effect.retry === undefined && options.requireRetryPolicy !== false) {
+          diagnostics.push(diagnostic(
+            "effect-retry-required",
+            `Route ${label} declares an Effect contract but does not declare retry.`,
+            controller.file,
+            'Set effect.retry to "none". That is the required default; use "explicit" only with maxAttempts and a retryable 5xx allow-list.',
+          ));
+        }
         if (effect.retry === "explicit" && effect.maxAttempts === undefined) {
           diagnostics.push(diagnostic(
             "invalid-effect-retry",
@@ -80,6 +88,31 @@ export function validateEffectPolicies(
               `Route ${label} enables explicit Effect retry for non-idempotent command "${command.name}".`,
               controller.file,
               "Set command idempotency to \"required\" or use effect.retry: \"none\".",
+            ));
+          }
+          const retryable = (effect.errors ?? []).filter((entry) => entry.retryable === true);
+          if (retryable.length === 0) {
+            diagnostics.push(diagnostic(
+              "effect-retry-target-required",
+              `Route ${label} enables explicit Effect retry without a transient failure allow-list.`,
+              controller.file,
+              "Mark only 5xx failures that did not commit with retryable: true, or use effect.retry: \"none\".",
+            ));
+          }
+        }
+        for (const entry of effect.errors ?? []) {
+          if (entry.retryable !== true) continue;
+          const transient = effect.retry === "explicit"
+            && entry.outcomeUnknown !== true
+            && entry.statusFromError !== true
+            && entry.status >= 500
+            && entry.status <= 599;
+          if (!transient) {
+            diagnostics.push(diagnostic(
+              "effect-retryable-invalid",
+              `Route ${label} marks "${entry.tag}" retryable, but in-process retry is only for declared 5xx failures that are not outcome-unknown.`,
+              controller.file,
+              "Remove retryable, or keep it on a 5xx mapping with retry: \"explicit\" and without outcomeUnknown or statusFromError.",
             ));
           }
         }

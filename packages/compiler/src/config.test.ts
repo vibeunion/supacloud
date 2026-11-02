@@ -28,6 +28,8 @@ describe("SupaCloud default configuration", () => {
         requireTimeoutForDependencies: true,
         forbidDirectRuntimeExecution: true,
         forbidDirectThrows: true,
+        requireRetryPolicy: true,
+        defaultRetry: "none",
       },
     });
   });
@@ -125,6 +127,8 @@ describe("SupaCloud default configuration", () => {
         requireTimeoutForDependencies: true,
         forbidDirectRuntimeExecution: true,
         forbidDirectThrows: true,
+        requireRetryPolicy: true,
+        defaultRetry: "none",
       },
     }, "/workspace/app").effect).toEqual({
       requireRouteEffects: true,
@@ -135,6 +139,8 @@ describe("SupaCloud default configuration", () => {
       requireTimeoutForDependencies: true,
       forbidDirectRuntimeExecution: true,
       forbidDirectThrows: true,
+      requireRetryPolicy: true,
+      defaultRetry: "none",
     });
   });
 
@@ -150,6 +156,14 @@ describe("SupaCloud default configuration", () => {
       requireTimeoutForDependencies: true,
       forbidDirectRuntimeExecution: true,
       forbidDirectThrows: true,
+      requireRetryPolicy: true,
+      defaultRetry: "none",
     });
+  });
+
+  test("rejects explicit as a project-level default retry policy", () => {
+    expect(() => defineSupacloudConfig({
+      effect: { defaultRetry: "explicit" as never },
+    })).toThrow("effect.defaultRetry must be \"none\"");
   });
 });

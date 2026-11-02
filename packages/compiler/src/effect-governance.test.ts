@@ -78,6 +78,7 @@ test("requires mappings and dependencies and blocks retry on non-idempotent comm
     "effect-error-mapping-required",
     "effect-dependencies-required",
     "effect-command-retry-forbidden",
+    "effect-retry-target-required",
   ]);
 });
 
@@ -85,7 +86,10 @@ test("accepts a complete retryable idempotent Effect contract", () => {
   expect(validateEffectPolicies(graphWith({
     required: true,
     dependencies: ["OrderRepository"],
-    errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+    errors: [
+      { tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" },
+      { tag: "OrderUpstreamUnavailable", status: 503, code: "ORDER_UPSTREAM_UNAVAILABLE", retryable: true },
+    ],
     retry: "explicit",
     maxAttempts: 3,
     timeoutMs: 1000,
@@ -377,6 +381,145 @@ export class OrdersModule {}
       code: "effect-promise-return",
       errorCode: "SC3047",
     }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("requires an explicit retry policy on every Effect contract by default", () => {
+  const diagnostics = validateEffectPolicies(graphWith({
+    required: true,
+    dependencies: [],
+    errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+  }), {
+    requireErrorMappings: true,
+    requireDependencies: true,
+  });
+  expect(diagnostics).toContainEqual(expect.objectContaining({
+    code: "effect-retry-required",
+    errorCode: "SC3050",
+    docsUrl: "https://supacloud.dev/errors/SC3050",
+    suggestion: 'Set effect.retry to "none". That is the required default; use "explicit" only with maxAttempts and a retryable 5xx allow-list.',
+  }));
+});
+
+test("allows an omitted retry policy when the requirement is disabled", () => {
+  const diagnostics = validateEffectPolicies(graphWith({
+    required: true,
+    dependencies: [],
+    errors: [],
+  }), {
+    requireErrorMappings: true,
+    requireDependencies: true,
+    requireRetryPolicy: false,
+  });
+  expect(diagnostics.map((diagnostic) => diagnostic.code)).toEqual([]);
+});
+
+test("materializes an omitted retry policy as none when the requirement is disabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-default-retry-"));
+  try {
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+      "src/orders.module.ts": `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [],
+    },
+  })
+  list(): Effect<string, never, never> {
+    return {} as Effect<string, never, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    });
+    const graph = await analyzeProject(root, undefined, undefined, undefined, {
+      requireRetryPolicy: false,
+    });
+    expect(graph.modules[0]?.controllers[0]?.routes[0]?.effect).toEqual({
+      required: true,
+      dependencies: [],
+      errors: [],
+      retry: "none",
+    });
+    expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects explicit retry without a transient allow-list", () => {
+  const diagnostics = validateEffectPolicies(graphWith({
+    required: true,
+    dependencies: [],
+    errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+    retry: "explicit",
+    maxAttempts: 2,
+  }), {
+    requireErrorMappings: true,
+    requireDependencies: true,
+  });
+  expect(diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["effect-retry-target-required"]);
+});
+
+test("rejects retryable failures that are not transient 5xx", () => {
+  const diagnostics = validateEffectPolicies(graphWith({
+    required: true,
+    dependencies: [],
+    errors: [
+      { tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND", retryable: true },
+      { tag: "OutcomeUnknown", status: 503, code: "OUTCOME_UNKNOWN", retryable: true, outcomeUnknown: true },
+    ],
+    retry: "explicit",
+    maxAttempts: 2,
+  }));
+  expect(diagnostics.map((diagnostic) => diagnostic.errorCode)).toEqual(["SC3049", "SC3049"]);
+});
+
+test("accepts an explicit retry limited to one transient 5xx failure", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Post, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+type Failure = { _tag: "OrderNotFound" } | { _tag: "UpstreamUnavailable" };
+
+@Controller("/orders")
+class OrdersController {
+  @Post("/", {
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" },
+        { tag: "UpstreamUnavailable", status: 503, code: "UPSTREAM_UNAVAILABLE", retryable: true },
+      ],
+      retry: "explicit",
+      maxAttempts: 2,
+    },
+  })
+  save(): Effect<string, Failure, never> {
+    return {} as Effect<string, Failure, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.diagnostics ?? []).toEqual([]);
+    expect(graph.modules[0]?.controllers[0]?.routes[0]?.effect?.errors?.[1]).toMatchObject({
+      retryable: true,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

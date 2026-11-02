@@ -122,6 +122,7 @@ export {
   INFRA_RESOURCE_METADATA,
   QUERY_METADATA,
   ROUTES_METADATA,
+  DEFAULT_EFFECT_ROUTE_POLICY,
 } from "./decorators";
 export type {
   CanActivateFn,

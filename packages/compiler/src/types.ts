@@ -223,6 +223,13 @@ export interface EffectErrorMappingNode {
   messageFromError?: boolean;
   /** Use the failure value's own HTTP status when it is an integer from 400 to 599. */
   statusFromError?: boolean;
+  /**
+   * In-process retry allow-list. Only a declared 5xx failure that did not
+   * commit may be retried by the framework adapter.
+   */
+  retryable?: boolean;
+  /** The write may already have happened. The framework adapter must not retry it. */
+  outcomeUnknown?: boolean;
 }
 
 export interface EffectRouteNode {
@@ -558,6 +565,13 @@ export interface EffectCompilerOptions {
   forbidDirectRuntimeExecution?: boolean;
   /** Reject direct throw statements inside governed route handlers. */
   forbidDirectThrows?: boolean;
+  /** Require every route that declares an Effect contract to write an explicit retry policy. */
+  requireRetryPolicy?: boolean;
+  /**
+   * Materialize an omitted retry policy when requireRetryPolicy is disabled.
+   * The only project-level default is "none"; "explicit" stays route-local.
+   */
+  defaultRetry?: "none";
 }
 
 export interface GraphqlOptions {
