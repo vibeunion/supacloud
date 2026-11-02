@@ -2709,6 +2709,72 @@ install_victorialogs_binary() {
     supacloud_atomic_install_binary "$candidate" "victoria-logs-linux-${asset_arch}" "$VICTORIALOGS_BINARY_FILE"
 }
  
+install_vector_binary() {
+    local version="${VECTOR_VERSION:-0.45.0}"
+    local asset_arch
+    case "$(uname -m)" in
+        x86_64|amd64) asset_arch="x86_64" ;;
+        aarch64|arm64) asset_arch="aarch64" ;;
+        *)
+            log_error "Vector has no supported native release for architecture: $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    local target="/usr/local/bin/vector"
+    if [[ -x "$target" ]]; then
+        log_info "Vector binary already installed: $($target --version 2>/dev/null | head -1 || echo installed)"
+        return 0
+    fi
+
+    local asset_name="vector-${version}-${asset_arch}-unknown-linux-gnu.tar.gz"
+    local archive_url="https://github.com/vectordotdev/vector/releases/download/v${version}/${asset_name}"
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "${temp_dir:-}"' RETURN
+    local archive_file="${temp_dir}/${asset_name}"
+
+    log_info "Downloading Vector ${version} native binary..."
+    supacloud_download_url "$archive_url" "$archive_file" || {
+        log_error "Failed to download Vector release archive"
+        return 1
+    }
+
+    tar -xzf "$archive_file" -C "$temp_dir" || return 1
+    local candidate
+    candidate=$(find "$temp_dir" -name "vector" -type f -perm -111 2>/dev/null | head -1)
+    [[ -n "$candidate" && -f "$candidate" ]] || {
+        log_error "Could not find vector binary in unpacked archive"
+        return 1
+    }
+
+    supacloud_atomic_install_binary "$candidate" "vector-${asset_arch}" "$target"
+}
+
+install_vector_collector() {
+    install_vector_binary || return 1
+    mkdir -p /etc/supabase /var/lib/supacloud/vector
+    chmod 750 /var/lib/supacloud/vector
+
+    local vector_cfg_src="${SCRIPT_DIR}/infrastructure/vector/vector.toml"
+    local vector_unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-vector.service"
+
+    [[ -f "$vector_cfg_src" ]] || {
+        log_error "Missing Vector configuration template at $vector_cfg_src"
+        return 1
+    }
+    [[ -f "$vector_unit_src" ]] || {
+        log_error "Missing Vector systemd unit at $vector_unit_src"
+        return 1
+    }
+
+    install -m 640 "$vector_cfg_src" /etc/supabase/vector.yaml
+    install -m 644 "$vector_unit_src" /etc/systemd/system/supacloud-vector.service
+    systemctl daemon-reload
+    systemctl enable --now supacloud-vector
+    log_info "Vector log collector running as native systemd service supacloud-vector"
+}
+
 install_observability() {
     log_step "Installing independent log storage (VictoriaLogs)..."
 
@@ -2742,8 +2808,15 @@ install_observability() {
     chmod 600 "$SUPACLOUD_LOGS_ENV_FILE"
 
     install -m 644 "$victorialogs_src" "$SUPACLOUD_VICTORIALOGS_UNIT_FILE"
-    systemctl disable --now supacloud-vector 2>/dev/null || true
-    rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.yaml
+
+    local collector_engine="${SUPACLOUD_LOG_COLLECTOR_ENGINE:-internal}"
+    if [[ "$collector_engine" == "vector" ]]; then
+        install_vector_collector || return 1
+    else
+        systemctl disable --now supacloud-vector 2>/dev/null || true
+        rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.yaml
+        log_info "VictoriaLogs runs as one native systemd service on 127.0.0.1:9428; SupaCloud performs internal log collection."
+    fi
 
     systemctl daemon-reload
     systemctl enable --now supacloud-victorialogs

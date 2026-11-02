@@ -8,7 +8,10 @@ import {
   parseJournalEvent,
   projectLogFields,
   redactLogMessage,
+  startLocalLogCollector,
+  stopLocalLogCollector,
 } from "../../src/workers/local-log-collector.worker";
+import { config } from "../../src/config";
 
 const temporaryDirectories: string[] = [];
 
@@ -98,5 +101,17 @@ describe("LocalLogCollector", () => {
       service: "functions",
       message: "function completed",
     })]);
+  });
+
+  test("skips starting internal collector when logCollectorEngine is vector", () => {
+    const originalEngine = config.logCollectorEngine;
+    try {
+      config.logCollectorEngine = "vector";
+      startLocalLogCollector();
+      // Internal collector should yield to standalone Vector
+      stopLocalLogCollector();
+    } finally {
+      config.logCollectorEngine = originalEngine;
+    }
   });
 });

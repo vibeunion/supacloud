@@ -1,0 +1,24 @@
+[Unit]
+Description=SupaCloud Vector Log Collector
+Documentation=https://vector.dev
+After=network-online.target supacloud-victorialogs.service
+Wants=network-online.target supacloud-victorialogs.service
+
+[Service]
+Type=simple
+Environment=VECTOR_BINARY=/usr/local/bin/vector
+Environment=VECTOR_CONFIG=/etc/supabase/vector.yaml
+EnvironmentFile=-/etc/supabase/vector.env
+ExecStartPre=/bin/sh -ec 'test -x "$${VECTOR_BINARY}"'
+ExecStart=/bin/sh -ec 'exec "$${VECTOR_BINARY}" --config "$${VECTOR_CONFIG}"'
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/supacloud /opt/supacloud/functions
+CapabilityBoundingSet=CAP_SYSLOG
+MemoryHigh=256M
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

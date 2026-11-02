@@ -79,3 +79,28 @@ test("VictoriaLogs systemd wrapper honors EnvironmentFile overrides", () => {
     rmSync(runtimeDir, { recursive: true, force: true });
   }
 });
+
+test("Vector log collector configuration and systemd unit are complete and valid", () => {
+  const vectorConfig = readRepoFile("infrastructure/vector/vector.toml");
+  const vectorUnit = readRepoFile("infrastructure/systemd/supacloud-vector.service");
+  const installer = readRepoFile("install.sh");
+
+  expect(vectorConfig).toContain('[sources.journald]');
+  expect(vectorConfig).toContain('type = "journald"');
+  expect(vectorConfig).toContain('supacloud-gotrue@*.service');
+  expect(vectorConfig).toContain('supacloud-pgrst@*.service');
+  expect(vectorConfig).toContain('[sources.functions]');
+  expect(vectorConfig).toContain('/opt/supacloud/functions/**/logs/*.log');
+  expect(vectorConfig).toContain('[transforms.process_journal]');
+  expect(vectorConfig).toContain('[transforms.process_functions]');
+  expect(vectorConfig).toContain('[sinks.victorialogs]');
+  expect(vectorConfig).toContain('http://127.0.0.1:9428/insert/jsonline');
+  expect(vectorConfig).toContain('application/stream+json');
+
+  expect(vectorUnit).toContain('Description=SupaCloud Vector Log Collector');
+  expect(vectorUnit).toContain('Environment=VECTOR_CONFIG=/etc/supabase/vector.yaml');
+  expect(vectorUnit).toContain('ExecStart=/bin/sh -ec \'exec "$${VECTOR_BINARY}" --config "$${VECTOR_CONFIG}"\'');
+
+  expect(installer).toContain('install_vector_collector');
+  expect(installer).toContain('SUPACLOUD_LOG_COLLECTOR_ENGINE');
+});

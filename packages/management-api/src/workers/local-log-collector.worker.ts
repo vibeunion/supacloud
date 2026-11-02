@@ -362,6 +362,10 @@ let collector: LocalLogCollector | null = null;
 
 export function startLocalLogCollector(): void {
   if (!config.logsEnabled) return;
+  if (config.logCollectorEngine === "vector") {
+    logger.info("[LocalLogCollector] logCollectorEngine is 'vector'; skipping internal log collector worker");
+    return;
+  }
   if (collector) return;
   collector = new LocalLogCollector();
   void collector.start().catch((error: unknown) => {
