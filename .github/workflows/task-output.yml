@@ -38,8 +38,7 @@ jobs:
       - name: Transport, authorization boundaries and SDK recovery
         run: bun test packages/management-api/tests/unit/task-output.test.ts packages/supacloud-js/src/task-events.test.ts
       - name: Install existing Management API dependencies
-        working-directory: packages/management-api
-        run: bun install --frozen-lockfile
+        run: bash scripts/prepare_management_api_dependencies.sh
       - name: Elysia raw-body and authorization integration
         run: bun test packages/management-api/tests/unit/task-output-route.test.ts packages/management-api/tests/unit/task-output-maintenance.test.ts
       - name: Worker ownership, cancellation and heartbeat regressions

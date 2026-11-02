@@ -155,6 +155,11 @@ jobs:
         working-directory: packages/delivery
         run: bun install --frozen-lockfile
 
+      - name: Build database governance dependencies
+        run: |
+          (cd packages/contracts && bun install --frozen-lockfile && bun run build)
+          (cd packages/db && bun install --frozen-lockfile && bun run build)
+
       - name: Install management API dependencies
         working-directory: packages/management-api
         run: bun install --frozen-lockfile

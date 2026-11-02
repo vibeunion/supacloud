@@ -327,6 +327,56 @@ describe("db governance tools", () => {
             .rejects.toThrow("supacloud-lite");
     });
 
+    test("module_check --remote sends normalized modules through the Management API", async () => {
+        const calls: Array<Record<string, unknown>> = [];
+        let callback: DbCallback | undefined;
+        registerDbGovernanceTools({
+            tool(_name, _description, _schema, registered) {
+                callback = registered as DbCallback;
+            },
+        }, {
+            environment: {},
+            projectRef: "project-ref",
+            apiUrl: "https://management.example.test",
+            runDatabase: () => async (args) => {
+                calls.push(args);
+                return {
+                    isError: false,
+                    content: [{ type: "text", text: "module: cases (ok)\n  no issues" }],
+                };
+            },
+        });
+        if (!callback) throw new Error("db tool was not registered");
+
+        const result = await callback({
+            action: "module_check",
+            root,
+            module_file: "db/modules.ts",
+            remote: true,
+            schema: "public,api",
+        });
+
+        expect(result.isError).toBe(false);
+        expect(result.content[0].text).toContain("module: cases");
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatchObject({
+            action: "governance_check",
+            ref: "project-ref",
+            schemas: ["public", "api"],
+        });
+        const modules = calls[0]?.["modules"] as Array<Record<string, unknown>>;
+        expect(modules.map((module) => module["name"])).toEqual(["cases", "clean"]);
+        expect(JSON.stringify(modules)).not.toContain("db/policies");
+        expect(modules[0]?.["functions"]).toEqual([
+            { name: "public.case_create", security: "definer" },
+        ]);
+    });
+
+    test("module_check --remote requires a Management API context", async () => {
+        await expect(db({ action: "module_check", root, remote: true }))
+            .rejects.toThrow("Management API context");
+    });
+
     test("db actions are classified in the execution policy", () => {
         expect(executionMode("db", "lint", {})).toBe("local");
         expect(executionMode("db", "explain", {})).toBe("local");

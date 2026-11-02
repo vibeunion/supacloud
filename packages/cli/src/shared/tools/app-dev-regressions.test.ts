@@ -100,7 +100,7 @@ describe("app dev actual CLI regressions", () => {
         const result = await run(await fixture(), ["--once", "--profile", "integration",
             "--database_url", "postgresql://db.example/app", "--database-url", "postgresql://other.example/app"]);
         expect(result.exitCode).toBe(1);
-        expect(result.stdout + result.stderr).toContain("Do not combine");
+        expect(result.stdout + result.stderr).toContain("Duplicate CLI flag is not allowed");
     });
 
     test("fast mode refuses an explicit database instead of claiming to use it", async () => {

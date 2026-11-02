@@ -60,9 +60,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
       - name: Install focused package dependencies
         run: |
-          bun install --frozen-lockfile --cwd packages/delivery
-          bun install --frozen-lockfile --cwd packages/contracts
-          bun install --frozen-lockfile --cwd packages/management-api
+          bash scripts/prepare_management_api_dependencies.sh
           bun install --frozen-lockfile --cwd packages/cli
           bun install --frozen-lockfile --cwd packages/web-console
       - name: Prepare CLI runtime dependencies

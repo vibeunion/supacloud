@@ -530,11 +530,12 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         registerContextAwareHelp();
         tools.deploy = {
             schema: deployToolSchema,
-            callback: async (args) => {
-                if (args.action === "init") {
+            callback: async (args: unknown) => {
+                const input = args && typeof args === "object" ? args as { action?: string; root?: string; format?: string } : {};
+                if (input.action === "init") {
                     return initializeProject({
-                        ...(typeof args.root === "string" ? { root: args.root } : {}),
-                        ...(args.json === true ? { json: true } : {}),
+                        ...(typeof input.root === "string" ? { root: input.root } : {}),
+                        ...(input.format === "json" ? { format: "json" } : {}),
                     }, { cwd: process.cwd() });
                 }
                 return {

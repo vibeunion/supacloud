@@ -104,6 +104,16 @@ const catalog = await readCatalog(executor, ["public"]);   // executor: 注入�
 const report = reconcileModule(caseDb, catalog);
 ```
 
+托管项目不需要把 tenant 数据库 URL 交给开发者：Management API 可以用内部
+凭据执行同一套对账，只返回诊断结果：
+
+```bash
+supacloud db module_check --module_file db/modules.ts --remote --ref <project-ref>
+```
+
+该命令仍需要 Management API 的认证上下文，但不会把数据库连接串返回给 CLI
+或写入构建日志。
+
 对账诊断：
 
 | 级别 | 码 | 含义 |
