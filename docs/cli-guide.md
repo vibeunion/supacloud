@@ -284,6 +284,12 @@ default mode writes `generated/tool-definitions.openai.json` and
 without writing files. Input schemas retain their source TypeBox symbol names
 as references until a schema exporter is added to the compiler.
 
+`db role_check` is classified read-only. With `--remote` the Management API
+inspects the project connection's `pg_roles`, database/schema CREATE privileges,
+and owned objects using internal credentials, so callers do not need a tenant
+`DATABASE_URL`. The response contains the bounded role state and any restriction
+failure but never the connection string.
+
 `db module_check` is classified read-only: it introspects `pg_policy`,
 `pg_proc`, `pg_class` and grants, and reports drift between the declared
 manifest and the live catalog (missing policies, RLS disabled, security

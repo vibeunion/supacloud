@@ -387,6 +387,7 @@ EXAMPLES
   ${preferredCommand} db plan --dir supabase/migrations
   ${preferredCommand} db apply --dir supabase/migrations --approved_digest <reviewed-digest>
   ${preferredCommand} db role_check --schema public
+  ${preferredCommand} db role_check --remote --schema public
   ${preferredCommand} db role_sql --application_role app_user --migration_role app_migrator --database app_db
   ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
