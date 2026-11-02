@@ -97,9 +97,9 @@ async function realDirectory(path: string): Promise<string> {
     return fail("PREVIEW_FIX_ROOT_UNSUPPORTED");
   }
   if (!stat.isDirectory() || stat.isSymbolicLink()) return fail("PREVIEW_FIX_ROOT_UNSUPPORTED");
-  const real = await realpath(resolved);
-  if (real !== resolved) return fail("PREVIEW_FIX_ROOT_UNSUPPORTED");
-  return real;
+  // The final component is already verified above. Parent aliases such as
+  // macOS's /tmp -> /private/tmp are safe once the canonical root is used.
+  return realpath(resolved);
 }
 
 async function treeDigest(root: string): Promise<string> {
