@@ -3,7 +3,10 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Activity, TrendingUp, AlertTriangle, ArrowLeft, BarChart3 } from "lucide-svelte";
+  import { Activity, ArrowLeft } from "lucide-svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
+  import MetricBlock from "@svadmin/ui/components/content/MetricBlock.svelte";
+  import StatusBadge from "@svadmin/ui/components/content/StatusBadge.svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   interface ApiStat {
@@ -90,28 +93,14 @@
   </div>
 
   {#if isLoading}
-    <div class="flex-1 flex items-center justify-center">
-      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-    </div>
+    <DataState state="loading" class="flex-1" />
   {:else}
     <!-- Stats Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.active_connections")}</div>
-        <div class="text-2xl font-bold mt-1 text-brand">{stats?.total_requests || 0}</div>
-      </div>
-      <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.average_latency")}</div>
-        <div class="text-2xl font-bold mt-1">{stats?.avg_latency_ms?.toFixed(1) || '0'} <span class="text-sm text-muted-foreground">ms</span></div>
-      </div>
-      <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.status")}</div>
-        <div class="text-lg font-bold mt-1 text-green-600">{$t("Reports.healthy")}</div>
-      </div>
-      <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.uplink_bandwidth")}</div>
-        <div class="text-lg font-bold mt-1 text-muted-foreground">-</div>
-      </div>
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <MetricBlock label={$t("Reports.active_connections")} value={stats?.total_requests || 0} />
+      <MetricBlock label={$t("Reports.average_latency")} value={`${stats?.avg_latency_ms?.toFixed(1) || "0"} ms`} />
+      <MetricBlock label={$t("Reports.status")} value={$t("Reports.healthy")} trendTone="positive" />
+      <MetricBlock label={$t("Reports.uplink_bandwidth")} value="-" />
     </div>
 
     <!-- Active Connections Table -->
@@ -120,10 +109,7 @@
         <h2 class="text-sm font-semibold flex items-center gap-2"><Activity size={14} /> {$t("Reports.current_connections")}</h2>
       </div>
       {#if recentRequests.length === 0}
-        <div class="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
-          <BarChart3 size={32} class="opacity-20" />
-          <p class="text-xs">{$t("Reports.no_active_connections")}</p>
-        </div>
+        <DataState state="empty" title={$t("Reports.no_active_connections")} class="m-4" />
       {:else}
         <div class="overflow-auto max-h-[55vh]">
           <table class="w-full text-left text-xs">
@@ -143,9 +129,10 @@
                   <td class="px-4 py-2">{req.usename || '-'}</td>
                   <td class="px-4 py-2 text-[10px]">{req.application_name || '-'}</td>
                   <td class="px-4 py-2">
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {req.state === 'active' ? 'bg-green-500/10 text-green-600' : req.state === 'idle' ? 'bg-muted text-muted-foreground' : 'bg-amber-500/10 text-amber-600'}">
-                      {connectionStateLabel(req.state)}
-                    </span>
+                    <StatusBadge
+                      status={req.state === "active" ? "success" : req.state === "idle" ? "neutral" : "warning"}
+                      label={connectionStateLabel(req.state)}
+                    />
                   </td>
                   <td class="px-4 py-2 text-[10px] truncate max-w-xs text-muted-foreground" title={String(req.query || "")}>{req.query || '-'}</td>
                 </tr>

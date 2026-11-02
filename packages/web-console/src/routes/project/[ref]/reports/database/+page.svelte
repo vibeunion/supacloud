@@ -3,7 +3,9 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, ArrowLeft, HardDrive } from "lucide-svelte";
+  import { ArrowLeft, HardDrive } from "lucide-svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
+  import MetricBlock from "@svadmin/ui/components/content/MetricBlock.svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
@@ -84,31 +86,22 @@
   </div>
 
   {#if isLoading}
-    <div class="flex-1 flex items-center justify-center">
-      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-    </div>
+    <DataState state="loading" class="flex-1" />
   {:else}
     {#if dbStats.length > 0}
       {@const db = dbStats[0]}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.database_size")}</div>
-          <div class="text-xl font-bold mt-1 text-brand">{db.db_size}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.active_connections")}</div>
-          <div class="text-xl font-bold mt-1">{db.connections}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.cache_hit_ratio")}</div>
-          <div class="text-xl font-bold mt-1 {Number(db.cache_hit_ratio) > 95 ? 'text-green-600' : Number(db.cache_hit_ratio) > 80 ? 'text-amber-600' : 'text-red-600'}">
-            {db.cache_hit_ratio}%
-          </div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.commits_rollbacks")}</div>
-          <div class="text-lg font-bold mt-1">{formatNum(db.commits)} / <span class="text-red-600">{formatNum(db.rollbacks)}</span></div>
-        </div>
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <MetricBlock label={$t("Reports.database_size")} value={db.db_size} />
+        <MetricBlock label={$t("Reports.active_connections")} value={db.connections} />
+        <MetricBlock
+          label={$t("Reports.cache_hit_ratio")}
+          value={`${db.cache_hit_ratio}%`}
+          trendTone={Number(db.cache_hit_ratio) > 95 ? "positive" : Number(db.cache_hit_ratio) > 80 ? "warning" : "negative"}
+        />
+        <MetricBlock
+          label={$t("Reports.commits_rollbacks")}
+          value={`${formatNum(db.commits)} / ${formatNum(db.rollbacks)}`}
+        />
       </div>
     {/if}
 

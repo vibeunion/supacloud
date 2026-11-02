@@ -3,7 +3,10 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Shield, ArrowLeft, UserPlus } from "lucide-svelte";
+  import { ArrowLeft, UserPlus } from "lucide-svelte";
+  import DataState from "@svadmin/ui/components/content/DataState.svelte";
+  import MetricBlock from "@svadmin/ui/components/content/MetricBlock.svelte";
+  import StatusBadge from "@svadmin/ui/components/content/StatusBadge.svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
@@ -81,36 +84,16 @@
   </div>
 
   {#if isLoading}
-    <div class="flex-1 flex items-center justify-center">
-      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-    </div>
+    <DataState state="loading" class="flex-1" />
   {:else}
     {#if authStats}
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.total_users")}</div>
-          <div class="text-xl font-bold mt-1 text-brand">{authStats?.total_users}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.signups_24h")}</div>
-          <div class="text-xl font-bold mt-1 text-green-600">{authStats?.signups_24h}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.signups_7d")}</div>
-          <div class="text-xl font-bold mt-1">{authStats?.signups_7d}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.logins_24h")}</div>
-          <div class="text-xl font-bold mt-1 text-blue-600">{authStats?.logins_24h}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.logins_7d")}</div>
-          <div class="text-xl font-bold mt-1">{authStats?.logins_7d}</div>
-        </div>
-        <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.confirmed_users")}</div>
-          <div class="text-xl font-bold mt-1">{authStats?.confirmed_users}</div>
-        </div>
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <MetricBlock label={$t("Reports.total_users")} value={authStats.total_users} />
+        <MetricBlock label={$t("Reports.signups_24h")} value={authStats.signups_24h} />
+        <MetricBlock label={$t("Reports.signups_7d")} value={authStats.signups_7d} />
+        <MetricBlock label={$t("Reports.logins_24h")} value={authStats.logins_24h} />
+        <MetricBlock label={$t("Reports.logins_7d")} value={authStats.logins_7d} />
+        <MetricBlock label={$t("Reports.confirmed_users")} value={authStats.confirmed_users} />
       </div>
     {/if}
 
@@ -119,10 +102,7 @@
         <h2 class="text-sm font-semibold flex items-center gap-2"><UserPlus size={14} /> {$t("Reports.recent_signups")}</h2>
       </div>
       {#if recentUsers.length === 0}
-        <div class="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
-          <Shield size={32} class="opacity-20" />
-          <p class="text-xs">{$t("Reports.no_user_data")}</p>
-        </div>
+        <DataState state="empty" title={$t("Reports.no_user_data")} class="m-4" />
       {:else}
         <div class="overflow-auto max-h-[55vh]">
           <table class="w-full text-left text-xs">
@@ -141,9 +121,10 @@
                   <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(user.created_at || "").substring(0, 19) || '-'}</td>
                   <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(user.last_sign_in_at || "").substring(0, 19) || '-'}</td>
                   <td class="px-4 py-2">
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {user.confirmed ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}">
-                      {user.confirmed ? $t("Reports.confirmed") : $t("Reports.unconfirmed")}
-                    </span>
+                    <StatusBadge
+                      status={user.confirmed ? "success" : "warning"}
+                      label={user.confirmed ? $t("Reports.confirmed") : $t("Reports.unconfirmed")}
+                    />
                   </td>
                 </tr>
               {/each}
