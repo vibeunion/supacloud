@@ -31,9 +31,9 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.102.0`, `@svadmin/core@0.67.0`,
-`@svadmin/ai-elements@0.13.0`, `@svadmin/sveltekit@0.13.12`, and
-`@svadmin/elysia@0.14.15`. List and settings pages that repeat a hand-rolled
+The console uses `@svadmin/ui@0.110.0`, `@svadmin/core@0.71.0`,
+`@svadmin/ai-elements@0.13.7`, `@svadmin/sveltekit@0.13.19`, and
+`@svadmin/elysia@0.14.22`. List and settings pages that repeat a hand-rolled
 loading, empty, and error shell use `PagePattern` and `FilterToolbar` from
 `@svadmin/ui`.
 
