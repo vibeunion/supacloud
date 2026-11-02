@@ -264,7 +264,7 @@ const task = await invokeAsync(supabase, "mockup-generator", {
 });
 
 const finalTask = await waitForTask(
-  process.env.SUPACLOUD_MANAGEMENT_API_URL!,
+  process.env.SUPACLOUD_API_URL!,
   process.env.SUPACLOUD_PROJECT_REF!,
   task.task_id,
   process.env.SUPACLOUD_MANAGEMENT_TOKEN!,

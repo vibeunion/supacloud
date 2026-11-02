@@ -379,6 +379,22 @@ describe("resolveSupaCloudContext", () => {
         expect(context.projectRef).toBe("");
     });
 
+    test("ignores removed Management URL and project-ref aliases", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_MANAGEMENT_API_URL: "https://legacy-management.example.com",
+            MANAGEMENT_API_URL: "https://legacy-management.example.com",
+            X_PROJECT_REF: "legacy-ref",
+            SUPACLOUD_API_TOKEN: "token",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context).toMatchObject({
+            apiUrl: "",
+            projectRef: "",
+            host: "",
+            credentialScope: "management",
+        });
+    });
+
     test("keeps legacy dotenv compatibility when process context is absent", () => {
         const workspace = temporaryWorkspace();
         const path = writeEnvironment(workspace, ".env", {

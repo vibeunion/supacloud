@@ -33,7 +33,7 @@ This version does not keep an enable-only mode.
 To migrate a project:
 
 ```bash
-curl -X POST "$MANAGEMENT_API_URL/v1/projects/$PROJECT_REF/auth/oauth-server/migrate" \
+curl -X POST "$SUPACLOUD_API_URL/v1/projects/$SUPACLOUD_PROJECT_REF/auth/oauth-server/migrate" \
   -H "Authorization: Bearer $MANAGEMENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "allow_dynamic_registration": true, "authorization_path": "/authorize.html" }'
