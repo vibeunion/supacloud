@@ -341,7 +341,7 @@ passed to a separate `svadmin_generateResource` call. The CLI does not generate
 the resource or UI itself.
 
 ```sh
-database action="export_svadmin_schema" table="orders" json=true
+database action="export_svadmin_schema" table="orders" format="json"
 ```
 
 Schema and table names must be unquoted PostgreSQL identifiers. A column named

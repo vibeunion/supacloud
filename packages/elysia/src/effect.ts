@@ -103,7 +103,7 @@ function mapEffectFailure(
     const instanceMessage = mapping.messageFromError ? boundedString(error, "message", 500) : undefined;
     const instanceStatus = mapping.statusFromError ? boundedStatus(error) : undefined;
     return new EffectApplicationError(
-      instanceMessage ?? mapping.message ?? instanceCode ?? mapping.code,
+      instanceMessage ?? mapping.message ?? mapping.code,
       instanceStatus ?? mapping.status,
       instanceCode ?? mapping.code,
     );

@@ -84,6 +84,20 @@ test("keeps the declared mapping when instance values are not opted in", async (
   });
 });
 
+test("does not publish an instance code as the message unless messageFromError is set", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail({ _tag: "OrderNotFound", code: "RAW_CODE", message: "raw message" }),
+    {
+      required: true,
+      errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND", codeFromError: true }],
+    },
+  )).rejects.toMatchObject({
+    status: 404,
+    code: "RAW_CODE",
+    message: "ORDER_NOT_FOUND",
+  });
+});
+
 test("maps framework Feature operation errors through the declared route contract", async () => {
   await expect(runCompiledEffect(
     Effect.fail(new FeatureOperationError()),

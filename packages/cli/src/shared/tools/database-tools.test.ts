@@ -2251,8 +2251,10 @@ describe("database migration helpers", () => {
   });
 
   test("export_svadmin_schema exports structured SVAdmin column metadata", async () => {
+    const statements: string[] = [];
     const callback = captureDatabaseTool({
       post: async (_path: string, body: { sql: string }) => {
+        statements.push(body.sql);
         if (body.sql.includes("information_schema.columns")) {
           return {
             ok: true,
@@ -2290,8 +2292,10 @@ describe("database migration helpers", () => {
     });
 
     expect(textRes.isError).toBeFalsy();
-    expect(textRes.content[0].text).toContain("SVAdmin Schema Definition for 'posts'");
+    expect(statements.some((sql) => sql.includes("conrelid = 'public.posts'::regclass"))).toBe(true);
+    expect(statements.some((sql) => sql.includes('"public"."posts"::regclass'))).toBe(false);
     expect(textRes.content[0].text).toContain("svadmin_generateResource");
+    expect(textRes.content[0].text).toContain('"sourceType": "databaseColumns"');
     expect(textRes.content[0].text).toContain("[PK]");
     expect(textRes.content[0].text).toContain("[FK -> users]");
 
@@ -2310,6 +2314,24 @@ describe("database migration helpers", () => {
     expect(parsed.columns).toHaveLength(3);
     expect(parsed.columns[0]).toEqual({ name: "id", type: "bigint", nullable: false, isPrimary: true, isForeignKey: false });
     expect(parsed.columns[2]).toEqual({ name: "user_id", type: "bigint", nullable: true, isPrimary: false, isForeignKey: true, referencesResource: "users" });
+  });
+
+  test("export_svadmin_schema fails when constraint metadata cannot be read", async () => {
+    const callback = captureDatabaseTool({
+      post: async (_path: string, body: { sql: string }) => {
+        if (body.sql.includes("pg_constraint")) return { ok: false, status: 500, data: {} };
+        return {
+          ok: true,
+          status: 200,
+          data: { rows: [{ column_name: "id", data_type: "bigint", is_nullable: "NO", column_default: null }] },
+        };
+      },
+    });
+    await expect(callback({
+      action: "export_svadmin_schema",
+      ref: "proj",
+      table: "posts",
+    })).rejects.toThrow("Failed to inspect constraints (500)");
   });
 
   test("export_svadmin_schema rejects unsafe identifiers before SQL", async () => {
