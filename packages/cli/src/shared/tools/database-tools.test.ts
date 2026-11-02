@@ -2084,6 +2084,32 @@ describe("database migration helpers", () => {
     expect(JSON.parse(jsonResult.content[0].text).total_rpcs).toBe(2);
   });
 
+  test("governance_check posts bounded module declarations and formats Catalog findings", async () => {
+    const payload = {
+      ok: false,
+      schemas: ["public"],
+      total_modules: 1,
+      reports: [{
+        module: "cases",
+        ok: false,
+        issues: [{ severity: "error", code: "missing-policy", object: "public.cases", message: "策略不存在" }],
+      }],
+    };
+    const modules = [{ name: "cases", tables: ["public.cases"] }];
+    const callback = captureDatabaseTool({
+      post: async (path: string, body: unknown) => {
+        expect(path).toBe("/v1/projects/proj/database/module-check");
+        expect(body).toEqual({ modules, schemas: ["public"] });
+        return { ok: true, status: 200, data: payload };
+      },
+    });
+
+    const result = await callback({ action: "governance_check", ref: "proj", modules, schemas: ["public"] });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("module: cases (FAILED)");
+    expect(result.content[0].text).toContain("error missing-policy public.cases");
+  });
+
   test("database governance reads reject unsafe refs and do not reflect failed response bodies", async () => {
     let requests = 0;
     const callback = captureDatabaseTool({

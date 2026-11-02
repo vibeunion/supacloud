@@ -13,10 +13,14 @@ const managementDb = mock((strings: TemplateStringsArray) => {
 const tenantDb = Object.assign(
   mock(() => Promise.resolve([])),
   {
+    array: (value: unknown[]) => value,
     unsafe: mock(async (query: string) => {
       tenantQueries.push(query);
       if (query.includes("WHERE p.prosecdef = true")) {
         return [{ schema_name: "public", function_name: "unsafe_rpc", identity_args: "", proconfig: null }];
+      }
+      if (query.includes("c.relkind = 'r'")) {
+        return [{ schema: "public", name: "items", rls_enabled: true, rls_forced: false }];
       }
       if (query.includes("pg_catalog.obj_description")) {
         return [{
@@ -58,8 +62,16 @@ const { databaseRoutes } = await import(
 );
 const app = new Elysia().use(databaseRoutes);
 
-function request(path: string) {
-  return app.handle(new Request(`http://localhost/v1/projects/proj_1/database/${path}`));
+function request(path: string, init?: RequestInit) {
+  return app.handle(new Request(`http://localhost/v1/projects/proj_1/database/${path}`, init));
+}
+
+function moduleRequest(body: unknown) {
+  return request("module-check", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 describe("database governance routes", () => {
@@ -70,6 +82,33 @@ describe("database governance routes", () => {
     tenantDb.unsafe.mockClear();
     getProject.mockClear();
     requireProjectOrAdminAuth.mockClear();
+  });
+
+  test("reconciles remote module declarations against the project Catalog", async () => {
+    const response = await moduleRequest({
+      modules: [{ name: "items", tables: ["public.items"] }],
+      schemas: ["public"],
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      schemas: ["public"],
+      total_modules: 1,
+      reports: [{ module: "items", ok: true, issues: [] }],
+    });
+    expect(tenantQueries.some((query) => query.includes("FROM pg_class"))).toBe(true);
+  });
+
+  test("rejects malformed module declarations before opening the tenant database", async () => {
+    const response = await moduleRequest({
+      modules: [{ name: "items", policies: [{ name: "items_read", table: "public.items", operation: "truncate", roles: [] }] }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_MODULE_CONTRACT", status: 400 });
+    expect(managementDb).not.toHaveBeenCalled();
+    expect(tenantQueries).toHaveLength(0);
   });
 
   test("returns bounded linter results from the selected schema", async () => {

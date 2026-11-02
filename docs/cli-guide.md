@@ -271,6 +271,10 @@ supacloud db module_check --module_file db/modules.ts --database_url "$DATABASE_
 
 # or reconcile against a local SupaCloud Lite project (delegates to supacloud-lite db check)
 supacloud db module_check --lite --project_dir .
+
+# managed project: the Management API selects the tenant database server-side,
+# so no database URL or tenant credentials are needed on the client
+supacloud db module_check --module_file db/modules.ts --remote --ref <project-ref>
 ```
 
 `app export-tools` reads `generated/app.manifest.json` and exports commands with
@@ -285,7 +289,10 @@ as references until a schema exporter is added to the compiler.
 manifest and the live catalog (missing policies, RLS disabled, security
 definer without a pinned `search_path`, PUBLIC grants). With `--lite` the
 check runs against a local SupaCloud Lite project instead of a connection
-URL (requires `supacloud-lite` on PATH). See
+URL (requires `supacloud-lite` on PATH). With `--remote` the Management API
+performs the same reconciliation against the project's tenant database using
+its internal credentials; the response contains only bounded diagnostics and
+never returns the connection URL. See
 [Database Governance](./database-governance.md) and
 [Application Framework](./application-framework.md).
 

@@ -26,6 +26,7 @@ export interface DbToolArguments {
     database_url?: string;
     schema?: string;
     lite?: boolean;
+    remote?: boolean;
     project_dir?: string;
     schema_dir?: string;
     db_major_version?: number;
@@ -319,17 +320,69 @@ async function runModuleCheckLite(
     return textResult(output || "lite db check 无输出", result.exitCode !== 0);
 }
 
+function remoteModuleManifest(modules: readonly DatabaseModule[]): Array<Record<string, unknown>> {
+    return modules.map((module) => ({
+        name: module.name,
+        tables: module.tables,
+        policies: module.policies.map((policy) => ({
+            name: policy.name,
+            table: policy.table,
+            operation: policy.operation,
+            roles: policy.roles,
+            ...(policy.usingExpr === undefined ? {} : { usingExpr: policy.usingExpr }),
+            ...(policy.checkExpr === undefined ? {} : { checkExpr: policy.checkExpr }),
+        })),
+        functions: module.functions.map((fn) => ({
+            name: fn.name,
+            security: fn.security,
+            ...(fn.signature === undefined ? {} : { signature: fn.signature }),
+        })),
+        triggers: module.triggers.map((trigger) => ({
+            name: trigger.name,
+            table: trigger.table,
+            ...(trigger.enabled === undefined ? {} : { enabled: trigger.enabled }),
+        })),
+        grants: module.grants.map((grant) => ({
+            object: grant.object,
+            privilege: grant.privilege,
+            role: grant.role,
+        })),
+    }));
+}
+
+async function runModuleCheckRemote(
+    args: DbToolArguments,
+    root: string,
+    options: DbGovernanceToolOptions,
+): Promise<ToolResult> {
+    const run = options.runDatabase?.();
+    if (!run) throw new Error("db module_check --remote 需要 Management API context（SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN）");
+    const ref = args.ref?.trim() || options.projectRef?.trim();
+    if (!ref) throw new Error("db module_check --remote 需要 --ref 或 SUPACLOUD_PROJECT_REF");
+    const modules = await loadDatabaseModules(root, args.module_file);
+    const schemas = args.schema?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? ["public"];
+    return await run({
+        action: "governance_check",
+        ref,
+        modules: remoteModuleManifest(modules),
+        schemas,
+    });
+}
+
 async function runModuleCheckAction(
     args: DbToolArguments,
     root: string,
     environment: NodeJS.ProcessEnv,
     spawn: LiteSpawn,
-    liteBinary?: string | null,
+    liteBinary: string | null | undefined,
+    options: DbGovernanceToolOptions,
 ): Promise<ToolResult> {
+    if (args.lite && args.remote) throw new Error("db module_check 只能选择 --lite 或 --remote");
+    if (args.remote) return runModuleCheckRemote(args, root, options);
     if (args.lite) return runModuleCheckLite(args, root, spawn, liteBinary);
     const databaseUrl = args.database_url?.trim() || environment.DATABASE_URL?.trim();
     if (!databaseUrl) {
-        throw new Error("db module_check requires --database_url、环境变量 DATABASE_URL 或 --lite");
+        throw new Error("db module_check requires --database_url、环境变量 DATABASE_URL、--lite 或 --remote");
     }
     const modules = await loadDatabaseModules(root, args.module_file);
     const schemas = parseSchemas(args.schema);
@@ -371,12 +424,13 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
             database_url: optional(Type.String(), "[module_check] Postgres connection URL (default: DATABASE_URL)"),
             schema: optional(Type.String(), "[module_check] Comma-separated schemas to inspect (default: public)"),
             lite: optional(Type.Boolean(), "[module_check] Reconcile against a local SupaCloud Lite project (runs supacloud-lite db check)"),
+            remote: optional(Type.Boolean(), "[module_check] Reconcile through Management API without a local database URL"),
             project_dir: optional(Type.String(), "[module_check] Lite project directory (with --lite; default: --root)"),
             schema_dir: optional(Type.String(), "[diff] Maintained declarative SQL directory (default: supabase/schemas)"),
             db_major_version: optional(Type.Number(), "[reverse/diff] PostgreSQL shadow major version (default: 18); set only when matching a non-18 source"),
             out: optional(Type.String(), "[reverse/diff] Candidate output path (reverse requires a new directory)"),
             dir: optional(Type.String(), "[diff/plan/apply] Reviewed forward migration directory"),
-            ref: optional(Type.String(), "[plan/apply] Target project ref"),
+            ref: optional(Type.String(), "[module_check/plan/apply] Target project ref (remote module_check defaults to SUPACLOUD_PROJECT_REF)"),
             approved_digest: optional(Type.String(), "[apply] Exact digest returned by db plan"),
             application_role: optional(Type.String(), "[role_sql] Application database role"),
             migration_role: optional(Type.String(), "[role_sql] Privileged migration role"),
@@ -388,7 +442,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
                 case "context": return runContext(request, root);
                 case "lint": return runLint(request, root);
                 case "explain": return runExplain(request, root);
-                case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary);
+                case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary, options);
                 case "reverse":
                 case "diff":
                 case "plan":

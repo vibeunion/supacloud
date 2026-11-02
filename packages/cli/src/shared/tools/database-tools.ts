@@ -525,7 +525,7 @@ export function registerDatabaseTools(
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
         "list_migrations", "migration_inventory", "delivery_migration_plan", "project_url", "generate_types",
-        "database_lint", "db_lint", "rpc_catalog", "list_rpcs", "migration_import",
+        "database_lint", "db_lint", "rpc_catalog", "list_rpcs", "migration_import", "governance_check",
     ] as const;
     const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"] as const;
     const remoteActions = [...readActions, ...localActions] as const;
@@ -556,7 +556,8 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             // schema
             schema: optional(Type.String(), "[describe_columns/list_indexes/list_constraints/rls_status/rls_policies/create_table_rls/database_lint] Schema name (default: public)"),
             table: optional(Type.String(), "[describe_columns/indexes/constraints/rls_*] Table name"),
-            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types/rpc_catalog] Schemas array"),
+            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types/rpc_catalog/governance_check] Schemas array"),
+            modules: optional(Type.Array(Type.Record(Type.String(), Type.Unknown()), { maxItems: 64 }), "[governance_check] JSON-safe database module declarations"),
             // auth users
             user_id: optional(Type.String(), "[get_auth_user] User UUID"),
             limit: optional(Type.Number(), "[list_auth_users] Max users (default: 20)"),
@@ -1212,6 +1213,26 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     }
                     break;
                 }
+                case "governance_check": {
+                    const schemasList = args.schemas && args.schemas.length > 0 ? args.schemas : (args.schema ? [args.schema] : ["public"]);
+                    const safeRef = projectRefPathSegment(ref, "governance_check");
+                    const r = await managementHttp().post(`/v1/projects/${safeRef}/database/module-check`, {
+                        modules: args.modules,
+                        schemas: schemasList,
+                    });
+                    if (!r.ok) {
+                        return { content: [{ type: "text" as const, text: `❌ Database module check failed (${r.status})` }], isError: true };
+                    }
+                    const result = recordPayload(r.data);
+                    if (!result || typeof result.ok !== "boolean" || !Array.isArray(result.reports)) {
+                        throw new Error("Invalid database module check response");
+                    }
+                    text = formatModuleCheckReport(r.data);
+                    if (!result.ok) {
+                        return { content: [{ type: "text" as const, text }], isError: true };
+                    }
+                    break;
+                }
                 case "rpc_catalog":
                 case "list_rpcs": {
                     const schemasList = args.schemas && args.schemas.length > 0 ? args.schemas : (args.schema ? [args.schema] : ["public", "api"]);
@@ -1331,6 +1352,31 @@ function formatDatabaseLintReport(data: unknown): string {
     }
 
     return lines.join("\n").trimEnd();
+}
+
+function formatModuleCheckReport(data: unknown): string {
+    const result = recordPayload(data);
+    const reports = Array.isArray(result?.["reports"]) ? result["reports"] : [];
+    const lines: string[] = [];
+    for (const raw of reports) {
+        const report = recordPayload(raw);
+        if (!report) continue;
+        const name = typeof report["module"] === "string" ? report["module"] : "unknown";
+        const ok = report["ok"] === true;
+        lines.push(`module: ${name} (${ok ? "ok" : "FAILED"})`);
+        const issues = Array.isArray(report["issues"]) ? report["issues"] : [];
+        if (issues.length === 0) lines.push("  no issues");
+        for (const rawIssue of issues) {
+            const issue = recordPayload(rawIssue);
+            if (!issue) continue;
+            const severity = typeof issue["severity"] === "string" ? issue["severity"] : "error";
+            const code = typeof issue["code"] === "string" ? issue["code"] : "unknown";
+            const object = typeof issue["object"] === "string" ? issue["object"] : "?";
+            const message = typeof issue["message"] === "string" ? issue["message"] : "";
+            lines.push(`  ${severity} ${code} ${object} ${message}`);
+        }
+    }
+    return lines.length > 0 ? lines.join("\n") : JSON.stringify(data, null, 2);
 }
 
 function formatRpcCatalog(data: unknown): string {
