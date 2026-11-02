@@ -30,6 +30,15 @@ bun run check
 bun run dev
 ```
 
+Agent-driven setup can request the same handoff without parsing human text:
+
+```sh
+supacloud app init --root ./orders --name orders --format json
+```
+
+The JSON result contains the absolute root, normalized name, template, generated
+file list, next commands and the local-only production boundary.
+
 Release the matching `@supacloud/app` with its `/core` export before publishing
 the CLI that emits these imports. Source tests and candidate-package overrides
 do not prove that the public registry already contains this entry point.

@@ -202,13 +202,26 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
     if (args.force) throw new Error("app init never overwrites files; choose an empty directory");
     const template = args.template ?? "minimal";
     const { root, name, files } = await initializeAppProject({ root: args.root, name: args.name, template });
-    return textResult([
-        `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
-        `cd '${root.replaceAll("'", "'\\''")}'`,
+    const next = [
         "bun install",
         ...(template === "command" ? ["bun run db:generate"] : []),
         "bun run check",
         "bun run dev",
+    ];
+    if (args.format === "json") return textResult(JSON.stringify({
+        version: 1,
+        ok: true,
+        root,
+        name,
+        template,
+        files,
+        next,
+        note: "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
+    }, null, 2));
+    return textResult([
+        `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
+        `cd '${root.replaceAll("'", "'\\''")}'`,
+        ...next,
         "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
     ].join("\n"));
 }
