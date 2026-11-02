@@ -96,8 +96,9 @@ existing deployment history blindly.
 `database.sources.json`, when present, protects the configured source, consumer,
 contract and migration paths from candidate output.
 
-The isolated project uses the standard `supabase/schemas` layout, PostgreSQL 17
-by default (`--db_major_version` selects 15-18), and no seed or application config.
+The isolated project uses the standard `supabase/schemas` layout, PostgreSQL 18
+by default, and no seed or application config. Set `--db_major_version` only when
+the shadow must match a non-18 source; supported values are 15-18.
 It does not import arbitrary project hooks, linked targets or credentials.
 Custom extension/bootstrap requirements must be validated in the project's
 official workflow first. This is an opt-in SQL-first path; legacy Drizzle-first
@@ -109,7 +110,7 @@ query models/types after adoption, without treating them as another authoring so
 
 The focused workflow test accepts `SUPACLOUD_SUPABASE_CLI_BIN` to exercise the
 real engine. CLI 2.120.0 was verified with an existing PostgreSQL 18 source and
-the official PostgreSQL 17 shadow. Both reverse and incremental diff succeeded
+an explicitly selected PostgreSQL 17 shadow. Both reverse and incremental diff succeeded
 without changing the selected source database. Initial shadow image downloads
 can take several minutes; each official invocation is bounded to five minutes.
 
