@@ -48,11 +48,8 @@ const CORE_CONTEXT_KEYS = [
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPACLOUD_API_URL",
-    "SUPACLOUD_MANAGEMENT_API_URL",
-    "MANAGEMENT_API_URL",
     "SUPACLOUD_API_TOKEN",
     "SUPACLOUD_PROJECT_REF",
-    "X_PROJECT_REF",
     "SUPACLOUD_HOST",
     "SUPACLOUD_APPLICATION_ID",
     "SUPACLOUD_APPLICATION_ENVIRONMENT_ID",
@@ -140,12 +137,9 @@ function sourceCredentialScope(
 
 function sourceProjectCore(values: Record<string, string>) {
     const supabaseUrl = canonicalApiOrigin(values.SUPABASE_URL || "");
-    const projectRef = (values.SUPACLOUD_PROJECT_REF || values.X_PROJECT_REF || "").trim()
+    const projectRef = (values.SUPACLOUD_PROJECT_REF || "").trim()
         || inferProjectRefFromSupabaseUrl(supabaseUrl);
-    const explicitApiUrl = values.SUPACLOUD_API_URL
-        || values.SUPACLOUD_MANAGEMENT_API_URL
-        || values.MANAGEMENT_API_URL
-        || "";
+    const explicitApiUrl = values.SUPACLOUD_API_URL || "";
     const credentialScope = sourceCredentialScope(values, explicitApiUrl, supabaseUrl);
     const managementUrl = explicitApiUrl
         || (values.SUPACLOUD_HOST ? `http://${values.SUPACLOUD_HOST}:9090` : "");

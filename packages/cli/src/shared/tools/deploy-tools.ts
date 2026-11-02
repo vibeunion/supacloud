@@ -92,7 +92,6 @@ function isProtectedBuildEnv(name: string): boolean {
     return name.startsWith("SUPACLOUD_")
         || name === "SUPABASE_SERVICE_ROLE_KEY"
         || name === "SUPABASE_ACCESS_TOKEN"
-        || name === "MANAGEMENT_API_URL"
         || name === "MANAGEMENT_API_TOKEN";
 }
 
