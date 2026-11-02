@@ -11,7 +11,7 @@ interface ModulePolicy {
 }
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
-    deploy: { write: ["deploy"] },
+    deploy: { local: ["init"], write: ["deploy"] },
     applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_promotion_status", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan", "list_previews", "get_preview"],
         write: ["upload_release", "put_configuration", "deploy_application", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
     project: {

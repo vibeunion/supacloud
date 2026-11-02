@@ -148,6 +148,16 @@ function releaseBasePath(projectRef: string, deploymentId: string): string {
 }
 
 describe("supacloud process contract", () => {
+    test("deploy init creates local deployment configuration without project context", async () => {
+        const root = mkdtempSync(join(tmpdir(), "supacloud-deploy-init-"));
+        temporaryDirectories.push(root);
+        const response = await runProjectCli(["deploy", "init", "--root", root, "--json"]);
+        expect(response.exitCode).toBe(0);
+        const payload = JSON.parse(response.stdout);
+        expect(payload).toMatchObject({ schema: "supacloud.developer-experience.init.v1", ok: true, root });
+        expect(existsSync(join(root, "supacloud.json"))).toBe(true);
+    });
+
     test("does not expose the internal applications release surface", async () => {
         const response = await runProjectCli(["applications", "--help"]);
         expect(response.exitCode).toBe(1);

@@ -13,6 +13,7 @@ import { registerTool, type ToolServer } from "../tool-server";
 import { publishFrontendRelease } from "./frontend-release-control";
 import { DEPLOYMENT_UPGRADE } from "../deployment-upgrade";
 import { readProjectDeploymentStatus, requireProjectDeploymentProtocol } from "./project-deployment";
+import { initToolSchema, initializeProject } from "./developer-experience-tools";
 
 const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 
@@ -96,6 +97,8 @@ function isProtectedBuildEnv(name: string): boolean {
 }
 
 export const deployToolSchema = {
+    action: optional(stringEnum(["init"]), "[init] Create local deployment configuration and environment examples"),
+    ...initToolSchema,
     ref: optional(Type.String(), "Project ref (defaults to the linked project)"),
     cwd: optional(Type.String(), "Project directory (default: current directory)"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
@@ -605,6 +608,12 @@ export function registerDeployTools(
         deployToolSchema,
         async (args) => {
             const invocationDirectory = resolve(String(args.cwd || options.cwd || process.cwd()));
+            if (args.action === "init") {
+                return initializeProject({
+                    ...(typeof args.root === "string" ? { root: args.root } : {}),
+                    ...(args.json === true ? { json: true } : {}),
+                }, { cwd: invocationDirectory });
+            }
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");
             if (args.assets_only === true && args.backend === true) throw new Error("Choose either frontend assets or backend deployment");

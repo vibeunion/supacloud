@@ -101,12 +101,15 @@ export async function runCli(
         const shape = getSchemaShape(tool.schema);
         const actionField = shape.action;
         const actionOptions = getEnumOptions(actionField);
-        const actionless = toolName === "deploy";
+        const actionless = actionOptions.length === 0;
         const otherFields = Object.entries(shape).filter(([name]) => name !== "action");
 
         const actionLines = actionOptions.length
             ? `Available actions:\n  ${actionOptions.join("\n  ")}`
             : actionless ? "" : "This command does not declare action metadata.";
+        const actionUsage = actionOptions.length
+            ? toolName === "deploy" ? " [action]" : " <action>"
+            : "";
 
         const argLines = otherFields.length
             ? otherFields
@@ -118,7 +121,7 @@ export async function runCli(
             : "  (no additional flags)";
 
         return [
-            `Usage: ${commandName} ${toolName}${actionless ? "" : " <action>"} [--flags]`,
+            `Usage: ${commandName} ${toolName}${actionUsage} [--flags]`,
             "",
             ...(actionLines ? [actionLines, ""] : []),
             "Flags:",
