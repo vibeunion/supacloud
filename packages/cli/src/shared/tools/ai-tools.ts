@@ -194,6 +194,35 @@ export function resolveDefaultCodexSkillRoot(
     return join(resolve(codexHome || join(homeDirectory, ".codex")), "skills");
 }
 
+/** Stable aliases for common Agent Skill roots; any other value remains an explicit path. */
+export const SKILL_TARGET_ALIASES = ["codex", "claude", "agents", "project"] as const;
+export type SkillTargetAlias = typeof SKILL_TARGET_ALIASES[number];
+
+export function resolveSkillTargetRoot(
+    target: string | undefined,
+    options: {
+        environment?: NodeJS.ProcessEnv;
+        homeDirectory?: string;
+        workingDirectory?: string;
+    } = {},
+): string {
+    const environment = options.environment ?? process.env;
+    const homeDirectory = options.homeDirectory ?? homedir();
+    const workingDirectory = options.workingDirectory ?? process.cwd();
+    const normalized = target?.trim().toLowerCase();
+    if (!normalized || normalized === "codex") return resolveDefaultCodexSkillRoot(environment, homeDirectory);
+    if (normalized === "claude") {
+        const config = environment.CLAUDE_CONFIG_DIR?.trim();
+        return join(resolve(config || join(homeDirectory, ".claude")), "skills");
+    }
+    if (normalized === "agents") {
+        const config = environment.AGENTS_HOME?.trim();
+        return join(resolve(config || join(homeDirectory, ".agents")), "skills");
+    }
+    if (normalized === "project") return join(resolve(workingDirectory), ".agents", "skills");
+    return resolve(target!);
+}
+
 export function resolveBundledSkillDirectory(moduleUrl = import.meta.url): string {
     const moduleDirectory = dirname(fileURLToPath(moduleUrl));
     const candidates = [
@@ -215,7 +244,7 @@ export function registerAiTools(server: ToolServer): void {
         "Install or inspect the bundled SupaCloud CLI AI skill. Actions: show_skill, install_skill",
         {
             action: stringEnum(["show_skill", "install_skill"]),
-            target: optional(Type.String(), "[install_skill] Skill root directory; defaults to $CODEX_HOME/skills or ~/.codex/skills"),
+            target: optional(Type.String(), "[install_skill] codex|claude|agents|project or an explicit Skill root directory"),
             dry_run: optional(Type.Boolean(), "[install_skill] Preview the installation without writing files"),
             force: optional(Type.Boolean(), "[install_skill] Back up and replace different existing skill content"),
         },
@@ -228,11 +257,15 @@ export function registerAiTools(server: ToolServer): void {
                     sourceDirectory,
                     defaultTargetRoot,
                     defaultDestination: join(defaultTargetRoot, SKILL_NAME),
+                    targetAliases: Object.fromEntries(SKILL_TARGET_ALIASES.map((alias) => [
+                        alias, resolveSkillTargetRoot(alias),
+                    ])),
                 });
             }
+            const targetRoot = resolveSkillTargetRoot(request.target);
             return textResponse(installSkill({
                 sourceDirectory,
-                targetRoot: request.target || defaultTargetRoot,
+                targetRoot,
                 mode: request.dry_run ? "dry-run" : "write",
                 conflictPolicy: request.force ? "replace" : "reject",
                 now: new Date(),

@@ -250,9 +250,10 @@ supacloud ai install_skill
 ```
 
 The default destination is `$CODEX_HOME/skills/supacloud` or
-`~/.codex/skills/supacloud`. Use `--target /path/to/skills` for an explicit
-Skill root. Different existing content is preserved unless `--force` is passed;
-forced replacement creates a timestamped adjacent backup first.
+`~/.codex/skills/supacloud`. `--target codex|claude|agents|project` selects a
+common Agent Skill root, and `--target /path/to/skills` remains available for an
+explicit root. Different existing content is preserved unless `--force` is
+passed; forced replacement creates a timestamped adjacent backup first.
 
 The Skill directs agents through the local application loop (`app init`,
 `context`, `generate`, `check`, `doctor`, reviewed `fix`, `verify-plan`) and keeps
