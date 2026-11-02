@@ -3,22 +3,25 @@
 ## Enforced Database Governance
 
 Existing compiler callers retain `off` as a compatibility migration exception.
-Newly generated `command` starters set
-`databaseGovernance: { mode: "enforce", moduleFile: "db/modules.ts" }`:
-compile/check/build run the existing `@supacloud/db` source-boundary and
-contract-freshness gate, SQL lint and live Catalog reconciliation, including
+Newly generated `command` starters keep `databaseGovernance: { mode: "check",
+moduleFile: "db/modules.ts" }` for ordinary compile/check/build. `check` runs
+the existing `@supacloud/db` source-boundary and contract-freshness gate plus SQL
+lint, without importing project modules or opening a database connection. The
+generated integration dev profile switches the same configuration to `enforce`
+and supplies a loopback database URL explicitly.
+
+`enforce` adds live Catalog reconciliation on top of `check`, including on
 incremental cache hits. Missing adoption files, stale contracts, SQL findings or
 Catalog drift block generation even with `writeOnError`; checks never generate
-contracts or migrations.
-The minimal/http/edge starters remain database-free.
+contracts or migrations. The minimal/http/edge starters remain database-free.
 
 For an existing database project, adopt the governed path by declaring the real
-database modules and explicitly setting the following in `supacloud.config.ts`:
+database modules and setting the following in `supacloud.config.ts`:
 
 ```ts
 export default {
   databaseGovernance: {
-    mode: "enforce",
+    mode: "check",
     projectRoot: ".",
     moduleFile: "db/modules.ts",
     databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
@@ -27,11 +30,17 @@ export default {
 };
 ```
 
+Keep `check` in committed project configuration so local builds and CI remain
+hermetic. Run `enforce` only in an explicit release/deployment gate where the
+platform injects a read-only PostgreSQL connection, or run the separate
+`supacloud db module_check` command through the same controlled environment.
+Application code and committed configuration must not contain a production
+connection URL.
+
 `projectRoot` is relative to the configuration directory (or `rootDir` when
-calling `compileProject` / `checkProject` directly). Use a read-only PostgreSQL
-credential in the named environment variable, targeting an explicitly selected
-local or test database. The compiler does not load `.env` files for this worker,
-generate migrations, repair contracts, or apply SQL. Setting `mode: "off"` is
+calling `compileProject` / `checkProject` directly). The compiler does not load
+`.env` files for this worker, generate migrations, repair contracts, or apply
+SQL. Never use a migration/owner role for this check. Setting `mode: "off"` is
 reserved for an explicit migration exception and should not be used in a new
 database starter.
 
