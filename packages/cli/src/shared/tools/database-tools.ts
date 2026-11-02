@@ -711,11 +711,14 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                 }
                 case "export_svadmin_schema": {
                     if (!args.table) throw new Error("'table' required");
-                    const colSql = `SELECT column_name, data_type, is_nullable, column_default, character_maximum_length FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${args.table}' ORDER BY ordinal_position;`;
+                    const schemaLiteral = sqlStringLiteral(schema, "schema");
+                    const tableLiteral = sqlStringLiteral(args.table, "table");
+                    const qualifiedTable = `${quoteIdentifier(schema, "schema")}.${quoteIdentifier(args.table, "table")}`;
+                    const colSql = `SELECT column_name, data_type, is_nullable, column_default, character_maximum_length FROM information_schema.columns WHERE table_schema = ${schemaLiteral} AND table_name = ${tableLiteral} ORDER BY ordinal_position;`;
                     const colRes = await execSql(colSql);
                     if (!colRes.ok) throw new Error(`Failed to inspect columns (${colRes.status})`);
 
-                    const conSql = `SELECT conname as name, contype as type, pg_get_constraintdef(oid) as definition FROM pg_constraint WHERE connamespace = '${schema}'::regnamespace AND conrelid = '${schema}.${args.table}'::regclass;`;
+                    const conSql = `SELECT conname as name, contype as type, pg_get_constraintdef(oid) as definition FROM pg_constraint WHERE connamespace = ${schemaLiteral}::regnamespace AND conrelid = ${qualifiedTable}::regclass;`;
                     const conRes = await execSql(conSql);
 
                     const cols = buildSvadminColumns(colRes.data, conRes.ok ? conRes.data : []);
@@ -1232,10 +1235,18 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
 }
 
 function quoteIdentifier(value: unknown, label: string): string {
+    return `"${validatedIdentifier(value, label)}"`;
+}
+
+function sqlStringLiteral(value: unknown, label: string): string {
+    return `'${validatedIdentifier(value, label)}'`;
+}
+
+function validatedIdentifier(value: unknown, label: string): string {
     if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value)) {
         throw new Error(`Invalid ${label} identifier`);
     }
-    return `"${value}"`;
+    return value;
 }
 
 function validateColumnDefinitions(value: unknown): string {

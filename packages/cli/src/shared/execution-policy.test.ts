@@ -320,6 +320,7 @@ describe("CLI execution policy", () => {
 
     test("allows migration previews and local authoring without production confirmation", () => {
         expect(executionMode("database", "migration_inventory", {})).toBe("read");
+        expect(executionMode("database", "export_svadmin_schema", {})).toBe("read");
         expect(executionMode("database", "push_migrations", { dry_run: true })).toBe("read");
         expect(executionMode("database", "execute", {})).toBe("write");
         expect(executionMode("supabase", "push", { dry_run: true })).toBe("read");

@@ -330,29 +330,23 @@ and showed failure. These checks are not deployment or live backend acceptance.
    outcomes, target switching and late results. Keep UI metadata application-owned.
 
 This PR delivers the SDK facade, public-entrypoint consumer/type checks and browser
-bundle isolation.
+bundle isolation. It does not generate SVAdmin UI components, upgrade the SVAdmin
+SDK, integrate production authorization, or publish a release.
 
-## End-to-End Vibe Coding Schema Generation
+## Database metadata for SVAdmin generation
 
-With the `database` MCP compound tool in `@supacloud/cli`, AI agents and operators can now directly export database column metadata into `@svadmin/core` compatible schema definitions without human transcription:
+`database` action `export_svadmin_schema` reads column metadata, primary keys, and
+foreign-key targets. JSON mode returns a `databaseColumns` payload that can be
+passed to a separate `svadmin_generateResource` call. The CLI does not generate
+the resource or UI itself.
 
 ```sh
-# Via MCP tool call:
 database action="export_svadmin_schema" table="orders" json=true
 ```
 
-The resulting `databaseColumns` payload connects directly to `svadmin_generateResource`:
-
-```ts
-svadmin_generateResource({
-  resource: "orders",
-  sourceType: "databaseColumns",
-  payload: JSON.stringify(exportedColumns),
-});
-```
-
-This guarantees zero-hallucination type alignment across:
-PostgreSQL Table $\longrightarrow$ SupaCloud CLI Metadata $\longrightarrow$ svadmin ResourceDefinition $\longrightarrow$ Svelte 5 AutoTable / AutoForm.
+Schema and table names must be unquoted PostgreSQL identifiers. A column named
+`id` is reported as a primary key when no primary-key constraint is present, and
+a `*_id` column is reported as a foreign key when no constraint names its target.
 
 ## Local verification
 

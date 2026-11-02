@@ -2285,4 +2285,27 @@ describe("database migration helpers", () => {
     expect(parsed.columns[0]).toEqual({ name: "id", type: "bigint", nullable: false, isPrimary: true, isForeignKey: false });
     expect(parsed.columns[2]).toEqual({ name: "user_id", type: "bigint", nullable: true, isPrimary: false, isForeignKey: true, referencesResource: "users" });
   });
+
+  test("export_svadmin_schema rejects unsafe identifiers before SQL", async () => {
+    let posts = 0;
+    const callback = captureDatabaseTool({
+      post: async () => {
+        posts += 1;
+        return { ok: true, status: 200, data: { rows: [] } };
+      },
+    });
+
+    await expect(callback({
+      action: "export_svadmin_schema",
+      ref: "proj",
+      table: "posts'; DROP TABLE users; --",
+    })).rejects.toThrow("Invalid table identifier");
+    await expect(callback({
+      action: "export_svadmin_schema",
+      ref: "proj",
+      schema: "public;select",
+      table: "posts",
+    })).rejects.toThrow("Invalid schema identifier");
+    expect(posts).toBe(0);
+  });
 });
