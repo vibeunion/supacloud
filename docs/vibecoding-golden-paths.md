@@ -115,7 +115,10 @@ The returned `subject` remains the canonical module name; ambiguous owners requi
 an explicit module target. Existing module queries keep the same version-1 shape.
 Agents read
 structured context instead of scanning the repository, and never receive
-credentials or live user data.
+credentials or live user data. `app check --format json` and `app doctor
+--format json` also return a `next` command list, so an agent can move from a
+failed check or preview-ready repair to the next verification step without
+inventing commands.
 
 Database changes use the same bounded-context rule:
 

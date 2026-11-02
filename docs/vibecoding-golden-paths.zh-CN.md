@@ -88,7 +88,9 @@ Query、受治理 Command、状态声明、异步任务边界、HTTP 路由、�
 
 ## AI 专用上下文
 
-`supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。
+`supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。`app check --format json` 与
+`app doctor --format json` 还会返回 `next` 命令列表，Agent 可以从失败检查或
+preview-ready 修复直接进入下一步验证，不必自行猜测命令。
 
 数据库任务使用同样的边界化上下文：
 
