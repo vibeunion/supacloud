@@ -1,4 +1,11 @@
-import { Cause, Duration, Effect, Exit, ManagedRuntime, Schedule } from "effect";
+/**
+ * The only production Effect interpreter.
+ *
+ * Application code returns an Effect program. This adapter owns timeout,
+ * the transient-failure allow-list, and the Exit-to-HTTP mapping. It does not
+ * replace command receipts, idempotency or durable job retry.
+ */
+import { Cause, Duration, Effect, Exit, ManagedRuntime } from "effect";
 import type * as Layer from "effect/Layer";
 
 export interface CompiledEffectError {
@@ -9,6 +16,10 @@ export interface CompiledEffectError {
   readonly codeFromError?: boolean;
   readonly messageFromError?: boolean;
   readonly statusFromError?: boolean;
+  /** Framework may retry this declared 5xx failure. Outcome-unknown failures must not set this. */
+  readonly retryable?: boolean;
+  /** The write may already have happened. Never retried, even when retry is explicit. */
+  readonly outcomeUnknown?: boolean;
 }
 
 export interface CompiledEffectDescriptor {
@@ -92,6 +103,23 @@ function boundedStatus(value: unknown): number | undefined {
     : undefined;
 }
 
+/**
+ * In-process retry is an allow-list, not a blanket schedule.
+ * Only a declared 5xx tag that is not outcome-unknown qualifies. 4xx, unmapped
+ * failures, defects and unknown write outcomes stay failed so the caller can
+ * use the receipt or read-back protocol instead of repeating a write.
+ */
+function isFrameworkRetryable(error: unknown, descriptor: CompiledEffectDescriptor): boolean {
+  const tag = effectErrorTag(error);
+  if (!tag) return false;
+  const mapping = descriptor.errors?.find((entry) => entry.tag === tag);
+  return mapping?.retryable === true
+    && mapping.outcomeUnknown !== true
+    && mapping.statusFromError !== true
+    && mapping.status >= 500
+    && mapping.status <= 599;
+}
+
 function mapEffectFailure(
   error: unknown,
   descriptor: CompiledEffectDescriptor | undefined,
@@ -139,7 +167,11 @@ export async function runCompiledEffect(
     program = Effect.timeout(program, Duration.millis(descriptor.timeoutMs));
   }
   if (descriptor?.retry === "explicit" && descriptor.maxAttempts !== undefined && descriptor.maxAttempts > 1) {
-    program = Effect.retry(program, Schedule.recurs(descriptor.maxAttempts - 1));
+    const policy = descriptor;
+    program = Effect.retry(program, {
+      times: policy.maxAttempts - 1,
+      while: (error) => isFrameworkRetryable(error, policy),
+    });
   }
   const exit = await runtime.run(program);
   if (Exit.isSuccess(exit)) return exit.value;

@@ -441,7 +441,7 @@
     {
       "name": "EffectErrorMappingNode",
       "kind": "type",
-      "signature": "export interface EffectErrorMappingNode {\n    tag: string;\n    status: number;\n    code: string;\n    message?: string;\n    codeFromError?: boolean;\n    messageFromError?: boolean;\n    statusFromError?: boolean;\n}"
+      "signature": "export interface EffectErrorMappingNode {\n    tag: string;\n    status: number;\n    code: string;\n    message?: string;\n    codeFromError?: boolean;\n    messageFromError?: boolean;\n    statusFromError?: boolean;\n    retryable?: boolean;\n    outcomeUnknown?: boolean;\n}"
     },
     {
       "name": "EffectRetryPolicy",

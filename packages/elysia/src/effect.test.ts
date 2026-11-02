@@ -169,18 +169,42 @@ test("enforces timeout and rejects non-Effect route results", async () => {
   )).rejects.toMatchObject({ code: "EFFECT_PROGRAM_REQUIRED" });
 });
 
-test("supports explicit bounded retries", async () => {
+test("retries only a declared transient 5xx failure", async () => {
   let attempts = 0;
   const program = Effect.suspend(() => {
     attempts += 1;
-    return attempts < 3 ? Effect.fail("temporary") : Effect.succeed("ok");
+    return attempts < 3
+      ? Effect.fail({ _tag: "UpstreamUnavailable" })
+      : Effect.succeed("ok");
   });
   await expect(runCompiledEffect(
     program,
-    { required: true, retry: "explicit", maxAttempts: 3 },
+    {
+      required: true,
+      retry: "explicit",
+      maxAttempts: 3,
+      errors: [{ tag: "UpstreamUnavailable", status: 503, code: "UPSTREAM_UNAVAILABLE", retryable: true }],
+    },
     createDefaultEffectRuntime(),
   )).resolves.toBe("ok");
   expect(attempts).toBe(3);
+});
+
+test("does not retry client, outcome-unknown or unlisted failures", async () => {
+  for (const descriptor of [
+    { required: true as const, retry: "explicit" as const, maxAttempts: 3, errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND", retryable: true }] },
+    { required: true as const, retry: "explicit" as const, maxAttempts: 3, errors: [{ tag: "OutcomeUnknown", status: 503, code: "OUTCOME_UNKNOWN", retryable: true, outcomeUnknown: true }] },
+    { required: true as const, retry: "explicit" as const, maxAttempts: 3, errors: [{ tag: "UpstreamUnavailable", status: 503, code: "UPSTREAM_UNAVAILABLE" }] },
+  ]) {
+    let attempts = 0;
+    const tag = descriptor.errors[0]!.tag;
+    const program = Effect.suspend(() => {
+      attempts += 1;
+      return Effect.fail({ _tag: tag });
+    });
+    await expect(runCompiledEffect(program, descriptor)).rejects.toBeTruthy();
+    expect(attempts).toBe(1);
+  }
 });
 
 test("reuses Layer services and disposes them explicitly", async () => {

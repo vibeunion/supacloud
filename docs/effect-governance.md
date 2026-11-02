@@ -10,10 +10,20 @@ execution model: the framework boundary receives an `Exit`, maps
 `Runtime<R>` type or FiberFailure wrapper APIs.
 
 ```text
-TypeBox/Elysia schemas -> HTTP boundary
-SupaCloud Compiler      -> module, dependency, error and retry governance
-Effect                  -> runtime execution, cancellation, timeout and retry
+Framework boundary      -> request entry and exit, auth, idempotency, audit, response protocol
+Effect program          -> one execution: typed failure, timeout, cancellation, composition
+Pure functions          -> validation, mapping and domain calculation; not Effect
+Receipts and jobs       -> durable replay of writes whose outcome may be unknown
 ```
+
+The framework adapter in `@supacloud/elysia` is the only production interpreter.
+Application code returns an `Effect` program. `dependencies: []` and
+`retry: "none"` are explicit contracts, not evidence that a retry policy is
+active. In-process retry is opt-in per failure: `retry: "explicit"` retries
+only mappings marked `retryable: true`. Those mappings must be 5xx and must
+not be `outcomeUnknown` or `statusFromError`. A 4xx, an unmapped failure, a
+defect, or a write whose result is unconfirmed is never repeated by the
+adapter. Replaying that write belongs to the command receipt or job lease.
 
 ## Default Strict Checks
 
@@ -170,8 +180,10 @@ The adapter:
 - executes only values recognized as Effect programs;
 - rejects a non-Effect value when the route declares `required: true`;
 - applies the declared timeout;
-- applies bounded retries only when `retry: "explicit"` and `maxAttempts` is
-  present;
+- applies bounded retries only when `retry: "explicit"`, `maxAttempts` is
+  present, and the failure tag is on the `retryable: true` allow-list;
+- does not retry 4xx mappings, `outcomeUnknown` mappings, unmapped failures
+  or defects;
 - maps tagged failures to public HTTP errors without exposing raw failure
   values;
 - refuses explicit retry on a command that does not require idempotency.

@@ -2428,9 +2428,13 @@ function parseController(
                   const codeFromError = booleanLiteralProp(errorExpr, "codeFromError");
                   const messageFromError = booleanLiteralProp(errorExpr, "messageFromError");
                   const statusFromError = booleanLiteralProp(errorExpr, "statusFromError");
+                  const retryable = booleanLiteralProp(errorExpr, "retryable");
+                  const outcomeUnknown = booleanLiteralProp(errorExpr, "outcomeUnknown");
                   if (invalidBooleanProp(errorExpr, "codeFromError")
                     || invalidBooleanProp(errorExpr, "messageFromError")
-                    || invalidBooleanProp(errorExpr, "statusFromError")) {
+                    || invalidBooleanProp(errorExpr, "statusFromError")
+                    || invalidBooleanProp(errorExpr, "retryable")
+                    || invalidBooleanProp(errorExpr, "outcomeUnknown")) {
                     ctx.diagnostics.push({
                       severity: "error",
                       code: "invalid-effect-errors",
@@ -2460,6 +2464,8 @@ function parseController(
                     ...(codeFromError === undefined ? {} : { codeFromError }),
                     ...(messageFromError === undefined ? {} : { messageFromError }),
                     ...(statusFromError === undefined ? {} : { statusFromError }),
+                    ...(retryable === undefined ? {} : { retryable }),
+                    ...(outcomeUnknown === undefined ? {} : { outcomeUnknown }),
                   });
                 }
                 effect.errors = errors;
