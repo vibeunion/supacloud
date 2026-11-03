@@ -1,6 +1,5 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import type { ProjectTask, ProjectTaskAttempt } from "../db";
 import { isRecord } from "./project-config";
 import { dateSchema } from "./date-schema";
 
@@ -9,12 +8,12 @@ const nullableText = Type.Union([text, Type.Null()]);
 const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const nullableDate = Type.Union([dateSchema, Type.Null()]);
 const jsonObject = Type.Record(Type.String(), Type.Unknown());
-const taskStatus = Type.Union([
+export const taskStatus = Type.Union([
   Type.Literal("pending"), Type.Literal("leased"), Type.Literal("running"),
   Type.Literal("retry_scheduled"), Type.Literal("succeeded"), Type.Literal("failed"),
   Type.Literal("dead_lettered"), Type.Literal("cancelled"),
 ]);
-const taskSchema = Type.Object({
+export const taskSchema = Type.Object({
   id: Type.String({ minLength: 1 }), project_ref: Type.String({ minLength: 1 }),
   task_type: Type.String({ minLength: 1 }),
   status: taskStatus,
@@ -31,12 +30,12 @@ const taskSchema = Type.Object({
   function_slug: nullableText, function_version: nullableText,
   created_at: dateSchema, updated_at: dateSchema,
 });
-const attemptLogsSchema = Type.Array(Type.Object({
+export const attemptLogsSchema = Type.Array(Type.Object({
   timestamp: Type.String({ minLength: 1 }),
   stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]),
   level: text, message: text,
 }));
-const attemptSchema = Type.Object({
+export const attemptSchema = Type.Object({
   id: Type.String({ minLength: 1 }), task_id: Type.String({ minLength: 1 }),
   project_ref: Type.String({ minLength: 1 }),
   attempt_no: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
@@ -47,6 +46,9 @@ const attemptSchema = Type.Object({
   logs: Type.Union([attemptLogsSchema, Type.Null()]),
   created_at: dateSchema, updated_at: dateSchema,
 });
+
+export type ProjectTask = Static<typeof taskSchema>;
+export type ProjectTaskAttempt = Static<typeof attemptSchema>;
 
 export class InvalidTaskRecordError extends Error {
   constructor() {

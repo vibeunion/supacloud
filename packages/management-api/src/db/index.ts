@@ -793,57 +793,13 @@ export const TaskType = {
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType] | (string & {});
 
-export interface ProjectTask {
-  id: string;
-  project_ref: string;
-  task_type: string;
-  status: TaskStatus;
-  payload: Record<string, unknown>;
-  error: string | null;
-  retries: number;
-  attempt: number;
-  max_attempts: number;
-  next_run_at: Date | null;
-  lease_until: Date | null;
-  started_at: Date | null;
-  completed_at: Date | null;
-  timeout_sec: number | null;
-  idempotency_key: string | null;
-  trace_id: string | null;
-  cancel_requested_at: Date | null;
-  cancellation_reason: string | null;
-  correlation_id: string | null;
-  business_task_id: string | null;
-  invoker_user_id: string | null;
-  auth_authority_ref: string;
-  metadata: Record<string, unknown> | null;
-  function_slug: string | null;
-  function_version: string | null;
-  result: Record<string, unknown> | null;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface ProjectTaskAttempt {
-  id: string;
-  task_id: string;
-  project_ref: string;
-  attempt_no: number;
-  status: string;
-  started_at: Date;
-  completed_at: Date | null;
-  duration_ms: number | null;
-  error: string | null;
-  response_status: number | null;
-  logs: Array<{
-    timestamp: string;
-    stream: "stdout" | "stderr";
-    level: string;
-    message: string;
-  }> | null;
-  created_at: Date;
-  updated_at: Date;
-}
+export {
+  type ProjectTask,
+  type ProjectTaskAttempt,
+  taskSchema,
+  attemptSchema,
+} from "../utils/task-record";
+export { decodeRow, decodeRows, DatabaseRecordDecodeError } from "./decode";
 
 export interface CreateProjectInput {
   ref: string;

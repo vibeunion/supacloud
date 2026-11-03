@@ -1,4 +1,4 @@
-import { sql, type ProjectTask, type ProjectTaskAttempt, type TaskStatus, type TaskType, TaskStatus as TaskStatuses, TaskType as TaskTypes } from "../db";
+import { sql, type ProjectTask, type ProjectTaskAttempt, type TaskStatus, type TaskType, TaskStatus as TaskStatuses, TaskType as TaskTypes, decodeRow, decodeRows, taskSchema } from "../db";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
 import { withRetry as retryOperation } from "../utils/retry";
 import { isRecord } from "../utils/project-config";
@@ -89,6 +89,36 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
   filters = captureTaskListFilters(filters);
   const conditions = [`project_ref = $1`];
   const values: unknown[] = [projectRef];
+  const explicitColumns = `
+      id,
+      project_ref,
+      task_type,
+      status,
+      payload,
+      result,
+      error,
+      retries,
+      attempt,
+      max_attempts,
+      next_run_at,
+      lease_until,
+      started_at,
+      completed_at,
+      timeout_sec,
+      idempotency_key,
+      trace_id,
+      cancel_requested_at,
+      cancellation_reason,
+      correlation_id,
+      business_task_id,
+      metadata,
+      invoker_user_id,
+      auth_authority_ref,
+      function_slug,
+      function_version,
+      created_at,
+      updated_at
+  `;
   const selectClause = filters.summary
     ? `
       id,
@@ -120,7 +150,7 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
       created_at,
       updated_at
     `
-    : "*";
+    : explicitColumns;
 
   if (filters.onlyDeadLettered) {
     conditions.push(`status = 'dead_lettered'`);
@@ -516,9 +546,27 @@ export async function updateTaskError(id: string, error: string): Promise<void> 
 export async function getTaskById(id: string, projectRef?: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.getTaskById", async () => {
     const rows = projectRef
-      ? await sql`SELECT * FROM project_tasks WHERE id = ${id} AND project_ref = ${projectRef} LIMIT 1`
-      : await sql`SELECT * FROM project_tasks WHERE id = ${id} LIMIT 1`;
-    return rows[0] ? mapTask(rows[0]) : null;
+      ? await sql`
+          SELECT
+            id, project_ref, task_type, status, payload, result, error, retries,
+            attempt, max_attempts, next_run_at, lease_until, started_at, completed_at,
+            timeout_sec, idempotency_key, trace_id, cancel_requested_at,
+            cancellation_reason, correlation_id, business_task_id, invoker_user_id,
+            auth_authority_ref, metadata, function_slug, function_version, created_at, updated_at
+          FROM project_tasks
+          WHERE id = ${id} AND project_ref = ${projectRef}
+          LIMIT 1`
+      : await sql`
+          SELECT
+            id, project_ref, task_type, status, payload, result, error, retries,
+            attempt, max_attempts, next_run_at, lease_until, started_at, completed_at,
+            timeout_sec, idempotency_key, trace_id, cancel_requested_at,
+            cancellation_reason, correlation_id, business_task_id, invoker_user_id,
+            auth_authority_ref, metadata, function_slug, function_version, created_at, updated_at
+          FROM project_tasks
+          WHERE id = ${id}
+          LIMIT 1`;
+    return rows[0] ? decodeRow(taskSchema, rows[0]) : null;
   });
 }
 
@@ -553,7 +601,7 @@ export async function listTasksByProjectFiltered(projectRef: string, filters: Ta
   const { sqlText, values } = buildTaskListQuery(projectRef, filters);
   return withRetry("TaskRepository.listTasksByProjectFiltered", async () => {
     const rows = await sql.unsafe(sqlText, values);
-    return rows.map(mapTask);
+    return decodeRows(taskSchema, rows);
   });
 }
 
