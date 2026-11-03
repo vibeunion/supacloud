@@ -856,7 +856,7 @@ export class S3Driver implements StorageDriver {
       return new Response(file.stream(), {
         headers: {
           "Content-Type": contentType,
-          ...(size !== undefined && size >= 0 ? { "Content-Length": String(size) } : {}),
+          ...(size !== undefined && size > 0 ? { "Content-Length": String(size) } : {}),
         },
       });
     } catch {

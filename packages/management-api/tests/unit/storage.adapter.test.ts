@@ -101,6 +101,84 @@ describe("S3Driver uploadFile", () => {
   });
 });
 
+describe("S3Driver getDownloadResponse", () => {
+  function mockS3Driver(file: {
+    exists: () => Promise<boolean>;
+    size: number;
+    type?: string;
+    stream: () => ReadableStream<Uint8Array>;
+  }) {
+    const driver = new S3Driver();
+    (driver as unknown as { getCreds: () => unknown }).getCreds = async () => ({
+      accessKey: "test-access",
+      secretKey: "test-secret",
+      endpoint: "http://127.0.0.1:9000",
+      bucket: "supa_test",
+    });
+    (driver as unknown as { getClient: () => unknown }).getClient = () => ({
+      file: () => file,
+    });
+    return driver;
+  }
+
+  test("streams the object and preserves a known positive Content-Length", async () => {
+    const body = textStream("streamed body");
+    const driver = mockS3Driver({
+      exists: async () => true,
+      size: "streamed body".length,
+      type: "text/plain",
+      stream: () => body,
+    });
+
+    const response = await driver.getDownloadResponse("testref", "gallery", "raw.txt");
+    expect(response).not.toBeNull();
+    expect(response!.headers.get("content-type")).toBe("text/plain");
+    expect(response!.headers.get("content-length")).toBe(String("streamed body".length));
+    expect(await response!.text()).toBe("streamed body");
+  });
+
+  test("omits Content-Length when the object size is unknown", async () => {
+    const driver = mockS3Driver({
+      exists: async () => true,
+      size: 0,
+      type: "application/octet-stream",
+      stream: () => textStream("unknown size"),
+    });
+
+    const response = await driver.getDownloadResponse("testref", "gallery", "raw.bin");
+    expect(response).not.toBeNull();
+    expect(response!.headers.get("content-length")).toBeNull();
+    expect(await response!.text()).toBe("unknown size");
+  });
+});
+
+describe("JuiceFSDriver getDownloadResponse", () => {
+  test("streams files without buffering them into memory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-storage-download-"));
+    try {
+      const driver = new JuiceFSDriver();
+      (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
+        (_projectRef: string, bucket?: string, key?: string) =>
+          join(root, bucket || "", key || "");
+      expect(await driver.createBucket("testref", "gallery")).toBe(true);
+      expect(await driver.uploadFile(
+        "testref",
+        "gallery",
+        "streamed.txt",
+        textStream("streamed from disk"),
+        "text/plain",
+      )).toBe(true);
+
+      const response = await driver.getDownloadResponse("testref", "gallery", "streamed.txt");
+      expect(response).not.toBeNull();
+      expect(response!.headers.get("content-length")).toBe(String("streamed from disk".length));
+      expect(await response!.text()).toBe("streamed from disk");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("JuiceFSDriver uploadFile", () => {
   test("materializes ReadableStream bodies before filesystem writes", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-storage-"));
