@@ -1,6 +1,16 @@
 import { sql } from "../db";
 import { withRetry } from "../utils/retry";
 
+const ORGANIZATION_TEAM_COLUMNS = [
+  "id", "organization_id", "name", "slug", "description", "created_at", "updated_at",
+] as const;
+const ORGANIZATION_TEAM_GRANT_COLUMNS = [
+  "id", "team_id", "project_ref", "role", "capability_allowlist", "created_at", "updated_at",
+] as const;
+const organizationTeamColumns = ORGANIZATION_TEAM_COLUMNS.join(", ");
+const organizationTeamGrantColumns = ORGANIZATION_TEAM_GRANT_COLUMNS.join(", ");
+const qualifiedOrganizationTeamGrantColumns = ORGANIZATION_TEAM_GRANT_COLUMNS.map((column) => `grant.${column}`).join(", ");
+
 export interface OrganizationTeamRecord {
   id: string;
   organization_id: string;
@@ -35,7 +45,7 @@ export interface OrganizationTeamGrantRecord {
 export async function listTeams(organizationId: string): Promise<OrganizationTeamRecord[]> {
   return withRetry("OrganizationTeamRepository.listTeams", async () => {
     const rows = await sql`
-      SELECT * FROM organization_teams
+      SELECT ${sql.unsafe(organizationTeamColumns)} FROM organization_teams
       WHERE organization_id = ${organizationId}
       ORDER BY name ASC
     `;
@@ -46,7 +56,7 @@ export async function listTeams(organizationId: string): Promise<OrganizationTea
 export async function findTeam(organizationId: string, slug: string): Promise<OrganizationTeamRecord | null> {
   return withRetry("OrganizationTeamRepository.findTeam", async () => {
     const [row] = await sql`
-      SELECT * FROM organization_teams
+      SELECT ${sql.unsafe(organizationTeamColumns)} FROM organization_teams
       WHERE organization_id = ${organizationId} AND slug = ${slug}
     `;
     return (row as OrganizationTeamRecord) || null;
@@ -63,7 +73,7 @@ export async function insertTeam(input: {
     const [row] = await sql`
       INSERT INTO organization_teams (organization_id, name, slug, description)
       VALUES (${input.organizationId}, ${input.name}, ${input.slug}, ${input.description})
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationTeamColumns)}
     `;
     return row as OrganizationTeamRecord;
   });
@@ -84,7 +94,7 @@ export async function updateTeam(
           END,
           updated_at = NOW()
       WHERE id = ${teamId}
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationTeamColumns)}
     `;
     return (row as OrganizationTeamRecord) || null;
   });
@@ -93,7 +103,7 @@ export async function updateTeam(
 export async function deleteTeam(teamId: string): Promise<OrganizationTeamRecord | null> {
   return withRetry("OrganizationTeamRepository.deleteTeam", async () => {
     const [row] = await sql`
-      DELETE FROM organization_teams WHERE id = ${teamId} RETURNING *
+      DELETE FROM organization_teams WHERE id = ${teamId} RETURNING ${sql.unsafe(organizationTeamColumns)}
     `;
     return (row as OrganizationTeamRecord) || null;
   });
@@ -156,7 +166,7 @@ export async function deleteMember(teamId: string, memberId: string): Promise<Or
 export async function listGrants(teamId: string): Promise<OrganizationTeamGrantRecord[]> {
   return withRetry("OrganizationTeamRepository.listGrants", async () => {
     const rows = await sql`
-      SELECT * FROM organization_team_project_grants
+      SELECT ${sql.unsafe(organizationTeamGrantColumns)} FROM organization_team_project_grants
       WHERE team_id = ${teamId}
       ORDER BY project_ref ASC
     `;
@@ -181,7 +191,7 @@ export async function upsertGrant(input: {
         role = EXCLUDED.role,
         capability_allowlist = EXCLUDED.capability_allowlist,
         updated_at = NOW()
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationTeamGrantColumns)}
     `;
     return row as OrganizationTeamGrantRecord;
   });
@@ -192,7 +202,7 @@ export async function deleteGrant(teamId: string, projectRef: string): Promise<O
     const [row] = await sql`
       DELETE FROM organization_team_project_grants
       WHERE team_id = ${teamId} AND project_ref = ${projectRef}
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationTeamGrantColumns)}
     `;
     return (row as OrganizationTeamGrantRecord) || null;
   });
@@ -201,7 +211,7 @@ export async function deleteGrant(teamId: string, projectRef: string): Promise<O
 export async function listGrantsForMember(memberId: string): Promise<OrganizationTeamGrantRecord[]> {
   return withRetry("OrganizationTeamRepository.listGrantsForMember", async () => {
     const rows = await sql`
-      SELECT grant.*
+      SELECT ${sql.unsafe(qualifiedOrganizationTeamGrantColumns)}
       FROM organization_team_project_grants grant
       JOIN organization_team_members membership ON membership.team_id = grant.team_id
       WHERE membership.member_id = ${memberId}

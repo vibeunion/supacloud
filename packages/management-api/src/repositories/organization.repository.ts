@@ -1,6 +1,16 @@
 import { sql, type Organization, type OrganizationMember } from "../db";
 import { withRetry } from "../utils/retry";
 
+const ORGANIZATION_COLUMNS = [
+  "id", "name", "slug", "plan", "owner_id", "created_at", "updated_at",
+] as const;
+const ORGANIZATION_MEMBER_COLUMNS = [
+  "id", "organization_id", "email", "role", "user_id", "invited_at", "joined_at",
+  "created_at", "updated_at",
+] as const;
+const organizationColumns = ORGANIZATION_COLUMNS.join(", ");
+const organizationMemberColumns = ORGANIZATION_MEMBER_COLUMNS.join(", ");
+
 export interface CreateOrganizationInput {
   name: string;
   slug: string;
@@ -23,21 +33,21 @@ export interface UpsertOrganizationMemberInput {
 
 export async function findAll(): Promise<Organization[]> {
   return withRetry("OrganizationRepository.findAll", async () => {
-    const results = await sql`SELECT * FROM organizations ORDER BY name ASC`;
+    const results = await sql`SELECT ${sql.unsafe(organizationColumns)} FROM organizations ORDER BY name ASC`;
     return results as unknown as Organization[];
   });
 }
 
 export async function findBySlug(slug: string): Promise<Organization | null> {
   return withRetry("OrganizationRepository.findBySlug", async () => {
-    const [org] = await sql`SELECT * FROM organizations WHERE slug = ${slug}`;
+    const [org] = await sql`SELECT ${sql.unsafe(organizationColumns)} FROM organizations WHERE slug = ${slug}`;
     return (org as Organization) || null;
   });
 }
 
 export async function findById(id: string): Promise<Organization | null> {
   return withRetry("OrganizationRepository.findById", async () => {
-    const [org] = await sql`SELECT * FROM organizations WHERE id = ${id}`;
+    const [org] = await sql`SELECT ${sql.unsafe(organizationColumns)} FROM organizations WHERE id = ${id}`;
     return (org as Organization) || null;
   });
 }
@@ -47,7 +57,7 @@ export async function create(input: CreateOrganizationInput): Promise<Organizati
     const [org] = await sql`
       INSERT INTO organizations (name, slug, plan, owner_id)
       VALUES (${input.name}, ${input.slug}, ${input.plan ?? "free"}, ${input.owner_id ?? null})
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationColumns)}
     `;
     return org as Organization;
   });
@@ -66,7 +76,7 @@ export async function updateBySlug(slug: string, input: UpdateOrganizationInput)
           END,
           updated_at = NOW()
       WHERE slug = ${slug}
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationColumns)}
     `;
     return (org as Organization) || null;
   });
@@ -77,7 +87,7 @@ export async function deleteBySlug(slug: string): Promise<Organization | null> {
     const [org] = await sql`
       DELETE FROM organizations
       WHERE slug = ${slug}
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationColumns)}
     `;
     return (org as Organization) || null;
   });
@@ -98,7 +108,7 @@ export async function countProjects(organizationId: string): Promise<number> {
 export async function findMembers(organizationId: string): Promise<OrganizationMember[]> {
   return withRetry("OrganizationRepository.findMembers", async () => {
     const rows = await sql`
-      SELECT *
+      SELECT ${sql.unsafe(organizationMemberColumns)}
       FROM organization_members
       WHERE organization_id = ${organizationId}
       ORDER BY created_at ASC
@@ -110,7 +120,7 @@ export async function findMembers(organizationId: string): Promise<OrganizationM
 export async function findMemberById(organizationId: string, id: string): Promise<OrganizationMember | null> {
   return withRetry("OrganizationRepository.findMemberById", async () => {
     const [member] = await sql`
-      SELECT *
+      SELECT ${sql.unsafe(organizationMemberColumns)}
       FROM organization_members
       WHERE organization_id = ${organizationId}
         AND id = ${id}
@@ -122,7 +132,7 @@ export async function findMemberById(organizationId: string, id: string): Promis
 export async function findMemberByEmail(organizationId: string, email: string): Promise<OrganizationMember | null> {
   return withRetry("OrganizationRepository.findMemberByEmail", async () => {
     const [member] = await sql`
-      SELECT *
+      SELECT ${sql.unsafe(organizationMemberColumns)}
       FROM organization_members
       WHERE organization_id = ${organizationId}
         AND lower(email) = lower(${email})
@@ -147,7 +157,7 @@ export async function upsertMember(
             END,
             updated_at = NOW()
         WHERE id = ${existing.id}
-        RETURNING *
+        RETURNING ${sql.unsafe(organizationMemberColumns)}
       `;
       return member as OrganizationMember;
     }
@@ -155,7 +165,7 @@ export async function upsertMember(
     const [member] = await sql`
       INSERT INTO organization_members (organization_id, email, role, user_id)
       VALUES (${organizationId}, ${input.email}, ${input.role}, ${input.user_id ?? null})
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationMemberColumns)}
     `;
     return member as OrganizationMember;
   });
@@ -167,7 +177,7 @@ export async function deleteMember(organizationId: string, id: string): Promise<
       DELETE FROM organization_members
       WHERE organization_id = ${organizationId}
         AND id = ${id}
-      RETURNING *
+      RETURNING ${sql.unsafe(organizationMemberColumns)}
     `;
     return (member as OrganizationMember) || null;
   });
