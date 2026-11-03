@@ -1963,16 +1963,18 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
 }
 
 
-type SupabaseChannelClient = {
-  channel: (topic: string, options?: { config?: RealtimeChannelConfig }) => unknown;
-};
-
 function openSupabaseChannel(
-  supabase: SupabaseChannelClient,
+  supabase: SupabaseClient,
   topic: string,
   config?: RealtimeChannelConfig,
 ): SupaCloudRealtimeChannel {
-  return supabase.channel(topic, { config }) as SupaCloudRealtimeChannel;
+  if (!config) return supabase.channel(topic) as unknown as SupaCloudRealtimeChannel;
+  return supabase.channel(topic, {
+    config: {
+      ...(config.broadcast ? { broadcast: config.broadcast } : {}),
+      ...(config.presence ? { presence: config.presence } : {}),
+    },
+  }) as unknown as SupaCloudRealtimeChannel;
 }
 
 export function createSupaCloudClient<

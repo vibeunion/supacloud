@@ -276,8 +276,8 @@ export class SupaCloudRealtimeChannel {
   ): this;
   on(
     type: string,
-    filter: { event?: string },
-    callback: (payload: unknown) => void,
+    filter: PostgresChangesFilter | { event?: string },
+    callback: (payload: never) => void,
   ): this {
     if (type === "postgres_changes") {
       this.postgresCallbacks.push({
@@ -294,7 +294,7 @@ export class SupaCloudRealtimeChannel {
       const evt = (filter.event as "sync" | "join" | "leave") ?? "sync";
       this.presenceCallbacks.push({
         event: evt,
-        callback,
+        callback: callback as (payload: unknown) => void,
       });
     }
     return this;
