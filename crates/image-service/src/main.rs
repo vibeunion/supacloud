@@ -9,7 +9,6 @@ use axum::{
 use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
@@ -43,7 +42,6 @@ async fn main() {
         .route("/health", get(healthcheck))
         .route("/", post(handle_root_post))
         .route("/{*path}", post(handle_transform_post).get(handle_get_dispatch))
-        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
     info!("🚀 SupaCloud Image Service (Rust) listening on http://{}", addr);

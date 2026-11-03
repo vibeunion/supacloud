@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, type Subprocess } from "bun";
 
@@ -43,10 +43,12 @@ const TINY_PNG_BASE64 =
 const tinyPngBytes = Buffer.from(TINY_PNG_BASE64, "base64");
 
 const TEST_PORT = 9876;
+const binaryPath = join(repoRoot, "crates/image-service/target/release/supacloud-image-service");
+const binaryAvailable = existsSync(binaryPath);
 let proc: Subprocess | null = null;
 
 beforeAll(async () => {
-  const binaryPath = join(repoRoot, "crates/image-service/target/release/supacloud-image-service");
+  if (!binaryAvailable) return;
   proc = spawn({
     cmd: [binaryPath],
     env: {
@@ -84,16 +86,16 @@ afterAll(() => {
   }
 });
 
-test("native Rust image service responds to /healthcheck", async () => {
+test.skipIf(!binaryAvailable)("native Rust image service responds to /healthcheck", async () => {
   const res = await fetch(`http://127.0.0.1:${TEST_PORT}/healthcheck`);
   expect(res.status).toBe(200);
   expect(res.headers.get("x-image-engine")).toBe("supacloud-image/rust");
-  const data = (await res.json()) as any;
+  const data = (await res.json()) as { status: string; engine: string };
   expect(data.status).toBe("healthy");
   expect(data.engine).toBe("supacloud-image/rust");
 });
 
-test("transforms PNG to WebP with SIMD resize and custom filters", async () => {
+test.skipIf(!binaryAvailable)("transforms PNG to WebP with SIMD resize and custom filters", async () => {
   const res = await fetch(
     `http://127.0.0.1:${TEST_PORT}/fit-in/100x100/filters:format(webp):quality(80):brightness(10)/`,
     {
@@ -115,7 +117,7 @@ test("transforms PNG to WebP with SIMD resize and custom filters", async () => {
   expect(magic).toBe("RIFF");
 });
 
-test("extracts image metadata JSON using /meta/", async () => {
+test.skipIf(!binaryAvailable)("extracts image metadata JSON using /meta/", async () => {
   const res = await fetch(`http://127.0.0.1:${TEST_PORT}/meta/`, {
     method: "POST",
     headers: { "Content-Type": "image/png" },
@@ -124,13 +126,13 @@ test("extracts image metadata JSON using /meta/", async () => {
 
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toBe("application/json");
-  const meta = (await res.json()) as any;
+  const meta = (await res.json()) as { width: number; height: number; format: string };
   expect(meta.width).toBe(2);
   expect(meta.height).toBe(2);
   expect(meta.format).toBe("png");
 });
 
-test("supports imgproxy Pro style auto format negotiation via Accept header", async () => {
+test.skipIf(!binaryAvailable)("supports imgproxy Pro style auto format negotiation via Accept header", async () => {
   const res = await fetch(`http://127.0.0.1:${TEST_PORT}/50x50/`, {
     method: "POST",
     headers: {
