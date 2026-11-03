@@ -31,6 +31,7 @@ export const jitDatabaseGateway = new JitDatabaseGateway(
   config.jitDatabaseGatewayBindHost,
   config.pgHost,
   config.pgPort,
+  config.jitDatabaseGatewayEngine === "rust" ? config.jitDatabaseGatewayControlUrl : undefined,
 );
 let schemaReady: Promise<void> | null = null;
 

@@ -202,19 +202,21 @@ function flushPending(target: Bun.Socket<ProxySocketData>): void {
 export class JitDatabaseGateway {
   private readonly listeners = new Map<string, Bun.TCPSocketListener>();
   private readonly expiryTimers = new Map<string, Timer>();
+  private readonly remotePorts = new Map<string, number>();
 
   constructor(
     private readonly bindHost: string,
     private readonly upstreamHost: string,
     private readonly upstreamPort: number,
+    private readonly controlUrl?: string,
   ) {}
 
   hasBinding(credentialId: string): boolean {
-    return this.listeners.has(credentialId);
+    return this.listeners.has(credentialId) || this.remotePorts.has(credentialId);
   }
 
   boundPort(credentialId: string): number | null {
-    return this.listeners.get(credentialId)?.port ?? null;
+    return this.remotePorts.get(credentialId) ?? this.listeners.get(credentialId)?.port ?? null;
   }
 
   private scheduleExpiry(credentialId: string, expiresAt: Date): void {
@@ -233,6 +235,47 @@ export class JitDatabaseGateway {
     const policy = compileAllowedNetworks(binding.allowedNetworks);
     if (policy.length === 0) throw new Error("JIT gateway binding requires at least one allowed CIDR");
 
+    if (this.controlUrl) {
+      this.remotePorts.set(binding.credentialId, binding.port);
+      this.scheduleExpiry(binding.credentialId, binding.expiresAt);
+      void fetch(`${this.controlUrl}/v1/bindings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credential_id: binding.credentialId,
+          port: binding.port,
+          expires_at_ms: binding.expiresAt.getTime(),
+          allowed_networks: binding.allowedNetworks,
+        }),
+      }).then(async (res) => {
+        if (!res.ok) {
+          logger.warn("[JitDatabaseGateway] Remote gateway binding rejected, falling back to local listener", {
+            credentialId: binding.credentialId,
+            status: res.status,
+          });
+          this.remotePorts.delete(binding.credentialId);
+          this.bindLocal(binding, policy);
+        } else {
+          const data = await res.json() as { bound_port?: number };
+          if (data?.bound_port) {
+            this.remotePorts.set(binding.credentialId, data.bound_port);
+          }
+        }
+      }).catch((err) => {
+        logger.warn("[JitDatabaseGateway] Remote gateway unreachable, falling back to local listener", {
+          credentialId: binding.credentialId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.remotePorts.delete(binding.credentialId);
+        this.bindLocal(binding, policy);
+      });
+      return;
+    }
+
+    this.bindLocal(binding, policy);
+  }
+
+  private bindLocal(binding: JitDatabaseGatewayBinding, policy: CompiledAllowedNetworks): void {
     const listener = Bun.listen<ProxySocketData>({
       hostname: this.bindHost,
       port: binding.port,
@@ -293,12 +336,22 @@ export class JitDatabaseGateway {
     const timer = this.expiryTimers.get(credentialId);
     if (timer) clearTimeout(timer);
     this.expiryTimers.delete(credentialId);
+    if (this.remotePorts.has(credentialId)) {
+      this.remotePorts.delete(credentialId);
+      if (this.controlUrl) {
+        void fetch(`${this.controlUrl}/v1/bindings/${encodeURIComponent(credentialId)}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
+    }
     const listener = this.listeners.get(credentialId);
     if (listener) listener.stop(true);
     this.listeners.delete(credentialId);
   }
 
   close(): void {
-    for (const credentialId of [...this.listeners.keys()]) this.release(credentialId);
+    for (const credentialId of [...this.listeners.keys(), ...this.remotePorts.keys()]) {
+      this.release(credentialId);
+    }
   }
 }

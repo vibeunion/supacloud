@@ -98,6 +98,7 @@ SUPACLOUD_INSTALL_KEYS=(
     SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
+    JIT_DATABASE_GATEWAY_ENGINE JIT_DATABASE_GATEWAY_CONTROL_PORT
     SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR
     PGREDIS_RUNTIME_PORT PGREDIS_RUNTIME_INTERNAL_URL
     SUPACLOUD_PGBACKREST_CONFIG SUPACLOUD_PGBACKREST_STANZA
@@ -3810,6 +3811,9 @@ install_management_api() {
         JIT_DATABASE_GATEWAY_BIND_HOST "${JIT_DATABASE_GATEWAY_BIND_HOST:-::}" \
         JIT_DATABASE_GATEWAY_PUBLIC_HOST "${JIT_DATABASE_GATEWAY_PUBLIC_HOST:-$INTERNAL_IP}" \
         JIT_DATABASE_GATEWAY_PORT_RANGE "${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}" \
+        JIT_DATABASE_GATEWAY_ENGINE "${JIT_DATABASE_GATEWAY_ENGINE:-rust}" \
+        JIT_DATABASE_GATEWAY_CONTROL_PORT "${JIT_DATABASE_GATEWAY_CONTROL_PORT:-9012}" \
+        JIT_DATABASE_GATEWAY_CONTROL_URL "http://127.0.0.1:${JIT_DATABASE_GATEWAY_CONTROL_PORT:-9012}" \
         SUPACLOUD_POSTGRES_MAJOR_UPGRADE_EXECUTOR /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh \
         SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR "${SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR:-/opt/supacloud/scripts/lib/postgres_major_upgrade_provider.sh}" \
         SECRETS_ENCRYPTION_KEY "$SECRETS_ENCRYPTION_KEY" \
@@ -3969,6 +3973,82 @@ install_management_api() {
     rm -rf "$management_transaction_dir"
     trap - ERR EXIT HUP INT TERM
 
+install_jit_gateway_binary() {
+    local target="/usr/local/bin/supacloud-jit-gateway"
+    if [[ -x "$target" ]]; then
+        log_info "supacloud-jit-gateway already installed: $($target --version 2>/dev/null || echo installed)"
+        return 0
+    fi
+
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *)
+            log_warn "Unsupported architecture for native JIT gateway: $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    local candidate=""
+    if [[ -f "${SCRIPT_DIR}/dist/supacloud-jit-gateway-linux-${arch}" ]]; then
+        candidate="${SCRIPT_DIR}/dist/supacloud-jit-gateway-linux-${arch}"
+    elif [[ -f "${SCRIPT_DIR}/dist/supacloud-jit-gateway" ]]; then
+        candidate="${SCRIPT_DIR}/dist/supacloud-jit-gateway"
+    elif [[ -f "${SCRIPT_DIR}/crates/jit-gateway/target/release/supacloud-jit-gateway" ]]; then
+        candidate="${SCRIPT_DIR}/crates/jit-gateway/target/release/supacloud-jit-gateway"
+    fi
+
+    if [[ -n "$candidate" ]]; then
+        install -m 0755 "$candidate" "$target"
+        log_info "Installed supacloud-jit-gateway binary from $candidate"
+        return 0
+    fi
+
+    if [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_jit_gateway.sh" ]] && command -v cargo >/dev/null 2>&1; then
+        log_info "Building supacloud-jit-gateway locally with cargo..."
+        local temp_out
+        temp_out=$(mktemp -d)
+        trap 'rm -rf "${temp_out:-}"' RETURN
+        OUT_DIR="$temp_out" "${SCRIPT_DIR}/scripts/build_supacloud_jit_gateway.sh" || return 1
+        install -m 0755 "${temp_out}/supacloud-jit-gateway" "$target"
+        log_info "Successfully built and installed supacloud-jit-gateway to $target"
+        return 0
+    elif [[ -d "${SCRIPT_DIR}/crates/jit-gateway" ]] && command -v cargo >/dev/null 2>&1; then
+        log_info "Compiling crates/jit-gateway release binary..."
+        cargo build --release --manifest-path "${SCRIPT_DIR}/crates/jit-gateway/Cargo.toml" || return 1
+        install -m 0755 "${SCRIPT_DIR}/crates/jit-gateway/target/release/supacloud-jit-gateway" "$target"
+        log_info "Installed supacloud-jit-gateway to $target"
+        return 0
+    fi
+
+    log_warn "Native supacloud-jit-gateway binary not found and cargo not available"
+    return 1
+}
+
+deploy_jit_gateway_service() {
+    local engine="${JIT_DATABASE_GATEWAY_ENGINE:-rust}"
+    if [[ "$engine" != "rust" ]]; then
+        log_info "JIT database gateway configured for internal engine, skipping native daemon installation"
+        systemctl disable --now supacloud-jit-gateway 2>/dev/null || true
+        rm -f /etc/systemd/system/supacloud-jit-gateway.service
+        return 0
+    fi
+
+    if ! install_jit_gateway_binary; then
+        log_warn "Failed to install native JIT gateway binary; Management API will use internal listener fallback"
+        return 0
+    fi
+
+    local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-jit-gateway.service"
+    if [[ -f "$unit_src" ]]; then
+        install -m 644 "$unit_src" /etc/systemd/system/supacloud-jit-gateway.service
+        systemctl daemon-reload
+        systemctl enable --now supacloud-jit-gateway
+        log_info "Native Rust JIT Database Gateway running as supacloud-jit-gateway.service"
+    fi
+}
+
     local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
     if [[ -f "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" ]]; then
         cp "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" /etc/systemd/system/supacloud-postgrest-watchdog.service
@@ -3980,6 +4060,8 @@ install_management_api() {
         systemctl enable supacloud-postgrest-watchdog.timer
         systemctl start supacloud-postgrest-watchdog.timer || log_warn "PostgREST watchdog timer start failed, please check journalctl -u supacloud-postgrest-watchdog.service"
     fi
+
+    deploy_jit_gateway_service
 
     # 7a. Upgrade the shared PostgREST binary as one global runtime transaction.
     local POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
