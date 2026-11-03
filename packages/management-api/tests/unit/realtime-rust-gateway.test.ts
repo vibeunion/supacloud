@@ -1,13 +1,24 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, type Subprocess } from "bun";
 
 const repoRoot = join(import.meta.dir, "../../../..");
 const TEST_PORT = 9890;
+const CONTROL_TOKEN = "test-realtime-control-token";
+
+function controlFetch(url: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${CONTROL_TOKEN}`);
+  return fetch(url, { ...init, headers });
+}
 let proc: Subprocess | null = null;
 
+const binaryPath = join(repoRoot, "dist/supacloud-realtime-gateway");
+const binaryAvailable = existsSync(binaryPath);
+
 beforeAll(async () => {
-  const binaryPath = join(repoRoot, "dist/supacloud-realtime-gateway");
+  if (!binaryAvailable) return;
   proc = spawn({
     cmd: [binaryPath],
     env: {
@@ -15,6 +26,7 @@ beforeAll(async () => {
       REALTIME_BIND_HOST: "127.0.0.1",
       REALTIME_PORT: String(TEST_PORT),
       API_JWT_SECRET: "test-secret-for-realtime",
+      REALTIME_CONTROL_TOKEN: CONTROL_TOKEN,
     },
     stdout: "ignore",
     stderr: "ignore",
@@ -43,18 +55,18 @@ afterAll(() => {
   if (proc) proc.kill();
 });
 
-describe("Native Rust Realtime Gateway (crates/realtime-gateway)", () => {
+describe.skipIf(!binaryAvailable)("Native Rust Realtime Gateway (crates/realtime-gateway)", () => {
   test("healthcheck returns healthy status and engine metadata", async () => {
     const res = await fetch(`http://127.0.0.1:${TEST_PORT}/healthcheck`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
+    const body = (await res.json()) as { status: string; engine: string };
     expect(body.status).toBe("ok");
     expect(body.engine).toBe("supacloud-realtime-gateway/rust");
   });
 
   test("manages tenants via Management API compatibility endpoints", async () => {
     // 1. Register tenant
-    const registerRes = await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants`, {
+    const registerRes = await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -71,25 +83,25 @@ describe("Native Rust Realtime Gateway (crates/realtime-gateway)", () => {
     expect(registerRes.status).toBe(201);
 
     // 2. Query tenant
-    const getRes = await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/proj_demo`);
+    const getRes = await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/proj_demo`);
     expect(getRes.status).toBe(200);
-    const tenant = (await getRes.json()) as any;
+    const tenant = (await getRes.json()) as { id: string; jwt_secret: string };
     expect(tenant.id).toBe("proj_demo");
     expect(tenant.jwt_secret).toBe("demo_jwt_secret");
 
     // 3. Delete tenant
-    const delRes = await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/proj_demo`, {
+    const delRes = await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/proj_demo`, {
       method: "DELETE",
     });
     expect(delRes.status).toBe(200);
 
-    const getAfterDel = await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/proj_demo`);
+    const getAfterDel = await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/proj_demo`);
     expect(getAfterDel.status).toBe(404);
   });
 
   test("handles Phoenix V2 heartbeat, broadcast, presence, and CDC changes", async () => {
     // Register project for WebSocket test
-    await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants`, {
+    await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -197,7 +209,7 @@ describe("Native Rust Realtime Gateway (crates/realtime-gateway)", () => {
 
     // 5. CDC event dispatch
     // Ingest low-priority change (should NOT trigger subscription)
-    await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
+    await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -214,7 +226,7 @@ describe("Native Rust Realtime Gateway (crates/realtime-gateway)", () => {
     expect(nonMatch).toBeUndefined();
 
     // Ingest high-priority change (should MATCH filter priority=eq.high)
-    await fetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
+    await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

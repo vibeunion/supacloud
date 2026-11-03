@@ -9,8 +9,9 @@ use crate::tenant::{TenantConfig, TenantRegistry};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, Query, State,
+        Path, Query, Request, State,
     },
+    middleware::{from_fn_with_state, Next},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -30,6 +31,7 @@ pub struct AppState {
     pub registry: Arc<TenantRegistry>,
     pub hub: Arc<ChannelHub>,
     pub pg_manager: Arc<PostgresListenerManager>,
+    pub control_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,28 +47,44 @@ fn default_vsn() -> String {
     "2.0.0".to_string()
 }
 
+async fn require_control_token(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let presented = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if state.control_token.is_empty() || presented != Some(state.control_token.as_str()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(next.run(request).await)
+}
+
 pub fn create_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let control = Router::new()
+        .route("/api/tenants", post(register_tenant).get(list_tenants))
+        .route("/api/tenants/{id}", get(get_tenant).delete(delete_tenant))
+        .route("/api/tenants/{id}/cdc", post(ingest_cdc))
+        .route("/api/broadcast", post(api_broadcast))
+        .route_layer(from_fn_with_state(state.clone(), require_control_token));
+
     Router::new()
-        // Health & Diagnostics
         .route("/", get(health_check))
         .route("/healthcheck", get(health_check))
         .route("/realtime/v1/health", get(health_check))
         .route("/api/health", get(health_check))
         .route("/metrics", get(metrics))
-        // Tenant Management API (RealtimeService compatibility)
-        .route("/api/tenants", post(register_tenant).get(list_tenants))
-        .route("/api/tenants/{id}", get(get_tenant).delete(delete_tenant))
-        // Control Plane / CDC Webhook
-        .route("/api/tenants/{id}/cdc", post(ingest_cdc))
-        .route("/api/broadcast", post(api_broadcast))
-        // Realtime WebSockets
         .route("/socket/websocket", get(ws_handler))
         .route("/realtime/v1/websocket", get(ws_handler))
+        .merge(control)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

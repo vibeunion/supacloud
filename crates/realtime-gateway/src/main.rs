@@ -38,10 +38,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = TenantRegistry::new(global_jwt_secret);
     let pg_manager = PostgresListenerManager::new(hub.clone());
 
+    let control_token = env::var("REALTIME_CONTROL_TOKEN").unwrap_or_default();
+    if control_token.is_empty() {
+        return Err(
+            "REALTIME_CONTROL_TOKEN is required before the realtime control API can start".into(),
+        );
+    }
+
     let state = AppState {
         registry,
         hub,
         pg_manager,
+        control_token,
     };
 
     let app = create_router(state);
