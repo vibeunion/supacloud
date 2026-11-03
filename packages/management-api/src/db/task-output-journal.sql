@@ -53,7 +53,7 @@ BEGIN
   END IF;
   -- Retried writes of a committed event can be acknowledged after completion.
   -- They may not mutate the event or create output for an old attempt.
-  SELECT * INTO v_event FROM public.project_task_output_events
+  SELECT task_id, project_ref, sequence, event_id, attempt, type, payload, created_at INTO v_event FROM public.project_task_output_events
     WHERE task_id = p_task_id AND attempt = p_attempt AND event_id = p_event_id;
   IF FOUND THEN
     IF v_event.type <> p_type OR v_event.payload <> p_payload THEN
@@ -70,17 +70,17 @@ BEGIN
   END IF;
   INSERT INTO public.project_task_output_streams(task_id, project_ref)
     VALUES (p_task_id, p_project_ref) ON CONFLICT (task_id) DO NOTHING;
-  SELECT * INTO v_stream FROM public.project_task_output_streams WHERE task_id = p_task_id FOR UPDATE;
+  SELECT task_id, project_ref, last_sequence, retained_after, output_count, output_bytes INTO v_stream FROM public.project_task_output_streams WHERE task_id = p_task_id FOR UPDATE;
   IF v_stream.output_count >= 4096 OR v_stream.output_bytes + v_bytes > 1048576 THEN
     RETURN jsonb_build_object('_error', 413, 'code', 'TASK_OUTPUT_LIMIT');
   END IF;
   -- Sequence allocation is transactional and serialized per task, NOT nextval().
   UPDATE public.project_task_output_streams
     SET last_sequence = last_sequence + 1, output_count = output_count + 1, output_bytes = output_bytes + v_bytes
-    WHERE task_id = p_task_id RETURNING * INTO v_stream;
+    WHERE task_id = p_task_id RETURNING task_id, project_ref, last_sequence, retained_after, output_count, output_bytes INTO v_stream;
   INSERT INTO public.project_task_output_events(task_id, project_ref, sequence, event_id, attempt, type, payload)
     VALUES (p_task_id, p_project_ref, v_stream.last_sequence, p_event_id, p_attempt, p_type, p_payload)
-    RETURNING * INTO v_event;
+    RETURNING task_id, project_ref, sequence, event_id, attempt, type, payload, created_at INTO v_event;
   RETURN jsonb_build_object('schema_version', 1, 'task_id', p_task_id, 'project_ref', p_project_ref,
     'event_id', v_event.event_id, 'sequence', v_event.sequence::text, 'attempt', v_event.attempt,
     'type', v_event.type, 'payload', v_event.payload, 'created_at', v_event.created_at);
@@ -126,7 +126,7 @@ BEGIN
     WHERE id = p_task_id AND project_ref = p_project_ref
       AND (p_invoker_user_id IS NULL OR invoker_user_id = p_invoker_user_id) FOR SHARE;
   IF NOT FOUND THEN RETURN jsonb_build_object('_error', 404, 'code', 'TASK_OUTPUT_NOT_FOUND'); END IF;
-  SELECT * INTO v_stream FROM public.project_task_output_streams WHERE task_id = p_task_id;
+  SELECT task_id, project_ref, last_sequence, retained_after, output_count, output_bytes INTO v_stream FROM public.project_task_output_streams WHERE task_id = p_task_id;
   v_enabled := FOUND;
   IF NOT v_enabled THEN
     v_stream.last_sequence := 0;
@@ -146,7 +146,7 @@ BEGIN
       'attempt', attempt, 'type', type, 'payload', payload, 'created_at', created_at) ORDER BY sequence), '[]'::jsonb),
     COALESCE(max(sequence), p_after)
     INTO v_events, v_next
-    FROM (SELECT * FROM public.project_task_output_events
+    FROM (SELECT task_id, project_ref, sequence, event_id, attempt, type, payload, created_at FROM public.project_task_output_events
       WHERE task_id = p_task_id AND project_ref = p_project_ref AND sequence > p_after
       ORDER BY sequence LIMIT p_limit) AS page;
   RETURN jsonb_build_object('schema_version', 1, 'project_ref', p_project_ref, 'task_id', p_task_id,
