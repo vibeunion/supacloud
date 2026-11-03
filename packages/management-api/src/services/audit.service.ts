@@ -334,7 +334,7 @@ async function insertAuditRow(
       ${input.userAgent || ""}, ${input.requestId}, ${JSON.stringify(append.metadata)}::jsonb,
       ${append.source}, ${row.previousHash}, ${row.hash}, ${row.chainSequence}, ${row.createdAt}
     )
-    RETURNING *
+    RETURNING id, project_ref, actor, actor_type, action, method, path, status, ip_address, user_agent, request_id, metadata, source, previous_hash, event_hash, chain_sequence, created_at
   `;
   return inserted;
 }
