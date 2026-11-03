@@ -55,7 +55,7 @@ try {
   await psql(database, `ALTER ROLE ${worker} LOGIN PASSWORD '${password}';`);
   const url = `postgres://${worker}:${password}@127.0.0.1:5432/${database}?sslmode=require`;
   runtime = new SQL(url, { connectionTimeout: 5 });
-  for (const statement of ["SELECT * FROM supacloud_worker.migrations", "DELETE FROM pgflow.runs",
+  for (const statement of ["SELECT version, sha256 FROM supacloud_worker.migrations", "DELETE FROM pgflow.runs",
     "SELECT pgflow.requeue_stalled_tasks()", "CREATE TABLE public.forbidden(id int)"]) {
     let denied = false;
     try { await runtime.unsafe(statement); } catch { denied = true; }
