@@ -1,10 +1,20 @@
 import type { SQL } from "bun";
+import { decodeProjectTask, type ProjectTask } from "../contracts/task-row";
+import { parseTaskAttemptRecord } from "../../utils/task-record";
+import { readTaskStatistics, type TaskStatistics } from "../../utils/task-statistics";
+import type { ProjectTaskAttempt } from "../index";
 import organizationGet from "./queries/organization_get.sql";
 import projectGet from "./queries/project_get.sql";
+import taskAttemptsFull from "./queries/task_attempts_full.sql";
 import taskAttemptsList from "./queries/task_attempts_list.sql";
 import taskGet from "./queries/task_get.sql";
+import taskGetFull from "./queries/task_get_full.sql";
+import taskGetFullUnscoped from "./queries/task_get_full_unscoped.sql";
 import taskListDue from "./queries/task_list_due.sql";
 import taskListForProject from "./queries/task_list_for_project.sql";
+import taskStatsSummary from "./queries/task_stats_summary.sql";
+import taskStatsTopFailures from "./queries/task_stats_top_failures.sql";
+import taskStatsTrend from "./queries/task_stats_trend.sql";
 import taskStatusCounts from "./queries/task_status_counts.sql";
 
 export type ProjectTaskSummary = {
@@ -58,28 +68,45 @@ export type TaskAttemptSummary = {
   response_status: number | null;
 };
 
-export type ReyloPilotQueries = {
-  getTask(db: SQL, id: string): Promise<ProjectTaskSummary | null>;
+export type ControlPlaneQueries = {
+  getTask(db: SQL, id: string, projectRef?: string): Promise<ProjectTask | null>;
+  getTaskSummary(db: SQL, id: string): Promise<ProjectTaskSummary | null>;
   listProjectTasks(db: SQL, projectRef: string, limit?: number): Promise<ProjectTaskSummary[]>;
   listDueTasks(db: SQL, projectRef: string, limit?: number): Promise<ProjectTaskSummary[]>;
   countTasksByStatus(db: SQL, projectRef: string): Promise<TaskStatusCount[]>;
-  listTaskAttempts(db: SQL, taskId: string, limit?: number): Promise<TaskAttemptSummary[]>;
+  listTaskAttempts(db: SQL, taskId: string): Promise<ProjectTaskAttempt[]>;
+  listTaskAttemptSummaries(db: SQL, taskId: string, limit?: number): Promise<TaskAttemptSummary[]>;
+  getTaskStats(db: SQL, projectRef: string): Promise<TaskStatistics>;
   getProject(db: SQL, ref: string): Promise<ProjectRef | null>;
   getOrganization(db: SQL, id: string): Promise<OrganizationRef | null>;
 };
 
-function timestamp(value: string | Date | null): Date | null {
+const TASK_TIMESTAMP_COLUMNS = [
+  "next_run_at", "lease_until", "started_at", "completed_at",
+  "cancel_requested_at", "created_at", "updated_at",
+] as const;
+const ATTEMPT_TIMESTAMP_COLUMNS = [
+  "started_at", "completed_at", "created_at", "updated_at",
+] as const;
+
+function timestamp(value: unknown): Date | null {
   if (value === null) return null;
   if (value instanceof Date) return value;
+  if (typeof value !== "string") throw new Error(`Invalid database timestamp: ${String(value)}`);
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) throw new Error(`Invalid database timestamp: ${value}`);
   return parsed;
 }
 
-function requiredTimestamp(value: string | Date): Date {
-  const parsed = timestamp(value);
-  if (parsed === null) throw new Error("Expected a required database timestamp");
-  return parsed;
+function normalizeTimestamps(
+  row: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const normalized = { ...row };
+  for (const field of fields) {
+    if (field in normalized) normalized[field] = timestamp(normalized[field]);
+  }
+  return normalized;
 }
 
 function taskSummary(row: {
@@ -113,8 +140,16 @@ function taskSummary(row: {
   return result;
 }
 
-export const queries: ReyloPilotQueries = {
-  async getTask(db, id) {
+export const queries: ControlPlaneQueries = {
+  async getTask(db, id, projectRef) {
+    const row = projectRef
+      ? await taskGetFull.run(db, { id, project_ref: projectRef })
+      : await taskGetFullUnscoped.run(db, { id });
+    if (row === null) return null;
+    return decodeProjectTask(normalizeTimestamps(row, TASK_TIMESTAMP_COLUMNS));
+  },
+
+  async getTaskSummary(db, id) {
     const row = await taskGet.run(db, { id });
     return row === null ? null : taskSummary(row);
   },
@@ -133,13 +168,36 @@ export const queries: ReyloPilotQueries = {
     return taskStatusCounts.run(db, { project_ref: projectRef });
   },
 
-  async listTaskAttempts(db, taskId, limit = 20) {
+  async listTaskAttempts(db, taskId) {
+    const rows = await taskAttemptsFull.run(db, { task_id: taskId });
+    return rows.map((row: Record<string, unknown>) => parseTaskAttemptRecord(normalizeTimestamps(row, ATTEMPT_TIMESTAMP_COLUMNS)));
+  },
+
+  async listTaskAttemptSummaries(db, taskId, limit = 20) {
     const rows = await taskAttemptsList.run(db, { task_id: taskId, limit });
-    return rows.map((row) => ({
+    return rows.map((row: Record<string, unknown>) => ({
       ...row,
-      started_at: requiredTimestamp(row.started_at),
-      completed_at: timestamp(row.completed_at),
-    }));
+      started_at: timestamp(row["started_at"]) as Date,
+      completed_at: timestamp(row["completed_at"]),
+    }) as TaskAttemptSummary);
+  },
+
+  async getTaskStats(db, projectRef) {
+    const [summaryRows, trendRows, topFailureRows] = await Promise.all([
+      taskStatsSummary.run(db, { project_ref: projectRef }),
+      taskStatsTrend.run(db, { project_ref: projectRef }),
+      taskStatsTopFailures.run(db, { project_ref: projectRef }),
+    ]);
+    const summary = summaryRows;
+    return readTaskStatistics({
+      running: summary?.running ?? 0,
+      retryScheduled: summary?.retry_scheduled ?? 0,
+      deadLettered: summary?.dead_lettered ?? 0,
+      failedLast24h: summary?.failed_last_24h ?? 0,
+      cancelledLast24h: summary?.cancelled_last_24h ?? 0,
+      topFailures: topFailureRows,
+      failedTrend: trendRows,
+    });
   },
 
   async getProject(db, ref) {

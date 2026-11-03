@@ -3,7 +3,7 @@ import { queries } from "./queries";
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
-export type ReyloPilotSmokeReport = {
+export type ControlPlaneSmokeReport = {
   project_ref: string;
   queries: number;
   rows: {
@@ -17,7 +17,7 @@ export type ReyloPilotSmokeReport = {
   };
 };
 
-export async function runReadOnlySmoke(db: SQL, projectRef: string): Promise<ReyloPilotSmokeReport> {
+export async function runReadOnlySmoke(db: SQL, projectRef: string): Promise<ControlPlaneSmokeReport> {
   const project = await queries.getProject(db, projectRef);
   const tasks = await queries.listProjectTasks(db, projectRef);
   const dueTasks = await queries.listDueTasks(db, projectRef);

@@ -34,17 +34,18 @@
     "test:compat": "bun test tests/integration/sdk-parity.test.ts && bun run tests/scripts/run-official-sdk-compliance.ts && bun run tests/scripts/run-official-cli-compliance.ts && bun run tests/scripts/run-openapi-compliance.ts",
     "release:manifest": "bun run ../../scripts/generate_release_manifest.ts --component management-api --package-json package.json",
     "prebuild": "bun run sql:check && bun run pgflow:roles:check && bun run scripts/patch-dependencies.ts && cd ../web-console && bun install --frozen-lockfile && bun run build",
-    "build:amd64": "bun build src/standalone.ts --compile --target=bun-linux-x64 --outfile=supacloud-linux-amd64",
-    "build:arm64": "bun build src/standalone.ts --compile --target=bun-linux-arm64 --outfile=supacloud-linux-arm64",
+    "build:amd64": "bun run scripts/build-standalone.ts --target=bun-linux-x64 --outfile=supacloud-linux-amd64",
+    "build:arm64": "bun run scripts/build-standalone.ts --target=bun-linux-arm64 --outfile=supacloud-linux-arm64",
     "build:linux": "bun run build:amd64 && bun run build:arm64",
-    "build:macos-amd64": "bun build src/standalone.ts --compile --target=bun-macos-x64 --outfile=supacloud-macos-amd64",
-    "build:macos-arm64": "bun build src/standalone.ts --compile --target=bun-macos-arm64 --outfile=supacloud-macos-arm64",
+    "build:macos-amd64": "bun run scripts/build-standalone.ts --target=bun-macos-x64 --outfile=supacloud-macos-amd64",
+    "build:macos-arm64": "bun run scripts/build-standalone.ts --target=bun-macos-arm64 --outfile=supacloud-macos-arm64",
     "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64",
     "build:all": "bun run prebuild && bun run build:linux && bun run build:macos",
     "build:aot:ab": "bun run ../../scripts/elysia-aot-ab.ts management-api",
     "typecheck:reylo": "tsc -p tsconfig.reylo.json --noEmit --runExternalCode",
-    "reylo:live": "bun run scripts/reylo-pilot-live.ts",
-    "reylo:build": "bun run scripts/build-reylo-pilot.ts"
+    "reylo:live": "bun run scripts/reylo-live.ts",
+    "reylo:contracts": "bun run scripts/generate-reylo-contracts.ts",
+    "reylo:test": "bun test tests/integration/reylo-control-plane.live.test.ts"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
@@ -59,6 +60,7 @@
     "jose": "^6.2.13",
     "nanoid": "^6.0.2",
     "pgsql-ast-parser": "12.0.2",
+    "reylo": "0.7.0",
     "typebox": "1.4.3"
   },
   "devDependencies": {
@@ -67,7 +69,6 @@
     "@types/yauzl": "3.4.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "reylo": "0.7.0",
     "typescript": "7.1.0-beta",
     "yauzl": "3.4.0"
   },
