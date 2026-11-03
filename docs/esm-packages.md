@@ -32,7 +32,7 @@ and `/reactive` as native MJS and CJS. `@supacloud/contracts` exports its root,
 `/client` and `/browser` in both formats. Each `import` condition selects `.mjs`
 and `.d.mts`; each `require` condition selects `.cjs` and `.d.cts`.
 Only these two packages may publish CommonJS artifacts. Their source remains
-TypeScript and the supported SDK Node floor remains 22.12.0.
+TypeScript and the supported SDK Node floor remains 24.0.0.
 
 The two formats have equivalent APIs and distinct class/function identities.
 Repeated loads within a format and the SDK/shared Contracts facade preserve
@@ -88,7 +88,7 @@ contract. Some Node versions can load eligible synchronous ESM graphs through
 `dist/index.cjs` references and tooling that requires a separate CJS build.
 
 The application/compiler baseline remains Node 24 and Bun 1.4.4. SDK loader
-acceptance also covers Node 22.12.0 and Node 26. SDK-specific TypeScript
+acceptance also covers Node 24 and Node 26. SDK-specific TypeScript
 NodeNext checks cover both `.cts` and `.mts` consumers: TypeScript 5.8.3 checks
 the full declaration graph; TypeScript 7 checks consumers with skipLibCheck=true
 because of a documented upstream auth-js/lib.dom WebAuthn declaration conflict.
