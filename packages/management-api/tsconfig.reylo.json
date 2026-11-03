@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "./src"
+  },
+  "contentMappers": [
+    { "package": "reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }
+  ],
+  "include": ["src/db/reylo-pilot/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
