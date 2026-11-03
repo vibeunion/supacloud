@@ -1,0 +1,160 @@
+# SupaCloud Vector Log Collector Configuration
+# Ingests systemd journals and edge function logs, redacts credentials, and forwards to VictoriaLogs.
+
+data_dir = "/var/lib/supacloud/vector"
+
+[sources.journald]
+type = "journald"
+include_units = [
+  "supacloud.service",
+  "supacloud-caddy.service",
+  "supacloud-edge-runtime.service",
+  "supacloud-pgredis-runtime.service",
+  "supacloud-realtime.service",
+  "patroni.service",
+  "supacloud-gotrue@*.service",
+  "supacloud-pgrst@*.service",
+  "supacloud-storage@*.service",
+  "supacloud-postgres@*.service"
+]
+
+[sources.functions]
+type = "file"
+include = ["/opt/supacloud/functions/**/logs/*.log"]
+read_from = "beginning"
+
+[transforms.process_journal]
+type = "remap"
+inputs = ["journald"]
+source = '''
+unit = string!(._SYSTEMD_UNIT || "system")
+msg = string!(.message || .MESSAGE || "")
+
+# Redact sensitive credentials and tokens
+msg = replace(msg, r'(?i)(authorization|proxy-authorization)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+', "$1=[REDACTED]")
+msg = replace(msg, r'(?i)(cookie|set-cookie)\s*[:=]\s*[^\r\n]+', "$1=[REDACTED]")
+msg = replace(msg, r'(?i)(jwt|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*[^\s,;]+', "$1=[REDACTED]")
+msg = replace(msg, r'(?i)(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s,;]+', "$1=[REDACTED]")
+msg = replace(msg, r'\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b', "[REDACTED]")
+
+# Extract projectRef and service
+service = "system"
+project_ref = ""
+activation_id = ""
+
+tenant_match, err = parse_regex(unit, r'^supacloud-(?P<kind>gotrue|pgrst|storage|postgres)@(?P<ref>[A-Za-z0-9_-]+)\.service$')
+if err == null {
+  project_ref = tenant_match.ref
+  if tenant_match.kind == "gotrue" {
+    service = "auth"
+  } else if tenant_match.kind == "pgrst" {
+    service = "postgrest"
+  } else if tenant_match.kind == "storage" {
+    service = "storage"
+  } else if tenant_match.kind == "postgres" {
+    service = "database"
+  }
+} else {
+  app_match, app_err = parse_regex(unit, r'^supacloud-application-(?P<ref>.+)-(?P<act>[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})-[^.]+\.service$')
+  if app_err == null {
+    project_ref = app_match.ref
+    service = "application"
+    activation_id = app_match.act
+  } else if unit == "supacloud-edge-runtime.service" {
+    service = "functions-runtime"
+  } else if unit == "supacloud-caddy.service" {
+    service = "gateway"
+  } else {
+    service = replace(unit, r'^supacloud-', "")
+    service = replace(service, r'\.service$', "")
+    if service == "" {
+      service = "system"
+    }
+  }
+}
+
+# Determine severity
+severity = "info"
+prio = to_int(.PRIORITY) ?? 6
+if prio <= 3 {
+  severity = "error"
+} else if prio == 4 {
+  severity = "warning"
+} else if prio >= 7 {
+  severity = "debug"
+} else if match(msg, r'(?i)\b(error|fatal|panic)\b') {
+  severity = "error"
+} else if match(msg, r'(?i)\bwarn(ing)?\b') {
+  severity = "warning"
+}
+
+# Construct VictoriaLogs JSON payload
+._time = format_timestamp!(.timestamp, format: "%+")
+._msg = msg
+.service = service
+.project_ref = project_ref
+.severity = severity
+._SYSTEMD_UNIT = unit
+if activation_id != "" {
+  .activation_id = activation_id
+}
+
+# Delete unused internal fields
+del(.message)
+del(.MESSAGE)
+del(.host)
+del(.timestamp)
+del(.PRIORITY)
+'''
+
+[transforms.process_functions]
+type = "remap"
+inputs = ["functions"]
+source = '''
+msg = string!(.message || "")
+file_path = string!(.file || "")
+
+# Redact sensitive credentials
+msg = replace(msg, r'(?i)(authorization|proxy-authorization)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+', "$1=[REDACTED]")
+msg = replace(msg, r'(?i)(cookie|set-cookie)\s*[:=]\s*[^\r\n]+', "$1=[REDACTED]")
+msg = replace(msg, r'(?i)(jwt|access[_-]?token|refresh[_-]?token|id[_-]?token)\s*[:=]\s*[^\s,;]+', "$1=[REDACTED]")
+msg = replace(msg, r'(?i)(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s,;]+', "$1=[REDACTED]")
+msg = replace(msg, r'\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b', "[REDACTED]")
+
+# Extract project_ref from path
+project_ref = ""
+ref_match, err = parse_regex(file_path, r'/functions/(?P<ref>[A-Za-z0-9_-]+)/logs/')
+if err == null {
+  project_ref = ref_match.ref
+}
+
+# Determine severity
+severity = "info"
+if match(msg, r'(?i)\b(error|fatal|panic)\b') {
+  severity = "error"
+} else if match(msg, r'(?i)\bwarn(ing)?\b') {
+  severity = "warning"
+}
+
+._time = format_timestamp!(.timestamp, format: "%+")
+._msg = msg
+.service = "functions"
+.project_ref = project_ref
+.severity = severity
+._SYSTEMD_UNIT = "supacloud-edge-function"
+
+del(.message)
+del(.file)
+del(.host)
+del(.timestamp)
+'''
+
+[sinks.victorialogs]
+type = "http"
+inputs = ["process_journal", "process_functions"]
+uri = "http://127.0.0.1:9428/insert/jsonline"
+method = "post"
+encoding.codec = "json"
+headers = { "Content-Type" = "application/stream+json" }
+batch.max_bytes = 1048576
+batch.timeout_secs = 1

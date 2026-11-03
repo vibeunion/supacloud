@@ -110,6 +110,7 @@ export interface Config {
   edgeFunctionsDir: string;
   logsEnabled: boolean;
   logCollectorJournalEnabled: boolean;
+  logCollectorEngine: "internal" | "vector";
   victoriaLogsUrl: string;
   logCollectorStateDir: string;
   homePath: string;
@@ -325,6 +326,7 @@ export const config: Config = {
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
   logsEnabled: getEnv("SUPACLOUD_LOGS_ENABLED", "true") === "true",
   logCollectorJournalEnabled: getEnv("SUPACLOUD_LOG_COLLECTOR_JOURNAL_ENABLED", "true") === "true",
+  logCollectorEngine: (getEnv("SUPACLOUD_LOG_COLLECTOR_ENGINE", "internal") === "vector" ? "vector" : "internal") as "internal" | "vector",
   victoriaLogsUrl: getEnv("VICTORIALOGS_URL", "http://127.0.0.1:9428"),
   logCollectorStateDir: getEnv("SUPACLOUD_LOG_COLLECTOR_STATE_DIR", "/var/lib/supacloud/log-collector"),
   homePath: getEnv("HOME", "/root"),

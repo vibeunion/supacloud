@@ -8,7 +8,11 @@ import {
   parseJournalEvent,
   projectLogFields,
   redactLogMessage,
+  localLogCollectorRunning,
+  startLocalLogCollector,
+  stopLocalLogCollector,
 } from "../../src/workers/local-log-collector.worker";
+import { config } from "../../src/config";
 
 const temporaryDirectories: string[] = [];
 
@@ -98,5 +102,17 @@ describe("LocalLogCollector", () => {
       service: "functions",
       message: "function completed",
     })]);
+  });
+
+  test("skips starting internal collector when logCollectorEngine is vector", () => {
+    const originalEngine = config.logCollectorEngine;
+    try {
+      config.logCollectorEngine = "vector";
+      startLocalLogCollector();
+      expect(localLogCollectorRunning()).toBe(false);
+    } finally {
+      stopLocalLogCollector();
+      config.logCollectorEngine = originalEngine;
+    }
   });
 });
