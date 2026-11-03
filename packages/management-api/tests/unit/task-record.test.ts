@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   InvalidTaskRecordError, parseTaskRecord, parseTaskAttemptRecord, copyTaskJson,
 } from "../../src/utils/task-record";
+import { PROJECT_TASK_COLUMNS, projectTaskRowSchema } from "../../src/db/contracts/task-row";
 import { taskAttemptFixture, taskFixture } from "../helpers/task-fixtures";
 
 test("task rows validate native and legacy JSON without erasing empty objects or null", () => {
@@ -60,4 +61,9 @@ test("JSON snapshots reject cycles, accessors and lossy serialization", () => {
     expect(() => copyTaskJson(value)).toThrow(InvalidTaskRecordError);
   }
   expect(getterCalls).toBe(0);
+});
+
+test("the explicit task column list stays aligned with the row schema", () => {
+  const columns = PROJECT_TASK_COLUMNS.split(",").map((column) => column.trim());
+  expect(columns).toEqual(Object.keys(projectTaskRowSchema.properties));
 });

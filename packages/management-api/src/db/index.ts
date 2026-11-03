@@ -8,6 +8,9 @@ import {
 } from "./sql-policy";
 import { runRegisteredSqlQuery } from "./sql-query-registry";
 import { splitSqlStatements, stripOuterTransactionStatements } from "./sql-statements";
+import { TaskStatus, type ProjectTask } from "./contracts/task-row";
+
+export { TaskStatus, type ProjectTask };
 
 function parseDatabaseUrl(url: string) {
   const urlMatch = url.match(/postgres(?:ql)?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
@@ -764,17 +767,6 @@ export interface Project {
   deleted_at: Date | null;
 }
 
-export const TaskStatus = {
-  PENDING: "pending",
-  LEASED: "leased",
-  RUNNING: "running",
-  RETRY_SCHEDULED: "retry_scheduled",
-  SUCCEEDED: "succeeded",
-  FAILED: "failed",
-  DEAD_LETTERED: "dead_lettered",
-  CANCELLED: "cancelled",
-} as const;
-export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
 
 export const TaskType = {
   PROVISION_DB: "provision_db",
@@ -793,36 +785,6 @@ export const TaskType = {
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType] | (string & {});
 
-export interface ProjectTask {
-  id: string;
-  project_ref: string;
-  task_type: string;
-  status: TaskStatus;
-  payload: Record<string, unknown>;
-  error: string | null;
-  retries: number;
-  attempt: number;
-  max_attempts: number;
-  next_run_at: Date | null;
-  lease_until: Date | null;
-  started_at: Date | null;
-  completed_at: Date | null;
-  timeout_sec: number | null;
-  idempotency_key: string | null;
-  trace_id: string | null;
-  cancel_requested_at: Date | null;
-  cancellation_reason: string | null;
-  correlation_id: string | null;
-  business_task_id: string | null;
-  invoker_user_id: string | null;
-  auth_authority_ref: string;
-  metadata: Record<string, unknown> | null;
-  function_slug: string | null;
-  function_version: string | null;
-  result: Record<string, unknown> | null;
-  created_at: Date;
-  updated_at: Date;
-}
 
 export interface ProjectTaskAttempt {
   id: string;
