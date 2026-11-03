@@ -48,11 +48,11 @@ const transactionQuery = mock((strings: TemplateStringsArray, ...values: unknown
   const text = strings.join("?");
   persistedQueries.push({ text, values });
   if (text.includes("FROM webhook_outbox") && text.includes("FOR UPDATE")) return Promise.resolve([claimed()]);
-  if (text.includes("SELECT * FROM project_webhooks")) return Promise.resolve([webhookRow]);
-  if (text.includes("SELECT id FROM project_webhooks")) return Promise.resolve([{ id: webhookRow.id }]);
-  if (text.includes("COUNT(*)::int AS count FROM project_webhooks")) return Promise.resolve([{ count: 1 }]);
   if (text.includes("COUNT(*)::int AS count FROM project_webhooks w")) return Promise.resolve([{ count: matchingSubscriptionCount }]);
+  if (text.includes("COUNT(*)::int AS count FROM project_webhooks")) return Promise.resolve([{ count: 1 }]);
   if (text.includes("COUNT(*)::int AS count FROM webhook_outbox")) return Promise.resolve([{ count: unfinishedOutboxCount }]);
+  if (text.includes("SELECT id FROM project_webhooks")) return Promise.resolve([{ id: webhookRow.id }]);
+  if (text.includes("FROM project_webhooks")) return Promise.resolve([webhookRow]);
   if (text.includes("SELECT value_encrypted") && text.includes("FROM project_control_secrets")) {
     return Promise.resolve(managedSecretAvailable ? [{ value_encrypted: "encrypted-secret" }] : []);
   }
@@ -69,24 +69,29 @@ const transactionQuery = mock((strings: TemplateStringsArray, ...values: unknown
   if (text.includes("UPDATE project_webhooks")) return Promise.resolve([{ id: webhookRow.id, deleted_at: new Date() }]);
   return Promise.resolve([]);
 });
-const txMock = Object.assign(transactionQuery, { array: transactionArray });
+const txMock = Object.assign(transactionQuery, {
+  array: transactionArray,
+  unsafe: (value: string) => value,
+});
 const sqlQueryMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const text = strings.join("?");
   persistedQueries.push({ text, values });
   if (text.includes("SELECT ref FROM projects")) return Promise.resolve([{ ref: "proj_1" }]);
-  if (text.includes("SELECT * FROM project_webhooks")) return Promise.resolve([webhookRow]);
-  if (text.includes("SELECT w.*") && text.includes("LEFT JOIN project_control_secrets")) {
+  if (text.includes("FROM project_webhooks w") && text.includes("LEFT JOIN project_control_secrets")) {
     return Promise.resolve([{ ...webhookRow, has_secret: managedSecretAvailable }]);
   }
+  if (text.includes("FROM project_webhooks")) return Promise.resolve([webhookRow]);
   if (text.includes("SELECT value_encrypted") && text.includes("FROM project_control_secrets")) {
     return Promise.resolve(managedSecretAvailable ? [{ value_encrypted: "encrypted-secret" }] : []);
   }
   if (text.includes("FROM webhook_deliveries d")) return Promise.resolve([originalDelivery]);
+  if (text.includes("COUNT(*)::int AS count FROM webhook_outbox")) return Promise.resolve([{ count: unfinishedOutboxCount }]);
   if (text.includes("COUNT(*)::int AS count")) return Promise.resolve([{ count: 1 }]);
   return Promise.resolve([]);
 });
 const sqlMock = Object.assign(sqlQueryMock, {
   array: controlArray,
+  unsafe: (value: string) => value,
   begin: mock((callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock)),
 });
 
@@ -140,7 +145,7 @@ describe("durable webhook delivery processing", () => {
       api_version: "2026-07-01",
     });
     expect(persistedQueries.some(({ values }) => values.includes("delivered"))).toBe(true);
-    expect(persistedQueries.some(({ text }) => text.includes("request_body"))).toBe(true);
+    expect(JSON.stringify(persistedQueries)).toContain("request_body");
   });
 
   test("creates and rotates signing secrets only through managed storage", async () => {
