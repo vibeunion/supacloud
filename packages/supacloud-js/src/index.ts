@@ -9,6 +9,12 @@ import { createBoundedRpcFetch, type FetchTransport } from "./bounded-rpc-fetch.
 import { SupaCloudOAuthClientsClient } from "./oauth-clients.js";
 import { SupaCloudOAuthServerClient } from "./oauth-server.js";
 import {
+  createRealtimeAdapter,
+  type RealtimeChannelConfig,
+  type RealtimeTransport,
+  type SupaCloudRealtimeChannel,
+} from "./realtime.js";
+import {
   createProcedureClient, createQueryAdapter,
   type ProcedureSource, type ProceduresOf, type QueryAdapterOptions,
 } from "@supacloud/query";
@@ -60,6 +66,7 @@ export {
 } from "./procedure-client.js";
 export * from "./commands.js";
 export * from "./artifacts.js";
+export * from "./realtime.js";
 
 export type SupaCloudTaskStatus =
   | "pending"
@@ -307,6 +314,7 @@ export type SupaCloudClientOptions<TClient extends SupabaseClient = SupabaseClie
   projectRef: string;
   getAccessToken?: () => Promise<string | null> | string | null;
   pollingIntervalMs?: number;
+  realtimeTransport?: RealtimeTransport | null;
 };
 
 export class SupaCloudTaskSubmitError extends Error {
@@ -1954,6 +1962,21 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
   }
 }
 
+
+function openSupabaseChannel(
+  supabase: SupabaseClient,
+  topic: string,
+  config?: RealtimeChannelConfig,
+): SupaCloudRealtimeChannel {
+  if (!config) return supabase.channel(topic) as unknown as SupaCloudRealtimeChannel;
+  return supabase.channel(topic, {
+    config: {
+      ...(config.broadcast ? { broadcast: config.broadcast } : {}),
+      ...(config.presence ? { presence: config.presence } : {}),
+    },
+  }) as unknown as SupaCloudRealtimeChannel;
+}
+
 export function createSupaCloudClient<
   TClient extends SupabaseClient = SupabaseClient,
   TApiClient extends ProcedureSource | undefined = undefined,
@@ -1964,6 +1987,7 @@ export function createSupaCloudClient<
     ...options,
     managementApiUrl: normalizeBaseUrl(options.managementApiUrl),
     pollingIntervalMs: options.pollingIntervalMs ?? 3000,
+    realtimeTransport: options.realtimeTransport ?? null,
     getAccessToken:
       options.getAccessToken ??
       (() => defaultAccessTokenResolver(options.supabase)),
@@ -1976,6 +2000,10 @@ export function createSupaCloudClient<
   const workflows = new SupaCloudWorkflowsClient(options.supabase);
   const commands = new SupaCloudCommandsClient(options.supabase);
   const artifacts = new SupaCloudArtifactsClient(options.supabase);
+  const realtime = createRealtimeAdapter({
+    transport: options.realtimeTransport ?? undefined,
+    projectRef: normalized.projectRef,
+  });
 
   const instance = {
     supabase: options.supabase,
@@ -1990,6 +2018,11 @@ export function createSupaCloudClient<
     commands,
     artifacts,
     queues,
+    realtime,
+    channel: (topic: string, config?: RealtimeChannelConfig) =>
+      options.realtimeTransport
+        ? realtime.channel(topic, config)
+        : openSupabaseChannel(options.supabase, topic, config),
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (
