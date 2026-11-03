@@ -189,6 +189,27 @@ describe("db governance tools", () => {
             .rejects.toThrow("未找到数据库模块: nope");
     });
 
+    test("check reports offline checks and skips catalog when no database is selected", async () => {
+        const result = await db({ action: "check", root, module: "clean" });
+        expect(result.isError).toBe(false);
+        const report = JSON.parse(result.content[0].text);
+        expect(report).toMatchObject({ version: 1, scope: "database-check", ok: true });
+        expect(report.checks).toEqual([
+            expect.objectContaining({ name: "source-contract", skipped: true }),
+            expect.objectContaining({ name: "module-lint", ok: true, modules: ["clean"] }),
+            expect.objectContaining({ name: "catalog", skipped: true }),
+        ]);
+    });
+
+    test("check fails when module lint has an error", async () => {
+        const result = await db({ action: "check", root, module: "cases" });
+        expect(result.isError).toBe(true);
+        const report = JSON.parse(result.content[0].text);
+        expect(report.ok).toBe(false);
+        expect(report.checks.find((entry: { name: string }) => entry.name === "module-lint"))
+            .toMatchObject({ ok: false });
+    });
+
     test("explain renders objects and flags unknown targets", async () => {
         const policy = await db({ action: "explain", root, target: "cases_select" });
         expect(policy.isError).toBe(false);
@@ -412,6 +433,7 @@ describe("db governance tools", () => {
     test("db actions are classified in the execution policy", () => {
         expect(executionMode("db", "lint", {})).toBe("local");
         expect(executionMode("db", "explain", {})).toBe("local");
+        expect(executionMode("db", "check", {})).toBe("read");
         expect(executionMode("db", "module_check", {})).toBe("read");
         expect(executionMode("db", "role_check", {})).toBe("read");
     });
