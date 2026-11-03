@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.38.0...elysia-v0.38.1) (2026-11-03)
+
+
+### Elegance & Refactoring
+
+* **elysia:** name HTTP rate-limit columns ([#2404](https://github.com/vibeunion/supacloud/issues/2404)) ([fe2149c](https://github.com/vibeunion/supacloud/commit/fe2149c1cf113cda3f0f7416d89873712437c001))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.37.0...elysia-v0.38.0) (2026-11-02)
 
 

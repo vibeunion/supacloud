@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.37.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.37.1...supacloud-lite-v0.37.2) (2026-11-03)
+
+
+### Elegance & Refactoring
+
+* **commands:** name command and artifact row columns ([#2418](https://github.com/vibeunion/supacloud/issues/2418)) ([7da4967](https://github.com/vibeunion/supacloud/commit/7da496706a152a3c3cbe7529d46ab4ac6c6b2bf0))
+* **workflows:** name workflow row columns ([#2417](https://github.com/vibeunion/supacloud/issues/2417)) ([5e3e9c2](https://github.com/vibeunion/supacloud/commit/5e3e9c20141e0e47ac939888b18cce7f938fabc1))
+
 ## [0.37.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.37.0...supacloud-lite-v0.37.1) (2026-11-02)
 
 

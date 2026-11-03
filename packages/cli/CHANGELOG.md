@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.115.2](https://github.com/vibeunion/supacloud/compare/cli-v0.115.1...cli-v0.115.2) (2026-11-03)
+
+
+### Elegance & Refactoring
+
+* **db:** establish task row contract and explicit SQL boundaries ([#2387](https://github.com/vibeunion/supacloud/issues/2387)) ([1e93d52](https://github.com/vibeunion/supacloud/commit/1e93d5218c8f7aaa63559273ac7560bf2242d9fe))
+
 ## [0.115.1](https://github.com/vibeunion/supacloud/compare/cli-v0.115.0...cli-v0.115.1) (2026-11-03)
 
 

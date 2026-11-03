@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.129.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.128.0...management-api-v0.129.0) (2026-11-03)
+
+
+### Features
+
+* **contracts:** establish strict database and task API boundaries ([#2414](https://github.com/vibeunion/supacloud/issues/2414)) ([391aba9](https://github.com/vibeunion/supacloud/commit/391aba9dd0ef70364c066714c2045f6dc5dcdbb3))
+* **database:** add native Rust JIT database access gateway ([#2380](https://github.com/vibeunion/supacloud/issues/2380)) ([b6501d5](https://github.com/vibeunion/supacloud/commit/b6501d565a47baebabd2baa6ec10f19346460044))
+* **management-api:** add isolated Reylo control-plane pilot ([#2388](https://github.com/vibeunion/supacloud/issues/2388)) ([0460335](https://github.com/vibeunion/supacloud/commit/0460335009aab2e8ec01537c748f0feb02975ff2))
+* **management-api:** promote Reylo control-plane queries ([#2392](https://github.com/vibeunion/supacloud/issues/2392)) ([38796dc](https://github.com/vibeunion/supacloud/commit/38796dcc468a1e8c54989c85fb0a10a0b2ed0bee))
+* **observability:** add Vector standalone log collector support ([#2377](https://github.com/vibeunion/supacloud/issues/2377)) ([c3a8d33](https://github.com/vibeunion/supacloud/commit/c3a8d332ff846abd7ac3cbca1a3cacc2523f2622))
+* **realtime:** add native Rust Realtime push gateway ([#2384](https://github.com/vibeunion/supacloud/issues/2384)) ([0ab9c05](https://github.com/vibeunion/supacloud/commit/0ab9c05af765f39855a6394e42ad62663457f43d))
+* **storage:** add native Rust image service with SIMD and imgproxy Pro features ([#2379](https://github.com/vibeunion/supacloud/issues/2379)) ([070c976](https://github.com/vibeunion/supacloud/commit/070c9763b2d07f8fed25964c1702eb518e9a8162))
+
+
+### Elegance & Refactoring
+
+* **commands:** name command and artifact row columns ([#2418](https://github.com/vibeunion/supacloud/issues/2418)) ([7da4967](https://github.com/vibeunion/supacloud/commit/7da496706a152a3c3cbe7529d46ab4ac6c6b2bf0))
+* **db:** establish task row contract and explicit SQL boundaries ([#2387](https://github.com/vibeunion/supacloud/issues/2387)) ([1e93d52](https://github.com/vibeunion/supacloud/commit/1e93d5218c8f7aaa63559273ac7560bf2242d9fe))
+* **docs:** name maker-checker row columns ([#2411](https://github.com/vibeunion/supacloud/issues/2411)) ([dc8eb22](https://github.com/vibeunion/supacloud/commit/dc8eb22537f09e7849d1473b67bd48e4edfc3f32))
+* **management-api:** name task output stream columns ([#2408](https://github.com/vibeunion/supacloud/issues/2408)) ([f59b858](https://github.com/vibeunion/supacloud/commit/f59b85804cd95bd5a159498c905314c43b5548ba))
+* **management-api:** name unified event columns ([#2403](https://github.com/vibeunion/supacloud/issues/2403)) ([9391dd8](https://github.com/vibeunion/supacloud/commit/9391dd82267cdbed9c963d221c87943f7c7e64e0))
+* **management-api:** name usage receipt columns ([#2407](https://github.com/vibeunion/supacloud/issues/2407)) ([c2563b2](https://github.com/vibeunion/supacloud/commit/c2563b2f82cdc434a3a56381493877950e7c6364))
+* **management-api:** use explicit application configuration columns ([#2399](https://github.com/vibeunion/supacloud/issues/2399)) ([cbe4375](https://github.com/vibeunion/supacloud/commit/cbe437538c1d949f49b955a06caf5cecb6fd5a14))
+* **management-api:** use explicit audit log columns ([#2400](https://github.com/vibeunion/supacloud/issues/2400)) ([8416aa2](https://github.com/vibeunion/supacloud/commit/8416aa25c9491de76dae61dd98bb68b38abc3037))
+* **management-api:** use explicit auth database columns ([#2401](https://github.com/vibeunion/supacloud/issues/2401)) ([1233aff](https://github.com/vibeunion/supacloud/commit/1233aff1a8708148f6ce29abf4e3405dcd09b854))
+* **management-api:** use explicit business organization columns ([#2398](https://github.com/vibeunion/supacloud/issues/2398)) ([7587f2b](https://github.com/vibeunion/supacloud/commit/7587f2bf25bee8bc893ab2c32418c9bd4f6ab7dd))
+* **management-api:** use explicit collaborator columns ([#2390](https://github.com/vibeunion/supacloud/issues/2390)) ([0692f5a](https://github.com/vibeunion/supacloud/commit/0692f5ae7bb35b345327eaea491355d3e199a639))
+* **management-api:** use explicit organization columns ([#2395](https://github.com/vibeunion/supacloud/issues/2395)) ([1e00fb5](https://github.com/vibeunion/supacloud/commit/1e00fb52923f64eedbfdeff2cc9593c7d95ddb87))
+* **management-api:** use explicit pgflow columns ([#2402](https://github.com/vibeunion/supacloud/issues/2402)) ([731a4f6](https://github.com/vibeunion/supacloud/commit/731a4f698759bdb0602cb46d219655214abb6dda))
+* **management-api:** use explicit pipeline columns ([#2391](https://github.com/vibeunion/supacloud/issues/2391)) ([93a5c17](https://github.com/vibeunion/supacloud/commit/93a5c173f32360aa81505eb5bbe8fae071536c0d))
+* **management-api:** use explicit postgres upgrade columns ([#2397](https://github.com/vibeunion/supacloud/issues/2397)) ([f46470a](https://github.com/vibeunion/supacloud/commit/f46470a13eb24e79f8d067386df27681b0a459ee))
+* **management-api:** use explicit project columns ([#2396](https://github.com/vibeunion/supacloud/issues/2396)) ([bce87df](https://github.com/vibeunion/supacloud/commit/bce87dfd0d89b1f8dd32a155597c40658fe7af04))
+* **management-api:** use explicit project mutation columns ([#2393](https://github.com/vibeunion/supacloud/issues/2393)) ([2d651ca](https://github.com/vibeunion/supacloud/commit/2d651cac83ef646a205f3f509ba945dd8aeaf26e))
+* **management-api:** use explicit storage columns ([#2394](https://github.com/vibeunion/supacloud/issues/2394)) ([00715a1](https://github.com/vibeunion/supacloud/commit/00715a1108edb5c252c5f358f3f37d55b0e1b85a))
+* **management-api:** use explicit webhook columns ([#2389](https://github.com/vibeunion/supacloud/issues/2389)) ([da4609c](https://github.com/vibeunion/supacloud/commit/da4609c34b64ac2b5217b333f6990b4c9117ee5f))
+* **worker:** name admission row columns ([#2416](https://github.com/vibeunion/supacloud/issues/2416)) ([5382aad](https://github.com/vibeunion/supacloud/commit/5382aad4b1208c2405d709bea1d07da110485a3e))
+* **workflows:** name workflow row columns ([#2417](https://github.com/vibeunion/supacloud/issues/2417)) ([5e3e9c2](https://github.com/vibeunion/supacloud/commit/5e3e9c20141e0e47ac939888b18cce7f938fabc1))
+
+
+### Performance Improvements
+
+* **storage:** enable zero-copy streaming for downloads and uploads ([#2383](https://github.com/vibeunion/supacloud/issues/2383)) ([e8f2199](https://github.com/vibeunion/supacloud/commit/e8f21997a15385b491573c7ab23d8a25117d1fa4))
+
 ## [0.128.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.127.0...management-api-v0.128.0) (2026-11-02)
 
 
