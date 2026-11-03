@@ -500,6 +500,11 @@ export type LifecycleCleanupStats = {
   errors: number;
 };
 
+const OBJECT_VERSION_COLUMNS = [
+  "id", "bucket_id", "name", "version_id", "owner", "owner_id",
+  "metadata", "is_delete_marker", "created_at", "archived_at",
+] as const;
+
 export async function cleanupProjectVersions(ref: string): Promise<{ versionsDeleted: number; markersDeleted: number }> {
   await ensureStorageVersioningSchema(ref);
   const dbName = await resolveDbName(ref);
@@ -531,7 +536,7 @@ export async function cleanupProjectVersions(ref: string): Promise<{ versionsDel
       const keepNewest = rule.noncurrentVersionExpiration.newerNoncurrentVersions ?? 0;
       const candidates = await db`
         WITH ranked AS (
-          SELECT *, row_number() OVER (PARTITION BY name ORDER BY archived_at DESC, id DESC) AS recency
+          SELECT ${db.unsafe(OBJECT_VERSION_COLUMNS.join(", "))}, row_number() OVER (PARTITION BY name ORDER BY archived_at DESC, id DESC) AS recency
           FROM storage.object_versions
           WHERE bucket_id = ${bucketId} AND is_delete_marker = false
         )
