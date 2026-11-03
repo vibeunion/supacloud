@@ -222,6 +222,18 @@ interface StoredRecoverableMutationClaimRow {
   fencing_epoch: number | string;
 }
 
+const PROJECT_MUTATION_COLUMNS = [
+  "project_ref", "mutation_id", "operation", "resource_key", "request_fingerprint",
+  "principal_type", "principal_id", "status", "checkpoint", "receipt", "response_status",
+  "failure_code", "lease_owner", "lease_token", "lease_expires_at", "fencing_epoch",
+  "recovery_not_before", "completed_at", "created_at", "updated_at",
+] as const;
+
+const projectMutationColumns = PROJECT_MUTATION_COLUMNS.join(", ");
+const qualifiedProjectMutationColumns = PROJECT_MUTATION_COLUMNS
+  .map((column) => `mutation.${column}`)
+  .join(", ");
+
 function isPlainRecord(candidate: unknown): candidate is Record<string, unknown> {
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
   const prototype = Object.getPrototypeOf(candidate);
@@ -399,7 +411,7 @@ async function lockedMutation(
   mutationId: string,
 ): Promise<StoredProjectMutationRow | null> {
   const [row] = await transaction`
-    SELECT * FROM project_mutations
+    SELECT ${sql.unsafe(projectMutationColumns)} FROM project_mutations
     WHERE project_ref = ${projectRef} AND mutation_id = ${mutationId}
     FOR UPDATE
   ` as StoredProjectMutationRow[];
@@ -412,7 +424,7 @@ async function activeResourceMutation(
   resourceKey: string,
 ): Promise<StoredProjectMutationRow | null> {
   const [row] = await transaction`
-    SELECT * FROM project_mutations
+    SELECT ${sql.unsafe(projectMutationColumns)} FROM project_mutations
     WHERE project_ref = ${projectRef} AND resource_key = ${resourceKey}
       AND status IN ('pending', 'running', 'failed_retryable', 'outcome_unknown')
     FOR UPDATE
@@ -428,7 +440,7 @@ export async function readActiveProjectMutationForResource(
   if (!/^[A-Za-z0-9_-]{1,20}$/.test(projectRef)) throw new Error("Project ref is invalid");
   const resourceKey = projectMutationResourceKey(resource);
   const [row] = await database`
-    SELECT * FROM project_mutations
+    SELECT ${sql.unsafe(projectMutationColumns)} FROM project_mutations
     WHERE project_ref = ${projectRef} AND resource_key = ${resourceKey}
       AND status IN ('pending', 'running', 'failed_retryable', 'outcome_unknown')
   ` as StoredProjectMutationRow[];
@@ -464,7 +476,7 @@ async function insertProjectMutation(
       ${input.requestFingerprint}, ${input.principal.type}, ${input.principal.id}
     )
     ON CONFLICT DO NOTHING
-    RETURNING *
+    RETURNING ${sql.unsafe(projectMutationColumns)}
   ` as StoredProjectMutationRow[];
   return inserted ?? null;
 }
@@ -499,7 +511,8 @@ async function lockedMutationLeaseState(
   input: ClaimProjectMutationInput,
 ): Promise<StoredMutationWithLeaseState | null> {
   const [row] = await transaction`
-    SELECT *, COALESCE(lease_expires_at > clock_timestamp(), false) AS lease_active
+    SELECT ${sql.unsafe(projectMutationColumns)},
+      COALESCE(lease_expires_at > clock_timestamp(), false) AS lease_active
     FROM project_mutations
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
     FOR UPDATE
@@ -541,7 +554,7 @@ export async function claimOrResumeProjectMutation(
       AND fencing_epoch < 9007199254740991
       AND (status IN ('pending', 'failed_retryable')
         OR (status = 'running' AND lease_expires_at <= clock_timestamp()))
-    RETURNING *
+    RETURNING ${sql.unsafe(projectMutationColumns)}
   ` as StoredProjectMutationRow[];
   if (claimed) return { kind: "claimed", mutation: projectMutationState(claimed) };
   const current = await lockedMutationLeaseState(transaction, input);
@@ -804,7 +817,7 @@ async function lockedReconciliationMutation(
   input: ReconcileProjectMutationInput,
 ): Promise<StoredReconciliationRow | null> {
   const [row] = await transaction`
-    SELECT mutation.*, clock_timestamp() AS database_now
+    SELECT ${sql.unsafe(qualifiedProjectMutationColumns)}, clock_timestamp() AS database_now
     FROM project_mutations AS mutation
     WHERE mutation.project_ref = ${input.projectRef}
       AND mutation.mutation_id = ${input.mutationId}
@@ -851,7 +864,7 @@ export async function reconcileProjectMutation(
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
       AND principal_type = ${actor.type} AND principal_id = ${actor.id}
       AND status = 'outcome_unknown' AND fencing_epoch = ${input.expectedFencingEpoch}
-    RETURNING *
+    RETURNING ${sql.unsafe(projectMutationColumns)}
   ` as StoredProjectMutationRow[];
   if (!updated) throw new Error("Locked mutation reconciliation changed unexpectedly");
   return { kind: "updated", mutation: projectMutationState(updated) };
@@ -863,7 +876,7 @@ export async function readProjectMutation(input: {
 }, database: SQL = sql): Promise<ProjectMutationState | null> {
   assertMutationIdentity(input.projectRef, input.mutationId);
   const [row] = await database`
-    SELECT * FROM project_mutations
+    SELECT ${sql.unsafe(projectMutationColumns)} FROM project_mutations
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
   ` as StoredProjectMutationRow[];
   return row ? projectMutationState(row) : null;
