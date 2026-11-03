@@ -228,3 +228,5 @@ export type {
   GraphqlSchemaDiff,
 } from "./graphql-governance";
 export { generateDatabaseContracts, parseDatabaseContractsOptions, runDatabaseContractsFile, type DatabaseContractsOptions } from "./database-contracts";
+export { parseDatabaseContractManifest } from "./database-contract-manifest";
+export type { DatabaseContractManifest } from "./database-contract-manifest";

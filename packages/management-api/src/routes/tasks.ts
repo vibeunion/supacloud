@@ -13,6 +13,7 @@ import { pgmqHttpDelay, pgmqHttpList, pgmqHttpReceive, pgmqHttpReceiveSettings }
 import { PgmqRequestBodyError } from "../utils/pgmq-request-body";
 import { parseAuthorizedPgmqEnqueue, PgmqEnqueueAuthError } from "./pgmq-enqueue-parser";
 import { PgmqMutationError } from "../utils/pgmq-mutation";
+import { taskErrorSchema, taskStatsSchema } from "../contracts/task-api";
 import { InvalidTaskListQueryError, parseTaskListQuery } from "../utils/task-list-query";
 import { isPgflowTask, pgflowTaskService, PgflowTaskError, PgflowTaskReadError, startPgflowTask } from "../services/pgflow-task.service";
 
@@ -576,7 +577,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(500, { message: "Failed to retrieve DLQ tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     })
-    .get("/stats", { detail: { tags: ["tasks"], summary: "Get task statistics" } }, async ({ params }) => {
+    .get("/stats", {
+        response: { 200: taskStatsSchema, 500: taskErrorSchema },
+        detail: { tags: ["tasks"], summary: "Get task statistics" },
+    }, async ({ params }) => {
         try {
             return await taskRepository.getTaskStats(params.ref);
         } catch (err: unknown) {
