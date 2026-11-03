@@ -13,7 +13,7 @@ let restoreManagementState: (snapshot: unknown) => void = () => undefined;
 const managementTransaction = mock(async (strings: TemplateStringsArray, ...values: unknown[]) => {
   managementTransactionCalls.push({ query: strings.join("?"), values });
   const query = strings.join("?");
-  if (query.includes("SELECT * FROM projects")) {
+  if (query.includes("FROM projects") && query.includes("FOR UPDATE")) {
     const project = await findByRef(String(values[0]));
     return project ? [project] : [];
   }

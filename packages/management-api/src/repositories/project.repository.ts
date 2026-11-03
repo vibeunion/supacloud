@@ -7,10 +7,21 @@ import { projectDatabaseLockKey } from "../services/project-database-lock";
 import type { StoredApplicationPreview } from "../services/application-preview-contract";
 import { persistApplicationPreview, replaceProjectConfig } from "./project-config-writes";
 
+const PROJECT_COLUMNS = [
+  "id", "ref", "organization_id", "name", "db_name", "db_user", "db_password",
+  "db_password_encrypted", "jwt_secret", "jwt_secret_encrypted", "anon_key",
+  "service_role_key", "service_role_key_encrypted", "publishable_key", "secret_key_hash",
+  "secret_key_encrypted", "s3_bucket", "s3_access_key", "s3_secret_key", "s3_secret_key_encrypted",
+  "region", "status", "postgrest_desired", "postgrest_actual", "postgrest_health",
+  "postgrest_port", "postgrest_last_error", "postgrest_updated_at", "postgrest_last_reconciled_at",
+  "config", "created_at", "updated_at", "deleted_at",
+] as const;
+export const projectColumns = PROJECT_COLUMNS.join(", ");
+
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
   const results = await sql`
-    SELECT * FROM projects
+    SELECT ${sql.unsafe(projectColumns)} FROM projects
     WHERE deleted_at IS NULL
     ORDER BY created_at DESC
   `;
@@ -23,7 +34,7 @@ export async function findAll(): Promise<Project[]> {
 export async function findByRef(ref: string): Promise<Project | null> {
   return withRetry("ProjectRepository.findByRef", async () => {
   const [project] = await sql`
-    SELECT * FROM projects
+    SELECT ${sql.unsafe(projectColumns)} FROM projects
     WHERE ref = ${ref} AND deleted_at IS NULL
   `;
   return project || null;
@@ -34,7 +45,7 @@ export async function findByRef(ref: string): Promise<Project | null> {
 export async function findById(id: string): Promise<Project | null> {
   return withRetry("ProjectRepository.findById", async () => {
   const [project] = await sql`
-    SELECT * FROM projects
+    SELECT ${sql.unsafe(projectColumns)} FROM projects
     WHERE id = ${id} AND deleted_at IS NULL
   `;
   return project || null;
@@ -74,7 +85,7 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ${encryptSecretIfNeeded(input.service_role_key)},
       ${input.s3_secret_key ? encryptSecretIfNeeded(input.s3_secret_key) : null}
     )
-    RETURNING *
+    RETURNING ${sql.unsafe(projectColumns)}
   `;
   return project;
   });
@@ -87,7 +98,7 @@ export async function updateStatus(ref: string, status: ProjectStatus): Promise<
     UPDATE projects
     SET status = ${status}, updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
-    RETURNING *
+    RETURNING ${sql.unsafe(projectColumns)}
   `;
   return project || null;
   });
@@ -104,7 +115,7 @@ export async function activateCreatingProject(ref: string): Promise<Project | nu
       UPDATE projects
       SET status = 'active', updated_at = NOW()
       WHERE ref = ${ref} AND status = 'creating' AND deleted_at IS NULL
-      RETURNING *
+      RETURNING ${sql.unsafe(projectColumns)}
     `;
     return project || null;
   });
@@ -140,7 +151,7 @@ export async function updateApiKeys(ref: string, keys: {
       service_role_key_encrypted = ${encryptSecretIfNeeded(keys.service_role_key)},
       updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
-    RETURNING *
+    RETURNING ${sql.unsafe(projectColumns)}
   `;
   return project || null;
   });
@@ -162,7 +173,7 @@ export async function updateOpaqueApiKeys(ref: string, keys: {
         secret_key_encrypted = ${encryptedSecretKey},
         updated_at = NOW()
       WHERE ref = ${ref} AND deleted_at IS NULL
-      RETURNING *
+      RETURNING ${sql.unsafe(projectColumns)}
     `;
     if (!project) return null;
 
@@ -190,7 +201,7 @@ export async function softDelete(ref: string): Promise<Project | null> {
     UPDATE projects
     SET deleted_at = NOW(), status = 'deleted', updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
-    RETURNING *
+    RETURNING ${sql.unsafe(projectColumns)}
   `;
   return project || null;
   });
