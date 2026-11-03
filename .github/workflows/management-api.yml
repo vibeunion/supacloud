@@ -767,6 +767,7 @@ jobs:
         with:
           name: management-api-reylo-${{ github.sha }}
           path: packages/management-api/.reylo
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 

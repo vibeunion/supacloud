@@ -177,8 +177,8 @@ export const queries: ControlPlaneQueries = {
     const rows = await taskAttemptsList.run(db, { task_id: taskId, limit });
     return rows.map((row: Record<string, unknown>) => ({
       ...row,
-      started_at: timestamp(row.started_at) as Date,
-      completed_at: timestamp(row.completed_at),
+      started_at: timestamp(row["started_at"]) as Date,
+      completed_at: timestamp(row["completed_at"]),
     }) as TaskAttemptSummary);
   },
 
