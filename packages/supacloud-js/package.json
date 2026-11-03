@@ -66,7 +66,8 @@
     "COMPATIBILITY.md",
     "PROCEDURES.md",
     "QUERY.md",
-    "REACTIVE.md"
+    "REACTIVE.md",
+    "REALTIME.md"
   ],
   "scripts": {
     "test": "bun test",
