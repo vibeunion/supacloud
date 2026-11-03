@@ -131,10 +131,10 @@ export const USAGE_METER_SCHEMA_SQL = `
       p_receipt_id, p_project_ref, p_dimension, p_unit, p_quantity, p_observed_at, p_observation_id, p_subject
     )
     ON CONFLICT ON CONSTRAINT usage_receipts_observation_key DO NOTHING
-    RETURNING * INTO inserted;
+    RETURNING receipt_id, project_ref, dimension, unit, quantity, observed_at, recorded_at, observation_id, subject INTO inserted;
 
     IF NOT FOUND THEN
-      SELECT * INTO existing
+      SELECT receipt_id, project_ref, dimension, unit, quantity, observed_at, recorded_at, observation_id, subject INTO existing
       FROM usage_receipts
       WHERE usage_receipts.project_ref = p_project_ref
         AND usage_receipts.observation_id = p_observation_id
