@@ -41,6 +41,9 @@ on:
   # Branch protection requires a result for every PR, so do not add path filters here.
   pull_request:
     branches: ["main", "dev"]
+  # Merge queue builds gh-readonly-queue/* and waits for Required Checks.
+  # Without this event the queue stays in AWAITING_CHECKS until it times out.
+  merge_group:
   workflow_dispatch:
 
 permissions:
