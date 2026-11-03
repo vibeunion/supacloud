@@ -36,8 +36,13 @@ pub struct TopicSubscriptionConfig {
 pub struct ConnectionState {
     pub id: String,
     pub tenant_id: String,
+    pub role: String,
     pub tx: mpsc::UnboundedSender<PhoenixV2Message>,
     pub subscriptions: HashMap<String, TopicSubscriptionConfig>,
+}
+
+fn topic_key(tenant_id: &str, topic: &str) -> String {
+    format!("{tenant_id}\u{1f}{topic}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +64,7 @@ pub struct PostgresChangeEvent {
 pub struct ChannelHub {
     // connection_id -> ConnectionState
     connections: RwLock<HashMap<String, ConnectionState>>,
-    // topic -> Set<connection_id>
+    // (tenant_id, topic) -> Set<connection_id>
     topic_subscribers: RwLock<HashMap<String, HashSet<String>>>,
     // presence manager
     presence: RwLock<PresenceManager>,
@@ -79,11 +84,13 @@ impl ChannelHub {
         &self,
         id: String,
         tenant_id: String,
+        role: String,
         tx: mpsc::UnboundedSender<PhoenixV2Message>,
     ) {
         let state = ConnectionState {
             id: id.clone(),
             tenant_id,
+            role,
             tx,
             subscriptions: HashMap::new(),
         };
@@ -94,6 +101,7 @@ impl ChannelHub {
     pub fn subscribe(
         &self,
         connection_id: &str,
+        tenant_id: &str,
         topic: &str,
         config: TopicSubscriptionConfig,
     ) {
@@ -104,53 +112,79 @@ impl ChannelHub {
 
         let mut topics = self.topic_subscribers.write();
         topics
-            .entry(topic.to_string())
+            .entry(topic_key(tenant_id, topic))
             .or_default()
             .insert(connection_id.to_string());
     }
 
     /// Unsubscribe connection from a topic
-    pub fn unsubscribe(&self, connection_id: &str, topic: &str) -> Option<PresenceDiff> {
+    pub fn unsubscribe(
+        &self,
+        connection_id: &str,
+        tenant_id: &str,
+        topic: &str,
+    ) -> Option<PresenceDiff> {
         let mut conns = self.connections.write();
         if let Some(conn) = conns.get_mut(connection_id) {
             conn.subscriptions.remove(topic);
         }
 
+        let key = topic_key(tenant_id, topic);
         let mut topics = self.topic_subscribers.write();
-        if let Some(subs) = topics.get_mut(topic) {
+        if let Some(subs) = topics.get_mut(&key) {
             subs.remove(connection_id);
             if subs.is_empty() {
-                topics.remove(topic);
+                topics.remove(&key);
             }
         }
 
-        self.presence.write().untrack(connection_id, topic)
+        self.presence
+            .write()
+            .untrack(tenant_id, connection_id, topic)
     }
 
     /// Disconnect connection and cleanup all state
     pub fn remove_connection(&self, connection_id: &str) -> Vec<(String, PresenceDiff)> {
-        let joined_topics = {
+        let (tenant_id, joined_topics) = {
             let mut conns = self.connections.write();
             if let Some(conn) = conns.remove(connection_id) {
-                conn.subscriptions.keys().cloned().collect::<Vec<_>>()
+                (
+                    conn.tenant_id.clone(),
+                    conn.subscriptions.keys().cloned().collect::<Vec<_>>(),
+                )
             } else {
-                Vec::new()
+                (String::new(), Vec::new())
             }
         };
+
+        if tenant_id.is_empty() {
+            return Vec::new();
+        }
 
         {
             let mut topics = self.topic_subscribers.write();
             for topic in &joined_topics {
-                if let Some(subs) = topics.get_mut(topic) {
+                let key = topic_key(&tenant_id, topic);
+                if let Some(subs) = topics.get_mut(&key) {
                     subs.remove(connection_id);
                     if subs.is_empty() {
-                        topics.remove(topic);
+                        topics.remove(&key);
                     }
                 }
             }
         }
 
-        self.presence.write().untrack_all(connection_id)
+        let mut diffs = Vec::new();
+        for topic in joined_topics {
+            if let Some(diff) = self
+                .presence
+                .write()
+                .untrack(&tenant_id, connection_id, &topic)
+            {
+                diffs.push((topic, diff));
+            }
+        }
+        diffs
     }
 
     /// Send a message directly to a specific connection
@@ -162,26 +196,25 @@ impl ChannelHub {
     }
 
     /// Broadcast client message to all other subscribers of the topic
-    pub fn broadcast(
-        &self,
-        sender_id: Option<&str>,
-        topic: &str,
-        payload: Value,
-    ) {
+    pub fn broadcast(&self, sender_id: Option<&str>, tenant_id: &str, topic: &str, payload: Value) {
         let msg = PhoenixV2Message::broadcast(topic, payload);
-        self.send_to_topic(topic, sender_id, msg);
+        self.send_to_topic(tenant_id, topic, sender_id, msg);
     }
 
-    /// Broadcast a Phoenix message to all subscribers of a topic
+    /// Broadcast a Phoenix message to all subscribers of a topic in one tenant.
     pub fn send_to_topic(
         &self,
+        tenant_id: &str,
         topic: &str,
         sender_id: Option<&str>,
         msg: PhoenixV2Message,
     ) {
         let subscriber_ids = {
             let topics = self.topic_subscribers.read();
-            topics.get(topic).cloned().unwrap_or_default()
+            topics
+                .get(&topic_key(tenant_id, topic))
+                .cloned()
+                .unwrap_or_default()
         };
 
         let conns = self.connections.read();
@@ -209,23 +242,31 @@ impl ChannelHub {
     pub fn track_presence(
         &self,
         connection_id: &str,
+        tenant_id: &str,
         topic: &str,
         key: Option<String>,
         payload: Value,
     ) -> PresenceDiff {
         self.presence
             .write()
-            .track(connection_id, topic, key, payload)
+            .track(tenant_id, connection_id, topic, key, payload)
     }
 
     /// Untrack presence for a connection on a topic
-    pub fn untrack_presence(&self, connection_id: &str, topic: &str) -> Option<PresenceDiff> {
-        self.presence.write().untrack(connection_id, topic)
+    pub fn untrack_presence(
+        &self,
+        connection_id: &str,
+        tenant_id: &str,
+        topic: &str,
+    ) -> Option<PresenceDiff> {
+        self.presence
+            .write()
+            .untrack(tenant_id, connection_id, topic)
     }
 
-    /// Get current presence state
-    pub fn get_presence_state(&self, topic: &str) -> Value {
-        self.presence.read().get_state(topic)
+    /// Get current presence state for one tenant topic
+    pub fn get_presence_state(&self, tenant_id: &str, topic: &str) -> Value {
+        self.presence.read().get_state(tenant_id, topic)
     }
 
     /// Dispatch CDC event to all subscribers matching the change
@@ -335,11 +376,12 @@ mod tests {
         let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
 
-        hub.add_connection("c1".into(), "tenant1".into(), tx1);
-        hub.add_connection("c2".into(), "tenant1".into(), tx2);
+        hub.add_connection("c1".into(), "tenant1".into(), "service_role".into(), tx1);
+        hub.add_connection("c2".into(), "tenant1".into(), "service_role".into(), tx2);
 
         hub.subscribe(
             "c1",
+            "tenant1",
             "room1",
             TopicSubscriptionConfig {
                 join_ref: Some("1".into()),
@@ -352,6 +394,7 @@ mod tests {
 
         hub.subscribe(
             "c2",
+            "tenant1",
             "room1",
             TopicSubscriptionConfig {
                 join_ref: Some("1".into()),
@@ -363,7 +406,7 @@ mod tests {
         );
 
         // Broadcast from c1
-        hub.broadcast(Some("c1"), "room1", json!({"hello": "world"}));
+        hub.broadcast(Some("c1"), "tenant1", "room1", json!({"hello": "world"}));
 
         // c1 should not receive it (broadcast_self: false)
         assert!(rx1.try_recv().is_err());
@@ -375,14 +418,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_broadcast_is_tenant_scoped() {
+        let hub = ChannelHub::new();
+        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+
+        hub.add_connection("a".into(), "tenant_a".into(), "service_role".into(), tx_a);
+        hub.add_connection("b".into(), "tenant_b".into(), "service_role".into(), tx_b);
+
+        for (conn, tenant) in [("a", "tenant_a"), ("b", "tenant_b")] {
+            hub.subscribe(
+                conn,
+                tenant,
+                "room1",
+                TopicSubscriptionConfig {
+                    join_ref: Some("1".into()),
+                    broadcast_self: false,
+                    broadcast_ack: false,
+                    presence_key: None,
+                    postgres_changes: vec![],
+                },
+            );
+        }
+
+        hub.broadcast(Some("a"), "tenant_a", "room1", json!({"hello": "a"}));
+
+        assert!(rx_a.try_recv().is_err());
+        assert!(rx_b.try_recv().is_err());
+        assert_eq!(hub.get_presence_state("tenant_b", "room1"), json!({}));
+    }
+
+    #[tokio::test]
     async fn test_cdc_dispatch_with_filter() {
         let hub = ChannelHub::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        hub.add_connection("c1".into(), "tenant_a".into(), tx);
+        hub.add_connection("c1".into(), "tenant_a".into(), "service_role".into(), tx);
 
         let filter = ColumnFilter::parse("id=eq.42").unwrap();
         hub.subscribe(
             "c1",
+            "tenant_a",
             "realtime:public:messages",
             TopicSubscriptionConfig {
                 join_ref: Some("1".into()),

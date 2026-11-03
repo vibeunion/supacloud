@@ -11,8 +11,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, Query, Request, State,
     },
-    middleware::{from_fn_with_state, Next},
     http::{HeaderMap, StatusCode},
+    middleware::{from_fn_with_state, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -57,8 +57,19 @@ async fn require_control_token(
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "));
-    if state.control_token.is_empty() || presented != Some(state.control_token.as_str()) {
+    let Some(token) = presented else {
         return Err(StatusCode::UNAUTHORIZED);
+    };
+    let raw_token_ok = !state.control_token.is_empty() && token == state.control_token;
+    if !raw_token_ok {
+        let jwt_ok = state
+            .registry
+            .verify_jwt(token, None)
+            .and_then(|claims| claims.role)
+            .is_some_and(|role| role == "supabase_admin" || role == "service_role");
+        if !jwt_ok {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
     }
     Ok(next.run(request).await)
 }
@@ -113,10 +124,18 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-async fn register_tenant(
-    State(state): State<AppState>,
-    Json(tenant): Json<TenantConfig>,
-) -> impl IntoResponse {
+async fn register_tenant(State(state): State<AppState>, Json(payload): Json<Value>) -> Response {
+    let tenant = match TenantConfig::from_registration(payload) {
+        Ok(tenant) => tenant,
+        Err(error) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": error })),
+            )
+                .into_response();
+        }
+    };
+
     info!(id = %tenant.id, "Registering tenant in native Realtime Gateway");
     state.pg_manager.start_listener(tenant.clone());
     state.registry.register(tenant);
@@ -125,6 +144,7 @@ async fn register_tenant(
         StatusCode::CREATED,
         Json(json!({ "message": "Tenant registered successfully" })),
     )
+        .into_response()
 }
 
 async fn list_tenants(State(state): State<AppState>) -> impl IntoResponse {
@@ -142,10 +162,7 @@ async fn get_tenant(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-async fn delete_tenant(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+async fn delete_tenant(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     info!(id = %id, "Removing tenant from Realtime Gateway");
     state.pg_manager.stop_listener(&id);
     let removed = state.registry.remove(&id);
@@ -174,6 +191,8 @@ async fn ingest_cdc(
 
 #[derive(Debug, Deserialize)]
 struct BroadcastBody {
+    #[serde(alias = "tenant", alias = "ref")]
+    tenant_id: String,
     topic: String,
     payload: Value,
 }
@@ -182,7 +201,9 @@ async fn api_broadcast(
     State(state): State<AppState>,
     Json(body): Json<BroadcastBody>,
 ) -> impl IntoResponse {
-    state.hub.broadcast(None, &body.topic, body.payload);
+    state
+        .hub
+        .broadcast(None, &body.tenant_id, &body.topic, body.payload);
     Json(json!({ "status": "broadcasted" }))
 }
 
@@ -209,29 +230,36 @@ async fn ws_handler(
         .as_deref()
         .or(header_ref)
         .or(host_ref)
-        .or(if !apikey.is_empty() { Some(&apikey) } else { None })
+        .or(if !apikey.is_empty() {
+            Some(&apikey)
+        } else {
+            None
+        })
         .unwrap_or("default");
 
-    let tenant_id = if let Some(tenant) = state.registry.resolve_tenant(candidate_ref) {
-        tenant.id
-    } else {
-        candidate_ref.to_string()
+    let Some(tenant) = state.registry.resolve_tenant(candidate_ref) else {
+        return StatusCode::UNAUTHORIZED.into_response();
     };
+    if apikey.is_empty() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(claims) = state.registry.verify_jwt(&apikey, Some(&tenant.jwt_secret)) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let role = claims.role.unwrap_or_else(|| "anon".to_string());
+    let tenant_id = tenant.id;
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, apikey))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role))
 }
 
-async fn handle_socket(
-    socket: WebSocket,
-    state: AppState,
-    tenant_id: String,
-    _apikey: String,
-) {
+async fn handle_socket(socket: WebSocket, state: AppState, tenant_id: String, role: String) {
     let conn_id = next_connection_id();
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<PhoenixV2Message>();
 
-    state.hub.add_connection(conn_id.clone(), tenant_id.clone(), tx);
+    state
+        .hub
+        .add_connection(conn_id.clone(), tenant_id.clone(), role.clone(), tx);
     info!(conn_id = %conn_id, tenant = %tenant_id, "WebSocket client connected");
 
     // Task to send messages from channel to WebSocket client
@@ -261,7 +289,15 @@ async fn handle_socket(
                 let text_str = text.as_str();
                 match PhoenixV2Message::decode(text_str) {
                     Ok(parsed) => {
-                        handle_client_message(&hub, &conn_id_recv, parsed).await;
+                        handle_client_message(
+                            &hub,
+                            &state.registry,
+                            &tenant_id,
+                            &role,
+                            &conn_id_recv,
+                            parsed,
+                        )
+                        .await;
                     }
                     Err(e) => {
                         warn!(conn_id = %conn_id_recv, error = %e, "Malformed Phoenix frame received");
@@ -281,14 +317,18 @@ async fn handle_socket(
     send_task.abort();
     let presence_diffs = hub.remove_connection(&conn_id);
     for (topic, diff) in presence_diffs {
-        let diff_msg = PhoenixV2Message::presence_diff(&topic, json!(diff.joins), json!(diff.leaves));
-        hub.send_to_topic(&topic, None, diff_msg);
+        let diff_msg =
+            PhoenixV2Message::presence_diff(&topic, json!(diff.joins), json!(diff.leaves));
+        hub.send_to_topic(&tenant_id, &topic, None, diff_msg);
     }
     info!(conn_id = %conn_id, "WebSocket client disconnected");
 }
 
 async fn handle_client_message(
     hub: &Arc<ChannelHub>,
+    registry: &TenantRegistry,
+    tenant_id: &str,
+    role: &str,
     conn_id: &str,
     msg: PhoenixV2Message,
 ) {
@@ -376,6 +416,20 @@ async fn handle_client_message(
             }
         }
 
+        if !change_subs.is_empty() && role != "service_role" && role != "supabase_admin" {
+            let reply = PhoenixV2Message::reply(
+                join_ref,
+                reference,
+                topic,
+                "error",
+                json!({
+                    "reason": "postgres_changes requires service_role until per-tenant RLS filtering is implemented"
+                }),
+            );
+            hub.send_to_connection(conn_id, reply);
+            return;
+        }
+
         let sub_config = TopicSubscriptionConfig {
             join_ref: join_ref.clone(),
             broadcast_self,
@@ -384,7 +438,7 @@ async fn handle_client_message(
             postgres_changes: change_subs,
         };
 
-        hub.subscribe(conn_id, topic, sub_config);
+        hub.subscribe(conn_id, tenant_id, topic, sub_config);
 
         // Send phx_reply: ok directly to connecting client
         let reply = PhoenixV2Message::reply(
@@ -399,7 +453,7 @@ async fn handle_client_message(
         hub.send_to_connection(conn_id, reply);
 
         // Send current presence_state if any directly to connecting client
-        let pres_state = hub.get_presence_state(topic);
+        let pres_state = hub.get_presence_state(tenant_id, topic);
         if pres_state != json!({}) {
             let state_msg = PhoenixV2Message::presence_state(topic, pres_state);
             hub.send_to_connection(conn_id, state_msg);
@@ -409,10 +463,11 @@ async fn handle_client_message(
 
     // 3. phx_leave
     if event == "phx_leave" {
-        let diff = hub.unsubscribe(conn_id, topic);
+        let diff = hub.unsubscribe(conn_id, tenant_id, topic);
         if let Some(diff) = diff {
-            let diff_msg = PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
-            hub.send_to_topic(topic, None, diff_msg);
+            let diff_msg =
+                PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
+            hub.send_to_topic(tenant_id, topic, None, diff_msg);
         }
 
         let reply = PhoenixV2Message::reply(join_ref, reference, topic, "ok", json!({}));
@@ -423,7 +478,7 @@ async fn handle_client_message(
     // 4. broadcast
     if event == "broadcast" {
         let bcast_payload = msg.payload.clone();
-        hub.broadcast(Some(conn_id), topic, bcast_payload);
+        hub.broadcast(Some(conn_id), tenant_id, topic, bcast_payload);
 
         // Send ack if requested
         if let Some(ref r) = reference {
@@ -438,23 +493,27 @@ async fn handle_client_message(
         let pres_type = msg.payload.get("event").and_then(|v| v.as_str());
         if pres_type == Some("track") {
             let payload = msg.payload.get("payload").cloned().unwrap_or(json!({}));
-            let diff = hub.track_presence(conn_id, topic, None, payload);
-            let diff_msg = PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
-            hub.send_to_topic(topic, None, diff_msg);
+            let diff = hub.track_presence(conn_id, tenant_id, topic, None, payload);
+            let diff_msg =
+                PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
+            hub.send_to_topic(tenant_id, topic, None, diff_msg);
 
             if let Some(ref r) = reference {
-                let reply = PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
+                let reply =
+                    PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
                 hub.send_to_connection(conn_id, reply);
             }
         } else if pres_type == Some("untrack") {
-            let diff = hub.untrack_presence(conn_id, topic);
+            let diff = hub.untrack_presence(conn_id, tenant_id, topic);
             if let Some(diff) = diff {
-                let diff_msg = PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
-                hub.send_to_topic(topic, None, diff_msg);
+                let diff_msg =
+                    PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
+                hub.send_to_topic(tenant_id, topic, None, diff_msg);
             }
 
             if let Some(ref r) = reference {
-                let reply = PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
+                let reply =
+                    PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
                 hub.send_to_connection(conn_id, reply);
             }
         }
@@ -463,8 +522,28 @@ async fn handle_client_message(
 
     // 6. access_token update
     if event == "access_token" {
+        let token = msg
+            .payload
+            .get("access_token")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let tenant_secret = registry.get(tenant_id).map(|tenant| tenant.jwt_secret);
+        let valid = !token.is_empty()
+            && registry
+                .verify_jwt(token, tenant_secret.as_deref())
+                .is_some();
         if let Some(ref r) = reference {
-            let reply = PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
+            let reply = if valid {
+                PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}))
+            } else {
+                PhoenixV2Message::reply(
+                    join_ref,
+                    Some(r.clone()),
+                    topic,
+                    "error",
+                    json!({ "reason": "invalid access_token" }),
+                )
+            };
             hub.send_to_connection(conn_id, reply);
         }
         return;

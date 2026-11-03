@@ -41,6 +41,90 @@ fn default_db_user() -> String {
     "postgres".to_string()
 }
 
+#[derive(Debug, Deserialize)]
+struct TenantEnvelope {
+    tenant: WrappedTenant,
+}
+
+#[derive(Debug, Deserialize)]
+struct WrappedTenant {
+    #[serde(default)]
+    external_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    jwt_secret: String,
+    #[serde(default)]
+    extensions: Vec<WrappedTenantExtension>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WrappedTenantExtension {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    settings: Value,
+}
+
+impl TenantConfig {
+    /// Accept both the flat gateway contract and the Management API
+    /// `{ tenant: { ..., extensions: [postgres_cdc_rls] } }` payload.
+    pub fn from_registration(value: Value) -> Result<Self, String> {
+        if let Ok(tenant) = serde_json::from_value::<TenantConfig>(value.clone()) {
+            if !tenant.id.trim().is_empty() && !tenant.jwt_secret.is_empty() {
+                return Ok(tenant);
+            }
+        }
+
+        let envelope: TenantEnvelope = serde_json::from_value(value)
+            .map_err(|error| format!("invalid tenant payload: {error}"))?;
+        let wrapped = envelope.tenant;
+        let id = wrapped
+            .external_id
+            .clone()
+            .or_else(|| wrapped.name.clone())
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "tenant payload is missing external_id".to_string())?;
+        if wrapped.jwt_secret.is_empty() {
+            return Err("tenant payload is missing jwt_secret".to_string());
+        }
+
+        let postgres = wrapped
+            .extensions
+            .iter()
+            .find(|extension| extension.kind == "postgres_cdc_rls")
+            .map(|extension| &extension.settings);
+        let read =
+            |key: &str| -> Option<&Value> { postgres.and_then(|settings| settings.get(key)) };
+        let text = |key: &str| -> Option<String> {
+            read(key).and_then(|value| match value {
+                Value::String(value) if !value.is_empty() => Some(value.clone()),
+                _ => None,
+            })
+        };
+
+        let db_port = read("db_port")
+            .and_then(|value| match value {
+                Value::Number(port) => port.as_u64(),
+                Value::String(port) => port.parse::<u64>().ok(),
+                _ => None,
+            })
+            .and_then(|port| u16::try_from(port).ok())
+            .unwrap_or_else(default_db_port);
+
+        Ok(Self {
+            id: id.clone(),
+            external_id: Some(id),
+            jwt_secret: wrapped.jwt_secret,
+            db_host: text("db_host").unwrap_or_else(default_db_host),
+            db_port,
+            db_name: text("db_name").unwrap_or_default(),
+            db_user: text("db_user").unwrap_or_else(default_db_user),
+            db_password: text("db_password").unwrap_or_default(),
+            slot_name: text("slot_name"),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtClaims {
     pub role: Option<String>,
@@ -213,6 +297,40 @@ mod tests {
         mac.update(signing_input.as_bytes());
         let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
         format!("{}.{}", signing_input, signature)
+    }
+
+    #[test]
+    fn test_management_api_envelope_registration() {
+        let payload = serde_json::json!({
+            "tenant": {
+                "external_id": "proj_demo",
+                "name": "Project proj_demo",
+                "jwt_secret": "tenant_secret",
+                "extensions": [{
+                    "type": "postgres_cdc_rls",
+                    "settings": {
+                        "db_host": "10.0.0.5",
+                        "db_port": "5433",
+                        "db_name": "db_proj_demo",
+                        "db_user": "supabase_admin",
+                        "db_password": "secret",
+                        "slot_name": "supabase_realtime_proj_demo"
+                    }
+                }]
+            }
+        });
+
+        let tenant = TenantConfig::from_registration(payload).unwrap();
+        assert_eq!(tenant.id, "proj_demo");
+        assert_eq!(tenant.external_id.as_deref(), Some("proj_demo"));
+        assert_eq!(tenant.db_host, "10.0.0.5");
+        assert_eq!(tenant.db_port, 5433);
+        assert_eq!(tenant.db_name, "db_proj_demo");
+        assert_eq!(tenant.db_user, "supabase_admin");
+        assert_eq!(
+            tenant.slot_name.as_deref(),
+            Some("supabase_realtime_proj_demo")
+        );
     }
 
     #[test]

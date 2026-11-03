@@ -2,14 +2,22 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, type Subprocess } from "bun";
+import { createHmac } from "node:crypto";
 
 const repoRoot = join(import.meta.dir, "../../../..");
 const TEST_PORT = 9890;
 const CONTROL_TOKEN = "test-realtime-control-token";
 
-function controlFetch(url: string, init: RequestInit = {}) {
+function signHs256(secret: string, payload: Record<string, unknown>) {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
+  return `${header}.${body}.${signature}`;
+}
+
+function controlFetch(url: string, init: RequestInit = {}, token = CONTROL_TOKEN) {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${CONTROL_TOKEN}`);
+  headers.set("Authorization", `Bearer ${token}`);
   return fetch(url, { ...init, headers });
 }
 let proc: Subprocess | null = null;
@@ -101,6 +109,73 @@ describe.skipIf(!binaryAvailable)("Native Rust Realtime Gateway (crates/realtime
     expect(getAfterDel.status).toBe(404);
   });
 
+  test("accepts Management API envelope payloads with a control JWT", async () => {
+    const controlJwt = signHs256("test-secret-for-realtime", {
+      iss: "supabase",
+      role: "supabase_admin",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const registerRes = await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenant: {
+          external_id: "proj_envelope",
+          name: "Project proj_envelope",
+          jwt_secret: "envelope-jwt-secret",
+          extensions: [{
+            type: "postgres_cdc_rls",
+            settings: {
+              db_host: "127.0.0.1",
+              db_port: "5432",
+              db_name: "db_proj_envelope",
+              db_user: "supabase_admin",
+              db_password: "password",
+              slot_name: "supabase_realtime_proj_envelope",
+            },
+          }],
+        },
+      }),
+    }, controlJwt);
+    expect(registerRes.status).toBe(201);
+
+    const getRes = await controlFetch(
+      `http://127.0.0.1:${TEST_PORT}/api/tenants/proj_envelope`,
+      {},
+      controlJwt,
+    );
+    expect(getRes.status).toBe(200);
+    const tenant = (await getRes.json()) as { id: string; db_name: string; slot_name: string };
+    expect(tenant.id).toBe("proj_envelope");
+    expect(tenant.db_name).toBe("db_proj_envelope");
+    expect(tenant.slot_name).toBe("supabase_realtime_proj_envelope");
+
+    await controlFetch(
+      `http://127.0.0.1:${TEST_PORT}/api/tenants/proj_envelope`,
+      { method: "DELETE" },
+      controlJwt,
+    );
+  });
+
+  test("rejects WebSocket connections without a verified JWT", async () => {
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${TEST_PORT}/socket/websocket?apikey=not-a-jwt&ref=test-project&vsn=2.0.0`,
+    );
+    const opened = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), 2000);
+      ws.onopen = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      ws.onerror = () => {
+        clearTimeout(timer);
+        resolve(false);
+      };
+    });
+    ws.close();
+    expect(opened).toBe(false);
+  });
+
   test("handles Phoenix V2 heartbeat, broadcast, presence, and CDC changes", async () => {
     // Register project for WebSocket test
     await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants`, {
@@ -117,7 +192,13 @@ describe.skipIf(!binaryAvailable)("Native Rust Realtime Gateway (crates/realtime
       }),
     });
 
-    const wsUrl = `ws://127.0.0.1:${TEST_PORT}/socket/websocket?apikey=test-key&ref=test-project&vsn=2.0.0`;
+    const accessToken = signHs256("test-secret-for-realtime", {
+      iss: "supabase",
+      role: "service_role",
+      ref: "test-project",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const wsUrl = `ws://127.0.0.1:${TEST_PORT}/socket/websocket?apikey=${encodeURIComponent(accessToken)}&ref=test-project&vsn=2.0.0`;
     const ws = new WebSocket(wsUrl);
 
     const incomingMessages: any[] = [];

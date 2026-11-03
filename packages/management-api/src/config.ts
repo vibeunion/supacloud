@@ -306,7 +306,7 @@ export const config: Config = {
   caddyBinaryPath: getEnv("CADDY_BINARY_PATH", "/usr/local/bin/supacloud-caddy"),
   grafanaUrl: getEnv("GRAFANA_URL", "http://127.0.0.1:3000/grafana"),
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),
-  realtimeEngine: getEnv("SUPACLOUD_REALTIME_ENGINE", "rust"),
+  realtimeEngine: getEnv("SUPACLOUD_REALTIME_ENGINE", "container"),
   realtimeAdminUrl: getEnv("REALTIME_ADMIN_URL", "http://127.0.0.1:4000"),
   realtimeApiSecret: getEnv("REALTIME_API_SECRET", ""),
   realtimeContainerEnvFile: getEnv(

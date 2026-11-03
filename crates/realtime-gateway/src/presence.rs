@@ -9,11 +9,20 @@ pub struct PresenceMeta {
     pub payload: Value,
 }
 
+fn topic_key(tenant_id: &str, topic: &str) -> String {
+    format!("{tenant_id}\u{1f}{topic}")
+}
+
+fn strip_topic_key<'a>(tenant_id: &str, key: &'a str) -> &'a str {
+    key.strip_prefix(&format!("{tenant_id}\u{1f}"))
+        .unwrap_or(key)
+}
+
 #[derive(Debug, Default)]
 pub struct PresenceManager {
-    // (topic, connection_id) -> Vec<(key, PresenceMeta)>
+    // ((tenant, topic), connection_id) -> Vec<(key, PresenceMeta)>
     connection_presences: HashMap<(String, String), Vec<(String, PresenceMeta)>>,
-    // topic -> key -> Vec<PresenceMeta>
+    // (tenant, topic) -> key -> Vec<PresenceMeta>
     topic_states: HashMap<String, HashMap<String, Vec<PresenceMeta>>>,
 }
 
@@ -31,13 +40,15 @@ impl PresenceManager {
     /// Track a presence for a connection on a given topic
     pub fn track(
         &mut self,
+        tenant_id: &str,
         connection_id: &str,
         topic: &str,
         key: Option<String>,
         payload: Value,
     ) -> PresenceDiff {
+        let scoped_topic = topic_key(tenant_id, topic);
         let phx_ref = format!("F{}", Uuid::new_v4().simple());
-        
+
         // Derive key from key param, or payload.user_id, or payload.key, or connection_id
         let resolved_key = key
             .or_else(|| {
@@ -47,13 +58,11 @@ impl PresenceManager {
                     .map(|s| s.to_string())
             })
             .or_else(|| {
-                payload
-                    .get("user_id")
-                    .map(|v| match v {
-                        Value::String(s) => s.clone(),
-                        Value::Number(n) => n.to_string(),
-                        _ => v.to_string(),
-                    })
+                payload.get("user_id").map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => v.to_string(),
+                })
             })
             .unwrap_or_else(|| connection_id.to_string());
 
@@ -70,14 +79,14 @@ impl PresenceManager {
         };
 
         // Add to connection_presences
-        let conn_key = (topic.to_string(), connection_id.to_string());
+        let conn_key = (scoped_topic.clone(), connection_id.to_string());
         self.connection_presences
             .entry(conn_key)
             .or_default()
             .push((resolved_key.clone(), meta.clone()));
 
         // Add to topic_states
-        let topic_map = self.topic_states.entry(topic.to_string()).or_default();
+        let topic_map = self.topic_states.entry(scoped_topic).or_default();
         topic_map
             .entry(resolved_key.clone())
             .or_default()
@@ -98,15 +107,21 @@ impl PresenceManager {
     }
 
     /// Untrack presences for a connection on a topic
-    pub fn untrack(&mut self, connection_id: &str, topic: &str) -> Option<PresenceDiff> {
-        let conn_key = (topic.to_string(), connection_id.to_string());
+    pub fn untrack(
+        &mut self,
+        tenant_id: &str,
+        connection_id: &str,
+        topic: &str,
+    ) -> Option<PresenceDiff> {
+        let scoped_topic = topic_key(tenant_id, topic);
+        let conn_key = (scoped_topic.clone(), connection_id.to_string());
         let removed = self.connection_presences.remove(&conn_key)?;
         if removed.is_empty() {
             return None;
         }
 
         let mut leaves: HashMap<String, Value> = HashMap::new();
-        if let Some(topic_map) = self.topic_states.get_mut(topic) {
+        if let Some(topic_map) = self.topic_states.get_mut(&scoped_topic) {
             for (key, meta) in removed {
                 if let Some(metas) = topic_map.get_mut(&key) {
                     metas.retain(|m| m.phx_ref != meta.phx_ref);
@@ -122,7 +137,7 @@ impl PresenceManager {
                 );
             }
             if topic_map.is_empty() {
-                self.topic_states.remove(topic);
+                self.topic_states.remove(&scoped_topic);
             }
         }
 
@@ -133,19 +148,26 @@ impl PresenceManager {
     }
 
     /// Called on connection disconnect. Untracks from all topics.
-    pub fn untrack_all(&mut self, connection_id: &str) -> Vec<(String, PresenceDiff)> {
+    pub fn untrack_all(
+        &mut self,
+        tenant_id: &str,
+        connection_id: &str,
+    ) -> Vec<(String, PresenceDiff)> {
         let keys_to_remove: Vec<(String, String)> = self
             .connection_presences
             .keys()
-            .filter(|(_, conn)| conn == connection_id)
+            .filter(|(topic, conn)| {
+                conn == connection_id && strip_topic_key(tenant_id, topic) != *topic
+            })
             .cloned()
             .collect();
 
         let mut result = Vec::new();
         for (topic, conn) in keys_to_remove {
-            if let Some(diff) = self.untrack(&conn, &topic) {
+            let original_topic = strip_topic_key(tenant_id, &topic).to_string();
+            if let Some(diff) = self.untrack(tenant_id, &conn, &original_topic) {
                 if !diff.leaves.is_empty() {
-                    result.push((topic, diff));
+                    result.push((original_topic, diff));
                 }
             }
         }
@@ -153,9 +175,9 @@ impl PresenceManager {
     }
 
     /// Get current presence state for a topic
-    pub fn get_state(&self, topic: &str) -> Value {
+    pub fn get_state(&self, tenant_id: &str, topic: &str) -> Value {
         let mut map = serde_json::Map::new();
-        if let Some(topic_map) = self.topic_states.get(topic) {
+        if let Some(topic_map) = self.topic_states.get(&topic_key(tenant_id, topic)) {
             for (key, metas) in topic_map {
                 let metas_json: Vec<Value> = metas.iter().map(|m| m.payload.clone()).collect();
                 map.insert(key.clone(), json!({ "metas": metas_json }));
@@ -177,6 +199,7 @@ mod tests {
 
         // Track user
         let diff = manager.track(
+            "tenant_a",
             conn_id,
             topic,
             Some("user_alice".to_string()),
@@ -186,25 +209,37 @@ mod tests {
         assert!(diff.leaves.is_empty());
 
         // Check state
-        let state = manager.get_state(topic);
+        let state = manager.get_state("tenant_a", topic);
         assert!(state.get("user_alice").is_some());
 
         // Untrack
-        let untrack_diff = manager.untrack(conn_id, topic).unwrap();
+        let untrack_diff = manager.untrack("tenant_a", conn_id, topic).unwrap();
         assert!(untrack_diff.leaves.contains_key("user_alice"));
 
         // Check state is now empty
-        let empty_state = manager.get_state(topic);
+        let empty_state = manager.get_state("tenant_a", topic);
         assert_eq!(empty_state, json!({}));
     }
 
     #[test]
     fn test_untrack_all_on_disconnect() {
         let mut manager = PresenceManager::new();
-        manager.track("conn_x", "realtime:room1", Some("u1".into()), json!({}));
-        manager.track("conn_x", "realtime:room2", Some("u1".into()), json!({}));
+        manager.track(
+            "tenant_a",
+            "conn_x",
+            "realtime:room1",
+            Some("u1".into()),
+            json!({}),
+        );
+        manager.track(
+            "tenant_a",
+            "conn_x",
+            "realtime:room2",
+            Some("u1".into()),
+            json!({}),
+        );
 
-        let diffs = manager.untrack_all("conn_x");
+        let diffs = manager.untrack_all("tenant_a", "conn_x");
         assert_eq!(diffs.len(), 2);
     }
 }

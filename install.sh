@@ -3812,7 +3812,7 @@ install_management_api() {
         REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
-        SUPACLOUD_REALTIME_ENGINE "${SUPACLOUD_REALTIME_ENGINE:-rust}" \
+        SUPACLOUD_REALTIME_ENGINE "${SUPACLOUD_REALTIME_ENGINE:-container}" \
         REALTIME_ADMIN_URL "${REALTIME_ADMIN_URL:-http://127.0.0.1:4000}" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
         REALTIME_IMAGE "${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}" \
@@ -5500,7 +5500,7 @@ deploy_service_containers() {
     supacloud_wait_http_health "http://127.0.0.1:9010/healthcheck" || return 1
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
-    if [[ "${SUPACLOUD_REALTIME_ENGINE:-rust}" == "rust" ]] && deploy_rust_realtime_gateway; then
+    if [[ "${SUPACLOUD_REALTIME_ENGINE:-container}" == "rust" ]] && deploy_rust_realtime_gateway; then
         log_info "Native Rust Realtime gateway is active; skipping the legacy container"
     else
         local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
