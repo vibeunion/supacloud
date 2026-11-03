@@ -16,7 +16,7 @@ export async function readPgflowState(db: SQL, ref: string): Promise<PgflowState
   const [schema] = await db`SELECT to_regnamespace('pgflow') IS NOT NULL AS installed,
     to_regclass('supacloud_worker.installation') IS NOT NULL AS managed`;
   if (!schema?.managed) return { installed: schema?.installed === true, managed: false, enabled: false, version: null };
-  const [binding] = await db`SELECT * FROM supacloud_worker.installation WHERE singleton`;
+  const [binding] = await db`SELECT singleton, project_ref, engine_version, profile FROM supacloud_worker.installation WHERE singleton`;
   if (binding?.project_ref !== ref || binding.engine_version !== "0.16.0") {
     throw new ExtensionOperationError("pgflow project binding/version mismatch");
   }
