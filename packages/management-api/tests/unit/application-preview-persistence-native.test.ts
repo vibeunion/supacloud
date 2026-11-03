@@ -19,7 +19,15 @@ function receipt(): StoredApplicationPreview {
 nativeTest("native PostgreSQL serializes preview writes, preserves config, and rejects stale lifecycle updates", async () => {
   await withNativePostgres(async db => {
     await db.unsafe(`CREATE TABLE projects (
-      ref text PRIMARY KEY, config jsonb, updated_at timestamptz DEFAULT now(), deleted_at timestamptz);
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), ref text UNIQUE NOT NULL, organization_id uuid,
+      name text, db_name text, db_user text, db_password text, db_password_encrypted text,
+      jwt_secret text, jwt_secret_encrypted text, anon_key text, service_role_key text,
+      service_role_key_encrypted text, publishable_key text, secret_key_hash text, secret_key_encrypted text,
+      s3_bucket text, s3_access_key text, s3_secret_key text, s3_secret_key_encrypted text,
+      region text, status text, postgrest_desired text, postgrest_actual text, postgrest_health text,
+      postgrest_port integer, postgrest_last_error text, postgrest_updated_at timestamptz,
+      postgrest_last_reconciled_at timestamptz, config jsonb,
+      created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), deleted_at timestamptz);
       INSERT INTO projects(ref, config) VALUES ('demo', '{"owner_setting":"before","scheduled_functions":[{"id":"live"}]}');`);
     const gate = Promise.withResolvers<void>();
     const writes = Array.from({ length: 12 }, async () => {
