@@ -17,6 +17,7 @@
         "jose": "^6.2.13",
         "nanoid": "^6.0.2",
         "pgsql-ast-parser": "12.0.2",
+        "reylo": "0.7.0",
         "typebox": "1.4.3",
       },
       "devDependencies": {
@@ -25,7 +26,6 @@
         "@types/yauzl": "3.4.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
-        "reylo": "0.7.0",
         "typescript": "7.1.0-beta",
         "yauzl": "3.4.0",
       },

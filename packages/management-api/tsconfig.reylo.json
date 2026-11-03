@@ -7,6 +7,6 @@
   "contentMappers": [
     { "package": "reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }
   ],
-  "include": ["src/db/reylo-pilot/**/*"],
+  "include": ["src/db/reylo/**/*"],
   "exclude": ["node_modules", "dist"]
 }

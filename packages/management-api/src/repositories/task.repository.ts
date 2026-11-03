@@ -4,6 +4,7 @@ import {
   parseTaskJsonObject, projectTaskColumns,
 } from "../db/contracts/task-row";
 import { executeUnsafeRows } from "../db/unsafe-rows";
+import { loadControlPlaneQueries } from "../db/reylo";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
 import { withRetry as retryOperation } from "../utils/retry";
 import { isRecord } from "../utils/project-config";
@@ -533,6 +534,8 @@ export async function updateTaskError(id: string, error: string): Promise<void> 
 
 export async function getTaskById(id: string, projectRef?: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.getTaskById", async () => {
+    const controlPlane = await loadControlPlaneQueries();
+    if (controlPlane) return controlPlane.getTask(sql, id, projectRef);
     const rows = projectRef
       ? await sql`SELECT ${sql.unsafe(projectTaskColumns())} FROM project_tasks WHERE id = ${id} AND project_ref = ${projectRef} LIMIT 1`
       : await sql`SELECT ${sql.unsafe(projectTaskColumns())} FROM project_tasks WHERE id = ${id} LIMIT 1`;
@@ -986,6 +989,8 @@ export async function completeTaskAttempt(
 
 export async function listTaskAttempts(taskId: string): Promise<ProjectTaskAttempt[]> {
   return withRetry("TaskRepository.listTaskAttempts", async () => {
+    const controlPlane = await loadControlPlaneQueries();
+    if (controlPlane) return controlPlane.listTaskAttempts(sql, taskId);
     const rows = await sql`
       SELECT ${sql.unsafe(PROJECT_TASK_ATTEMPT_COLUMNS)}
       FROM project_task_attempts
@@ -1006,6 +1011,8 @@ export async function getTaskStats(projectRef: string): Promise<{
   failedTrend: Array<{ bucket: string; failures: number }>;
 }> {
   return withRetry("TaskRepository.getTaskStats", async () => {
+    const controlPlane = await loadControlPlaneQueries();
+    if (controlPlane) return controlPlane.getTaskStats(sql, projectRef);
     const [summary] = await sql`
       SELECT
         COUNT(*) FILTER (WHERE status IN (${TaskStatuses.LEASED}, ${TaskStatuses.RUNNING}))::int AS running,

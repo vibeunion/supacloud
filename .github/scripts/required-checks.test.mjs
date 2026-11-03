@@ -87,7 +87,7 @@ test('Windows Lite checks restore Bun cache before installation', () => {
 });
 
 test('binary builds remain downstream of the aggregate quality gate', () => {
-  assert.match(job('build-binaries'), /^ {4}needs: \[required-checks\]$/m);
+  assert.match(job('build-binaries'), /^ {4}needs: \[required-checks, reylo-contracts\]$/m);
   assert.doesNotMatch(job('build-binaries'), /always\(\)|continue-on-error/);
 });
 
