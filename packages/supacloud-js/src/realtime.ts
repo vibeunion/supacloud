@@ -272,12 +272,12 @@ export class SupaCloudRealtimeChannel {
   on(
     type: "presence",
     filter: { event: "sync" | "join" | "leave" },
-    callback: (payload: any) => void,
+    callback: (payload: unknown) => void,
   ): this;
   on(
     type: string,
-    filter: any,
-    callback: (payload: any) => void,
+    filter: { event?: string },
+    callback: (payload: unknown) => void,
   ): this {
     if (type === "postgres_changes") {
       this.postgresCallbacks.push({

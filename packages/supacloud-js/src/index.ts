@@ -1962,6 +1962,19 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
   }
 }
 
+
+type SupabaseChannelClient = {
+  channel: (topic: string, options?: { config?: RealtimeChannelConfig }) => unknown;
+};
+
+function openSupabaseChannel(
+  supabase: SupabaseChannelClient,
+  topic: string,
+  config?: RealtimeChannelConfig,
+): SupaCloudRealtimeChannel {
+  return supabase.channel(topic, { config }) as SupaCloudRealtimeChannel;
+}
+
 export function createSupaCloudClient<
   TClient extends SupabaseClient = SupabaseClient,
   TApiClient extends ProcedureSource | undefined = undefined,
@@ -2007,7 +2020,7 @@ export function createSupaCloudClient<
     channel: (topic: string, config?: RealtimeChannelConfig) =>
       options.realtimeTransport
         ? realtime.channel(topic, config)
-        : (options.supabase.channel(topic, config as any) as unknown as SupaCloudRealtimeChannel),
+        : openSupabaseChannel(options.supabase, topic, config),
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (

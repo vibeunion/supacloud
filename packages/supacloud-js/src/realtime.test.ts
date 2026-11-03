@@ -256,10 +256,10 @@ describe("Realtime Adapter — Broadcast & Presence", () => {
     const trackRes = await channel.track({ username: "alice", status: "online" });
     expect(trackRes).toBe("ok");
 
-    const presences = channel.presenceState();
+    const presences = channel.presenceState<{ username: string; status: string }>();
     expect(presences["user-123"]).toBeDefined();
     expect(presences["user-123"].length).toBe(1);
-    expect((presences["user-123"][0] as any).username).toBe("alice");
+    expect(presences["user-123"]?.[0]?.username).toBe("alice");
     expect(joinState).not.toBeNull();
     expect(syncState).not.toBeNull();
 
