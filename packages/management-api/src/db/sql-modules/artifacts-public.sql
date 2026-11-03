@@ -142,7 +142,7 @@ BEGIN
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(artifact_id::text, 0));
-  SELECT * INTO existing FROM supacloud_artifacts.artifacts WHERE id = artifact_id;
+  SELECT artifact.id, artifact.storage_object_id, artifact.bucket_id, artifact.object_path, artifact.object_version, artifact.artifact_type, artifact.sha256, artifact.size_bytes, artifact.mime_type, artifact.metadata, artifact.retention_until, artifact.created_by, artifact.created_at INTO existing FROM supacloud_artifacts.artifacts artifact WHERE artifact.id = artifact_id;
   IF FOUND THEN
     IF existing.storage_object_id <> object_row.id
        OR existing.artifact_type <> normalized_type

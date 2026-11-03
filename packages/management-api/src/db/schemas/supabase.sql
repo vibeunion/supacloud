@@ -2185,7 +2185,7 @@ BEGIN
 
   fingerprint := 'md5:' || md5(payload::text);
   PERFORM pg_advisory_xact_lock(hashtextextended(command_id::text, 0));
-  SELECT * INTO existing FROM supacloud_commands.receipts WHERE id = command_id;
+  SELECT receipt.id, receipt.command_type, receipt.target_type, receipt.target_id, receipt.actor_id, receipt.payload, receipt.payload_fingerprint, receipt.workflow_run_id, receipt.created_at, receipt.tenant_id INTO existing FROM supacloud_commands.receipts receipt WHERE receipt.id = command_id;
   IF FOUND THEN
     IF existing.command_type <> normalized_command_type
        OR existing.target_type <> normalized_target_type
@@ -2465,7 +2465,7 @@ BEGIN
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(artifact_id::text, 0));
-  SELECT * INTO existing FROM supacloud_artifacts.artifacts WHERE id = artifact_id;
+  SELECT artifact.id, artifact.storage_object_id, artifact.bucket_id, artifact.object_path, artifact.object_version, artifact.artifact_type, artifact.sha256, artifact.size_bytes, artifact.mime_type, artifact.metadata, artifact.retention_until, artifact.created_by, artifact.created_at INTO existing FROM supacloud_artifacts.artifacts artifact WHERE artifact.id = artifact_id;
   IF FOUND THEN
     IF existing.storage_object_id <> object_row.id
        OR existing.artifact_type <> normalized_type
