@@ -48,7 +48,7 @@ export async function listUnifiedEvents(input: {
   const kind = input.kind ?? null;
   const eventStatus = input.status ?? null;
   const rows = await sql`
-    SELECT *
+    SELECT source_kind, source_id, event_id, project_ref, task_type, function_slug, status, occurred_at, attempt, max_attempts, next_attempt_at, error, correlation_id, idempotency_key, metadata, event_type, webhook_payload, signature_version, signature_timestamp, secret_version, audit_action, audit_actor, request_id
     FROM (
       SELECT
         'task'::text AS source_kind, id::text AS source_id, id::text || ':' || status AS event_id,
