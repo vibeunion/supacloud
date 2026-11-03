@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import { BACKGROUND_TASK_SETTING_LIMITS, DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
 import { isRecord } from "../utils/project-config";
 import { copyTaskJson, InvalidTaskRecordError, parseTaskRecord } from "../utils/task-record";
+import { projectTaskColumns } from "../db/contracts/task-row";
 import { InvalidBackgroundInvocationError, parseBackgroundInvocation } from "../utils/background-invocation";
 import { ConflictError } from "../utils/errors";
 
@@ -343,14 +344,14 @@ export async function enqueueBackgroundFunctionTask(
           ${authAuthorityRef},
           ${input.metadata ?? null}
         )
-        RETURNING *
+        RETURNING ${transaction.unsafe(projectTaskColumns())}
       `;
 
       let rows: unknown[];
       let isNewTask = true;
       if (idempotencyKey) {
         const existingRows: unknown[] = await transaction`
-          SELECT *
+          SELECT ${transaction.unsafe(projectTaskColumns())}
           FROM project_tasks
           WHERE project_ref = ${input.projectRef}
             AND idempotency_key = ${idempotencyKey}
@@ -371,7 +372,7 @@ export async function enqueueBackgroundFunctionTask(
             WHERE id = ${existingTask.id}
               AND project_ref = ${input.projectRef}
               AND idempotency_key = ${idempotencyKey}
-            RETURNING *
+            RETURNING ${transaction.unsafe(projectTaskColumns())}
           `;
           isNewTask = false;
         } else {

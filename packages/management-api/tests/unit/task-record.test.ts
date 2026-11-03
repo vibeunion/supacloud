@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import {
   InvalidTaskRecordError, parseTaskRecord, parseTaskAttemptRecord, copyTaskJson,
 } from "../../src/utils/task-record";
+import { PROJECT_TASK_COLUMNS, projectTaskColumns, projectTaskRowSchema } from "../../src/db/contracts/task-row";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { taskAttemptFixture, taskFixture } from "../helpers/task-fixtures";
 
 test("task rows validate native and legacy JSON without erasing empty objects or null", () => {
@@ -60,4 +63,42 @@ test("JSON snapshots reject cycles, accessors and lossy serialization", () => {
     expect(() => copyTaskJson(value)).toThrow(InvalidTaskRecordError);
   }
   expect(getterCalls).toBe(0);
+});
+
+test("the explicit task column list stays aligned with the row schema", () => {
+  const columns = PROJECT_TASK_COLUMNS.split(",").map((column) => column.trim());
+  expect(columns).toEqual(Object.keys(projectTaskRowSchema.properties));
+});
+
+test("explicit column fragments reject unsafe aliases and stay inlined in tagged SQL", () => {
+  expect(projectTaskColumns("pt").startsWith("pt.id,")).toBe(true);
+  expect(() => projectTaskColumns("pt;drop")).toThrow("Invalid SQL identifier");
+
+  const root = join(import.meta.dir, "../../src");
+  const files = [
+    "repositories/task.repository.ts",
+    "services/background-task.service.ts",
+    "services/pgflow-task.service.ts",
+  ];
+  for (const file of files) {
+    const source = readFileSync(join(root, file), "utf8");
+    let index = 0;
+    while (index < source.length) {
+      const tick = source.indexOf("`", index);
+      if (tick < 0) break;
+      let start = tick - 1;
+      while (start >= 0 && /[A-Za-z0-9_]/.test(source[start] ?? "")) start -= 1;
+      const client = source.slice(start + 1, tick);
+      const end = source.indexOf("`", tick + 1);
+      if (end < 0) throw new Error(`unclosed template in ${file}`);
+      if (client === "sql" || client === "transaction" || client === "tx") {
+        const body = source.slice(tick + 1, end);
+        if (/\$\{(?:projectTaskColumns\(|PROJECT_TASK_ATTEMPT_COLUMNS)/.test(body)
+          && !/\$\{(?:sql|transaction|tx)\.unsafe\((?:projectTaskColumns\(|PROJECT_TASK_ATTEMPT_COLUMNS)/.test(body)) {
+          throw new Error(`${file} binds a task column list instead of inlining it`);
+        }
+      }
+      index = end + 1;
+    }
+  }
 });

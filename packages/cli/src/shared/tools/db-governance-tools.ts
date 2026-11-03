@@ -12,13 +12,14 @@ import {
     type QueryExecutor,
     type ReconcileReport,
 } from "@supacloud/db";
+import { databaseSources } from "@supacloud/db/source-contracts";
 import { runDbWorkflow, type DbWorkflowAction } from "./db-workflow";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import { registerTool, type ToolServer, type ToolResult } from "../tool-server";
 
 export interface DbToolArguments {
-    action: "context" | "lint" | "explain" | "module_check" | DbWorkflowAction;
+    action: "context" | "lint" | "check" | "explain" | "module_check" | DbWorkflowAction;
     module?: string;
     root?: string;
     module_file?: string;
@@ -241,7 +242,10 @@ function parseSchemas(schema: string | undefined): string[] {
     return schemas && schemas.length > 0 ? schemas : ["public"];
 }
 
-async function runLint(args: DbToolArguments, root: string): Promise<ToolResult> {
+async function collectLintIssues(
+    args: DbToolArguments,
+    root: string,
+): Promise<{ selected: DatabaseModule[]; issues: LintIssue[] }> {
     const modules = await loadDatabaseModules(root, args.module_file);
     const selected = args.module ? modules.filter((module) => module.name === args.module) : modules;
     if (args.module && selected.length === 0) {
@@ -260,10 +264,98 @@ async function runLint(args: DbToolArguments, root: string): Promise<ToolResult>
         };
         issues.push(...await lintModule(module, readSqlFile));
     }
+    return { selected, issues };
+}
+
+async function runLint(args: DbToolArguments, root: string): Promise<ToolResult> {
+    const { selected, issues } = await collectLintIssues(args, root);
     const hasError = issues.some((issue) => issue.severity === "error");
     const header = `linted ${selected.length} module(s): ${selected.map((module) => module.name).join(", ")}`;
     const body = issues.length > 0 ? issues.map(formatLintIssue).join("\n") : "no issues";
     return textResult(`${header}\n${body}`, hasError);
+}
+
+interface DatabaseCheckEntry {
+    name: "source-contract" | "module-lint" | "catalog";
+    ok?: boolean;
+    skipped?: boolean;
+    reason?: string;
+    error?: string;
+    findings?: unknown;
+    issues?: string[];
+    modules?: string[];
+    output?: string;
+}
+
+async function runCheck(
+    args: DbToolArguments,
+    root: string,
+    environment: NodeJS.ProcessEnv,
+    spawn: LiteSpawn,
+    liteBinary: string | null | undefined,
+    options: DbGovernanceToolOptions,
+): Promise<ToolResult> {
+    const checks: DatabaseCheckEntry[] = [];
+    let ok = true;
+
+    if (existsSync(join(root, "database.sources.json"))) {
+        try {
+            const source = await databaseSources(root, "check");
+            checks.push({ name: "source-contract", ok: source.ok, findings: source.findings });
+            if (!source.ok) ok = false;
+        } catch (error) {
+            checks.push({ name: "source-contract", ok: false, error: error instanceof Error ? error.message : String(error) });
+            ok = false;
+        }
+    } else {
+        checks.push({ name: "source-contract", skipped: true, reason: "database.sources.json not found" });
+    }
+
+    const modulePath = args.module_file ? resolve(root, args.module_file) : join(root, "db/modules.ts");
+    if (existsSync(modulePath)) {
+        try {
+            const { selected, issues } = await collectLintIssues(args, root);
+            const lintOk = !issues.some((issue) => issue.severity === "error");
+            checks.push({
+                name: "module-lint",
+                ok: lintOk,
+                modules: selected.map((module) => module.name),
+                ...(issues.length === 0 ? {} : { issues: issues.map(formatLintIssue) }),
+            });
+            if (!lintOk) ok = false;
+        } catch (error) {
+            checks.push({ name: "module-lint", ok: false, error: error instanceof Error ? error.message : String(error) });
+            ok = false;
+        }
+    } else {
+        checks.push({ name: "module-lint", skipped: true, reason: "db/modules.ts not found" });
+    }
+
+    const selectedDatabase = args.database_url?.trim() || environment.DATABASE_URL?.trim();
+    if (selectedDatabase || args.lite || args.remote) {
+        try {
+            const catalog = await runModuleCheckAction(args, root, environment, spawn, liteBinary, options);
+            checks.push({
+                name: "catalog",
+                ok: !catalog.isError,
+                output: catalog.content.map((entry) => entry.text).join("\n"),
+            });
+            if (catalog.isError) ok = false;
+        } catch (error) {
+            checks.push({ name: "catalog", ok: false, error: error instanceof Error ? error.message : String(error) });
+            ok = false;
+        }
+    } else {
+        checks.push({ name: "catalog", skipped: true, reason: "no --database_url, DATABASE_URL, --lite or --remote" });
+    }
+
+    return textResult(JSON.stringify({
+        version: 1,
+        scope: "database-check",
+        root,
+        ok,
+        checks,
+    }, null, 2), !ok);
 }
 
 async function runExplain(args: DbToolArguments, root: string): Promise<ToolResult> {
@@ -428,7 +520,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
         "db",
         "Database governance (@supacloud/db): inspect, reverse-adopt, diff, plan and apply through explicit source and migration boundaries. Actions: context, lint, explain, module_check, reverse, diff, plan, apply, role_check, role_sql",
         {
-            action: withDescription(stringEnum(["context", "lint", "explain", "module_check", "reverse", "diff", "plan", "apply", "role_check", "role_sql"]), "Database governance action"),
+            action: withDescription(stringEnum(["context", "lint", "check", "explain", "module_check", "reverse", "diff", "plan", "apply", "role_check", "role_sql"]), "Database governance action"),
             module: optional(Type.String(), "[context/lint] Only select this manifest module (default: all)"),
             root: optional(Type.String(), "[*] Project root (default: current directory)"),
             module_file: optional(Type.String(), "[*] File exporting defineDatabaseModule(...) (default: <root>/db/modules.ts)"),
@@ -453,6 +545,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
             switch (request.action) {
                 case "context": return runContext(request, root);
                 case "lint": return runLint(request, root);
+                case "check": return runCheck(request, root, environment, liteSpawn, options.liteBinary, options);
                 case "explain": return runExplain(request, root);
                 case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary, options);
                 case "role_check":

@@ -260,6 +260,11 @@ supacloud app explain --target CaseService
 supacloud app export-tools
 supacloud app export-tools --format json
 
+# one entry: source contract + module lint + optional live Catalog reconcile
+supacloud db check --module_file db/modules.ts
+supacloud db check --module_file db/modules.ts --database_url "$DATABASE_URL"
+supacloud db check --module_file db/modules.ts --remote --ref <project-ref>
+
 # SQL governance over defineDatabaseModule sources
 supacloud db context --root . --module_file db/modules.ts --module cases
 supacloud db context --root . --module_file db/modules.ts --target public.case_create
@@ -289,6 +294,14 @@ inspects the project connection's `pg_roles`, database/schema CREATE privileges,
 and owned objects using internal credentials, so callers do not need a tenant
 `DATABASE_URL`. The response contains the bounded role state and any restriction
 failure but never the connection string.
+
+`db check` is the agent-facing default: it runs the local source-contract check
+when `database.sources.json` exists, lints `defineDatabaseModule` sources when
+`db/modules.ts` exists, and only then reconciles the live Catalog when a
+database URL, `--lite` or `--remote` is selected. It returns a JSON report with
+one entry per check and marks unavailable checks as skipped instead of failing
+unrelated projects. `db module_check` remains available for a single explicit
+Catalog reconcile.
 
 `db module_check` is classified read-only: it introspects `pg_policy`,
 `pg_proc`, `pg_class` and grants, and reports drift between the declared
