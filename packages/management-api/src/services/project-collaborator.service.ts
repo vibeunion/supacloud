@@ -17,6 +17,16 @@ import {
 
 export type { CollaboratorCapability, CollaboratorRole } from "./collaborator-capabilities";
 
+const COLLABORATOR_COLUMNS = [
+  "id", "project_ref", "principal_id", "email", "role", "status",
+  "created_by", "created_at", "updated_at", "capability_allowlist",
+] as const;
+
+const INVITATION_COLUMNS = [
+  "id", "project_ref", "email", "role", "token_hash", "status", "invited_by",
+  "accepted_principal_id", "expires_at", "accepted_at", "created_at", "updated_at",
+] as const;
+
 type AcceptCollaboratorInvitationInput = {
   ref: string;
   invitationId: string;
@@ -129,7 +139,7 @@ async function existingInvitationCollaborator(
 ): Promise<Record<string, unknown> | null> {
   await tx`SELECT pg_advisory_xact_lock(hashtext(${`project-collaborator:${input.ref}:${input.principal.id}`}))`;
   const [existing] = await tx`
-    SELECT * FROM project_collaborators
+    SELECT ${tx.unsafe(COLLABORATOR_COLUMNS.join(", "))} FROM project_collaborators
     WHERE project_ref = ${input.ref} AND principal_id = ${input.principal.id}
     FOR UPDATE
   `;
@@ -147,7 +157,7 @@ async function createInvitedCollaborator(
   const [collaborator] = await tx`
     INSERT INTO project_collaborators (project_ref, principal_id, email, role, created_by)
     VALUES (${input.ref}, ${input.principal.id}, ${invitation["email"]}, ${invitation["role"]}, ${invitation["invited_by"]})
-    RETURNING *
+    RETURNING ${tx.unsafe(COLLABORATOR_COLUMNS.join(", "))}
   `;
   return collaborator;
 }
@@ -155,7 +165,7 @@ async function createInvitedCollaborator(
 async function lockedCollaborator(tx: SQL, ref: string, collaboratorId: string): Promise<Record<string, unknown>> {
   await tx`SELECT pg_advisory_xact_lock(hashtext(${`project-owner:${ref}`}))`;
   const [collaborator] = await tx`
-    SELECT * FROM project_collaborators
+    SELECT ${tx.unsafe(COLLABORATOR_COLUMNS.join(", "))} FROM project_collaborators
     WHERE project_ref = ${ref} AND id = ${collaboratorId}
     FOR UPDATE
   `;
@@ -264,7 +274,7 @@ export const projectCollaboratorService = {
     await projectOrThrow(ref);
     assertCapabilityPresent(await actorCapabilities(ref, actor), "tenant.members.read");
     const rows = await sql`
-      SELECT * FROM project_collaborators
+      SELECT ${sql.unsafe(COLLABORATOR_COLUMNS.join(", "))} FROM project_collaborators
       WHERE project_ref = ${ref}
       ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
                created_at ASC
@@ -285,7 +295,7 @@ export const projectCollaboratorService = {
       const [row] = await sql`
         INSERT INTO project_collaborators (project_ref, principal_id, email, role, created_by)
         VALUES (${ref}, ${principalId}, ${email}, ${role}, ${actor.id})
-        RETURNING *
+        RETURNING ${sql.unsafe(COLLABORATOR_COLUMNS.join(", "))}
       `;
       return publicCollaborator(row);
     } catch (error: unknown) {
@@ -321,7 +331,7 @@ export const projectCollaboratorService = {
           status = COALESCE(${nextStatus}, status),
           updated_at = NOW()
         WHERE project_ref = ${ref} AND id = ${collaboratorId}
-        RETURNING *
+        RETURNING ${tx.unsafe(COLLABORATOR_COLUMNS.join(", "))}
       `;
       return publicCollaborator(row);
     });
@@ -340,7 +350,7 @@ export const projectCollaboratorService = {
       const [row] = await tx`
         DELETE FROM project_collaborators
         WHERE project_ref = ${ref} AND id = ${collaboratorId}
-        RETURNING *
+        RETURNING ${tx.unsafe(COLLABORATOR_COLUMNS.join(", "))}
       `;
       return publicCollaborator(row);
     });
@@ -350,7 +360,8 @@ export const projectCollaboratorService = {
     await projectOrThrow(ref);
     assertCapabilityPresent(await actorCapabilities(ref, actor), "tenant.members.read");
     const rows = await sql`
-      SELECT *, CASE WHEN status = 'pending' AND expires_at <= NOW() THEN 'expired' ELSE status END AS effective_status
+      SELECT ${sql.unsafe(INVITATION_COLUMNS.join(", "))},
+             CASE WHEN status = 'pending' AND expires_at <= NOW() THEN 'expired' ELSE status END AS effective_status
       FROM project_collaborator_invitations
       WHERE project_ref = ${ref}
       ORDER BY created_at DESC
@@ -375,14 +386,14 @@ export const projectCollaboratorService = {
         project_ref, email, role, token_hash, invited_by, expires_at
       ) VALUES (${ref}, ${email}, ${role}, ${tokenHash(token)}, ${actor.id}, ${expiresAt})
       ON CONFLICT DO NOTHING
-      RETURNING *
+      RETURNING ${sql.unsafe(INVITATION_COLUMNS.join(", "))}
     `;
     const [row] = inserted.length > 0 ? inserted : await sql`
       UPDATE project_collaborator_invitations
       SET role = ${role}, token_hash = ${tokenHash(token)}, invited_by = ${actor.id},
           expires_at = ${expiresAt}, updated_at = NOW()
       WHERE project_ref = ${ref} AND lower(email) = ${email} AND status = 'pending'
-      RETURNING *
+      RETURNING ${sql.unsafe(INVITATION_COLUMNS.join(", "))}
     `;
     const { token_hash: _tokenHash, ...publicRow } = row;
     return { ...publicRow, scope: "project", token };
@@ -402,7 +413,7 @@ export const projectCollaboratorService = {
     await projectOrThrow(input.ref);
     return sql.begin(async (tx) => {
       const [invitation] = await tx`
-        SELECT * FROM project_collaborator_invitations
+        SELECT ${tx.unsafe(INVITATION_COLUMNS.join(", "))} FROM project_collaborator_invitations
         WHERE project_ref = ${input.ref} AND id = ${input.invitationId}
         FOR UPDATE
       `;
@@ -424,7 +435,7 @@ export const projectCollaboratorService = {
       UPDATE project_collaborator_invitations
       SET status = 'revoked', updated_at = NOW()
       WHERE project_ref = ${ref} AND id = ${invitationId} AND status = 'pending'
-      RETURNING *
+      RETURNING ${sql.unsafe(INVITATION_COLUMNS.join(", "))}
     `;
     if (!row) throw new NotFoundError("Active collaborator invitation", invitationId);
     const { token_hash: _tokenHash, ...publicRow } = row;
