@@ -2366,6 +2366,34 @@ describe("database migration helpers", () => {
     expect(parsed.columns[2]).toEqual({ name: "user_id", type: "bigint", nullable: true, isPrimary: false, isForeignKey: true, referencesResource: "users" });
   });
 
+  test("generate_types preserves PostgreSQL precision and marks the snapshot non-canonical", async () => {
+    const callback = captureDatabaseTool({
+      post: async (_path: string, body: { sql: string }) => {
+        expect(body.sql).toContain("information_schema.tables");
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            rows: [
+              { table_schema: "public", table_name: "metrics", column_name: "id", data_type: "bigint", is_nullable: "NO", column_default: null },
+              { table_schema: "public", table_name: "metrics", column_name: "amount", data_type: "numeric", is_nullable: "YES", column_default: null },
+              { table_schema: "public", table_name: "metrics", column_name: "created_at", data_type: "timestamp with time zone", is_nullable: "NO", column_default: null },
+              { table_schema: "public", table_name: "metrics", column_name: "payload", data_type: "jsonb", is_nullable: "YES", column_default: null },
+            ],
+          },
+        };
+      },
+    });
+
+    const result = await callback({ action: "generate_types", ref: "proj", schemas: ["public"] });
+    const output = result.content[0]!.text;
+    expect(output).toContain("Compatibility snapshot, not a canonical database contract.");
+    expect(output).toContain("id: bigint | string;");
+    expect(output).toContain("amount: string | null;");
+    expect(output).toContain("created_at: string;");
+    expect(output).toContain("payload: unknown | null;");
+  });
+
   test("export_svadmin_schema fails when constraint metadata cannot be read", async () => {
     const callback = captureDatabaseTool({
       post: async (_path: string, body: { sql: string }) => {

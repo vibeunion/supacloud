@@ -1691,7 +1691,9 @@ function generateTypeScriptTypes(data: unknown, schemas: string[]): string {
             nullable: column["is_nullable"] === "YES",
         };
     }
-    let out = `// Types from ${schemas.join(", ")}\n\n`;
+    let out = `// Types from ${schemas.join(", ")} (information_schema)\n`;
+    out += "// Compatibility snapshot, not a canonical database contract.\n";
+    out += "// Use supacloud-db generate/check for source contracts and runtime decoders for trust boundaries.\n\n";
     for (const [key, cols] of Object.entries(tables)) {
         const tableName = key.split(".")[1];
         if (tableName === undefined) continue;
@@ -1708,9 +1710,15 @@ function generateTypeScriptTypes(data: unknown, schemas: string[]): string {
 
 function pgToTs(t: string): string {
     const m: Record<string, string> = {
-        integer: "number", bigint: "number", smallint: "number", numeric: "number", real: "number",
-        "double precision": "number", boolean: "boolean", text: "string", "character varying": "string",
-        uuid: "string", date: "string", "timestamp with time zone": "string", timestamptz: "string",
+        smallint: "number", integer: "number", real: "number", "double precision": "number",
+        bigint: "bigint | string",
+        numeric: "string", money: "string",
+        boolean: "boolean",
+        text: "string", "character varying": "string", character: "string", "character varying[]": "string[]",
+        uuid: "string", name: "string", citext: "string",
+        date: "string", time: "string", "time with time zone": "string",
+        timestamp: "string", "timestamp with time zone": "string", timestamptz: "string",
+        bytea: "Uint8Array",
         json: "unknown", jsonb: "unknown",
     };
     return m[t.toLowerCase()] || "unknown";
