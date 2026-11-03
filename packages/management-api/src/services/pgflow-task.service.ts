@@ -239,7 +239,7 @@ export const pgflowTaskService = {
       >`SELECT to_regclass('supacloud_worker.tasks') IS NOT NULL AS ready`;
       if (installed?.ready) {
         return await db<PgflowTask[]>`
-          SELECT * FROM supacloud_worker.tasks
+          SELECT id, project_ref, task_type, status, executor, capabilities, blocked_reason, total_steps, finished_steps, created_at, started_at, completed_at, updated_at, error, result FROM supacloud_worker.tasks
           WHERE project_ref=${projectRef}
             AND (${filters.statuses === undefined} OR status=ANY(${db.array(filters.statuses ?? [], "TEXT")}))
           ORDER BY created_at DESC, id DESC LIMIT ${Math.min(filters.limit, 200)}
@@ -260,7 +260,7 @@ export const pgflowTaskService = {
       >`SELECT to_regclass('supacloud_worker.tasks') IS NOT NULL AS ready`;
       if (installed?.ready) {
         const [task] = await db<PgflowTask[]>`
-          SELECT * FROM supacloud_worker.tasks WHERE project_ref=${projectRef} AND id=${id}
+          SELECT id, project_ref, task_type, status, executor, capabilities, blocked_reason, total_steps, finished_steps, created_at, started_at, completed_at, updated_at, error, result FROM supacloud_worker.tasks WHERE project_ref=${projectRef} AND id=${id}
         `;
         return task ?? null;
       }
@@ -347,7 +347,7 @@ export async function reconcilePgflowTask(id: string, ref: string): Promise<void
     const run = await db.begin(async (tenant) => {
       await tenant`SELECT pg_advisory_xact_lock(hashtextextended(${task.id}, 0))`;
       const existing = await tenant`
-                SELECT *, input = ${flowInput}::text::jsonb AS input_matches
+                SELECT run_id, flow_slug, status, input, output, started_at, completed_at, failed_at, input = ${flowInput}::text::jsonb AS input_matches
                 FROM pgflow.runs WHERE run_id = ${task.id}::uuid
             `;
       if (existing.length > 0) {
@@ -359,7 +359,7 @@ export async function reconcilePgflowTask(id: string, ref: string): Promise<void
       }
       if (task.status !== "pending") throw new PgflowTaskError(503, "pgflow run is missing; refusing to replay");
       const created = await tenant`
-                SELECT * FROM pgflow.start_flow(
+                SELECT run_id, flow_slug, status, input, output, started_at, completed_at, failed_at FROM pgflow.start_flow(
                     ${task.payload.flow_slug}::text, ${flowInput}::text::jsonb, ${task.id}::uuid
                 )
             `;
