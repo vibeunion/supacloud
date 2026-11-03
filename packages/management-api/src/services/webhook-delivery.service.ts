@@ -29,6 +29,23 @@ const MAX_UNFINISHED_OUTBOX_ITEMS = 10_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EVENT_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
+const WEBHOOK_COLUMNS = [
+  "id", "project_ref", "legacy_id", "url", "events", "secret_encrypted",
+  "previous_secret_encrypted", "secret_version", "enabled", "api_version",
+  "created_by", "created_at", "updated_at", "deleted_at",
+] as const;
+
+const WEBHOOK_DELIVERY_COLUMNS = [
+  "id", "outbox_id", "project_ref", "webhook_id", "attempt", "status",
+  "status_code", "error", "response_preview", "request_bytes", "request_body",
+  "signature_timestamp", "request_api_version", "signature_version",
+  "secret_version", "started_at", "completed_at", "created_at",
+] as const;
+
+function columns(alias: string, names: readonly string[]): string {
+  return names.map((name) => `${alias}.${name}`).join(", ");
+}
+
 type WebhookRow = Record<string, unknown> & {
   id: string;
   project_ref: string;
@@ -173,7 +190,7 @@ async function insertWebhookMetadata(database: SQL, input: NewWebhook): Promise<
     ) VALUES (
       ${input.id}, ${input.projectRef}, ${input.url}, ${eventArray},
       ${input.enabled}, ${SIGNATURE_API_VERSION}, ${input.actor}
-    ) RETURNING *
+    ) RETURNING ${database.unsafe(WEBHOOK_COLUMNS.join(", "))}
   ` as WebhookRow[];
   return webhookMetadata;
 }
@@ -194,7 +211,7 @@ async function persistNewWebhook(database: SQL, input: NewWebhook): Promise<Webh
 async function activeWebhook(database: SQL, ref: string, webhookId: string): Promise<WebhookRow> {
   assertUuid(webhookId, "webhook_id");
   const [row] = await database`
-    SELECT * FROM project_webhooks
+    SELECT ${database.unsafe(WEBHOOK_COLUMNS.join(", "))} FROM project_webhooks
     WHERE project_ref = ${ref} AND id = ${webhookId} AND deleted_at IS NULL
   ` as WebhookRow[];
   if (!row) throw new NotFoundError("Webhook", webhookId);
@@ -204,7 +221,7 @@ async function activeWebhook(database: SQL, ref: string, webhookId: string): Pro
 async function storedWebhookOrThrow(ref: string, webhookId: string): Promise<WebhookRow> {
   assertUuid(webhookId, "webhook_id");
   const [webhookRow] = await sql`
-    SELECT * FROM project_webhooks
+    SELECT ${sql.unsafe(WEBHOOK_COLUMNS.join(", "))} FROM project_webhooks
     WHERE project_ref = ${ref} AND id = ${webhookId}
   ` as WebhookRow[];
   if (!webhookRow) throw new NotFoundError("Webhook", webhookId);
@@ -214,7 +231,7 @@ async function storedWebhookOrThrow(ref: string, webhookId: string): Promise<Web
 async function activePublicWebhook(ref: string, webhookId: string): Promise<ReturnType<typeof publicWebhook>> {
   assertUuid(webhookId, "webhook_id");
   const [webhookRow] = await sql`
-    SELECT w.*, (managed.name IS NOT NULL) AS has_secret
+    SELECT ${sql.unsafe(columns("w", WEBHOOK_COLUMNS))}, (managed.name IS NOT NULL) AS has_secret
     FROM project_webhooks w
     LEFT JOIN project_control_secrets managed
       ON managed.project_ref = w.project_ref
@@ -361,7 +378,7 @@ export const webhookDeliveryService = {
   async listWebhooks(ref: string) {
     await projectOrThrow(ref);
     const rows = await sql`
-      SELECT w.*, (managed.name IS NOT NULL) AS has_secret
+      SELECT ${sql.unsafe(columns("w", WEBHOOK_COLUMNS))}, (managed.name IS NOT NULL) AS has_secret
       FROM project_webhooks w
       LEFT JOIN project_control_secrets managed
         ON managed.project_ref = w.project_ref
@@ -461,7 +478,7 @@ export const webhookDeliveryService = {
           secret_version = secret_version + 1,
           updated_at = NOW()
         WHERE project_ref = ${ref} AND id = ${webhookId}
-        RETURNING *
+        RETURNING ${tx.unsafe(WEBHOOK_COLUMNS.join(", "))}
       ` as WebhookRow[];
       return publicWebhook({ ...rotatedWebhook, has_secret: true });
     });
@@ -521,7 +538,8 @@ export const webhookDeliveryService = {
         AND (${to}::timestamptz IS NULL OR d.created_at <= ${to}::timestamptz)
     `;
     const rows = await sql`
-      SELECT d.*, o.event_id, o.event_type, o.status AS outbox_status,
+      SELECT ${sql.unsafe(columns("d", WEBHOOK_DELIVERY_COLUMNS))},
+             o.event_id, o.event_type, o.status AS outbox_status,
              o.replay_of_delivery_id
       FROM webhook_deliveries d
       JOIN webhook_outbox o ON o.id = d.outbox_id
@@ -548,7 +566,8 @@ export const webhookDeliveryService = {
     assertUuid(webhookId, "webhook_id");
     assertUuid(deliveryId, "delivery_id");
     const [row] = await sql`
-      SELECT d.*, o.event_id, o.event_type, o.payload, o.status AS outbox_status,
+      SELECT ${sql.unsafe(columns("d", WEBHOOK_DELIVERY_COLUMNS))},
+             o.event_id, o.event_type, o.payload, o.status AS outbox_status,
              o.attempt_count, o.max_attempts, o.next_attempt_at,
              o.replay_of_delivery_id, o.occurred_at, o.api_version,
              o.created_at AS event_created_at
@@ -615,7 +634,7 @@ async function claimNextDelivery(): Promise<ClaimedDelivery | null> {
              o.attempt_count, o.max_attempts, o.created_at AS event_created_at,
              o.occurred_at, o.api_version AS outbox_api_version,
              o.replay_of_delivery_id,
-             w.*
+             ${tx.unsafe(columns("w", WEBHOOK_COLUMNS))}
       FROM webhook_outbox o
       JOIN project_webhooks w ON w.id = o.webhook_id
       WHERE (
