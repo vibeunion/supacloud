@@ -1,1 +1,1 @@
-declare const __SUPACLOUD_REYLO_QUERIES__: boolean;
+/// <reference path="../../types/reylo-global.d.ts" />
