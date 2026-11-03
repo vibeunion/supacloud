@@ -307,8 +307,8 @@ test("native PostgreSQL query retains microsecond ordering and keyset boundaries
         completed_at timestamptz,
         request_fingerprint char(64), principal_type varchar(20), principal_id text,
         checkpoint jsonb, receipt jsonb, response_status integer,
-        failure_code text, lease_owner text, lease_expires_at timestamptz,
-        fencing_epoch bigint, created_at timestamptz, updated_at timestamptz,
+        failure_code text, lease_owner text, lease_token uuid, lease_expires_at timestamptz,
+        fencing_epoch bigint, recovery_not_before timestamptz, created_at timestamptz, updated_at timestamptz,
         PRIMARY KEY (project_ref, mutation_id)
       )
     `);

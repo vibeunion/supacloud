@@ -23,8 +23,27 @@ function mutationKey(projectRef: string, mutationId: string): string {
   return `${projectRef}:${mutationId}`;
 }
 
-function queryText(strings: TemplateStringsArray): string {
-  return strings.join("?").replaceAll(/\s+/g, " ").trim();
+const rawSql = Symbol("rawSql");
+
+function unsafe(value: string): { [rawSql]: string } {
+  return { [rawSql]: value };
+}
+
+function queryText(strings: TemplateStringsArray, parameters: readonly unknown[]): { query: string; parameters: unknown[] } {
+  const values: unknown[] = [];
+  let query = "";
+  strings.forEach((part, index) => {
+    query += part;
+    if (index >= parameters.length) return;
+    const parameter = parameters[index];
+    if (typeof parameter === "object" && parameter !== null && rawSql in parameter) {
+      query += parameter[rawSql];
+      return;
+    }
+    query += "?";
+    values.push(parameter);
+  });
+  return { query: query.replaceAll(/\s+/g, " ").trim(), parameters: values };
 }
 
 function clonedRow(row: MutationRow | undefined): MutationRow[] {
@@ -140,8 +159,10 @@ function recoverableMutations(parameters: unknown[]): MutationRow[] {
   return claimed.map((row) => structuredClone(row));
 }
 
-const database = mock(async (strings: TemplateStringsArray, ...parameters: unknown[]) => {
-  const query = queryText(strings);
+const database = mock(async (strings: TemplateStringsArray, ...incoming: unknown[]) => {
+  const parsed = queryText(strings, incoming);
+  const query = parsed.query;
+  const parameters = parsed.parameters;
   executedQueries.push(query);
   if (query.startsWith("INSERT INTO project_mutations")) return insertedMutation(parameters);
   if (query.startsWith("WITH candidates AS")) return recoverableMutations(parameters);
@@ -157,7 +178,7 @@ const database = mock(async (strings: TemplateStringsArray, ...parameters: unkno
   }
   const [projectRef, mutationId] = parameters;
   const row = mutationRows.get(mutationKey(String(projectRef), String(mutationId)));
-  if (query.startsWith("SELECT mutation.*, clock_timestamp() AS database_now")) {
+  if (query.includes("clock_timestamp() AS database_now")) {
     return row ? [{ ...structuredClone(row), database_now: "2026-08-11T00:05:00.000Z" }] : [];
   }
   if (query.includes("lease_active")) {
@@ -176,6 +197,7 @@ const database = mock(async (strings: TemplateStringsArray, ...parameters: unkno
 });
 
 Object.assign(database, {
+  unsafe,
   begin: async <T>(callback: (transaction: typeof database) => Promise<T>) => {
     const snapshot = structuredClone([...mutationRows.entries()]);
     try {
@@ -242,7 +264,8 @@ describe("project mutation journal", () => {
     expect(begun.kind).toBe("started");
     expect(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))?.recovery_not_before).toBeNull();
     const insertQuery = executedQueries.find((query) => query.startsWith("INSERT INTO project_mutations"));
-    expect(insertQuery).not.toContain("recovery_not_before");
+    const insertedColumns = insertQuery?.split("RETURNING")[0] ?? "";
+    expect(insertedColumns).not.toContain("recovery_not_before");
   });
 
   test("schedules recovery only after a pending mutation acquires its first lease", async () => {
@@ -924,4 +947,18 @@ describe("project mutation journal", () => {
     expect(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID)))
       .toMatchObject({ status: "failed_retryable", fencing_epoch: 0, lease_token: null });
   });
+});
+
+test("project mutation queries name every stored column", async () => {
+  const source = await Bun.file(new URL("../../src/services/project-mutation.service.ts", import.meta.url)).text();
+  expect(source).not.toMatch(/SELECT\s+(?:\w+\.)?\*/);
+  expect(source).not.toMatch(/RETURNING\s+\*/);
+  for (const column of [
+    "project_ref", "mutation_id", "operation", "resource_key", "request_fingerprint",
+    "principal_type", "principal_id", "status", "checkpoint", "receipt", "response_status",
+    "failure_code", "lease_owner", "lease_token", "lease_expires_at", "fencing_epoch",
+    "recovery_not_before", "completed_at", "created_at", "updated_at",
+  ]) {
+    expect(source).toContain(column);
+  }
 });
