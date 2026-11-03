@@ -31,6 +31,8 @@ export const jitDatabaseGateway = new JitDatabaseGateway(
   config.jitDatabaseGatewayBindHost,
   config.pgHost,
   config.pgPort,
+  config.jitDatabaseGatewayEngine === "rust" ? config.jitDatabaseGatewayControlUrl : undefined,
+  config.jitDatabaseGatewayControlToken,
 );
 let schemaReady: Promise<void> | null = null;
 
@@ -564,7 +566,7 @@ export const jitDatabaseAccessService = {
         `;
         if (gatewayPort !== null) {
           try {
-            jitDatabaseGateway.bind({ credentialId, port: gatewayPort, expiresAt, allowedNetworks });
+            await jitDatabaseGateway.bind({ credentialId, port: gatewayPort, expiresAt, allowedNetworks });
           } catch (error) {
             throw new JitDatabaseAccessError(
               `JIT database gateway could not bind port ${gatewayPort}: ${error instanceof Error ? error.message : String(error)}`,
@@ -621,7 +623,7 @@ export const jitDatabaseAccessService = {
     const errors: string[] = [];
     for (const credential of active) {
       try {
-        jitDatabaseGateway.bind({
+        await jitDatabaseGateway.bind({
           credentialId: String(credential.id),
           port: Number(credential.gateway_port),
           expiresAt: new Date(credential.expires_at as Date),

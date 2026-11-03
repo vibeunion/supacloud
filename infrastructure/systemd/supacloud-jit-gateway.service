@@ -1,0 +1,27 @@
+[Unit]
+Description=SupaCloud JIT Database Access Gateway (Rust)
+Documentation=https://github.com/vibeunion/supacloud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=JIT_GATEWAY_BINARY=/usr/local/bin/supacloud-jit-gateway
+Environment=JIT_GATEWAY_CONTROL_HOST=127.0.0.1
+Environment=JIT_GATEWAY_CONTROL_PORT=9012
+Environment=JIT_GATEWAY_BIND_HOST=::
+Environment=JIT_GATEWAY_UPSTREAM_HOST=127.0.0.1
+Environment=JIT_GATEWAY_UPSTREAM_PORT=5432
+EnvironmentFile=-/etc/supabase/jit-gateway.env
+ExecStartPre=/bin/sh -ec 'test -x "$${JIT_GATEWAY_BINARY}"'
+ExecStart=/bin/sh -ec 'exec "$${JIT_GATEWAY_BINARY}"'
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+CapabilityBoundingSet=
+MemoryHigh=128M
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

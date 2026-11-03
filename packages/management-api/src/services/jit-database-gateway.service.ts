@@ -202,19 +202,22 @@ function flushPending(target: Bun.Socket<ProxySocketData>): void {
 export class JitDatabaseGateway {
   private readonly listeners = new Map<string, Bun.TCPSocketListener>();
   private readonly expiryTimers = new Map<string, Timer>();
+  private readonly remotePorts = new Map<string, number>();
 
   constructor(
     private readonly bindHost: string,
     private readonly upstreamHost: string,
     private readonly upstreamPort: number,
+    private readonly controlUrl?: string,
+    private readonly controlToken = "",
   ) {}
 
   hasBinding(credentialId: string): boolean {
-    return this.listeners.has(credentialId);
+    return this.listeners.has(credentialId) || this.remotePorts.has(credentialId);
   }
 
   boundPort(credentialId: string): number | null {
-    return this.listeners.get(credentialId)?.port ?? null;
+    return this.remotePorts.get(credentialId) ?? this.listeners.get(credentialId)?.port ?? null;
   }
 
   private scheduleExpiry(credentialId: string, expiresAt: Date): void {
@@ -227,12 +230,51 @@ export class JitDatabaseGateway {
     this.expiryTimers.set(credentialId, timer);
   }
 
-  bind(binding: JitDatabaseGatewayBinding): void {
+  async bind(binding: JitDatabaseGatewayBinding): Promise<void> {
     this.release(binding.credentialId);
     if (binding.expiresAt.getTime() <= Date.now()) return;
     const policy = compileAllowedNetworks(binding.allowedNetworks);
     if (policy.length === 0) throw new Error("JIT gateway binding requires at least one allowed CIDR");
 
+    if (this.controlUrl) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (this.controlToken) headers.Authorization = `Bearer ${this.controlToken}`;
+        const res = await fetch(`${this.controlUrl}/v1/bindings`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            credential_id: binding.credentialId,
+            port: binding.port,
+            expires_at_ms: binding.expiresAt.getTime(),
+            allowed_networks: binding.allowedNetworks,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`remote gateway rejected binding with status ${res.status}`);
+        const data = await res.json() as { bound_port?: number };
+        const boundPort = data.bound_port ?? binding.port;
+        if (!boundPort) throw new Error("remote gateway did not return a bound port");
+        this.remotePorts.set(binding.credentialId, boundPort);
+        this.scheduleExpiry(binding.credentialId, binding.expiresAt);
+        return;
+      } catch (error) {
+        logger.warn("[JitDatabaseGateway] Remote gateway unavailable, falling back to local listener", {
+          credentialId: binding.credentialId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.remotePorts.delete(binding.credentialId);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    this.bindLocal(binding, policy);
+  }
+
+  private bindLocal(binding: JitDatabaseGatewayBinding, policy: CompiledAllowedNetworks): void {
     const listener = Bun.listen<ProxySocketData>({
       hostname: this.bindHost,
       port: binding.port,
@@ -293,12 +335,25 @@ export class JitDatabaseGateway {
     const timer = this.expiryTimers.get(credentialId);
     if (timer) clearTimeout(timer);
     this.expiryTimers.delete(credentialId);
+    if (this.remotePorts.has(credentialId)) {
+      this.remotePorts.delete(credentialId);
+      if (this.controlUrl) {
+        const headers: Record<string, string> = {};
+        if (this.controlToken) headers.Authorization = `Bearer ${this.controlToken}`;
+        void fetch(`${this.controlUrl}/v1/bindings/${encodeURIComponent(credentialId)}`, {
+          method: "DELETE",
+          headers,
+        }).catch(() => {});
+      }
+    }
     const listener = this.listeners.get(credentialId);
     if (listener) listener.stop(true);
     this.listeners.delete(credentialId);
   }
 
   close(): void {
-    for (const credentialId of [...this.listeners.keys()]) this.release(credentialId);
+    for (const credentialId of [...this.listeners.keys(), ...this.remotePorts.keys()]) {
+      this.release(credentialId);
+    }
   }
 }

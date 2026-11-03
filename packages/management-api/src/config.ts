@@ -125,6 +125,9 @@ export interface Config {
   jitDatabaseGatewayBindHost: string;
   jitDatabaseGatewayPublicHost: string;
   jitDatabaseGatewayPortRange: string;
+  jitDatabaseGatewayEngine: "rust" | "internal";
+  jitDatabaseGatewayControlUrl: string;
+  jitDatabaseGatewayControlToken: string;
   minDiskGb: number;
   postgrestBin: string;
   postgrestRts: string;
@@ -343,6 +346,9 @@ export const config: Config = {
   jitDatabaseGatewayBindHost: getEnv("JIT_DATABASE_GATEWAY_BIND_HOST", "::"),
   jitDatabaseGatewayPublicHost: getEnv("JIT_DATABASE_GATEWAY_PUBLIC_HOST", pgHost),
   jitDatabaseGatewayPortRange: getEnv("JIT_DATABASE_GATEWAY_PORT_RANGE", "6600-6699"),
+  jitDatabaseGatewayEngine: getEnv("JIT_DATABASE_GATEWAY_ENGINE", "rust") === "internal" ? "internal" : "rust",
+  jitDatabaseGatewayControlUrl: getEnv("JIT_DATABASE_GATEWAY_CONTROL_URL", "http://127.0.0.1:9012"),
+  jitDatabaseGatewayControlToken: getEnv("JIT_DATABASE_GATEWAY_CONTROL_TOKEN", ""),
   minDiskGb: Number(getEnv("MIN_DISK_GB", "10")),
   postgrestBin: getEnv("POSTGREST_BIN", "/usr/local/bin/postgrest"),
   postgrestRts: getEnv("POSTGREST_RTS", "-N1 -M256m -I0.5 -A4m"),
