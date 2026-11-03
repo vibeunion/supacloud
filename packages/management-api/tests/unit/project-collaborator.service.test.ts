@@ -27,7 +27,7 @@ const delegatedActor: TrustedPrincipal = {
   platformAdmin: false,
 };
 
-const txMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
+const transactionQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const text = strings.join("?");
   if (text.includes("SELECT pg_advisory_xact_lock")) return Promise.resolve([]);
   if (text.includes("FROM project_collaborator_invitations") && text.includes("FOR UPDATE")) {
@@ -41,7 +41,7 @@ const txMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
       expires_at: new Date(Date.now() + 60_000),
     }]);
   }
-  if (text.includes("SELECT * FROM project_collaborators") && text.includes("principal_id") && text.includes("FOR UPDATE")) {
+  if (text.includes("FROM project_collaborators") && text.includes("principal_id") && text.includes("FOR UPDATE")) {
     return acceptedExistingRole
       ? Promise.resolve([{
         id: "existing-user",
@@ -52,7 +52,7 @@ const txMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
       }])
       : Promise.resolve([]);
   }
-  if (text.includes("SELECT * FROM project_collaborators") && text.includes("FOR UPDATE")) {
+  if (text.includes("FROM project_collaborators") && text.includes("FOR UPDATE")) {
     return Promise.resolve([{
       id: "owner-one",
       project_ref: "proj_1",
@@ -76,6 +76,7 @@ const txMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   }
   return Promise.resolve([]);
 });
+const txMock = Object.assign(transactionQuery, { unsafe: (value: string) => value });
 
 const sqlMock = Object.assign(
   mock((strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -93,16 +94,19 @@ const sqlMock = Object.assign(
     if (text.includes("SELECT role FROM project_collaborators")) {
       return Promise.resolve(actorRole ? [{ role: actorRole }] : []);
     }
-    if (text.includes("SELECT * FROM project_collaborators")) return Promise.resolve([]);
     if (text.includes("INSERT INTO project_collaborators")) {
       return Promise.resolve([{ id: "created-one", role: values[3], status: "active" }]);
     }
     if (text.includes("DELETE FROM project_collaborators")) {
       return Promise.resolve([{ id: "released" }]);
     }
+    if (text.includes("FROM project_collaborators")) return Promise.resolve([]);
     return Promise.resolve([]);
   }),
-  { begin: mock((callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock)) },
+  {
+    unsafe: (value: string) => value,
+    begin: mock((callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock)),
+  },
 );
 
 const tenantDbMock = mock((strings: TemplateStringsArray) => {
