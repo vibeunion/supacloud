@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import type { SQL } from "bun";
 import {
   assertApplicationPromotionOwner, ApplicationPromotionOwnershipError,
@@ -6,6 +6,11 @@ import {
 } from "../../src/services/application-promotion-ownership";
 import { projectMutationResourceKey } from "../../src/services/project-mutation.service";
 import { stableSha256 } from "../../src/utils/stable-json";
+
+const rawSql = Symbol("rawSql");
+mock.module("../../src/db", () => ({
+  sql: { unsafe: (value: string) => ({ [rawSql]: value }) },
+}));
 
 function fixture() {
   const scope: ApplicationPromotionScope = {
@@ -35,9 +40,22 @@ function fixture() {
   };
   let transactionOpen = false, resourceVisible = true, fail = false, present = true;
   const queries: Array<{ query: string; values: unknown[] }> = [];
-  const transaction = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+  const transaction = async (strings: TemplateStringsArray, ...incoming: unknown[]) => {
     if (!transactionOpen) throw new Error("Query escaped the ownership transaction");
-    const query = strings.join("?").replaceAll(/\s+/g, " ").trim();
+    const values: unknown[] = [];
+    let query = "";
+    strings.forEach((part, index) => {
+      query += part;
+      if (index >= incoming.length) return;
+      const value = incoming[index];
+      if (typeof value === "object" && value !== null && rawSql in value) {
+        query += (value as { [rawSql]: string })[rawSql];
+        return;
+      }
+      query += "?";
+      values.push(value);
+    });
+    query = query.replaceAll(/\s+/g, " ").trim();
     queries.push({ query, values });
     if (fail) throw new Error(`private-database-detail:${owner.lease.leaseToken}`);
     if (!present) return [];
