@@ -201,7 +201,17 @@ async function launch(bundle: string, databaseUrl: string, signal: AbortSignal, 
       await admin.unsafe(`CREATE ROLE delivery_migrator LOGIN PASSWORD '${migrationPassword}';
         CREATE ROLE delivery_runtime LOGIN PASSWORD '${runtimePassword}';`);
       await admin.unsafe("CREATE DATABASE delivery_project");
-      await admin.unsafe(`CREATE TABLE projects(ref text PRIMARY KEY, db_name text, db_user text, db_password text, deleted_at timestamptz)`);
+      await admin.unsafe(`CREATE TABLE projects(
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), ref text UNIQUE NOT NULL, organization_id uuid,
+        name text, db_name text, db_user text, db_password text, db_password_encrypted text,
+        jwt_secret text, jwt_secret_encrypted text, anon_key text, service_role_key text,
+        service_role_key_encrypted text, publishable_key text, secret_key_hash text, secret_key_encrypted text,
+        s3_bucket text, s3_access_key text, s3_secret_key text, s3_secret_key_encrypted text,
+        region text, status text, postgrest_desired text, postgrest_actual text, postgrest_health text,
+        postgrest_port integer, postgrest_last_error text, postgrest_updated_at timestamptz,
+        postgrest_last_reconciled_at timestamptz, config jsonb,
+        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), deleted_at timestamptz
+      )`);
       await admin`INSERT INTO projects(ref,db_name,db_user,db_password)
         VALUES('delivery_test','delivery_project','delivery_migrator',${migrationPassword})`;
 
