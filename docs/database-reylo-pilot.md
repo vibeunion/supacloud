@@ -75,9 +75,10 @@ Verified on Bun 1.4.4 and macOS arm64:
 
 - SQL text is inlined into the bundle.
 - The compiled binary runs all seven queries from an empty directory.
-- Reylo's native engine is not embedded in the binary. The engine is needed
+- Reylo's native engine is not bundled into the binary. The engine is needed
   only for typechecking and building the query module; the compiled runtime
-  uses the inlined query metadata and Reylo's decoder.
+  uses the inlined query metadata and Reylo's decoder, and starts without the
+  engine package present.
 
 `Bun.build({ compile: ... })` with a plugin did not resolve `.sql` imports in
 Bun 1.4.4. The working path is therefore two-step: bundle with the Reylo

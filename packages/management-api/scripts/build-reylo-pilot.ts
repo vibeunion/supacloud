@@ -30,6 +30,9 @@ try {
   if (/from\s+["'][^"']+\.sql["']/.test(source)) {
     throw new Error("Bundled output still contains a .sql import");
   }
+  if (source.includes("@reylosql/engine")) {
+    throw new Error("Bundled output unexpectedly contains the Reylo native engine");
+  }
 
   const compile = Bun.spawnSync({
     cmd: [process.execPath, "build", bundlePath, "--compile", "--outfile", join(outdir, binaryName)],
