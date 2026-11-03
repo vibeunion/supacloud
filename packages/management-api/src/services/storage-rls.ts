@@ -484,7 +484,7 @@ export class StorageRLS {
              FROM storage.object_versions WHERE bucket_id = $1
                AND ((is_delete_marker AND $8::boolean) OR (NOT is_delete_marker AND $7::boolean))
            )
-           SELECT * FROM visible
+           SELECT id, name, version_id, owner, metadata, is_delete_marker, created_at, updated_at, last_accessed_at, is_versioned FROM visible
            WHERE name LIKE $2 AND ($3::text = '' OR name ILIKE $3)
            ORDER BY ${sortColumn} ${direction}, name ASC, id ASC, version_id ASC
            LIMIT $4 OFFSET $5`,
@@ -990,11 +990,11 @@ export class StorageRLS {
             FROM normalized
             WHERE folder_name IS NULL
           )
-          SELECT *
+          SELECT id, name, updated_at, created_at, last_accessed_at, owner, metadata, version, size, is_folder, sort_key
           FROM (
-            SELECT * FROM folders
+            SELECT id, name, updated_at, created_at, last_accessed_at, owner, metadata, version, size, is_folder, sort_key FROM folders
             UNION ALL
-            SELECT * FROM files
+            SELECT id, name, updated_at, created_at, last_accessed_at, owner, metadata, version, size, is_folder, sort_key FROM files
           ) listed_objects
           ORDER BY ${orderClause}
           LIMIT $7 OFFSET $8

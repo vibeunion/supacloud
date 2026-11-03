@@ -192,7 +192,7 @@ BEGIN
     RAISE EXCEPTION 'REVIEW_DOCUMENT_TRANSITION_INVALID' USING ERRCODE = '22023';
   END IF;
 
-  SELECT * INTO document
+  SELECT id, status, maker_id, checker_id, payload, submitted_payload, submitted_payload_checksum, row_version, created_at, updated_at INTO document
   FROM public.review_documents candidate
   WHERE candidate.id = v_document_id
   FOR UPDATE;
@@ -200,7 +200,7 @@ BEGIN
     RAISE EXCEPTION 'REVIEW_DOCUMENT_NOT_FOUND' USING ERRCODE = 'P0002';
   END IF;
 
-  SELECT * INTO existing_event
+  SELECT id, document_id, from_state, to_state, event, actor_id, actor_role, reason, idempotency_key, expected_version, entity_version, payload_checksum, created_at INTO existing_event
   FROM public.review_document_transition_events event_record
   WHERE event_record.document_id = v_document_id
     AND event_record.idempotency_key = v_idempotency_key;

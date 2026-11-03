@@ -83,7 +83,7 @@ const controlQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) 
     const [member] = storedMembers.splice(0, 1);
     return Promise.resolve(member ? [member] : []);
   }
-  if (query.includes("SELECT * FROM project_business_organization_members")) {
+  if (query.includes("FROM project_business_organization_members") && query.includes("FOR UPDATE")) {
     const member = storedMembers.find((candidate) => {
       if (candidate.organization_id !== values[0]) return false;
       if (query.includes("id::text")) return candidate.id === values[1] || candidate.user_id === values[1];
@@ -102,7 +102,7 @@ const controlQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) 
       expires_at: values[5],
     }]);
   }
-  if (query.includes("SELECT * FROM project_business_organization_invitations")) {
+  if (query.includes("FROM project_business_organization_invitations") && query.includes("FOR UPDATE")) {
     return Promise.resolve([{
       id: "invitation-one",
       organization_id: "org-one",

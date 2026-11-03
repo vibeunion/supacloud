@@ -1,7 +1,18 @@
 import { sql } from "../db";
+
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
+
+const TUS_UPLOAD_COLUMNS = [
+    "id", "ref", "bucket", "object_name", "content_type", "total_size",
+    "offset_size", "created_at", "updated_at", "auth_token",
+] as const;
+const SIGNED_UPLOAD_COLUMNS = [
+    "token", "ref", "bucket", "object_name", "upsert", "expires_at", "created_at", "auth_token",
+] as const;
+const tusUploadColumns = TUS_UPLOAD_COLUMNS.join(", ");
+const signedUploadColumns = SIGNED_UPLOAD_COLUMNS.join(", ");
 
 export interface TusUpload {
     ref: string;
@@ -40,7 +51,7 @@ export class TusStore {
     }
 
     static async get(id: string): Promise<TusUpload | null> {
-        const [row] = await sql`SELECT * FROM system_tus_uploads WHERE id = ${id}`;
+        const [row] = await sql`SELECT ${sql.unsafe(tusUploadColumns)} FROM system_tus_uploads WHERE id = ${id}`;
         if (!row) return null;
         return {
             ref: row.ref,
@@ -128,7 +139,7 @@ export class SignedStore {
     }
 
     static async get(token: string): Promise<SignedUpload | null> {
-        const [row] = await sql`SELECT * FROM system_signed_uploads WHERE token = ${token}`;
+        const [row] = await sql`SELECT ${sql.unsafe(signedUploadColumns)} FROM system_signed_uploads WHERE token = ${token}`;
         if (!row) return null;
         return this.fromRow(row as Record<string, unknown>);
     }
@@ -138,7 +149,7 @@ export class SignedStore {
             DELETE FROM system_signed_uploads
             WHERE token = ${token}
               AND expires_at >= extract(epoch from NOW())
-            RETURNING *
+            RETURNING ${sql.unsafe(signedUploadColumns)}
         `;
         if (!row) return null;
         return this.fromRow(row as Record<string, unknown>);

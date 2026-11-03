@@ -118,7 +118,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         const rows = await db`
           INSERT INTO supabase_functions.hooks (hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, is_rls_enabled)
           VALUES (${hookTableId}, ${hookName}, ${hookSchema}, ${hookTable}, ${requestUrl}, ${JSON.stringify(requestHeaders)}, ${events}, ${isRlsEnabled})
-          RETURNING *
+          RETURNING id, hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, created_at, updated_at, is_rls_enabled
         `;
         return publicDatabaseHook(rows[0] || {});
       } catch (err: unknown) {
@@ -177,7 +177,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
-        const current = await db`SELECT * FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
+        const current = await db`SELECT id, hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, created_at, updated_at, is_rls_enabled FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
         if (current.length === 0) return status(404, { message: "Webhook not found", code: "404" });
 
         const existing = current[0] as Record<string, unknown>;
@@ -192,7 +192,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
             is_rls_enabled = ${body.is_rls_enabled ?? existing.is_rls_enabled},
             updated_at = NOW()
           WHERE id = ${Number(params.id)}
-          RETURNING *
+          RETURNING id, hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, created_at, updated_at, is_rls_enabled
         `;
         return publicDatabaseHook(updated[0]);
       } catch (err: unknown) {
@@ -213,7 +213,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
-        const [deleted] = await db`DELETE FROM supabase_functions.hooks WHERE id = ${Number(params.id)} RETURNING *`;
+        const [deleted] = await db`DELETE FROM supabase_functions.hooks WHERE id = ${Number(params.id)} RETURNING id, hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, created_at, updated_at, is_rls_enabled`;
         if (!deleted) return status(404, { message: "Webhook not found", code: "404" });
         return publicDatabaseHook(deleted);
       } catch (err: unknown) {

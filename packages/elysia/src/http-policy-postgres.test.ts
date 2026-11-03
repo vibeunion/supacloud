@@ -65,7 +65,7 @@ suite("shared PostgreSQL HTTP policy stores", () => {
       for (let i = 0; i < 100; i++) {
         const rows = await database.query(`
           SELECT count(*)::integer AS count FROM pg_stat_activity
-          WHERE wait_event_type='Lock' AND query LIKE 'SELECT * FROM supacloud_http.consume_rate_limit%'
+          WHERE wait_event_type='Lock' AND query LIKE 'SELECT allowed, remaining, reset_at_ms FROM supacloud_http.consume_rate_limit%'
         `, []);
         if (Number(rows[0]?.count) > 0) { locked = true; break; }
         await Bun.sleep(10);

@@ -86,7 +86,7 @@ export class ApplicationConfigurations {
            request_fingerprint, encrypted_configuration, public_configuration)
         VALUES (${scope.projectRef}, ${scope.applicationId}, ${scope.environmentId}, ${input.configuration_id},
           ${input.expected_configuration_id}, ${fingerprint}, ${encrypted}, ${summary(input.configuration)}::jsonb)
-        RETURNING *
+        RETURNING project_ref, application_id, environment_id, configuration_id, previous_configuration_id, request_fingerprint, encrypted_configuration, public_configuration, created_at
       `;
       await transaction`
         INSERT INTO application_configuration_heads (project_ref, application_id, environment_id, configuration_id)
@@ -160,14 +160,14 @@ export class ApplicationConfigurations {
     }
     const [row] = configurationId === undefined
       ? await database`
-          SELECT revision.* FROM application_configuration_heads head
+          SELECT revision.project_ref, revision.application_id, revision.environment_id, revision.configuration_id, revision.previous_configuration_id, revision.request_fingerprint, revision.encrypted_configuration, revision.public_configuration, revision.created_at FROM application_configuration_heads head
           JOIN application_configuration_revisions revision USING
             (project_ref, application_id, environment_id, configuration_id)
           WHERE head.project_ref = ${scope.projectRef} AND head.application_id = ${scope.applicationId}
             AND head.environment_id = ${scope.environmentId}
         `
       : await database`
-          SELECT * FROM application_configuration_revisions
+          SELECT project_ref, application_id, environment_id, configuration_id, previous_configuration_id, request_fingerprint, encrypted_configuration, public_configuration, created_at FROM application_configuration_revisions
           WHERE project_ref = ${scope.projectRef} AND application_id = ${scope.applicationId}
             AND environment_id = ${scope.environmentId} AND configuration_id = ${configurationId}
         `;

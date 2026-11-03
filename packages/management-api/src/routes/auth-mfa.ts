@@ -100,7 +100,8 @@ async function listTotpFactors(ref: string, userId: string | null, page: number,
       WHERE factor.factor_type::text = 'totp'
         AND (${userId}::text IS NULL OR factor.user_id = ${userId}::uuid)
     ), page_items AS (
-      SELECT *
+      SELECT id, user_id, user_email, friendly_name, factor_type, status, created_at, updated_at,
+        enrolled_factor_count, verified_factor_count, latest_session_aal, latest_session_updated_at
       FROM filtered_factors
       ORDER BY created_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}

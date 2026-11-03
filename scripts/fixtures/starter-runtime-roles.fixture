@@ -64,7 +64,7 @@ export async function setupRuntimeRoleConnections(database: VerificationDatabase
         await denied("UPDATE public.starter_attachment_results SET result='{}'");
         await denied("DELETE FROM public.starter_attachment_results WHERE false");
         await denied("INSERT INTO public.starter_attachment_retries VALUES (gen_random_uuid(),'missing',gen_random_uuid(),1)");
-        await denied("SELECT * FROM supacloud_commands.execution_receipts");
+        await denied("SELECT dispatch_key FROM supacloud_commands.execution_receipts");
         await denied("SELECT supacloud_workflows.start_run(gen_random_uuid(),'forbidden','1','step','{}',1)");
       }
     } finally { await pool.close({ timeout: 5 }); }

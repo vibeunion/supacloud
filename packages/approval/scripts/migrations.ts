@@ -27,6 +27,7 @@ export async function loadApprovalMigrations(): Promise<readonly ApprovalMigrati
     { version: '012', sql: await Bun.file(new URL('../sql/012-graph-bootstrap-fix.sql', import.meta.url)).text() },
     { version: '013', sql: await Bun.file(new URL('../sql/013-controlled-migration.sql', import.meta.url)).text() },
     { version: '014', sql: await Bun.file(new URL('../sql/014-graph-notifications.sql', import.meta.url)).text() },
+    { version: '015', sql: await Bun.file(new URL('../sql/015-explicit-page-columns.sql', import.meta.url)).text() },
   ];
 }
 

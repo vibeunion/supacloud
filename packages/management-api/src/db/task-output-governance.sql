@@ -41,7 +41,7 @@ BEGIN
   IF NEW.type NOT IN ('output.delta', 'output.snapshot', 'progress', 'warning') THEN RETURN NEW; END IF;
   INSERT INTO public.project_task_output_quotas(project_ref) VALUES (NEW.project_ref)
     ON CONFLICT (project_ref) DO NOTHING;
-  SELECT * INTO STRICT v_quota FROM public.project_task_output_quotas
+  SELECT project_ref, max_retained_bytes, max_retained_events, max_events_per_minute, max_bytes_per_minute, retained_bytes, retained_events, window_start, window_events, window_bytes INTO STRICT v_quota FROM public.project_task_output_quotas
     WHERE project_ref = NEW.project_ref FOR UPDATE;
   -- Different task locks converge on this shared project row. Sample time AFTER
   -- the quota lock, not at transaction start or before a potentially slow wait.
