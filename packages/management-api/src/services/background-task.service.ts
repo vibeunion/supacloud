@@ -344,14 +344,14 @@ export async function enqueueBackgroundFunctionTask(
           ${authAuthorityRef},
           ${input.metadata ?? null}
         )
-        RETURNING ${projectTaskColumns()}
+        RETURNING ${transaction.unsafe(projectTaskColumns())}
       `;
 
       let rows: unknown[];
       let isNewTask = true;
       if (idempotencyKey) {
         const existingRows: unknown[] = await transaction`
-          SELECT ${projectTaskColumns()}
+          SELECT ${transaction.unsafe(projectTaskColumns())}
           FROM project_tasks
           WHERE project_ref = ${input.projectRef}
             AND idempotency_key = ${idempotencyKey}
@@ -372,7 +372,7 @@ export async function enqueueBackgroundFunctionTask(
             WHERE id = ${existingTask.id}
               AND project_ref = ${input.projectRef}
               AND idempotency_key = ${idempotencyKey}
-            RETURNING ${projectTaskColumns()}
+            RETURNING ${transaction.unsafe(projectTaskColumns())}
           `;
           isNewTask = false;
         } else {

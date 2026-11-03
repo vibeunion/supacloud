@@ -240,7 +240,7 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
       ON CONFLICT (project_ref, idempotency_key)
       WHERE idempotency_key IS NOT NULL
       DO UPDATE SET updated_at = NOW()
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
 
     return decodeProjectTask(task);
@@ -296,7 +296,7 @@ export async function claimQueueMessage(options: ClaimQueueMessageOptions): Prom
         updated_at = NOW()
       FROM candidate
       WHERE pt.id = candidate.id
-      RETURNING ${projectTaskColumns("pt")}
+      RETURNING ${sql.unsafe(projectTaskColumns("pt"))}
     `;
 
     return task ? decodeProjectTask(task) : null;
@@ -389,7 +389,7 @@ export async function markTaskRunning(id: string): Promise<ProjectTask | null> {
       UPDATE project_tasks
       SET status = ${TaskStatuses.RUNNING}, updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -410,7 +410,7 @@ export async function markTaskSucceeded(id: string, result?: Record<string, unkn
         completed_at = NOW(),
         updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -434,7 +434,7 @@ export async function acknowledgeQueueMessage(id: string, result?: Record<string
         AND status IN (${TaskStatuses.LEASED}, ${TaskStatuses.RUNNING})
         AND lease_until IS NOT NULL
         AND lease_until > NOW()
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -453,7 +453,7 @@ export async function scheduleRetry(id: string, error: string, nextRunAt: Date):
         cancellation_reason = NULL,
         updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -472,7 +472,7 @@ export async function markTaskFailed(id: string, error: string, deadLetter = fal
         completed_at = NOW(),
         updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -491,7 +491,7 @@ export async function cancelTask(id: string, error?: string): Promise<ProjectTas
         completed_at = NOW(),
         updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -514,7 +514,7 @@ export async function updateStatus(id: string, status: TaskStatus, error?: strin
           UPDATE project_tasks
           SET status = ${status}, error = ${error || null}, updated_at = NOW()
           WHERE id = ${id}
-          RETURNING ${projectTaskColumns()}
+          RETURNING ${sql.unsafe(projectTaskColumns())}
         `;
         return task ? decodeProjectTask(task) : null;
       });
@@ -534,8 +534,8 @@ export async function updateTaskError(id: string, error: string): Promise<void> 
 export async function getTaskById(id: string, projectRef?: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.getTaskById", async () => {
     const rows = projectRef
-      ? await sql`SELECT ${projectTaskColumns()} FROM project_tasks WHERE id = ${id} AND project_ref = ${projectRef} LIMIT 1`
-      : await sql`SELECT ${projectTaskColumns()} FROM project_tasks WHERE id = ${id} LIMIT 1`;
+      ? await sql`SELECT ${sql.unsafe(projectTaskColumns())} FROM project_tasks WHERE id = ${id} AND project_ref = ${projectRef} LIMIT 1`
+      : await sql`SELECT ${sql.unsafe(projectTaskColumns())} FROM project_tasks WHERE id = ${id} LIMIT 1`;
     return rows[0] ? decodeProjectTask(rows[0]) : null;
   });
 }
@@ -543,7 +543,7 @@ export async function getTaskById(id: string, projectRef?: string): Promise<Proj
 export async function getTaskByIdAndType(id: string, projectRef: string, taskType: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.getTaskByIdAndType", async () => {
     const [task] = await sql`
-      SELECT ${projectTaskColumns()}
+      SELECT ${sql.unsafe(projectTaskColumns())}
       FROM project_tasks
       WHERE id = ${id}
         AND project_ref = ${projectRef}
@@ -556,7 +556,7 @@ export async function getTaskByIdAndType(id: string, projectRef: string, taskTyp
 
 export async function getTaskByIdempotencyKey(projectRef: string, key: string): Promise<ProjectTask | null> {
   const [task] = await sql`
-    SELECT ${projectTaskColumns()} FROM project_tasks
+    SELECT ${sql.unsafe(projectTaskColumns())} FROM project_tasks
     WHERE project_ref = ${projectRef} AND idempotency_key = ${key}
     LIMIT 1
   `;
@@ -658,7 +658,7 @@ export async function retryTask(id: string, projectRef: string): Promise<Project
       WHERE id = ${id}
         AND project_ref = ${projectRef}
         AND status IN (${TaskStatuses.FAILED}, ${TaskStatuses.DEAD_LETTERED}, ${TaskStatuses.CANCELLED})
-      RETURNING ${projectTaskColumns()}, id = ${id}::uuid AS retry_identity_matches
+      RETURNING ${transaction.unsafe(projectTaskColumns())}, id = ${id}::uuid AS retry_identity_matches
     `;
     if (rows.length === 0) return null;
     if (rows.length !== 1) throw new InvalidTaskRecordError();
@@ -693,7 +693,7 @@ export async function retryQueueMessage(id: string, projectRef: string, queueNam
         AND project_ref = ${projectRef}
         AND task_type = ${queueName}
         AND status IN (${TaskStatuses.FAILED}, ${TaskStatuses.DEAD_LETTERED}, ${TaskStatuses.CANCELLED})
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -835,7 +835,7 @@ export async function releaseTask(id: string, nextRunAt: Date, error?: string): 
         next_run_at = ${nextRunAt},
         updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -853,7 +853,7 @@ export async function transitionTaskToRunning(
           lease_until = NOW() + (${leaseSeconds} * INTERVAL '1 second'),
           updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
 
     if (!updated) return { task: null, attempt: null };
@@ -878,7 +878,7 @@ export async function transitionTaskToRunning(
         error = NULL,
         response_status = NULL,
         updated_at = NOW()
-      RETURNING ${PROJECT_TASK_ATTEMPT_COLUMNS}
+      RETURNING ${sql.unsafe(PROJECT_TASK_ATTEMPT_COLUMNS)}
     `;
 
     return {
@@ -896,7 +896,7 @@ export async function extendLease(id: string, leaseSeconds: number): Promise<Pro
         lease_until = NOW() + (${leaseSeconds} * INTERVAL '1 second'),
         updated_at = NOW()
       WHERE id = ${id} AND cancel_requested_at IS NULL
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -911,7 +911,7 @@ export async function requestTaskCancellation(id: string, reason: string): Promi
         cancellation_reason = ${reason},
         updated_at = NOW()
       WHERE id = ${id}
-      RETURNING ${projectTaskColumns()}
+      RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
     return task ? decodeProjectTask(task) : null;
   });
@@ -943,7 +943,7 @@ export async function startTaskAttempt(task: ProjectTask): Promise<ProjectTaskAt
         error = NULL,
         response_status = NULL,
         updated_at = NOW()
-      RETURNING ${PROJECT_TASK_ATTEMPT_COLUMNS}
+      RETURNING ${sql.unsafe(PROJECT_TASK_ATTEMPT_COLUMNS)}
     `;
     return mapAttempt(attempt);
   });
@@ -978,7 +978,7 @@ export async function completeTaskAttempt(
         completed_at = NOW(),
         updated_at = NOW()
       WHERE task_id = ${taskId} AND attempt_no = ${attemptNo}
-      RETURNING ${PROJECT_TASK_ATTEMPT_COLUMNS}
+      RETURNING ${sql.unsafe(PROJECT_TASK_ATTEMPT_COLUMNS)}
     `;
     return attempt ? mapAttempt(attempt) : null;
   });
@@ -987,7 +987,7 @@ export async function completeTaskAttempt(
 export async function listTaskAttempts(taskId: string): Promise<ProjectTaskAttempt[]> {
   return withRetry("TaskRepository.listTaskAttempts", async () => {
     const rows = await sql`
-      SELECT ${PROJECT_TASK_ATTEMPT_COLUMNS}
+      SELECT ${sql.unsafe(PROJECT_TASK_ATTEMPT_COLUMNS)}
       FROM project_task_attempts
       WHERE task_id = ${taskId}
       ORDER BY attempt_no DESC

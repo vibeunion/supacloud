@@ -64,7 +64,13 @@ const ATTEMPT_COLUMN_NAMES = [
   "error", "response_status", "logs", "created_at", "updated_at",
 ] as const;
 
+const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 function columns(names: readonly string[], alias = ""): string {
+  if (alias !== "" && !SQL_IDENTIFIER.test(alias)) throw new Error("Invalid SQL identifier");
+  for (const name of names) {
+    if (!SQL_IDENTIFIER.test(name)) throw new Error("Invalid SQL identifier");
+  }
   const prefix = alias ? `${alias}.` : "";
   return names.map((name) => `${prefix}${name}`).join(", ");
 }

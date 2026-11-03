@@ -320,7 +320,7 @@ export async function startPgflowTask(
         DO UPDATE SET idempotency_key = project_tasks.idempotency_key
         WHERE project_tasks.task_type = EXCLUDED.task_type
             AND project_tasks.payload = EXCLUDED.payload
-        RETURNING ${projectTaskColumns()}
+        RETURNING ${sql.unsafe(projectTaskColumns())}
     `;
   if (rows.length !== 1) throw new PgflowTaskError(409, "Idempotency key belongs to another request");
   return decodeProjectTask(rows[0]);
@@ -336,7 +336,7 @@ export function pgflowTaskStatus(status: unknown): "running" | "succeeded" | "fa
 export async function reconcilePgflowTask(id: string, ref: string): Promise<void> {
   await sql.begin(async (tx) => {
     const rows: unknown[] = await tx`
-            SELECT ${projectTaskColumns()} FROM project_tasks WHERE id = ${id}::uuid AND project_ref = ${ref}
+            SELECT ${tx.unsafe(projectTaskColumns())} FROM project_tasks WHERE id = ${id}::uuid AND project_ref = ${ref}
                 AND task_type = ${PGFLOW_TASK_TYPE} AND status IN ('pending', 'running')
             FOR UPDATE SKIP LOCKED
         `;
