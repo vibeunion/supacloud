@@ -50,9 +50,10 @@ const adminDb = Object.assign(mock(async () => []), { unsafe: mock(async (query:
   }
   return [];
 }) });
-const managementDb = mock((strings: TemplateStringsArray) => {
-  if (strings.join("?").includes("SELECT db_name, db_user, db_password")
-    || strings.join("?").includes("SELECT * FROM projects")) {
+const managementDb = Object.assign(mock((strings: TemplateStringsArray) => {
+  const text = strings.join("?");
+  if (text.includes("SELECT db_name, db_user, db_password")
+    || text.includes("FROM projects")) {
     return Promise.resolve([{
       db_name: "tenant_db",
       db_user: "tenant_user",
@@ -60,7 +61,7 @@ const managementDb = mock((strings: TemplateStringsArray) => {
     }]);
   }
   return Promise.resolve([]);
-});
+}), { unsafe: mock((fragment: string) => fragment) });
 
 const getProject = mock(async () => ({ ref: "proj_1" }));
 const requireProjectOrAdminAuth = mock(async (): Promise<undefined | { status: number; body: { error: string } }> => undefined);
