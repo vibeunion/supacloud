@@ -1183,7 +1183,7 @@ BEGIN
     id, run_id, step_key, input, max_attempts, queue_message_id
   ) VALUES (
     step_id, p_run_id, normalized_step_key, p_input, p_max_attempts, message_id
-  ) RETURNING * INTO created_step;
+  ) RETURNING id, run_id, step_key, status, input, output, error_message, attempts, max_attempts, retry_delay_seconds, queue_message_id, claimed_by, claimed_at, completed_at, next_step_key, created_at, updated_at INTO created_step;
 
   RETURN created_step;
 END;
@@ -1223,11 +1223,11 @@ BEGIN
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(p_run_id::text, 0));
-  SELECT * INTO existing_run FROM supacloud_workflows.runs WHERE id = p_run_id;
+  SELECT workflow_run.id, workflow_run.workflow_name, workflow_run.workflow_version, workflow_run.status, workflow_run.input, workflow_run.output, workflow_run.error_message, workflow_run.row_version, workflow_run.created_at, workflow_run.started_at, workflow_run.completed_at, workflow_run.updated_at INTO existing_run FROM supacloud_workflows.runs workflow_run WHERE workflow_run.id = p_run_id;
   IF FOUND THEN
-    SELECT * INTO existing_step
-    FROM supacloud_workflows.steps
-    WHERE run_id = p_run_id
+    SELECT workflow_step.id, workflow_step.run_id, workflow_step.step_key, workflow_step.status, workflow_step.input, workflow_step.output, workflow_step.error_message, workflow_step.attempts, workflow_step.max_attempts, workflow_step.retry_delay_seconds, workflow_step.queue_message_id, workflow_step.claimed_by, workflow_step.claimed_at, workflow_step.completed_at, workflow_step.next_step_key, workflow_step.created_at, workflow_step.updated_at INTO existing_step
+    FROM supacloud_workflows.steps workflow_step
+    WHERE workflow_step.run_id = p_run_id
     ORDER BY created_at, id
     LIMIT 1;
     IF NOT FOUND THEN
@@ -1315,11 +1315,11 @@ BEGIN
   IF NOT pg_try_advisory_xact_lock(hashtextextended(candidate_run_id::text, 0)) THEN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_CLAIM_RETRY' USING ERRCODE = '40001';
   END IF;
-  SELECT * INTO claimed_step
-  FROM supacloud_workflows.steps
-  WHERE id::text = lower(message_step_id)
-    AND run_id = candidate_run_id
-    AND queue_message_id = queued_message.msg_id
+  SELECT workflow_step.id, workflow_step.run_id, workflow_step.step_key, workflow_step.status, workflow_step.input, workflow_step.output, workflow_step.error_message, workflow_step.attempts, workflow_step.max_attempts, workflow_step.retry_delay_seconds, workflow_step.queue_message_id, workflow_step.claimed_by, workflow_step.claimed_at, workflow_step.completed_at, workflow_step.next_step_key, workflow_step.created_at, workflow_step.updated_at INTO claimed_step
+  FROM supacloud_workflows.steps workflow_step
+  WHERE workflow_step.id::text = lower(message_step_id)
+    AND workflow_step.run_id = candidate_run_id
+    AND workflow_step.queue_message_id = queued_message.msg_id
   FOR UPDATE;
   IF NOT FOUND THEN
     PERFORM pgmq.archive('supacloud_internal_workflows', queued_message.msg_id);
@@ -1330,9 +1330,9 @@ BEGIN
     );
   END IF;
 
-  SELECT * INTO claimed_run
-  FROM supacloud_workflows.runs
-  WHERE id = claimed_step.run_id
+  SELECT workflow_run.id, workflow_run.workflow_name, workflow_run.workflow_version, workflow_run.status, workflow_run.input, workflow_run.output, workflow_run.error_message, workflow_run.row_version, workflow_run.created_at, workflow_run.started_at, workflow_run.completed_at, workflow_run.updated_at INTO claimed_run
+  FROM supacloud_workflows.runs workflow_run
+  WHERE workflow_run.id = claimed_step.run_id
   FOR UPDATE;
   IF claimed_run.status NOT IN ('queued', 'running')
      OR claimed_step.status NOT IN ('queued', 'running') THEN
@@ -1419,9 +1419,9 @@ BEGIN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_STEP_NOT_FOUND' USING ERRCODE = 'P0002';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(candidate_run_id::text, 0));
-  SELECT * INTO active_step
-  FROM supacloud_workflows.steps
-  WHERE id = p_step_id
+  SELECT workflow_step.id, workflow_step.run_id, workflow_step.step_key, workflow_step.status, workflow_step.input, workflow_step.output, workflow_step.error_message, workflow_step.attempts, workflow_step.max_attempts, workflow_step.retry_delay_seconds, workflow_step.queue_message_id, workflow_step.claimed_by, workflow_step.claimed_at, workflow_step.completed_at, workflow_step.next_step_key, workflow_step.created_at, workflow_step.updated_at INTO active_step
+  FROM supacloud_workflows.steps workflow_step
+  WHERE workflow_step.id = p_step_id
   FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_STEP_NOT_FOUND' USING ERRCODE = 'P0002';
@@ -1483,9 +1483,9 @@ BEGIN
   );
 
   IF current_step.status = 'completed' THEN
-    SELECT * INTO next_step
-    FROM supacloud_workflows.steps
-    WHERE run_id = current_step.run_id AND step_key = normalized_next_step_key;
+    SELECT workflow_step.id, workflow_step.run_id, workflow_step.step_key, workflow_step.status, workflow_step.input, workflow_step.output, workflow_step.error_message, workflow_step.attempts, workflow_step.max_attempts, workflow_step.retry_delay_seconds, workflow_step.queue_message_id, workflow_step.claimed_by, workflow_step.claimed_at, workflow_step.completed_at, workflow_step.next_step_key, workflow_step.created_at, workflow_step.updated_at INTO next_step
+    FROM supacloud_workflows.steps workflow_step
+    WHERE workflow_step.run_id = current_step.run_id AND workflow_step.step_key = normalized_next_step_key;
     IF NOT FOUND
        OR current_step.output IS DISTINCT FROM p_output
        OR current_step.next_step_key IS DISTINCT FROM normalized_next_step_key
@@ -1541,9 +1541,9 @@ BEGIN
   current_step := supacloud_workflows.lock_step_attempt(
     p_step_id, p_message_id, p_attempt, p_worker_id
   );
-  SELECT * INTO current_run
-  FROM supacloud_workflows.runs
-  WHERE id = current_step.run_id
+  SELECT workflow_run.id, workflow_run.workflow_name, workflow_run.workflow_version, workflow_run.status, workflow_run.input, workflow_run.output, workflow_run.error_message, workflow_run.row_version, workflow_run.created_at, workflow_run.started_at, workflow_run.completed_at, workflow_run.updated_at INTO current_run
+  FROM supacloud_workflows.runs workflow_run
+  WHERE workflow_run.id = current_step.run_id
   FOR UPDATE;
 
   IF current_step.status = 'completed' THEN
@@ -1719,9 +1719,9 @@ BEGIN
   current_step := supacloud_workflows.lock_step_attempt(
     p_step_id, p_message_id, p_attempt, p_worker_id
   );
-  SELECT * INTO current_run
-  FROM supacloud_workflows.runs
-  WHERE id = current_step.run_id
+  SELECT workflow_run.id, workflow_run.workflow_name, workflow_run.workflow_version, workflow_run.status, workflow_run.input, workflow_run.output, workflow_run.error_message, workflow_run.row_version, workflow_run.created_at, workflow_run.started_at, workflow_run.completed_at, workflow_run.updated_at INTO current_run
+  FROM supacloud_workflows.runs workflow_run
+  WHERE workflow_run.id = current_step.run_id
   FOR UPDATE;
 
   IF current_step.status = 'failed' THEN
@@ -1775,7 +1775,7 @@ BEGIN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_CANCEL_INVALID' USING ERRCODE = '22023';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(p_run_id::text, 0));
-  SELECT * INTO locked_run FROM supacloud_workflows.runs WHERE id = p_run_id FOR UPDATE;
+  SELECT workflow_run.id, workflow_run.workflow_name, workflow_run.workflow_version, workflow_run.status, workflow_run.input, workflow_run.output, workflow_run.error_message, workflow_run.row_version, workflow_run.created_at, workflow_run.started_at, workflow_run.completed_at, workflow_run.updated_at INTO locked_run FROM supacloud_workflows.runs workflow_run WHERE workflow_run.id = p_run_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_RUN_NOT_FOUND' USING ERRCODE = 'P0002';
   END IF;
@@ -1788,9 +1788,9 @@ BEGIN
   IF locked_run.status NOT IN ('queued', 'running') THEN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_RUN_NOT_ACTIVE' USING ERRCODE = '55000';
   END IF;
-  SELECT * INTO active_step
-  FROM supacloud_workflows.steps
-  WHERE run_id = p_run_id AND status IN ('queued', 'running')
+  SELECT workflow_step.id, workflow_step.run_id, workflow_step.step_key, workflow_step.status, workflow_step.input, workflow_step.output, workflow_step.error_message, workflow_step.attempts, workflow_step.max_attempts, workflow_step.retry_delay_seconds, workflow_step.queue_message_id, workflow_step.claimed_by, workflow_step.claimed_at, workflow_step.completed_at, workflow_step.next_step_key, workflow_step.created_at, workflow_step.updated_at INTO active_step
+  FROM supacloud_workflows.steps workflow_step
+  WHERE workflow_step.run_id = p_run_id AND workflow_step.status IN ('queued', 'running')
   FOR UPDATE;
   IF FOUND THEN
     PERFORM pgmq.archive('supacloud_internal_workflows', active_step.queue_message_id);
