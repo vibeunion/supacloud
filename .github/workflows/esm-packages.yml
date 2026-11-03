@@ -113,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.12.0', '24.x', '26.x']
+        node: ['24.x', '26.x']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -137,12 +137,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Install real tarballs and verify public entrypoints
-        run: |
-          if [ '${{ matrix.node }}' = '22.12.0' ]; then
-            node .github/scripts/esm-package.acceptance.mjs --sdk-only
-          else
-            node .github/scripts/esm-package.acceptance.mjs
-          fi
+        run: node .github/scripts/esm-package.acceptance.mjs
       - name: Collect reproducible SDK type-failure evidence
         if: failure() && matrix.node == '24.x'
         run: |

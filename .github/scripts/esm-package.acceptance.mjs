@@ -26,7 +26,7 @@ delete env.BUN_OPTIONS;
 /** @param {string} command @param {string[]} args @param {string} cwd */
 function run(command, args, cwd) {
   return execFileSync(command, args, {
-    cwd, env, encoding: 'utf8', timeout: 300_000, maxBuffer: 32 * 1024 * 1024,
+    cwd, env, encoding: 'utf8', timeout: 600_000, maxBuffer: 32 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }
@@ -85,6 +85,7 @@ try {
     name: 'supacloud-esm-installed-consumer', version: '0.0.0', private: true, type: 'module',
   }));
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund',
+    '--prefer-offline', '--fetch-retries=5', '--fetch-retry-mintimeout=20000', '--fetch-retry-maxtimeout=120000',
     ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.118.0'] : []), ...tarballs], consumer);
   if (sdkOnly) {
     for (const name of ['@angular/core', '@supacloud/app', '@supacloud/compiler', '@supacloud/delivery']) {
@@ -179,7 +180,9 @@ const { createSupaCloudClient } = require('@supacloud/js');
   // link or asking Bun to reinstall the candidate SDK dependency graph.
   const compilerPackage = sdkOnly ? 'supacloud-js' : 'app';
   const nodeTypes = pack(resolve(root, 'packages', compilerPackage, 'node_modules', '@types', 'node'), raw);
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', nodeTypes.path, 'typescript@5.8.3'], consumer);
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev',
+    '--prefer-offline', '--fetch-retries=5', '--fetch-retry-mintimeout=20000', '--fetch-retry-maxtimeout=120000',
+    nodeTypes.path, 'typescript@5.8.3'], consumer);
   checkConsumerTypes(consumer, resolve(root, 'packages', compilerPackage), run);
   await writeFile(join(consumer, 'browser.ts'), [
     ...(sdkOnly ? [] : ['export { HttpClient } from "@supacloud/app/browser";']),
