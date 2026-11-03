@@ -99,6 +99,7 @@ SUPACLOUD_INSTALL_KEYS=(
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
     JIT_DATABASE_GATEWAY_ENGINE JIT_DATABASE_GATEWAY_CONTROL_PORT
+    SUPACLOUD_REALTIME_ENGINE
     SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR
     PGREDIS_RUNTIME_PORT PGREDIS_RUNTIME_INTERNAL_URL
     SUPACLOUD_PGBACKREST_CONFIG SUPACLOUD_PGBACKREST_STANZA
@@ -486,6 +487,7 @@ recover_legacy_install_config() {
     apply_recovered_env_value EDGE_RUNTIME_PORT "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT
     apply_recovered_env_value EDGE_MAX_BODY_SIZE_MB "$MANAGEMENT_ENV_FILE" EDGE_MAX_BODY_SIZE_MB
     apply_recovered_env_value SUPACLOUD_IMAGE_ENGINE "$MANAGEMENT_ENV_FILE" SUPACLOUD_IMAGE_ENGINE
+    apply_recovered_env_value SUPACLOUD_REALTIME_ENGINE "$MANAGEMENT_ENV_FILE" SUPACLOUD_REALTIME_ENGINE
     apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGOR_IMAGE
     if [[ -z "${IMAGOR_IMAGE:-}" ]]; then
         apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
@@ -3810,6 +3812,8 @@ install_management_api() {
         REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
+        SUPACLOUD_REALTIME_ENGINE "${SUPACLOUD_REALTIME_ENGINE:-rust}" \
+        REALTIME_ADMIN_URL "${REALTIME_ADMIN_URL:-http://127.0.0.1:4000}" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
         REALTIME_IMAGE "${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
@@ -5338,6 +5342,93 @@ deploy_rust_image_service() {
     log_info "Native Rust image service running as supacloud-image.service"
 }
 
+install_realtime_gateway_binary() {
+    local target="/usr/local/bin/supacloud-realtime-gateway"
+    if [[ -x "$target" ]]; then
+        log_info "supacloud-realtime-gateway already installed: $($target --version 2>/dev/null || echo installed)"
+        return 0
+    fi
+
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *)
+            log_warn "Unsupported architecture for native Realtime gateway: $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    local candidate=""
+    if [[ -f "${SCRIPT_DIR}/dist/supacloud-realtime-gateway-linux-${arch}" ]]; then
+        candidate="${SCRIPT_DIR}/dist/supacloud-realtime-gateway-linux-${arch}"
+    elif [[ -f "${SCRIPT_DIR}/dist/supacloud-realtime-gateway" ]]; then
+        candidate="${SCRIPT_DIR}/dist/supacloud-realtime-gateway"
+    elif [[ -f "${SCRIPT_DIR}/crates/realtime-gateway/target/release/supacloud-realtime-gateway" ]]; then
+        candidate="${SCRIPT_DIR}/crates/realtime-gateway/target/release/supacloud-realtime-gateway"
+    fi
+
+    if [[ -n "$candidate" ]]; then
+        install -m 0755 "$candidate" "$target"
+        log_info "Installed supacloud-realtime-gateway binary from $candidate"
+        return 0
+    fi
+
+    if [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_realtime_gateway.sh" ]] && command -v cargo >/dev/null 2>&1; then
+        log_info "Building supacloud-realtime-gateway locally with cargo..."
+        local temp_out
+        temp_out=$(mktemp -d)
+        trap 'rm -rf "${temp_out:-}"' RETURN
+        OUT_DIR="$temp_out" "${SCRIPT_DIR}/scripts/build_supacloud_realtime_gateway.sh" || return 1
+        install -m 0755 "${temp_out}/supacloud-realtime-gateway" "$target"
+        log_info "Successfully built and installed supacloud-realtime-gateway to $target"
+        return 0
+    fi
+
+    log_warn "Neither prebuilt supacloud-realtime-gateway binary nor cargo build toolchain found"
+    return 1
+}
+
+deploy_rust_realtime_gateway() {
+    log_info "Deploying native Rust Realtime Push Gateway service..."
+    if ! install_realtime_gateway_binary; then
+        log_warn "Failed to install native Realtime gateway binary; falling back to container"
+        return 1
+    fi
+
+    # Stop legacy Elixir container if present to reclaim 300MB~600MB memory
+    if systemctl is-active --quiet supacloud-realtime 2>/dev/null; then
+        log_info "Stopping and decommissioning legacy Elixir Realtime container..."
+        systemctl stop supacloud-realtime 2>/dev/null || true
+        systemctl disable supacloud-realtime 2>/dev/null || true
+    fi
+    local RUNTIME="${CONTAINER_RUNTIME:-podman}"
+    if "$RUNTIME" ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-realtime$'; then
+        "$RUNTIME" rm -f supacloud-realtime 2>/dev/null || true
+    fi
+
+    local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime-gateway.service"
+    if [[ -f "$unit_src" ]]; then
+        install -m 644 "$unit_src" /etc/systemd/system/supacloud-realtime-gateway.service
+        local gateway_env="/etc/supabase/realtime-gateway.env"
+        if [[ ! -f "$gateway_env" ]] || ! grep -q '^REALTIME_CONTROL_TOKEN=.' "$gateway_env"; then
+            local control_token
+            control_token=$(openssl rand -hex 32)
+            mkdir -p /etc/supabase
+            umask 077
+            printf 'REALTIME_CONTROL_TOKEN=%s\n' "$control_token" > "$gateway_env"
+            chmod 600 "$gateway_env"
+        fi
+        systemctl daemon-reload
+        systemctl enable --now supacloud-realtime-gateway
+        log_info "Native Rust Realtime Gateway running as supacloud-realtime-gateway.service"
+        supacloud_wait_http_health "http://127.0.0.1:4000/healthcheck" || return 1
+        return 0
+    fi
+    return 1
+}
+
+
 # ========== Deploy Service Containers (Imagor + Realtime) ==========
 deploy_service_containers() {
     log_step "Deploying SupaCloud service containers..."
@@ -5409,14 +5500,18 @@ deploy_service_containers() {
     supacloud_wait_http_health "http://127.0.0.1:9010/healthcheck" || return 1
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
-    local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}"
-    if [[ -f "$REALTIME_UNIT_SRC" ]]; then
-        log_info "Building and activating a transactional SupaCloud Realtime generation..."
-        deploy_realtime_service_transaction "$RUNTIME" "$REALTIME_IMAGE_VALUE" "$REALTIME_UNIT_SRC" || return 1
+    if [[ "${SUPACLOUD_REALTIME_ENGINE:-rust}" == "rust" ]] && deploy_rust_realtime_gateway; then
+        log_info "Native Rust Realtime gateway is active; skipping the legacy container"
     else
-        log_error "SupaCloud Realtime systemd unit is missing; refusing an unpatched container fallback"
-        return 1
+        local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
+        local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}"
+        if [[ -f "$REALTIME_UNIT_SRC" ]]; then
+            log_info "Building and activating a transactional SupaCloud Realtime generation..."
+            deploy_realtime_service_transaction "$RUNTIME" "$REALTIME_IMAGE_VALUE" "$REALTIME_UNIT_SRC" || return 1
+        else
+            log_error "SupaCloud Realtime systemd unit is missing; refusing an unpatched container fallback"
+            return 1
+        fi
     fi
 
     # --- 3. Atomically merge management API container references ---
