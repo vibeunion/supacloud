@@ -1,6 +1,7 @@
 import { getProjectDb, sql, type ProjectTask } from "../db";
 import { projectRepository } from "../repositories/project.repository";
 import { parseTaskRecord } from "../utils/task-record";
+import { decodeProjectTask, projectTaskColumns } from "../db/contracts/task-row";
 import { readPgmqProjectDatabase } from "../utils/pgmq-project";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
 
@@ -319,10 +320,10 @@ export async function startPgflowTask(
         DO UPDATE SET idempotency_key = project_tasks.idempotency_key
         WHERE project_tasks.task_type = EXCLUDED.task_type
             AND project_tasks.payload = EXCLUDED.payload
-        RETURNING *
+        RETURNING ${projectTaskColumns()}
     `;
   if (rows.length !== 1) throw new PgflowTaskError(409, "Idempotency key belongs to another request");
-  return parseTaskRecord(rows[0]);
+  return decodeProjectTask(rows[0]);
 }
 
 export function pgflowTaskStatus(status: unknown): "running" | "succeeded" | "failed" {
@@ -335,12 +336,12 @@ export function pgflowTaskStatus(status: unknown): "running" | "succeeded" | "fa
 export async function reconcilePgflowTask(id: string, ref: string): Promise<void> {
   await sql.begin(async (tx) => {
     const rows: unknown[] = await tx`
-            SELECT * FROM project_tasks WHERE id = ${id}::uuid AND project_ref = ${ref}
+            SELECT ${projectTaskColumns()} FROM project_tasks WHERE id = ${id}::uuid AND project_ref = ${ref}
                 AND task_type = ${PGFLOW_TASK_TYPE} AND status IN ('pending', 'running')
             FOR UPDATE SKIP LOCKED
         `;
     if (rows.length === 0) return;
-    const task = parseTaskRecord(rows[0]);
+    const task = decodeProjectTask(rows[0]);
     const db = await projectDatabase(ref);
     const flowInput = JSON.stringify(task.payload.input);
     const run = await db.begin(async (tenant) => {
