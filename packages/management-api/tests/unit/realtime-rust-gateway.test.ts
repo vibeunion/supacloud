@@ -34,9 +34,11 @@ beforeAll(async () => {
 
   const start = Date.now();
   let healthy = false;
-  while (Date.now() - start < 5000) {
+  while (Date.now() - start < 10000) {
     try {
-      const res = await fetch(`http://127.0.0.1:${TEST_PORT}/healthcheck`);
+      const res = await fetch(`http://127.0.0.1:${TEST_PORT}/healthcheck`, {
+        signal: AbortSignal.timeout(300),
+      });
       if (res.status === 200) {
         healthy = true;
         break;
