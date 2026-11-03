@@ -30,7 +30,7 @@ describe("Maker-Checker application reference", () => {
     expect(migration).toContain("v_document_id uuid;");
     expect(migration).not.toContain("\n  document_id uuid;");
     expect(migration.indexOf("FOR UPDATE;")).toBeLessThan(
-      migration.indexOf("SELECT * INTO existing_event"),
+      migration.indexOf("SELECT id, document_id, from_state, to_state, event, actor_id, actor_role, reason, idempotency_key, expected_version, entity_version, payload_checksum, created_at INTO existing_event"),
     );
     expect(migration).toContain("REVIEW_DOCUMENT_STALE_VERSION");
     expect(migration).toContain("REVIEW_DOCUMENT_IDEMPOTENCY_CONFLICT");
