@@ -59,7 +59,7 @@ export async function sharedDatabaseAcceptance() {
       const runtime = new SQL(`postgres://${worker}:fixture-runtime@127.0.0.1:${port}/${database}`);
       connections.push(runtime);
       for (const statement of [
-        "SELECT * FROM supacloud_worker.migrations",
+        "SELECT version, sha256 FROM supacloud_worker.migrations",
         "DELETE FROM pgflow.runs",
         "CREATE TABLE public.forbidden(id int)",
         "SELECT pgflow.requeue_stalled_tasks()",
