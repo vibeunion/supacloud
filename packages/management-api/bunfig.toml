@@ -1,0 +1,4 @@
+preload = ["./scripts/reylo-preload.ts"]
+
+[test]
+preload = ["./scripts/reylo-preload.ts"]
