@@ -3744,6 +3744,17 @@ install_management_api() {
             abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" false 1
         fi
     fi
+    if [[ -z "${JIT_DATABASE_GATEWAY_CONTROL_TOKEN:-}" && -f /etc/supabase/jit-gateway.env ]]; then
+        JIT_DATABASE_GATEWAY_CONTROL_TOKEN=$(sed -n 's/^JIT_GATEWAY_CONTROL_TOKEN=//p' /etc/supabase/jit-gateway.env | head -1)
+    fi
+    if [[ -z "${JIT_DATABASE_GATEWAY_CONTROL_TOKEN:-}" ]]; then
+        JIT_DATABASE_GATEWAY_CONTROL_TOKEN=$(openssl rand -hex 32)
+    fi
+    mkdir -p /etc/supabase
+    umask 077
+    printf 'JIT_GATEWAY_CONTROL_TOKEN=%s\n' "$JIT_DATABASE_GATEWAY_CONTROL_TOKEN" > /etc/supabase/jit-gateway.env
+    chmod 600 /etc/supabase/jit-gateway.env
+
     if ! supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
         PORT 9090 \
         MANAGEMENT_API_URL http://127.0.0.1:9090 \
@@ -3814,6 +3825,7 @@ install_management_api() {
         JIT_DATABASE_GATEWAY_ENGINE "${JIT_DATABASE_GATEWAY_ENGINE:-rust}" \
         JIT_DATABASE_GATEWAY_CONTROL_PORT "${JIT_DATABASE_GATEWAY_CONTROL_PORT:-9012}" \
         JIT_DATABASE_GATEWAY_CONTROL_URL "http://127.0.0.1:${JIT_DATABASE_GATEWAY_CONTROL_PORT:-9012}" \
+        JIT_DATABASE_GATEWAY_CONTROL_TOKEN "$JIT_DATABASE_GATEWAY_CONTROL_TOKEN" \
         SUPACLOUD_POSTGRES_MAJOR_UPGRADE_EXECUTOR /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh \
         SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR "${SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR:-/opt/supacloud/scripts/lib/postgres_major_upgrade_provider.sh}" \
         SECRETS_ENCRYPTION_KEY "$SECRETS_ENCRYPTION_KEY" \

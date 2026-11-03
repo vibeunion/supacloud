@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
@@ -15,6 +15,27 @@ mod gateway;
 mod policy;
 
 use gateway::{CreateBindingRequest, GatewayManager};
+
+fn control_authorized(headers: &HeaderMap) -> bool {
+    let expected = std::env::var("JIT_GATEWAY_CONTROL_TOKEN").unwrap_or_default();
+    if expected.is_empty() {
+        let host = std::env::var("JIT_GATEWAY_CONTROL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+        return host == "127.0.0.1" || host == "::1" || host == "localhost";
+    }
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|token| token == expected)
+}
+
+fn unauthorized() -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "status": "error", "message": "unauthorized" })),
+    )
+}
+
 
 #[tokio::main]
 async fn main() {
@@ -78,8 +99,12 @@ async fn healthcheck() -> impl IntoResponse {
 
 async fn create_binding(
     State(manager): State<Arc<GatewayManager>>,
+    headers: HeaderMap,
     Json(payload): Json<CreateBindingRequest>,
 ) -> impl IntoResponse {
+    if !control_authorized(&headers) {
+        return unauthorized();
+    }
     let credential_id = payload.credential_id.clone();
     match manager.bind(payload).await {
         Ok(actual_port) => (
@@ -100,15 +125,22 @@ async fn create_binding(
     }
 }
 
-async fn list_bindings(State(manager): State<Arc<GatewayManager>>) -> impl IntoResponse {
+async fn list_bindings(State(manager): State<Arc<GatewayManager>>, headers: HeaderMap) -> impl IntoResponse {
+    if !control_authorized(&headers) {
+        return unauthorized();
+    }
     let bindings = manager.list_bindings();
     (StatusCode::OK, Json(json!({ "bindings": bindings })))
 }
 
 async fn get_binding(
     State(manager): State<Arc<GatewayManager>>,
+    headers: HeaderMap,
     Path(credential_id): Path<String>,
 ) -> impl IntoResponse {
+    if !control_authorized(&headers) {
+        return unauthorized();
+    }
     if let Some(port) = manager.bound_port(&credential_id) {
         (
             StatusCode::OK,
@@ -131,8 +163,12 @@ async fn get_binding(
 
 async fn delete_binding(
     State(manager): State<Arc<GatewayManager>>,
+    headers: HeaderMap,
     Path(credential_id): Path<String>,
 ) -> impl IntoResponse {
+    if !control_authorized(&headers) {
+        return unauthorized();
+    }
     let released = manager.release(&credential_id);
     (
         StatusCode::OK,

@@ -209,6 +209,7 @@ export class JitDatabaseGateway {
     private readonly upstreamHost: string,
     private readonly upstreamPort: number,
     private readonly controlUrl?: string,
+    private readonly controlToken = "",
   ) {}
 
   hasBinding(credentialId: string): boolean {
@@ -229,47 +230,45 @@ export class JitDatabaseGateway {
     this.expiryTimers.set(credentialId, timer);
   }
 
-  bind(binding: JitDatabaseGatewayBinding): void {
+  async bind(binding: JitDatabaseGatewayBinding): Promise<void> {
     this.release(binding.credentialId);
     if (binding.expiresAt.getTime() <= Date.now()) return;
     const policy = compileAllowedNetworks(binding.allowedNetworks);
     if (policy.length === 0) throw new Error("JIT gateway binding requires at least one allowed CIDR");
 
     if (this.controlUrl) {
-      this.remotePorts.set(binding.credentialId, binding.port);
-      this.scheduleExpiry(binding.credentialId, binding.expiresAt);
-      void fetch(`${this.controlUrl}/v1/bindings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          credential_id: binding.credentialId,
-          port: binding.port,
-          expires_at_ms: binding.expiresAt.getTime(),
-          allowed_networks: binding.allowedNetworks,
-        }),
-      }).then(async (res) => {
-        if (!res.ok) {
-          logger.warn("[JitDatabaseGateway] Remote gateway binding rejected, falling back to local listener", {
-            credentialId: binding.credentialId,
-            status: res.status,
-          });
-          this.remotePorts.delete(binding.credentialId);
-          this.bindLocal(binding, policy);
-        } else {
-          const data = await res.json() as { bound_port?: number };
-          if (data?.bound_port) {
-            this.remotePorts.set(binding.credentialId, data.bound_port);
-          }
-        }
-      }).catch((err) => {
-        logger.warn("[JitDatabaseGateway] Remote gateway unreachable, falling back to local listener", {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (this.controlToken) headers.Authorization = `Bearer ${this.controlToken}`;
+        const res = await fetch(`${this.controlUrl}/v1/bindings`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            credential_id: binding.credentialId,
+            port: binding.port,
+            expires_at_ms: binding.expiresAt.getTime(),
+            allowed_networks: binding.allowedNetworks,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`remote gateway rejected binding with status ${res.status}`);
+        const data = await res.json() as { bound_port?: number };
+        const boundPort = data.bound_port ?? binding.port;
+        if (!boundPort) throw new Error("remote gateway did not return a bound port");
+        this.remotePorts.set(binding.credentialId, boundPort);
+        this.scheduleExpiry(binding.credentialId, binding.expiresAt);
+        return;
+      } catch (error) {
+        logger.warn("[JitDatabaseGateway] Remote gateway unavailable, falling back to local listener", {
           credentialId: binding.credentialId,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         this.remotePorts.delete(binding.credentialId);
-        this.bindLocal(binding, policy);
-      });
-      return;
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     this.bindLocal(binding, policy);
@@ -339,8 +338,11 @@ export class JitDatabaseGateway {
     if (this.remotePorts.has(credentialId)) {
       this.remotePorts.delete(credentialId);
       if (this.controlUrl) {
+        const headers: Record<string, string> = {};
+        if (this.controlToken) headers.Authorization = `Bearer ${this.controlToken}`;
         void fetch(`${this.controlUrl}/v1/bindings/${encodeURIComponent(credentialId)}`, {
           method: "DELETE",
+          headers,
         }).catch(() => {});
       }
     }

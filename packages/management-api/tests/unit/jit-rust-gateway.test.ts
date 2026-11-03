@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, type Subprocess } from "bun";
 import { JitDatabaseGateway } from "../../src/services/jit-database-gateway.service";
@@ -9,7 +10,11 @@ let proc: Subprocess | null = null;
 let upstreamListener: ReturnType<typeof Bun.listen> | null = null;
 let upstreamPort = 0;
 
+const binaryPath = join(repoRoot, "dist/supacloud-jit-gateway");
+const binaryAvailable = existsSync(binaryPath);
+
 beforeAll(async () => {
+  if (!binaryAvailable) return;
   // Start mock upstream echo server on an ephemeral port
   upstreamListener = Bun.listen({
     hostname: "127.0.0.1",
@@ -23,7 +28,6 @@ beforeAll(async () => {
   });
   upstreamPort = upstreamListener.port;
 
-  const binaryPath = join(repoRoot, "dist/supacloud-jit-gateway");
   proc = spawn({
     cmd: [binaryPath],
     env: {
@@ -62,11 +66,11 @@ afterAll(() => {
   if (upstreamListener) upstreamListener.stop(true);
 });
 
-describe("Native Rust JIT Database Gateway", () => {
+describe.skipIf(!binaryAvailable)("Native Rust JIT Database Gateway", () => {
   test("healthcheck returns healthy status and engine metadata", async () => {
     const res = await fetch(`http://127.0.0.1:${TEST_CONTROL_PORT}/healthcheck`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
+    const body = (await res.json()) as { status: string; engine: string };
     expect(body.status).toBe("healthy");
     expect(body.engine).toBe("supacloud-jit-gateway/rust");
   });
@@ -80,7 +84,7 @@ describe("Native Rust JIT Database Gateway", () => {
     );
 
     try {
-      gateway.bind({
+      await gateway.bind({
         credentialId: "rust-allowed",
         port: 0,
         expiresAt: new Date(Date.now() + 60_000),
@@ -119,7 +123,7 @@ describe("Native Rust JIT Database Gateway", () => {
       expect(echoed).toBe("tokio-postgres-stream");
 
       // Verify denied network rejects client
-      gateway.bind({
+      await gateway.bind({
         credentialId: "rust-denied",
         port: 0,
         expiresAt: new Date(Date.now() + 60_000),
@@ -164,7 +168,7 @@ describe("Native Rust JIT Database Gateway", () => {
     );
 
     try {
-      unreachableGateway.bind({
+      await unreachableGateway.bind({
         credentialId: "fallback-test",
         port: 0,
         expiresAt: new Date(Date.now() + 60_000),
