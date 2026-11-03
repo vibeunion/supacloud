@@ -269,9 +269,14 @@
       "signature": "export declare function createRoleSnapshotReport(roles: readonly {\n    role: string;\n    path: string;\n    source: string;\n}[]): GraphqlRoleSnapshotReport;"
     },
     {
+      "name": "DatabaseContractManifest",
+      "kind": "type",
+      "signature": "export interface DatabaseContractManifest {\n    readonly version: 1;\n    readonly role: string;\n    readonly fingerprint: string;\n    readonly inputs: Readonly<Record<string, string>>;\n    readonly migrationOrder: readonly string[];\n    readonly outputs: Readonly<Record<string, string>>;\n}"
+    },
+    {
       "name": "DatabaseContractsOptions",
       "kind": "type",
-      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes: string;\n    drizzleSchema: string;\n    role: string;\n    graphql: GraphqlOptions;\n    migrations: readonly string[];\n}"
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    drizzleSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    migrations: readonly string[];\n}"
     },
     {
       "name": "DatabaseGovernanceOptions",
@@ -887,6 +892,11 @@
       "name": "parseApplicationDevelopmentContext",
       "kind": "value",
       "signature": "export declare function parseApplicationDevelopmentContext(input: unknown): ApplicationDevelopmentContext;"
+    },
+    {
+      "name": "parseDatabaseContractManifest",
+      "kind": "value",
+      "signature": "export declare function parseDatabaseContractManifest(value: unknown): DatabaseContractManifest;"
     },
     {
       "name": "parseDatabaseContractsOptions",

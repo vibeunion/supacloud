@@ -25,6 +25,7 @@ test("single entry generates native read types, decoders and source/migration dr
     }, root);
     const result = await generateDatabaseContracts(options);
     expect(result.written).toContain("database.ts");
+    expect(result.manifest.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     const barrel = await readFile(join(root, "generated/database.ts"), "utf8");
     expect(barrel).toContain('export type { Database } from "../database.types"');
     expect(barrel).toContain('QueryData, QueryResult, QueryError');
@@ -94,4 +95,53 @@ void [rows, extra, wrong, row, invalidRow, result, invalidResult];`,
     });
     expect(ts.getPreEmitDiagnostics(program).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("uses only the protocols named in the configuration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "database-contracts-protocols-"));
+  try {
+    await writeFixtureProject(root, {
+      "database.types.ts": `export type Database = { public: { Tables: { orders: { Row: { id: string } } } } };`,
+      "schema.graphql": `type Query { health: String! }`,
+      "health.graphql": `query Health { health }`,
+      "db/schema.ts": `export const orders = { id: "uuid" };`,
+    });
+    expect(() => parseDatabaseContractsOptions({
+      rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
+    }, root)).toThrow("postgrestTypes, drizzleSchema, or graphql");
+
+    const postgrest = parseDatabaseContractsOptions({
+      rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
+      postgrestTypes: "database.types.ts",
+    }, root);
+    expect(postgrest.drizzleSchema).toBeUndefined();
+    expect(postgrest.graphql).toBeUndefined();
+    await generateDatabaseContracts(postgrest);
+    const postgrestBarrel = await readFile(join(root, "generated/database.ts"), "utf8");
+    expect(postgrestBarrel).toContain("export type { Database }");
+    expect(postgrestBarrel).not.toContain("DrizzleSchema");
+    expect(postgrestBarrel).not.toContain("./graphql");
+
+    const graphql = parseDatabaseContractsOptions({
+      rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
+      graphql: { schema: "schema.graphql", documents: ["*.graphql"] },
+    }, root);
+    await generateDatabaseContracts(graphql);
+    const graphqlBarrel = await readFile(join(root, "generated/database.ts"), "utf8");
+    expect(graphqlBarrel).toContain('export * from "./graphql"');
+    expect(graphqlBarrel).not.toContain("Database");
+    expect(await readFile(join(root, "generated/graphql.ts"), "utf8")).toContain("parseHealthQuery");
+
+    const drizzle = parseDatabaseContractsOptions({
+      rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
+      drizzleSchema: "db/schema.ts",
+    }, root);
+    await generateDatabaseContracts(drizzle);
+    const drizzleBarrel = await readFile(join(root, "generated/database.ts"), "utf8");
+    expect(drizzleBarrel).toContain("DrizzleSchema");
+    expect(drizzleBarrel).not.toContain("export type { Database }");
+    expect(drizzleBarrel).not.toContain("./graphql");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

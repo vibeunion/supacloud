@@ -85,6 +85,11 @@ attempts. The default policy requires `requireRouteEffects`,
 
 ## Unified Database Contracts
 
+Database contracts are protocol-aware: configure only the database sources the
+application uses (`postgrestTypes`, `drizzleSchema`, or `graphql`). The generated
+`database.manifest.json` is a TypeBox-validated, fingerprinted build boundary;
+consumers must reject it when its schema or migration fingerprint is stale.
+
 `supacloud-compiler database-contracts database-contracts.json` generates a shared
 type entry point while preserving PostgREST, Drizzle and GraphQL native types:
 
