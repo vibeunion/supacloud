@@ -87,9 +87,10 @@ describe("pgflow process adapter", () => {
   );
   test("installer is version locked, target bound and checksum protected", async () => {
     const migrations = await loadMigrations();
-    expect(migrations).toHaveLength(26);
-    expect(migrations.at(-2)?.version).toBe("supacloud_002");
-    expect(migrations.at(-1)?.version).toBe("supacloud_003");
+    expect(migrations).toHaveLength(27);
+    expect(migrations.at(-3)?.version).toBe("supacloud_002");
+    expect(migrations.at(-2)?.version).toBe("supacloud_003");
+    expect(migrations.at(-1)?.version).toBe("supacloud_004");
     const script = renderInstall(migrations, "fixture", "postgres");
     expect(script).toContain("pg_advisory_xact_lock");
     expect(script).toContain("PGFLOW_MIGRATION_CHECKSUM_MISMATCH");
@@ -125,7 +126,7 @@ describe("pgflow process adapter", () => {
         await Promise.all([install(), install()]);
         const [receipt] =
           await db`SELECT count(*)::int AS count FROM supacloud_worker.migrations`;
-        expect(receipt.count).toBe(26);
+        expect(receipt.count).toBe(27);
         await expect(install("wrong-project")).rejects.toThrow(
           "PGFLOW_INSTALLATION_BINDING_MISMATCH",
         );

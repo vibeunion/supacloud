@@ -170,7 +170,8 @@ ${COMMAND_PERSISTENCE_SQL}
 DO $backfill$
 DECLARE r record;
 BEGIN
-  FOR r IN SELECT * FROM supacloud_commands.execution_receipts
+  FOR r IN SELECT dispatch_key, tenant_id, actor_id, command, operation_key
+    FROM supacloud_commands.execution_receipts
     WHERE kind='external' AND status<>'rejected' AND (status<>'confirmed' OR audit_state<>'complete')
       AND NOT EXISTS(SELECT FROM supacloud_workflows.runs w WHERE w.id=dispatch_key)
   LOOP

@@ -42,7 +42,7 @@ BEGIN
   LOOP
     INSERT INTO supacloud_http.rate_limits(key, used, reset_at)
       VALUES (p_key, 1, '-infinity') ON CONFLICT DO NOTHING;
-    SELECT * INTO entry FROM supacloud_http.rate_limits WHERE key=p_key FOR UPDATE;
+    SELECT key, used, reset_at INTO entry FROM supacloud_http.rate_limits WHERE key=p_key FOR UPDATE;
     EXIT WHEN FOUND;
     -- Expiry pruning may remove a conflicting row before we acquire its lock.
   END LOOP;
@@ -79,7 +79,7 @@ export function createPostgresHttpPolicyStores(database: HttpPolicyDatabase): {
         throw new TypeError("Invalid rate limit window");
       }
       const [row] = await database.query(
-        "SELECT * FROM supacloud_http.consume_rate_limit($1,$2,$3)", [key, limit, windowMs],
+        "SELECT allowed, remaining, reset_at_ms FROM supacloud_http.consume_rate_limit($1,$2,$3)", [key, limit, windowMs],
       );
       if (!row || typeof row.allowed !== "boolean") throw new Error("Invalid rate limit storage result");
       return { allowed: row.allowed, remaining: Number(row.remaining), resetAt: Number(row.reset_at_ms) };

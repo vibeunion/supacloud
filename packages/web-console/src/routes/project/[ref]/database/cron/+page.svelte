@@ -44,8 +44,8 @@
   const projectRef = $derived(page.params.ref);
 
   const CRON_EXTENSION_SQL = `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') AS installed;`;
-  const JOBS_SQL = `SELECT * FROM cron.job ORDER BY jobid;`;
-  const RUNS_SQL = `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 50;`;
+  const JOBS_SQL = `SELECT jobid, schedule, command, nodename, nodeport, database, username, active, jobname FROM cron.job ORDER BY jobid;`;
+  const RUNS_SQL = `SELECT runid, jobid, job_pid, database, username, command, status, return_message, start_time, end_time FROM cron.job_run_details ORDER BY start_time DESC LIMIT 50;`;
 
   const cronQuery = createQuery(() => ({
     queryKey: ["database_cron", projectRef],

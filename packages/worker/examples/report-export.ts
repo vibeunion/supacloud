@@ -64,7 +64,7 @@ export function createReportExport(options: {
     max: group.database.handlerConnectionsPerReplica, connectionTimeout: 5, idleTimeout: 30,
   });
   async function request(id: string, connection: Pick<SQL, "unsafe"> = database): Promise<RequestRow> {
-    const rows = await connection.unsafe<RequestRow[]>("SELECT * FROM report_export_example.requests WHERE operation_id=$1::uuid", [id]);
+    const rows = await connection.unsafe<RequestRow[]>("SELECT operation_id, actor_id, tenant_id, source_id, revision, group_name, status, object_id, sha256, row_count FROM report_export_example.requests WHERE operation_id=$1::uuid", [id]);
     if (rows.length !== 1) throw new Error("REPORT_EXPORT_NOT_FOUND");
     return rows[0]!;
   }
