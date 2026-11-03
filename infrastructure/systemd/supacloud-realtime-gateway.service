@@ -1,0 +1,26 @@
+[Unit]
+Description=SupaCloud Native Realtime Push Gateway (Rust)
+Documentation=https://github.com/vibeunion/supacloud
+After=network-online.target supacloud.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=REALTIME_GATEWAY_BINARY=/usr/local/bin/supacloud-realtime-gateway
+Environment=REALTIME_BIND_HOST=0.0.0.0
+Environment=REALTIME_PORT=4000
+EnvironmentFile=-/etc/supabase/realtime-gateway.env
+EnvironmentFile=-/etc/supabase/management-api.env
+ExecStartPre=/bin/sh -ec 'test -x "$${REALTIME_GATEWAY_BINARY}"'
+ExecStart=/bin/sh -ec 'exec "$${REALTIME_GATEWAY_BINARY}"'
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+MemoryHigh=128M
+MemoryMax=256M
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
