@@ -291,6 +291,7 @@ async function serveVersionDownload(
     const lastModified = res.headers?.get('Last-Modified') || info.updated_at || info.created_at;
     if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
     setDownloadDisposition(query as Record<string, string | undefined>, filePath, set);
+    if (!res.body) return new Response(null, { status: 502 });
     return new Response(res.body);
 }
 
@@ -1020,7 +1021,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            return new Response(res.body);
+            if (!res.body) return new Response(null, { status: 502 });
+    return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
@@ -1073,7 +1075,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            return new Response(res.body);
+            if (!res.body) return new Response(null, { status: 502 });
+    return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
@@ -1202,7 +1205,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            return new Response(res.body);
+            if (!res.body) return new Response(null, { status: 502 });
+    return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
@@ -1484,7 +1488,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, no-store';
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            return new Response(res.body);
+            if (!res.body) return new Response(null, { status: 502 });
+    return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
