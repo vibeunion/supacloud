@@ -8,6 +8,7 @@ import {
   parseJournalEvent,
   projectLogFields,
   redactLogMessage,
+  localLogCollectorRunning,
   startLocalLogCollector,
   stopLocalLogCollector,
 } from "../../src/workers/local-log-collector.worker";
@@ -108,9 +109,9 @@ describe("LocalLogCollector", () => {
     try {
       config.logCollectorEngine = "vector";
       startLocalLogCollector();
-      // Internal collector should yield to standalone Vector
-      stopLocalLogCollector();
+      expect(localLogCollectorRunning()).toBe(false);
     } finally {
+      stopLocalLogCollector();
       config.logCollectorEngine = originalEngine;
     }
   });

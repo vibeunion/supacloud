@@ -2768,7 +2768,7 @@ install_vector_collector() {
         return 1
     }
 
-    install -m 640 "$vector_cfg_src" /etc/supabase/vector.yaml
+    install -m 640 "$vector_cfg_src" /etc/supabase/vector.toml
     install -m 644 "$vector_unit_src" /etc/systemd/system/supacloud-vector.service
     systemctl daemon-reload
     systemctl enable --now supacloud-vector
@@ -2781,7 +2781,7 @@ install_observability() {
     if [[ "${SUPACLOUD_LOGS_ENABLED:-true}" != "true" ]]; then
         log_info "Independent log collection is disabled by SUPACLOUD_LOGS_ENABLED=false"
         systemctl disable --now supacloud-victorialogs 2>/dev/null || true
-        rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.yaml
+        rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.toml
         return 0
     fi
 
@@ -2814,7 +2814,7 @@ install_observability() {
         install_vector_collector || return 1
     else
         systemctl disable --now supacloud-vector 2>/dev/null || true
-        rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.yaml
+        rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.toml
         log_info "VictoriaLogs runs as one native systemd service on 127.0.0.1:9428; SupaCloud performs internal log collection."
     fi
 

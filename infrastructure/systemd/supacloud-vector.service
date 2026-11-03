@@ -7,7 +7,7 @@ Wants=network-online.target supacloud-victorialogs.service
 [Service]
 Type=simple
 Environment=VECTOR_BINARY=/usr/local/bin/vector
-Environment=VECTOR_CONFIG=/etc/supabase/vector.yaml
+Environment=VECTOR_CONFIG=/etc/supabase/vector.toml
 EnvironmentFile=-/etc/supabase/vector.env
 ExecStartPre=/bin/sh -ec 'test -x "$${VECTOR_BINARY}"'
 ExecStart=/bin/sh -ec 'exec "$${VECTOR_BINARY}" --config "$${VECTOR_CONFIG}"'

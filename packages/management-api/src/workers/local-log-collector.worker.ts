@@ -360,6 +360,10 @@ export class LocalLogCollector {
 
 let collector: LocalLogCollector | null = null;
 
+export function localLogCollectorRunning(): boolean {
+  return collector !== null;
+}
+
 export function startLocalLogCollector(): void {
   if (!config.logsEnabled) return;
   if (config.logCollectorEngine === "vector") {

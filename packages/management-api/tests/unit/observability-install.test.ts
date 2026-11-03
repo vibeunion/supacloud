@@ -98,7 +98,7 @@ test("Vector log collector configuration and systemd unit are complete and valid
   expect(vectorConfig).toContain('application/stream+json');
 
   expect(vectorUnit).toContain('Description=SupaCloud Vector Log Collector');
-  expect(vectorUnit).toContain('Environment=VECTOR_CONFIG=/etc/supabase/vector.yaml');
+  expect(vectorUnit).toContain('Environment=VECTOR_CONFIG=/etc/supabase/vector.toml');
   expect(vectorUnit).toContain('ExecStart=/bin/sh -ec \'exec "$${VECTOR_BINARY}" --config "$${VECTOR_CONFIG}"\'');
 
   expect(installer).toContain('install_vector_collector');
