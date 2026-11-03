@@ -9,8 +9,9 @@ export interface ProjectS3Client {
   }>;
   file(key: string): {
     exists(): Promise<boolean>;
-    stat(): Promise<{ type: string }>;
+    stat(): Promise<{ type: string; size?: number }>;
     arrayBuffer(): Promise<ArrayBuffer>;
+    stream?(): ReadableStream;
     write(data: Uint8Array, options: { type: string }): Promise<unknown>;
     delete(): Promise<unknown>;
     presign(options: { method: "GET"; expiresIn: number }): string;
@@ -151,6 +152,14 @@ export class ProjectS3Driver implements StorageDriver {
       if (!(await file.exists())) return null;
       // S3File.type is a local Blob default, not the stored object's Content-Type.
       const metadata = await file.stat();
+      if (typeof file.stream === "function") {
+        return new Response(file.stream(), {
+          headers: {
+            'content-type': metadata.type || 'application/octet-stream',
+            ...(metadata.size !== undefined ? { 'content-length': String(metadata.size) } : {}),
+          },
+        });
+      }
       const bytes = await file.arrayBuffer();
       return new Response(bytes, { headers: { 'content-type': metadata.type || 'application/octet-stream', 'content-length': String(bytes.byteLength) } });
     });

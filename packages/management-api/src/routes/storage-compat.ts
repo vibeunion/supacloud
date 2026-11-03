@@ -285,13 +285,15 @@ async function serveVersionDownload(
     const contentEncoding = resolveContentEncoding(info);
     if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
     set.headers['Cache-Control'] = cacheControl;
-    set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+    const contentLength = res.headers?.get('Content-Length');
+    if (contentLength) set.headers['Content-Length'] = contentLength;
     const etag = res.headers?.get('ETag') || (info.id ? `"${String(info.id)}"` : undefined);
     if (etag) set.headers['ETag'] = etag;
     const lastModified = res.headers?.get('Last-Modified') || info.updated_at || info.created_at;
     if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
     setDownloadDisposition(query as Record<string, string | undefined>, filePath, set);
-    return new Response(await res.arrayBuffer());
+    if (!res.body) return new Response(null, { status: 502 });
+    return new Response(res.body);
 }
 
 async function requireVectorServiceRole(
@@ -1014,14 +1016,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             const rawCc = (info?.cache_control as string) || '3600';
             set.headers['Cache-Control'] = /^\d+$/.test(rawCc) ? `public, max-age=${rawCc}` : rawCc;
-            set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+            const contentLength = res.headers?.get('Content-Length');
+            if (contentLength) set.headers['Content-Length'] = contentLength;
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
             if (etag) set.headers['ETag'] = etag;
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(await res.arrayBuffer());
-            return newRes;
+            if (!res.body) return new Response(null, { status: 502 });
+            return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
@@ -1068,14 +1071,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const contentEncoding = resolveContentEncoding(info);
             if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, max-age=3600';
-            set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+            const contentLength = res.headers?.get('Content-Length');
+            if (contentLength) set.headers['Content-Length'] = contentLength;
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
             if (etag) set.headers['ETag'] = etag;
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(await res.arrayBuffer());
-            return newRes;
+            if (!res.body) return new Response(null, { status: 502 });
+            return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
@@ -1198,14 +1202,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const contentEncoding = resolveContentEncoding(info);
             if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, max-age=3600';
-            set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+            const contentLength = res.headers?.get('Content-Length');
+            if (contentLength) set.headers['Content-Length'] = contentLength;
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
             if (etag) set.headers['ETag'] = etag;
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(await res.arrayBuffer());
-            return newRes;
+            if (!res.body) return new Response(null, { status: 502 });
+            return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
@@ -1487,8 +1492,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (contentEncoding) set.headers['Content-Encoding'] = contentEncoding;
             set.headers['Cache-Control'] = 'private, no-store';
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(await res.arrayBuffer());
-            return newRes;
+            if (!res.body) return new Response(null, { status: 502 });
+            return new Response(res.body);
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }

@@ -233,7 +233,11 @@ export class JuiceFSDriver implements StorageDriver {
       const cleanKey = normalizeObjectKey(key);
       await createObjectParent(this.getBasePath(projectRef, bucket), cleanKey);
       const filePath = this.getBasePath(projectRef, bucket, cleanKey);
-      await Bun.write(filePath, await toUint8Array(data));
+      if (data instanceof ReadableStream) {
+        await Bun.write(filePath, data);
+      } else {
+        await Bun.write(filePath, await toUint8Array(data));
+      }
       return true;
     } catch (e: unknown) {
       logger.error("JuiceFS uploadFile error:", {
@@ -388,11 +392,10 @@ export class JuiceFSDriver implements StorageDriver {
   ): Promise<Response | null> {
     const file = Bun.file(this.getBasePath(projectRef, bucket, key));
     if (!(await file.exists())) return null;
-    const content = await file.arrayBuffer();
-    return new Response(content, {
+    return new Response(file.stream(), {
       headers: {
         "Content-Type": file.type || "application/octet-stream",
-        "Content-Length": String(content.byteLength),
+        "Content-Length": String(file.size),
       },
     });
   }
@@ -848,14 +851,12 @@ export class S3Driver implements StorageDriver {
       const file = s3.file(`${bucket}/${cleanFileName}`);
       if (!(await file.exists())) return null;
 
-      // Eagerly read content to avoid S3File stream consumption issues
-      // when the response body gets re-wrapped in route handlers
-      const content = await file.arrayBuffer();
+      const size = file.size;
       const contentType = file.type || "application/octet-stream";
-      return new Response(content, {
+      return new Response(file.stream(), {
         headers: {
           "Content-Type": contentType,
-          "Content-Length": String(content.byteLength),
+          ...(size !== undefined && size > 0 ? { "Content-Length": String(size) } : {}),
         },
       });
     } catch {
