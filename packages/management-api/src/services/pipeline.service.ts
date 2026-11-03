@@ -257,6 +257,12 @@ async function writeRuntimeConfig(row: Record<string, unknown>) {
   await chown(target, PIPELINE_CONTAINER_UID, PIPELINE_CONTAINER_UID);
 }
 
+const PIPELINE_COLUMNS = [
+  "id", "runtime_id", "project_ref", "name", "publication_name",
+  "destination_type", "destination_project_id", "destination_dataset_id",
+  "destination_secret_encrypted", "settings", "desired_state", "created_at", "updated_at",
+] as const;
+
 function publicPipeline(row: Record<string, unknown>, runtimeState?: string) {
   return {
     id: row.id,
@@ -274,7 +280,7 @@ function publicPipeline(row: Record<string, unknown>, runtimeState?: string) {
 export const pipelineService = {
   async list(ref: string) {
     await ensureSchema();
-    const rows = await sql`SELECT * FROM project_pipelines WHERE project_ref = ${ref} ORDER BY created_at DESC`;
+    const rows = await sql`SELECT ${sql.unsafe(PIPELINE_COLUMNS.join(", "))} FROM project_pipelines WHERE project_ref = ${ref} ORDER BY created_at DESC`;
     return { items: rows.map((row: Record<string, unknown>) => publicPipeline(row)), total: rows.length };
   },
 
@@ -292,7 +298,7 @@ export const pipelineService = {
           (${ref}, ${input.name}, ${input.publication_name}, ${input.destination.project_id}, ${input.destination.dataset_id},
            ${encryptSecretIfNeeded(input.destination.service_account_key)},
            ${JSON.stringify({ batch_wait_ms: input.batch_wait_ms, sync_workers: input.sync_workers, slot_recovery: input.slot_recovery, max_staleness_mins: input.destination.max_staleness_mins ?? null })}::jsonb)
-        RETURNING *
+        RETURNING ${sql.unsafe(PIPELINE_COLUMNS.join(", "))}
       `;
       return publicPipeline(row);
     } catch (error: unknown) {
@@ -303,7 +309,7 @@ export const pipelineService = {
 
   async find(ref: string, id: string) {
     await ensureSchema();
-    const [row] = await sql`SELECT * FROM project_pipelines WHERE project_ref = ${ref} AND id = ${id}`;
+    const [row] = await sql`SELECT ${sql.unsafe(PIPELINE_COLUMNS.join(", "))} FROM project_pipelines WHERE project_ref = ${ref} AND id = ${id}`;
     if (!row) throw new PipelineError("Pipeline not found", 404, "pipeline_not_found");
     const runtime = await runSystemctl("is-active", Number(row.runtime_id));
     return { row, public: publicPipeline(row, runtime.ok ? "running" : "stopped") };
@@ -322,7 +328,7 @@ export const pipelineService = {
     const desiredState = action === "stop" ? "stopped" : "running";
     const [row] = await sql`
       UPDATE project_pipelines SET desired_state = ${desiredState}, updated_at = now()
-      WHERE project_ref = ${ref} AND id = ${id} RETURNING *
+      WHERE project_ref = ${ref} AND id = ${id} RETURNING ${sql.unsafe(PIPELINE_COLUMNS.join(", "))}
     `;
     return publicPipeline(row, desiredState === "running" ? "running" : "stopped");
   },
