@@ -702,8 +702,77 @@ jobs:
           node --check .github/scripts/recover-edge-runtime-release.mjs
           node --test .github/scripts/recover-edge-runtime-release.test.mjs
 
+  reylo-contracts:
+    name: Reylo Contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore Bun package cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('packages/management-api/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
+      - name: Install Management API dependencies
+        run: bash scripts/prepare_management_api_dependencies.sh
+
+      - name: Initialize control-plane schema
+        working-directory: packages/management-api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          MASTER_TOKEN: ci-reylo-master-token-0123456789abcdef
+          JWT_SECRET: ci-reylo-jwt-secret-0123456789abcdef
+          SECRETS_ENCRYPTION_KEY: ci-reylo-encryption-key-0123456789abcdef
+          SUPAOAUTH_BFF_SIGNING_SECRET: ci-reylo-bff-signing-secret-0123456789abcdef
+          DASHBOARD_PASSWORD: ci-reylo-dashboard-password-0123456789abcdef
+        run: bun src/db/init.ts
+
+      - name: Generate Reylo contract cache
+        working-directory: packages/management-api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun run reylo:contracts
+
+      - name: Verify live control-plane queries
+        working-directory: packages/management-api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun run reylo:test
+
+      - name: Upload Reylo contract cache
+        uses: actions/upload-artifact@v7
+        with:
+          name: management-api-reylo-${{ github.sha }}
+          path: packages/management-api/.reylo
+          if-no-files-found: error
+          retention-days: 1
+
   unit-test:
     name: Unit Tests
+    needs: reylo-contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -748,6 +817,12 @@ jobs:
       - name: Enforce canonical SQL module coverage
         working-directory: packages/management-api
         run: bun run test:sql-modules
+
+      - name: Download Reylo contract cache
+        uses: actions/download-artifact@v7
+        with:
+          name: management-api-reylo-${{ github.sha }}
+          path: packages/management-api/.reylo
 
       - name: Compile management API
         working-directory: packages/management-api
@@ -1343,6 +1418,7 @@ jobs:
       - supacloud-lite-standalone-native
       - application-activation-native
       - docker-and-scripts-checks
+      - reylo-contracts
       - unit-test
       - postgres-18-compatibility
       - integration-test
@@ -1365,6 +1441,7 @@ jobs:
           SUPACLOUD_LITE_STANDALONE: ${{ needs.supacloud-lite-standalone-native.result }}
           APPLICATION_ACTIVATION_NATIVE: ${{ needs.application-activation-native.result }}
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
+          REYLO_CONTRACTS: ${{ needs.reylo-contracts.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
           INTEGRATION_TESTS: ${{ needs.integration-test.result }}
@@ -1383,6 +1460,7 @@ jobs:
             "$SUPACLOUD_LITE_STANDALONE" \
             "$APPLICATION_ACTIVATION_NATIVE" \
             "$DOCKER_AND_SCRIPTS" \
+            "$REYLO_CONTRACTS" \
             "$UNIT_TESTS" \
             "$POSTGRES_18" \
             "$INTEGRATION_TESTS" \
@@ -1399,7 +1477,7 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    needs: [required-checks]
+    needs: [required-checks, reylo-contracts]
     runs-on: ubuntu-24.04
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 
@@ -1458,6 +1536,12 @@ jobs:
       - name: Install dependencies
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
+
+      - name: Download Reylo contract cache
+        uses: actions/download-artifact@v7
+        with:
+          name: management-api-reylo-${{ github.sha }}
+          path: packages/management-api/.reylo
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
