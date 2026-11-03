@@ -130,7 +130,7 @@ async function projectExists(ref: string): Promise<boolean> {
 
 async function organizationOrThrow(ref: string, organizationId: string) {
   const [row] = await sql`
-    SELECT * FROM project_business_organizations
+    SELECT id, project_ref, name, slug, description, branding, jit_enabled, jit_domains, created_by, created_at, updated_at FROM project_business_organizations
     WHERE project_ref = ${ref} AND id = ${organizationId}
   `;
   if (!row) throw new NotFoundError("Business organization", organizationId);
@@ -226,7 +226,7 @@ async function organizationMember(
   userId: string,
 ) {
   const [member] = await database`
-    SELECT * FROM project_business_organization_members
+    SELECT id, organization_id, user_id, role, created_at, updated_at FROM project_business_organization_members
     WHERE organization_id = ${organizationId} AND user_id = ${userId}
     FOR UPDATE
   `;
@@ -235,7 +235,7 @@ async function organizationMember(
 
 async function organizationMemberByKey(database: SQL, organizationId: string, memberKey: string) {
   const [member] = await database`
-    SELECT * FROM project_business_organization_members
+    SELECT id, organization_id, user_id, role, created_at, updated_at FROM project_business_organization_members
     WHERE organization_id = ${organizationId}
       AND (id::text = ${memberKey} OR user_id = ${memberKey})
     FOR UPDATE
@@ -248,7 +248,7 @@ async function updateOrganizationMemberRole(database: SQL, memberId: string, rol
     UPDATE project_business_organization_members
     SET role = ${role}, updated_at = NOW()
     WHERE id = ${memberId}
-    RETURNING *
+    RETURNING id, organization_id, user_id, role, created_at, updated_at
   `;
   if (!updatedMember) throw new ConflictError("Organization membership changed concurrently");
   return updatedMember as Record<string, unknown>;
@@ -277,7 +277,7 @@ async function mutateOrganizationMember(
   const [member] = await database`
     INSERT INTO project_business_organization_members (organization_id, user_id, role)
     VALUES (${organizationId}, ${userId}, ${role})
-    RETURNING *
+    RETURNING id, organization_id, user_id, role, created_at, updated_at
   `;
   return { member, eventType: "organization.member_added" } as OrganizationMemberMutation;
 }
@@ -322,7 +322,7 @@ export const projectOrganizationService = {
     const search = input.search?.trim() || null;
     const applicationId = input.application_id?.trim() || null;
     const rows = await sql`
-      SELECT o.*,
+      SELECT o.id, o.project_ref, o.name, o.slug, o.description, o.branding, o.jit_enabled, o.jit_domains, o.created_by, o.created_at, o.updated_at,
              COUNT(*) OVER()::int AS total,
              (SELECT COUNT(*)::int FROM project_business_organization_members m WHERE m.organization_id = o.id) AS member_count,
              (SELECT COUNT(*)::int FROM project_business_organization_applications a WHERE a.organization_id = o.id) AS application_count
@@ -359,7 +359,7 @@ export const projectOrganizationService = {
           ) VALUES (
             ${ref}, ${name}, ${slug}, ${input.description ?? null}, ${input.branding ?? {}}::jsonb,
             ${input.jit_enabled ?? false}, ${jitDomains}, ${actor}
-          ) RETURNING *
+          ) RETURNING id, project_ref, name, slug, description, branding, jit_enabled, jit_domains, created_by, created_at, updated_at
         `;
         await enqueueWebhookEventInTransaction(transaction, {
           projectRef: ref,
@@ -402,7 +402,7 @@ export const projectOrganizationService = {
           jit_domains = CASE WHEN ${jitDomains !== null} THEN ${jitDomains} ELSE jit_domains END,
           updated_at = NOW()
         WHERE project_ref = ${ref} AND id = ${organizationId}
-        RETURNING *
+        RETURNING id, project_ref, name, slug, description, branding, jit_enabled, jit_domains, created_by, created_at, updated_at
       `;
       return row;
     } catch (error: unknown) {
@@ -426,7 +426,7 @@ export const projectOrganizationService = {
     const [row] = await sql`
       DELETE FROM project_business_organizations
       WHERE project_ref = ${ref} AND id = ${organizationId}
-      RETURNING *
+      RETURNING id, project_ref, name, slug, description, branding, jit_enabled, jit_domains, created_by, created_at, updated_at
     `;
     return row;
   },
@@ -434,7 +434,7 @@ export const projectOrganizationService = {
   async listMembers(ref: string, organizationId: string) {
     await organizationOrThrow(ref, organizationId);
     const rows = await sql`
-      SELECT * FROM project_business_organization_members
+      SELECT id, organization_id, user_id, role, created_at, updated_at FROM project_business_organization_members
       WHERE organization_id = ${organizationId}
       ORDER BY created_at ASC
     `;
@@ -445,7 +445,7 @@ export const projectOrganizationService = {
     if (!(await projectExists(ref))) throw new NotFoundError("Project", ref);
     await assertGoTrueUser(ref, userId);
     const rows = await sql`
-      SELECT o.*, membership.role AS member_role, membership.created_at AS joined_at
+      SELECT o.id, o.project_ref, o.name, o.slug, o.description, o.branding, o.jit_enabled, o.jit_domains, o.created_by, o.created_at, o.updated_at, membership.role AS member_role, membership.created_at AS joined_at
       FROM project_business_organizations o
       JOIN project_business_organization_members membership
         ON membership.organization_id = o.id
@@ -509,7 +509,7 @@ export const projectOrganizationService = {
         DELETE FROM project_business_organization_members
         WHERE organization_id = ${organizationId}
           AND (id::text = ${memberKey} OR user_id = ${memberKey})
-        RETURNING *
+        RETURNING id, organization_id, user_id, role, created_at, updated_at
       `;
       if (!member) throw new NotFoundError("Organization member", memberKey);
       await enqueueWebhookEventInTransaction(transaction, {
@@ -533,7 +533,7 @@ export const projectOrganizationService = {
   async listInvitations(ref: string, organizationId: string) {
     await organizationOrThrow(ref, organizationId);
     const rows = await sql`
-      SELECT *, CASE WHEN status = 'pending' AND expires_at <= NOW() THEN 'expired' ELSE status END AS effective_status
+      SELECT id, organization_id, email, role, token_hash, status, invited_by, accepted_user_id, expires_at, accepted_at, created_at, updated_at, CASE WHEN status = 'pending' AND expires_at <= NOW() THEN 'expired' ELSE status END AS effective_status
       FROM project_business_organization_invitations
       WHERE organization_id = ${organizationId}
       ORDER BY created_at DESC
@@ -555,14 +555,14 @@ export const projectOrganizationService = {
           organization_id, email, role, token_hash, invited_by, expires_at
         ) VALUES (${input.organizationId}, ${email}, ${normalized}, ${tokenHash}, ${input.actor}, ${expiresAt})
         ON CONFLICT DO NOTHING
-        RETURNING *
+        RETURNING id, organization_id, email, role, token_hash, status, invited_by, accepted_user_id, expires_at, accepted_at, created_at, updated_at
       `;
       const [invitation] = inserted.length > 0 ? inserted : await transaction`
         UPDATE project_business_organization_invitations
         SET role = ${normalized}, token_hash = ${tokenHash}, invited_by = ${input.actor},
             expires_at = ${expiresAt}, updated_at = NOW()
         WHERE organization_id = ${input.organizationId} AND lower(email) = ${email} AND status = 'pending'
-        RETURNING *
+        RETURNING id, organization_id, email, role, token_hash, status, invited_by, accepted_user_id, expires_at, accepted_at, created_at, updated_at
       `;
       await enqueueWebhookEventInTransaction(transaction, {
         projectRef: input.ref,
@@ -587,7 +587,7 @@ export const projectOrganizationService = {
     await organizationOrThrow(input.ref, input.organizationId);
     return sql.begin(async (tx) => {
       const [invitation] = await tx`
-        SELECT * FROM project_business_organization_invitations
+        SELECT id, organization_id, email, role, token_hash, status, invited_by, accepted_user_id, expires_at, accepted_at, created_at, updated_at FROM project_business_organization_invitations
         WHERE organization_id = ${input.organizationId} AND id = ${input.invitationId}
         FOR UPDATE
       `;
@@ -604,7 +604,7 @@ export const projectOrganizationService = {
         VALUES (${input.organizationId}, ${input.principal.id}, ${invitation.role})
         ON CONFLICT (organization_id, user_id)
         DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
-        RETURNING *
+        RETURNING id, organization_id, user_id, role, created_at, updated_at
       `;
       await tx`
         UPDATE project_business_organization_invitations
@@ -635,7 +635,7 @@ export const projectOrganizationService = {
       UPDATE project_business_organization_invitations
       SET status = 'revoked', updated_at = NOW()
       WHERE organization_id = ${organizationId} AND id = ${invitationId} AND status = 'pending'
-      RETURNING *
+      RETURNING id, organization_id, email, role, token_hash, status, invited_by, accepted_user_id, expires_at, accepted_at, created_at, updated_at
     `;
     if (!row) throw new NotFoundError("Active organization invitation", invitationId);
     const { token_hash: _tokenHash, ...publicRow } = row;
@@ -645,7 +645,7 @@ export const projectOrganizationService = {
   async listApplications(ref: string, organizationId: string) {
     await organizationOrThrow(ref, organizationId);
     const rows = await sql`
-      SELECT * FROM project_business_organization_applications
+      SELECT id, organization_id, application_id, created_by, created_at FROM project_business_organization_applications
       WHERE organization_id = ${organizationId}
       ORDER BY created_at ASC
     `;
@@ -659,7 +659,7 @@ export const projectOrganizationService = {
       INSERT INTO project_business_organization_applications (organization_id, application_id, created_by)
       VALUES (${organizationId}, ${applicationId}, ${actor})
       ON CONFLICT (organization_id, application_id) DO UPDATE SET application_id = EXCLUDED.application_id
-      RETURNING *
+      RETURNING id, organization_id, application_id, created_by, created_at
     `;
     return row;
   },
@@ -669,7 +669,7 @@ export const projectOrganizationService = {
     const [row] = await sql`
       DELETE FROM project_business_organization_applications
       WHERE organization_id = ${organizationId} AND application_id = ${applicationId}
-      RETURNING *
+      RETURNING id, organization_id, application_id, created_by, created_at
     `;
     if (!row) throw new NotFoundError("Organization application binding", applicationId);
     return row;
