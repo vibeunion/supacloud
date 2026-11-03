@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.5](https://github.com/vibeunion/supacloud/compare/db-v0.20.4...db-v0.20.5) (2026-11-03)
+
+
+### Elegance & Refactoring
+
+* **db:** name command receipt recovery columns ([#2405](https://github.com/vibeunion/supacloud/issues/2405)) ([80bbcd5](https://github.com/vibeunion/supacloud/commit/80bbcd538db054fe75d3212bd2b3f2b5e85c9be0))
+
 ## [0.20.4](https://github.com/vibeunion/supacloud/compare/db-v0.20.3...db-v0.20.4) (2026-11-02)
 
 

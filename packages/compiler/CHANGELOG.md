@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.54.0...compiler-v0.55.0) (2026-11-03)
+
+
+### Features
+
+* **contracts:** establish strict database and task API boundaries ([#2414](https://github.com/vibeunion/supacloud/issues/2414)) ([391aba9](https://github.com/vibeunion/supacloud/commit/391aba9dd0ef70364c066714c2045f6dc5dcdbb3))
+
 ## [0.54.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.53.1...compiler-v0.54.0) (2026-11-02)
 
 

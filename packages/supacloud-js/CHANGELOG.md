@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.46.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.5...supacloud-js-v0.46.0) (2026-11-03)
+
+
+### Features
+
+* **sdk:** add pluggable Realtime Channel adapter to supacloud-js ([#2381](https://github.com/vibeunion/supacloud/issues/2381)) ([d243f6d](https://github.com/vibeunion/supacloud/commit/d243f6db98a555804db72d756d8f321e33c31222))
+
+
+### Miscellaneous Chores
+
+* **esm:** drop legacy node 22 compatibility and optimize acceptance timeouts ([#2419](https://github.com/vibeunion/supacloud/issues/2419)) ([f786c78](https://github.com/vibeunion/supacloud/commit/f786c7885e3801571b0bbc0c389c488773385545))
+
 ## [0.45.5](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.45.4...supacloud-js-v0.45.5) (2026-10-31)
 
 

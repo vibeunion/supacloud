@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/vibeunion/supacloud/compare/query-v0.5.2...query-v0.5.3) (2026-11-03)
+
+
+### Miscellaneous Chores
+
+* **esm:** drop legacy node 22 compatibility and optimize acceptance timeouts ([#2419](https://github.com/vibeunion/supacloud/issues/2419)) ([f786c78](https://github.com/vibeunion/supacloud/commit/f786c7885e3801571b0bbc0c389c488773385545))
+
 ## [0.5.2](https://github.com/vibeunion/supacloud/compare/query-v0.5.1...query-v0.5.2) (2026-10-31)
 
 

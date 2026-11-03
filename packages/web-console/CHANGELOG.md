@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.55.1...web-console-v0.55.2) (2026-11-03)
+
+
+### Elegance & Refactoring
+
+* **web-console:** name pg_cron page columns ([#2410](https://github.com/vibeunion/supacloud/issues/2410)) ([18d36dc](https://github.com/vibeunion/supacloud/commit/18d36dc2d1626197dc0308e1d0805f3aa5e0ab75))
+
 ## [0.55.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.55.0...web-console-v0.55.1) (2026-11-02)
 
 
