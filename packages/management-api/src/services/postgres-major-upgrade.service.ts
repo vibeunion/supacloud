@@ -347,8 +347,17 @@ async function runExecutor(action: "preflight" | "execute" | "rollback", id: str
   }
 }
 
+const POSTGRES_MAJOR_UPGRADE_COLUMNS = [
+  "id", "requested_project_ref", "scope", "current_major", "target_major", "status", "strategy",
+  "preflight", "backup_id", "backup_evidence", "scope_snapshot", "executor_evidence",
+  "error_code", "error_message", "approved_at", "started_at", "completed_at",
+  "lease_owner", "lease_token", "lease_expires_at", "heartbeat_at", "fencing_epoch",
+  "rollback_requested_at", "created_at", "updated_at",
+] as const;
+const postgresMajorUpgradeColumns = POSTGRES_MAJOR_UPGRADE_COLUMNS.join(", ");
+
 async function readUpgrade(id: string) {
-  const [row] = await sql`SELECT * FROM postgres_major_upgrades WHERE id = ${id} LIMIT 1`;
+  const [row] = await sql`SELECT ${sql.unsafe(postgresMajorUpgradeColumns)} FROM postgres_major_upgrades WHERE id = ${id} LIMIT 1`;
   if (!row) throw new PostgresMajorUpgradeError("PostgreSQL upgrade was not found", 404, "postgres_upgrade_not_found");
   return row as Record<string, unknown>;
 }
@@ -385,7 +394,7 @@ async function transition(
         updated_at = now()
     WHERE id = ${id} AND status = ${previous}
       AND (${expectedLeaseToken ?? null}::uuid IS NULL OR lease_token = ${expectedLeaseToken ?? null}::uuid)
-    RETURNING *
+    RETURNING ${sql.unsafe(postgresMajorUpgradeColumns)}
   `;
   if (!updated) throw new PostgresMajorUpgradeError("PostgreSQL upgrade changed concurrently", 409, "postgres_upgrade_conflict");
   return updated;
@@ -752,7 +761,7 @@ export const postgresMajorUpgradeService = {
   async get(ref: string) {
     await ensureSchema();
     const [row] = await sql`
-      SELECT * FROM postgres_major_upgrades
+      SELECT ${sql.unsafe(postgresMajorUpgradeColumns)} FROM postgres_major_upgrades
       ORDER BY created_at DESC LIMIT 1
     `;
     if (!row) {
