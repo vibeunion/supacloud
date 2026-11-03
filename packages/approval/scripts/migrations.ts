@@ -30,6 +30,7 @@ export async function loadApprovalMigrations(): Promise<readonly ApprovalMigrati
     { version: '015', sql: await Bun.file(new URL('../sql/015-explicit-page-columns.sql', import.meta.url)).text() },
     { version: '016', sql: await Bun.file(new URL('../sql/016-explicit-graph-terminal.sql', import.meta.url)).text() },
     { version: '017', sql: await Bun.file(new URL('../sql/017-explicit-notice-columns.sql', import.meta.url)).text() },
+    { version: '018', sql: await Bun.file(new URL('../sql/018-explicit-unpinned-rows.sql', import.meta.url)).text() },
   ];
 }
 
