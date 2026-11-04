@@ -1790,15 +1790,18 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
   const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true })
     .use(contextPlugin(options.http).as("global"));
   if (options.documentation) app.use(createDocumentationPlugin(options.documentation));
-  const configuredContextFactory = options.requestContext ?? defaultRequestContext;
-  const contextCache = new WeakMap<Request, unknown | Promise<unknown>>();
-  const ctxFactory: HttpRequestContextFactory<Http> = (request, context, signal) => {
-    if (contextCache.has(request)) return contextCache.get(request);
-    const value = configuredContextFactory(request, context, signal);
-    const cached = isPromiseLike(value) ? Promise.resolve(value) : value;
-    contextCache.set(request, cached);
-    return cached;
-  };
+  const ctxFactory: HttpRequestContextFactory<Http> = options.requestContext === undefined
+    ? defaultRequestContext
+    : (() => {
+      const contextCache = new WeakMap<Request, unknown | Promise<unknown>>();
+      return (request, context, signal) => {
+        if (contextCache.has(request)) return contextCache.get(request);
+        const value = options.requestContext!(request, context, signal);
+        const cached = isPromiseLike(value) ? Promise.resolve(value) : value;
+        contextCache.set(request, cached);
+        return cached;
+      };
+    })();
   const imported: Record<string, Record<string, unknown>> = {};
   const moduleServices: Array<{ module: CompiledModule; services: Record<string, unknown> }> = [];
 
@@ -1808,7 +1811,14 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
     moduleServices.push({ module, services });
     // The root owns shared HTTP hooks; mounting them again on each module
     // duplicates anonymous global hooks in Elysia 2.
-    app.use(createModulePlugin(module, services, ctxFactory, { ...options, http: undefined }, imported, pendingWork));
+    app.use(createModulePlugin(
+      module,
+      services,
+      ctxFactory,
+      { ...options, http: undefined },
+      imported,
+      options.pendingWork ? pendingWork : undefined,
+    ));
   }
 
   let initialized = false;
