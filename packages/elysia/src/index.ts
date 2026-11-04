@@ -142,6 +142,10 @@ export interface CompiledRoute {
       context?: unknown;
     },
   ) => Promise<unknown> | unknown;
+  /** Compiler-emitted Elysia-context invoker for routes without SupaCloud stages. */
+  directInvoker?: (controller: unknown, context: unknown) => Promise<unknown> | unknown;
+  /** Compiler-selected execution plan. Older artifacts default to the full pipeline. */
+  executionMode?: "direct" | "pipeline";
   /** Class name of the @Command explicitly bound to this route. */
   command?: string;
   /** Transport-level idempotency contract, independent of route command binding. */
@@ -1325,8 +1329,15 @@ export function createModulePlugin<
     : (options.commandExecutor ?? governanceExecutor);
   const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
 
-  const plugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true)
-    .derive((context) => {
+  const needsRequestState = options.requestContext !== undefined
+    || options.pendingWork !== undefined
+    || options.httpPolicies !== undefined
+    || options.onExecution !== undefined
+    || compiled.createRequestScope !== undefined
+    || compiled.aspectPipeline !== undefined
+    || compiled.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
+  const basePlugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true);
+  const plugin = needsRequestState ? basePlugin.derive((context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
       let complete: (() => void) | undefined;
       try {
@@ -1346,11 +1357,11 @@ export function createModulePlugin<
       };
       const requestContext = ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
       return isPromiseLike(requestContext) ? requestContext.then(finish) : finish(requestContext);
-    });
+    }) : basePlugin;
 
   const createRequestScope = compiled.createRequestScope;
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
-  plugin.onAfterResponse(async ({ request }) => {
+  if (needsRequestState) plugin.onAfterResponse(async ({ request }) => {
     const scope = requestScopes.get(request);
     requestScopes.delete(request);
     try {
@@ -1490,6 +1501,14 @@ export function createModulePlugin<
       }
 
       const handler = async (ctx: HttpContext) => {
+        // The compiler marks routes that have no SupaCloud execution stages.
+        // Let Elysia's AOT decoder feed the generated positional handler
+        // directly; do not allocate the generic input envelope or enter the
+        // aspect/command pipeline for this route.
+        if (route.executionMode === "direct" && route.directInvoker
+          && policies.length === 0 && responsePolicies.length === 0 && mappingPolicies.length === 0) {
+          return route.directInvoker(services[controller.serviceKey], ctx);
+        }
         const requestContext = requestContexts.get(ctx.request);
         const execute = async () => {
           const requestScope = createRequestScope
