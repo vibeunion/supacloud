@@ -94,14 +94,6 @@ export type {
 } from "./documentation";
 export { createSupaCloudFramework } from "./framework";
 export type { SupaCloudFrameworkOptions } from "./framework";
-export { createBunNativeApplication } from "./bun-native";
-export type {
-  BunNativeApplication,
-  BunNativeApplicationOptions,
-  BunNativeRequestContextFactory,
-  BunNativeServeOptions,
-  BunNativeServer,
-} from "./bun-native";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
@@ -212,8 +204,6 @@ export interface CompiledController {
 
 export interface CompiledModule {
   name: string;
-  /** Compiler-selected HTTP execution path; absent on older descriptors. */
-  runtimeMode?: "native" | "aot";
   createServices(
     deps: Record<string, unknown>,
     imported: Record<string, Record<string, unknown>>,

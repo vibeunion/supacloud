@@ -23,8 +23,6 @@ if (requestIdMode !== "provided" && requestIdMode !== "generated") {
 const output = options.output ? resolve(process.cwd(), options.output) : undefined;
 const allAdapters = [
   { id: "supacloud-elysia-bun", label: "SupaCloud compiled adapter / Elysia 2 / Bun (generated invoker)", runtime: "bun", validation: "TypeBox native route schema" },
-  { id: "supacloud-bun-aot", label: "SupaCloud full parity / Bun.serve + Elysia AOT", runtime: "bun", validation: "TypeBox native route schema" },
-  { id: "supacloud-bun-native", label: "SupaCloud native HTTP core / Bun.serve", runtime: "bun", validation: "TypeBox core route schema" },
   { id: "express", label: "Express", runtime: "node", validation: "TypeBox Value.Check middleware" },
   { id: "fastify", label: "Fastify", runtime: "node", validation: "TypeBox JSON Schema / Ajv" },
   { id: "nestjs-express", label: "NestJS / Express", runtime: "node", validation: "TypeBox pipe" },
@@ -280,12 +278,10 @@ function summarize(samples) {
 function buildComparisons(rows) {
   return scenarios.map((scenario) => {
     const forScenario = rows.filter((row) => row.scenario === scenario.id);
-    const supacloud = forScenario.find((row) => row.adapter === "supacloud-bun-aot")?.summary
-      ?? forScenario.find((row) => row.adapter === "supacloud-bun-native")?.summary
-      ?? forScenario.find((row) => row.adapter === "supacloud-elysia-bun")?.summary;
+    const supacloud = forScenario.find((row) => row.adapter === "supacloud-elysia-bun")?.summary;
     const nativeElysia = forScenario.find((row) => row.adapter === "elysia-native-contract-bun")?.summary;
     const nativeBareElysia = forScenario.find((row) => row.adapter === "elysia-native-bare-bun")?.summary;
-    const native = forScenario.filter((row) => !["supacloud-elysia-bun", "supacloud-bun-aot", "supacloud-bun-native", "elysia-native-contract-bun", "elysia-native-bare-bun"].includes(row.adapter));
+    const native = forScenario.filter((row) => !["supacloud-elysia-bun", "elysia-native-contract-bun", "elysia-native-bare-bun"].includes(row.adapter));
     const fastestNative = native.reduce((best, row) => !best || row.summary.requestsPerSecondMedian > best.summary.requestsPerSecondMedian ? row : best, undefined);
     return {
       scenario: scenario.id,

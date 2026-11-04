@@ -7,11 +7,6 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    "./bun": {
-      "types": "./dist/bun-native.d.ts",
-      "import": "./dist/bun-native.js",
-      "default": "./dist/bun-native.js"
-    },
     "./bun-aot": {
       "types": "./dist/bun-aot.d.ts",
       "import": "./dist/bun-aot.js",
@@ -33,7 +28,7 @@
   "scripts": {
     "generate:example": "bun src/generate-webhook-example.ts",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/bun-native.ts src/bun-aot.ts --outdir dist --target node --external elysia --external effect --external jose --external @supacloud/app --external @supacloud/db --external @supacloud/contracts --external @supacloud/commands",
+    "build:js": "bun build src/index.ts src/bun-aot.ts --outdir dist --target node --external elysia --external effect --external jose --external @supacloud/app --external @supacloud/db --external @supacloud/contracts --external @supacloud/commands",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",

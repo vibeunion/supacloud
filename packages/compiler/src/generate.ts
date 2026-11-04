@@ -170,7 +170,6 @@ export interface CompiledController {
 
 export interface CompiledModule {
   name: string;
-  runtimeMode?: "native" | "aot";
   createServices(
     deps: Record<string, unknown>,
     imported: Record<string, Record<string, unknown>>,
@@ -708,7 +707,6 @@ class ModuleGenerator {
     const lines: string[] = [
       `{`,
       `  name: ${JSON.stringify(this.module.name)} as const,`,
-      `  runtimeMode: ${JSON.stringify(this.runtimeMode())},`,
       `  createServices: create${this.pascal}Services,`,
     ];
     if (this.hasApplicationLifecycle("init")) {
@@ -736,30 +734,6 @@ class ModuleGenerator {
     return lines.join("\n");
   }
 
-  private runtimeMode(): "native" | "aot" {
-    const hasAdvancedRoute = this.module.controllers.some((controller) =>
-      controller.scope !== "application"
-      || controller.routes.some((route) => route.command !== undefined
-        || route.aspects?.length
-        || route.data?.httpPolicies !== undefined
-        || route.responses !== undefined
-        || route.response !== undefined
-        || route.nativeResponse === true
-        || route.parse === "none"
-        || route.allowDeleteBody === true
-        || route.cookie !== undefined
-        || route.contract?.response === "binary"
-        || route.contract?.response === "stream"),
-    );
-    const hasLifecycle = this.module.controllers.some((controller) => controller.hasOnInit || controller.hasOnDestroy)
-      || this.module.providers.some((provider) => provider.hasOnInit || provider.hasOnDestroy);
-    return this.module.commands.length > 0
-      || (this.module.jobs?.length ?? 0) > 0
-      || this.module.aspects?.length
-      || hasAdvancedRoute
-      || hasLifecycle
-      ? "aot" : "native";
-  }
 
   private hasFactoryContent(kind: Exclude<FactoryKind, "services">): boolean {
     return (
