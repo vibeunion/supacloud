@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { databaseSources } from "@supacloud/db/source-contracts";
@@ -95,6 +95,7 @@ export async function createDeliveryWorker(...args: Parameters<typeof original>)
       await Promise.all(created.map(path => rm(path, { force: true })));
       // This fixture temporarily branched from the baseline; restore its exact
       // contracts along with its sources, never regenerate rewritten history.
+      await mkdir(contractsRoot, { recursive: true });
       for (const name of await readdir(contractsRoot)) {
         if (!originalContracts.has(name)) await rm(join(contractsRoot, name));
       }

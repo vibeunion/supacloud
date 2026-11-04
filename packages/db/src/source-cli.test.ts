@@ -19,8 +19,8 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   await compileModel(join(project, "zenstack/schema.zmodel"), join(project, "zenstack/generated"));
   await mkdir(packed);
   const built = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts"), resolve(import.meta.dir, "typescript.ts")],
-    outdir: packed, target: "node", external: ["libpg-query", "typescript", "typescript/*", "@zenstackhq/language", "@zenstackhq/sdk", resolve(import.meta.dir, "typescript.ts")],
+    entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts")],
+    outdir: packed, target: "node", external: ["libpg-query", "typescript", "typescript/*", "@zenstackhq/language", "@zenstackhq/sdk"],
   });
   expect(built.success).toBe(true);
   await writeFile(join(packed, "package.json"), JSON.stringify({

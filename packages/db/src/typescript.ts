@@ -5,7 +5,8 @@ import { API, type Program as NativeProgram, type Snapshot, type Diagnostic as N
   type RawCompilerOptions, type ProjectReference, type TranspileOptions,
   type Symbol as NativeSymbol, type ParsedCommandLine as NativeParsedCommandLine } from "typescript/async";
 import { createFileSystemLayer, serverFS, type FileSystemCallbacks } from "typescript/fs";
-import { isDecorator, ScriptKind, type SourceFile, type Node, type Declaration } from "typescript/ast";
+import { isDecorator, type SourceFile, type Node, type Declaration } from "typescript/ast";
+import { forEachChild } from "./typescript-source.ts";
 export * from "typescript/ast";
 export * from "typescript/async";
 export * as factory from "typescript/ast/factory";
@@ -69,6 +70,7 @@ export class Program implements AsyncDisposable {
   async getGlobalDiagnostics() { return diagnostics(await this.native.getGlobalDiagnostics()); }
   async getOptionsDiagnostics() { return diagnostics(await this.native.getProgramDiagnostics()); }
   async emit() { return this.native.emit(); }
+  async emitToString() { return this.native.emitToString(); }
   async resolveModuleName(name: string, containingFile: string) {
     await using resolver = await this.api.createModuleResolver(this.getCompilerOptions());
     return await resolver.resolveModuleName(name, dirname(containingFile));
@@ -102,14 +104,7 @@ export async function getPreEmitDiagnostics(program: Program): Promise<Diagnosti
     ...await program.getSyntacticDiagnostics(), ...await program.getSemanticDiagnostics()];
 }
 
-/** Parse local syntax only; callers bind source text into a Program for semantic queries. */
-export async function createSourceFile(fileName: string, text: string, _target?: number, _parents = true,
-  scriptKind?: ScriptKind): Promise<SourceFile> {
-  await using api = new API();
-  await using lease = await api.createSourceFile(fileName, text, { scriptKind });
-  // AST navigation and printing use the local tree. No remote source lease is needed afterwards.
-  return lease.sourceFile;
-}
+export { createSourceFile } from "./typescript-source.ts";
 export async function declarationsOf(symbol: NativeSymbol | undefined): Promise<Declaration[]> {
   const result: Declaration[] = [];
   for (const handle of symbol?.declarations ?? []) {
@@ -193,7 +188,7 @@ export async function printNode(node: Node): Promise<string> {
   return await api.printer.printNode(node);
 }
 
-export function forEachChild<T>(node: Node, visit: (child: Node) => T): T | undefined { return node.forEachChild(visit); }
+export { forEachChild } from "./typescript-source.ts";
 
 export function canHaveDecorators(node: Node): node is Node & { modifiers?: readonly import("typescript/ast").ModifierLike[] } {
   return "modifiers" in node;

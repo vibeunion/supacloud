@@ -50,6 +50,7 @@
   },
   "files": [
     "src/typescript.ts",
+    "src/typescript-source.ts",
     "NOTICE",
     "LICENSE-APACHE-2.0.txt",
     "dist",

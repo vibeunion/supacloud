@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promis
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import * as ts from "typescript/ast";
 import { API } from "typescript/async";
-import { createSourceFile, forEachChild, forEachChildAsync, sys, findConfigFile, readConfigFile, parseJsonConfigFileContent } from "./typescript.js";
+import { forEachChild, withSourceFile } from "./typescript-source";
 import { migrationFunctionIdentities, rpcSourceContract, renderRpcSourceTypes, type RpcSourceContract } from "./rpc-source-contracts";
 
 export interface DatabaseSourcesConfig {
@@ -195,15 +195,21 @@ async function boundaryFindings(
     && (config ? schemaInputs.includes(file) || config.consumers.some(directory => within(file, directory))
       : !within(file, "output") && !within(file, "generated")));
   const findings: SourceFinding[] = [];
-  const configFile = findConfigFile(root, sys.fileExists);
-  const compilerOptions = configFile ? (await parseJsonConfigFileContent(
-    (await readConfigFile(configFile, sys.readFile)).config, sys, dirname(configFile),
-  )).options : {};
   await using api = new API({ cwd: root });
+  let configDirectory = root;
+  let configFile: string | undefined;
+  for (;;) {
+    const candidate = join(configDirectory, "tsconfig.json");
+    if (await exists(candidate)) { configFile = candidate; break; }
+    const parent = dirname(configDirectory);
+    if (parent === configDirectory) break;
+    configDirectory = parent;
+  }
+  const compilerOptions = configFile ? (await api.parseConfigFile(configFile)).options : {};
   await using resolver = await api.createModuleResolver(compilerOptions);
   for (const file of consumers) {
     if (config?.auditConsumers.includes(file)) continue;
-    const source = await createSourceFile(file, await readFile(await safePath(root, file), "utf8"), ts.ScriptTarget.Latest, true);
+    await withSourceFile(file, await readFile(await safePath(root, file), "utf8"), async source => {
     if (file.startsWith("src/") && !config?.trustedHosts.some(host => within(file, host)) && !/\.(test|spec)\.[cm]?tsx?$/.test(file)) {
       const checkBoundary = async (node: ts.Node): Promise<void> => {
         const module = (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) ? node.moduleSpecifier
@@ -223,7 +229,9 @@ async function boundaryFindings(
               code: "model-boundary", message: "Database construction and host imports belong in src/host; inject policy model capabilities into business code." });
           }
         }
-        await forEachChildAsync(node, checkBoundary);
+        const children: ts.Node[] = [];
+        forEachChild(node, child => { children.push(child); });
+        for (const child of children) await checkBoundary(child);
       };
       await checkBoundary(source);
     }
@@ -240,6 +248,7 @@ async function boundaryFindings(
         findings.push({ file, line: reference.line, code: "audit-input", message: "Ordinary source references an audit dump or audit-only script; use maintained sources or migration replay." });
       }
     }
+    });
   }
   return findings;
 }
@@ -284,7 +293,6 @@ export async function databaseSources(
       await input(file);
       // Follow local schema imports so splitting tables does not weaken freshness.
       const visitImports = async (path: string) => {
-        const tree = (await createSourceFile(path, await input(path), ts.ScriptTarget.Latest, true));
         const imports: string[] = [];
         const visit = (node: ts.Node) => {
           if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
@@ -294,7 +302,7 @@ export async function databaseSources(
         };
         if (path.endsWith(".zmodel")) {
           for (const match of (await input(path)).matchAll(/\bimport\s+["'](\.[^"']+)["']/g)) imports.push(match[1]!);
-        } else visit(tree);
+        } else await withSourceFile(path, await input(path), tree => visit(tree));
         for (const specifier of imports) {
           const base = slash(relative(root, resolve(root, dirname(path), specifier)));
           const candidates = path.endsWith(".zmodel") ? [base, `${base}.zmodel`] : [base, base.replace(/\.js$/, ".ts"), `${base}.ts`, `${base}/index.ts`];
