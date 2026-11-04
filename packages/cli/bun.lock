@@ -5,7 +5,7 @@
     "": {
       "name": "@supacloud/cli",
       "dependencies": {
-        "@supacloud/compiler": "file:../compiler",
+        "@supacloud/compiler": "^0.56.0",
         "@supacloud/db": "file:../db",
         "@supacloud/delivery": "file:../delivery",
         "typebox": "1.4.3",
@@ -22,7 +22,9 @@
   },
   "overrides": {
     "@graphql-tools/utils": "^12.0.4",
+    "@supacloud/compiler": "file:../compiler",
     "@supacloud/contracts": "file:../contracts",
+    "@supacloud/db": "file:../db",
     "@supacloud/delivery": "file:../delivery",
     "deepmerge-ts": "8.0.2",
     "prisma": "6.19.3",
