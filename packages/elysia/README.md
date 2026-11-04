@@ -8,6 +8,46 @@ is a separately authorized business command, never an assumed rollback.
 
 ## Compatibility and Acceptance Boundary
 
+### Static route registration migration
+
+HTTP modules now require compiler-emitted `registerRoutes(register)` calls.
+The adapter has no descriptor-array registration fallback. A module with routes
+and a missing or non-callable plan fails at startup with
+`COMPILED_ROUTE_REGISTRATION_REQUIRED`. Modules containing only providers,
+commands or jobs may omit this HTTP-only plan.
+
+Upgrade `@supacloud/compiler` and `@supacloud/elysia` together using a matched
+release, then regenerate application artifacts with the installed compiler:
+
+```sh
+bun run supacloud-compiler compile
+bun run supacloud-compiler check --json
+```
+
+Commit the regenerated `application.ts` and manifests together with the lockfile,
+rebuild the application bundle, and exercise its affected HTTP entry points.
+Do not patch generated files by hand or deploy a new adapter with an old bundle.
+For rollback, restore the compiler, adapter, lockfile and compiled bundle as one
+tested release. The package version numbers need not be identical.
+
+Hand-authored test fixtures and custom integrations must register each route
+explicitly, with its full path. Preserve descriptor identities and order:
+
+```ts
+registerRoutes(register) {
+  register(this.controllers[0]!, this.controllers[0]!.routes[0]!, '/orders')
+  register(this.controllers[0]!, this.controllers[0]!.routes[1]!, '/orders/:id')
+}
+```
+
+The callback runs during plugin construction. The compiler emits full paths and
+individual registrations; schema validation, HTTP policies, command governance,
+scope cleanup and error handling stay in the adapter. Startup validation still
+inspects descriptors. This is not a claim of zero overhead or a measured speedup.
+The manifest describes static declarations; host options can add lifecycle hooks
+or select the request pipeline. Native Elysia macros supplied by the host are
+not inferred from application declarations.
+
 The Elysia peer and development dependency are pinned to `2.0.0-rc.1`.
 The runtime adapter pins Effect `4.0.5` and consumes its `Exit`-based
 execution boundary.

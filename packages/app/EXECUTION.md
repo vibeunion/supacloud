@@ -92,6 +92,85 @@ For commands, put aspects inside the authorized handler continuation, not around
 the complete executor. Calling a raw service method is still a raw call: it does
 not magically acquire governance. Route every governed entry through the executor.
 
+## Compile framework features instead of adding a runtime framework
+
+SupaCloud uses its own application declarations, informed by NestJS and AdonisJS,
+to target the existing Elysia host and static DI factories. It does not accept
+those frameworks' decorators or provide their full runtime compatibility.
+The generated execution plan is inspection metadata; the request path uses the
+already generated invokers and pipelines, without reflection, `Proxy`, or runtime
+pointcut discovery.
+
+| Framework feature | Compile-time representation | Elysia/runtime boundary |
+| --- | --- | --- |
+| Nest module/provider graph | `ApplicationGraph`, topological module order, static provider factories | Elysia receives compiled module descriptors |
+| Nest controller/decorator routes | compiled route descriptor and direct invoker | Elysia plugin registers routes and lifecycle hooks |
+| Nest guard / Adonis middleware | explicit HTTP policy declarations and command permissions | native Elysia hooks and authorization adapters |
+| Nest interceptor / Adonis hooks | module, route, command, and job `around(context, next)` aspects | one generated pipeline call |
+| Nest pipes / Adonis validators | input/output schemas and parameter transforms | Elysia validates and maps the HTTP value |
+| Nest exception filters | declared response/error contracts | adapter error mapper and Elysia `onError` handle runtime errors |
+| Nest lifecycle hooks / Adonis boot hooks | generated initialize/destroy plans | application startup and teardown |
+| Nest custom providers | constructor-injection factory, value/factory/existing provider descriptors | Elysia composition root supplies external tokens |
+| Nest jobs / Adonis queues | compiled job descriptor with scope, timeout, attempts and idempotency | durable scheduler owns delivery and retry |
+
+The compiler may reject an incomplete declaration, but it must not claim runtime
+success. Authorization, transaction commits, receipt replay, external effects,
+and queue delivery remain runtime adapter responsibilities. This keeps the
+compiler strict about structure while production truth stays in durable boundaries.
+
+Angular supplies DI semantics for the runtime application API. Compiled server
+factories use explicit constructor calls without an injector on the HTTP path.
+The compiled environment scopes have no Angular element-injector tree; `@Host()`
+does not introduce a DOM boundary. Angular Router metadata such as `canMatch` is
+not automatically executable by the Elysia adapter. Use its supported HTTP policy
+contract for HTTP checks and the command executor for business authorization.
+
+Generated modules also contain a static `registerRoutes(register)` callback. The
+Elysia adapter requires this callback for modules with HTTP routes and does not
+fall back to traversing `controllers[].routes[]`. If a custom descriptor reports
+`COMPILED_ROUTE_REGISTRATION_REQUIRED`, upgrade compiler and adapter together and
+recompile. See the [route registration migration](../elysia/README.md#static-route-registration-migration).
+
+## Versioned compilation contract
+
+`app.manifest.json.executionPlan` version 1 records provider scopes and edges,
+ordered initialization and destruction, resolved module boundary rules, route
+registration and lifecycle hooks, Effect declarations, and command adapter
+requirements including conditional RPC branches. `renderApplication()` also
+returns the typed `executionPlan` for in-process tooling. Module and route arrays
+retain factory initialization and registration order. The inspection/context
+pack and manifest use the same execution-stage calculation.
+
+Routes with an explicit command binding have `commandBoundary: "route"`.
+Feature routes that invoke a command inside their handler have
+`commandBoundary: "handler"`; their HTTP stages do not claim that authorization
+wraps the entire handler. Elysia host options can add hooks or force a pipeline.
+Guards and resolvers recorded as metadata do not become executable HTTP hooks.
+
+Delivery rendering calls `validateExecutionManifest(plan, commandCapabilities)`
+before bundling. Supply explicit permission, transaction, audit and idempotency
+capabilities, including named RPC adapters and external reconciliation. Missing
+capabilities fail closed. This API consumes a compiler-produced typed plan;
+external JSON needs its own input validation. These checks validate declarations,
+not database reachability, successful transactions or durable audit persistence.
+
+### Command boundary migration (`SC4029`)
+
+The analyzer rejects typed raw `@Command` method access outside its governed
+boundary, including method extraction and destructuring. The check runs on
+incremental analysis too, and `writeOnError` cannot emit a bypassing application.
+Use a route explicitly bound to that command, an `executeCompiledCommand`
+handler with a literal command name, or a durable facade whose method only
+forwards to a readonly `createTransactionalCommand` / `createExternalCommand`
+executor. Import aliases are supported; matching a method name alone is not
+proof of governance. Ordinary ungoverned service calls are unaffected.
+
+This is a conservative check of typed class method and callable field references within the compiled
+source root. It is not whole-program information-flow verification: structural
+type erasure, dynamic JavaScript, external packages and reflection cannot be
+proven safe by this check. Durable adapter tests and runtime authorization remain
+required. Keep raw business implementations private to the governed boundary.
+
 ## Execution guarantees and limits
 
 Authorization always runs before receipt lookup/replay and before business

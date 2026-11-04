@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
@@ -6,6 +7,9 @@ import { createModulePlugin, type CompiledModule } from "./index";
 function moduleFor(route: CompiledModule["controllers"][number]["routes"][number]): CompiledModule {
   return {
     name: "body-policy", createServices: () => ({}),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, this.controllers[0]!.path + this.controllers[0]!.routes[0]!.path);
+    },
     controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [route] }],
   };
 }

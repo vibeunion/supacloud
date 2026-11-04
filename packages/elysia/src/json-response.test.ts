@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import Elysia, { t } from "elysia";
@@ -22,6 +23,9 @@ function receiptModule(write: () => unknown): CompiledModule {
   return {
     name: "receipt",
     createServices: () => ({ controller: { write } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/receipt");
+    },
     controllers: [{
       path: "/receipt",
       serviceKey: "controller",

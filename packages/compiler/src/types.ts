@@ -388,6 +388,121 @@ export interface JobNode {
   aspects?: AspectRefNode[];
 }
 
+/** Static provider information exposed to deployment and tooling consumers. */
+export interface ExecutionPlanProvider {
+  token: string;
+  kind: ProviderKind;
+  scope: Scope;
+  deps: string[];
+  optionalDeps: string[];
+  selfDeps: string[];
+  skipSelfDeps: string[];
+  hostDeps: string[];
+  multi: boolean;
+  exported: boolean;
+  lifecycle: { init: boolean; destroy: boolean };
+}
+
+export interface ExecutionPlanProviderEdge {
+  from: string;
+  to: string;
+  relation: "local" | "imported" | "root" | "context" | "external" | "unresolved";
+}
+
+export interface ExecutionPlanRoute {
+  method: RouteNode["method"];
+  path: string;
+  controller: string;
+  handler: string;
+  scope: Scope;
+  executor: "route" | "command";
+  invoker: "direct" | "pipeline";
+  commandBoundary?: "route" | "handler";
+  effect?: EffectRouteNode;
+  stages: string[];
+  command?: string;
+  guards: string[];
+  canMatch: string[];
+  canDeactivate: string[];
+  resolvers: string[];
+  aspects: string[];
+  plugin: {
+    name: string;
+    registration: "registerRoutes";
+    lifecycle: string[];
+    macros: string[];
+    conditions: string;
+  };
+}
+
+export interface ExecutionPlanCommand {
+  name: string;
+  className: string;
+  executor: "commandExecutor";
+  adapter: string | null;
+  permission: string | null;
+  audit: string | null;
+  transaction: CommandNode["transaction"];
+  idempotency: CommandNode["idempotency"];
+  branches: CommandBranchNode[];
+  tenantScope?: CommandNode["tenantScope"];
+  requiredCapabilities: {
+    permission: boolean;
+    audit: boolean;
+    idempotency: boolean;
+    transaction: boolean;
+  };
+  aspects: string[];
+}
+
+export interface ExecutionPlanJob {
+  name: string;
+  className: string;
+  scope: Scope;
+  mode: JobMode;
+  timeoutSec: number | null;
+  maxAttempts: number | null;
+  idempotency: JobIdempotency | null;
+  aspects: string[];
+}
+
+export interface ExecutionPlanModule {
+  name: string;
+  className: string;
+  tags: string[];
+  imports: string[];
+  providers: ExecutionPlanProvider[];
+  providerEdges: ExecutionPlanProviderEdge[];
+  scopes: { application: string[]; request: string[]; job: string[] };
+  lifecycle: {
+    initialize: Array<{ key: string; index?: number }>;
+    destroy: Array<{ key: string; index?: number }>;
+    requestDestroy: Array<{ key: string; index?: number }>;
+    jobDestroy: Array<{ key: string; index?: number }>;
+  };
+  plugin: {
+    name: string;
+    lifecycle: string[];
+    macros: string[];
+    conditions: string;
+    routeCount: number;
+  };
+  routes: ExecutionPlanRoute[];
+  commands: ExecutionPlanCommand[];
+  jobs: ExecutionPlanJob[];
+  aspects: string[];
+}
+
+/** Versioned, transport-aware plan emitted alongside static application factories. */
+export interface CompiledExecutionManifest {
+  version: 1;
+  compiler: "@supacloud/compiler";
+  host: { adapter: "elysia"; api: "2.x"; reflection: false; proxy: false };
+  di: { runtime: "angular-compatible"; generation: "static"; scopes: Scope[] };
+  boundaries: ModuleBoundaryRule[];
+  modules: ExecutionPlanModule[];
+}
+
 export interface QueryNode {
   className: string;
   name: string;
