@@ -428,7 +428,7 @@ export class ${className}Controller {
         @Inject(Detail${className}Query) private readonly detailQuery: Detail${className}Query,
         @Inject(Receipt${className}Query) private readonly receiptQuery: Receipt${className}Query,
         @Inject(JobStatus${className}Query) private readonly jobStatusQuery: JobStatus${className}Query,
-        @Inject(Approve${className}Command) private readonly approveCommand: Approve${className}Command,
+        @Inject(${className}Service) private readonly service: ${className}Service,
     ) {}
 
     @Get("/", {
@@ -496,7 +496,7 @@ export class ${className}Controller {
         @Param("id") id: string,
         @Body() body: ${className}ApproveInput,
     ): Effect.Effect<${className}Result, ${className}ApproveError, never> {
-        return Effect.promise(() => this.approveCommand.execute(id, body));
+        return Effect.promise(() => this.service.approve(id, body));
     }
 
     @Get("/:id/operations/:operationId", {
