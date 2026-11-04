@@ -29,7 +29,7 @@
       },
       "devDependencies": {
         "@zenstackhq/cli": "3.10.0",
-        "prisma": "6.19.0",
+        "prisma": "6.19.3",
         "pg": "8.23.1"
       }
     },
