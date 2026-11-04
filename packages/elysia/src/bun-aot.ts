@@ -70,7 +70,8 @@ export function createBunAotApplication<const Http extends AnyElysia = Elysia, R
 export function createBunApplication<const Http extends AnyElysia = Elysia, RequestContext = unknown>(
   options: ApplicationOptions<Http, RequestContext>,
 ): BunApplication {
-  const complex = options.modules?.some((module) =>
+  const generatedMode = options.modules?.some((module) => module.runtimeMode === "aot") ?? false;
+  const complex = generatedMode || options.modules?.some((module) =>
     module.createRequestScope !== undefined
     || module.initializeServices !== undefined
     || module.destroyServices !== undefined

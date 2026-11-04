@@ -205,6 +205,7 @@ for (const module of createUnscopedModules()) {
     expect(applicationCode).toContain("export interface CompiledController {");
     expect(applicationCode).toContain("export interface CompiledRoute {");
     expect(applicationCode).toContain("export interface CompiledCommand {");
+    expect(applicationCode).toContain("runtimeMode: \"native\" | \"aot\"");
     expect(applicationCode).not.toContain("@supacloud/app");
     expect(applicationCode).not.toContain("@supacloud/elysia");
   });

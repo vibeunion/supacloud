@@ -212,6 +212,8 @@ export interface CompiledController {
 
 export interface CompiledModule {
   name: string;
+  /** Compiler-selected HTTP execution path; absent on older descriptors. */
+  runtimeMode?: "native" | "aot";
   createServices(
     deps: Record<string, unknown>,
     imported: Record<string, Record<string, unknown>>,
