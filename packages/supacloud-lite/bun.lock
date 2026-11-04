@@ -17,7 +17,7 @@
         "typebox": "1.4.3",
       },
       "devDependencies": {
-        "@supabase/supabase-js": "^2.118.0",
+        "@supabase/supabase-js": "2.118.0",
         "@supacloud/app": "file:../app",
         "@supacloud/compiler": "file:../compiler",
         "@supacloud/contracts": "file:../contracts",
