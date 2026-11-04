@@ -315,11 +315,7 @@ function readReview(value: unknown): Review {
 }
 
 @Injectable({ scope: "request" })
-@Command({
-  name: "review.approve", permission: "review.approve", transaction: "required",
-  idempotency: "required", audit: "review.approved", aspects: [requireRequest],
-})
-export class ApproveReview {
+export class ReviewApproval {
   constructor(@Inject(DB_CLIENT) private readonly store: ReviewStore) {}
 
   async execute(id: string, expectedVersion: number): Promise<Review> {
@@ -339,6 +335,13 @@ export class ApproveReview {
   }
 }
 
+@Injectable({ scope: "request" })
+@Command({
+  name: "review.approve", permission: "review.approve", transaction: "required",
+  idempotency: "required", audit: "review.approved", aspects: [requireRequest],
+})
+export class ApproveReview extends ReviewApproval {}
+
 type ReviewError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
     | { readonly _tag: "REVIEW_NOT_FOUND" }
@@ -352,7 +355,7 @@ type ReviewError =
 
 @Controller("/reviews")
 export class ReviewController {
-  constructor(@Inject(ApproveReview) private readonly approveReview: ApproveReview) {}
+  constructor(@Inject(ReviewApproval) private readonly reviewApproval: ReviewApproval) {}
 
   @Get("/health", {
     responses: { 200: HealthResult },
@@ -383,13 +386,13 @@ export class ReviewController {
     },
   })
   approve(@Param("id") id: string, @Body() body: ApprovalBody): Effect.Effect<Review, ReviewError, never> {
-    return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
+    return Effect.promise(() => this.reviewApproval.execute(id, body.expectedVersion));
   }
 }
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts, ReviewTasks],
+  providers: [ReviewApproval, ApproveReview, VerifyReviewAttachment, ReviewUploads, ReviewReceipts, ReviewTasks],
   controllers: [ReviewController, ReviewUploadsController, ReviewReceiptsController, ReviewTasksController],
   jobs: [VerifyReviewAttachment],
 });

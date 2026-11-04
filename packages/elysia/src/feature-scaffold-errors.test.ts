@@ -34,7 +34,7 @@ let ControllerClass: new (
   detail: { execute(id: string): Promise<unknown> },
   receipts: { execute(id: string, operationId: string): Promise<unknown> },
   jobStatuses: { execute(id: string, operationId: string): Promise<unknown> },
-  command: { execute(id: string, input: { expectedVersion: number }): Promise<unknown> },
+  service: Service,
 ) => Controller;
 let root: string | undefined;
 const identity = {
@@ -74,7 +74,7 @@ function controller(context: unknown, lookup: Lookup["lookup"], failure?: Error,
     { execute: (id) => service.detail(id) },
     { execute: (id, operationId) => service.receipt(id, operationId) },
     { execute: (id, operationId) => service.jobStatus(id, operationId) },
-    { execute: (id, body) => service.approve(id, body) },
+    service,
   );
 }
 function run(instance: Controller, method: Method) {
