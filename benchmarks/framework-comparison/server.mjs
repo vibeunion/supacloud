@@ -169,9 +169,9 @@ async function startSupaCloudElysia() {
   if (typeof Bun === "undefined") {
     throw new Error("supacloud-elysia-bun must be started by Bun");
   }
-  const [{ t }, { createBunApplication }] = await Promise.all([
+  const [{ t }, { createApplication }] = await Promise.all([
     import("elysia"),
-    import("@supacloud/elysia/bun-aot"),
+    import("@supacloud/elysia"),
   ]);
   // Keep this descriptor in the same shape as compiler output. Generated routes
   // carry a positional invoker which calls the controller method with decoded
@@ -234,8 +234,8 @@ async function startSupaCloudElysia() {
       routes,
     }],
   };
-  const app = createBunApplication({ modules: [module] });
-  const server = app.start({ hostname: HOST, port });
+  const app = createApplication({ modules: [module] });
+  const server = Bun.serve({ hostname: HOST, port, fetch: app.handle });
   return { runtime: `bun ${Bun.version}`, close: () => server.stop(true) };
 }
 

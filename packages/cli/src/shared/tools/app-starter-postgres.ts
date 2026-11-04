@@ -225,8 +225,7 @@ test("PostgreSQL host never falls back to demo identity or unbound business stor
 export const STARTER_REVIEW_DELIVERY_HOST = `import { SQL } from "bun";
 import { createClient } from "@supabase/supabase-js";
 import { createBunCommandDatabase } from "@supacloud/db/bun";
-import { createBunApplication } from "@supacloud/elysia/bun-aot";
-import type { CompiledModule } from "@supacloud/elysia";
+import { createApplication, type CompiledModule } from "@supacloud/elysia";
 import { createReviewPostgresAdapters } from "./host/review-postgres";
 import { createReviewAttachmentAdapters } from "./host/review-attachments";
 import { createReviewUploadAdapters } from "./host/review-uploads";
@@ -292,8 +291,8 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     });
     lifecycle.signal.throwIfAborted();
     stage = "application";
-    const app = createBunApplication({ name: "review", modules, ...adapters });
-    return { fetch: app.fetch, close };
+    const app = createApplication({ name: "review", modules, ...adapters, onExecution: createReviewHttpObserver() });
+    return { fetch: (request: Request) => app.handle(request), close };
   } catch (error) {
     await close();
     const code = error !== null && typeof error === "object" && "code" in error

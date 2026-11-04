@@ -11,7 +11,6 @@ export interface BunAotApplication {
   readonly start: (options: BunAotServeOptions) => BunAotServer;
   readonly destroy: () => Promise<void>;
 }
-
 export interface BunAotServeOptions {
   hostname?: string;
   port: number;
@@ -57,5 +56,3 @@ export function createBunAotApplication<const Http extends AnyElysia = Elysia, R
     destroy: () => app.destroy(),
   };
 }
-
-export const createBunApplication = createBunAotApplication;

@@ -238,7 +238,7 @@ export function createDemo() {
   return sandbox;
 }
 `,
-        "src/application.ts": `import { createBunApplication } from "@supacloud/elysia/bun-aot";
+        "src/application.ts": `import { createApplication } from "@supacloud/elysia";
 import { createSupAuthRequestContext, type SupAuthContextOptions, type ApplicationOptions, type CommandGovernance } from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
 
@@ -251,7 +251,7 @@ export interface AppAdapters {
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
 export function createApp(adapters: AppAdapters) {
-  return createBunApplication({
+  return createApplication({
     ...adapters,
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
