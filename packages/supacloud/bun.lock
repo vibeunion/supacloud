@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.30.5",
-        "@supacloud/cli": "^0.115.1",
+        "@supacloud/cli": "^0.115.2",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
@@ -65,11 +65,11 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.30.5", "", { "dependencies": { "@supacloud/cli": "0.115.0", "@supacloud/delivery": "0.24.0", "ssh2": "^1.17.0", "typebox": "1.4.3" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-+T+lXDAUOEh+nFMDO1rbG0qoFlX2VUC8cB/x11xS6swPH8BPeFRt3soS4g694uVvb39+RAeOY7Qz+PdXsozJbQ=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.115.1", "", { "dependencies": { "@supacloud/compiler": "^0.54.0", "@supacloud/db": "0.20.4", "@supacloud/delivery": "0.24.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-aQZ9k9VOK89AEFBs+vR7qRf0S8JGzSPA5YhNdjrZuTPuOgaBSvsfoIdby+3cx546nfiCmpvGDPzjXrpfNzqDvQ=="],
+    "@supacloud/cli": ["@supacloud/cli@0.115.2", "", { "dependencies": { "@supacloud/compiler": "^0.55.0", "@supacloud/db": "0.20.5", "@supacloud/delivery": "0.24.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-QZNIsJRLd8mLfwryk4MCCCdrnrw8Jk3YcsDdsb5sSm81c2f3rhlLTWPG1qQOaIoLkVNSfPkOuKT7TewFxxNreQ=="],
 
     "@supacloud/contracts": ["@supacloud/contracts@0.15.2", "", {}, "sha512-n4CMgleJf68zpWuy+v+mtmG5VtDBSJONLI2YEIZic9wdislvuE3QZU6EV/sX5xMyKuX0J/YNEt4Gl78WTNz2Rw=="],
 
-    "@supacloud/db": ["@supacloud/db@0.20.4", "", { "dependencies": { "@supacloud/contracts": "0.15.2", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-5935859" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-2fdK0WQPfDyXHDDZnitokBRINEdiNcjmtJaUT5PrSxtLqUNPn4EudGZT28rjA3l0/YqIgtQU6FTXET8nwo/ACQ=="],
+    "@supacloud/db": ["@supacloud/db@0.20.5", "", { "dependencies": { "@supacloud/contracts": "0.15.2", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-5935859" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-qMolptXbh9wKupg4KOs5/od0/BewjY4Jv1CSL3NJe4waCMB+eWSuZp5fWA+67SMvyvOqDirOpHFReCRm+GVA3g=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
@@ -240,6 +240,8 @@
     "@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "@supacloud/admin/@supacloud/cli/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.4.3" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "drizzle-orm": "1.0.0-rc.5-5935859", "typescript": "^7.0.2" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/db": ["@supacloud/db@0.20.4", "", { "dependencies": { "@supacloud/contracts": "0.15.2", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-5935859" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-2fdK0WQPfDyXHDDZnitokBRINEdiNcjmtJaUT5PrSxtLqUNPn4EudGZT28rjA3l0/YqIgtQU6FTXET8nwo/ACQ=="],
 
     "@supacloud/admin/@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" }, "devDependencies": { "@types/bun": "^1.4.4", "@types/tar-stream": "^3.1.5", "typescript": "^7.0.2" } }],
 
