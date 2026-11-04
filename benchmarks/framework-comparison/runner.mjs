@@ -22,7 +22,7 @@ if (requestIdMode !== "provided" && requestIdMode !== "generated") {
 }
 const output = options.output ? resolve(process.cwd(), options.output) : undefined;
 const allAdapters = [
-  { id: "supacloud-elysia-bun", label: "SupaCloud compiled adapter / Elysia 2 / Bun (generated invoker)", runtime: "bun", validation: "TypeBox native route schema" },
+  { id: "supacloud-elysia-bun", label: "SupaCloud compiled adapter / Elysia 2 / Bun (compiler-selected plan)", runtime: "bun", validation: "TypeBox native route schema" },
   { id: "express", label: "Express", runtime: "node", validation: "TypeBox Value.Check middleware" },
   { id: "fastify", label: "Fastify", runtime: "node", validation: "TypeBox JSON Schema / Ajv" },
   { id: "nestjs-express", label: "NestJS / Express", runtime: "node", validation: "TypeBox pipe" },

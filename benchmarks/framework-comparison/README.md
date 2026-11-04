@@ -36,8 +36,10 @@ bun install --frozen-lockfile
 node runner.mjs --requests 10000 --rounds 5 --concurrency 32 --output report.json
 ```
 
-The benchmark uses the compiler-generated positional route invoker and provides
-an `x-request-id` header, matching the Edge Runtime request boundary.
+The benchmark uses compiler-generated route execution plans: direct routes call
+the Elysia-decoded context without a SupaCloud input envelope, while complex
+routes use the positional SupaCloud invoker. It provides an `x-request-id`
+header, matching the Edge Runtime request boundary.
 
 Use `--request-id-mode generated` to measure the fallback UUID path separately.
 Use `--only supacloud-elysia-bun,elysia-native-contract-bun` for a focused
