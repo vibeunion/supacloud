@@ -62,6 +62,7 @@ beforeAll(async () => {
   const options = {
     rootDir: join(project, "src"), outDir: join(project, "generated"), strict: false,
     generateClient: false, generatePermissions: false,
+    commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true },
   };
   const settings = {
     version: 1, runtime: { processIsolation: true, durableQueue: true, capabilities: [] },

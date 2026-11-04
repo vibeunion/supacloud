@@ -164,6 +164,11 @@
       "signature": "export interface CommandNode {\n    rpc?: string;\n    branches?: CommandBranchNode[];\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
+      "name": "CompiledExecutionManifest",
+      "kind": "type",
+      "signature": "export interface CompiledExecutionManifest {\n    version: 1;\n    compiler: \"@supacloud/compiler\";\n    host: {\n        adapter: \"elysia\";\n        api: \"2.x\";\n        reflection: false;\n        proxy: false;\n    };\n    di: {\n        runtime: \"angular-compatible\";\n        generation: \"static\";\n        scopes: Scope[];\n    };\n    boundaries: ModuleBoundaryRule[];\n    modules: ExecutionPlanModule[];\n}"
+    },
+    {
       "name": "CompileOptions",
       "kind": "type",
       "signature": "export interface CompileOptions {\n    databaseGovernance?: DatabaseGovernanceOptions;\n    graphql?: GraphqlOptions;\n    requireRouteContracts?: boolean;\n    rootDir: string;\n    include?: string[];\n    outDir: string;\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    writeOnError?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    cache?: DependencyGraphCache;\n    changedPaths?: string[];\n    typeSafety?: TypeSafetyOptions;\n    effect?: EffectCompilerOptions;\n}"
@@ -539,6 +544,36 @@
       "signature": "export interface ExecutionPlan {\n    module: string;\n    kind: \"route\" | \"command\" | \"job\";\n    name: string;\n    command?: string;\n    stages: string[];\n}"
     },
     {
+      "name": "ExecutionPlanCommand",
+      "kind": "type",
+      "signature": "export interface ExecutionPlanCommand {\n    name: string;\n    className: string;\n    executor: \"commandExecutor\";\n    adapter: string | null;\n    permission: string | null;\n    audit: string | null;\n    transaction: CommandNode[\"transaction\"];\n    idempotency: CommandNode[\"idempotency\"];\n    branches: CommandBranchNode[];\n    tenantScope?: CommandNode[\"tenantScope\"];\n    requiredCapabilities: {\n        permission: boolean;\n        audit: boolean;\n        idempotency: boolean;\n        transaction: boolean;\n    };\n    aspects: string[];\n}"
+    },
+    {
+      "name": "ExecutionPlanJob",
+      "kind": "type",
+      "signature": "export interface ExecutionPlanJob {\n    name: string;\n    className: string;\n    scope: Scope;\n    mode: JobMode;\n    timeoutSec: number | null;\n    maxAttempts: number | null;\n    idempotency: JobIdempotency | null;\n    aspects: string[];\n}"
+    },
+    {
+      "name": "ExecutionPlanModule",
+      "kind": "type",
+      "signature": "export interface ExecutionPlanModule {\n    name: string;\n    className: string;\n    tags: string[];\n    imports: string[];\n    providers: ExecutionPlanProvider[];\n    providerEdges: ExecutionPlanProviderEdge[];\n    scopes: {\n        application: string[];\n        request: string[];\n        job: string[];\n    };\n    lifecycle: {\n        initialize: Array<{\n            key: string;\n            index?: number;\n        }>;\n        destroy: Array<{\n            key: string;\n            index?: number;\n        }>;\n        requestDestroy: Array<{\n            key: string;\n            index?: number;\n        }>;\n        jobDestroy: Array<{\n            key: string;\n            index?: number;\n        }>;\n    };\n    plugin: {\n        name: string;\n        lifecycle: string[];\n        macros: string[];\n        conditions: string;\n        routeCount: number;\n    };\n    routes: ExecutionPlanRoute[];\n    commands: ExecutionPlanCommand[];\n    jobs: ExecutionPlanJob[];\n    aspects: string[];\n}"
+    },
+    {
+      "name": "ExecutionPlanProvider",
+      "kind": "type",
+      "signature": "export interface ExecutionPlanProvider {\n    token: string;\n    kind: ProviderKind;\n    scope: Scope;\n    deps: string[];\n    optionalDeps: string[];\n    selfDeps: string[];\n    skipSelfDeps: string[];\n    hostDeps: string[];\n    multi: boolean;\n    exported: boolean;\n    lifecycle: {\n        init: boolean;\n        destroy: boolean;\n    };\n}"
+    },
+    {
+      "name": "ExecutionPlanProviderEdge",
+      "kind": "type",
+      "signature": "export interface ExecutionPlanProviderEdge {\n    from: string;\n    to: string;\n    relation: \"local\" | \"imported\" | \"root\" | \"context\" | \"external\" | \"unresolved\";\n}"
+    },
+    {
+      "name": "ExecutionPlanRoute",
+      "kind": "type",
+      "signature": "export interface ExecutionPlanRoute {\n    method: RouteNode[\"method\"];\n    path: string;\n    controller: string;\n    handler: string;\n    scope: Scope;\n    executor: \"route\" | \"command\";\n    invoker: \"direct\" | \"pipeline\";\n    commandBoundary?: \"route\" | \"handler\";\n    effect?: EffectRouteNode;\n    stages: string[];\n    command?: string;\n    guards: string[];\n    canMatch: string[];\n    canDeactivate: string[];\n    resolvers: string[];\n    aspects: string[];\n    plugin: {\n        name: string;\n        registration: \"registerRoutes\";\n        lifecycle: string[];\n        macros: string[];\n        conditions: string;\n    };\n}"
+    },
+    {
       "name": "ExecutionTimelineAttempt",
       "kind": "type",
       "signature": "export interface ExecutionTimelineAttempt {\n    attempt: number;\n    stages: ExecutionTimelineStage[];\n    failed: boolean;\n    complete: boolean;\n    missingStages: string[];\n    unexpectedStages: string[];\n    traceIds: string[];\n    omittedStages: number;\n}"
@@ -651,7 +686,7 @@
     {
       "name": "GenerateOptions",
       "kind": "type",
-      "signature": "export interface GenerateOptions {\n    rootDir: string;\n    outDir: string;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    artifactHashes?: Map<string, string>;\n}"
+      "signature": "export interface GenerateOptions extends Pick<ValidateOptions, \"moduleBoundaryPreset\" | \"moduleBoundaries\" | \"commandCapabilities\"> {\n    rootDir: string;\n    outDir: string;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    artifactHashes?: Map<string, string>;\n}"
     },
     {
       "name": "getModuleBoundaryPreset",
@@ -1026,7 +1061,7 @@
     {
       "name": "RenderedArtifacts",
       "kind": "type",
-      "signature": "export interface RenderedArtifacts {\n    applicationCode: string;\n    manifestJson: string;\n    contractsManifestJson: string;\n    clientCode?: string;\n    openApiCode?: string;\n    permissionsCode?: string;\n}"
+      "signature": "export interface RenderedArtifacts {\n    applicationCode: string;\n    manifestJson: string;\n    executionPlan: CompiledExecutionManifest;\n    contractsManifestJson: string;\n    clientCode?: string;\n    openApiCode?: string;\n    permissionsCode?: string;\n}"
     },
     {
       "name": "renderOpenApi",
@@ -1202,6 +1237,11 @@
       "name": "validateEffectPolicies",
       "kind": "value",
       "signature": "export declare function validateEffectPolicies(graph: ApplicationGraph, options?: EffectCompilerOptions): Diagnostic[];"
+    },
+    {
+      "name": "validateExecutionManifest",
+      "kind": "value",
+      "signature": "export declare function validateExecutionManifest(plan: CompiledExecutionManifest, capabilities?: CommandExecutionCapabilities): Diagnostic[];"
     },
     {
       "name": "validateFeatureSpec",

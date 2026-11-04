@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import {
@@ -262,6 +263,9 @@ test("HTTP and Worker entrypoints share one bound business command", async () =>
           bound.execute(decodeNumber(body), { request, requestContext }),
       },
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/approve");
+    },
     controllers: [{
       path: "/", serviceKey: "controller", scope: "application",
       routes: [{ method: "POST", path: "approve", handler: "approve", invoker: testInvoker("approve") }],

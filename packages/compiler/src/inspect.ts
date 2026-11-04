@@ -265,6 +265,8 @@ export function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[] {
       const commandRef = route.command ?? featureTransition?.command;
       const command = module.commands.find((item) =>
         item.className === commandRef || item.name === commandRef);
+      // Feature commands execute inside the handler; only a route binding wraps it.
+      const boundCommand = route.command === undefined ? undefined : command;
       const path = `${controller.path}/${route.path}`.replace(/\/+/g, "/");
       return {
         module: module.name,
@@ -272,31 +274,30 @@ export function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[] {
         name: `${route.method} ${path.length > 1 ? path.replace(/\/+$/, "") : path}`,
         ...(command ? { command: command.name } : {}),
         stages: [
-          ...aspects(`module:${module.name}`, module.aspects),
-          ...aspects("route", route.aspects),
-          ...aspects("command", command?.aspects),
-          ...(command ? [
-            "commandExecutor",
-            "authorize",
-            ...(command.rpc ? [`rpc:${command.rpc}`] : [
-              ...(command.idempotency === "required" ? ["idempotency"] : []),
-              ...(command.transaction === "required" ? ["transaction"] : []),
+          ...(boundCommand ? [
+            "commandExecutor", "authorize",
+            ...(boundCommand.branches?.length ? ["rpc:selected-branch"] : boundCommand.rpc ? [`rpc:${boundCommand.rpc}`] : [
+              ...(boundCommand.idempotency === "required" ? ["idempotency"] : []),
+              ...(boundCommand.transaction === "required" ? ["transaction"] : []),
             ]),
           ] : []),
+          ...aspects(`module:${module.name}`, module.aspects),
+          ...aspects("route", route.aspects),
+          ...aspects("command", boundCommand?.aspects),
           "handler",
-          ...(command?.audit && !command.rpc ? ["audit"] : []),
+          ...(boundCommand?.audit && !boundCommand.rpc && !boundCommand.branches?.length ? ["audit"] : []),
         ],
       };
     })),
     ...module.commands.map((command): ExecutionPlan => ({
       module: module.name, kind: "command", name: command.name, command: command.name,
       stages: ["commandExecutor", "authorize",
-        ...(command.rpc ? [`rpc:${command.rpc}`] : [
+        ...(command.branches?.length ? ["rpc:selected-branch"] : command.rpc ? [`rpc:${command.rpc}`] : [
           ...(command.idempotency === "required" ? ["idempotency"] : []),
           ...(command.transaction === "required" ? ["transaction"] : []),
         ]),
         ...aspects(`module:${module.name}`, module.aspects), ...aspects("command", command.aspects),
-        "handler", ...(command.audit && !command.rpc ? ["audit"] : [])],
+        "handler", ...(command.audit && !command.rpc && !command.branches?.length ? ["audit"] : [])],
     })),
     ...(module.jobs ?? []).map((job): ExecutionPlan => ({
       module: module.name,

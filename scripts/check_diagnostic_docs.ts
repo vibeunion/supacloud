@@ -105,6 +105,9 @@ list(@Body() input: unknown) {}`,
   SC3018: `@Get("/items") @Post("/items") save() {}`,
   SC3019: `@Get("/items/{id}") get() {}`,
   SC3020: `@Post("/items", { contract: { body: "database" } }) create() {}`,
+  SC4029: `@Command({ name: "billing.issue", permission: "billing.issue" })
+class Issue { execute() {} }
+function ungoverned(command: Issue) { return command.execute(); }`,
   SC4001: `@Command({ name: "billing.issueInvoice" })
 class IssueInvoiceCommand {}`,
   SC4002: `@Command({ name: "billing.issueInvoice", permission: "billing.issue" })

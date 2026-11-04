@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { expect, test } from "bun:test";
 import { Context, Effect, Layer } from "effect";
 import { Elysia } from "elysia";
@@ -278,6 +279,10 @@ test("executes compiled Effect routes through the Elysia adapter", async () => {
         fail: () => Effect.fail({ _tag: "OrderNotFound" }),
       },
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/orders");
+      register(this.controllers[0]!, this.controllers[0]!.routes[1]!, "/orders/missing");
+    },
     controllers: [{
       path: "/orders",
       serviceKey: "controller",
@@ -318,6 +323,9 @@ test("requires an explicit runtime when the compiled Effect needs services", () 
   const module: CompiledModule = {
     name: "effect-dependency",
     createServices: () => ({ controller: { get: () => Effect.succeed("ok") } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/orders");
+    },
     controllers: [{
       path: "/orders",
       serviceKey: "controller",

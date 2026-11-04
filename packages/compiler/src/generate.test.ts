@@ -12,8 +12,9 @@ import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { scanGeneratedArtifacts } from "./type-safety";
-import type { ApplicationGraph, CompileResult } from "./types";
+import type { ApplicationGraph, CompileResult, CompiledExecutionManifest } from "./types";
 import * as ts from "@typescript/typescript6";
+
 
 let rootDir: string;
 let outDir: string;
@@ -59,6 +60,27 @@ describe("compileProject：总体结果", () => {
     expect(manifest.commandGovernance.commands).toContainEqual(expect.objectContaining({
       module: "case", name: "case.accept", permission: "case.accept", idempotency: "required",
     }));
+    expect(manifest.executionPlan).toMatchObject({
+      version: 1,
+      compiler: "@supacloud/compiler",
+      host: { adapter: "elysia", reflection: false, proxy: false },
+      di: { runtime: "angular-compatible", generation: "static" },
+    });
+    const plan = manifest.executionPlan as CompiledExecutionManifest;
+    const casePlan = requireValue(plan.modules.find((module) => module.name === "case"));
+    expect(casePlan.commands).toEqual([expect.objectContaining({
+      name: "case.accept",
+      executor: "commandExecutor",
+      requiredCapabilities: { permission: true, audit: true, idempotency: true, transaction: true },
+    })]);
+    expect(casePlan.providerEdges).toContainEqual({ from: "CASE_REPOSITORY", to: "DB_CLIENT", relation: "external" });
+    expect(casePlan.providerEdges).toContainEqual({ from: "CaseService", to: "CASE_REPOSITORY", relation: "local" });
+    expect(casePlan.routes[0]).toMatchObject({
+      path: "/cases/:caseId/accept",
+      executor: "command",
+      command: "case.accept",
+      stages: ["commandExecutor", "authorize", "idempotency", "transaction", "handler", "audit"],
+    });
   });
 
   test("contracts.manifest.json 汇总 command/query/route/RPC/权限和 evidence", async () => {

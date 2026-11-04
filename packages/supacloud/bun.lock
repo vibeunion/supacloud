@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.30.5",
-        "@supacloud/cli": "^0.115.3",
+        "@supacloud/cli": "^0.115.4",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",

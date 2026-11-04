@@ -105,6 +105,7 @@ export { TraitCompiler } from "./traits";
 export type { TraitCompilation, TraitHandler, TraitKind, TraitRecord } from "./traits";
 export { generateApplication, renderApplication, renderClient, renderOpenApi } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
+export { validateExecutionManifest } from "./execution-manifest";
 export { buildContractManifest } from "./contract-manifest";
 export type { ContractManifest } from "./contract-manifest";
 export {
@@ -168,6 +169,13 @@ export type {
   DatabaseGovernanceOptions,
   CompileResult,
   CompileStats,
+  CompiledExecutionManifest,
+  ExecutionPlanCommand,
+  ExecutionPlanJob,
+  ExecutionPlanModule,
+  ExecutionPlanProvider,
+  ExecutionPlanProviderEdge,
+  ExecutionPlanRoute,
   ControllerNode,
   DependencyGraphCache,
   DependencyGraphIndex,

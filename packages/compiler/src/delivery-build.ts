@@ -6,6 +6,7 @@ import { checkProject } from "./compile";
 import { createDeliveryPlan } from "./delivery-plan";
 import { parseDeliveryOptions, type DeliveryDiagnostic } from "./delivery-schema";
 import { deliveryObjectDigest, parseDeliveryBuildManifest, parseDeliveryBuildResult, type DeliveryBuildResult, type DeliveryObject } from "./delivery-build-schema";
+import { ExecutionManifestValidationError } from "./execution-manifest";
 import { renderDeliveryTarget } from "./delivery-render";
 import { bundleDeliveryTarget } from "./delivery-bundle";
 import { renderDeliveryHttpEntry } from "./delivery-http";
@@ -324,7 +325,8 @@ export async function buildDeliveryProject(
       changedTargets: objects.filter((object) => !unchangedTargets.includes(object.name)).map((object) => object.name),
       removedTargets: previous?.objects.filter((old) => !objects.some((object) => object.name === old.name)).map((old) => old.name) ?? [],
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof ExecutionManifestValidationError) return failed(error.diagnostics);
     // Build errors can contain source snippets or values. Return the phase, not rejected data.
     return failed([{
       severity: "error", code: "delivery-build-failed",

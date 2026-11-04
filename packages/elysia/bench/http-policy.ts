@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "../src/index";
 import { Elysia, t } from "elysia";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { cpus } from "node:os";
@@ -17,6 +18,9 @@ const params = t.Object({ tenant: t.String() });
 function compiled(policies?: unknown[], onHandle?: () => void): CompiledModule {
   return {
     name: "bench", createServices: () => ({ controller: { run: () => { onHandle?.(); return { value: 42 }; } } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/:tenant");
+    },
     controllers: [{
       path: "", serviceKey: "controller", scope: "application",
       routes: [{ method: "GET", path: "/:tenant", handler: "run", params, data: { httpPolicies: policies } }],
