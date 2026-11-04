@@ -36,6 +36,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./typescript": {
+      "supacloud-source": "./src/typescript.ts",
+      "types": "./dist/typescript.d.ts",
+      "import": "./dist/typescript.js"
     }
   },
   "files": [
@@ -47,7 +52,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/command-bun.ts src/drizzle.ts src/drizzle-bun.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --outdir dist --target node --external bun --external @supacloud/contracts --external drizzle-orm --external libpg-query --external @typescript/typescript6",
+    "build:js": "bun build src/index.ts src/command-bun.ts src/drizzle.ts src/drizzle-bun.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts src/typescript.ts --outdir dist --root src --target node --external bun --external @supacloud/contracts --external drizzle-orm --external libpg-query --external typescript --external 'typescript/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -74,13 +79,12 @@
     "@sinclair/typebox": "0.34.52",
     "drizzle-orm": "1.0.0-rc.5-5935859",
     "drizzle-kit": "1.0.0-rc.5-5935859",
-    "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2"
+    "@types/bun": "^1.4.4"
   },
   "dependencies": {
-    "@typescript/typescript6": "^6.0.2",
     "libpg-query": "18.1.5",
-    "@supacloud/contracts": "file:../contracts"
+    "@supacloud/contracts": "file:../contracts",
+    "typescript": "7.1.0-beta"
   },
   "peerDependencies": {
     "drizzle-orm": "1.0.0-rc.5-5935859"

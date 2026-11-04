@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { ownerOf, slash } from './model.mjs';
 
 const excluded = new Set(['node_modules', 'dist', '__tests__', '__fixtures__', 'fixtures', 'generated', '.generated']);
@@ -15,11 +15,10 @@ export function productionSources(directory, onSymlink = () => {}) {
   }).sort();
 }
 
-export function importSites(ts, source) {
+export async function importSites(ts, source) {
   const sites = [];
   const requireFactories = new Set();
   const requireNames = new Set(['require']);
-  const printer = ts.createPrinter({ removeComments: true });
   for (const statement of source.statements) {
     if (ts.isImportDeclaration(statement) && ['node:module', 'module'].includes(statement.moduleSpecifier.text)) {
       const bindings = statement.importClause?.namedBindings;
@@ -35,7 +34,7 @@ export function importSites(ts, source) {
     ts.forEachChild(node, collect);
   };
   collect(source);
-  const visit = (node) => {
+  const visit = async (node) => {
     let argument;
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) argument = node.moduleSpecifier;
     else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) argument = node.moduleReference.expression;
@@ -47,13 +46,13 @@ export function importSites(ts, source) {
           (ts.isMetaProperty(node.expression.expression) && node.expression.expression.keywordToken === ts.SyntaxKind.ImportKeyword))))) argument = node.arguments[0];
     if (argument) {
       const position = source.getLineAndCharacterOfPosition(argument.getStart(source));
-      sites.push({ specifier: ts.isStringLiteralLike(argument) ? argument.text : null,
+      sites.push({ specifier: ts.isStringLiteralLikeNode(argument) ? argument.text : null,
         line: position.line + 1, column: position.character + 1,
-        fingerprint: createHash('sha256').update(printer.printNode(ts.EmitHint.Unspecified, node, source)).digest('hex') });
+        fingerprint: createHash('sha256').update(await ts.printNode(node)).digest('hex') });
     }
-    ts.forEachChild(node, visit);
+    await ts.forEachChildAsync(node, visit);
   };
-  visit(source);
+  await visit(source);
   return sites;
 }
 
@@ -128,7 +127,7 @@ export function publicSubpath(exports, subpath) {
 }
 
 /** Reuses the existing tag policy; does not infer runtime behavior from imports. */
-export function checkSourceBoundaries(workspace, ts, rules) {
+export async function checkSourceBoundaries(workspace, ts, rules) {
   const diagnostics = [];
   const notes = [];
   const edges = [];
@@ -139,12 +138,12 @@ export function checkSourceBoundaries(workspace, ts, rules) {
     const configPath = resolve(workspace.root, project.root, 'tsconfig.json');
     let compilerOptions = { moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true };
     if (existsSync(configPath)) {
-      const config = ts.readConfigFile(configPath, ts.sys.readFile);
+      const config = await ts.readConfigFile(configPath, ts.sys.readFile);
       if (config.error) {
         diagnostics.push({ code: 'WS_TSCONFIG', file: `${project.root}/tsconfig.json`, line: 1, column: 1,
           tsCode: config.error.code, message: normalize(ts.flattenDiagnosticMessageText(config.error.messageText, '\n')) });
       } else {
-        const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, resolve(workspace.root, project.root));
+        const parsed = await ts.parseJsonConfigFileContent(config.config, ts.sys, resolve(workspace.root, project.root));
         // Missing generated extends still permit named/relative checks, but never a clean result.
         const errors = parsed.errors.filter((error) => error.code !== 18003 && error.code !== 18002);
         for (const error of errors) diagnostics.push({ code: 'WS_TSCONFIG', file: `${project.root}/tsconfig.json`,
@@ -152,13 +151,15 @@ export function checkSourceBoundaries(workspace, ts, rules) {
         compilerOptions = parsed.options;
       }
     }
+    await using api = new ts.API({ cwd: resolve(workspace.root, project.root) });
+    await using resolver = await api.createModuleResolver(compilerOptions);
     for (const absolute of productionSources(resolve(workspace.root, project.root, 'src'), (path) => notes.push({
       code: 'WS_SOURCE_SYMLINK', file: slash(relative(workspace.root, path)), line: 1, column: 1,
       message: 'Symlinked source is not scanned; coverage requires an explicit owned source file.' }))) {
       filesScanned++;
       const file = slash(relative(workspace.root, absolute));
-      const source = ts.createSourceFile(absolute, readFileSync(absolute, 'utf8'), ts.ScriptTarget.Latest, true);
-      for (const error of source.parseDiagnostics) {
+      const source = await ts.createSourceFile(absolute, readFileSync(absolute, 'utf8'), ts.ScriptTarget.Latest, true);
+      for (const error of (await ts.transpileModule(source.text, { fileName: absolute, reportDiagnostics: true })).diagnostics ?? []) {
         const position = source.getLineAndCharacterOfPosition(error.start ?? 0);
         diagnostics.push({ code: 'WS_SOURCE_PARSE', file, line: position.line + 1, column: position.character + 1,
           message: ts.flattenDiagnosticMessageText(error.messageText, '\n') });
@@ -172,7 +173,7 @@ export function checkSourceBoundaries(workspace, ts, rules) {
           message: `Direct Effect.${site.method} execution escapes the framework adapter boundary.`,
         });
       }
-      for (const site of importSites(ts, source)) {
+      for (const site of await importSites(ts, source)) {
         const detail = { file, ...site };
         const report = (code, message) => diagnostics.push({ code, ...detail, message });
         if (site.specifier === null) {
@@ -182,7 +183,7 @@ export function checkSourceBoundaries(workspace, ts, rules) {
         const specifier = site.specifier;
         const named = byName.find((target) => specifier === target.packageName || specifier.startsWith(`${target.packageName}/`));
         // Resolve even a declared/self package name: tsconfig paths may redirect it.
-        const resolved = ts.resolveModuleName(specifier, absolute, compilerOptions, ts.sys).resolvedModule;
+        const resolved = (await resolver.resolveModuleName(specifier, dirname(absolute))).resolvedModule;
         const destination = resolved?.resolvedFileName ?? (specifier.startsWith('.') ? resolve(absolute, '..', specifier) : undefined);
         const destinationPath = destination ? slash(destination) : '';
         const installedAt = destinationPath.lastIndexOf('/node_modules/');

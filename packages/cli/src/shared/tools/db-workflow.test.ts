@@ -3,7 +3,7 @@ import { SQL } from "bun";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "../../../../compiler/src/typescript";
 import { runDbWorkflow, type DbWorkflowOptions } from "./db-workflow";
 import { authorizeExecution, executionMode } from "../execution-policy";
 import { resolveSupaCloudContext } from "../context";
@@ -289,13 +289,13 @@ test("registered workflow commands participate in read-only and exact production
     expect(registered).toBe(true);
 });
 
-test("modified workflow modules have scoped strict TypeScript diagnostics", () => {
+test("modified workflow modules have scoped strict TypeScript diagnostics", async () => {
     const files = [
         resolve(import.meta.dir, "db-workflow.ts"), resolve(import.meta.dir, "db-governance-tools.ts"),
         resolve(import.meta.dir, "../../../../db/src/reverse.ts"), resolve(import.meta.dir, "../../../../db/src/role-guard.ts"),
     ];
-    const program = ts.createProgram(files, { strict: true, noEmit: true, skipLibCheck: true, types: ["bun"],
-        target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
-    const errors = ts.getPreEmitDiagnostics(program).filter((item) => !item.file || files.includes(resolve(item.file.fileName)));
+    await using program = (await ts.createProgram(files, { strict: true, noEmit: true, skipLibCheck: true, types: ["bun"],
+        target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler }));
+    const errors = (await ts.getPreEmitDiagnostics(program)).filter((item) => !item.file || files.includes(resolve(item.file.fileName)));
     expect(errors.map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
 }, 30_000);

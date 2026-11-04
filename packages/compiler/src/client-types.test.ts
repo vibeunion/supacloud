@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { renderApplication, renderClient, renderOpenApi, renderPermissions } from "./generate";
 import { buildContractManifest } from "./contract-manifest";
 import { createApplicationDevelopmentContext } from "./application-development";
@@ -49,15 +49,15 @@ test("generated client requires inherited path parameters and a decoder for type
         "client.items.get<string>(options);",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0",
       baseUrl: root,
       paths: { "typebox": [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
     const client = await import(pathToFileURL(join(root, "client.ts")).href);
     let calls = 0;
@@ -119,14 +119,14 @@ test("generated client exposes query and mutation procedures with explicit idemp
         "void detail; void accepted; void procedureKind;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
       paths: { typebox: [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -160,14 +160,14 @@ test("generated client enforces route idempotency without a command binding", as
         "void required;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
       paths: { typebox: [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -232,14 +232,14 @@ test("feature transition route bindings carry command governance into generated 
         'client.cases.approve.mutate({ params: { id: "case-1" } });',
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
       paths: { typebox: [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
 
     expect(buildContractManifest(featureGraph, { client: true, openapi: false, permissions: true }).routes)
@@ -338,7 +338,7 @@ test("generated client and OpenAPI honor the enhanced strict baseline with schem
         "void valid;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts"), join(root, "openapi.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts"), join(root, "openapi.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noPropertyAccessFromIndexSignature: true, noImplicitOverride: true,
       noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
@@ -347,8 +347,8 @@ test("generated client and OpenAPI honor the enhanced strict baseline with schem
       ignoreDeprecations: "6.0",
       baseUrl: root,
       paths: { "typebox": [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -386,14 +386,14 @@ test("generated client infers Type.Module recursive request and response contrac
         'void typed; void invalid;',
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
       paths: { typebox: [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -437,14 +437,14 @@ test("generated client uses encoded request types and decoded response types for
         "void typed;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
       paths: { typebox: [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -482,14 +482,14 @@ test("generated client requires params when a params schema exists without a pat
         "void valid;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
       paths: { "typebox": [typeboxPath] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -511,15 +511,15 @@ test("changing the shared route contract rejects stale callers without handwritt
         }],
       }],
     };
-    const diagnostics = () => {
-      const program = ts.createProgram([join(root, "consumer.ts")], {
+    const diagnostics = async () => {
+      await using program = (await ts.createProgram([join(root, "consumer.ts")], {
         strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
         noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
         ignoreDeprecations: "6.0", baseUrl: root,
         paths: { "typebox": [typeboxPath] },
-      });
-      return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+      }));
+      return (await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
     };
     await writeFixtureProject(root, {
       "client.ts": renderClient(contractGraph, { rootDir: root, outDir: root }),
@@ -539,7 +539,7 @@ test("changing the shared route contract rejects stale callers without handwritt
         "void id;",
       ].join("\n"),
     });
-    expect(diagnostics()).toEqual([]);
+    expect((await diagnostics())).toEqual([]);
     await writeFixtureProject(root, {
       "schemas.ts": [
         'import { Type } from "typebox";',
@@ -547,7 +547,7 @@ test("changing the shared route contract rejects stale callers without handwritt
         'export const Result = Type.Object({ receiptId: Type.String() });',
       ].join("\n"),
     });
-    const stale = diagnostics();
+    const stale = (await diagnostics());
     expect(stale.some((message) => message.includes("amount"))).toBe(true);
     expect(stale.some((message) => message.includes("id"))).toBe(true);
     await writeFixtureProject(root, {
@@ -560,7 +560,7 @@ test("changing the shared route contract rejects stale callers without handwritt
         "void receiptId; void fabricated;",
       ].join("\n"),
     });
-    expect(diagnostics()).toEqual([]);
+    expect((await diagnostics())).toEqual([]);
     await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
     const build = await Bun.build({ entrypoints: [join(root, "client.ts")], target: "browser" });
     expect(build.success).toBe(true);

@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { Type } from "typebox";
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "../../../compiler/src/typescript";
 import { runCli } from "./cli";
 import { decodedSchema, optional, stringEnum, withDescription, type ToolArguments, type ToolSchema } from "./schema";
 import { registerTool, type ToolCallback, type ToolInvocation, type ToolResult, type ToolServer, type ToolTextContent } from "./tool-server";
@@ -213,14 +213,14 @@ test("CLI production sources contain no explicit any or checking suppressions", 
     for (const file of files) {
         if (!file.endsWith(".ts") || /\.(test|spec)\.ts$/.test(file)) continue;
         const text = await readFile(resolve(root, file), "utf8");
-        const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+        const source = (await ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true));
         const visit = (node: ts.Node): void => {
             if (node.kind === ts.SyntaxKind.AnyKeyword) failures.push(`${file}: explicit any`);
             ts.forEachChild(node, visit);
         };
         visit(source);
-        const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, text);
-        for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+        const scanner = ts.createScanner(false, ts.LanguageVariant.Standard, text);
+        for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFile; kind = scanner.scan()) {
             if ((kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia)
                 && /@ts-(ignore|nocheck|expect-error)\b/.test(scanner.getTokenText())) {
                 failures.push(`${file}: suppressed checking`);

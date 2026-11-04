@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as ts from "../packages/compiler/node_modules/@typescript/typescript6/lib/typescript.js";
+import * as ts from "../packages/compiler/src/typescript";
 
 const SOURCE_EXTENSIONS = new Set([".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"]);
 const EXCLUDED_DIRECTORIES = new Set([
@@ -46,14 +46,14 @@ function lineAndColumn(source: string, position: number): { line: number; column
   };
 }
 
-function scanTypeScript(
+async function scanTypeScript(
   root: string,
   file: string,
   sourceText: string,
   displaySource = sourceText,
   sourceOffset = 0,
-): PlatformSourceFinding[] {
-  const source = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true);
+): Promise<PlatformSourceFinding[]> {
+  const source = (await ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true));
   const findings: PlatformSourceFinding[] = [];
   const comments = new Set<number>();
   const report = (position: number, kind: PlatformSourceFinding["kind"], text: string): void => {
@@ -83,7 +83,7 @@ function scanTypeScript(
   return findings;
 }
 
-function scanFile(root: string, file: string): PlatformSourceFinding[] {
+async function scanFile(root: string, file: string): Promise<PlatformSourceFinding[]> {
   const source = readFileSync(file, "utf8");
   const findings: PlatformSourceFinding[] = [];
   if (file.endsWith(".svelte")) {
@@ -118,7 +118,7 @@ function scanFile(root: string, file: string): PlatformSourceFinding[] {
     };
     visit(ast);
   } else {
-    findings.push(...scanTypeScript(root, file, source));
+    findings.push(...(await scanTypeScript(root, file, source)));
   }
 
   return findings;
@@ -128,7 +128,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function scanPlatformSource(root: string): PlatformSourceFinding[] {
+export async function scanPlatformSource(root: string): Promise<PlatformSourceFinding[]> {
   const packageRoot = resolve(root, "packages");
   const directories = existsSync(packageRoot)
     ? readdirSync(packageRoot, { withFileTypes: true })
@@ -136,12 +136,12 @@ export function scanPlatformSource(root: string): PlatformSourceFinding[] {
       .map((entry) => join(packageRoot, entry.name))
     : [];
   directories.push(resolve(root, "scripts"));
-  return directories.flatMap((directory) => sourceFiles(directory).flatMap((file) => scanFile(root, file)));
+  return (await ts.asyncFlatMap(directories, async (directory) => (await ts.asyncFlatMap(sourceFiles(directory), async (file) => (await scanFile(root, file))))));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = resolve(import.meta.dir, "..");
-  const findings = scanPlatformSource(root);
+  const findings = (await scanPlatformSource(root));
   if (findings.length > 0) {
     for (const finding of findings) {
       console.error(`${finding.file}:${finding.line}:${finding.column}: ${finding.text}`);

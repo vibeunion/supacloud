@@ -38,10 +38,11 @@
   },
   "overrides": {
     "@supacloud/compiler": "file:../compiler",
-    "@supacloud/delivery": "file:../delivery"
+    "@supacloud/delivery": "file:../delivery",
+    "@supacloud/db": "file:../db"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2"
+    "typescript": "7.1.0-beta"
   }
 }

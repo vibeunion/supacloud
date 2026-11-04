@@ -13,7 +13,7 @@ import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { scanGeneratedArtifacts } from "./type-safety";
 import type { ApplicationGraph, CompileResult, CompiledExecutionManifest } from "./types";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 
 
 let rootDir: string;
@@ -39,8 +39,8 @@ describe("compileProject：总体结果", () => {
     ]);
   });
 
-  test("严格生成产物不包含 any", () => {
-    expect(scanGeneratedArtifacts({ "application.ts": applicationCode })).toEqual([]);
+  test("严格生成产物不包含 any", async () => {
+    expect((await scanGeneratedArtifacts({ "application.ts": applicationCode }))).toEqual([]);
   });
 
   test("app.manifest.json 是 graph 的 JSON 序列化", async () => {
@@ -201,13 +201,13 @@ for (const module of createUnscopedModules()) {
 }
 `,
       });
-      const program = ts.createProgram([join(root, "consumer.ts")], {
+      await using program = (await ts.createProgram([join(root, "consumer.ts")], {
         noEmit: true, strict: true, skipLibCheck: true,
         noPropertyAccessFromIndexSignature: true,
         target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
-      });
-      const diagnostics = ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+      }));
+      const diagnostics = (await ts.getPreEmitDiagnostics(program)).map((diagnostic) => {
         const position = diagnostic.file && diagnostic.start !== undefined
           ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start) : undefined;
         return `${diagnostic.file?.fileName}:${position ? position.line + 1 : "?"}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")}`;
@@ -311,28 +311,28 @@ export class LifecycleController {
 `,
         "generated/application.ts": rendered.applicationCode,
       });
-      const program = ts.createProgram([join(root, "generated/application.ts")], {
+      await using program = (await ts.createProgram([join(root, "generated/application.ts")], {
         noEmit: true, strict: true, skipLibCheck: true,
         noPropertyAccessFromIndexSignature: true,
         target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
-      });
-      expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+      }));
+      expect((await ts.getPreEmitDiagnostics(program)).map((diagnostic) =>
         ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
       const sourceFile = program.getSourceFile(join(root, "generated/application.ts"));
       if (!sourceFile) throw new Error("Generated application source is missing");
       const checker = program.getTypeChecker();
       const hits = { instance: 0, init: 0, teardown: 0, handlerCall: 0 };
-      const assertNotAny = (node: ts.Node) => {
-        expect(checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any).toBe(0);
+      const assertNotAny = async (node: ts.Node) => {
+        expect((await checker.getTypeAtLocation(node)).flags & ts.TypeFlags.Any).toBe(0);
       };
-      const visit = (node: ts.Node): void => {
+      const visit = async (node: ts.Node): Promise<void> => {
         if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
           const name = node.name.text;
           if (name === "instance" || name === "init" || name === "teardown") {
             hits[name]++;
-            assertNotAny(node.name);
-            if (node.initializer) assertNotAny(node.initializer);
+            (await assertNotAny(node.name));
+            if (node.initializer) (await assertNotAny(node.initializer));
           }
         }
         if (ts.isCallExpression(node) &&
@@ -341,12 +341,12 @@ export class LifecycleController {
           node.expression.name.text === "call" &&
           node.expression.expression.text === "handler") {
           hits.handlerCall++;
-          assertNotAny(node.expression.expression);
-          assertNotAny(node);
+          (await assertNotAny(node.expression.expression));
+          (await assertNotAny(node));
         }
-        ts.forEachChild(node, visit);
+        (await ts.forEachChildAsync(node, visit));
       };
-      visit(sourceFile);
+      (await visit(sourceFile));
       expect(hits).toEqual({ instance: 3, init: 1, teardown: 1, handlerCall: 3 });
       const generated = await import(pathToFileURL(join(root, "generated/application.ts")).href);
       const [module] = generated.createCompiledModules() as Array<{
@@ -1459,12 +1459,12 @@ test("direct parameter invokers typecheck and preserve positional bindings and t
       }`,
       "generated/application.ts": rendered.applicationCode,
     });
-    const program = ts.createProgram([join(root, "generated/application.ts")], {
+    await using program = (await ts.createProgram([join(root, "generated/application.ts")], {
       noEmit: true, strict: true, skipLibCheck: true, noPropertyAccessFromIndexSignature: true,
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((diagnostic) =>
       ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
     const generated: { createCompiledModules(): Array<{
       createServices(deps: Record<string, unknown>, imported: Record<string, Record<string, unknown>>): Record<string, unknown>;

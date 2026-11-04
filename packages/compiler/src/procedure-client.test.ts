@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { renderClient } from "./generate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
@@ -52,13 +52,13 @@ test("grouped procedures preserve main runtime hooks, metadata and required exec
         "const metadata: readonly unknown[] = client.procedures;",
       ].join("\n"),
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noEmit: true, skipLibCheck: true, types: [],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       paths: { typebox: [join(import.meta.dir, "../node_modules/typebox")] },
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
     const generated = await import(pathToFileURL(join(root, "client.ts")).href);
     const requests: { url: string; key: string | null }[] = [];
     let validations = 0;

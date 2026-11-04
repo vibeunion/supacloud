@@ -1,9 +1,9 @@
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import type { SourceMigrationResult } from "./migrations";
 import type { Diagnostic } from "./types";
 import { apiOrigin, bindApiSource } from "./api-source";
 
-function providerArgument(node: ts.Node, checker: ts.TypeChecker): boolean {
+async function providerArgument(node: ts.Node, checker: ts.TypeChecker): Promise<boolean> {
   let current = node;
   while (ts.isParenthesizedExpression(current.parent)) current = current.parent;
   if (!ts.isCallExpression(current.parent) || current.parent.expression !== current) return false;
@@ -11,37 +11,37 @@ function providerArgument(node: ts.Node, checker: ts.TypeChecker): boolean {
   while (ts.isParenthesizedExpression(current.parent)) current = current.parent;
   const parent = current.parent;
   if (!ts.isCallExpression(parent) || !parent.arguments.some(argument => argument === current)) return false;
-  const owner = apiOrigin(parent.expression, checker);
+  const owner = (await apiOrigin(parent.expression, checker));
   return owner?.name === "provideHttpClient" && ["@supacloud/app", "@supacloud/app/http"].includes(owner.module);
 }
 
 /** Never replaces the root array helper in constructor/custom pipeline usages. */
-export function migrateHttpProviderImports(source: string, fileName: string): SourceMigrationResult {
-  const bound = bindApiSource(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true));
+export async function migrateHttpProviderImports(source: string, fileName: string): Promise<SourceMigrationResult> {
+  const parsed = await ts.createSourceFile(fileName, source);
+  await using bound = await bindApiSource(parsed);
   const sf = bound.source, checker = bound.checker;
   const edits: { start: number; end: number; text: string }[] = [];
   const issues: SourceMigrationResult["issues"] = [];
-  const printer = ts.createPrinter({ newLine: source.includes("\r\n") ? ts.NewLineKind.CarriageReturnLineFeed : ts.NewLineKind.LineFeed });
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   for (const statement of sf.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
       || statement.moduleSpecifier.text !== "@supacloud/app" || !statement.importClause
-      || statement.importClause.isTypeOnly) continue;
+      || (statement.importClause.phaseModifier === ts.SyntaxKind.TypeKeyword)) continue;
     const named = statement.importClause.namedBindings;
     if (!named || !ts.isNamedImports(named)) continue;
     const specifier = named.elements.find(item => !item.isTypeOnly && (item.propertyName ?? item.name).text === "withInterceptors");
     if (!specifier) continue;
-    const symbol = checker.getSymbolAtLocation(specifier.name);
+    const symbol = (await checker.getSymbolAtLocation(specifier.name));
     if (!symbol) continue;
     const uses: ts.Identifier[] = [];
-    const visit = (node: ts.Node): void => {
+    const visit = async (node: ts.Node): Promise<void> => {
       if (ts.isImportDeclaration(node)) return;
-      if (ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === symbol) uses.push(node);
-      ts.forEachChild(node, visit);
+      if (ts.isIdentifier(node) && (await checker.getSymbolAtLocation(node)) === symbol) uses.push(node);
+      (await ts.forEachChildAsync(node, visit));
     };
-    visit(sf);
-    if (!uses.some(node => providerArgument(node, checker))) continue;
-    if (!uses.every(node => providerArgument(node, checker)) || statement.attributes) {
+    (await visit(sf));
+    if (!(await ts.asyncSome(uses, async node => (await providerArgument(node, checker))))) continue;
+    if (!(await ts.asyncEvery(uses, async node => (await providerArgument(node, checker)))) || statement.attributes) {
       issues.push({ code: "http-provider-migration-ambiguous", file: fileName,
         line: sf.getLineAndCharacterOfPosition(specifier.getStart(sf)).line + 1,
         message: "withInterceptors also has non-provider uses; split the bindings manually before migration.",
@@ -52,42 +52,43 @@ export function migrateHttpProviderImports(source: string, fileName: string): So
     if (remaining.length === 0 && !statement.importClause.name) {
       edits.push({ start: statement.moduleSpecifier.getStart(sf), end: statement.moduleSpecifier.end, text: '"@supacloud/app/http"' });
     } else {
-      const clause = ts.factory.updateImportClause(statement.importClause, false, statement.importClause.name,
+      const clause = ts.factory.updateImportClause(statement.importClause, statement.importClause.name,
         remaining.length ? ts.factory.updateNamedImports(named, remaining) : undefined);
       const updated = ts.factory.updateImportDeclaration(statement, statement.modifiers, clause, statement.moduleSpecifier, statement.attributes);
-      const text = printer.printNode(ts.EmitHint.Unspecified, updated, sf).trimStart()
+      const text = (await ts.printNode(updated)).trimStart()
         + newline + `import { ${specifier.getText(sf)} } from "@supacloud/app/http";`;
       // Keep comments before the statement outside the replaced range.
       const withoutLeading = text.replace(/^(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)+/, "");
       edits.push({ start: statement.getStart(sf), end: statement.end, text: withoutLeading });
     }
   }
-  const checkNamespace = (node: ts.Node): void => {
-    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && providerArgument(node, checker)) {
-      const origin = apiOrigin(node, checker);
+  const checkNamespace = async (node: ts.Node): Promise<void> => {
+    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && (await providerArgument(node, checker))) {
+      const origin = (await apiOrigin(node, checker));
       if (origin?.module === "@supacloud/app" && origin.name === "withInterceptors") issues.push({
         code: "http-provider-migration-namespace", file: fileName,
         line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
         message: "Use a dedicated named import from @supacloud/app/http; namespace rewrites require manual review.",
       });
     }
-    ts.forEachChild(node, checkNamespace);
+    (await ts.forEachChildAsync(node, checkNamespace));
   };
-  checkNamespace(sf);
+  (await checkNamespace(sf));
   if (issues.length) return { changed: false, content: source, replacements: 0, issues };
   let content = source;
   for (const edit of edits.sort((a, b) => b.start - a.start)) content = content.slice(0, edit.start) + edit.text + content.slice(edit.end);
   return { changed: edits.length > 0, content, replacements: edits.length, issues: [] };
 }
 
-export function scanHttpProviderImports(source: ts.SourceFile, file: string): Diagnostic[] {
+export async function scanHttpProviderImports(source: ts.SourceFile, file: string): Promise<Diagnostic[]> {
   if (!source.text.includes("@supacloud/app")) return [];
-  const { source: sf, checker } = bindApiSource(source);
+  await using bound = await bindApiSource(source);
+  const { source: sf, checker } = bound;
   const diagnostics: Diagnostic[] = [];
-  const visit = (node: ts.Node): void => {
+  const visit = async (node: ts.Node): Promise<void> => {
     if (ts.isCallExpression(node)) {
-      const origin = apiOrigin(node.expression, checker);
-      if (origin?.module === "@supacloud/app" && origin.name === "withInterceptors" && providerArgument(node.expression, checker)) {
+      const origin = (await apiOrigin(node.expression, checker));
+      if (origin?.module === "@supacloud/app" && origin.name === "withInterceptors" && (await providerArgument(node.expression, checker))) {
         const start = sf.getLineAndCharacterOfPosition(node.getStart(sf));
         const end = sf.getLineAndCharacterOfPosition(node.end);
         diagnostics.push({ severity: "error", code: "http-provider-import-mismatch", file,
@@ -99,8 +100,8 @@ export function scanHttpProviderImports(source: ts.SourceFile, file: string): Di
         });
       }
     }
-    ts.forEachChild(node, visit);
+    (await ts.forEachChildAsync(node, visit));
   };
-  visit(sf);
+  (await visit(sf));
   return diagnostics;
 }

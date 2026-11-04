@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { renderGraphql } from "./graphql";
 import { writeFileIfChanged } from "./generate";
 import { assertGraphqlOptions } from "./graphql-options";
@@ -72,16 +72,16 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
 
 async function assertPostgrestSnapshot(path: string): Promise<void> {
   const snapshot = await readFile(path, "utf8");
-  const syntax = ts.createSourceFile(path, snapshot, ts.ScriptTarget.Latest, true);
+  const syntax = (await ts.createSourceFile(path, snapshot, ts.ScriptTarget.Latest, true));
   const database = syntax.statements.find((node) =>
     (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) && node.name.text === "Database"
     && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
   if (!database) throw new Error("PostgREST snapshot must export Database from the official type generator");
-  const program = ts.createProgram([path], {
+  await using program = (await ts.createProgram([path], {
     strict: true, noEmit: true, skipLibCheck: true, types: [], target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-  });
-  if (ts.getPreEmitDiagnostics(program).length) throw new Error("PostgREST snapshot has TypeScript errors");
+  }));
+  if ((await ts.getPreEmitDiagnostics(program)).length) throw new Error("PostgREST snapshot has TypeScript errors");
 }
 
 /** One offline entrypoint; preserves each protocol's native type semantics and generated validators. */
@@ -106,10 +106,10 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   if (drizzleSchema) {
     await addInput(drizzleSchema);
     // Track local type imports too: a split Drizzle schema must invalidate the contract.
-    const drizzleProgram = ts.createProgram([drizzleSchema], {
+    await using drizzleProgram = (await ts.createProgram([drizzleSchema], {
       noEmit: true, moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext,
       target: ts.ScriptTarget.ES2022, types: [], skipLibCheck: true,
-    });
+    }));
     for (const source of drizzleProgram.getSourceFiles()) {
       if (!source.isDeclarationFile && !source.fileName.includes("/node_modules/")) await addInput(source.fileName);
     }

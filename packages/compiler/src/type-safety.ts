@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
 import { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
@@ -35,20 +35,20 @@ export interface TypeSafetyScanOptions extends TypeSafetyOptions {
   strict?: boolean;
 }
 
-export function scanGeneratedArtifacts(
+export async function scanGeneratedArtifacts(
   artifacts: Record<string, string | undefined>,
   strict = true,
-): Diagnostic[] {
+): Promise<Diagnostic[]> {
   const diagnostics: Diagnostic[] = [];
   for (const [file, content] of Object.entries(artifacts)) {
     if (content === undefined) continue;
-    const sourceFile = ts.createSourceFile(
+    const sourceFile = (await ts.createSourceFile(
       file,
       content,
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TS,
-    );
+    ));
     for (const node of descendantsOfKind(sourceFile, isAnyKeyword)) {
       diagnostics.push(makeDiagnostic(
         "generated-any",
@@ -62,11 +62,11 @@ export function scanGeneratedArtifacts(
   return diagnostics;
 }
 
-export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[] {
+export async function scanProductionSource(options: TypeSafetyScanOptions): Promise<Diagnostic[]> {
   const rootDir = resolve(options.rootDir);
   const configPath = ts.findConfigFile(rootDir, ts.sys.fileExists) ?? join(rootDir, "tsconfig.json");
   const projectConfig: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] } = existsSync(configPath)
-    ? readProjectConfig(configPath)
+    ? (await readProjectConfig(configPath))
     : {
         options: {
           strict: true,
@@ -79,12 +79,12 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
         errors: [],
       };
   const include = options.include ?? ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
-  const rootNames = ts.sys.readDirectory(
+  const rootNames = (await ts.sys.readDirectory(
     rootDir,
     [".ts", ".tsx", ".mts", ".cts"],
     ["node_modules", "dist"],
     include,
-  ).filter((file) => isProductionSourcePath(
+  )).filter((file) => isProductionSourcePath(
     rootDir,
     file,
     [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])],
@@ -111,16 +111,14 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     forceConsistentCasingInFileNames: true,
     noEmit: true,
   };
-  const host = ts.createCompilerHost(compilerOptions);
-  host.getCurrentDirectory = () => dirname(configPath);
-  const program = ts.createProgram(rootNames, compilerOptions, host);
+  await using program = await ts.createProgram(rootNames, compilerOptions, { cwd: dirname(configPath) });
   const outDir = options.outDir ? normalizeRelative(rootDir, options.outDir) : undefined;
   const excludes = [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])];
   const sourceFiles = program
     .getSourceFiles()
     .filter((sourceFile) => isProductionSource(rootDir, sourceFile, excludes, outDir));
 
-  const diagnostics: Diagnostic[] = [...projectConfig.errors, ...program.getOptionsDiagnostics()]
+  const diagnostics: Diagnostic[] = [...projectConfig.errors, ...(await program.getOptionsDiagnostics())]
     .map((diagnostic) => ({
       severity: "error",
       code: "source-config",
@@ -135,11 +133,11 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   // Resolution failures are configuration errors, but must still block emission.
   const moduleResolutionCodes = new Set([2307, 2688, 2792]);
   for (const diagnostic of [
-    ...program.getGlobalDiagnostics(),
-    ...sourceFiles.flatMap((sourceFile) => [
-      ...program.getSyntacticDiagnostics(sourceFile),
-      ...program.getSemanticDiagnostics(sourceFile),
-    ]),
+    ...(await program.getGlobalDiagnostics()),
+    ...(await ts.asyncFlatMap(sourceFiles, async (sourceFile) => [
+      ...(await program.getSyntacticDiagnostics(sourceFile)),
+      ...(await program.getSemanticDiagnostics(sourceFile)),
+    ])),
   ]) {
     diagnostics.push({
       severity: "error",
@@ -152,16 +150,16 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     });
   }
   for (const sourceFile of sourceFiles) {
-    scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
-    diagnostics.push(...scanSourceSemantics(
+    (await scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false));
+    diagnostics.push(...(await scanSourceSemantics(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), rootDir,
       options.allowAlternativeLibraries === undefined ? {} : { allowAlternativeLibraries: options.allowAlternativeLibraries },
-    ));
-    diagnostics.push(...scanDrizzleSql(
+    )));
+    diagnostics.push(...(await scanDrizzleSql(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
-    ));
-    const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, sourceFile.languageVariant, sourceFile.text);
-    for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+    )));
+    const scanner = ts.createScanner(false, sourceFile.languageVariant, sourceFile.text);
+    for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFile; kind = scanner.scan()) {
       if ((kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia)
         && /@ts-(?:ignore|nocheck|expect-error)\b/.test(scanner.getTokenText())) {
         diagnostics.push({
@@ -169,7 +167,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
           code: "source-type-suppression",
           message: "Production source must not suppress TypeScript checking; keep negative type fixtures in tests.",
           file: normalizeRelative(rootDir, sourceFile.fileName),
-          line: sourceFile.getLineAndCharacterOfPosition(scanner.getTokenPos()).line + 1,
+          line: sourceFile.getLineAndCharacterOfPosition(scanner.getTokenStart()).line + 1,
           errorCode: TYPE_SAFETY_DIAGNOSTIC_CODES["source-type-suppression"].errorCode,
           docsUrl: TYPE_SAFETY_DIAGNOSTIC_CODES["source-type-suppression"].docsUrl,
         });
@@ -179,13 +177,13 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   return diagnostics;
 }
 
-function scanSourceFile(
+async function scanSourceFile(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   rootDir: string,
   diagnostics: Diagnostic[],
   strict: boolean,
-): void {
+): Promise<void> {
   for (const node of descendantsOfKind(sourceFile, isAnyKeyword)) {
     diagnostics.push(makeDiagnostic(
       "source-any",
@@ -199,7 +197,7 @@ function scanSourceFile(
 
   for (const node of descendants(sourceFile)) {
     if (ts.isAsExpression(node)) {
-      if (ts.isAsExpression(node.parent) || ts.isTypeAssertionExpression(node.parent)) continue;
+      if (ts.isAsExpression(node.parent) || ts.isTypeAssertion(node.parent)) continue;
       const assertedType = node.type.getText(sourceFile);
       if (assertedType === "const") continue;
       diagnostics.push(makeDiagnostic(
@@ -210,8 +208,8 @@ function scanSourceFile(
         strict,
         rootDir,
       ));
-    } else if (ts.isTypeAssertionExpression(node)) {
-      if (ts.isAsExpression(node.parent) || ts.isTypeAssertionExpression(node.parent)) continue;
+    } else if (ts.isTypeAssertion(node)) {
+      if (ts.isAsExpression(node.parent) || ts.isTypeAssertion(node.parent)) continue;
       diagnostics.push(makeDiagnostic(
         "source-type-assertion",
         `生产源码包含类型断言 ${node.getText(sourceFile)}；请优先使用类型守卫、satisfies 或显式边界解析。`,
@@ -235,10 +233,10 @@ function scanSourceFile(
   for (const declaration of descendantsOfKind(sourceFile, ts.isVariableDeclaration)) {
     const initializer = declaration.initializer;
     if (!initializer || declaration.type) continue;
-    const declarationType = checker.getTypeAtLocation(declaration.name);
-    const initializerType = checker.getTypeAtLocation(initializer);
+    const declarationType = (await checker.getTypeAtLocation(declaration.name));
+    const initializerType = (await checker.getTypeAtLocation(initializer));
     for (const name of bindingNames(declaration.name)) {
-      if (isAnyType(checker.getTypeAtLocation(name))) {
+      if (isAnyType((await checker.getTypeAtLocation(name)))) {
         diagnostics.push(makeDiagnostic(
           "source-any",
           "生产源码中的变量被推断为 any；请为边界数据提供解析类型或显式 unknown。",
@@ -255,7 +253,7 @@ function scanSourceFile(
       && !isLiteralType(declarationType)) {
       diagnostics.push(makeDiagnostic(
         "source-implicit-widening",
-        `变量 ${declaration.name.getText(sourceFile)} 的字面量类型从 ${checker.typeToString(initializerType, initializer)} 隐式宽化为 ${checker.typeToString(declarationType, declaration)}；请补充类型或使用 const。`,
+        `变量 ${declaration.name.getText(sourceFile)} 的字面量类型从 ${(await checker.typeToString(initializerType, initializer))} 隐式宽化为 ${(await checker.typeToString(declarationType, declaration))}；请补充类型或使用 const。`,
         sourceFile,
         declaration,
         strict,
@@ -281,10 +279,10 @@ function scanSourceFile(
     }
   }
 
-  for (const parameter of descendantsOfKind(sourceFile, ts.isParameter)) {
+  for (const parameter of descendantsOfKind(sourceFile, ts.isParameterDeclaration)) {
     if (parameter.type) continue;
     for (const name of bindingNames(parameter.name)) {
-      if (isAnyType(checker.getTypeAtLocation(name))) {
+      if (isAnyType((await checker.getTypeAtLocation(name)))) {
         diagnostics.push(makeDiagnostic(
           "source-any",
           "生产源码中的参数被推断为 any；请补充参数类型。",
@@ -298,13 +296,13 @@ function scanSourceFile(
   }
 }
 
-function readProjectConfig(configPath: string): {
+async function readProjectConfig(configPath: string): Promise<{
   options: ts.CompilerOptions;
   errors: readonly ts.Diagnostic[];
-} {
-  const config = ts.readConfigFile(configPath, (file) => readFileSync(file, "utf8"));
+}> {
+  const config = (await ts.readConfigFile(configPath, (file) => readFileSync(file, "utf8")));
   if (config.error) return { options: {}, errors: [config.error] };
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath));
+  const parsed = (await ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath)));
   return { options: parsed.options, errors: parsed.errors };
 }
 
@@ -342,7 +340,7 @@ function globMatches(value: string, pattern: string): boolean {
 function bindingNames(name: ts.BindingName): ts.Identifier[] {
   if (ts.isIdentifier(name)) return [name];
   return name.elements.flatMap((element) =>
-    ts.isBindingElement(element) ? bindingNames(element.name) : [],
+    ts.isBindingElement(element) && element.name ? bindingNames(element.name) : [],
   );
 }
 

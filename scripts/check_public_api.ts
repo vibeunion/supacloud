@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import * as ts from "../packages/compiler/node_modules/@typescript/typescript6/lib/typescript.js";
+import * as ts from "../packages/compiler/src/typescript";
 
 type ExportKind = "type" | "value" | "both";
 
@@ -73,7 +73,7 @@ function parseSnapshot(value: unknown, path: string): PublicApiSnapshot {
   return { format: 2, package: value["package"], entrypoint: ".", exports };
 }
 
-function packageProgram(target: ApiTarget): ts.Program {
+async function packageProgram(target: ApiTarget): Promise<ts.Program> {
   const configPath = ts.findConfigFile(dirname(target.source), ts.sys.fileExists);
   if (!configPath) throw new Error(`Cannot find tsconfig for ${target.packageName}: ${target.source}`);
 
@@ -84,17 +84,17 @@ function packageProgram(target: ApiTarget): ts.Program {
       configDiagnostics.push(diagnostic);
     },
   } satisfies Parameters<typeof ts.getParsedCommandLineOfConfigFile>[2];
-  const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, configHost);
+  const parsed = (await ts.getParsedCommandLineOfConfigFile(configPath, {}, configHost));
   if (!parsed || configDiagnostics.length > 0 || parsed.errors.length > 0) {
     const diagnostics = [...configDiagnostics, ...(parsed?.errors ?? [])]
       .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
     throw new Error(`Cannot parse ${configPath}: ${diagnostics.join("\n")}`);
   }
 
-  const rootNames = parsed.fileNames.includes(target.source)
+  const rootNames = parsed.fileNames.some(file => file === target.source)
     ? parsed.fileNames
     : [...parsed.fileNames, target.source];
-  return ts.createProgram(rootNames, { ...parsed.options, noEmit: true });
+  return (await ts.createProgram(rootNames, { ...parsed.options, noEmit: true }));
 }
 
 function symbolKind(symbol: ts.Symbol): ExportKind {
@@ -105,20 +105,20 @@ function symbolKind(symbol: ts.Symbol): ExportKind {
   return "value";
 }
 
-function declarationSignature(symbol: ts.Symbol, checker: ts.TypeChecker): string {
-  const declarations = symbol.declarations ?? [];
-  const signatures = declarations.map((declaration) => {
+async function declarationSignature(symbol: ts.Symbol, checker: ts.TypeChecker): Promise<string> {
+  const declarations = (await ts.declarationsOf(symbol));
+  const signatures = (await ts.asyncMap(declarations, async (declaration) => {
     try {
       const sourceFile = declaration.getSourceFile();
       const source = ts.isVariableDeclaration(declaration)
         ? declaration.parent.parent.getText(sourceFile)
         : declaration.getText(sourceFile);
-      return ts.transpileDeclaration(source, TRANSPILE_OPTIONS).outputText.trim().replaceAll("\r\n", "\n");
+      return (await ts.transpileDeclaration(source, TRANSPILE_OPTIONS)).outputText.trim().replaceAll("\r\n", "\n");
     } catch {
-      const type = checker.getTypeOfSymbolAtLocation(symbol, declaration);
-      return checker.typeToString(type, declaration, ts.TypeFormatFlags.NoTruncation);
+      const type = (await checker.getTypeOfSymbolAtLocation(symbol, declaration));
+      return (await checker.typeToString(type, declaration, ts.TypeFormatFlags.NoTruncation));
     }
-  }).filter((signature) => signature.length > 0);
+  })).filter((signature) => signature.length > 0);
 
   return [...new Set(signatures)].sort().join("\n");
 }
@@ -156,21 +156,20 @@ export function compareSnapshot(expected: PublicApiSnapshot, actual: PublicApiSn
 }
 
 export async function collectPublicApi(target: ApiTarget): Promise<PublicApiSnapshot> {
-  const program = packageProgram(target);
+  await using program = (await packageProgram(target));
   const sourceFile = program.getSourceFile(target.source);
   if (!sourceFile) throw new Error(`Cannot load public API entrypoint: ${target.source}`);
   rejectExportStars(sourceFile);
 
   const checker = program.getTypeChecker();
-  const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
+  const moduleSymbol = (await checker.getSymbolAtLocation(sourceFile));
   if (!moduleSymbol) throw new Error(`Cannot resolve public API module: ${target.source}`);
 
-  const exports = checker.getExportsOfModule(moduleSymbol)
-    .map((exportSymbol): PublicApiExport => {
+  const exports = (await ts.asyncMap((await checker.getExportsOfModule(moduleSymbol)), async (exportSymbol): Promise<PublicApiExport> => {
       const resolved = exportSymbol.flags & ts.SymbolFlags.Alias
-        ? checker.getAliasedSymbol(exportSymbol)
+        ? (await checker.getAliasedSymbol(exportSymbol))
         : exportSymbol;
-      const signature = declarationSignature(resolved, checker);
+      const signature = (await declarationSignature(resolved, checker));
       // Missing dependency declarations resolve aliases to an unknown symbol.
       // Never turn that incomplete graph into an approved empty API signature.
       if (!resolved.declarations?.length || !signature) {
@@ -181,7 +180,7 @@ export async function collectPublicApi(target: ApiTarget): Promise<PublicApiSnap
         kind: symbolKind(resolved),
         signature,
       };
-    })
+    }))
     .sort((left, right) => left.name.localeCompare(right.name));
 
   return { format: 2, package: target.packageName, entrypoint: ".", exports };

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createClient, FunctionsHttpError, FunctionsFetchError, FunctionsRelayError } from "@supabase/supabase-js";
 import { MutationObserver, QueryClient, QueryObserver, hashKey } from "@tanstack/query-core";
-import * as ts from "../../compiler/node_modules/@typescript/typescript6";
+import * as ts from "../../compiler/src/typescript";
 import { createCommandScope } from "@supacloud/contracts/client";
 import { createSupaCloudApiFetch } from "./api-fetch";
 import {
@@ -994,25 +994,25 @@ void data; void pending; void error; void selectedData; void fetched; void cache
 void facadeData; void facadeLegacy; void procedureKind; void facadeDecoded; void facadeQueryData; void wrongFacade;
 void configuredResult; void extendedResult; void knownCode;
 `);
-  const program = ts.createProgram([join(root, "consumer.ts")], {
+  await using program = (await ts.createProgram([join(root, "consumer.ts")], {
     strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
     noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-  });
-  expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  }));
+  expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
 }, 15_000);
 
 test("facade emits portable declarations and root browser/CommonJS exports without Query dependencies", async () => {
   const source = join(import.meta.dir, "procedure-client.ts");
   const declarations: string[] = [];
-  const program = ts.createProgram([source], {
+  await using program = (await ts.createProgram([source], {
     strict: true, skipLibCheck: true, declaration: true, emitDeclarationOnly: true,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     types: [], outDir: join(root, "facade-declarations"),
-  });
-  const emitted = program.emit(undefined, (_path, text) => { declarations.push(text); });
-  expect([...ts.getPreEmitDiagnostics(program), ...emitted.diagnostics]
+  }));
+  const emitted = (await program.emit(undefined, (_path, text) => { declarations.push(text); }));
+  expect([...(await ts.getPreEmitDiagnostics(program)), ...emitted.diagnostics]
     .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
   expect(declarations.join("\n")).toContain("ReturnType<TFactory>");
   expect(declarations.join("\n")).not.toContain("node_modules/");
@@ -1035,14 +1035,14 @@ test("facade emits portable declarations and root browser/CommonJS exports witho
 test("optional query entrypoint produces portable declarations and dependency-free browser/CommonJS bundles", async () => {
   const source = join(import.meta.dir, "query.ts");
   const declarations: string[] = [];
-  const program = ts.createProgram([source], {
+  await using program = (await ts.createProgram([source], {
     strict: true, skipLibCheck: true, declaration: true, emitDeclarationOnly: true,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     types: [], outDir: join(root, "declarations"),
-  });
-  const emitted = program.emit(undefined, (_path, text) => { declarations.push(text); });
-  expect([...ts.getPreEmitDiagnostics(program), ...emitted.diagnostics]
+  }));
+  const emitted = (await program.emit(undefined, (_path, text) => { declarations.push(text); }));
+  expect([...(await ts.getPreEmitDiagnostics(program)), ...emitted.diagnostics]
     .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
   expect(declarations.join("\n")).toContain('from "@tanstack/query-core"');
   expect(declarations.join("\n")).not.toContain("node_modules/");

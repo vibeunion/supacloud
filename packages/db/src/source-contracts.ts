@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "typescript/ast";
+import { createSourceFile, forEachChild } from "./typescript";
 import { migrationFunctionIdentities, rpcSourceContract, renderRpcSourceTypes, type RpcSourceContract } from "./rpc-source-contracts";
 
 export interface DatabaseSourcesConfig {
@@ -124,12 +125,12 @@ function staticPaths(source: ts.SourceFile): Array<{ value: string; line: number
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
       bindings.set(node.name.text, node.initializer);
     }
-    ts.forEachChild(node, collect);
+    forEachChild(node, collect);
   };
   collect(source);
   const evaluate = (node: ts.Node, depth = 0): string | undefined => {
     if (depth > 12) return;
-    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isStringLiteralLikeNode(node)) return node.text;
     if (ts.isIdentifier(node)) {
       const binding = bindings.get(node.text);
       return binding ? evaluate(binding, depth + 1) : undefined;
@@ -163,7 +164,7 @@ function staticPaths(source: ts.SourceFile): Array<{ value: string; line: number
   const visit = (node: ts.Node) => {
     const value = evaluate(node);
     if (value !== undefined) references.push({ value, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 });
-    ts.forEachChild(node, visit);
+    forEachChild(node, visit);
   };
   visit(source);
   return references;
@@ -191,7 +192,7 @@ async function boundaryFindings(
   const findings: SourceFinding[] = [];
   for (const file of consumers) {
     if (config?.auditConsumers.includes(file)) continue;
-    const source = ts.createSourceFile(file, await readFile(await safePath(root, file), "utf8"), ts.ScriptTarget.Latest, true);
+    const source = (await createSourceFile(file, await readFile(await safePath(root, file), "utf8"), ts.ScriptTarget.Latest, true));
     const reported = new Set<number>();
     for (const reference of staticPaths(source)) {
       const candidates = [slash(relative(root, resolve(root, reference.value))),
@@ -246,13 +247,13 @@ export async function databaseSources(
       await input(file);
       // Follow local schema imports so splitting tables does not weaken freshness.
       const visitImports = async (path: string) => {
-        const tree = ts.createSourceFile(path, await input(path), ts.ScriptTarget.Latest, true);
+        const tree = (await createSourceFile(path, await input(path), ts.ScriptTarget.Latest, true));
         const imports: string[] = [];
         const visit = (node: ts.Node) => {
           if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
             && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
             && node.moduleSpecifier.text.startsWith(".")) imports.push(node.moduleSpecifier.text);
-          ts.forEachChild(node, visit);
+          forEachChild(node, visit);
         };
         visit(tree);
         for (const specifier of imports) {

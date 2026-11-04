@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promi
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { buildSchema, introspectionFromSchema } from "graphql";
 import { compileProject, checkProject } from "./compile";
 import { compileOptionsFromConfig } from "./config";
@@ -123,7 +123,7 @@ describe("GraphQL query contracts", () => {
     expect(result.files["graphql.ts"]).toContain("createGraphqlClient");
     expect(result.files["graphql.ts"]).not.toMatch(/^import /m);
     expect(result.files["graphql.ts"]).toContain("unknown");
-    expect(scanGeneratedArtifacts({ "graphql.ts": result.files["graphql.ts"] }, true)).toEqual([]);
+    expect((await scanGeneratedArtifacts({ "graphql.ts": result.files["graphql.ts"] }, true))).toEqual([]);
     expect(result.contract?.mode).toBe("query-only");
     expect(JSON.parse(result.files["graphql.manifest.json"]!)).toMatchObject({
       mode: "query-only",
@@ -160,7 +160,7 @@ result.order.title;
 const total: number = result.order!.total;
 `,
     });
-    const program = ts.createProgram([join(options.outDir, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(options.outDir, "consumer.ts")], {
       strict: true,
       noEmit: true,
       skipLibCheck: true,
@@ -168,8 +168,8 @@ const total: number = result.order!.total;
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       types: [],
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
   });
 
   test("optional TypedDocumentNode artifacts infer consumer results and participate in drift checks", async () => {
@@ -196,11 +196,11 @@ const title: string | undefined = result.order?.title;
 result.order?.internal;
 `,
     });
-    const program = ts.createProgram([join(options.outDir, "typed-consumer.ts")], {
+    await using program = (await ts.createProgram([join(options.outDir, "typed-consumer.ts")], {
       strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
     expect((await checkProject(options)).upToDate).toBe(true);
     await writeFile(documentPath, content + "\n// drift\n");
     expect((await checkProject(options)).mismatches).toContain("graphql.documents.ts: disk artifact differs from current compiler output");

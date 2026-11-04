@@ -18,7 +18,7 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   await mkdir(packed);
   const built = await Bun.build({
     entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts")],
-    outdir: packed, target: "node", external: ["libpg-query", "@typescript/typescript6"],
+    outdir: packed, target: "node", external: ["libpg-query", "typescript", "typescript/*"],
   });
   expect(built.success).toBe(true);
   await writeFile(join(packed, "package.json"), JSON.stringify({

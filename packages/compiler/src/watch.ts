@@ -177,6 +177,7 @@ export function watchProject(options: WatchOptions): WatchHandle {
       // startup settles even when ready rejects, and closed startup never installs new watchers.
       await startup;
       await activeCompilation.catch(() => undefined);
+      await incremental.reset();
     },
   };
 }

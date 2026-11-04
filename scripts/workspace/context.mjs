@@ -1,4 +1,4 @@
-import { createRequire } from 'node:module';
+import * as ts from "../../packages/compiler/src/typescript.ts";
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { graphReport, readWorkspace, affectedReport } from './model.mjs';
@@ -27,12 +27,10 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length !== 0 && (args.length !== 2 || args[0] !== '--base' || args[1].startsWith('--'))) throw new Error('Usage: workspace:context [--base REF]');
   const root = fileURLToPath(new URL('../../', import.meta.url));
-  const require = createRequire(new URL('../../packages/compiler/package.json', import.meta.url));
-  const ts = require('@typescript/typescript6');
   const { WORKSPACE_BOUNDARY_RULES } = await import('../check_workspace_boundaries.ts');
   const { checkSourceBoundaries } = await import('./source.mjs');
   const workspace = readWorkspace(root);
-  console.log(JSON.stringify(contextReport(workspace, checkSourceBoundaries(workspace, ts, WORKSPACE_BOUNDARY_RULES),
+  console.log(JSON.stringify(contextReport(workspace, (await checkSourceBoundaries(workspace, ts, WORKSPACE_BOUNDARY_RULES)),
     changedInputs(root, args[1])), null, 2));
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

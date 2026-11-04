@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { t } from "elysia";
 import { Type } from "typebox";
-import * as ts from "@typescript/typescript6";
+import * as ts from "../../compiler/src/typescript";
 import { compileProject, migrateProject } from "@supacloud/compiler";
 import { createApplication, type CompiledModule } from "./index";
 
@@ -102,14 +102,15 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
       moduleResolution: ts.ModuleResolutionKind.Bundler, skipLibCheck: true,
       types: [], experimentalDecorators: true,
     };
-    const diagnostics = (source: string) => ts.getPreEmitDiagnostics(
-      ts.createProgram([join(root, source)], typeOptions),
-    ).map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
-    expect(diagnostics("consumer.ts")).toEqual([]);
+    const diagnostics = async (source: string) => {
+      await using program = await ts.createProgram([join(root, source)], typeOptions);
+      return (await ts.getPreEmitDiagnostics(program)).map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+    };
+    expect((await diagnostics("consumer.ts"))).toEqual([]);
     phase("consumer TypeScript API end");
     // Prove the negative assertions really fail rather than relying on permissive types.
     await writeFile(join(root, "negative.ts"), consumer.replaceAll("// @ts-expect-error", "// expected failure"));
-    expect(diagnostics("negative.ts").length).toBeGreaterThanOrEqual(3);
+    expect((await diagnostics("negative.ts")).length).toBeGreaterThanOrEqual(3);
     phase("negative TypeScript API end");
     for (const file of ["consumer.ts", "negative.ts"]) {
       const configPath = join(root, `typecheck-${file}.json`);

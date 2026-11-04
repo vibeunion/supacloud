@@ -6,7 +6,7 @@ import { boolean, integer, pgSchema, text } from "drizzle-orm/pg-core";
 import { createSelectSchema } from "drizzle-orm/typebox-legacy";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import * as ts from "@typescript/typescript6";
+import * as ts from "../src/typescript";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -236,16 +236,16 @@ export const staticDdl = query.raw("CREATE TABLE example(id integer)");
 const unrelated = { raw: (value: string) => value };
 unrelated.raw(value);
 `);
-    const program = ts.createProgram([path], {
+    await using program = (await ts.createProgram([path], {
       strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    });
+    }));
     const source = program.getSourceFile(path);
     if (!source) throw new Error("Missing compiler fixture");
-    const diagnostics = scanDrizzleSql(source, program.getTypeChecker(), "source.ts", true);
+    const diagnostics = (await scanDrizzleSql(source, program.getTypeChecker(), "source.ts", true));
     expect(diagnostics.map((diagnostic) => diagnostic.errorCode)).toEqual(["SC6007", "SC6007", "SC6008"]);
     expect(diagnostics.every((diagnostic) => diagnostic.severity === "error")).toBe(true);
-    const productionDiagnostics = scanProductionSource({ rootDir: dir, strict: true });
+    const productionDiagnostics = (await scanProductionSource({ rootDir: dir, strict: true }));
     expect(productionDiagnostics.filter((diagnostic) =>
       diagnostic.errorCode === "SC6007" || diagnostic.errorCode === "SC6008")
       .map((diagnostic) => diagnostic.errorCode)).toEqual(["SC6007", "SC6007", "SC6008"]);

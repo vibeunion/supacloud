@@ -1,6 +1,6 @@
 import { rename, readFile, writeFile, rm } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { checkMigrationDependencies } from "./migration-policy";
 import { migrateHttpProviderImports } from "./http-provider-migration";
 
@@ -23,7 +23,7 @@ export interface SupaCloudMigration {
   from: string;
   to: string;
   description: string;
-  apply(source: string, fileName: string): SourceMigrationResult;
+  apply(source: string, fileName: string): SourceMigrationResult | Promise<SourceMigrationResult>;
 }
 
 export interface MigrateProjectOptions {
@@ -60,7 +60,7 @@ const MIGRATION_COMPILER_OPTIONS: ts.CompilerOptions = {
   skipLibCheck: true,
 };
 
-function migrationCompilerOptions(rootDir?: string): ts.CompilerOptions {
+async function migrationCompilerOptions(rootDir?: string): Promise<ts.CompilerOptions> {
   if (!rootDir) return MIGRATION_COMPILER_OPTIONS;
   const configPath = ts.findConfigFile(rootDir, ts.sys.fileExists);
   if (!configPath) return MIGRATION_COMPILER_OPTIONS;
@@ -68,7 +68,7 @@ function migrationCompilerOptions(rootDir?: string): ts.CompilerOptions {
     ...ts.sys,
     onUnRecoverableConfigFileDiagnostic: (_diagnostic: ts.Diagnostic): void => {},
   } satisfies Parameters<typeof ts.getParsedCommandLineOfConfigFile>[2];
-  const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, configHost);
+  const parsed = (await ts.getParsedCommandLineOfConfigFile(configPath, {}, configHost));
   if (!parsed || parsed.errors.length > 0) return MIGRATION_COMPILER_OPTIONS;
   return { ...parsed.options, noEmit: true, skipLibCheck: true };
 }
@@ -82,17 +82,17 @@ function lineOf(sourceFile: ts.SourceFile, node: ts.Node): number {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 }
 
-function resolveSymbol(symbol: ts.Symbol | undefined, checker: ts.TypeChecker): ts.Symbol | undefined {
+async function resolveSymbol(symbol: ts.Symbol | undefined, checker: ts.TypeChecker): Promise<ts.Symbol | undefined> {
   if (!symbol) return undefined;
   for (let guard = 0; guard < 4 && (symbol.flags & ts.SymbolFlags.Alias) !== 0; guard += 1) {
-    const aliased = checker.getAliasedSymbol(symbol);
+    const aliased = (await checker.getAliasedSymbol(symbol));
     if (aliased === symbol) break;
     symbol = aliased;
   }
   return symbol;
 }
 
-function symbolForExpression(expression: ts.Expression, checker: ts.TypeChecker): ts.Symbol | undefined {
+async function symbolForExpression(expression: ts.Expression, checker: ts.TypeChecker): Promise<ts.Symbol | undefined> {
   const location = ts.isIdentifier(expression)
     ? expression
     : ts.isPropertyAccessExpression(expression)
@@ -100,7 +100,7 @@ function symbolForExpression(expression: ts.Expression, checker: ts.TypeChecker)
       : ts.isElementAccessExpression(expression) && expression.argumentExpression && ts.isStringLiteral(expression.argumentExpression)
         ? expression
         : undefined;
-  return location ? resolveSymbol(checker.getSymbolAtLocation(location), checker) : undefined;
+  return location ? (await resolveSymbol((await checker.getSymbolAtLocation(location)), checker)) : undefined;
 }
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
@@ -109,48 +109,48 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
     ts.isAsExpression(current) ||
     ts.isSatisfiesExpression(current) ||
     ts.isParenthesizedExpression(current) ||
-    ts.isTypeAssertionExpression(current)
+    ts.isTypeAssertion(current)
   ) {
     current = current.expression;
   }
   return current;
 }
 
-function isDefineRouteContractCall(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+async function isDefineRouteContractCall(node: ts.CallExpression, checker: ts.TypeChecker): Promise<boolean> {
   const name = node.expression.getText(node.getSourceFile());
   if (name === "defineRouteContract" || name.endsWith(".defineRouteContract")) return true;
-  return resolveSymbol(checker.getSymbolAtLocation(node.expression), checker)?.name === "defineRouteContract";
+  return (await resolveSymbol((await checker.getSymbolAtLocation(node.expression)), checker))?.name === "defineRouteContract";
 }
 
-function isRouteDecoratorCall(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+async function isRouteDecoratorCall(node: ts.CallExpression, checker: ts.TypeChecker): Promise<boolean> {
   // Route options are the second argument. Avoid instantiating unrelated schema
   // builder types (for example chained TypeBox transforms) without any options.
   if (node.arguments.length < 2) return false;
   const name = node.expression.getText(node.getSourceFile());
   if (ts.isIdentifier(node.expression) && ROUTE_DECORATORS.has(node.expression.text)) return true;
   if (ROUTE_DECORATORS.has(name)) return true;
-  const resolved = resolveSymbol(checker.getSymbolAtLocation(node.expression), checker);
+  const resolved = (await resolveSymbol((await checker.getSymbolAtLocation(node.expression)), checker));
   return resolved ? ROUTE_DECORATORS.has(resolved.name) : false;
 }
 
-function resolveStaticObjectLiteral(
+async function resolveStaticObjectLiteral(
   input: ts.Expression | undefined,
   checker: ts.TypeChecker,
   seen = new Set<ts.Node>(),
-): ts.ObjectLiteralExpression | undefined {
+): Promise<ts.ObjectLiteralExpression | undefined> {
   if (!input) return undefined;
   const expression = unwrapExpression(input);
   if (seen.has(expression)) return undefined;
   seen.add(expression);
   if (ts.isObjectLiteralExpression(expression)) return expression;
-  if (ts.isCallExpression(expression) && isDefineRouteContractCall(expression, checker)) {
-    return resolveStaticObjectLiteral(expression.arguments[0], checker, seen);
+  if (ts.isCallExpression(expression) && (await isDefineRouteContractCall(expression, checker))) {
+    return (await resolveStaticObjectLiteral(expression.arguments[0], checker, seen));
   }
 
-  const symbol = symbolForExpression(expression, checker);
-  for (const declaration of symbol?.declarations ?? []) {
+  const symbol = (await symbolForExpression(expression, checker));
+  for (const declaration of (await ts.declarationsOf(symbol))) {
     if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
-      const resolved = resolveStaticObjectLiteral(declaration.initializer, checker, seen);
+      const resolved = (await resolveStaticObjectLiteral(declaration.initializer, checker, seen));
       if (resolved) return resolved;
     }
   }
@@ -173,27 +173,13 @@ function displayFile(rootDir: string, fileName: string): string {
   return path && !path.startsWith("..") ? path : fileName;
 }
 
-function createMigrationProgram(
+async function createMigrationProgram(
   fileNames: readonly string[],
   sourceOverrides: ReadonlyMap<string, string>,
   rootDir?: string,
-): ts.Program {
-  const compilerOptions = migrationCompilerOptions(rootDir);
-  const host = ts.createCompilerHost(compilerOptions);
-  const getSourceFile = host.getSourceFile.bind(host);
-  const fileExists = host.fileExists.bind(host);
-  const readFile = host.readFile.bind(host);
-  const currentDirectory = host.getCurrentDirectory.bind(host);
-  host.fileExists = (fileName): boolean => sourceOverrides.has(resolve(fileName)) || fileExists(fileName);
-  host.readFile = (fileName): string | undefined => sourceOverrides.get(resolve(fileName)) ?? readFile(fileName);
-  host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
-    const source = sourceOverrides.get(resolve(fileName));
-    return source === undefined
-      ? getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile)
-      : ts.createSourceFile(fileName, source, languageVersion, true);
-  };
-  host.getCurrentDirectory = () => rootDir ?? currentDirectory();
-  return ts.createProgram(fileNames, compilerOptions, host);
+): Promise<ts.Program> {
+  const compilerOptions = (await migrationCompilerOptions(rootDir));
+  return (await ts.createProgram(fileNames, compilerOptions, { cwd: rootDir, sources: sourceOverrides }));
 }
 
 function routeResponseProperties(object: ts.ObjectLiteralExpression): {
@@ -214,12 +200,12 @@ function routeResponseProperties(object: ts.ObjectLiteralExpression): {
   };
 }
 
-function planRouteResponseMigration(
+async function planRouteResponseMigration(
   sourceFiles: readonly ts.SourceFile[],
   checker: ts.TypeChecker,
   rootDir: string,
   includedFiles: ReadonlySet<string>,
-): RouteResponseMigrationPlan {
+): Promise<RouteResponseMigrationPlan> {
   const objects = new Map<string, ts.ObjectLiteralExpression>();
   const issues: SourceMigrationIssue[] = [];
   const issueKeys = new Set<string>();
@@ -234,10 +220,10 @@ function planRouteResponseMigration(
   for (const sourceFile of sourceFiles) {
     const sourcePath = resolve(sourceFile.fileName);
     if (!includedFiles.has(sourcePath)) continue;
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && isRouteDecoratorCall(node, checker)) {
+    const visit = async (node: ts.Node): Promise<void> => {
+      if (ts.isCallExpression(node) && (await isRouteDecoratorCall(node, checker))) {
         const options = node.arguments[1];
-        const object = options && resolveStaticObjectLiteral(options, checker);
+        const object = options && (await resolveStaticObjectLiteral(options, checker));
         if (object) {
           const objectPath = resolve(object.getSourceFile().fileName);
           const properties = routeResponseProperties(object);
@@ -255,9 +241,9 @@ function planRouteResponseMigration(
           }
         }
       }
-      ts.forEachChild(node, visit);
+      (await ts.forEachChildAsync(node, visit));
     };
-    visit(sourceFile);
+    (await visit(sourceFile));
   }
 
   const replacementsByFile = new Map<string, TextReplacement[]>();
@@ -303,10 +289,10 @@ function applyReplacements(source: string, replacements: readonly TextReplacemen
   return content;
 }
 
-function migrateRouteResponse(source: string, fileName: string): SourceMigrationResult {
+async function migrateRouteResponse(source: string, fileName: string): Promise<SourceMigrationResult> {
   const absoluteFile = resolve(fileName);
   const sourceOverrides = new Map([[absoluteFile, source]]);
-  const program = createMigrationProgram([absoluteFile], sourceOverrides);
+  await using program = (await createMigrationProgram([absoluteFile], sourceOverrides));
   const sourceFile = program.getSourceFile(absoluteFile);
   if (!sourceFile) {
     return {
@@ -320,12 +306,12 @@ function migrateRouteResponse(source: string, fileName: string): SourceMigration
       }],
     };
   }
-  const plan = planRouteResponseMigration(
+  const plan = (await planRouteResponseMigration(
     [sourceFile],
     program.getTypeChecker(),
     resolve("."),
     new Set([absoluteFile]),
-  );
+  ));
   const replacements = plan.replacementsByFile.get(absoluteFile) ?? [];
   return {
     changed: replacements.length > 0,
@@ -335,22 +321,22 @@ function migrateRouteResponse(source: string, fileName: string): SourceMigration
   };
 }
 
-function migrateRouteResponseProject(
+async function migrateRouteResponseProject(
   files: readonly string[],
   rootDir: string,
   sourceByPath: ReadonlyMap<string, string>,
-): { results: Map<string, SourceMigrationResult>; issues: SourceMigrationIssue[] } {
+): Promise<{ results: Map<string, SourceMigrationResult>; issues: SourceMigrationIssue[] }> {
   const absoluteFiles = files.map((file) => resolve(file));
-  const program = createMigrationProgram(absoluteFiles, sourceByPath, rootDir);
+  await using program = (await createMigrationProgram(absoluteFiles, sourceByPath, rootDir));
   const sourceFiles = absoluteFiles
     .map((file) => program.getSourceFile(file))
     .filter((file): file is ts.SourceFile => file !== undefined);
-  const plan = planRouteResponseMigration(
+  const plan = (await planRouteResponseMigration(
     sourceFiles,
     program.getTypeChecker(),
     rootDir,
     new Set(absoluteFiles),
-  );
+  ));
   const results = new Map<string, SourceMigrationResult>();
   for (const [file, replacements] of plan.replacementsByFile) {
     const source = sourceByPath.get(file);
@@ -442,7 +428,7 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
     }
   }
   const include = options.include ?? ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
-  const files = ts.sys.readDirectory(rootDir, [".ts", ".tsx", ".mts", ".cts"], ["node_modules", "dist", "generated"], include)
+  const files = (await ts.sys.readDirectory(rootDir, [".ts", ".tsx", ".mts", ".cts"], ["node_modules", "dist", "generated"], include))
     .sort();
   const results: MigrateFileResult[] = [];
   const issues: SourceMigrationIssue[] = [];
@@ -467,7 +453,7 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
 
   for (const migration of migrations) {
     const projectResults = migration.id === "route-response-to-responses"
-      ? migrateRouteResponseProject(files, rootDir, sourceByPath)
+      ? (await migrateRouteResponseProject(files, rootDir, sourceByPath))
       : undefined;
     if (projectResults) appendIssues(projectResults.issues);
 
@@ -480,7 +466,7 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
       // unchanged, not a reason to re-run a context-free compiler per file.
       const result = projectResults
         ? projectResults.results.get(absoluteFile) ?? { changed: false, content: before, replacements: 0, issues: [] }
-        : migration.apply(before, file);
+        : await migration.apply(before, file);
       sourceByPath.set(absoluteFile, result.content);
       if (result.changed && result.issues.length === 0) {
         pendingWrites.set(absoluteFile, result.content);

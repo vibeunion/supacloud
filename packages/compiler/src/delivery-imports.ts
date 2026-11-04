@@ -1,9 +1,10 @@
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 
 /** Resolve private literal-only import wrappers without permitting an open dependency set. */
-export function staticDeliveryImports(path: string, contents: Uint8Array): Uint8Array {
+export async function staticDeliveryImports(path: string, contents: Uint8Array): Promise<Uint8Array> {
   if (!/\.[cm]?[jt]sx?$/.test(path)) return contents;
-  const source = ts.createSourceFile(path, new TextDecoder().decode(contents), ts.ScriptTarget.Latest, true);
+  const syntax = await ts.createSourceFile(path, new TextDecoder().decode(contents));
+  let source: ts.SourceFile = syntax;
   const computed: ts.CallExpression[] = [];
   function scan(node: ts.Node): void {
     if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
@@ -18,10 +19,16 @@ export function staticDeliveryImports(path: string, contents: Uint8Array): Uint8
   const reject = () => { throw new Error("Computed module loading is not supported in independent delivery bundles."); };
   if (!ts.isExternalModule(source)) return reject();
 
-  const host = ts.createCompilerHost({ noLib: true, noResolve: true, allowJs: true });
-  host.getSourceFile = (name) => name === path ? source : undefined;
-  const checker = ts.createProgram([path], { noLib: true, noResolve: true, allowJs: true }, host).getTypeChecker();
-  const replacements = new Map<ts.CallExpression, ts.CallExpression>();
+  await using program = await ts.createProgram([path], { noLib: true, noResolve: true, allowJs: true },
+    { sources: new Map([[path, source.text]]) });
+  const boundSource = program.getSourceFile(path);
+  if (!boundSource) return reject();
+  // Recollect on the bound tree: native checker handles belong to that program.
+  computed.length = 0;
+  source = boundSource;
+  scan(source);
+  const checker = program.getTypeChecker();
+  const replacements = new Map<ts.CallExpression, string>();
   const removed = new Set<ts.FunctionDeclaration>();
 
   for (const call of computed) {
@@ -37,18 +44,18 @@ export function staticDeliveryImports(path: string, contents: Uint8Array): Uint8
     const argument = call.arguments[0];
     if (!parameter || !ts.isIdentifier(parameter.name) || parameter.initializer || parameter.dotDotDotToken
       || !argument || !ts.isIdentifier(argument)
-      || checker.getSymbolAtLocation(argument) !== checker.getSymbolAtLocation(parameter.name)) return reject();
-    const symbol = checker.getSymbolAtLocation(declaration.name);
+      || (await checker.getSymbolAtLocation(argument)) !== (await checker.getSymbolAtLocation(parameter.name))) return reject();
+    const symbol = (await checker.getSymbolAtLocation(declaration.name));
     if (!symbol || symbol.declarations?.length !== 1) return reject();
     const declarationName = declaration.name;
     let references = 0;
-    function visit(node: ts.Node): void {
+    async function visit(node: ts.Node): Promise<void> {
       const referenced = ts.isIdentifier(node)
         ? ts.isShorthandPropertyAssignment(node.parent)
-          ? checker.getShorthandAssignmentValueSymbol(node.parent)
+          ? (await checker.getShorthandAssignmentValueSymbol(node.parent))
           : ts.isExportSpecifier(node.parent)
-            ? checker.getExportSpecifierLocalTargetSymbol(node.parent)
-            : checker.getSymbolAtLocation(node)
+            ? (await checker.getExportSpecifierLocalTargetSymbol(node.parent))
+            : (await checker.getSymbolAtLocation(node))
         : undefined;
       if (ts.isIdentifier(node) && node !== declarationName && referenced === symbol) {
         const use = node.parent;
@@ -57,26 +64,19 @@ export function staticDeliveryImports(path: string, contents: Uint8Array): Uint8
         const value = use.arguments[0];
         if (!value || (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value))) return reject();
         references++;
-        replacements.set(use, ts.factory.createCallExpression(call.expression, undefined, [value]));
+        replacements.set(use, `import(${value.getText(source)})`);
       }
-      ts.forEachChild(node, visit);
+      (await ts.forEachChildAsync(node, visit));
     }
-    visit(source);
+    (await visit(source));
     if (references === 0) return reject();
     removed.add(declaration);
   }
-  const transformed = ts.transform(source, [(context) => {
-    const visit: ts.Visitor = (node) => {
-      if (ts.isFunctionDeclaration(node) && removed.has(node)) return undefined;
-      const replacement = ts.isCallExpression(node) ? replacements.get(node) : undefined;
-      if (replacement) return replacement;
-      return ts.visitEachChild(node, visit, context);
-    };
-    return (node) => ts.visitNode(node, visit, ts.isSourceFile) ?? node;
-  }]);
-  try {
-    const transformedSource = transformed.transformed[0];
-    if (!transformedSource) return reject();
-    return new TextEncoder().encode(ts.createPrinter().printFile(transformedSource));
-  } finally { transformed.dispose(); }
+  const edits = [
+    ...[...removed].map(node => ({ start: node.getStart(source), end: node.end, text: "" })),
+    ...[...replacements].map(([node, text]) => ({ start: node.getStart(source), end: node.end, text })),
+  ].sort((a, b) => b.start - a.start);
+  let output = source.text;
+  for (const edit of edits) output = output.slice(0, edit.start) + edit.text + output.slice(edit.end);
+  return new TextEncoder().encode(output);
 }

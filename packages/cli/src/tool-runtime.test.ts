@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "../../compiler/src/typescript";
 import {
     parseToolArguments,
     registerTool,
@@ -73,21 +73,21 @@ test("public declarations retain strict callback inference for detached NodeNext
         await writeFile(join(packageRoot, "package.json"), await readFile(join(import.meta.dir, "../package.json")));
         await symlink(join(import.meta.dir, "../node_modules/typebox"), join(root, "node_modules/typebox"), "dir");
 
-        const config = ts.readConfigFile(join(import.meta.dir, "../tsconfig.tool-runtime.json"), ts.sys.readFile);
+        const config = (await ts.readConfigFile(join(import.meta.dir, "../tsconfig.tool-runtime.json"), ts.sys.readFile));
         expect(config.error).toBeUndefined();
-        const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, join(import.meta.dir, ".."));
+        const parsed = (await ts.parseJsonConfigFileContent(config.config, ts.sys, join(import.meta.dir, "..")));
         expect(parsed.errors).toEqual([]);
         expect(parsed.fileNames).toEqual([join(import.meta.dir, "tool-runtime.ts")]);
-        const declarations = ts.createProgram(parsed.fileNames, {
+        await using declarations = (await ts.createProgram(parsed.fileNames, {
             ...parsed.options,
             skipLibCheck: false,
             declaration: true,
             emitDeclarationOnly: true,
             noEmitOnError: true,
             outDir: join(packageRoot, "dist"),
-        });
-        expect(ts.getPreEmitDiagnostics(declarations).map(diagnostic => diagnostic.messageText)).toEqual([]);
-        expect(declarations.emit().emitSkipped).toBe(false);
+        }));
+        expect((await ts.getPreEmitDiagnostics(declarations)).map(diagnostic => diagnostic.messageText)).toEqual([]);
+        expect((await declarations.emit()).emitSkipped).toBe(false);
 
         const consumer = join(root, "consumer.mts");
         const setup = `import {registerTool, stringEnum, type ToolServer} from "@supacloud/cli/tool-runtime";
@@ -103,15 +103,15 @@ registerTool(server, "read", "", schema, async ({action}) => {
 registerTool(server, "bad-input", "", schema, async (_args: {action: "write"}) => ({content: []}));
 registerTool(server, "bad-result", "", schema, async () => ({content: [{type: "image"}]}));`;
         host.readFile = path => path === consumer ? source : read(path);
-        const program = ts.createProgram([consumer], {
+        await using program = (await ts.createProgram([consumer], {
             target: ts.ScriptTarget.ES2022,
             module: ts.ModuleKind.NodeNext,
             moduleResolution: ts.ModuleResolutionKind.NodeNext,
             strict: true,
             noEmit: true,
             types: [],
-        }, host);
-        const diagnostics = ts.getPreEmitDiagnostics(program);
+        }, host));
+        const diagnostics = (await ts.getPreEmitDiagnostics(program));
         expect(diagnostics.map(diagnostic => diagnostic.code).sort()).toEqual([2322, 2345]);
         const invalidStart = source.indexOf('registerTool(server, "bad-input"');
         expect(invalidStart).toBeGreaterThan(0);

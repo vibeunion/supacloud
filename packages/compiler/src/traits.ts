@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 
 export type TraitKind =
   | "module"

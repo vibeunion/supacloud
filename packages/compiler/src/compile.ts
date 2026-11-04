@@ -65,13 +65,13 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
   const rendered = renderApplication(graph, options);
   if (typeSafety.scanProductionSource) {
-    diagnostics.push(...scanProductionSource({
+    diagnostics.push(...(await scanProductionSource({
       ...options,
       ...typeSafety,
-    }));
+    })));
   }
   if (typeSafety.noAnyInGenerated) {
-    diagnostics.push(...scanGeneratedArtifacts({
+    diagnostics.push(...(await scanGeneratedArtifacts({
       "application.ts": rendered.applicationCode,
       "client.ts": rendered.clientCode,
       "openapi.ts": rendered.openApiCode,
@@ -79,7 +79,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
       "contracts.manifest.json": rendered.contractsManifestJson,
       "graphql.ts": graphql.files["graphql.ts"],
       "graphql.documents.ts": graphql.files["graphql.documents.ts"],
-    }, options.strict ?? false));
+    }, options.strict ?? false)));
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
   const hasTypeErrors = diagnostics.some(({ severity, code }) =>
@@ -145,20 +145,20 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
   const rendered = renderApplication(graph, options);
   if (typeSafety.scanProductionSource) {
-    diagnostics.push(...scanProductionSource({
+    diagnostics.push(...(await scanProductionSource({
       ...options,
       ...typeSafety,
-    }));
+    })));
   }
   if (typeSafety.noAnyInGenerated) {
-    diagnostics.push(...scanGeneratedArtifacts({
+    diagnostics.push(...(await scanGeneratedArtifacts({
       "application.ts": rendered.applicationCode,
       "client.ts": rendered.clientCode,
       "openapi.ts": rendered.openApiCode,
       "permissions.ts": rendered.permissionsCode,
       "graphql.ts": graphql.files["graphql.ts"],
       "graphql.documents.ts": graphql.files["graphql.documents.ts"],
-    }, options.strict ?? false));
+    }, options.strict ?? false)));
   }
 
   const expectedFiles: Record<string, string> = {

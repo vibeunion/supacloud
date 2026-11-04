@@ -20,10 +20,10 @@ async function projectFixture(files: Record<string, string>): Promise<string> {
 }
 
 describe("compiler type-safety gates", () => {
-  test("strict generated-artifact scan rejects any", () => {
-    const diagnostics = scanGeneratedArtifacts({
+  test("strict generated-artifact scan rejects any", async () => {
+    const diagnostics = (await scanGeneratedArtifacts({
       "application.ts": "export function create(value: any): unknown { return value; }\n",
-    });
+    }));
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toMatchObject({
       severity: "error",
@@ -40,7 +40,7 @@ describe("compiler type-safety gates", () => {
       "src/production.ts": "export const unsafe: any = 1;",
     });
 
-    const diagnostics = scanProductionSource({ rootDir, strict: false });
+    const diagnostics = (await scanProductionSource({ rootDir, strict: false }));
 
     expect(diagnostics).toEqual([
       expect.objectContaining({
@@ -49,7 +49,7 @@ describe("compiler type-safety gates", () => {
         errorCode: "SC6002",
       }),
     ]);
-    expect(scanGeneratedArtifacts({ "application.ts": "export const value: any = 1;" }, false)).toEqual([
+    expect((await scanGeneratedArtifacts({ "application.ts": "export const value: any = 1;" }, false))).toEqual([
       expect.objectContaining({ severity: "error", code: "generated-any" }),
     ]);
   });
@@ -75,7 +75,7 @@ describe("compiler type-safety gates", () => {
       }),
       "src/production.ts": source,
     });
-    expect(scanProductionSource({ rootDir, strict: false })).toContainEqual(
+    expect((await scanProductionSource({ rootDir, strict: false }))).toContainEqual(
       expect.objectContaining({ severity: "error", code: "source-typescript", errorCode }),
     );
   });
@@ -95,7 +95,7 @@ describe("compiler type-safety gates", () => {
         "export class Derived extends Base { override value(): number { return 2; } }",
       ].join("\n"),
     });
-    expect(scanProductionSource({ rootDir, strict: true })).toEqual([]);
+    expect((await scanProductionSource({ rootDir, strict: true }))).toEqual([]);
   });
 
   test("noCheck cannot disable the mandatory TypeScript gate", async () => {
@@ -103,7 +103,7 @@ describe("compiler type-safety gates", () => {
       "tsconfig.json": JSON.stringify({ compilerOptions: { noCheck: true, types: [] } }),
       "src/production.ts": "export const value: string = 1;",
     });
-    expect(scanProductionSource({ rootDir, strict: false })).toContainEqual(
+    expect((await scanProductionSource({ rootDir, strict: false }))).toContainEqual(
       expect.objectContaining({ code: "source-typescript", errorCode: "TS2322", severity: "error" }),
     );
   });
@@ -126,7 +126,7 @@ describe("compiler type-safety gates", () => {
         "export const rawBatch: Promise<unknown> = readMany();",
       ].join("\n"),
     });
-    expect(scanProductionSource({ rootDir, strict: false })
+    expect((await scanProductionSource({ rootDir, strict: false }))
       .filter(({ code }) => code === "source-unsafe-any").map(({ line }) => line))
       .toEqual([2, 4, 6, 7, 8]);
   });
@@ -147,7 +147,7 @@ describe("compiler type-safety gates", () => {
         "export function forwarded(): Promise<void> { return work(); }",
       ].join("\n"),
     });
-    expect(scanProductionSource({ rootDir, strict: false })
+    expect((await scanProductionSource({ rootDir, strict: false }))
       .filter(({ code }) => code === "source-floating-promise").map(({ line }) => line))
       .toEqual([2, 3, 4, 5, 6]);
   });
@@ -170,7 +170,7 @@ describe("compiler type-safety gates", () => {
         "export const boundary = (): unknown => handle.read();",
       ].join("\n"),
     });
-    expect(scanProductionSource({ rootDir, strict: false })
+    expect((await scanProductionSource({ rootDir, strict: false }))
       .filter(({ code }) => code === "source-unsafe-any").map(({ line }) => line))
       .toEqual([3, 4, 5, 7]);
   });
@@ -191,7 +191,7 @@ describe("compiler type-safety gates", () => {
         "}",
       ].join("\n"),
     });
-    expect(scanProductionSource({ rootDir, strict: false })
+    expect((await scanProductionSource({ rootDir, strict: false }))
       .filter(({ code }) => code === "source-non-exhaustive-switch").map(({ line }) => line))
       .toEqual([3]);
   });
@@ -206,14 +206,14 @@ describe("compiler type-safety gates", () => {
         "export { createClient, stream, Flow };",
       ].join("\n"),
     });
-    expect(scanProductionSource({ rootDir, strict: true })
+    expect((await scanProductionSource({ rootDir, strict: true }))
       .filter(({ code }) => code === "source-alternative-library")
       .map(({ line }) => line))
       .toEqual([1, 2, 3]);
-    expect(scanProductionSource({
+    expect((await scanProductionSource({
       rootDir, strict: true,
       allowAlternativeLibraries: ["@apollo/client", "xstream", "@pgflow"],
-    }).filter(({ code }) => code === "source-alternative-library")).toEqual([]);
+    })).filter(({ code }) => code === "source-alternative-library")).toEqual([]);
   });
 
   test("the existing RxJS boundary remains an approved default", async () => {
@@ -221,7 +221,7 @@ describe("compiler type-safety gates", () => {
       "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
       "src/production.ts": 'import { Observable } from "rxjs";\nexport { Observable };',
     });
-    expect(scanProductionSource({ rootDir, strict: true })
+    expect((await scanProductionSource({ rootDir, strict: true }))
       .filter(({ code }) => code === "source-alternative-library")).toEqual([]);
   });
 
@@ -287,11 +287,11 @@ describe("compiler type-safety gates", () => {
       "src/ignored.ts": "export const ignored: any = 1;",
     });
 
-    const diagnostics = scanProductionSource({
+    const diagnostics = (await scanProductionSource({
       rootDir,
       exclude: ["src/ignored.ts"],
       strict: true,
-    });
+    }));
 
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       "source-any",
@@ -316,7 +316,7 @@ describe("compiler type-safety gates", () => {
       "src/production.test.ts": "export const ignored: any = 1;",
     });
 
-    expect(scanProductionSource({ rootDir, strict: true })).toEqual([]);
+    expect((await scanProductionSource({ rootDir, strict: true }))).toEqual([]);
   });
 
   test("typed destructuring does not become any, but unsafe binding leaves are reported", async () => {
@@ -331,7 +331,7 @@ describe("compiler type-safety gates", () => {
         "export const handler: (input: { value: string }) => string = ({ value }) => value;",
       ].join("\n"),
     });
-    const diagnostics = scanProductionSource({ rootDir, strict: true });
+    const diagnostics = (await scanProductionSource({ rootDir, strict: true }));
     expect(diagnostics.map(({ code, line }) => ({ code, line }))).toEqual([
       { code: "source-any", line: 1 },
       { code: "source-any", line: 4 },
@@ -345,8 +345,8 @@ describe("compiler type-safety gates", () => {
       "node_modules/@types/scan-env/index.d.ts": "declare function scanEnvValue(): string;",
       "src/production.ts": "export const value = scanEnvValue();",
     });
-    expect(scanProductionSource({ rootDir, strict: true })).toEqual([]);
-    expect(scanProductionSource({ rootDir: relative(process.cwd(), rootDir), strict: true })).toEqual([]);
+    expect((await scanProductionSource({ rootDir, strict: true }))).toEqual([]);
+    expect((await scanProductionSource({ rootDir: relative(process.cwd(), rootDir), strict: true }))).toEqual([]);
   });
 
   test("default exclusions work at root and nested levels without excluding production lookalikes", async () => {
@@ -359,7 +359,7 @@ describe("compiler type-safety gates", () => {
       ...Object.fromEntries(ignored.map((file) => [file, "export const unsafe: any = 1;"])),
       "src/test-utils.ts": "export const unsafe: any = 1;",
     });
-    const diagnostics = scanProductionSource({ rootDir, strict: true });
+    const diagnostics = (await scanProductionSource({ rootDir, strict: true }));
     expect(diagnostics.map(({ file, code }) => ({ file, code }))).toEqual([
       { file: "src/test-utils.ts", code: "source-any" },
     ]);
@@ -371,7 +371,7 @@ describe("compiler type-safety gates", () => {
       "tsconfig.json": JSON.stringify({ compilerOptions: { types: ["missing-env"], invalidOption: true } }),
       "src/production.ts": "export const value = 1;",
     });
-    const diagnostics = scanProductionSource({ rootDir });
+    const diagnostics = (await scanProductionSource({ rootDir }));
     expect(diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ severity: "error", code: "source-config", errorCode: "TS5023" }),
       expect.objectContaining({ severity: "error", code: "source-config", errorCode: "TS2688" }),
@@ -384,7 +384,7 @@ describe("compiler type-safety gates", () => {
       "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
       "src/production.ts": 'export const value: number = "wrong";',
     });
-    expect(scanProductionSource({ rootDir, strict: false })).toContainEqual(
+    expect((await scanProductionSource({ rootDir, strict: false }))).toContainEqual(
       expect.objectContaining({ severity: "error", code: "source-typescript", errorCode: "TS2322" }),
     );
   });
@@ -396,7 +396,7 @@ describe("compiler type-safety gates", () => {
       "src/literal.ts": 'export const label = "// @ts-ignore";',
       "src/suppressed.ts": '// @ts-expect-error\nexport const value: number = "wrong";',
     });
-    expect(scanProductionSource({ rootDir })).toEqual([
+    expect((await scanProductionSource({ rootDir }))).toEqual([
       expect.objectContaining({ severity: "error", code: "source-type-suppression", errorCode: "SC6006", file: "src/production.ts" }),
       expect.objectContaining({ severity: "error", code: "source-type-suppression", errorCode: "SC6006", file: "src/suppressed.ts" }),
     ]);
@@ -414,7 +414,7 @@ describe("compiler type-safety gates", () => {
       "src/models/value.ts": 'export const values: string[] = [];',
       "src/production.ts": 'import { values } from "@models/value";\nexport const value: string = values[0];',
     });
-    const diagnostics = scanProductionSource({ rootDir: join(rootDir, "src") });
+    const diagnostics = (await scanProductionSource({ rootDir: join(rootDir, "src") }));
     expect(diagnostics).toEqual([
       expect.objectContaining({ code: "source-typescript", errorCode: "TS2322", file: "production.ts" }),
     ]);

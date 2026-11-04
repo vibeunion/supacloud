@@ -33,7 +33,7 @@ export function migrationDependencies(): Readonly<Record<string, string>> {
     "@supacloud/compiler": compilerVersion(),
     "@supacloud/elysia": MIGRATION_ELYSIA_VERSION,
     elysia: "2.0.0-rc.1",
-    typescript: "7.0.2",
+    typescript: "7.1.0-beta",
   };
 }
 
