@@ -40,7 +40,7 @@ import { Module, DB_CLIENT } from "@supacloud/app";
   imports: [AuditModule],
   providers: [
     CaseService,
-    { provide: CASE_REPOSITORY, useClass: DrizzleCaseRepository, deps: [DB_CLIENT] },
+    { provide: CASE_REPOSITORY, useClass: CaseRepository, deps: [DB_CLIENT] },
     AcceptCaseCommand,
   ],
   controllers: [CaseController],

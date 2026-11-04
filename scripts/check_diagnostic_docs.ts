@@ -55,9 +55,9 @@ const provider = { provide: COUNT, useValue: "not a number" };`,
   SC2011: `const providers = makeEnvironmentProviders(loadProvidersAtRuntime());`,
   SC2012: `import { inject } from "@supacloud/app";
 class Service { repository = inject(Repository); }`,
-  SC6007: `import { sql } from "drizzle-orm";
+  SC6007: `import { sql } from "kysely";
 const count = sql<number>\`count(*)\`;`,
-  SC6008: `import { sql } from "drizzle-orm";
+  SC6008: `import { sql } from "kysely";
 const statement = sql.raw(request.body);`,
   SC6009: `declare const input: any;
 export const value: string = input;`,

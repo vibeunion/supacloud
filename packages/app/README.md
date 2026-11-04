@@ -220,7 +220,7 @@ export class CaseController {
   name: "case",
   providers: [
     CaseService,
-    { provide: CASE_REPOSITORY, useClass: DrizzleCaseRepository },
+    { provide: CASE_REPOSITORY, useClass: CaseRepository },
     AcceptCaseCommand,
   ],
   controllers: [CaseController],
@@ -274,7 +274,7 @@ scope only exposes the already-open transaction to code running inside it.
 
 ## Built-in Tokens
 
-- `DB_CLIENT` — Platform database / Drizzle client (`application` scope).
+- `DB_CLIENT` — Platform database / ZModel client (`application` scope).
 - `REQUEST_CONTEXT` — HTTP request context (`request` scope).
 - `JOB_CONTEXT` — Background job execution context (`job` scope).
 

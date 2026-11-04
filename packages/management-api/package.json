@@ -41,11 +41,7 @@
     "build:macos-arm64": "bun run scripts/build-standalone.ts --target=bun-macos-arm64 --outfile=supacloud-macos-arm64",
     "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64",
     "build:all": "bun run prebuild && bun run build:linux && bun run build:macos",
-    "build:aot:ab": "bun run ../../scripts/elysia-aot-ab.ts management-api",
-    "typecheck:reylo": "tsc -p tsconfig.reylo.json --noEmit --runExternalCode",
-    "reylo:live": "bun run scripts/reylo-live.ts",
-    "reylo:contracts": "bun run scripts/generate-reylo-contracts.ts",
-    "reylo:test": "bun test tests/integration/reylo-control-plane.live.test.ts"
+    "build:aot:ab": "bun run ../../scripts/elysia-aot-ab.ts management-api"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
@@ -60,7 +56,6 @@
     "jose": "^6.2.13",
     "nanoid": "^6.0.2",
     "pgsql-ast-parser": "12.0.2",
-    "reylo": "0.7.0",
     "typebox": "1.4.3"
   },
   "devDependencies": {

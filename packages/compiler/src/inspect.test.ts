@@ -104,7 +104,7 @@ export class FeatureModule {}`);
   test("context resolves owned symbols to the same existing module pack", () => {
     const expected = createContextPack(graph, "case");
     for (const target of [
-      "CaseModule", "CaseService", "CASE_SERVICE", "DrizzleCaseRepository",
+      "CaseModule", "CaseService", "CASE_SERVICE", "CaseRepository",
       "CaseController", "AcceptCaseCommand", "case.accept",
     ]) {
       expect(createContextPack(graph, target)).toEqual(expected);
@@ -201,7 +201,7 @@ export class FeatureModule {}`);
       writeTransport: "command-rpc",
       writeRetry: "disabled",
       externalOutcome: "receipt-reconcile",
-      databaseSource: "drizzle-append-only",
+      databaseSource: "zmodel-append-only",
     });
   });
 

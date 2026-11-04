@@ -5,7 +5,7 @@
 `@supacloud/commands/typebox` exports `createTypeBoxTransactionalCommand`.
 Pass `schemas: { input, result }` to derive both handler types and runtime
 validation from TypeBox. The concrete store transaction type is retained,
-including Drizzle `transaction.db`. Typed callers use `execute` / `lookup`;
+including ZModel `transaction.db`. Typed callers use `execute` / `lookup`;
 transport adapters use `executeUnknown` / `lookupUnknown`. Both validate at
 runtime without coercion, defaults or transforms.
 

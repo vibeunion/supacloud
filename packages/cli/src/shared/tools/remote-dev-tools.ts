@@ -11,7 +11,6 @@ import { registerTool, type ToolServer } from "../tool-server";
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string };
 type CommandExecutor = (command: string, args: string[], cwd: string) => Promise<CommandResult>;
-type DatabaseCallback = (args: Record<string, unknown>) => Promise<unknown>;
 
 export interface RemoteDevToolOptions {
     cwd?: string;
@@ -22,7 +21,6 @@ export interface RemoteDevToolOptions {
     projectRef?: string;
     environment?: string;
     execute?: CommandExecutor;
-    runDatabase?: DatabaseCallback;
 }
 
 interface DevConfig {
@@ -38,12 +36,6 @@ interface DevConfig {
     compileRoot?: string;
     compileOutDir?: string;
     compileStrict?: boolean;
-    database?: {
-        drizzleConfig?: string;
-        migrationsDir?: string;
-        drizzleBin?: string;
-        strict?: boolean;
-    };
 }
 
 interface ProjectConfig {
@@ -55,7 +47,7 @@ const SAFE_TOKEN = /^[A-Za-z0-9._:@/+,-]+$/;
 const SAFE_REMOTE_ROOT = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\/?$/;
 
 export const remoteDevToolSchema = {
-    action: withDescription(stringEnum(["sync", "watch", "status", "migrate"]), "Remote development action"),
+    action: withDescription(stringEnum(["sync", "watch", "status"]), "Remote development action"),
     target: optional(stringEnum(["db", "functions", "frontend", "project"]), "Sync target (default: project)"),
     project_dir: optional(Type.String(), "Local project directory (default: current directory)"),
     remote_root: optional(Type.String(), "Remote development root"),
@@ -67,10 +59,6 @@ export const remoteDevToolSchema = {
     delete: optional(Type.Boolean(), "Delete remote files absent locally"),
     reload: optional(Type.Boolean(), "Reload the affected target after sync (default: true)"),
     interval_ms: optional(Type.Number(), "Watch debounce interval in milliseconds (default: 300)"),
-    apply: optional(Type.Boolean(), "Apply generated migrations to the selected test database"),
-    drizzle_config: optional(Type.String(), "Drizzle config path"),
-    migrations_dir: optional(Type.String(), "Migration directory"),
-    drizzle_bin: optional(Type.String(), "drizzle-kit executable"),
 };
 
 async function runProcess(executable: string, args: string[], cwd: string): Promise<CommandResult> {
@@ -83,50 +71,15 @@ async function runProcess(executable: string, args: string[], cwd: string): Prom
     return { exitCode: exitCode ?? 1, stdout, stderr };
 }
 
-function resolveDrizzleCommand(root: string, configured: string | undefined): string {
-    if (configured?.trim()) return configured.trim();
-    const local = join(root, "node_modules", ".bin", "drizzle-kit");
-    return existsSync(local) ? local : "drizzle-kit";
-}
-
-function toolFailed(value: unknown): boolean {
-    if (!value || typeof value !== "object") return false;
-    const result = value as { isError?: unknown; content?: unknown };
-    const content = Array.isArray(result.content) ? result.content : [];
-    return result.isError === true || content.some((chunk: unknown) =>
-        chunk !== null
-        && typeof chunk === "object"
-        && "text" in chunk
-        && typeof chunk.text === "string"
-        && chunk.text.trimStart().startsWith("❌")
-    );
-}
-
-async function migrateDatabase(args: Record<string, unknown>, options: RemoteDevToolOptions): Promise<Record<string, unknown>> {
-    const root = resolve(String(args.project_dir || options.cwd || process.cwd()));
-    const projectConfig = await readProjectConfig(root);
-    const config = projectConfig.dev || {};
-    const database = config.database || {};
-    const execute = options.execute || ((command, commandArgs, cwd) => runProcess(command, commandArgs, cwd));
-    const drizzleConfig = resolve(root, String(args.drizzle_config || database.drizzleConfig || "drizzle.config.ts"));
-    const migrationsDir = String(args.migrations_dir || database.migrationsDir || "supabase/migrations");
-    if (!existsSync(drizzleConfig)) throw new Error(`Drizzle config not found: ${drizzleConfig}`);
-    const generated = await execute(resolveDrizzleCommand(root, typeof args.drizzle_bin === "string" ? args.drizzle_bin : database.drizzleBin), ["generate", "--config", drizzleConfig], root);
-    if (generated.exitCode !== 0) throw new Error(`Drizzle migration generation failed: ${generated.stderr.trim() || `exit ${generated.exitCode}`}`);
-    if (!options.runDatabase) throw new Error("dev migrate requires Management API context");
-    const dryRun = await options.runDatabase({ action: "push_migrations", dir: migrationsDir, dry_run: true, strict: database.strict !== false });
-    if (toolFailed(dryRun)) throw new Error("SupaCloud migration dry-run failed");
-    if (args.apply !== true) return { ok: true, mode: "dev", action: "migrate", generated: true, applied: false, migrations_dir: migrationsDir, dry_run: dryRun };
-    const applied = await options.runDatabase({ action: "push_migrations", dir: migrationsDir, strict: database.strict !== false });
-    if (toolFailed(applied)) throw new Error("SupaCloud migration apply failed");
-    return { ok: true, mode: "dev", action: "migrate", generated: true, applied: true, migrations_dir: migrationsDir, result: applied };
-}
-
 async function readProjectConfig(root: string): Promise<ProjectConfig> {
     const file = join(root, "supacloud.json");
     if (!existsSync(file)) return {};
     try {
-        const parsed = JSON.parse(await readFile(file, "utf8"));
+        const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+        if (parsed && typeof parsed === "object" && "dev" in parsed && parsed.dev
+            && typeof parsed.dev === "object" && "database" in parsed.dev) {
+            throw new Error("dev.database was removed; use supacloud-model diff and db plan/apply");
+        }
         return parsed && typeof parsed === "object" ? parsed as ProjectConfig : {};
     } catch (error) {
         throw new Error(`Invalid supacloud.json: ${error instanceof Error ? error.message : String(error)}`);
@@ -291,9 +244,6 @@ export function registerRemoteDevTools(server: ToolServer, options: RemoteDevToo
         }
         if (args.action === "sync") {
             return { content: [{ type: "text" as const, text: JSON.stringify(await syncOnce(args, options), null, 2) }] };
-        }
-        if (args.action === "migrate") {
-            return { content: [{ type: "text" as const, text: JSON.stringify(await migrateDatabase(args, options), null, 2) }] };
         }
         if (args.action === "watch") {
             const root = resolve(String(args.project_dir || options.cwd || process.cwd()));

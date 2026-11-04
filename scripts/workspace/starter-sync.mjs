@@ -48,8 +48,8 @@ export function starterMetadata(cwd = root) {
     const entry = { version: manifest.version };
     if (alias === 'app') entry.dependencies = { rxjs: dependency(manifest, 'dependencies', 'rxjs') };
     if (alias === 'db') {
-      entry.peerDependencies = { 'drizzle-orm': dependency(manifest, 'peerDependencies', 'drizzle-orm') };
-      entry.devDependencies = { 'drizzle-kit': dependency(manifest, 'devDependencies', 'drizzle-kit') };
+      entry.dependencies = Object.fromEntries(['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy'].map(name => [name, dependency(manifest, 'dependencies', name)]));
+      entry.devDependencies = Object.fromEntries(['@zenstackhq/cli', 'prisma', 'pg'].map(name => [name, dependency(manifest, 'devDependencies', name)]));
     }
     if (alias === 'sdk') entry.peerDependencies = { '@supabase/supabase-js': dependency(manifest, 'peerDependencies', '@supabase/supabase-js') };
     packages[alias] = entry;

@@ -217,7 +217,7 @@ for (const module of createUnscopedModules()) {
       'import { createLogger } from "../src/features/audit/logger";',
     );
     expect(applicationCode).toContain(
-      'import { DrizzleCaseRepository } from "../src/features/case/case.repository";',
+      'import { CaseRepository } from "../src/features/case/case.repository";',
     );
     expect(applicationCode).toContain(
       'import { AcceptParams, AcceptResult, CreateCaseBody } from "../src/features/case/contracts";',
@@ -351,7 +351,7 @@ export class LifecycleController {
       "const auditService = new AuditService(auditConfig, logger);",
     );
     expect(applicationCode).toContain(
-      'const caseRepository = new DrizzleCaseRepository(deps["dbClient"] as ConstructorParameters<typeof DrizzleCaseRepository>[0]);',
+      'const caseRepository = new CaseRepository(deps["dbClient"] as ConstructorParameters<typeof CaseRepository>[0]);',
     );
     expect(applicationCode).toContain(
       'const caseService = new CaseService(caseRepository, imported["audit"]["auditService"] as ConstructorParameters<typeof CaseService>[1]);',

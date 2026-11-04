@@ -1,3 +1,4 @@
+import { compileModel } from "./model";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -13,6 +14,7 @@ export interface DatabaseSourcesConfig {
   audit: string;
   consumers: string[];
   auditConsumers: string[];
+  trustedHosts: string[];
   role: string;
 }
 export interface SourceFinding { file: string; code: string; message: string; line?: number }
@@ -30,7 +32,7 @@ const GENERATOR = "supacloud-db/source-contracts/v1";
 const skip = new Set(["node_modules", ".git", ".worktrees", ".wt", "dist", "coverage", ".next", ".svelte-kit"]);
 const steps = [
   "Keep the existing append-only migration directory and deployment ledger.",
-  "Review Drizzle declarations and per-function SQL against a local migration replay.",
+  "Review ZModel declarations and per-function SQL against a local migration replay.",
   "Add database.sources.json; replace ordinary audit dump consumers.",
   "Run supacloud-db generate, review contracts, then add supacloud-db check to default checks.",
   "Verify PostgreSQL definitions, ACL, RLS and behavior separately before deployment.",
@@ -56,17 +58,19 @@ function paths(value: unknown): string[] {
 }
 export function parseDatabaseSourcesConfig(value: unknown): DatabaseSourcesConfig {
   if (!record(value) || value.version !== 1 || Object.keys(value).some(key =>
-    !["version", "schema", "functions", "migrations", "contracts", "audit", "consumers", "auditConsumers", "role"].includes(key))) {
+    !["version", "schema", "functions", "migrations", "contracts", "audit", "consumers", "auditConsumers", "trustedHosts", "role"].includes(key))) {
     throw new Error("Invalid database.sources.json");
   }
   const schema = paths(value.schema), consumers = paths(value.consumers), auditConsumers = paths(value.auditConsumers);
-  if (!schema.length || !consumers.length || schema.some(file => !file.endsWith(".ts"))) throw new Error("Select TypeScript schemas and consumer roots");
+  if (!schema.length || !consumers.length || schema.some(file => !file.endsWith(".ts") && !file.endsWith(".zmodel"))) throw new Error("Select ZModel or generated TypeScript schemas and consumer roots");
   if (typeof value.role !== "string" || !/^[a-z_][a-z0-9_]*$/.test(value.role)) throw new Error("Select an explicit database role");
   const config: DatabaseSourcesConfig = {
     version: 1, schema, consumers, auditConsumers, role: value.role,
+    trustedHosts: paths(value.trustedHosts ?? ["src/host"]),
     functions: pathValue(value.functions), migrations: pathValue(value.migrations),
     contracts: pathValue(value.contracts), audit: pathValue(value.audit),
   };
+  if (config.trustedHosts.some(path => !path.startsWith("src/") || path === "src")) throw new Error("Trusted hosts must be explicit paths inside src/");
   const areas = [...schema, config.functions, config.migrations, config.contracts, config.audit];
   for (const [index, area] of areas.entries()) {
     if (areas.some((other, otherIndex) => index !== otherIndex && (within(area, other) || within(other, area)))) {
@@ -189,9 +193,37 @@ async function boundaryFindings(
     && (config ? schemaInputs.includes(file) || config.consumers.some(directory => within(file, directory))
       : !within(file, "output") && !within(file, "generated")));
   const findings: SourceFinding[] = [];
+  const configFile = ts.findConfigFile(root, ts.sys.fileExists);
+  const compilerOptions = configFile ? ts.parseJsonConfigFileContent(
+    ts.readConfigFile(configFile, ts.sys.readFile).config, ts.sys, dirname(configFile),
+  ).options : {};
+  const resolutionCache = ts.createModuleResolutionCache(root, path => path, compilerOptions);
   for (const file of consumers) {
     if (config?.auditConsumers.includes(file)) continue;
     const source = ts.createSourceFile(file, await readFile(await safePath(root, file), "utf8"), ts.ScriptTarget.Latest, true);
+    if (file.startsWith("src/") && !config?.trustedHosts.some(host => within(file, host)) && !/\.(test|spec)\.[cm]?tsx?$/.test(file)) {
+      const checkBoundary = (node: ts.Node) => {
+        const module = (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) ? node.moduleSpecifier
+          : ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+            || ts.isIdentifier(node.expression) && node.expression.text === "require") ? node.arguments[0] : undefined;
+        const typeOnly = ts.isImportDeclaration(node) && (node.importClause?.isTypeOnly
+          || node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
+          && !node.importClause.name && node.importClause.namedBindings.elements.every(item => item.isTypeOnly))
+          || ts.isExportDeclaration(node) && node.isTypeOnly;
+        if (module && ts.isStringLiteral(module) && !typeOnly) {
+          const name = module.text;
+          const resolved = ts.resolveModuleName(name, resolve(root, file), compilerOptions, ts.sys, resolutionCache).resolvedModule;
+          const local = slash(relative(root, resolved?.resolvedFileName ?? resolve(root, dirname(file), name)));
+          if (/^(?:@zenstackhq\/|kysely(?:$|\/)|bun(?:$|:)|(?:pg|postgres)(?:$|\/)|@prisma\/client(?:$|\/)|@supacloud\/db(?:$|\/))/.test(name)
+            || config?.trustedHosts.some(host => within(local, host) || within(`${local}.ts`, host))) {
+            findings.push({ file, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+              code: "model-boundary", message: "Database construction and host imports belong in src/host; inject policy model capabilities into business code." });
+          }
+        }
+        ts.forEachChild(node, checkBoundary);
+      };
+      checkBoundary(source);
+    }
     const reported = new Set<number>();
     for (const reference of staticPaths(source)) {
       const candidates = [slash(relative(root, resolve(root, reference.value))),
@@ -235,6 +267,9 @@ export async function databaseSources(
     for (const directory of [config.functions, config.migrations, ...config.consumers]) {
       if (!(await exists(await safePath(root, directory)))) throw new Error(`Missing source directory: ${directory}`);
     }
+    for (const model of config.schema.filter(file => file.endsWith(".zmodel"))) {
+      await compileModel(await safePath(root, model), await safePath(root, slash(join(dirname(model), "generated"))), true);
+    }
     const inputs = new Map<string, string>();
     const input = async (file: string) => {
       const text = await readFile(await safePath(root, file), "utf8");
@@ -254,10 +289,12 @@ export async function databaseSources(
             && node.moduleSpecifier.text.startsWith(".")) imports.push(node.moduleSpecifier.text);
           ts.forEachChild(node, visit);
         };
-        visit(tree);
+        if (path.endsWith(".zmodel")) {
+          for (const match of (await input(path)).matchAll(/\bimport\s+["'](\.[^"']+)["']/g)) imports.push(match[1]!);
+        } else visit(tree);
         for (const specifier of imports) {
           const base = slash(relative(root, resolve(root, dirname(path), specifier)));
-          const candidates = [base, `${base}.ts`, `${base}/index.ts`];
+          const candidates = path.endsWith(".zmodel") ? [base, `${base}.zmodel`] : [base, base.replace(/\.js$/, ".ts"), `${base}.ts`, `${base}/index.ts`];
           let target: string | undefined;
           for (const candidate of candidates) {
             const full = await safePath(root, candidate);

@@ -2,7 +2,7 @@
 
 ## Database First Only
 
-The only supported server-schema model is **Database First**. Drizzle table
+The only supported server-schema model is **Database First**. ZModel table
 definitions and reviewed SQL governance declarations are applied to PostgreSQL;
 `pg_graphql` reflects the actual database under the intended caller role.
 `graphql/schema.graphql` (or introspection JSON) is an exported, derived snapshot,
@@ -10,13 +10,13 @@ not an independently authored API definition. Change the database declarations,
 apply migrations, then export again. Do not edit the snapshot to make a query pass.
 
 ```text
-Drizzle + SQL grants/policies -> migrated PostgreSQL -> pg_graphql
+ZModel + SQL grants/policies -> migrated PostgreSQL -> pg_graphql
   -> role-scoped local snapshot + authored queries/fragments
   -> validated operation types, typed client and optional TypedDocumentNode
 ```
 
 There is no Code First decorator/resolver mode, handwritten server SDL mode, or
-Drizzle-to-GraphQL generator. `@Query` in the application framework does not define
+ZModel-to-GraphQL generator. `@Query` in the application framework does not define
 a GraphQL resolver. SDL and introspection JSON are two snapshot formats, not two
 authoring modes; TypedDocumentNode is an output option, not another schema model.
 Only `schema`, `documents`, `scalars` and `typedDocuments` configure this pipeline.

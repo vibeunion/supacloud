@@ -18,9 +18,9 @@ schema / migrations
 - Effect is the canonical application execution and typed failure model for
   compiler-managed features. Routes declare dependencies, public error mappings,
   timeout and retry policy explicitly.
-- Drizzle owns table declarations, migrations, transactions and general reads or
-  writes. Reylo owns fixed, read-only queries whose SQL is compiled into a
-  standalone build.
+- ZModel owns business model declarations and data policies. ZenStack generates
+  model types and executes model queries through the internal Bun SQL dialect.
+  SupaCloud owns migration delivery, command transactions and static AOP ordering.
 - Database row types are never exported directly as browser API types. Domain
   mapping and a stable HTTP DTO are required at the API boundary.
 - The compiler core owns orchestration, manifest format, fingerprints and drift
@@ -36,7 +36,7 @@ schema / migrations
 migrations, hashed inputs, hashed outputs and a schema fingerprint. Consumers
 must fail closed when the fingerprint is stale or the manifest is malformed.
 Only configured protocols are emitted, so a project that uses PostgREST does not
-silently acquire Drizzle or GraphQL types.
+silently acquire ZModel or GraphQL types.
 
 ## Feature workflow
 
@@ -48,7 +48,7 @@ feature/
   domain/          business state and tagged errors
   application/     Effect programs and ports
   contracts/       TypeBox schemas and DTOs
-  infrastructure/  Drizzle or Reylo adapters
+  infrastructure/  ZenStack/Bun SQL adapters
   http/             Elysia routes
 ```
 

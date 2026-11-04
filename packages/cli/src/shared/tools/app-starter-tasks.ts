@@ -140,11 +140,11 @@ import { AttachmentInput, AttachmentResult } from "../review/attachment";
 import { ReviewResult } from "../review/contracts";
 import { RetryInput, RetryResult, TaskParams, TaskStatus, type ReviewRetryInput } from "../review/task-contracts";
 import type { ReviewTaskPort } from "../review/tasks";
-import type { attachments, attachmentRetries, ReviewRow } from "../../db/schema";
+import type { AttachmentRow, AttachmentRetryRow, ReviewRow } from "../../db/schema";
 
 export interface ReviewTaskOptions { database: CommandDatabase; projectId: string; tenantId: string }
-type Binding = Pick<typeof attachments.$inferSelect, "artifactId" | "runId">
-  & Pick<typeof attachmentRetries.$inferSelect, "generation" | "runId">;
+type Binding = Pick<AttachmentRow, "artifactId" | "runId">
+  & Pick<AttachmentRetryRow, "generation" | "runId">;
 const decodeInput = createSchemaDecoder(RetryInput, { normalize: false });
 const decodeRetry = createSchemaDecoder(RetryResult, { normalize: false });
 const decodeStatus = createSchemaDecoder(TaskStatus, { normalize: false });

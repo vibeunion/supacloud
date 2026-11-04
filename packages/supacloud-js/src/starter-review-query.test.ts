@@ -1,3 +1,4 @@
+import { compileModel } from "../../db/src/model";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -18,12 +19,13 @@ let listReviews: (client: SupabaseClient, options?: {
 
 beforeAll(async () => {
   root = await mkdtemp(join(sdk, ".starter-query-"));
-  for (const path of ["src/review/list-reviews.ts", "db/schema.ts"]) {
+  for (const path of ["src/review/list-reviews.ts", "db/schema.ts", "zenstack/schema.zmodel"]) {
     await mkdir(join(root, path, ".."), { recursive: true });
     await writeFile(join(root, path), files[path]!);
   }
   await mkdir(join(root, "node_modules"));
-  await symlink(resolve(sdk, "../db/node_modules/drizzle-orm"), join(root, "node_modules/drizzle-orm"));
+  await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
+  await symlink(resolve(sdk, "../db/node_modules/@zenstackhq"), join(root, "node_modules/@zenstackhq"));
   const loaded: { listReviews: typeof listReviews } = await import(join(root, "src/review/list-reviews.ts"));
   listReviews = loaded.listReviews;
 });

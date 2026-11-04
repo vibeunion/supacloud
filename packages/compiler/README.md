@@ -63,7 +63,7 @@ Remote database changes alone do not trigger watch; the next compile checks them
 This gate enforces the adopted database-source contract and declared object
 checks, not complete database coverage, ORM usage, runtime authorization, or SQL
 test behavior. Passing it is not deployment acceptance. Keep one existing
-append-only migration ledger, maintain Drizzle structure and SQL sources
+append-only migration ledger, maintain ZModel structure and SQL sources
 separately, and explicitly generate/review RPC contracts before compiling.
 See `docs/database-governance.md` and `docs/database-source-contracts.md` for
 the database checks and their limitations.
@@ -86,19 +86,19 @@ attempts. The default policy requires `requireRouteEffects`,
 ## Unified Database Contracts
 
 Database contracts are protocol-aware: configure only the database sources the
-application uses (`postgrestTypes`, `drizzleSchema`, or `graphql`). The generated
+application uses (`postgrestTypes`, `modelSchema`, or `graphql`). The generated
 `database.manifest.json` is a TypeBox-validated, fingerprinted build boundary;
 consumers must reject it when its schema or migration fingerprint is stale.
 
 `supacloud-compiler database-contracts database-contracts.json` generates a shared
-type entry point while preserving PostgREST, Drizzle and GraphQL native types:
+type entry point while preserving PostgREST, ZModel and GraphQL native types:
 
 ```json
 {
   "rootDir": ".",
   "outDir": "generated",
   "postgrestTypes": "database.types.ts",
-  "drizzleSchema": "db/schema.ts",
+  "modelSchema": "zenstack/generated/schema.ts",
   "role": "authenticated",
   "graphql": {
     "schema": "graphql/schema.graphql",
@@ -111,10 +111,10 @@ type entry point while preserving PostgREST, Drizzle and GraphQL native types:
 Configuration paths are relative to the configuration directory; GraphQL document
 patterns are resolved under `rootDir`. Supply the official PostgREST `Database`
 snapshot and a role-scoped `pg_graphql` schema snapshot. The generated barrel
-exports `Database`, `QueryData`, Drizzle schema types and GraphQL contracts.
-Consumers need `@supabase/supabase-js` and their Drizzle dependencies.
+exports `Database`, `QueryData`, ZModel schema types and GraphQL contracts.
+Consumers need `@supabase/supabase-js` and their ZenStack dependencies.
 
-`--check` detects drift in supplied snapshots, local Drizzle imports, migration
+`--check` detects drift in supplied snapshots, local ZModel imports, migration
 content/order and generated artifacts without writing. This is an offline check,
 not proof of live database parity or authorization. Refresh snapshots from the
 intended database and role before running it. Keep runtime decoders at untrusted
@@ -122,7 +122,7 @@ boundaries; protocol result shapes are not interchangeable.
 
 Compiled DI requires constructor injection and generated scope factories.
 Property `inject()` and runtime injection-context APIs fail with `SC2012`.
-Production SQL scanning reports non-`unknown` Drizzle `sql<T>` as `SC6007` and
+Production SQL scanning reports non-`unknown` Kysely `sql<T>` as `SC6007` and
 dynamic `sql.raw` as `SC6008`. Prefer parameters and explicit result decoders.
 These rules do not replace PostgreSQL constraints, RLS or migration review.
 
@@ -208,7 +208,7 @@ SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的�
 
 ## Recommended GraphQL Query Contracts
 
-**Database First is the only server-schema model.** Drizzle and SQL declarations
+**Database First is the only server-schema model.** ZModel and SQL declarations
 are migrated to PostgreSQL; `pg_graphql` reflects the actual database, and
 `graphql-schema` exports the intended role's snapshot. Author queries/fragments,
 not GraphQL resolver classes or a separate server SDL. `graphql.schema` accepts

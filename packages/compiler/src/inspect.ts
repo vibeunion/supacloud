@@ -31,7 +31,7 @@ export interface ContextPack {
     writeTransport: "command-rpc";
     writeRetry: "disabled";
     externalOutcome: "receipt-reconcile";
-    databaseSource: "drizzle-append-only";
+    databaseSource: "zmodel-append-only";
   };
   relatedModules: {
     importedBy: string[];
@@ -175,7 +175,7 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
       writeTransport: "command-rpc",
       writeRetry: "disabled",
       externalOutcome: "receipt-reconcile",
-      databaseSource: "drizzle-append-only",
+      databaseSource: "zmodel-append-only",
     },
     relatedModules: {
       imports: subjectModule.imports.filter((name) => selected.has(name)),

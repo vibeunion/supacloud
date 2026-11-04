@@ -92,7 +92,7 @@ test('package tasks run through Bun and do not keep a result cache', () => {
 test('verification-only dependency targets preserve the old extra build contracts', () => {
   const w=readWorkspace(resolve(import.meta.dirname,'../..'));
   const find=(alias)=>Object.values(w.projects).find(p=>p.root===`packages/${alias}`);
-  assert.deepEqual(verificationTargets(w,find('db')).slice(1).map(x=>x.projects[0]),['@supacloud/commands','@supacloud/compiler']);
+  assert.deepEqual(verificationTargets(w,find('db')).slice(1).map(x=>x.projects[0]),['@supacloud/commands','@supacloud/compiler','@supacloud/cli']);
   assert.equal(verificationTargets(w,find('compiler'))[1].projects[0],'@supacloud/contracts');
   assert.equal(verificationTargets(w,find('supacloud-lite'))[1].projects[0],'@supacloud/js');
   assert.equal(verificationTargets(w,find('elysia'))[1].projects[0],'@supacloud/js');
@@ -115,7 +115,7 @@ test('all legacy consumer preparation closures preserve their previous artifact 
   const w=readWorkspace(resolve(import.meta.dirname,'../..'));
   const original={
     'supacloud-js':['compiler','contracts','db','delivery','query'], 'supacloud-lite':['contracts','supacloud-js','commands','delivery','compiler','db','app','elysia','query'],
-    app:['contracts'],compiler:['contracts','db','delivery','query'],db:['contracts','commands','delivery','compiler','db'],
+    app:['contracts'],compiler:['contracts','db','delivery','query'],db:['contracts','commands','delivery','compiler','db','app','elysia'],
     commands:['contracts'],'app-svelte':['contracts'],elysia:['contracts','commands','delivery','compiler','db','app','supacloud-js','query'],
   };
   const find=alias=>Object.values(w.projects).find(p=>p.root===`packages/${alias}`);
