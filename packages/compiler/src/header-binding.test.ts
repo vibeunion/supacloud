@@ -28,6 +28,6 @@ export class HeaderModule {}
       { kind: "headers", bindingName: "Idempotency-Key" }, { kind: "headers" },
     ]);
     const output = await Bun.file(join(root, "generated/application.ts")).text();
-    expect(output).toContain('[req.headers?.["idempotency-key"], req.headers]');
+    expect(output).toContain('handler.call(ctrl, req.headers?.["idempotency-key"], req.headers);');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -58,6 +58,7 @@ describe("public type safety", () => {
       path: "/items", method: "POST",
       guards: [(() => "yes") as unknown as CanActivateFn],
       handler: () => { writes++; return {}; },
+      invoker: () => { writes++; return {}; },
     }, { url: "/items", method: "POST" });
     expect(result.status).toBe(403);
     expect(writes).toBe(0);

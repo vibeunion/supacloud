@@ -130,9 +130,9 @@ export interface CompiledRoute {
   schemaKinds?: Partial<Record<"body" | "params" | "query" | "headers" | "cookie" | "response", "opaque" | "declared">>;
   /** True when the handler returns a native Response rather than a framework value. */
   nativeResponse?: boolean;
-  /** Compiler-emitted positional invoker; used when available. */
-  invoker?: (
-    controller: unknown,
+  /** Compiler-emitted positional invoker. */
+  invoker?: <Controller extends CompiledControllerInvokerTarget>(
+    controller: Controller,
     request: {
       params?: Record<string, unknown>;
       query?: Record<string, unknown>;
@@ -142,6 +142,10 @@ export interface CompiledRoute {
       context?: unknown;
     },
   ) => Promise<unknown> | unknown;
+  /** Compiler-emitted Elysia-context invoker for routes without SupaCloud stages. */
+  directInvoker?: <Controller extends CompiledControllerInvokerTarget>(controller: Controller, context: unknown) => Promise<unknown> | unknown;
+  /** Compiler-selected execution plan. Older artifacts default to the full pipeline. */
+  executionMode?: "direct" | "pipeline";
   /** Class name of the @Command explicitly bound to this route. */
   command?: string;
   /** Transport-level idempotency contract, independent of route command binding. */
@@ -150,6 +154,14 @@ export interface CompiledRoute {
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
 }
+
+/**
+ * The generated invoker validates the controller at runtime, while hand-written
+ * descriptors often call a known method directly. Keep the target callable so
+ * those descriptors retain useful contextual types without weakening the
+ * compiled module contract to `any`.
+ */
+export type CompiledControllerInvokerTarget = Record<string, (...args: unknown[]) => unknown> & object;
 
 export interface CompiledCommand {
   rpc?: string;
@@ -297,6 +309,7 @@ export function composeAspects(
   const active = aspects.filter(
     (aspect): aspect is ApplicationAspect => typeof aspect === "function",
   );
+  if (active.length === 0) return (_context, next) => next();
   return (context, next) => {
     let index = -1;
     const dispatch = (current: number): Promise<unknown> => {
@@ -697,6 +710,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return value instanceof Promise;
+}
+
 function isTrustedIdentity(value: unknown): value is TrustedRequestIdentity {
   return isRecord(value)
     && typeof value.authenticated === "boolean"
@@ -996,16 +1013,20 @@ export async function previewCompiledCommand<Input>(options: {
   return preview;
 }
 
-function once(next: () => unknown | Promise<unknown>): () => Promise<unknown> {
+function once(next: () => unknown | Promise<unknown>): () => unknown | Promise<unknown> {
   let called = false;
-  return async () => {
+  return () => {
     if (called) {
-      throw new ApplicationError("Command continuation called multiple times", {
+      return Promise.reject(new ApplicationError("Command continuation called multiple times", {
         code: "COMMAND_CONTINUATION_REUSED",
-      });
+      }));
     }
     called = true;
-    return await next();
+    try {
+      return next();
+    } catch (error) {
+      return Promise.reject(error);
+    }
   };
 }
 
@@ -1230,6 +1251,7 @@ export function createModulePlugin<
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
     "effect",
+    "directInvoker", "executionMode",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     "idempotency",
@@ -1280,6 +1302,9 @@ export function createModulePlugin<
     );
   }
   assertCommandGovernanceReady(compiled, options.commandGovernance, options.commandExecutor);
+  const commandsByClassName = new Map(
+    (compiled.commands ?? []).map((command) => [command.className, command]),
+  );
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const command = route.command === undefined ? undefined : resolveCompiledCommand(compiled, route.command);
@@ -1312,9 +1337,18 @@ export function createModulePlugin<
   const commandExecutor = options.commandExecutor && governanceExecutor
     ? composeCommandExecutors(options.commandExecutor, governanceExecutor)
     : (options.commandExecutor ?? governanceExecutor);
+  const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
 
-  const plugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true)
-    .derive(async (context) => {
+  const needsRequestState = ctxFactory !== defaultRequestContext
+    || pendingWork !== undefined
+    || options.httpPolicies !== undefined
+    || options.onExecution !== undefined
+    || compiled.createRequestScope !== undefined
+    || compiled.aspectPipeline !== undefined
+    || compiled.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
+  const basePlugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true);
+  const servicesPlugin = basePlugin.derive(() => ({ services }));
+  const plugin = needsRequestState ? (servicesPlugin.derive((context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
       let complete: (() => void) | undefined;
       try {
@@ -1326,16 +1360,17 @@ export function createModulePlugin<
       if (complete) requestCompletions.set(context.request, complete);
       const signal = pendingWork
         ? AbortSignal.any([context.request.signal, pendingWork.signal]) : context.request.signal;
-      const requestContext = await ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
-      requestContexts.set(context.request, requestContext);
-      // Elysia merges decorators across siblings. Resolve the original map
-      // locally so colliding service names cannot change module ownership.
-      return { services, requestContext };
-    });
+      const finish = (requestContext: unknown) => {
+        requestContexts.set(context.request, requestContext);
+        return { requestContext };
+      };
+      const requestContext = ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
+      return isPromiseLike(requestContext) ? requestContext.then(finish) : finish(requestContext);
+    }) as unknown as typeof servicesPlugin) : servicesPlugin;
 
   const createRequestScope = compiled.createRequestScope;
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
-  plugin.onAfterResponse(async ({ request }) => {
+  if (needsRequestState) plugin.onAfterResponse(async ({ request }) => {
     const scope = requestScopes.get(request);
     requestScopes.delete(request);
     try {
@@ -1422,6 +1457,12 @@ export function createModulePlugin<
       }
       const responsePolicies = policies.filter((policy) => policy.afterResponse);
       const mappingPolicies = policies.filter((policy) => policy.mapResponse);
+      const routePipeline = descriptorPipeline(route, "route", options.onExecution);
+      const command = route.command ? commandsByClassName.get(route.command) : undefined;
+      const commandPipeline = route.command
+        ? descriptorPipeline(command ?? {}, "command", options.onExecution)
+        : undefined;
+      const routeInvoker = route.invoker;
       if (mappingPolicies.length > 0) {
         const responseValidators = Validator.response(schema.response, { normalize: options.normalize ?? true });
         Object.assign(schema, {
@@ -1431,7 +1472,7 @@ export function createModulePlugin<
             for (const policy of mappingPolicies) {
               const result = await policy.mapResponse!({
                 http: context, requestContext: requestContexts.get(context.request), response,
-                encodeResponse: async (value) => {
+                encodeResponse: (value) => {
                   const validator = responseValidators?.get(responseStatusOf(value, context.set.status));
                   if (!validator) return value;
                   if (!("EncodeFrom" in validator) || typeof validator.EncodeFrom !== "function") {
@@ -1439,9 +1480,9 @@ export function createModulePlugin<
                   }
                   if ("mayReturnPromise" in validator && validator.mayReturnPromise
                     && "From" in validator && typeof validator.From === "function") {
-                    return await Reflect.apply(validator.From, validator, [value, "response", true]);
+                    return validator.From.call(validator, value, "response", true);
                   }
-                  return await Reflect.apply(validator.EncodeFrom, validator, [value, "response"]);
+                  return validator.EncodeFrom.call(validator, value, "response");
                 },
               });
               if (result !== undefined) {
@@ -1468,7 +1509,15 @@ export function createModulePlugin<
         });
       }
 
-      const handler = async (ctx: HttpContext) => {
+      const directRoute = route.executionMode === "direct" && route.directInvoker !== undefined
+        && policies.length === 0 && responsePolicies.length === 0 && mappingPolicies.length === 0;
+      // Keep the direct AOT path synchronous when the generated controller is
+      // synchronous. An async wrapper would allocate a Promise for every
+      // request and erase the benefit of bypassing the SupaCloud pipeline.
+      // I have nothing but my burger and I want nothing more
+      const handler = directRoute
+        ? (ctx: HttpContext) => route.directInvoker!(services[controller.serviceKey] as CompiledControllerInvokerTarget, ctx)
+        : async (ctx: HttpContext) => {
         const requestContext = requestContexts.get(ctx.request);
         const execute = async () => {
           const requestScope = createRequestScope
@@ -1477,13 +1526,7 @@ export function createModulePlugin<
           if (requestScope && compiled.destroyRequestScope) requestScopes.set(ctx.request, requestScope);
           const source =
             controller.scope === "request" ? requestScope : services;
-          const instance = controllerInstance(source?.[controller.serviceKey]);
-          const method = instance?.[route.handler];
-          if (typeof method !== "function") {
-            throw new Error(
-              `supacloud: controller "${controller.serviceKey}" has no handler "${route.handler}" in scope "${controller.scope}"`,
-            );
-          }
+          const instance = source?.[controller.serviceKey];
           const normalizedCookie = ctx.cookie === undefined ? undefined : cookieValues(ctx.cookie);
           const input = {
             body: ctx.body,
@@ -1496,18 +1539,25 @@ export function createModulePlugin<
             ...(requestScope ? { scope: requestScope } : {}),
             requestContext,
           };
-          const handlerCall = () => route.invoker
-            ? route.invoker(instance, input)
-            : Reflect.apply(method, instance, [input]);
+          const handlerCall = () => {
+            if (route.invoker) return route.invoker(instance as CompiledControllerInvokerTarget, input);
+            if (!isRecord(instance)) throw new TypeError("Route controller is not an object");
+            const method = instance[route.handler];
+            if (typeof method !== "function") throw new TypeError(`Route handler ${route.handler} is not callable`);
+            return method.call(instance, input);
+          };
           const invokeHandler = async () =>
             runCompiledEffect(await handlerCall(), route.effect, options.effectRuntime);
-          const invoke = once(() => route.command && options.commandGovernance ? invokeHandler()
-            : observeExecution(options.onExecution, {
-              kind: route.command ? "command" : "route",
-              operation: route.command ?? `${route.method} ${path}`,
-              stage: "handler",
-              ...executionTrace(requestContext),
-            }, invokeHandler));
+          const invoke = once(() => route.command && options.commandGovernance
+            ? invokeHandler()
+            : options.onExecution
+              ? observeExecution(options.onExecution, {
+                kind: route.command ? "command" : "route",
+                operation: route.command ?? `${route.method} ${path}`,
+                stage: "handler",
+                ...executionTrace(requestContext),
+              }, invokeHandler)
+              : invokeHandler());
           const routeContext: ApplicationAspectContext = {
             kind: "route",
             name: `${route.method} ${path}`,
@@ -1519,9 +1569,9 @@ export function createModulePlugin<
             metadata: route,
           };
           const command = route.command === undefined ? undefined : resolveCompiledCommand(compiled, route.command);
-          const commandContext: ApplicationAspectContext = {
-            kind: "command",
-            name: command?.name ?? route.command ?? `${route.method} ${path}`,
+          const commandContext = route.command === undefined ? routeContext : {
+            kind: "command" as const,
+            name: command?.name ?? route.command,
             input,
             request: ctx.request,
             requestContext,
@@ -1529,13 +1579,10 @@ export function createModulePlugin<
             services,
             metadata: command ?? route,
           };
-          const routePipeline = descriptorPipeline(route, "route", options.onExecution);
-          const commandPipeline = descriptorPipeline(command ?? {}, "command", options.onExecution);
-          const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
           const invokeRoute = () => modulePipeline(
             route.command ? commandContext : routeContext,
             once(() => routePipeline(routeContext, once(() => route.command
-              ? commandPipeline(commandContext, once(invoke))
+              ? commandPipeline!(commandContext, once(invoke))
               : invoke()))),
           );
           const invokeCommand = () => {
@@ -1760,15 +1807,18 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
   const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true })
     .use(contextPlugin(options.http).as("global"));
   if (options.documentation) app.use(createDocumentationPlugin(options.documentation));
-  const configuredContextFactory = options.requestContext ?? defaultRequestContext;
-  const contextCache = new WeakMap<Request, Promise<unknown>>();
-  const ctxFactory: HttpRequestContextFactory<Http> = (request, context, signal) => {
-    const cached = contextCache.get(request);
-    if (cached) return cached;
-    const pending = Promise.resolve().then(() => configuredContextFactory(request, context, signal));
-    contextCache.set(request, pending);
-    return pending;
-  };
+  const ctxFactory: HttpRequestContextFactory<Http> = options.requestContext === undefined
+    ? defaultRequestContext
+    : (() => {
+      const contextCache = new WeakMap<Request, unknown | Promise<unknown>>();
+      return (request, context, signal) => {
+        if (contextCache.has(request)) return contextCache.get(request);
+        const value = options.requestContext!(request, context, signal);
+        const cached = isPromiseLike(value) ? Promise.resolve(value) : value;
+        contextCache.set(request, cached);
+        return cached;
+      };
+    })();
   const imported: Record<string, Record<string, unknown>> = {};
   const moduleServices: Array<{ module: CompiledModule; services: Record<string, unknown> }> = [];
 
@@ -1776,9 +1826,23 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
     moduleServices.push({ module, services });
+    const moduleNeedsRequestState = options.pendingWork !== undefined
+      || options.requestContext !== undefined
+      || options.httpPolicies !== undefined
+      || options.onExecution !== undefined
+      || module.createRequestScope !== undefined
+      || module.aspectPipeline !== undefined
+      || module.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
     // The root owns shared HTTP hooks; mounting them again on each module
     // duplicates anonymous global hooks in Elysia 2.
-    app.use(createModulePlugin(module, services, ctxFactory, { ...options, http: undefined }, imported, pendingWork));
+    app.use(createModulePlugin(
+      module,
+      services,
+      ctxFactory,
+      { ...options, http: undefined },
+      imported,
+      moduleNeedsRequestState ? pendingWork : undefined,
+    ));
   }
 
   let initialized = false;

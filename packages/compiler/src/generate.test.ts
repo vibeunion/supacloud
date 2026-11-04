@@ -300,7 +300,7 @@ export class LifecycleController {
       const sourceFile = program.getSourceFile(join(root, "generated/application.ts"));
       if (!sourceFile) throw new Error("Generated application source is missing");
       const checker = program.getTypeChecker();
-      const hits = { instance: 0, init: 0, teardown: 0, reflectApply: 0 };
+      const hits = { instance: 0, init: 0, teardown: 0, handlerCall: 0 };
       const assertNotAny = (node: ts.Node) => {
         expect(checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any).toBe(0);
       };
@@ -316,18 +316,16 @@ export class LifecycleController {
         if (ts.isCallExpression(node) &&
           ts.isPropertyAccessExpression(node.expression) &&
           ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "Reflect" &&
-          node.expression.name.text === "apply") {
-          hits.reflectApply++;
-          const handler = node.arguments[0];
-          if (!handler) throw new Error("Reflect.apply call is missing its handler argument");
-          assertNotAny(handler);
+          node.expression.name.text === "call" &&
+          node.expression.expression.text === "handler") {
+          hits.handlerCall++;
+          assertNotAny(node.expression.expression);
           assertNotAny(node);
         }
         ts.forEachChild(node, visit);
       };
       visit(sourceFile);
-      expect(hits).toEqual({ instance: 3, init: 1, teardown: 1, reflectApply: 1 });
+      expect(hits).toEqual({ instance: 3, init: 1, teardown: 1, handlerCall: 2 });
       const generated = await import(pathToFileURL(join(root, "generated/application.ts")).href);
       const [module] = generated.createCompiledModules() as Array<{
         createServices: (deps: Record<string, unknown>, imported: Record<string, Record<string, unknown>>) => Record<string, unknown>;
@@ -421,7 +419,7 @@ export class LifecycleController {
     expect(applicationCode).toContain('serviceKey: "caseController"');
     expect(applicationCode).toContain('path: "/cases"');
     expect(applicationCode).toContain(
-      'handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, effect: {"required":true,"retry":"none","dependencies":[],"errors":[]}, idempotency: "required", command: "AcceptCaseCommand", invoker: async (ctrl: unknown',
+      'handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, effect: {"required":true,"retry":"none","dependencies":[],"errors":[]}, idempotency: "required", command: "AcceptCaseCommand", invoker: (ctrl: unknown',
     );
   });
 
@@ -1332,9 +1330,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
       rootDir: "/app",
       outDir: "/app/gen",
     });
-    expect(rendered.applicationCode).toContain("invoker: async (ctrl: unknown, req:");
+    expect(rendered.applicationCode).toContain("invoker: (ctrl: unknown, req:");
     expect(rendered.applicationCode).toContain('const handler = ctrl["getUser"];');
-    expect(rendered.applicationCode).toContain("Reflect.apply(handler, ctrl");
+    expect(rendered.applicationCode).toContain("handler.call(ctrl,");
     expect(rendered.applicationCode).toContain('Number(req.params?.["id"])');
     expect(rendered.applicationCode).toContain('Number(req.query?.["limit"])');
     expect(rendered.applicationCode).toContain(": 20");

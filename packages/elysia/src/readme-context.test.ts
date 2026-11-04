@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Elysia, t } from "elysia";
@@ -62,7 +63,7 @@ test("README context reaches compiled request-scoped controllers", async () => {
     createRequestScope: (_services, context) => ({ controller: { run: () => context } }),
     controllers: [{
       path: "/compiled", serviceKey: "controller", scope: "request",
-      routes: [{ method: "GET", path: "", handler: "run" }],
+      routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],
     }],
   };
   const response = await createReadmeApp([compiled])

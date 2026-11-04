@@ -92,7 +92,7 @@ const INTERFACES = `export interface CompiledRoute {
   data?: Record<string, unknown>;
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
-  invoker?: (
+  invoker: (
     controller: unknown,
     request: {
       params?: Record<string, unknown>;
@@ -103,6 +103,8 @@ const INTERFACES = `export interface CompiledRoute {
       context?: unknown;
     },
   ) => Promise<unknown> | unknown;
+  directInvoker?: (controller: unknown, context: unknown) => Promise<unknown> | unknown;
+  executionMode?: "direct" | "pipeline";
 }
 
 export interface CompiledCommand {
@@ -734,6 +736,7 @@ class ModuleGenerator {
     return lines.join("\n");
   }
 
+
   private hasFactoryContent(kind: Exclude<FactoryKind, "services">): boolean {
     return (
       this.module.providers.some((p) => factoryOfScope(p.scope) === kind) ||
@@ -785,6 +788,22 @@ class ModuleGenerator {
           ?? featureTransition?.idempotency;
         const responseEntries = normalizedResponseEntries(route.responses);
         const hasResponseMap = responseEntries.length > 0;
+        const handlerParams = route.handlerParams ?? [];
+        const needsContext = handlerParams.some((parameter) => parameter.kind === "context");
+        const direct = factoryOfScope(controller.scope) === "services"
+          && route.command === undefined
+          && (route.aspects?.length ?? 0) === 0
+          && !hasResponseMap
+          && route.parse !== "none"
+          && !needsContext
+          && (route.guards?.length ?? 0) === 0
+          && (route.canMatch?.length ?? 0) === 0
+          && (route.canDeactivate?.length ?? 0) === 0
+          && (route.resolvers === undefined || Object.keys(route.resolvers).length === 0)
+          && (route.paramTransforms === undefined || Object.keys(route.paramTransforms).length === 0)
+          && (route.queryTransforms === undefined || Object.keys(route.queryTransforms).length === 0)
+          && (route.paramDefaults === undefined || Object.keys(route.paramDefaults).length === 0)
+          && (route.queryDefaults === undefined || Object.keys(route.queryDefaults).length === 0);
         const fields: string[] = [
           `method: ${JSON.stringify(route.method)}`,
           `path: ${JSON.stringify(route.path)}`,
@@ -852,7 +871,7 @@ class ModuleGenerator {
           fields.push(`aspects: ${this.renderAspects(route.aspects)}`);
           fields.push(`aspectPipeline: ${this.renderAspectPipeline(route.aspects)}`);
         }
-        const invokerArgs = (route.handlerParams ?? []).map((hp) => {
+        const invokerArgs = handlerParams.map((hp) => {
           if (hp.kind === "param") {
             const accessor = `req.params?.[${JSON.stringify(hp.bindingName ?? hp.name)}]`;
             const fallback = hp.default !== undefined ? JSON.stringify(hp.default) : "undefined";
@@ -891,12 +910,26 @@ class ModuleGenerator {
         });
         const callArgs = invokerArgs.length > 0 ? invokerArgs.join(", ") : "req";
         fields.push(
-          `invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { ` +
+          `invoker: (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { ` +
           `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
           `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
           `if (!isFunction(handler)) throw new TypeError("Route handler ${route.handler} is not callable"); ` +
-          `return await Reflect.apply(handler, ctrl, [${callArgs}]); }`,
+          `return handler.call(ctrl, ${callArgs}); }`,
         );
+        if (direct) {
+          const directArgs = invokerArgs.map((argument) => argument.replaceAll("req.", "ctx.").replaceAll("req)", "ctx)"));
+          const directCallArgs = directArgs.length > 0 ? directArgs.join(", ") : "";
+          fields.push(
+            `directInvoker: (ctrl: unknown, ctx: unknown) => { ` +
+            `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
+            `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
+            `if (!isFunction(handler)) throw new TypeError("Route handler ${route.handler} is not callable"); ` +
+            `return handler.call(ctrl, ${directCallArgs}); }`,
+          );
+          fields.push('executionMode: "direct"');
+        } else {
+          fields.push('executionMode: "pipeline"');
+        }
         if (route.contract !== undefined) {
           fields.push(`contract: ${JSON.stringify(route.contract)}`);
         }

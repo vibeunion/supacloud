@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { COMMAND_PERSISTENCE_SQL } from "@supacloud/db";
@@ -162,7 +163,7 @@ suite("real HTTP and PostgreSQL runtime safety", () => {
       },
       controllers: [{
         path: "/scope", serviceKey: "controller", scope: "request",
-        routes: [{ method: "GET", path: "", handler: "read" }],
+        routes: [{ method: "GET", path: "", handler: "read", invoker: testInvoker("read") }],
       }],
     };
     const app = createApplication({

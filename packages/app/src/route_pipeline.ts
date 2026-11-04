@@ -52,7 +52,7 @@ export interface RoutePipelineDefinition {
   resolvers?: Record<string, ResolveFn | string>;
   title?: string;
   data?: Record<string, unknown>;
-  invoker?: (
+  invoker: (
     controller: unknown,
     request: RoutePipelineContext,
   ) => Promise<unknown> | unknown;
@@ -189,17 +189,7 @@ export async function executeRoutePipeline(
   let responseBody: unknown;
   try {
     emit("ExecutionStart");
-    if (route.invoker && typeof route.invoker === "function") {
-      responseBody = await route.invoker(componentInstance, ctx);
-    } else if (componentInstance && typeof componentInstance === "object" && typeof route.handler === "string") {
-      const handler: unknown = Reflect.get(componentInstance, route.handler);
-      if (typeof handler !== "function") throw new TypeError(`Handler '${route.handler}' is not callable`);
-      responseBody = await Reflect.apply(handler, componentInstance, [ctx]);
-    } else if (typeof route.handler === "function") {
-      responseBody = await route.handler(ctx);
-    } else {
-      throw new Error(`Handler '${String(route.handler)}' is not executable on component instance.`);
-    }
+    responseBody = await route.invoker(componentInstance, ctx);
     if (isRedirectCommand(responseBody)) {
       emit("ExecutionEnd");
       return {

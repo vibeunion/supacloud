@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
 import { Type } from "typebox";
@@ -43,7 +44,7 @@ test("the same contract rejects invalid HTTP input before writes and invalid out
     } } }),
     controllers: [{
       path: "/items", serviceKey: "controller", scope: "application",
-      routes: [{ method: "POST", path: "", handler: "save", ...contract }],
+      routes: [{ method: "POST", path: "", handler: "save", invoker: testInvoker("save"), ...contract }],
     }],
   };
   const app = createApplication({ modules: [module] });
@@ -288,7 +289,7 @@ test("expands default and status-family response selectors for Elysia runtime va
     controllers: [{
       path: "/fallback", serviceKey: "controller", scope: "application",
       routes: [{
-        method: "GET", path: "/:mode", handler: "handle",
+        method: "GET", path: "/:mode", handler: "handle", invoker: testInvoker("handle"),
         responses: fallbackResponseContract.responses,
       }],
     }],
@@ -493,7 +494,7 @@ test("typed error handlers preserve normalized mapper codes", async () => {
     }),
     controllers: [{
       path: "/normalized", serviceKey: "controller", scope: "application",
-      routes: [{ method: "GET", path: "", handler: "run" }],
+      routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],
     }],
   };
   const app = createApplication({

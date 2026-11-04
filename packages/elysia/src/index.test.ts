@@ -18,8 +18,9 @@ import {
   type ApplicationOptions,
   type CommandGovernance,
   type CompiledModule,
+  type CompiledRoute,
 } from "./index";
-import { testRequest } from "./testing";
+import { testRequest, testInvoker } from "./testing";
 
 // ---------------------------------------------------------------------------
 // Hand-written compiled module fixtures (mirrors @supacloud/compiler output)
@@ -123,13 +124,13 @@ function createCaseModule(captured: Captured): CompiledModule {
           {
             method: "GET",
             path: "/:id",
-            handler: "get",
+            handler: "get", invoker: testInvoker("get"),
             params: t.Object({ id: t.String() }),
           },
           {
             method: "POST",
             path: "/",
-            handler: "create",
+            handler: "create", invoker: testInvoker("create"),
             body: t.Object({ title: t.String() }),
             response: t.Object({ id: t.String(), title: t.String() }),
             command: "CreateCaseCommand",
@@ -137,7 +138,7 @@ function createCaseModule(captured: Captured): CompiledModule {
           {
             method: "GET",
             path: "/invalid-response",
-            handler: "invalidResponse",
+            handler: "invalidResponse", invoker: testInvoker("invalidResponse"),
             response: t.Object({ id: t.String(), title: t.String() }),
           },
           {
@@ -148,7 +149,7 @@ function createCaseModule(captured: Captured): CompiledModule {
             query: t.Object({ title: t.String() }),
             response: t.Object({ id: t.String(), title: t.String() }),
             invoker: (controller, request) => {
-              const instance = controller as CaseController;
+              const instance = controller as unknown as CaseController;
               return instance.positional(
                 String(request.params?.id),
                 String(request.query?.title),
@@ -204,6 +205,29 @@ describe("createApplication", () => {
     const app = createApplication({});
     const response = await app.handle(new Request("http://localhost/health"));
     expect(response.status).toBe(404);
+  });
+
+  test("application profiles safely execute routes without generated invokers", async () => {
+    const missingInvokerRoute = {
+      method: "GET" as const,
+      path: "/read",
+      handler: "read",
+    } as unknown as CompiledRoute;
+    const app = createApplication({
+      modules: [{
+        name: "missing-invoker",
+        createServices: () => ({ controller: { read: () => ({ ok: true }) } }),
+        controllers: [{
+          path: "",
+          serviceKey: "controller",
+          scope: "application",
+          routes: [missingInvokerRoute],
+        }],
+      }],
+    });
+    const response = await app.handle(new Request("http://localhost/read"));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
   test("serves GET and POST routes with JSON responses", async () => {
@@ -313,7 +337,7 @@ describe("createApplication", () => {
         routes: [{
           method: "GET",
           path: "/context",
-          handler: "get",
+          handler: "get", invoker: testInvoker("get"),
           response: t.Object({ requestId: t.String(), rootValue: t.String() }),
         }],
       }],
@@ -491,6 +515,7 @@ describe("createApplication", () => {
             method: "POST",
             path: "/:id/approve",
             handler: "approve",
+            invoker: testInvoker("approve"),
             command: "review.approve",
             params: t.Object({ id: t.String() }),
           }],
@@ -566,7 +591,7 @@ describe("createApplication", () => {
           routes: [{
             method: "POST",
             path: "/",
-            handler: "run",
+            handler: "run", invoker: testInvoker("run"),
             aspects: [around("route")],
             command: "RunCommand",
           }],
@@ -741,7 +766,7 @@ describe("native error dictionary", () => {
       } }),
       controllers: [{
         path: "/dictionary", serviceKey: "controller", scope: "application",
-        routes: [{ method: "GET", path: "", handler: "run" }],
+        routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],
       }],
     };
     const response = await createApplication({ modules: [module] })
@@ -765,7 +790,7 @@ describe("native error dictionary", () => {
       } }),
       controllers: [{
         path: "/dictionary-mapped", serviceKey: "controller", scope: "application",
-        routes: [{ method: "GET", path: "", handler: "run" }],
+        routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],
       }],
     };
     const response = await createApplication({
@@ -970,8 +995,8 @@ describe("composeCommandExecutors", () => {
               serviceKey: "statusController",
               scope: "application",
               routes: [
-                { method: "HEAD", path: "", handler: "headCheck" },
-                { method: "OPTIONS", path: "", handler: "optionsCheck" },
+                { method: "HEAD", path: "", handler: "headCheck", invoker: testInvoker("headCheck") },
+                { method: "OPTIONS", path: "", handler: "optionsCheck", invoker: testInvoker("optionsCheck") },
               ],
             },
           ],

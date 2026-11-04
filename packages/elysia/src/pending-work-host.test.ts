@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { createApplication, createWorker, type CompiledModule } from "./index";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
@@ -11,7 +12,7 @@ function moduleFor(run: () => Promise<unknown>, cleanup: () => Promise<void> = a
   return { name: "pending", createServices: () => ({ controller: { run } }),
     createRequestScope: () => ({}), destroyRequestScope: cleanup,
     controllers: [{ path: "/work", serviceKey: "controller", scope: "application",
-      routes: [{ method: "GET", path: "/", handler: "run" }] }] };
+      routes: [{ method: "GET", path: "/", handler: "run", invoker: testInvoker("run") }] }] };
 }
 
 test("registry capacity has a typed error without changing validation or losing admitted work", async () => {

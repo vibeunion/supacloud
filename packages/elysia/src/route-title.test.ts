@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import { createApplication, type CompiledModule } from "./index";
@@ -11,7 +12,7 @@ test("compiled route titles preserve OpenAPI summaries and declared tags", async
       serviceKey: "controller",
       scope: "application",
       routes: [{
-        method: "GET", path: "/environment", handler: "read",
+        method: "GET", path: "/environment", handler: "read", invoker: testInvoker("read"),
         title: "Get project environment and platform version",
         data: { openapi: { hide: true, tags: ["projects"] } },
         responses: { 200: t.Object({ ok: t.Boolean() }) },

@@ -2,13 +2,29 @@ import { describe, expect, it } from "bun:test";
 import { RedirectCommand, executeRoutePipeline } from "./route_pipeline";
 import type { RoutePipelineDefinition, RouterEvent } from "./route_pipeline";
 
+function withInvoker(definition: Omit<RoutePipelineDefinition, "invoker">): RoutePipelineDefinition {
+  const handler = definition.handler;
+  return {
+    ...definition,
+    invoker: (controller, request) => {
+      if (typeof handler === "function") return handler(request);
+      if (controller === null || typeof controller !== "object") {
+        throw new TypeError(`Handler '${handler}' requires a controller instance`);
+      }
+      const method = (controller as Record<string, unknown>)[handler];
+      if (typeof method !== "function") throw new TypeError(`Handler '${handler}' is not callable`);
+      return Reflect.apply(method, controller, [request]);
+    },
+  };
+}
+
 describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   it("executes handler successfully on happy path", async () => {
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/items",
       method: "GET",
       handler: async (ctx) => ({ items: ["a", "b"], query: ctx.query }),
-    };
+    });
 
     const result = await executeRoutePipeline(route, {
       url: "/items",
@@ -22,12 +38,12 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   });
 
   it("rejects route matching when CanMatch guard returns false", async () => {
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/admin",
       method: "GET",
       handler: () => "admin data",
       canMatch: [() => false],
-    };
+    });
 
     const result = await executeRoutePipeline(route, {
       url: "/admin",
@@ -40,12 +56,12 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   });
 
   it("blocks activation when CanActivate guard returns false", async () => {
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/protected",
       method: "GET",
       handler: () => "secret data",
       guards: [async (ctx) => ctx.headers?.authorization === "Bearer valid"],
-    };
+    });
 
     const blockedResult = await executeRoutePipeline(route, {
       url: "/protected",
@@ -66,14 +82,14 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   });
 
   it("prefetches data via resolvers before handler execution", async () => {
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/users/:id",
       method: "GET",
       handler: (ctx) => ({ user: ctx.resolved?.user, extra: ctx.data?.user }),
       resolvers: {
         user: async (ctx) => ({ id: ctx.params?.id, name: `User ${ctx.params?.id}` }),
       },
-    };
+    });
 
     const result = await executeRoutePipeline(route, {
       url: "/users/42",
@@ -98,14 +114,14 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
     }
 
     const controller = new EditController();
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/posts/1",
       method: "POST",
       handler: "savePost",
       canDeactivate: [
         (component) => component instanceof EditController && !component.hasUnsavedChanges,
       ],
-    };
+    });
 
     // Blocked by CanDeactivate because hasUnsavedChanges is true
     const blockedResult = await executeRoutePipeline(route, {
@@ -130,13 +146,13 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   });
 
   it("catches handler errors and returns status 500", async () => {
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/crash",
       method: "GET",
       handler: () => {
         throw new Error("Simulated backend failure");
       },
-    };
+    });
 
     const result = await executeRoutePipeline(route, {
       url: "/crash",
@@ -149,7 +165,7 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
 
   it("emits Angular Router events throughout navigation lifecycle", async () => {
     const events: RouterEvent[] = [];
-    const route: RoutePipelineDefinition = {
+    const route = withInvoker({
       path: "/items/:id",
       method: "GET",
       canMatch: [() => true],
@@ -158,7 +174,7 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
         item: () => ({ id: "item-123" }),
       },
       handler: (ctx) => ({ success: true, item: ctx.resolved?.item }),
-    };
+    });
 
     const result = await executeRoutePipeline(
       route,
@@ -185,23 +201,23 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   });
 
   it("supports Angular 18+ RedirectCommand from guard or handler", async () => {
-    const guardedRoute: RoutePipelineDefinition = {
+    const guardedRoute = withInvoker({
       path: "/admin",
       method: "GET",
       guards: [() => new RedirectCommand("/login", { status: 307 })],
       handler: () => ({ secret: "42" }),
-    };
+    });
 
     const guardRedirect = await executeRoutePipeline(guardedRoute, { url: "/admin", method: "GET" });
     expect(guardRedirect.status).toBe(307);
     expect(guardRedirect.redirect).toBe("/login");
     expect(guardRedirect.headers?.Location).toBe("/login");
 
-    const handlerRoute: RoutePipelineDefinition = {
+    const handlerRoute = withInvoker({
       path: "/legacy",
       method: "GET",
       handler: () => new RedirectCommand("/modern"),
-    };
+    });
     const handlerRedirect = await executeRoutePipeline(handlerRoute, { url: "/legacy", method: "GET" });
     expect(handlerRedirect.status).toBe(302);
     expect(handlerRedirect.redirect).toBe("/modern");
