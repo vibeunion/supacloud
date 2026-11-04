@@ -187,6 +187,8 @@ async function startSupaCloudElysia() {
         if (!isFunction(handler)) throw new TypeError("Route handler json is not callable");
         return await Reflect.apply(handler, controller, [request]);
       },
+      executionMode: "direct",
+      directInvoker: (controller) => controller.json(),
     },
     {
       method: "GET",
@@ -199,6 +201,8 @@ async function startSupaCloudElysia() {
         if (!isFunction(handler)) throw new TypeError("Route handler params is not callable");
         return await Reflect.apply(handler, controller, [request.params?.["id"]]);
       },
+      executionMode: "direct",
+      directInvoker: (controller, context) => controller.params(context.params?.["id"]),
     },
     {
       method: "POST",
@@ -211,6 +215,8 @@ async function startSupaCloudElysia() {
         if (!isFunction(handler)) throw new TypeError("Route handler echo is not callable");
         return await Reflect.apply(handler, controller, [request.body]);
       },
+      executionMode: "direct",
+      directInvoker: (controller, context) => controller.echo(context.body),
     },
   ];
   const controller = {
