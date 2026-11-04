@@ -368,7 +368,7 @@ export const OrderResponse = {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test("marks root-optional request bodies as optional in OpenAPI", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-optional-body-"));

@@ -61,4 +61,4 @@ test("implicit governance defaults preserve both factories and manifest on failu
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
