@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/app-v0.36.1...app-v0.37.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** enforce compiled execution and route registration contracts ([#2427](https://github.com/vibeunion/supacloud/issues/2427))
+
+### Features
+
+* **compiler:** enforce compiled execution and route registration contracts ([#2427](https://github.com/vibeunion/supacloud/issues/2427)) ([6458711](https://github.com/vibeunion/supacloud/commit/6458711e41fb54fda6ab147bf500185cb903a7e9))
+
 ## [0.36.1](https://github.com/vibeunion/supacloud/compare/app-v0.36.0...app-v0.36.1) (2026-11-04)
 
 

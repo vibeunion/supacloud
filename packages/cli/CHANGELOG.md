@@ -14,6 +14,22 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.116.0](https://github.com/vibeunion/supacloud/compare/cli-v0.115.4...cli-v0.116.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** enforce compiled execution and route registration contracts ([#2427](https://github.com/vibeunion/supacloud/issues/2427))
+
+### Features
+
+* **compiler:** enforce compiled execution and route registration contracts ([#2427](https://github.com/vibeunion/supacloud/issues/2427)) ([6458711](https://github.com/vibeunion/supacloud/commit/6458711e41fb54fda6ab147bf500185cb903a7e9))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2430](https://github.com/vibeunion/supacloud/issues/2430)) ([4cb0882](https://github.com/vibeunion/supacloud/commit/4cb088262c3d4c092446cc8a075dcec72e66d261))
+
 ## [0.115.4](https://github.com/vibeunion/supacloud/compare/cli-v0.115.3...cli-v0.115.4) (2026-11-04)
 
 

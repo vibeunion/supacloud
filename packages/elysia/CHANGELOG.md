@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.38.2...elysia-v0.39.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** enforce compiled execution and route registration contracts ([#2427](https://github.com/vibeunion/supacloud/issues/2427))
+
+### Features
+
+* **compiler:** enforce compiled execution and route registration contracts ([#2427](https://github.com/vibeunion/supacloud/issues/2427)) ([6458711](https://github.com/vibeunion/supacloud/commit/6458711e41fb54fda6ab147bf500185cb903a7e9))
+
 ## [0.38.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.38.1...elysia-v0.38.2) (2026-11-04)
 
 
