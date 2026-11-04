@@ -239,7 +239,7 @@ export async function analyzeProject(
     ["node_modules", "dist"],
     include ?? DEFAULT_INCLUDE,
   ));
-  const update = await session.update(rootNames, changedPaths);
+  const update = await (ownedSession ?? session).update(rootNames, changedPaths);
   const program = update.program;
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles()

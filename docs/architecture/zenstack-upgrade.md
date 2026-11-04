@@ -137,7 +137,7 @@ may be archived as historical evidence; do not rewrite the applied SQL.
    synchronized with the published CLI/admin releases.
 2. Remove the old ORM/query-generator dependencies. Pin ZenStack packages to
    `3.10.0` and Kysely to `0.29.0`. Development tooling is ZenStack CLI `3.10.0`,
-   Prisma `6.19.0` and `pg` `8.23.1`. `pg` is needed only by ZenStack introspection;
+   Prisma `6.19.3` and `pg` `8.23.1`. `pg` is needed only by ZenStack introspection;
    application model queries use Bun SQL. Regenerate and commit the lockfile.
 3. Author `zenstack/schema.zmodel`, preserving SQL names via `@map`/`@@map`, native
    types, nullability, defaults, relation actions, keys and indexes. Use PostgreSQL

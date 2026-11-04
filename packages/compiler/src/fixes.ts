@@ -128,7 +128,7 @@ export async function applyDiagnosticFix(
     default:
       throw new Error(`Diagnostic fix '${fix.type}' requires a manual semantic decision; no files changed`);
   }
-  const checkedSource = await parse(file, content);
+  await parse(file, content);
   const result = { file, changed: content !== original, content, sourceHash };
   if (options.dryRun === false && result.changed) {
     const temporary = `${file}.supacloud-fix-${randomUUID()}`;
