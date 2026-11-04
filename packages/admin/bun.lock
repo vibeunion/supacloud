@@ -105,7 +105,7 @@
 
     "@supabase/supabase-js": ["@supabase/supabase-js@2.118.0", "", { "dependencies": { "@supabase/auth-js": "2.118.0", "@supabase/functions-js": "2.118.0", "@supabase/postgrest-js": "2.118.0", "@supabase/realtime-js": "2.118.0", "@supabase/storage-js": "2.118.0" }, "peerDependencies": { "@opentelemetry/api": ">=1.0.0" }, "optionalPeers": ["@opentelemetry/api"] }, "sha512-FxI8UXMVC2UG7IkeiI8fuQZqq2oI3JeSuN8MPIC2RLVaoEAxKS0nqE6kii9Ewpq8f9gNPM6git1Y8f0vN/QLFw=="],
 
-    "@supacloud/cli": ["@supacloud/cli@file:../cli", { "dependencies": { "@supacloud/compiler": "file:../compiler", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "typebox": "1.4.3" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@supacloud/elysia": "file:../elysia", "@types/bun": "^1.4.4", "effect": "4.0.5", "elysia": "2.0.0-rc.1", "typescript": "7.1.0-beta" }, "bin": { "supacloud": "dist/index.js" } }],
+    "@supacloud/cli": ["@supacloud/cli@file:../cli", { "dependencies": { "@supacloud/compiler": "^0.56.0", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "typebox": "1.4.3" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@supacloud/elysia": "file:../elysia", "@types/bun": "^1.4.4", "effect": "4.0.5", "elysia": "2.0.0-rc.1", "typescript": "7.1.0-beta" }, "bin": { "supacloud": "dist/index.js" } }],
 
     "@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" }, "devDependencies": { "@types/bun": "^1.4.4", "@types/tar-stream": "^3.1.5", "typescript": "7.1.0-beta" } }],
 
