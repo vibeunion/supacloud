@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import Elysia, { t } from "elysia";
@@ -7,6 +8,11 @@ function commandModule(write: () => unknown): CompiledModule {
   return {
     name: "receipt",
     createServices: () => ({ controller: { write } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      const controller = this.controllers[0]!;
+      const route = controller.routes[0]!;
+      register(controller, route, (controller.path + "/" + route.path).replace(/\/+/g, "/").replace(/\/$/, "") || "/");
+    },
     controllers: [{
       path: "/receipt", serviceKey: "controller", scope: "application",
       routes: [{

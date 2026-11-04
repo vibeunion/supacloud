@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { status, t } from "elysia";
@@ -15,6 +16,9 @@ test("enforces headers and cookies and validates status-code response maps", asy
               ok: request.headers?.authorization === "Bearer test" && request.cookie?.session === "s-1",
             },
     } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/items");
+    },
     controllers: [{
       path: "/items", serviceKey: "controller", scope: "application",
       routes: [{
@@ -58,6 +62,9 @@ test("passes Elysia-decoded headers to compiled handlers", async () => {
         value: request.headers?.["x-count"],
       }),
     } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/headers");
+    },
     controllers: [{
       path: "/headers", serviceKey: "controller", scope: "application",
       routes: [{

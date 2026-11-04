@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
@@ -23,6 +24,9 @@ function moduleFor(
   return {
     name: "conformance",
     createServices: () => ({ controller: { run: handler } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, this.controllers[0]!.routes[0]!.path);
+    },
     controllers: [{
       path: "",
       serviceKey: "controller",

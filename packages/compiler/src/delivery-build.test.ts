@@ -10,6 +10,7 @@ import { bundleDeliveryTarget } from "./delivery-bundle";
 import { reserveOutput } from "./delivery-files";
 import { parseDeliveryOptions } from "./delivery-schema";
 
+const commandCapabilities = { permission: true, audit: true, transaction: true, idempotency: true };
 let root: string;
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "delivery-build-"));
@@ -23,11 +24,15 @@ afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
 const settings = { version: 1 };
 const build = () => buildDeliveryProject({
-  rootDir: root, outDir: join(root, "generated"), strict: false,
+  rootDir: root, outDir: join(root, "generated"), strict: false, commandCapabilities,
   generateClient: false, generatePermissions: false,
 }, settings);
 
 test("builds a movable factory and reuses immutable artifacts; failures preserve the pointer", async () => {
+  const missingCapabilities = await buildDeliveryProject({ rootDir: root, outDir: join(root, "generated"), strict: false }, settings);
+  expect(missingCapabilities.ok).toBe(false);
+  expect(missingCapabilities.diagnostics.some((item) => item.code === "command-permission-unsupported")).toBe(true);
+  expect(missingCapabilities.written).toEqual([]);
   const first = await build();
   if (!first.ok) throw new Error(JSON.stringify(first.diagnostics));
   expect(parseDeliveryBuildResult(JSON.parse(JSON.stringify(first)))).toEqual(first);
@@ -83,7 +88,7 @@ test("isolates route owners, includes assets, and invalidates only dependent tar
         @Module({name: "health", controllers: [HealthController]}) export class HealthModule {}`,
       "src/template.txt": "first",
     });
-    const options = { rootDir: project, outDir: join(project, "generated"), strict: false, generateClient: false, generatePermissions: false };
+    const options = { rootDir: project, outDir: join(project, "generated"), strict: false, commandCapabilities, generateClient: false, generatePermissions: false };
     const config = { version: 1, targets: [{ name: "cases", kind: "api", modules: ["case"] }],
       build: { assets: [{ target: "cases", source: "src/template.txt", path: "template.txt" }] } };
     const first = await buildDeliveryProject(options, config);
@@ -194,7 +199,7 @@ test("keeps shared-module routes private to their owner and preserves Job factor
         @Module({name: "worker", imports: [AuditModule], jobs: [RebuildJob]}) export class WorkerModule {}`,
     });
     const result = await buildDeliveryProject({
-      rootDir: project, outDir: join(project, "generated"), strict: false,
+      rootDir: project, outDir: join(project, "generated"), strict: false, commandCapabilities,
       generateClient: false, generatePermissions: false,
     }, {version: 1, targets: [{name: "cases", kind: "api", modules: ["case"]}],
       runtime: {processIsolation: true, durableQueue: true, capabilities: []}});

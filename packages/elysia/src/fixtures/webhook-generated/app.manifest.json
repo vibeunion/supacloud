@@ -118,6 +118,177 @@
     "REQUEST_CONTEXT",
     "WEBHOOK_ENVIRONMENT"
   ],
+  "executionPlan": {
+    "version": 1,
+    "compiler": "@supacloud/compiler",
+    "host": {
+      "adapter": "elysia",
+      "api": "2.x",
+      "reflection": false,
+      "proxy": false
+    },
+    "di": {
+      "runtime": "angular-compatible",
+      "generation": "static",
+      "scopes": [
+        "application",
+        "request",
+        "job"
+      ]
+    },
+    "boundaries": [],
+    "modules": [
+      {
+        "name": "webhook",
+        "className": "WebhookModule",
+        "tags": [],
+        "imports": [],
+        "providers": [
+          {
+            "token": "UpdateWebhook",
+            "kind": "class",
+            "scope": "application",
+            "deps": [
+              "WEBHOOK_ENVIRONMENT"
+            ],
+            "optionalDeps": [],
+            "selfDeps": [],
+            "skipSelfDeps": [],
+            "hostDeps": [],
+            "multi": false,
+            "exported": false,
+            "lifecycle": {
+              "init": false,
+              "destroy": false
+            }
+          }
+        ],
+        "providerEdges": [
+          {
+            "from": "UpdateWebhook",
+            "to": "WEBHOOK_ENVIRONMENT",
+            "relation": "external"
+          },
+          {
+            "from": "WebhookController",
+            "to": "UpdateWebhook",
+            "relation": "local"
+          },
+          {
+            "from": "WebhookController",
+            "to": "REQUEST_CONTEXT",
+            "relation": "context"
+          }
+        ],
+        "scopes": {
+          "application": [
+            "UpdateWebhook"
+          ],
+          "request": [
+            "WebhookController"
+          ],
+          "job": []
+        },
+        "lifecycle": {
+          "initialize": [],
+          "destroy": [],
+          "requestDestroy": [],
+          "jobDestroy": []
+        },
+        "plugin": {
+          "conditions": "Host options and HTTP policies may add hooks or select the pipeline at startup",
+          "name": "supacloud:webhook",
+          "lifecycle": [
+            "onError",
+            "derive",
+            "onAfterResponse"
+          ],
+          "macros": [],
+          "routeCount": 2
+        },
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/webhooks/update",
+            "controller": "WebhookController",
+            "handler": "update",
+            "scope": "request",
+            "executor": "route",
+            "invoker": "pipeline",
+            "stages": [
+              "handler"
+            ],
+            "guards": [],
+            "canMatch": [],
+            "canDeactivate": [],
+            "resolvers": [],
+            "aspects": [],
+            "plugin": {
+              "conditions": "Host options and HTTP policies may add hooks or select the pipeline at startup",
+              "name": "supacloud:webhook",
+              "registration": "registerRoutes",
+              "lifecycle": [
+                "onError",
+                "derive",
+                "onAfterResponse"
+              ],
+              "macros": []
+            }
+          },
+          {
+            "method": "GET",
+            "path": "/webhooks/receipts/:key",
+            "controller": "WebhookController",
+            "handler": "receipt",
+            "scope": "request",
+            "executor": "route",
+            "invoker": "pipeline",
+            "stages": [
+              "handler"
+            ],
+            "guards": [],
+            "canMatch": [],
+            "canDeactivate": [],
+            "resolvers": [],
+            "aspects": [],
+            "plugin": {
+              "conditions": "Host options and HTTP policies may add hooks or select the pipeline at startup",
+              "name": "supacloud:webhook",
+              "registration": "registerRoutes",
+              "lifecycle": [
+                "onError",
+                "derive",
+                "onAfterResponse"
+              ],
+              "macros": []
+            }
+          }
+        ],
+        "commands": [
+          {
+            "name": "webhook.update.v1",
+            "className": "UpdateWebhook",
+            "executor": "commandExecutor",
+            "adapter": "webhookUpdate",
+            "permission": "webhook.update",
+            "audit": "webhook.updated",
+            "transaction": "required",
+            "idempotency": "required",
+            "branches": [],
+            "requiredCapabilities": {
+              "permission": true,
+              "audit": true,
+              "idempotency": true,
+              "transaction": true
+            },
+            "aspects": []
+          }
+        ],
+        "jobs": [],
+        "aspects": []
+      }
+    ]
+  },
   "commandGovernance": {
     "defaults": {
       "authorization": "required",
