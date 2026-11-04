@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
@@ -42,6 +43,9 @@ test("the same contract rejects invalid HTTP input before writes and invalid out
       writes++;
       return { version: "invalid" };
     } } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/items");
+    },
     controllers: [{
       path: "/items", serviceKey: "controller", scope: "application",
       routes: [{ method: "POST", path: "", handler: "save", invoker: testInvoker("save"), ...contract }],
@@ -286,6 +290,9 @@ test("expands default and status-family response selectors for Elysia runtime va
         return status(302, { kind: "fallback" });
       },
     } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/fallback/:mode");
+    },
     controllers: [{
       path: "/fallback", serviceKey: "controller", scope: "application",
       routes: [{
@@ -492,6 +499,9 @@ test("typed error handlers preserve normalized mapper codes", async () => {
         },
       },
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/normalized");
+    },
     controllers: [{
       path: "/normalized", serviceKey: "controller", scope: "application",
       routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],

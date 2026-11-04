@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { beforeAll, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
@@ -45,6 +46,9 @@ function fixture(policies: readonly unknown[], run?: (context: SupAuthRequestCon
         subject: (context as SupAuthRequestContext).identity.subject,
       } },
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/tenants/:tenant/items");
+    },
     controllers: [{
       path: "/tenants/:tenant", serviceKey: "controller", scope: "request",
       routes: [{

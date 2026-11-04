@@ -1,3 +1,4 @@
+import { ExecutionManifestValidationError, validateExecutionManifest } from "./execution-manifest";
 import type { ApplicationGraph } from "./types";
 import type { DeliveryTarget } from "./delivery-schema";
 import { renderApplication, type GenerateOptions } from "./generate";
@@ -38,8 +39,13 @@ export function renderDeliveryTarget(
   // A successful writer must produce a document accepted by the same reader schema.
   const development = parseApplicationDevelopmentContext(createApplicationDevelopmentContext(projected, { byteBudget: "archive" }));
   // Existing root-provider pruning does not treat Jobs as roots; preserve all providers here.
+  const rendered = renderApplication(projected, { ...options, treeShakeUnusedProviders: false });
+  const executionDiagnostics = validateExecutionManifest(rendered.executionPlan, options.commandCapabilities);
+  if (executionDiagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    throw new ExecutionManifestValidationError(executionDiagnostics);
+  }
   return {
-    ...renderApplication(projected, { ...options, treeShakeUnusedProviders: false }),
+    ...rendered,
     executionSnapshot: serializedExecutionSnapshot(projected),
     applicationDevelopment: JSON.stringify(development, null, 2) + "\n",
   };

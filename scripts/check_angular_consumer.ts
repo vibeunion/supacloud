@@ -223,6 +223,7 @@ const module: CompiledModule = {
     entered.resolve(); await release.promise; return "ok";
   } } }),
   destroyServices: async () => { cleaned++; },
+  registerRoutes(register) { register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/work"); },
   controllers: [{ path: "/work", serviceKey: "controller", scope: "application",
     routes: [{ method: "GET", path: "/", handler: "run" }] }],
 };

@@ -90,6 +90,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "command-idempotency-unsupported": { code: "SC4024", docsUrl: "https://supacloud.dev/errors/SC4024" },
   "command-transaction-rpc-only": { code: "SC4025", docsUrl: "https://supacloud.dev/errors/SC4025" },
   "command-transaction-unsupported": { code: "SC4026", docsUrl: "https://supacloud.dev/errors/SC4026" },
+  "command-executor-bypass": { code: "SC4029", docsUrl: "https://supacloud.dev/errors/SC4029" },
   "command-reconcile-required": { code: "SC4028", docsUrl: "https://supacloud.dev/errors/SC4028" },
   "invalid-route-contract": { code: "SC3020", docsUrl: "https://supacloud.dev/errors/SC3020" },
   "invalid-route-idempotency": { code: "SC3028", docsUrl: "https://supacloud.dev/errors/SC3028" },
@@ -1044,7 +1045,7 @@ export function validateGraph(
             module.line,
           );
         }
-        if (command.audit && caps.audit === false) {
+        if (branchCaps.length === 0 && command.audit && caps.audit === false) {
           error(
             "command-audit-unsupported",
             `Command ${command.name} declares audit, but audit persistence is unavailable (${location}).`,
@@ -1052,7 +1053,7 @@ export function validateGraph(
             module.line,
           );
         }
-        if (command.idempotency === "required" && caps.idempotency === false) {
+        if (branchCaps.length === 0 && command.idempotency === "required" && caps.idempotency === false) {
           error(
             "command-idempotency-unsupported",
             `Command ${command.name} declares idempotency, but idempotency receipt persistence is unavailable (${location}).`,
@@ -1060,7 +1061,7 @@ export function validateGraph(
             module.line,
           );
         }
-        if (command.transaction === "required") {
+        if (branchCaps.length === 0 && command.transaction === "required") {
           if (caps.transaction === "rpc-only") {
             warn(
               "command-transaction-rpc-only",

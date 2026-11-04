@@ -164,9 +164,9 @@ export class FeatureModule {}`);
     const fixture = { ...graph, modules: [changed] };
     const plan = createExecutionPlans(fixture)[0];
     expect(plan.stages).toEqual([
+      "commandExecutor", "authorize", "idempotency", "transaction",
       "module:case.aspect[0]:auditAspect", "route.aspect[0]:auditAspect",
-      "command.aspect[0]:auditAspect", "commandExecutor", "authorize",
-      "idempotency", "transaction", "handler", "audit",
+      "command.aspect[0]:auditAspect", "handler", "audit",
     ]);
     expect(createContextPack(fixture, "case").files).toContain("src/audit.ts");
     expect(explainGraph(fixture, "case")).toContain(plan.stages.join(" -> "));
