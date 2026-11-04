@@ -1,4 +1,5 @@
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
+import type { TSchema } from "typebox";
 import type { CompiledModule, CompiledRoute } from "./index";
 
 export type BunNativeRequestContextFactory = (
@@ -33,6 +34,10 @@ type RouteEntry = {
   route: CompiledRoute;
   path: string;
   segments: string[];
+  matchPath: (pathname: string) => Record<string, string> | undefined;
+  validateBody: (value: unknown) => unknown;
+  validateParams: (value: unknown) => unknown;
+  validateQuery: (value: unknown) => unknown;
 };
 
 type BunServe = (options: {
@@ -56,31 +61,37 @@ function routeSegments(path: string): string[] {
   return path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
 }
 
-function match(entry: RouteEntry, pathname: string): Record<string, string> | undefined {
-  const actual = routeSegments(pathname);
-  if (actual.length !== entry.segments.length) return undefined;
-  const params: Record<string, string> = {};
-  for (let index = 0; index < entry.segments.length; index += 1) {
-    const expected = entry.segments[index]!;
-    const value = actual[index]!;
-    if (expected.startsWith(":")) params[expected.slice(1)] = decodeURIComponent(value);
-    else if (expected !== value) return undefined;
-  }
-  return params;
+function compilePathMatcher(segments: string): (pathname: string) => Record<string, string> | undefined {
+  const names: string[] = [];
+  const pattern = routeSegments(segments).map((segment) => {
+    if (!segment.startsWith(":")) return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    names.push(segment.slice(1));
+    return "([^/]+)";
+  }).join("/");
+  const matcher = new RegExp(`^/${pattern}/?$`);
+  return (pathname) => {
+    const match = matcher.exec(pathname);
+    if (!match) return undefined;
+    const params: Record<string, string> = {};
+    for (let index = 0; index < names.length; index += 1) params[names[index]!] = decodeURIComponent(match[index + 1]!);
+    return params;
+  };
 }
 
-function schemaValue(schema: unknown, value: unknown, label: string, normalize: boolean): unknown {
-  if (schema === undefined) return value;
-  try {
-    if (!Value.Check(schema as never, value)) throw new TypeError(`Invalid ${label}`);
-    const decode = (Value as unknown as { Decode?: (schema: unknown, value: unknown) => unknown }).Decode;
-    return normalize && decode ? decode(schema, value) : value;
-  } catch {
-    throw new Response(JSON.stringify({ ok: false, code: "REQUEST_VALIDATION_FAILED", message: "Invalid request" }), {
-      status: 422,
-      headers: { "content-type": "application/json" },
-    });
-  }
+function compileSchema(schema: unknown, label: string, normalize: boolean): (value: unknown) => unknown {
+  if (schema === undefined) return (value) => value;
+  const validator = Compile(schema as TSchema);
+  return (value) => {
+    try {
+      if (!validator.Check(value)) throw new TypeError(`Invalid ${label}`);
+      return normalize ? validator.Decode(value) : value;
+    } catch {
+      throw new Response(JSON.stringify({ ok: false, code: "REQUEST_VALIDATION_FAILED", message: "Invalid request" }), {
+        status: 422,
+        headers: { "content-type": "application/json" },
+      });
+    }
+  };
 }
 
 async function requestBody(request: Request, route: CompiledRoute): Promise<unknown> {
@@ -104,29 +115,46 @@ function errorResponse(error: unknown): Response {
 export function createBunNativeApplication(options: BunNativeApplicationOptions): BunNativeApplication {
   const normalize = options.normalize ?? true;
   const services = options.modules.map((module) => ({ module, value: module.createServices(options.deps ?? {}, {}) }));
-  const routes: RouteEntry[] = [];
+  const staticRoutes = new Map<string, RouteEntry>();
+  const dynamicRoutes = new Map<string, RouteEntry[]>();
   for (const module of options.modules) {
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         if (typeof route.invoker !== "function") throw new TypeError(`Route ${route.method} ${route.path} requires a generated invoker`);
         const path = joinPath(controller.path, route.path);
-        routes.push({ module, controller, route, path, segments: routeSegments(path) });
+        const segments = routeSegments(path);
+        const entry: RouteEntry = {
+          module, controller, route, path, segments,
+          matchPath: compilePathMatcher(path),
+          validateBody: compileSchema(route.body, "body", normalize),
+          validateParams: compileSchema(route.params, "params", normalize),
+          validateQuery: compileSchema(route.query, "query", normalize),
+        };
+        const key = `${route.method} ${path}`;
+        if (segments.some((segment) => segment.startsWith(":"))) {
+          const list = dynamicRoutes.get(route.method) ?? [];
+          list.push(entry);
+          dynamicRoutes.set(route.method, list);
+        } else {
+          staticRoutes.set(key, entry);
+        }
       }
     }
   }
 
   const fetch = async (request: Request): Promise<Response> => {
-    const entry = routes.find((candidate) => candidate.route.method === request.method && match(candidate, new URL(request.url).pathname));
+    const url = new URL(request.url);
+    const entry = staticRoutes.get(`${request.method} ${url.pathname}`)
+      ?? dynamicRoutes.get(request.method)?.find((candidate) => candidate.matchPath(url.pathname));
     if (!entry) return new Response("Not Found", { status: 404 });
     try {
-      const url = new URL(request.url);
-      const params = match(entry, url.pathname)!;
+      const params = entry.matchPath(url.pathname)!;
       const query = Object.fromEntries(url.searchParams.entries());
       const body = await requestBody(request, entry.route);
       const input = {
-        body: schemaValue(entry.route.body, body, "body", normalize),
-        params: schemaValue(entry.route.params, params, "params", normalize) as Record<string, unknown>,
-        query: schemaValue(entry.route.query, query, "query", normalize) as Record<string, unknown>,
+        body: entry.validateBody(body),
+        params: entry.validateParams(params) as Record<string, unknown>,
+        query: entry.validateQuery(query) as Record<string, unknown>,
         headers: Object.fromEntries(request.headers.entries()),
         context: options.requestContext ? await options.requestContext(request) : undefined,
         request,
