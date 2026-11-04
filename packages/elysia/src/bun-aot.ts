@@ -4,6 +4,7 @@ import {
   createApplication,
   type ApplicationOptions,
 } from "./index";
+import { createBunNativeApplication } from "./bun-native";
 
 export interface BunAotApplication {
   readonly app: AnyElysia;
@@ -20,6 +21,10 @@ export interface BunAotServeOptions {
 export interface BunAotServer {
   readonly url: string;
   stop(closeActiveConnections?: boolean): Promise<void>;
+}
+
+export interface BunApplication extends BunAotApplication {
+  readonly mode: "native" | "aot";
 }
 
 type BunServe = (options: {
@@ -54,5 +59,50 @@ export function createBunAotApplication<const Http extends AnyElysia = Elysia, R
       };
     },
     destroy: () => app.destroy(),
+  };
+}
+
+/**
+ * Select the optimized native path only when it can preserve the complete
+ * application contract. Complex applications automatically use the full AOT
+ * runtime, so capability checks never become silent behavior loss.
+ */
+export function createBunApplication<const Http extends AnyElysia = Elysia, RequestContext = unknown>(
+  options: ApplicationOptions<Http, RequestContext>,
+): BunApplication {
+  const complex = options.modules?.some((module) =>
+    module.createRequestScope !== undefined
+    || module.controllers.some((controller) => controller.routes.some((route) =>
+      route.command !== undefined
+      || route.aspects?.length
+      || route.aspectPipeline
+      || route.data?.httpPolicies !== undefined,
+    )),
+  )
+    || options.requestContext !== undefined
+    || options.http !== undefined
+    || options.httpPolicies !== undefined
+    || options.commandGovernance !== undefined
+    || options.commandExecutor !== undefined
+    || options.errorMapper !== undefined
+    || options.onExecution !== undefined
+    || options.pendingWork !== undefined
+    || options.documentation !== undefined;
+  if (complex) return { ...createBunAotApplication(options), mode: "aot" };
+  const native = createBunNativeApplication({
+    modules: options.modules ?? [],
+    deps: options.deps,
+    normalize: options.normalize,
+  });
+  const start = (serveOptions: BunAotServeOptions): BunAotServer => {
+    const server = native.start(serveOptions);
+    return { url: server.url, stop: async (close = true) => { await server.stop(close); } };
+  };
+  return {
+    fetch: native.fetch,
+    start,
+    mode: "native",
+    app: native as unknown as AnyElysia,
+    destroy: async () => {},
   };
 }
