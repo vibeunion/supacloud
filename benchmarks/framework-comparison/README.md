@@ -15,7 +15,8 @@ same request contract; an unvalidated bare transport baseline is excluded.
 
 The server contract is deliberately small so the result isolates routing,
 JSON serialization, path parameter matching and JSON body parsing. Every
-adapter runs in its own child process. A single Node `fetch` client drives all
+adapter starts in a fresh child process each round; framework order rotates between
+rounds to reduce time-order bias. A single Node `fetch` client drives all
 adapters over loopback with the same warmup, concurrency, request count and
 rotated scenario order. SupaCloud uses the release-tagged local
 `@supacloud/elysia` package. Before each run, `generate.mjs` uses that checkout's

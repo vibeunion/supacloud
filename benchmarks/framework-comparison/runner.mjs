@@ -52,7 +52,8 @@ const scenarios = [
 const buildDirectory = adapters.some((adapter) => adapter.runtime === "go")
   ? await mkdtemp(resolve(tmpdir(), "supacloud-benchmark-")) : undefined;
 const ginBinary = buildDirectory ? resolve(buildDirectory, process.platform === "win32" ? "gin.exe" : "gin") : undefined;
-const resultRows = [];
+const rows = new Map();
+const adapterOrder = [];
 const observedAdapters = new Map();
 try {
   if (adapters.some((adapter) => adapter.id === "supacloud-elysia-bun")) {
@@ -63,35 +64,34 @@ try {
       cwd: resolve(root, "gin-server"), timeout: 180_000,
     });
   }
-  for (let adapterOffset = 0; adapterOffset < adapters.length; adapterOffset += 1) {
-    const adapter = adapters[adapterOffset];
-    const processInfo = await startServer(adapter);
-    observedAdapters.set(adapter.id, processInfo.event);
-    try {
-      await verifyContract(processInfo.port, adapter.id);
-      for (let scenarioOffset = 0; scenarioOffset < scenarios.length; scenarioOffset += 1) {
-        const scenario = scenarios[(scenarioOffset + adapterOffset) % scenarios.length];
-        const url = `http://${HOST}:${processInfo.port}${scenario.path}`;
-        await load(url, scenario, warmup, concurrency, false, requestIdMode);
-        const samples = [];
-        for (let round = 0; round < rounds; round += 1) {
+  for (let round = 0; round < rounds; round += 1) {
+    const ordered = adapters.map((_, index) => adapters[(index + round) % adapters.length]);
+    adapterOrder.push(ordered.map((adapter) => adapter.id));
+    for (const [adapterOffset, adapter] of ordered.entries()) {
+      const processInfo = await startServer(adapter);
+      observedAdapters.set(adapter.id, processInfo.event);
+      try {
+        await verifyContract(processInfo.port, adapter.id);
+        for (let scenarioOffset = 0; scenarioOffset < scenarios.length; scenarioOffset += 1) {
+          const scenario = scenarios[(scenarioOffset + adapterOffset + round) % scenarios.length];
+          const url = `http://${HOST}:${processInfo.port}${scenario.path}`;
+          const warmed = await load(url, scenario, warmup, concurrency, false, requestIdMode);
+          if (warmed.errors) throw new Error(`${adapter.id}/${scenario.id}: ${warmed.errors} warmup errors`);
           const sample = await load(url, scenario, requests, concurrency, true, requestIdMode);
-          samples.push({ round, ...sample });
+          const key = `${adapter.id}:${scenario.id}`;
+          const row = rows.get(key) ?? { adapter: adapter.id, scenario: scenario.id, samples: [] };
+          row.samples.push({ round, ...sample });
+          rows.set(key, row);
         }
-        resultRows.push({
-          adapter: adapter.id,
-          scenario: scenario.id,
-          samples,
-          summary: summarize(samples),
-        });
+      } finally {
+        await stopServer(processInfo.child);
       }
-    } finally {
-      await stopServer(processInfo.child);
     }
   }
 } finally {
   if (buildDirectory) await rm(buildDirectory, { recursive: true, force: true });
 }
+const resultRows = [...rows.values()].map((row) => ({ ...row, summary: summarize(row.samples) }));
 const sourceCommit = (await exec("git", ["rev-parse", "HEAD"], { cwd: root })).stdout.trim();
 const report = {
   schemaVersion: 1,
@@ -108,13 +108,13 @@ const report = {
     cpuModel: cpus()[0]?.model ?? "unknown",
     cpuCount: cpus().length,
   },
-  configuration: { requests, rounds, concurrency, warmup, requestIdMode },
+  configuration: { requests, rounds, concurrency, warmup, requestIdMode, adapterOrder },
   client: { runtime: `node ${process.versions.node}`, implementation: "native fetch" },
   dependencies: packageJson.dependencies,
   adapters: adapters.map((adapter) => ({ ...adapter, observed: observedAdapters.get(adapter.id) ?? null })),
   results: resultRows,
   comparisons: buildComparisons(resultRows),
-  methodology: "Each adapter runs in an isolated child process. The same native fetch client, loopback address, response contract, warmup, concurrency, request-id mode and rotated scenario order are used for every adapter. The provided request-id mode models the Edge Runtime header; generated mode omits it. These direct routes do not require SupaCloud request context or generate fallback UUIDs. Throughput and latency include client transport and JSON handling; server startup time is excluded. These are relative framework overhead measurements, not production capacity or an SLA.",
+  methodology: "Each adapter runs in a fresh isolated child process per round, with adapter order rotated between rounds. The same native fetch client, loopback address, response contract, warmup, concurrency, request-id mode and rotated scenario order are used for every adapter. The provided request-id mode models the Edge Runtime header; generated mode omits it. These direct routes do not require SupaCloud request context or generate fallback UUIDs. Throughput and latency include client transport and JSON handling; server startup time is excluded. These are relative framework overhead measurements, not production capacity or an SLA.",
 };
 
 const json = JSON.stringify(report, null, 2) + "\n";

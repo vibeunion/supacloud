@@ -30,7 +30,7 @@ SupaCloud 路径加载发布 tag 对应的本地 `@supacloud/elysia`，并重新
 
 ## 请求场景与指标
 
-每个适配器独立子进程、同一个 Node 原生 `fetch` 客户端、loopback 地址、同一
+每轮重新启动独立子进程并轮换框架顺序，所有适配器使用同一个 Node 原生 `fetch` 客户端、loopback 地址、同一
 并发数、warmup 和旋转后的场景顺序：
 
 - `GET /json`：路由和 JSON 响应基线；

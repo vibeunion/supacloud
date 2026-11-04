@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { readFile } from "node:fs/promises";
 
 const HOST = "127.0.0.1";
 const args = new Map();
@@ -16,7 +17,7 @@ const STATIC_RESPONSE = Object.freeze({ ok: true, value: 42 });
 const BODY_RESPONSE = Object.freeze({ ok: true, value: 42, label: "benchmark" });
 const packageVersions = {
   ...(adapter === "elysia-native-contract-bun" || adapter === "supacloud-elysia-bun" ? { elysia: "2.0.0-rc.1" } : {}),
-  ...(adapter === "supacloud-elysia-bun" ? { supacloudCore: process.env.SUPACLOUD_CORE_VERSION ?? "source-at-release-tag" } : {}),
+  ...(adapter === "supacloud-elysia-bun" ? { supacloudCore: process.env.SUPACLOUD_CORE_VERSION ?? JSON.parse(await readFile(new URL("../../packages/elysia/package.json", import.meta.url), "utf8")).version } : {}),
   ...(adapter === "express" || adapter === "nestjs-express" ? { express: "5.3.0" } : {}),
   ...(adapter === "fastify" ? { fastify: "5.12.8" } : {}),
   ...(adapter.startsWith("nestjs-")
