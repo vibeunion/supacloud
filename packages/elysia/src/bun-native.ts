@@ -9,6 +9,7 @@ export type BunNativeRequestContextFactory = (
 export interface BunNativeApplicationOptions {
   modules: CompiledModule[];
   deps?: Record<string, unknown>;
+  imported?: Record<string, Record<string, unknown>>;
   requestContext?: BunNativeRequestContextFactory;
   normalize?: boolean;
 }
@@ -38,6 +39,9 @@ type RouteEntry = {
   validateBody: (value: unknown) => unknown;
   validateParams: (value: unknown) => unknown;
   validateQuery: (value: unknown) => unknown;
+  needsQuery: boolean;
+  needsHeaders: boolean;
+  needsCookie: boolean;
 };
 
 type BunServe = (options: {
@@ -78,6 +82,8 @@ function compilePathMatcher(segments: string): (pathname: string) => Record<stri
   };
 }
 
+function emptyParams(): Record<string, string> { return {}; }
+
 function compileSchema(schema: unknown, label: string, normalize: boolean): (value: unknown) => unknown {
   if (schema === undefined) return (value) => value;
   const validator = Compile(schema as TSchema);
@@ -115,6 +121,7 @@ function errorResponse(error: unknown): Response {
 export function createBunNativeApplication(options: BunNativeApplicationOptions): BunNativeApplication {
   const normalize = options.normalize ?? true;
   const services = options.modules.map((module) => ({ module, value: module.createServices(options.deps ?? {}, {}) }));
+  const servicesByModule = new Map(services.map((entry) => [entry.module, entry.value]));
   const staticRoutes = new Map<string, RouteEntry>();
   const dynamicRoutes = new Map<string, RouteEntry[]>();
   for (const module of options.modules) {
@@ -123,12 +130,17 @@ export function createBunNativeApplication(options: BunNativeApplicationOptions)
         if (typeof route.invoker !== "function") throw new TypeError(`Route ${route.method} ${route.path} requires a generated invoker`);
         const path = joinPath(controller.path, route.path);
         const segments = routeSegments(path);
+        const handlerParams = (route as CompiledRoute & { handlerParams?: Array<{ kind: string }> }).handlerParams ?? [];
+        const needsQuery = route.query !== undefined || handlerParams.some((param) => param.kind === "query");
+        const needsHeaders = route.headers !== undefined || handlerParams.some((param) => param.kind === "headers");
+        const needsCookie = route.cookie !== undefined || handlerParams.some((param) => param.kind === "cookie");
         const entry: RouteEntry = {
           module, controller, route, path, segments,
-          matchPath: compilePathMatcher(path),
+          matchPath: segments.some((segment) => segment.startsWith(":")) ? compilePathMatcher(path) : emptyParams,
           validateBody: compileSchema(route.body, "body", normalize),
           validateParams: compileSchema(route.params, "params", normalize),
           validateQuery: compileSchema(route.query, "query", normalize),
+          needsQuery, needsHeaders, needsCookie,
         };
         const key = `${route.method} ${path}`;
         if (segments.some((segment) => segment.startsWith(":"))) {
@@ -149,20 +161,31 @@ export function createBunNativeApplication(options: BunNativeApplicationOptions)
     if (!entry) return new Response("Not Found", { status: 404 });
     try {
       const params = entry.matchPath(url.pathname)!;
-      const query = Object.fromEntries(url.searchParams.entries());
+      const query = entry.needsQuery ? Object.fromEntries(url.searchParams.entries()) : undefined;
       const body = await requestBody(request, entry.route);
+      const requestContext = options.requestContext ? await options.requestContext(request) : undefined;
+      const requestScope = entry.module.createRequestScope
+        ? await entry.module.createRequestScope(servicesByModule.get(entry.module) ?? {}, requestContext, options.imported ?? {})
+        : undefined;
       const input = {
         body: entry.validateBody(body),
         params: entry.validateParams(params) as Record<string, unknown>,
-        query: entry.validateQuery(query) as Record<string, unknown>,
-        headers: Object.fromEntries(request.headers.entries()),
-        context: options.requestContext ? await options.requestContext(request) : undefined,
+        query: entry.needsQuery ? entry.validateQuery(query) as Record<string, unknown> : undefined,
+        ...(entry.needsHeaders ? { headers: Object.fromEntries(request.headers.entries()) } : {}),
+        ...(entry.needsCookie ? { cookie: {} } : {}),
+        context: requestContext,
+        ...(requestScope ? { scope: requestScope } : {}),
         request,
       };
-      const service = services.find((item) => item.module === entry.module)?.value;
-      const controller = entry.controller.scope === "application" ? service?.[entry.controller.serviceKey] : service?.[entry.controller.serviceKey];
-      const result = await entry.route.invoker(controller, input);
-      return responseFor(result);
+      const service = servicesByModule.get(entry.module);
+      const source = entry.controller.scope === "request" ? requestScope : service;
+      const controller = source?.[entry.controller.serviceKey];
+      try {
+        const result = await entry.route.invoker(controller, input);
+        return responseFor(result);
+      } finally {
+        if (requestScope && entry.module.destroyRequestScope) await entry.module.destroyRequestScope(requestScope);
+      }
     } catch (error) {
       return errorResponse(error);
     }

@@ -895,7 +895,7 @@ class ModuleGenerator {
           `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
           `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
           `if (!isFunction(handler)) throw new TypeError("Route handler ${route.handler} is not callable"); ` +
-          `return await Reflect.apply(handler, ctrl, [${callArgs}]); }`,
+          `return await handler.call(ctrl, ${callArgs}); }`,
         );
         if (route.contract !== undefined) {
           fields.push(`contract: ${JSON.stringify(route.contract)}`);
