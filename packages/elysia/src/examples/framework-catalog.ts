@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "../index";
 import { Elysia, t } from "elysia";
 import { createSupaCloudFramework } from "../framework";
 import { ApplicationError, type CompiledModule } from "../index";
@@ -68,6 +69,9 @@ export function createCatalogModule(ports: CatalogPorts): CompiledModule {
     createRequestScope: (_services, context) => ({
       catalog: new CatalogController(ports, catalogIdentity(context)),
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/catalog/:id");
+    },
     controllers: [{
       path: "/catalog",
       serviceKey: "catalog",

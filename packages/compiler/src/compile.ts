@@ -50,7 +50,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
   diagnostics.push(...databaseDiagnostics);
   if (databaseDiagnostics.length) return { diagnostics, graph, written: [] };
-  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
+  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed" || item.code === "command-executor-bypass")) {
     return { diagnostics, graph, written: [] };
   }
   if (options.strict) {
@@ -129,8 +129,8 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   if (databaseDiagnostics.length) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };
   }
-  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
-    return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI must be migrated to constructor injection."] };
+  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed" || item.code === "command-executor-bypass")) {
+    return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI or command boundary violations must be migrated before compilation."] };
   }
   if (options.strict) {
     for (const diagnostic of diagnostics) {

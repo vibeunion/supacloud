@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -61,6 +62,9 @@ test("README context reaches compiled request-scoped controllers", async () => {
     name: "readme-context",
     createServices: () => ({}),
     createRequestScope: (_services, context) => ({ controller: { run: () => context } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/compiled");
+    },
     controllers: [{
       path: "/compiled", serviceKey: "controller", scope: "request",
       routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],

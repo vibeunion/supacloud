@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { expect, test } from "bun:test";
 import { t } from "elysia";
 import { Effect } from "effect";
@@ -9,6 +10,9 @@ test("Bun AOT adapter preserves the full Elysia application path", async () => {
     modules: [{
       name: "aot-test",
       createServices: () => ({ controller: { read: () => ({ ok: true }) } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/health");
+      },
       controllers: [{
         path: "",
         serviceKey: "controller",
@@ -36,6 +40,10 @@ test("compiler-selected direct routes receive Elysia's decoded context without a
         read: (...args: unknown[]) => ({ argumentCount: args.length }),
         echo: (body: unknown) => body,
       } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/direct");
+        register(this.controllers[0]!, this.controllers[0]!.routes[1]!, "/echo");
+      },
       controllers: [{
         path: "",
         serviceKey: "controller",
@@ -91,6 +99,9 @@ test("fast invokers preserve decoded params, body, this, async results and error
       directInvoker: () => controller.fail(), directInvokerFast: (instance, handler) => handler.call(instance) },
   ];
   const app = createApplication({ modules: [{ name: "fast", createServices: () => ({ controller }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      for (const route of routes) register(this.controllers[0]!, route, route.path);
+    },
     controllers: [{ path: "", scope: "application", serviceKey: "controller", routes }] }] });
   try {
     const response = await app.fetch(new Request("http://localhost/42"));
@@ -128,6 +139,9 @@ for (const mode of ["module-aspect", "route-aspect", "effect", "response-map", "
       return next();
     };
     const module: CompiledModule = { name: `guarded-${mode}`, createServices: () => ({ controller: { read() {} } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, route, route.path);
+      },
       controllers: [{ path: "", scope: "application", serviceKey: "controller", routes: [route] }] };
     if (mode === "module-aspect") module.aspects = [aspect];
     if (mode === "route-aspect") route.aspects = [aspect];

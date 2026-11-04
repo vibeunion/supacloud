@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
@@ -15,6 +16,11 @@ function fixture(calls: string[]): CompiledModule {
       return { controller: { run: () => context } };
     },
     destroyRequestScope: async () => { calls.push("destroy"); },
+    registerRoutes(register: CompiledRouteRegistrar) {
+      const controller = this.controllers[0]!;
+      const route = controller.routes[0]!;
+      register(controller, route, (controller.path + "/" + route.path).replace(/\/+/g, "/").replace(/\/$/, "") || "/");
+    },
     controllers: [{
       path: "/items",
       serviceKey: "controller",

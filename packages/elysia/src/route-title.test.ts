@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
@@ -7,6 +8,9 @@ test("compiled route titles preserve OpenAPI summaries and declared tags", async
   const module: CompiledModule = {
     name: "route-titles",
     createServices: () => ({ controller: { read: () => ({ ok: true }) } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/projects/environment");
+    },
     controllers: [{
       path: "/projects",
       serviceKey: "controller",

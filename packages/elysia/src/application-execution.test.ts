@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
@@ -33,6 +34,9 @@ describe("Elysia 2 native HTTP with portable application execution", () => {
     const module: CompiledModule = {
       name: "orders",
       createServices: () => ({ controller: { update: () => { trace.push("handler"); return { ok: true }; } } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/orders");
+      },
       controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{
         method: "POST", path: "/orders", handler: "update", invoker: testInvoker("update"), command: descriptor.className,
         body: t.Object({ value: t.Number() }),
@@ -118,6 +122,9 @@ describe("Elysia 2 native HTTP with portable application execution", () => {
     const module: CompiledModule = {
       name: "denied",
       createServices: () => ({ controller: { run: () => { entered++; return "no"; } } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/denied");
+      },
       controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{
         method: "POST", path: "/denied", handler: "run", invoker: testInvoker("run"), command: descriptor.className,
       }] }],
