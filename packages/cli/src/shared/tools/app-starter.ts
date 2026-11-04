@@ -340,7 +340,9 @@ export class ReviewApproval {
   name: "review.approve", permission: "review.approve", transaction: "required",
   idempotency: "required", audit: "review.approved", aspects: [requireRequest],
 })
-export class ApproveReview extends ReviewApproval {}
+export class ApproveReview extends ReviewApproval {
+  constructor(@Inject(DB_CLIENT) store: ReviewStore) { super(store); }
+}
 
 type ReviewError =
     | { readonly _tag: "AUTHENTICATION_REQUIRED" }
