@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
@@ -115,6 +116,12 @@ function createCaseModule(captured: Captured): CompiledModule {
     destroyRequestScope: async () => {
       captured.requestScopeDestroyed = (captured.requestScopeDestroyed ?? 0) + 1;
     },
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/cases/:id");
+      register(this.controllers[0]!, this.controllers[0]!.routes[1]!, "/cases");
+      register(this.controllers[0]!, this.controllers[0]!.routes[2]!, "/cases/invalid-response");
+      register(this.controllers[0]!, this.controllers[0]!.routes[3]!, "/cases/positional/:id");
+    },
     controllers: [
       {
         path: "/cases",
@@ -217,6 +224,9 @@ describe("createApplication", () => {
       modules: [{
         name: "missing-invoker",
         createServices: () => ({ controller: { read: () => ({ ok: true }) } }),
+        registerRoutes(register: CompiledRouteRegistrar) {
+          register(this.controllers[0]!, this.controllers[0]!.routes[0]!, this.controllers[0]!.path + this.controllers[0]!.routes[0]!.path);
+        },
         controllers: [{
           path: "",
           serviceKey: "controller",
@@ -329,6 +339,9 @@ describe("createApplication", () => {
           throw new TypeError("Invalid request dependencies");
         }
         return { controller: new InjectedController({ requestId: context.requestId }, services.rootValue) };
+      },
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/injected/context");
       },
       controllers: [{
         path: "/injected",
@@ -507,6 +520,9 @@ describe("createApplication", () => {
         createServices: () => ({
           reviewController: { approve: () => ({ ok: true }) },
         }),
+        registerRoutes(register: CompiledRouteRegistrar) {
+          register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/reviews/:id/approve");
+        },
         controllers: [{
           path: "/reviews",
           serviceKey: "reviewController",
@@ -584,6 +600,9 @@ describe("createApplication", () => {
             return { ok: true };
           } },
         }),
+        registerRoutes(register: CompiledRouteRegistrar) {
+          register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/aop");
+        },
         controllers: [{
           path: "/aop",
           serviceKey: "controller",
@@ -764,6 +783,9 @@ describe("native error dictionary", () => {
           });
         },
       } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/dictionary");
+      },
       controllers: [{
         path: "/dictionary", serviceKey: "controller", scope: "application",
         routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],
@@ -788,6 +810,9 @@ describe("native error dictionary", () => {
           throw new ApplicationError("Nope", { status: 403, code: "PERMISSION_DENIED" });
         },
       } }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/dictionary-mapped");
+      },
       controllers: [{
         path: "/dictionary-mapped", serviceKey: "controller", scope: "application",
         routes: [{ method: "GET", path: "", handler: "run", invoker: testInvoker("run") }],
@@ -989,6 +1014,10 @@ describe("composeCommandExecutors", () => {
               optionsCheck: () => new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS" } }),
             },
           }),
+          registerRoutes(register: CompiledRouteRegistrar) {
+            register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/status");
+            register(this.controllers[0]!, this.controllers[0]!.routes[1]!, "/status");
+          },
           controllers: [
             {
               path: "/status",

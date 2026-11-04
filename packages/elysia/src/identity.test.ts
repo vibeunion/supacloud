@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { beforeAll, expect, test } from "bun:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -111,6 +112,9 @@ test("actual HTTP handlers run only for verified users with access to the curren
   const module: CompiledModule = {
     name: "protected",
     createServices: () => ({ controller: { get: () => { calls++; return { ok: true }; } } }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/reviews");
+    },
     controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{ method: "GET", path: "/reviews", handler: "get", invoker: testInvoker("get") }] }],
   };
   const app = createApplication({

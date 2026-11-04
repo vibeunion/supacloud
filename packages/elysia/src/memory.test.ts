@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { t } from "elysia";
@@ -24,6 +25,9 @@ function createModule(): CompiledModule {
     createRequestScope: () => ({
       memoryController: new MemoryController(),
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/memory/hello");
+    },
     controllers: [{
       path: "/memory",
       serviceKey: "memoryController",
@@ -59,6 +63,9 @@ describe("createMemorySandbox", () => {
           },
         },
       }),
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/items/:id");
+      },
       controllers: [{
         path: "/items", serviceKey: "controller", scope: "request",
         routes: [{

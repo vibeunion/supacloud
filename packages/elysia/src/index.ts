@@ -214,6 +214,8 @@ export interface CompiledController {
   routes: CompiledRoute[];
 }
 
+export type CompiledRouteRegistrar = (controller: CompiledController, route: CompiledRoute, path: string) => void;
+
 export interface CompiledModule {
   name: string;
   createServices(
@@ -237,6 +239,8 @@ export interface CompiledModule {
   ): Record<string, unknown> | Promise<Record<string, unknown>>;
   destroyJobScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
+  /** Required for HTTP modules. Recompile artifacts when upgrading the adapter. */
+  registerRoutes?(register: CompiledRouteRegistrar): void;
   commands?: CompiledCommand[];
   jobs?: CompiledJob[];
   /** Statically generated module aspects. */
@@ -1244,7 +1248,7 @@ export function createModulePlugin<
   imported: Record<string, Record<string, unknown>> = {},
   pendingWork?: PendingWorkRegistry,
 ) {
-  // Compiled descriptors are also loadable from JavaScript and older generators.
+  // Compiled descriptors are also loadable from JavaScript.
   // Reject options we cannot preserve instead of silently dropping native hooks.
   const supportedMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
   const supportedFields = new Set([
@@ -1259,8 +1263,15 @@ export function createModulePlugin<
     "input", "result", "request",
     "parse", "allowDeleteBody",
   ]);
+  const pendingRoutes = new Map<CompiledRoute, { controller: CompiledController; path: string }>();
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
+      if (pendingRoutes.has(route)) {
+        throw new ApplicationError(`Duplicate route descriptor in module "${compiled.name}". Recompile the application.`, {
+          code: "COMPILED_ROUTE_REGISTRATION_INVALID",
+        });
+      }
+      pendingRoutes.set(route, { controller, path: joinPaths(controller.path, route.path) });
       const unsupported = Object.keys(route).filter((field) => !supportedFields.has(field));
       if (!supportedMethods.has(route.method) || unsupported.length > 0) {
         throw new ApplicationError(
@@ -1291,6 +1302,13 @@ export function createModulePlugin<
         );
       }
     }
+  }
+  if ((compiled.controllers.some((controller) => controller.routes.length > 0) || compiled.registerRoutes !== undefined)
+    && typeof compiled.registerRoutes !== "function") {
+    throw new ApplicationError(
+      `Module "${compiled.name}" requires a compiler-emitted registerRoutes plan. Upgrade @supacloud/compiler with @supacloud/elysia and recompile the application.`,
+      { code: "COMPILED_ROUTE_REGISTRATION_REQUIRED" },
+    );
   }
   const hasCommandRoutes = compiled.controllers.some((controller) =>
     controller.routes.some((route) => route.command !== undefined),
@@ -1410,9 +1428,13 @@ export function createModulePlugin<
   // Compiled descriptors carry runtime schemas, not native literal route types.
   // Widen only registration; keep the public plugin's context/service inference.
   const routeRegistrar = plugin as unknown as Elysia;
-  for (const controller of compiled.controllers) {
-    for (const route of controller.routes) {
-      const path = joinPaths(controller.path, route.path);
+  const registerRoute: CompiledRouteRegistrar = (controller, route, path) => {
+      if (pendingRoutes.get(route)?.controller !== controller || pendingRoutes.get(route)?.path !== path) {
+        throw new ApplicationError(`Invalid static route registration in module "${compiled.name}". Recompile the application.`, {
+          code: "COMPILED_ROUTE_REGISTRATION_INVALID",
+        });
+      }
+      pendingRoutes.delete(route);
       const documentation = route.data?.openapi;
       const hidden = documentation !== null && typeof documentation === "object"
         && "hide" in documentation && documentation.hide === true;
@@ -1641,7 +1663,12 @@ export function createModulePlugin<
           routeRegistrar.options(path, schema, handler);
           break;
       }
-    }
+  };
+  compiled.registerRoutes?.(registerRoute);
+  if (pendingRoutes.size > 0) {
+    throw new ApplicationError(`Incomplete static route registration in module "${compiled.name}". Recompile the application.`, {
+      code: "COMPILED_ROUTE_REGISTRATION_INVALID",
+    });
   }
 
   return plugin;

@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
@@ -160,6 +161,9 @@ suite("real HTTP and PostgreSQL runtime safety", () => {
         expect(disposed.has(scope)).toBe(false);
         disposed.add(scope);
         if (disposed.size === 6) destroyed.resolve();
+      },
+      registerRoutes(register: CompiledRouteRegistrar) {
+        register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/scope");
       },
       controllers: [{
         path: "/scope", serviceKey: "controller", scope: "request",

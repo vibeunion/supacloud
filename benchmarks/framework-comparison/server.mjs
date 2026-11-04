@@ -226,6 +226,11 @@ async function startSupaCloudElysia() {
   };
   const module = {
     name: "framework-comparison",
+    registerRoutes(register) {
+      register(this.controllers[0], routes[0], "/json");
+      register(this.controllers[0], routes[1], "/params/:id");
+      register(this.controllers[0], routes[2], "/echo");
+    },
     createServices: () => ({ controller }),
     controllers: [{
       path: "",

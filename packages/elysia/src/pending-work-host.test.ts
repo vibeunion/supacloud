@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { createApplication, createWorker, type CompiledModule } from "./index";
@@ -11,6 +12,9 @@ function deferred() {
 function moduleFor(run: () => Promise<unknown>, cleanup: () => Promise<void> = async () => {}): CompiledModule {
   return { name: "pending", createServices: () => ({ controller: { run } }),
     createRequestScope: () => ({}), destroyRequestScope: cleanup,
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/work");
+    },
     controllers: [{ path: "/work", serviceKey: "controller", scope: "application",
       routes: [{ method: "GET", path: "/", handler: "run", invoker: testInvoker("run") }] }] };
 }
