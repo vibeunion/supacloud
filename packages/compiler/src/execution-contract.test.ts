@@ -153,5 +153,5 @@ test("Feature handler boundaries and Effect metadata do not imply route-level go
   expect(executionPlan.modules[0]?.routes[0]).toMatchObject({
     command: "write", commandBoundary: "handler", executor: "route", stages: ["handler"], effect,
   });
-  expect(executionPlan.modules[0]?.plugin.lifecycle).toEqual(["onError", "derive"]);
+  expect(executionPlan.modules[0]?.plugin.lifecycle).toEqual(["onError", "derive", "onAfterResponse"]);
 });

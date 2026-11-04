@@ -347,7 +347,7 @@ export class LifecycleController {
         ts.forEachChild(node, visit);
       };
       visit(sourceFile);
-      expect(hits).toEqual({ instance: 3, init: 1, teardown: 1, handlerCall: 2 });
+      expect(hits).toEqual({ instance: 3, init: 1, teardown: 1, handlerCall: 3 });
       const generated = await import(pathToFileURL(join(root, "generated/application.ts")).href);
       const [module] = generated.createCompiledModules() as Array<{
         createServices: (deps: Record<string, unknown>, imported: Record<string, Record<string, unknown>>) => Record<string, unknown>;
@@ -1435,4 +1435,53 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(relativeImportPath("/project/src", "/project/src/service.ts"))
       .toBe("./service");
   });
+});
+
+// I have nothing but my burger and I want nothing more
+test("direct parameter invokers typecheck and preserve positional bindings and this", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-direct-invoker-"));
+  try {
+    const graph: ApplicationGraph = { externalTokens: [], modules: [{
+      name: "direct", className: "DirectModule", file: "source.ts", line: 1,
+      imports: [], exports: [], providers: [], commands: [], queries: [],
+      controllers: [{ className: "DirectController", path: "/", scope: "application", deps: [],
+        importPath: "source", file: "source.ts", routes: [{
+          method: "POST", path: "/:id", handler: "read", pathParams: ["id"], paramBindings: ["id"],
+          handlerParams: [{ name: "id", kind: "param" }, { name: "body", kind: "body" }],
+        }],
+      }],
+    }] };
+    const rendered = renderApplication(graph, { rootDir: root, outDir: join(root, "generated") });
+    await writeFixtureProject(root, {
+      "source.ts": `export class DirectController {
+        prefix = "item:";
+        read(id: unknown, body: unknown) { return { id: this.prefix + id, body }; }
+      }`,
+      "generated/application.ts": rendered.applicationCode,
+    });
+    const program = ts.createProgram([join(root, "generated/application.ts")], {
+      noEmit: true, strict: true, skipLibCheck: true, noPropertyAccessFromIndexSignature: true,
+      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+      ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
+    const generated: { createCompiledModules(): Array<{
+      createServices(deps: Record<string, unknown>, imported: Record<string, Record<string, unknown>>): Record<string, unknown>;
+      controllers: Array<{ serviceKey: string; routes: Array<{
+        directInvoker(controller: unknown, context: unknown): unknown;
+        directInvokerFast(controller: Record<string, unknown>, handler: (...args: unknown[]) => unknown, context: unknown): unknown;
+      }> }>;
+    }> } = await import(pathToFileURL(join(root, "generated/application.ts")).href);
+    const module = requireValue(generated.createCompiledModules()[0]);
+    const descriptor = requireValue(module.controllers[0]);
+    const route = requireValue(descriptor.routes[0]);
+    const controller = module.createServices({}, {})[descriptor.serviceKey] as Record<string, unknown>;
+    const handler = controller["read"];
+    if (typeof handler !== "function") throw new Error("Missing generated controller handler");
+    const context = { params: { id: "42" }, body: { value: 0 } };
+    const expected = { id: "item:42", body: { value: 0 } };
+    expect(route.directInvoker(controller, context)).toEqual(expected);
+    expect(route.directInvokerFast(controller, handler as (...args: unknown[]) => unknown, context)).toEqual(expected);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

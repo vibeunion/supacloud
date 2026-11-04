@@ -64,6 +64,7 @@ export interface CompiledRoute {
     },
   ) => Promise<unknown> | unknown;
   directInvoker?: (controller: unknown, context: unknown) => Promise<unknown> | unknown;
+  directInvokerFast?: (controller: Record<string, unknown>, handler: (...args: unknown[]) => unknown, context: unknown) => Promise<unknown> | unknown;
   executionMode?: "direct" | "pipeline";
 }
 
