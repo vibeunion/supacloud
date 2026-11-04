@@ -1239,6 +1239,7 @@ export function createModulePlugin<
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
     "effect",
+    "directInvoker", "executionMode",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     "idempotency",
