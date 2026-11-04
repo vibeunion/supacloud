@@ -13,6 +13,7 @@ import {
   type RealtimeChannelConfig,
   type RealtimeTransport,
   type SupaCloudRealtimeChannel,
+  type SupaCloudRealtimeAdapter,
 } from "./realtime.js";
 import {
   createProcedureClient, createQueryAdapter,
@@ -1963,6 +1964,39 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
 }
 
 
+type SupaCloudClientBase<TClient extends SupabaseClient> = {
+  readonly supabase: TClient;
+  readonly projectRef: string;
+  readonly managementApiUrl: string;
+  readonly auth: {
+    readonly oauthServer: SupaCloudOAuthServerClient;
+    readonly oauthClients: SupaCloudOAuthClientsClient;
+  };
+  readonly tasks: SupaCloudTasksClient<TClient>;
+  readonly workflows: SupaCloudWorkflowsClient<TClient>;
+  readonly commands: SupaCloudCommandsClient<TClient>;
+  readonly artifacts: SupaCloudArtifactsClient<TClient>;
+  readonly queues: SupaCloudQueuesClient<TClient>;
+  readonly realtime: SupaCloudRealtimeAdapter;
+  channel(topic: string, config?: RealtimeChannelConfig): SupaCloudRealtimeChannel;
+  queue(name: string): SupaCloudQueueClient<TClient>;
+  readonly functions: {
+    invokeBackground(
+      functionName: string,
+      submitOptions?: SupaCloudTaskSubmitOptions,
+    ): Promise<SupaCloudTaskReceipt<unknown>>;
+  };
+};
+
+type SupaCloudClientWithProcedures<TClient extends SupabaseClient, TProcedures> =
+  SupaCloudClientBase<TClient> & {
+    readonly procedures: TProcedures;
+    queryAdapter(options: QueryAdapterOptions): ReturnType<typeof createQueryAdapter>;
+    withClient<T extends ProcedureSource>(
+      apiClient: T,
+    ): SupaCloudClientWithProcedures<TClient, ProceduresOf<T>>;
+  };
+
 function openSupabaseChannel(
   supabase: SupabaseClient,
   topic: string,
@@ -1989,7 +2023,10 @@ export function createSupaCloudClient<
   TApiClient extends ProcedureSource | undefined = undefined,
 >(
   options: SupaCloudClientOptions<TClient> & { apiClient?: TApiClient },
-) {
+): SupaCloudClientWithProcedures<
+  TClient,
+  TApiClient extends ProcedureSource ? ProceduresOf<TApiClient> : undefined
+> {
   const normalized: Required<SupaCloudClientOptions<TClient>> = {
     ...options,
     managementApiUrl: normalizeBaseUrl(options.managementApiUrl),

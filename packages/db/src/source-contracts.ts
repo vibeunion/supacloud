@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import * as ts from "typescript/ast";
-import { createSourceFile, forEachChild } from "./typescript";
+import { forEachChild, withSourceFile } from "./typescript-source";
 import { migrationFunctionIdentities, rpcSourceContract, renderRpcSourceTypes, type RpcSourceContract } from "./rpc-source-contracts";
 
 export interface DatabaseSourcesConfig {
@@ -189,23 +189,36 @@ async function boundaryFindings(
   const consumers = all.filter(file => /\.[cm]?[jt]sx?$/.test(file)
     && (config ? schemaInputs.includes(file) || config.consumers.some(directory => within(file, directory))
       : !within(file, "output") && !within(file, "generated")));
+  const auditHints = new Set(["database-audit", "schema.sql", "bootstrap"]);
+  if (config) {
+    auditHints.add(config.audit.split("/").at(-1) ?? config.audit);
+    for (const script of config.auditConsumers) {
+      auditHints.add(script);
+      auditHints.add(script.replace(/\.[cm]?[jt]s$/, ""));
+      auditHints.add(script.split("/").at(-1) ?? script);
+    }
+  }
   const findings: SourceFinding[] = [];
   for (const file of consumers) {
     if (config?.auditConsumers.includes(file)) continue;
-    const source = (await createSourceFile(file, await readFile(await safePath(root, file), "utf8"), ts.ScriptTarget.Latest, true));
-    const reported = new Set<number>();
-    for (const reference of staticPaths(source)) {
-      const candidates = [slash(relative(root, resolve(root, reference.value))),
-        slash(relative(root, resolve(root, dirname(file), reference.value)))];
-      if (candidates.some(candidate => dumps.has(candidate)
-        || (config && (within(candidate, config.audit) || config.auditConsumers.some(script =>
-          candidate === script || candidate === script.replace(/\.[cm]?[jt]s$/, "")))))
-        || /(?:^|\/)bootstrap\/schema\.sql$/.test(reference.value)) {
-        if (reported.has(reference.line)) continue;
-        reported.add(reference.line);
-        findings.push({ file, line: reference.line, code: "audit-input", message: "Ordinary source references an audit dump or audit-only script; use maintained sources or migration replay." });
+    const text = await readFile(await safePath(root, file), "utf8");
+    // Avoid materializing every consumer AST when the text cannot name an audit artifact.
+    if (![...auditHints].some(hint => hint && text.includes(hint))) continue;
+    await withSourceFile(file, text, source => {
+      const reported = new Set<number>();
+      for (const reference of staticPaths(source)) {
+        const candidates = [slash(relative(root, resolve(root, reference.value))),
+          slash(relative(root, resolve(root, dirname(file), reference.value)))];
+        if (candidates.some(candidate => dumps.has(candidate)
+          || (config && (within(candidate, config.audit) || config.auditConsumers.some(script =>
+            candidate === script || candidate === script.replace(/\.[cm]?[jt]s$/, "")))))
+          || /(?:^|\/)bootstrap\/schema\.sql$/.test(reference.value)) {
+          if (reported.has(reference.line)) continue;
+          reported.add(reference.line);
+          findings.push({ file, line: reference.line, code: "audit-input", message: "Ordinary source references an audit dump or audit-only script; use maintained sources or migration replay." });
+        }
       }
-    }
+    });
   }
   return findings;
 }
@@ -247,29 +260,30 @@ export async function databaseSources(
       await input(file);
       // Follow local schema imports so splitting tables does not weaken freshness.
       const visitImports = async (path: string) => {
-        const tree = (await createSourceFile(path, await input(path), ts.ScriptTarget.Latest, true));
-        const imports: string[] = [];
-        const visit = (node: ts.Node) => {
-          if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
-            && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
-            && node.moduleSpecifier.text.startsWith(".")) imports.push(node.moduleSpecifier.text);
-          forEachChild(node, visit);
-        };
-        visit(tree);
-        for (const specifier of imports) {
-          const base = slash(relative(root, resolve(root, dirname(path), specifier)));
-          const candidates = [base, `${base}.ts`, `${base}/index.ts`];
-          let target: string | undefined;
-          for (const candidate of candidates) {
-            const full = await safePath(root, candidate);
-            if (await exists(full) && (await lstat(full)).isFile()) { target = candidate; break; }
+        await withSourceFile(path, await input(path), async tree => {
+          const imports: string[] = [];
+          const visit = (node: ts.Node) => {
+            if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+              && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
+              && node.moduleSpecifier.text.startsWith(".")) imports.push(node.moduleSpecifier.text);
+            forEachChild(node, visit);
+          };
+          visit(tree);
+          for (const specifier of imports) {
+            const base = slash(relative(root, resolve(root, dirname(path), specifier)));
+            const candidates = [base, `${base}.ts`, `${base}/index.ts`];
+            let target: string | undefined;
+            for (const candidate of candidates) {
+              const full = await safePath(root, candidate);
+              if (await exists(full) && (await lstat(full)).isFile()) { target = candidate; break; }
+            }
+            if (!target) throw new Error(`Unresolved local schema import: ${path} -> ${specifier}`);
+            if ([config.audit, config.contracts, config.migrations, config.functions].some(area => within(target, area))) {
+              throw new Error(`Schema imports a non-structure artifact: ${target}`);
+            }
+            if (!inputs.has(target)) await visitImports(target);
           }
-          if (!target) throw new Error(`Unresolved local schema import: ${path} -> ${specifier}`);
-          if ([config.audit, config.contracts, config.migrations, config.functions].some(area => within(target, area))) {
-            throw new Error(`Schema imports a non-structure artifact: ${target}`);
-          }
-          if (!inputs.has(target)) await visitImports(target);
-        }
+        });
       };
       await visitImports(file);
     }

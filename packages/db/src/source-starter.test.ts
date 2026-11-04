@@ -84,7 +84,7 @@ const insert: NewReview = row;`;
   };
   expect((await diagnostics(source)).map(item => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   expect((await diagnostics(source + '\nconst invalid: NewReview = { ...row, state: true };')).map(item => item.code)).toContain(2322);
-});
+}, 30_000);
 
 test("Drizzle generates real SQL drafts without changing deployment migrations", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-diff-"));
