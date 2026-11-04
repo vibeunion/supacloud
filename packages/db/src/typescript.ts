@@ -3,7 +3,7 @@ import { globSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve, join, relative, isAbsolute } from "node:path";
 import { API, type Program as NativeProgram, type Snapshot, type Diagnostic as NativeDiagnostic,
   type RawCompilerOptions, type ProjectReference, type TranspileOptions,
-  type Symbol as NativeSymbol } from "typescript/async";
+  type Symbol as NativeSymbol, type ParsedCommandLine as NativeParsedCommandLine } from "typescript/async";
 import { createFileSystemLayer, serverFS, type FileSystemCallbacks } from "typescript/fs";
 import { isDecorator, ScriptKind, type SourceFile, type Node, type Declaration } from "typescript/ast";
 export * from "typescript/ast";
@@ -164,12 +164,16 @@ export async function readConfigFile(path: string, readFile = sys.readFile) {
   const result = await api.readConfigFile(path);
   return { config: result.config, error: result.error ? diagnostics([result.error])[0] : undefined };
 }
-export async function parseJsonConfigFileContent(config: unknown, host: ConfigHost, rootDir: string) {
+export type ParsedProjectConfig = Omit<NativeParsedCommandLine, "errors" | "options"> & {
+  errors: Diagnostic[];
+  options: RawCompilerOptions;
+};
+export async function parseJsonConfigFileContent(config: unknown, host: ConfigHost, rootDir: string): Promise<ParsedProjectConfig> {
   await using api = configAPI(host);
   const parsed = await api.parseJsonConfigFileContent(config, { configDirectory: rootDir });
   return { ...parsed, errors: diagnostics(parsed.errors) };
 }
-export async function getParsedCommandLineOfConfigFile(path: string, options: RawCompilerOptions, host: ConfigHost) {
+export async function getParsedCommandLineOfConfigFile(path: string, options: RawCompilerOptions, host: ConfigHost): Promise<ParsedProjectConfig> {
   await using api = configAPI(host);
   const parsed = await api.parseConfigFile(path);
   return { ...parsed, options: { ...parsed.options, ...options }, errors: diagnostics(parsed.errors) };

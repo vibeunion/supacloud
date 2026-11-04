@@ -1004,15 +1004,15 @@ void configuredResult; void extendedResult; void knownCode;
 
 test("facade emits portable declarations and root browser/CommonJS exports without Query dependencies", async () => {
   const source = join(import.meta.dir, "procedure-client.ts");
-  const declarations: string[] = [];
   await using program = (await ts.createProgram([source], {
     strict: true, skipLibCheck: true, declaration: true, emitDeclarationOnly: true,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     types: [], outDir: join(root, "facade-declarations"),
   }));
-  const emitted = (await program.emit(undefined, (_path, text) => { declarations.push(text); }));
-  expect([...(await ts.getPreEmitDiagnostics(program)), ...emitted.diagnostics]
+  const emitted = await program.native.emitToString();
+  const declarations = [...emitted.outputFiles.values()].map(file => file.text);
+  expect([...(await ts.getPreEmitDiagnostics(program)), ...ts.diagnostics(emitted.diagnostics)]
     .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
   expect(declarations.join("\n")).toContain("ReturnType<TFactory>");
   expect(declarations.join("\n")).not.toContain("node_modules/");
@@ -1034,15 +1034,15 @@ test("facade emits portable declarations and root browser/CommonJS exports witho
 
 test("optional query entrypoint produces portable declarations and dependency-free browser/CommonJS bundles", async () => {
   const source = join(import.meta.dir, "query.ts");
-  const declarations: string[] = [];
   await using program = (await ts.createProgram([source], {
     strict: true, skipLibCheck: true, declaration: true, emitDeclarationOnly: true,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     types: [], outDir: join(root, "declarations"),
   }));
-  const emitted = (await program.emit(undefined, (_path, text) => { declarations.push(text); }));
-  expect([...(await ts.getPreEmitDiagnostics(program)), ...emitted.diagnostics]
+  const emitted = await program.native.emitToString();
+  const declarations = [...emitted.outputFiles.values()].map(file => file.text);
+  expect([...(await ts.getPreEmitDiagnostics(program)), ...ts.diagnostics(emitted.diagnostics)]
     .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
   expect(declarations.join("\n")).toContain('from "@tanstack/query-core"');
   expect(declarations.join("\n")).not.toContain("node_modules/");

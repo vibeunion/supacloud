@@ -44,6 +44,7 @@
     }
   },
   "files": [
+    "src/typescript.ts",
     "NOTICE",
     "LICENSE-APACHE-2.0.txt",
     "dist",

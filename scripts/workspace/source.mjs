@@ -59,6 +59,15 @@ export async function importSites(ts, source) {
 const EFFECT_RUNTIME_METHODS = new Set(['runPromise', 'runPromiseExit', 'runSync', 'runFork']);
 const EFFECT_MODULES = new Set(['effect', 'effect/Effect', 'effect/Runtime']);
 
+async function syntaxDiagnostics(ts, source) {
+  if (source.isDeclarationFile) {
+    await using program = await ts.createProgram([source.fileName], { noLib: true, noResolve: true },
+      { sources: new Map([[source.fileName, source.text]]) });
+    return await program.getSyntacticDiagnostics();
+  }
+  return (await ts.transpileModule(source.text, { fileName: source.fileName, reportDiagnostics: true })).diagnostics ?? [];
+}
+
 /** Finds direct Effect interpretation calls without evaluating application code. */
 export function effectRuntimeExecutionSites(ts, source) {
   const namespaceBindings = new Set();
@@ -159,7 +168,7 @@ export async function checkSourceBoundaries(workspace, ts, rules) {
       filesScanned++;
       const file = slash(relative(workspace.root, absolute));
       const source = await ts.createSourceFile(absolute, readFileSync(absolute, 'utf8'), ts.ScriptTarget.Latest, true);
-      for (const error of (await ts.transpileModule(source.text, { fileName: absolute, reportDiagnostics: true })).diagnostics ?? []) {
+      for (const error of await syntaxDiagnostics(ts, source)) {
         const position = source.getLineAndCharacterOfPosition(error.start ?? 0);
         diagnostics.push({ code: 'WS_SOURCE_PARSE', file, line: position.line + 1, column: position.character + 1,
           message: ts.flattenDiagnosticMessageText(error.messageText, '\n') });
