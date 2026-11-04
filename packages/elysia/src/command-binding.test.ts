@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import {
   ApplicationError,
@@ -263,7 +264,7 @@ test("HTTP and Worker entrypoints share one bound business command", async () =>
     }),
     controllers: [{
       path: "/", serviceKey: "controller", scope: "application",
-      routes: [{ method: "POST", path: "approve", handler: "approve" }],
+      routes: [{ method: "POST", path: "approve", handler: "approve", invoker: testInvoker("approve") }],
     }],
   };
   const app = createApplication({

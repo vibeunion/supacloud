@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { beforeAll, expect, test } from "bun:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createApplication, createSupAuthRequestContext, requireTrustedIdentity, type CompiledModule, type SupAuthContextOptions } from "./index";
@@ -110,7 +111,7 @@ test("actual HTTP handlers run only for verified users with access to the curren
   const module: CompiledModule = {
     name: "protected",
     createServices: () => ({ controller: { get: () => { calls++; return { ok: true }; } } }),
-    controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{ method: "GET", path: "/reviews", handler: "get" }] }],
+    controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{ method: "GET", path: "/reviews", handler: "get", invoker: testInvoker("get") }] }],
   };
   const app = createApplication({
     modules: [module],

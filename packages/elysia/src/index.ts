@@ -130,8 +130,8 @@ export interface CompiledRoute {
   schemaKinds?: Partial<Record<"body" | "params" | "query" | "headers" | "cookie" | "response", "opaque" | "declared">>;
   /** True when the handler returns a native Response rather than a framework value. */
   nativeResponse?: boolean;
-  /** Compiler-emitted positional invoker; used when available. */
-  invoker?: (
+  /** Compiler-emitted positional invoker. */
+  invoker: (
     controller: unknown,
     request: {
       params?: Record<string, unknown>;
@@ -297,6 +297,7 @@ export function composeAspects(
   const active = aspects.filter(
     (aspect): aspect is ApplicationAspect => typeof aspect === "function",
   );
+  if (active.length === 0) return (_context, next) => next();
   return (context, next) => {
     let index = -1;
     const dispatch = (current: number): Promise<unknown> => {
@@ -695,6 +696,10 @@ function safeHeaderValue(value: string | null, maxLength: number): string | unde
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return value instanceof Promise;
 }
 
 function isTrustedIdentity(value: unknown): value is TrustedRequestIdentity {
@@ -1268,6 +1273,12 @@ export function createModulePlugin<
           { code: "ROUTE_IDEMPOTENCY_INVALID" },
         );
       }
+      if (typeof route.invoker !== "function") {
+        throw new ApplicationError(
+          `Compiled route ${route.method} ${controller.path}${route.path} is missing a generated invoker`,
+          { code: "ROUTE_INVOKER_REQUIRED" },
+        );
+      }
     }
   }
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -1312,9 +1323,10 @@ export function createModulePlugin<
   const commandExecutor = options.commandExecutor && governanceExecutor
     ? composeCommandExecutors(options.commandExecutor, governanceExecutor)
     : (options.commandExecutor ?? governanceExecutor);
+  const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
 
   const plugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true)
-    .derive(async (context) => {
+    .derive((context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
       let complete: (() => void) | undefined;
       try {
@@ -1326,11 +1338,14 @@ export function createModulePlugin<
       if (complete) requestCompletions.set(context.request, complete);
       const signal = pendingWork
         ? AbortSignal.any([context.request.signal, pendingWork.signal]) : context.request.signal;
-      const requestContext = await ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
-      requestContexts.set(context.request, requestContext);
-      // Elysia merges decorators across siblings. Resolve the original map
-      // locally so colliding service names cannot change module ownership.
-      return { services, requestContext };
+      const finish = (requestContext: unknown) => {
+        requestContexts.set(context.request, requestContext);
+        // Elysia merges decorators across siblings. Resolve the original map
+        // locally so colliding service names cannot change module ownership.
+        return { services, requestContext };
+      };
+      const requestContext = ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
+      return isPromiseLike(requestContext) ? requestContext.then(finish) : finish(requestContext);
     });
 
   const createRequestScope = compiled.createRequestScope;
@@ -1422,6 +1437,12 @@ export function createModulePlugin<
       }
       const responsePolicies = policies.filter((policy) => policy.afterResponse);
       const mappingPolicies = policies.filter((policy) => policy.mapResponse);
+      const routePipeline = descriptorPipeline(route, "route", options.onExecution);
+      const command = route.command ? commandsByClassName.get(route.command) : undefined;
+      const commandPipeline = route.command
+        ? descriptorPipeline(command ?? {}, "command", options.onExecution)
+        : undefined;
+      const routeInvoker = route.invoker;
       if (mappingPolicies.length > 0) {
         const responseValidators = Validator.response(schema.response, { normalize: options.normalize ?? true });
         Object.assign(schema, {
@@ -1477,13 +1498,7 @@ export function createModulePlugin<
           if (requestScope && compiled.destroyRequestScope) requestScopes.set(ctx.request, requestScope);
           const source =
             controller.scope === "request" ? requestScope : services;
-          const instance = controllerInstance(source?.[controller.serviceKey]);
-          const method = instance?.[route.handler];
-          if (typeof method !== "function") {
-            throw new Error(
-              `supacloud: controller "${controller.serviceKey}" has no handler "${route.handler}" in scope "${controller.scope}"`,
-            );
-          }
+          const instance = source?.[controller.serviceKey];
           const normalizedCookie = ctx.cookie === undefined ? undefined : cookieValues(ctx.cookie);
           const input = {
             body: ctx.body,
@@ -1496,9 +1511,7 @@ export function createModulePlugin<
             ...(requestScope ? { scope: requestScope } : {}),
             requestContext,
           };
-          const handlerCall = () => route.invoker
-            ? route.invoker(instance, input)
-            : Reflect.apply(method, instance, [input]);
+          const handlerCall = () => route.invoker(instance, input);
           const invokeHandler = async () =>
             runCompiledEffect(await handlerCall(), route.effect, options.effectRuntime);
           const invoke = once(() => route.command && options.commandGovernance ? invokeHandler()
@@ -1529,13 +1542,10 @@ export function createModulePlugin<
             services,
             metadata: command ?? route,
           };
-          const routePipeline = descriptorPipeline(route, "route", options.onExecution);
-          const commandPipeline = descriptorPipeline(command ?? {}, "command", options.onExecution);
-          const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
           const invokeRoute = () => modulePipeline(
             route.command ? commandContext : routeContext,
             once(() => routePipeline(routeContext, once(() => route.command
-              ? commandPipeline(commandContext, once(invoke))
+              ? commandPipeline!(commandContext, once(invoke))
               : invoke()))),
           );
           const invokeCommand = () => {
@@ -1761,13 +1771,13 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
     .use(contextPlugin(options.http).as("global"));
   if (options.documentation) app.use(createDocumentationPlugin(options.documentation));
   const configuredContextFactory = options.requestContext ?? defaultRequestContext;
-  const contextCache = new WeakMap<Request, Promise<unknown>>();
+  const contextCache = new WeakMap<Request, unknown | Promise<unknown>>();
   const ctxFactory: HttpRequestContextFactory<Http> = (request, context, signal) => {
-    const cached = contextCache.get(request);
-    if (cached) return cached;
-    const pending = Promise.resolve().then(() => configuredContextFactory(request, context, signal));
-    contextCache.set(request, pending);
-    return pending;
+    if (contextCache.has(request)) return contextCache.get(request);
+    const value = configuredContextFactory(request, context, signal);
+    const cached = isPromiseLike(value) ? Promise.resolve(value) : value;
+    contextCache.set(request, cached);
+    return cached;
   };
   const imported: Record<string, Record<string, unknown>> = {};
   const moduleServices: Array<{ module: CompiledModule; services: Record<string, unknown> }> = [];

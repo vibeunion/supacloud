@@ -1,0 +1,92 @@
+name: Framework comparison benchmark
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref or release tag to benchmark (empty uses the selected branch)
+        required: false
+        default: ""
+      requests:
+        description: Measured requests per scenario and round
+        required: false
+        default: "10000"
+      rounds:
+        description: Measured rounds per adapter and scenario
+        required: false
+        default: "5"
+      concurrency:
+        description: Concurrent fetch workers
+        required: false
+        default: "32"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: framework-comparison-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    # Release Please creates component tags such as elysia-v0.26.0. The
+    # SupaCloud runtime depends on these core components, so benchmark after
+    # any of their published tags. Keep dispatch available for deliberate runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'elysia-v') ||
+      startsWith(github.event.release.tag_name, 'app-v') ||
+      startsWith(github.event.release.tag_name, 'compiler-v') ||
+      startsWith(github.event.release.tag_name, 'supacloud-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      BUN_VERSION: "1.4.2"
+      REQUESTS: ${{ inputs.requests || '10000' }}
+      ROUNDS: ${{ inputs.rounds || '5' }}
+      CONCURRENCY: ${{ inputs.concurrency || '32' }}
+    steps:
+      - name: Check out released source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.event.release.tag_name || github.sha }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.x"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Build the released SupaCloud Elysia adapter
+        run: |
+          for package in contracts delivery commands db compiler app elysia; do
+            (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
+          done
+          SUPACLOUD_CORE_VERSION=$(node -p "require('./packages/elysia/package.json').version")
+          echo "SUPACLOUD_CORE_VERSION=$SUPACLOUD_CORE_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install benchmark dependencies
+        working-directory: benchmarks/framework-comparison
+        run: bun install --frozen-lockfile
+
+      - name: Run framework benchmark
+        working-directory: benchmarks/framework-comparison
+        env:
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+        run: node runner.mjs --requests "$REQUESTS" --rounds "$ROUNDS" --concurrency "$CONCURRENCY" --output report.json
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-comparison-${{ github.run_id }}
+          path: |
+            benchmarks/framework-comparison/report.json
+            benchmarks/framework-comparison/report.md
+          if-no-files-found: error

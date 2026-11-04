@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import Elysia, { t } from "elysia";
 import { createApplication, createModulePlugin, type CompiledModule } from "./index";
@@ -9,7 +10,7 @@ function commandModule(write: () => unknown): CompiledModule {
     controllers: [{
       path: "/receipt", serviceKey: "controller", scope: "application",
       routes: [{
-        method: "POST", path: "", handler: "write",
+        method: "POST", path: "", handler: "write", invoker: testInvoker("write"),
         response: t.Object({ id: t.String() }),
         command: "WriteCommand",
       }],

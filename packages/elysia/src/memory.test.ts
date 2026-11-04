@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { t } from "elysia";
 import {
@@ -30,7 +31,7 @@ function createModule(): CompiledModule {
       routes: [{
         method: "GET",
         path: "/hello",
-        handler: "hello",
+        handler: "hello", invoker: testInvoker("hello"),
         response: t.Object({
           requestId: t.String(),
           subject: t.Union([t.String(), t.Null()]),
@@ -61,7 +62,7 @@ describe("createMemorySandbox", () => {
       controllers: [{
         path: "/items", serviceKey: "controller", scope: "request",
         routes: [{
-          method: "POST", path: "/:id", handler: "write", command: "Write",
+          method: "POST", path: "/:id", handler: "write", invoker: testInvoker("write"), command: "Write",
           body: t.Object({ value: t.Number() }),
           params: t.Object({ id: t.String() }),
         }],

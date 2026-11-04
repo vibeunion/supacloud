@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import { createModulePlugin, type CompiledModule } from "./index";
@@ -12,7 +13,7 @@ function moduleFor(route: CompiledModule["controllers"][number]["routes"][number
 test('parse: "none" preserves request identity and malformed JSON until authorized domain parsing', async () => {
   let seen: Request | undefined;
   const module = moduleFor({
-    method: "POST", path: "/raw", handler: "raw", parse: "none",
+    method: "POST", path: "/raw", handler: "raw", invoker: testInvoker("raw"), parse: "none",
     contract: { body: "domain", response: "binary", evidence: "route-body-policy.test.ts" },
   });
   const app = new Elysia().onBeforeHandle(({ request }) => {
@@ -40,7 +41,7 @@ test('parse: "none" preserves request identity and malformed JSON until authoriz
 
 test("explicit DELETE bodies retain framework validation", async () => {
   const module = moduleFor({
-    method: "DELETE", path: "/item", handler: "remove", allowDeleteBody: true,
+    method: "DELETE", path: "/item", handler: "remove", invoker: testInvoker("remove"), allowDeleteBody: true,
     body: t.Object({ name: t.String() }), response: t.Object({ name: t.String() }),
   });
   let calls = 0;
@@ -93,8 +94,8 @@ test("route-level none does not add an HTTP idempotency requirement", async () =
 
 test("JavaScript descriptors cannot bypass the raw parsing contract", () => {
   for (const route of [
-    { method: "POST" as const, path: "/", handler: "raw", parse: "none" as const },
-    { method: "GET" as const, path: "/", handler: "raw", allowDeleteBody: true as const, body: t.String() },
-    { method: "DELETE" as const, path: "/", handler: "raw", allowDeleteBody: true as const },
+    { method: "POST" as const, path: "/", handler: "raw", invoker: testInvoker("raw"), parse: "none" as const },
+    { method: "GET" as const, path: "/", handler: "raw", invoker: testInvoker("raw"), allowDeleteBody: true as const, body: t.String() },
+    { method: "DELETE" as const, path: "/", handler: "raw", invoker: testInvoker("raw"), allowDeleteBody: true as const },
   ]) expect(() => createModulePlugin(moduleFor(route), {})).toThrow("Invalid compiled body policy");
 });

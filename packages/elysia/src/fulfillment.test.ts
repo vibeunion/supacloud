@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { decodeDurableCommandReceipt, type DurableCommandReceipt } from "@supacloud/contracts";
 import {
@@ -148,7 +149,7 @@ test("one cross-module composition serves HTTP, event, schedule and trusted CLI 
         invoke(body, { request, requestContext }) },
     }),
     controllers: [{ path: "/", serviceKey: "controller", scope: "application",
-      routes: [{ method: "POST", path: "fulfill", handler: "fulfill" }] }],
+      routes: [{ method: "POST", path: "fulfill", handler: "fulfill", invoker: testInvoker("fulfill") }] }],
   };
   const app = createApplication({ modules: [httpModule], requestContext: () => context().requestContext });
   const response = await app.handle(new Request("http://localhost/fulfill", {

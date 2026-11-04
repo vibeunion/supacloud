@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { ApplicationError, createApplication, createCommandExecutor, executeJob, type CompiledModule, type CommandInvocation, type ExecutionEvent } from "./index";
 
@@ -113,7 +114,7 @@ test("HTTP aspect trace identifies rejection and cleanup without invoking the ha
     createRequestScope: () => ({ controller: { get: () => { calls++; return "receipt"; } } }),
     destroyRequestScope: async () => { destroyed++; cleanup.resolve(); },
     aspects: [function deny() { throw new ApplicationError("Denied", { status: 403 }); }],
-    controllers: [{ path: "", serviceKey: "controller", scope: "request", routes: [{ method: "GET", path: "/review", handler: "get" }] }],
+    controllers: [{ path: "", serviceKey: "controller", scope: "request", routes: [{ method: "GET", path: "/review", handler: "get", invoker: testInvoker("get") }] }],
   };
   const app = createApplication({
     modules: [module], onExecution: (event) => { events.push(event); },

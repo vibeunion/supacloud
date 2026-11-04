@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import { createApplication, type CompiledModule, HttpPolicyConfigurationError } from "./index";
@@ -13,7 +14,7 @@ function moduleWith(httpPolicies: unknown, calls: string[]): CompiledModule {
     controllers: [{
       path: "/items", scope: "request", serviceKey: "controller",
       routes: [{
-        method: "GET", path: "/:id", handler: "run",
+        method: "GET", path: "/:id", handler: "run", invoker: testInvoker("run"),
         params: t.Object({ id: t.Numeric() }), data: { httpPolicies },
       }],
     }],

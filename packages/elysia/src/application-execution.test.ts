@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
@@ -33,7 +34,7 @@ describe("Elysia 2 native HTTP with portable application execution", () => {
       name: "orders",
       createServices: () => ({ controller: { update: () => { trace.push("handler"); return { ok: true }; } } }),
       controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{
-        method: "POST", path: "/orders", handler: "update", command: descriptor.className,
+        method: "POST", path: "/orders", handler: "update", invoker: testInvoker("update"), command: descriptor.className,
         body: t.Object({ value: t.Number() }),
       }] }],
       commands: [descriptor],
@@ -118,7 +119,7 @@ describe("Elysia 2 native HTTP with portable application execution", () => {
       name: "denied",
       createServices: () => ({ controller: { run: () => { entered++; return "no"; } } }),
       controllers: [{ path: "", serviceKey: "controller", scope: "application", routes: [{
-        method: "POST", path: "/denied", handler: "run", command: descriptor.className,
+        method: "POST", path: "/denied", handler: "run", invoker: testInvoker("run"), command: descriptor.className,
       }] }],
       commands: [descriptor],
       aspectPipeline: composeAspects((_call, next) => { entered++; return next(); }),

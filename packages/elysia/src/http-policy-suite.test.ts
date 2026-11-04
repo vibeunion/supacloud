@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { beforeAll, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -47,7 +48,7 @@ function fixture(policies: readonly unknown[], run?: (context: SupAuthRequestCon
     controllers: [{
       path: "/tenants/:tenant", serviceKey: "controller", scope: "request",
       routes: [{
-        method: "GET", path: "/items", handler: "run",
+        method: "GET", path: "/items", handler: "run", invoker: testInvoker("run"),
         params: t.Object({ tenant: t.String({ minLength: 1 }) }), data: { httpPolicies: policies },
       }],
     }],
@@ -218,8 +219,9 @@ test("HTTP telemetry includes validation, denial, failure and native routes with
   const suite = createHttpPolicySuite({ auth: auth() });
   const module = fixture(guards, () => { throw new Error("private"); });
   module.controllers[0]!.routes[0]!.params = t.Object({ tenant: t.Literal("a") });
-  const app = createApplication({
-    ...suite, http: createHttpTelemetry((event) => { events.push(event); }),
+  const telemetry = createHttpTelemetry((event) => { events.push(event); });
+  const app = createApplication<typeof telemetry>({
+    ...suite, http: telemetry,
     modules: [module],
   }).get("/public", () => "ok")
     .get("/denied", ({ set }) => { set.status = "Forbidden"; return "denied"; });
@@ -242,8 +244,9 @@ test("HTTP telemetry includes validation, denial, failure and native routes with
 
 test("request context and command observation share the HTTP correlation ID", async () => {
   const suite = createHttpPolicySuite({ auth: auth() });
-  const app = createApplication({
-    ...suite, http: createHttpTelemetry(() => {}),
+  const telemetry = createHttpTelemetry(() => {});
+  const app = createApplication<typeof telemetry>({
+    ...suite, http: telemetry,
     modules: [fixture(guards, (context) => ({ requestId: context.requestId }))],
   });
   const response = await app.handle(request(await token()));
@@ -296,8 +299,9 @@ test("cache awaits promise-returning Standard Schema validation and never stores
 test("real HTTP serves protected cache and telemetry with fresh per-request correlation", async () => {
   let calls = 0;
   const suite = createHttpPolicySuite({ auth: auth(), cacheNamespace: "test-v1", cacheStore: createMemoryHttpCacheStore() });
-  const app = createApplication({
-    ...suite, http: createHttpTelemetry(() => {}),
+  const telemetry = createHttpTelemetry(() => {});
+  const app = createApplication<typeof telemetry>({
+    ...suite, http: telemetry,
     modules: [fixture([...guards, { name: "cache", options: { ttlMs: 1000 } }], () => ({ count: ++calls }))],
   });
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => app.handle(req) });

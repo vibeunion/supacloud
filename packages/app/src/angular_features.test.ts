@@ -68,6 +68,7 @@ describe("Angular DX culminations in @supacloud/app", () => {
         method: "GET",
         title: "Analytics Overview",
         handler: () => ({ ok: true }),
+        invoker: () => ({ ok: true }),
       },
       ctx,
       undefined,

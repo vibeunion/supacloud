@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { status, t } from "elysia";
 import { Type } from "typebox";
@@ -17,7 +18,7 @@ test("enforces headers and cookies and validates status-code response maps", asy
     controllers: [{
       path: "/items", serviceKey: "controller", scope: "application",
       routes: [{
-        method: "GET", path: "", handler: "read",
+        method: "GET", path: "", handler: "read", invoker: testInvoker("read"),
         headers: t.Object({ authorization: t.String() }),
         cookie: t.Object({ session: t.String() }),
         responses: {
@@ -60,7 +61,7 @@ test("passes Elysia-decoded headers to compiled handlers", async () => {
     controllers: [{
       path: "/headers", serviceKey: "controller", scope: "application",
       routes: [{
-        method: "GET", path: "", handler: "read",
+        method: "GET", path: "", handler: "read", invoker: testInvoker("read"),
         headers: t.Object({ "x-count": decodedHeader }),
         response: t.Object({ value: t.Number() }),
       }],

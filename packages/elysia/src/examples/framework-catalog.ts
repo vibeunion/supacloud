@@ -41,6 +41,22 @@ function catalogIdentity(value: unknown): CatalogIdentity {
   return { tenantId: value.tenantId, subject: value.subject };
 }
 
+function catalogRouteInvoker(controller: unknown, request: {
+  params?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, unknown>;
+  cookie?: Record<string, unknown>;
+  context?: unknown;
+}) {
+  if (controller === null || typeof controller !== "object") {
+    throw new TypeError("Catalog route controller is not an object");
+  }
+  const handler = (controller as Record<string, unknown>)["read"];
+  if (typeof handler !== "function") throw new TypeError("Catalog route handler read is not callable");
+  return Reflect.apply(handler, controller, [request]);
+}
+
 /**
  * A handwritten adapter fixture, not compiler output or a new module format.
  * Real applications can supply the existing compiler's createCompiledModules().
@@ -60,6 +76,7 @@ export function createCatalogModule(ports: CatalogPorts): CompiledModule {
         method: "GET",
         path: "/:id",
         handler: "read",
+        invoker: catalogRouteInvoker,
         params: t.Object({ id: t.String({ minLength: 1 }) }),
         query: t.Object({}),
         responses: { 200: t.Object({ id: t.String(), name: t.String() }) },

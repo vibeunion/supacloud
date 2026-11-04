@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
@@ -19,7 +20,7 @@ function fixture(calls: string[]): CompiledModule {
       serviceKey: "controller",
       scope: "request",
       routes: [{
-        method: "POST", path: "/:id", handler: "run",
+        method: "POST", path: "/:id", handler: "run", invoker: testInvoker("run"),
         params: t.Object({ id: t.Numeric() }),
         body: t.Object({ name: t.String() }),
       }],

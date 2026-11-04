@@ -1456,7 +1456,7 @@
     {
       "name": "RoutePipelineDefinition",
       "kind": "type",
-      "signature": "export interface RoutePipelineDefinition {\n    path: string;\n    method: string;\n    handler: ((context: RoutePipelineContext) => unknown) | string;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    title?: string;\n    data?: Record<string, unknown>;\n    invoker?: (controller: unknown, request: RoutePipelineContext) => Promise<unknown> | unknown;\n}"
+      "signature": "export interface RoutePipelineDefinition {\n    path: string;\n    method: string;\n    handler: ((context: RoutePipelineContext) => unknown) | string;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    title?: string;\n    data?: Record<string, unknown>;\n    invoker: (controller: unknown, request: RoutePipelineContext) => Promise<unknown> | unknown;\n}"
     },
     {
       "name": "RoutePipelineOptions",

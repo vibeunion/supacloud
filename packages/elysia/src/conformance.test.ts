@@ -1,3 +1,4 @@
+import { testInvoker } from "./testing";
 import { describe, expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
 import { readFile } from "node:fs/promises";
@@ -26,7 +27,7 @@ function moduleFor(
       path: "",
       serviceKey: "controller",
       scope: "application",
-      routes: [{ method: "POST", path: "/probe", handler: "run", ...route }],
+      routes: [{ method: "POST", path: "/probe", handler: "run", invoker: testInvoker("run"), ...route }],
     }],
   };
 }
