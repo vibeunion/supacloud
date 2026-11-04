@@ -1,10 +1,14 @@
-import { cpus, arch, platform, release } from "node:os";
-import { spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { cpus, arch, platform, release, tmpdir } from "node:os";
+import { spawn, execFile } from "node:child_process";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { promisify } from "node:util";
+
+// I have nothing but my burger and I want nothing more
+const exec = promisify(execFile);
 
 const root = dirname(fileURLToPath(import.meta.url));
 const serverPath = resolve(root, "server.mjs");
@@ -28,7 +32,7 @@ const allAdapters = [
   { id: "nestjs-express", label: "NestJS / Express", runtime: "node", validation: "TypeBox pipe" },
   { id: "nestjs-node", label: "NestJS / native Node", runtime: "node", validation: "TypeBox pipe" },
   { id: "elysia-native-contract-bun", label: "Elysia 2 native / same contracts / Bun", runtime: "bun", validation: "TypeBox native route schema" },
-  { id: "elysia-native-bare-bun", label: "Elysia 2 native bare baseline / Bun", runtime: "bun", validation: "none" },
+  { id: "gin-go", label: "Gin / Go 1.27", runtime: "go", validation: "go-playground/validator tags" },
 ];
 const only = options.only === undefined ? undefined : String(options.only).split(",").filter(Boolean);
 const adapters = only === undefined ? allAdapters : allAdapters.filter((adapter) => only.includes(adapter.id));
@@ -45,41 +49,57 @@ const scenarios = [
   },
 ];
 
-const resultRows = [];
+const buildDirectory = adapters.some((adapter) => adapter.runtime === "go")
+  ? await mkdtemp(resolve(tmpdir(), "supacloud-benchmark-")) : undefined;
+const ginBinary = buildDirectory ? resolve(buildDirectory, process.platform === "win32" ? "gin.exe" : "gin") : undefined;
+const rows = new Map();
+const adapterOrder = [];
 const observedAdapters = new Map();
-for (let adapterOffset = 0; adapterOffset < adapters.length; adapterOffset += 1) {
-  const adapter = adapters[adapterOffset];
-  const processInfo = await startServer(adapter);
-  observedAdapters.set(adapter.id, processInfo.event);
-  try {
-    for (let scenarioOffset = 0; scenarioOffset < scenarios.length; scenarioOffset += 1) {
-      const scenario = scenarios[(scenarioOffset + adapterOffset) % scenarios.length];
-      const url = `http://${HOST}:${processInfo.port}${scenario.path}`;
-      await load(url, scenario, warmup, concurrency, false, requestIdMode);
-      const samples = [];
-      for (let round = 0; round < rounds; round += 1) {
-        const sample = await load(url, scenario, requests, concurrency, true, requestIdMode);
-        samples.push({ round, ...sample });
-      }
-      resultRows.push({
-        adapter: adapter.id,
-        scenario: scenario.id,
-        samples,
-        summary: summarize(samples),
-      });
-    }
-  } finally {
-    await stopServer(processInfo.child);
+try {
+  if (adapters.some((adapter) => adapter.id === "supacloud-elysia-bun")) {
+    await exec(process.execPath, [resolve(root, "generate.mjs")], { cwd: root, timeout: 30_000 });
   }
+  if (ginBinary) {
+    await exec(process.env.GO_BIN ?? "go", ["build", "-o", ginBinary, "."], {
+      cwd: resolve(root, "gin-server"), timeout: 180_000,
+    });
+  }
+  for (let round = 0; round < rounds; round += 1) {
+    const ordered = adapters.map((_, index) => adapters[(index + round) % adapters.length]);
+    adapterOrder.push(ordered.map((adapter) => adapter.id));
+    for (const [adapterOffset, adapter] of ordered.entries()) {
+      const processInfo = await startServer(adapter);
+      observedAdapters.set(adapter.id, processInfo.event);
+      try {
+        await verifyContract(processInfo.port, adapter.id);
+        for (let scenarioOffset = 0; scenarioOffset < scenarios.length; scenarioOffset += 1) {
+          const scenario = scenarios[(scenarioOffset + adapterOffset + round) % scenarios.length];
+          const url = `http://${HOST}:${processInfo.port}${scenario.path}`;
+          const warmed = await load(url, scenario, warmup, concurrency, false, requestIdMode);
+          if (warmed.errors) throw new Error(`${adapter.id}/${scenario.id}: ${warmed.errors} warmup errors`);
+          const sample = await load(url, scenario, requests, concurrency, true, requestIdMode);
+          const key = `${adapter.id}:${scenario.id}`;
+          const row = rows.get(key) ?? { adapter: adapter.id, scenario: scenario.id, samples: [] };
+          row.samples.push({ round, ...sample });
+          rows.set(key, row);
+        }
+      } finally {
+        await stopServer(processInfo.child);
+      }
+    }
+  }
+} finally {
+  if (buildDirectory) await rm(buildDirectory, { recursive: true, force: true });
 }
-
+const resultRows = [...rows.values()].map((row) => ({ ...row, summary: summarize(row.samples) }));
+const sourceCommit = (await exec("git", ["rev-parse", "HEAD"], { cwd: root })).stdout.trim();
 const report = {
   schemaVersion: 1,
   generatedAt: new Date().toISOString(),
   git: {
-    sha: process.env.GITHUB_SHA ?? null,
-    ref: process.env.GITHUB_REF_NAME ?? null,
-    releaseTag: process.env.GITHUB_REF_NAME ?? null,
+    sha: sourceCommit,
+    ref: process.env.BENCHMARK_SOURCE_REF ?? (await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root })).stdout.trim(),
+    releaseTag: process.env.BENCHMARK_RELEASE_TAG || null,
   },
   host: {
     platform: platform(),
@@ -88,13 +108,13 @@ const report = {
     cpuModel: cpus()[0]?.model ?? "unknown",
     cpuCount: cpus().length,
   },
-  configuration: { requests, rounds, concurrency, warmup, requestIdMode },
+  configuration: { requests, rounds, concurrency, warmup, requestIdMode, adapterOrder },
   client: { runtime: `node ${process.versions.node}`, implementation: "native fetch" },
   dependencies: packageJson.dependencies,
   adapters: adapters.map((adapter) => ({ ...adapter, observed: observedAdapters.get(adapter.id) ?? null })),
   results: resultRows,
   comparisons: buildComparisons(resultRows),
-  methodology: "Each adapter runs in an isolated child process. The same native fetch client, loopback address, response contract, warmup, concurrency, request-id mode and rotated scenario order are used for every adapter. The provided request-id mode models the Edge Runtime header; generated mode measures the fallback UUID path. Throughput and latency include client transport and JSON handling; server startup time is excluded. These are relative framework overhead measurements, not production capacity or an SLA.",
+  methodology: "Each adapter runs in a fresh isolated child process per round, with adapter order rotated between rounds. The same native fetch client, loopback address, response contract, warmup, concurrency, request-id mode and rotated scenario order are used for every adapter. The provided request-id mode models the Edge Runtime header; generated mode omits it. These direct routes do not require SupaCloud request context or generate fallback UUIDs. Throughput and latency include client transport and JSON handling; server startup time is excluded. These are relative framework overhead measurements, not production capacity or an SLA.",
 };
 
 const json = JSON.stringify(report, null, 2) + "\n";
@@ -132,13 +152,20 @@ function positiveInteger(value, fallback, name) {
 }
 
 function commandFor(adapter) {
-  return adapter.runtime === "bun" ? (process.env.BUN_BIN ?? "bun") : process.execPath;
+  if (adapter.runtime === "bun") return process.env.BUN_BIN ?? "bun";
+  if (adapter.runtime === "go") return ginBinary;
+  return process.execPath;
+}
+
+function commandArgs(adapter, port) {
+  if (adapter.runtime === "go") return ["--port", String(port)];
+  return [serverPath, "--adapter", adapter.id, "--port", String(port)];
 }
 
 async function startServer(adapter) {
   const port = await freePort();
-  const child = spawn(commandFor(adapter), [serverPath, "--adapter", adapter.id, "--port", String(port)], {
-    cwd: root,
+  const child = spawn(commandFor(adapter), commandArgs(adapter, port), {
+    cwd: adapter.runtime === "go" ? resolve(root, "gin-server") : root,
     env: {
       ...process.env,
       NODE_NO_WARNINGS: "1",
@@ -147,6 +174,7 @@ async function startServer(adapter) {
   });
   let stdout = "";
   let stderr = "";
+  let pending = "";
   const ready = new Promise((resolveReady, rejectReady) => {
     const timer = setTimeout(() => rejectReady(new Error(`Timed out starting ${adapter.id}\n${stdout}\n${stderr}`)), 30_000);
     const onLine = (line) => {
@@ -161,34 +189,57 @@ async function startServer(adapter) {
       }
     };
     child.stdout.on("data", (chunk) => {
-      for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) onLine(line);
+      pending += String(chunk);
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const line of lines.filter(Boolean)) onLine(line);
     });
     child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-8_000); });
     child.once("error", (error) => { clearTimeout(timer); rejectReady(error); });
     child.once("exit", (code, signal) => {
-      if (code !== 0) rejectReady(new Error(`${adapter.id} exited before ready: ${code ?? signal}\n${stdout}\n${stderr}`));
+      clearTimeout(timer);
+      rejectReady(new Error(`${adapter.id} exited before ready: ${code ?? signal}\n${stdout}\n${stderr}`));
     });
   });
   const event = await ready.catch(async (error) => {
-    child.kill("SIGTERM");
-    await waitForExit(child);
+    await stopServer(child);
     throw error;
   });
   return { child, port, event };
 }
 
 function waitForExit(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolveExit) => child.once("exit", resolveExit));
 }
 
 async function stopServer(child) {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
   child.kill("SIGTERM");
-  await Promise.race([
-    waitForExit(child),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out stopping benchmark server")), 10_000)),
-  ]);
+  const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+  try { await waitForExit(child); } finally { clearTimeout(timer); }
+}
+
+async function verifyContract(port, adapter) {
+  const cases = [
+    { body: '{"value":0,"label":""}', expected: { ok: true, value: 0, label: "" } },
+    { body: '{"label":"missing number"}' },
+    { body: '{"value":"invalid","label":"wrong type"}' },
+    { body: '{"value":null,"label":"null number"}' },
+    { body: '{"value":42,"label":null}' },
+    { body: '{broken' },
+  ];
+  for (const probe of cases) {
+    const response = await fetch(`http://${HOST}:${port}/echo`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: probe.body,
+      signal: AbortSignal.timeout(5_000),
+    });
+    const payload = await response.text();
+    if (probe.expected ? response.status !== 200 || !samePayload(JSON.parse(payload), probe.expected)
+      : response.status < 400 || response.status >= 500) {
+      throw new Error(`${adapter} contract preflight failed for ${probe.body}: ${response.status} ${payload}`);
+    }
+  }
 }
 
 async function load(url, scenario, count, workerCount, measure, requestIdMode) {
@@ -209,6 +260,7 @@ async function load(url, scenario, count, workerCount, measure, requestIdMode) {
           method: scenario.method,
           headers,
           body: scenario.body,
+          signal: AbortSignal.timeout(10_000),
         });
         const payload = await response.json();
         if (response.status !== 200 || !samePayload(payload, scenario.expected)) errors += 1;
@@ -280,13 +332,11 @@ function buildComparisons(rows) {
     const forScenario = rows.filter((row) => row.scenario === scenario.id);
     const supacloud = forScenario.find((row) => row.adapter === "supacloud-elysia-bun")?.summary;
     const nativeElysia = forScenario.find((row) => row.adapter === "elysia-native-contract-bun")?.summary;
-    const nativeBareElysia = forScenario.find((row) => row.adapter === "elysia-native-bare-bun")?.summary;
-    const native = forScenario.filter((row) => !["supacloud-elysia-bun", "elysia-native-contract-bun", "elysia-native-bare-bun"].includes(row.adapter));
+    const native = forScenario.filter((row) => !["supacloud-elysia-bun", "elysia-native-contract-bun"].includes(row.adapter));
     const fastestNative = native.reduce((best, row) => !best || row.summary.requestsPerSecondMedian > best.summary.requestsPerSecondMedian ? row : best, undefined);
     return {
       scenario: scenario.id,
       supacloudVsNativeElysia: comparison(supacloud, nativeElysia),
-      supacloudVsNativeElysiaBare: comparison(supacloud, nativeBareElysia),
       supacloudVsFastestNative: comparison(supacloud, fastestNative?.summary),
       fastestNativeAdapter: fastestNative?.adapter ?? null,
     };
@@ -319,10 +369,10 @@ function renderMarkdown(report) {
       lines.push(`| ${adapter?.label ?? row.adapter} | ${adapter?.validation ?? "-"} | ${format(row.summary.requestsPerSecondMedian)} | ${format(row.summary.p50MsMedian)} | ${format(row.summary.p95MsMedian)} | ${format(row.summary.p99MsMedian)} | ${row.summary.errorCount} |`);
     }
     const comparison = report.comparisons.find((item) => item.scenario === scenario.id);
-    if (comparison?.supacloudVsNativeElysia && comparison.supacloudVsNativeElysiaBare && comparison.supacloudVsFastestNative) {
+    if (comparison?.supacloudVsNativeElysia && comparison.supacloudVsFastestNative) {
       lines.push(
         "",
-        `SupaCloud vs native Elysia with the same contracts: RPS ${signed(comparison.supacloudVsNativeElysia.requestsPerSecondDeltaPercent)}%, P95 ${signed(comparison.supacloudVsNativeElysia.p95DeltaPercent)}%; vs bare Elysia: RPS ${signed(comparison.supacloudVsNativeElysiaBare.requestsPerSecondDeltaPercent)}%, P95 ${signed(comparison.supacloudVsNativeElysiaBare.p95DeltaPercent)}%; vs fastest native (${comparison.fastestNativeAdapter}): RPS ${signed(comparison.supacloudVsFastestNative.requestsPerSecondDeltaPercent)}%, P95 ${signed(comparison.supacloudVsFastestNative.p95DeltaPercent)}%.`,
+        `SupaCloud vs native Elysia with the same contracts: RPS ${signed(comparison.supacloudVsNativeElysia.requestsPerSecondDeltaPercent)}%, P95 ${signed(comparison.supacloudVsNativeElysia.p95DeltaPercent)}%; vs fastest native (${comparison.fastestNativeAdapter}): RPS ${signed(comparison.supacloudVsFastestNative.requestsPerSecondDeltaPercent)}%, P95 ${signed(comparison.supacloudVsFastestNative.p95DeltaPercent)}%.`,
       );
     }
     lines.push("");

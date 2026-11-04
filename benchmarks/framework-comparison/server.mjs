@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { readFile } from "node:fs/promises";
 
 const HOST = "127.0.0.1";
 const args = new Map();
@@ -15,8 +16,8 @@ if (!adapter || !Number.isInteger(port) || port < 1 || port > 65_535) {
 const STATIC_RESPONSE = Object.freeze({ ok: true, value: 42 });
 const BODY_RESPONSE = Object.freeze({ ok: true, value: 42, label: "benchmark" });
 const packageVersions = {
-  ...(adapter === "elysia-native-bare-bun" || adapter === "elysia-native-contract-bun" || adapter === "supacloud-elysia-bun" ? { elysia: "2.0.0-rc.0" } : {}),
-  ...(adapter === "supacloud-elysia-bun" ? { supacloudCore: process.env.SUPACLOUD_CORE_VERSION ?? "source-at-release-tag" } : {}),
+  ...(adapter === "elysia-native-contract-bun" || adapter === "supacloud-elysia-bun" ? { elysia: "2.0.0-rc.1" } : {}),
+  ...(adapter === "supacloud-elysia-bun" ? { supacloudCore: process.env.SUPACLOUD_CORE_VERSION ?? JSON.parse(await readFile(new URL("../../packages/elysia/package.json", import.meta.url), "utf8")).version } : {}),
   ...(adapter === "express" || adapter === "nestjs-express" ? { express: "5.3.0" } : {}),
   ...(adapter === "fastify" ? { fastify: "5.12.8" } : {}),
   ...(adapter.startsWith("nestjs-")
@@ -26,14 +27,6 @@ const packageVersions = {
 
 function methodDecorator(decorator, target, key) {
   decorator(target, key, Object.getOwnPropertyDescriptor(target, key));
-}
-
-function isRecord(value) {
-  return typeof value === "object" && value !== null;
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function makeContracts(Type) {
@@ -112,7 +105,7 @@ async function startExpress() {
 async function startFastify() {
   const [{ default: Fastify }, { Type }] = await Promise.all([import("fastify"), import("typebox")]);
   const contracts = makeContracts(Type);
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, ajv: { customOptions: { coerceTypes: false } } });
   app.get("/json", async () => STATIC_RESPONSE);
   app.get("/params/:id", { schema: { params: contracts.params } }, async (request) => ({ ok: true, id: request.params.id }));
   app.post("/echo", { schema: { body: contracts.body } }, async (request) => ({ ...request.body, ok: true }));
@@ -139,19 +132,6 @@ async function startNest(platform) {
   };
 }
 
-async function startElysia() {
-  if (typeof Bun === "undefined") {
-    throw new Error("elysia-bun must be started by Bun");
-  }
-  const { Elysia } = await import("elysia");
-  const app = new Elysia()
-    .get("/json", () => STATIC_RESPONSE)
-    .get("/params/:id", ({ params }) => ({ ok: true, id: params.id }))
-    .post("/echo", ({ body }) => ({ ...body, ok: true }));
-  const server = Bun.serve({ hostname: HOST, port, fetch: app.fetch });
-  return { runtime: `bun ${Bun.version}`, close: () => server.stop(true) };
-}
-
 async function startElysiaContract() {
   if (typeof Bun === "undefined") {
     throw new Error("elysia-native-contract-bun must be started by Bun");
@@ -169,73 +149,11 @@ async function startSupaCloudElysia() {
   if (typeof Bun === "undefined") {
     throw new Error("supacloud-elysia-bun must be started by Bun");
   }
-  const [{ t }, { createApplication }] = await Promise.all([
-    import("elysia"),
-    import("@supacloud/elysia"),
+  const [{ createApplication }, { createCompiledModules }] = await Promise.all([
+    import("@supacloud/elysia"), import("./generated/application.ts"),
   ]);
-  // Keep this descriptor in the same shape as compiler output. Generated routes
-  // carry a positional invoker which calls the controller method with decoded
-  // parameters.
-  const routes = [
-    {
-      method: "GET",
-      path: "/json",
-      handler: "json",
-      invoker: async (controller, request) => {
-        if (!isRecord(controller)) throw new TypeError("Route controller is not an object");
-        const handler = controller["json"];
-        if (!isFunction(handler)) throw new TypeError("Route handler json is not callable");
-        return await Reflect.apply(handler, controller, [request]);
-      },
-      executionMode: "direct",
-      directInvoker: (controller) => controller.json(),
-    },
-    {
-      method: "GET",
-      path: "/params/:id",
-      handler: "params",
-      params: t.Object({ id: t.String() }),
-      invoker: async (controller, request) => {
-        if (!isRecord(controller)) throw new TypeError("Route controller is not an object");
-        const handler = controller["params"];
-        if (!isFunction(handler)) throw new TypeError("Route handler params is not callable");
-        return await Reflect.apply(handler, controller, [request.params?.["id"]]);
-      },
-      executionMode: "direct",
-      directInvoker: (controller, context) => controller.params(context.params?.["id"]),
-    },
-    {
-      method: "POST",
-      path: "/echo",
-      handler: "echo",
-      body: t.Object({ value: t.Number(), label: t.String() }),
-      invoker: async (controller, request) => {
-        if (!isRecord(controller)) throw new TypeError("Route controller is not an object");
-        const handler = controller["echo"];
-        if (!isFunction(handler)) throw new TypeError("Route handler echo is not callable");
-        return await Reflect.apply(handler, controller, [request.body]);
-      },
-      executionMode: "direct",
-      directInvoker: (controller, context) => controller.echo(context.body),
-    },
-  ];
-  const controller = {
-    json: () => STATIC_RESPONSE,
-    params: (id) => ({ ok: true, id }),
-    echo: (body) => ({ ...body, ok: true }),
-  };
-  const module = {
-    name: "framework-comparison",
-    createServices: () => ({ controller }),
-    controllers: [{
-      path: "",
-      serviceKey: "controller",
-      scope: "application",
-      routes,
-    }],
-  };
-  const app = createApplication({ modules: [module] });
-  const server = Bun.serve({ hostname: HOST, port, fetch: app.handle });
+  const app = createApplication({ modules: createCompiledModules() });
+  const server = Bun.serve({ hostname: HOST, port, fetch: app.fetch });
   return { runtime: `bun ${Bun.version}`, close: () => server.stop(true) };
 }
 
@@ -244,7 +162,6 @@ const starters = {
   fastify: startFastify,
   "nestjs-express": () => startNest("express"),
   "nestjs-node": () => startNest("node"),
-  "elysia-native-bare-bun": startElysia,
   "elysia-native-contract-bun": startElysiaContract,
   "supacloud-elysia-bun": startSupaCloudElysia,
 };
