@@ -16,7 +16,7 @@ import {
 } from "./realtime.js";
 import {
   createProcedureClient, createQueryAdapter,
-  type ProcedureSource, type ProceduresOf, type QueryAdapterOptions,
+  type ProcedureSource, type ProceduresOf, type QueryAdapter, type QueryAdapterOptions,
 } from "@supacloud/query";
 export {
   createProcedureClient, createQueryAdapter, createQueryKey, invalidateByTags,
@@ -1977,6 +1977,13 @@ function openSupabaseChannel(
   }) as unknown as SupaCloudRealtimeChannel;
 }
 
+interface SupaCloudClientBinding<TBase> {
+  withClient<T extends ProcedureSource>(apiClient: T): TBase & SupaCloudClientBinding<TBase> & {
+    procedures: ProceduresOf<T>;
+    queryAdapter(adapterOptions: QueryAdapterOptions): QueryAdapter<T>;
+  };
+}
+
 export function createSupaCloudClient<
   TClient extends SupabaseClient = SupabaseClient,
   TApiClient extends ProcedureSource | undefined = undefined,
@@ -2032,14 +2039,14 @@ export function createSupaCloudClient<
     },
   };
 
-  function withClient<T extends ProcedureSource>(apiClient: T) {
+  const withClient: SupaCloudClientBinding<typeof instance>["withClient"] = (apiClient) => {
     return {
       ...instance,
       procedures: createProcedureClient(apiClient),
       queryAdapter: (adapterOptions: QueryAdapterOptions) => createQueryAdapter(apiClient, adapterOptions),
       withClient,
     };
-  }
+  };
 
   return {
     ...instance,

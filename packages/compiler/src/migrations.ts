@@ -179,7 +179,9 @@ async function createMigrationProgram(
   rootDir?: string,
 ): Promise<ts.Program> {
   const compilerOptions = (await migrationCompilerOptions(rootDir));
-  return (await ts.createProgram(fileNames, compilerOptions, { cwd: rootDir, sources: sourceOverrides }));
+  return (await ts.createProgram(fileNames, compilerOptions, {
+    ...(rootDir === undefined ? {} : { cwd: rootDir }), sources: sourceOverrides,
+  }));
 }
 
 function routeResponseProperties(object: ts.ObjectLiteralExpression): {

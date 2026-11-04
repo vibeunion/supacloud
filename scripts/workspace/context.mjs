@@ -1,4 +1,4 @@
-import * as ts from "../../packages/compiler/src/typescript.ts";
+import * as ts from "../../packages/db/src/typescript.ts";
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { graphReport, readWorkspace, affectedReport } from './model.mjs';

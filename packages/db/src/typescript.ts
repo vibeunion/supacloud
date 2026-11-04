@@ -39,9 +39,19 @@ export function flattenDiagnosticMessageText(text: string, _newline = "\n"): str
 
 /** A program owns its API process unless it belongs to an incremental session. */
 export class Program implements AsyncDisposable {
-  private constructor(readonly native: NativeProgram, readonly api: API,
-    private readonly sources: Map<string, SourceFile>, private readonly owned: boolean,
-    private readonly snapshot?: Snapshot) {}
+  readonly native: NativeProgram;
+  readonly api: API;
+  private readonly sources: Map<string, SourceFile>;
+  private readonly owned: boolean;
+  private readonly snapshot: Snapshot | undefined;
+  private constructor(native: NativeProgram, api: API,
+    sources: Map<string, SourceFile>, owned: boolean, snapshot?: Snapshot) {
+    this.native = native;
+    this.api = api;
+    this.sources = sources;
+    this.owned = owned;
+    this.snapshot = snapshot;
+  }
   static async load(native: NativeProgram, api: API, owned = false, snapshot?: Snapshot): Promise<Program> {
     const sources = new Map<string, SourceFile>();
     for (const path of await native.getSourceFileNames()) {

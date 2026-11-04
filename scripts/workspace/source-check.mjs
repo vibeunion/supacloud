@@ -1,4 +1,4 @@
-import * as ts from "../../packages/compiler/src/typescript.ts";
+import * as ts from "../../packages/db/src/typescript.ts";
 import { fileURLToPath } from 'node:url';
 import { WORKSPACE_BOUNDARY_RULES } from '../check_workspace_boundaries.ts';
 import { readJson, readWorkspace } from './model.mjs';

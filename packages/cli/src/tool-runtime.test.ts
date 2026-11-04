@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as ts from "../../compiler/src/typescript";
+import * as ts from "@supacloud/db/typescript";
 import {
     parseToolArguments,
     registerTool,
@@ -77,7 +77,7 @@ test("public declarations retain strict callback inference for detached NodeNext
         expect(config.error).toBeUndefined();
         const parsed = (await ts.parseJsonConfigFileContent(config.config, ts.sys, join(import.meta.dir, "..")));
         expect(parsed.errors).toEqual([]);
-        expect(parsed.fileNames).toEqual([join(import.meta.dir, "tool-runtime.ts")]);
+        expect(parsed.fileNames.map(String)).toEqual([join(import.meta.dir, "tool-runtime.ts")]);
         await using declarations = (await ts.createProgram(parsed.fileNames, {
             ...parsed.options,
             skipLibCheck: false,
@@ -93,8 +93,6 @@ test("public declarations retain strict callback inference for detached NodeNext
         const setup = `import {registerTool, stringEnum, type ToolServer} from "@supacloud/cli/tool-runtime";
 const server: ToolServer = {tool() {}};
 const schema = {action: stringEnum(["read"])};`;
-        const host = ts.createCompilerHost({});
-        const read = host.readFile;
         const source = `${setup}
 registerTool(server, "read", "", schema, async ({action}) => {
     const exact: "read" = action;
@@ -102,7 +100,6 @@ registerTool(server, "read", "", schema, async ({action}) => {
 });
 registerTool(server, "bad-input", "", schema, async (_args: {action: "write"}) => ({content: []}));
 registerTool(server, "bad-result", "", schema, async () => ({content: [{type: "image"}]}));`;
-        host.readFile = path => path === consumer ? source : read(path);
         await using program = (await ts.createProgram([consumer], {
             target: ts.ScriptTarget.ES2022,
             module: ts.ModuleKind.NodeNext,
@@ -110,7 +107,7 @@ registerTool(server, "bad-result", "", schema, async () => ({content: [{type: "i
             strict: true,
             noEmit: true,
             types: [],
-        }, host));
+        }, { sources: new Map([[consumer, source]]) }));
         const diagnostics = (await ts.getPreEmitDiagnostics(program));
         expect(diagnostics.map(diagnostic => diagnostic.code).sort()).toEqual([2322, 2345]);
         const invalidStart = source.indexOf('registerTool(server, "bad-input"');

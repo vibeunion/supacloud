@@ -1,4 +1,4 @@
-import * as ts from "../../packages/compiler/src/typescript.ts";
+import * as ts from "../../packages/db/src/typescript.ts";
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

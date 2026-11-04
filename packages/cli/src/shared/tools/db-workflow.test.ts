@@ -3,7 +3,7 @@ import { SQL } from "bun";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as ts from "../../../../compiler/src/typescript";
+import * as ts from "@supacloud/db/typescript";
 import { runDbWorkflow, type DbWorkflowOptions } from "./db-workflow";
 import { authorizeExecution, executionMode } from "../execution-policy";
 import { resolveSupaCloudContext } from "../context";

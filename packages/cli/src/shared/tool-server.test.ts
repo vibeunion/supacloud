@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { Type } from "typebox";
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import * as ts from "../../../compiler/src/typescript";
+import * as ts from "@supacloud/db/typescript";
 import { runCli } from "./cli";
 import { decodedSchema, optional, stringEnum, withDescription, type ToolArguments, type ToolSchema } from "./schema";
 import { registerTool, type ToolCallback, type ToolInvocation, type ToolResult, type ToolServer, type ToolTextContent } from "./tool-server";
