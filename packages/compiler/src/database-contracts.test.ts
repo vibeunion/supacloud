@@ -39,7 +39,7 @@ test("single entry generates native read types, decoders and source/migration dr
     await writeFixtureProject(root, { "migrations/001.sql": "CREATE TABLE public.orders(id text);" });
     expect((await generateDatabaseContracts(options, true)).upToDate).toBe(false);
     await writeFixtureProject(root, { "src/orders.graphql": "query Orders { missing }" });
-    await expect(generateDatabaseContracts(options)).rejects.toThrow();
+    expect(await generateDatabaseContracts(options).catch((error: unknown) => error)).toBeInstanceOf(Error);
     expect(await readFile(join(root, "generated/database.ts"), "utf8")).toBe(barrel);
   } finally {
     await rm(root, { recursive: true, force: true });

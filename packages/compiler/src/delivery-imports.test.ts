@@ -40,7 +40,7 @@ test("rejects escaped, exported, reassigned, side-effecting and open import help
       export const run = () => load("node:fs");`,
     `${wrapper} export const run = () => load("node:fs"); export const other = () => import(process.env.MODULE);`,
     `${wrapper} load("node:fs");`,
-  ]) await expect(convert(source)).rejects.toThrow("Computed module loading");
+  ]) expect(await convert(source).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Computed module loading") });
 });
 
 test("does not rewrite shadowed bindings and preserves files without computed imports", async () => {

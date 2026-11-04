@@ -302,14 +302,14 @@ const generic: DetailQuery = decode("Detail", wire);
 
 test.each(["any", "Date", "() => string", "[string, ...number[]]", "Record<number, string>"])(
   "validator generation refuses unsafe or unrepresentable result type %s", async (type) => {
-    await expect(renderGraphqlValidators(`export type UnsafeQuery = ${type};`, ["Unsafe"])).rejects.toThrow("Unsupported GraphQL result wire type");
+    expect(await renderGraphqlValidators(`export type UnsafeQuery = ${type};`, ["Unsafe"]).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Unsupported GraphQL result wire type") });
   },
 );
 
 test("validator generation reports missing or invalid operation types", async () => {
-  await expect(renderGraphqlValidators("export type Other = string;", ["Missing"])).rejects.toThrow("Missing generated operation type");
-  await expect(renderGraphqlValidators("export type BadQuery = Missing;", ["Bad"])).rejects.toThrow("Generated GraphQL types cannot be validated");
-  await expect(renderGraphqlValidators(
+  expect(await renderGraphqlValidators("export type Other = string;", ["Missing"]).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Missing generated operation type") });
+  expect(await renderGraphqlValidators("export type BadQuery = Missing;", ["Bad"]).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Generated GraphQL types cannot be validated") });
+  expect(await renderGraphqlValidators(
     "export type GraphqlQueryResults = string; export type ValidQuery = string;", ["Valid"],
-  )).rejects.toThrow("conflicts with the generated result registry");
+  ).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("conflicts with the generated result registry") });
 });

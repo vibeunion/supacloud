@@ -55,8 +55,10 @@ export class Program implements AsyncDisposable {
   }
   static async load(native: NativeProgram, api: API, owned = false, snapshot?: Snapshot): Promise<Program> {
     const sources = new Map<string, SourceFile>();
-    for (const path of await native.getSourceFileNames()) {
-      const source = await native.getSourceFile(path);
+    // Let the native client batch independent AST requests into one RPC round trip.
+    const loaded = await Promise.all((await native.getSourceFileNames()).map(async path =>
+      [path, await native.getSourceFile(path)] as const));
+    for (const [path, source] of loaded) {
       if (source) sources.set(resolve(path), source);
     }
     return new Program(native, api, sources, owned, snapshot);

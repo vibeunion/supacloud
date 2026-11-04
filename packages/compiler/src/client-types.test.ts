@@ -54,7 +54,6 @@ test("generated client requires inherited path parameters and a decoder for type
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0",
-      baseUrl: root,
       paths: { "typebox": [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -123,7 +122,7 @@ test("generated client exposes query and mutation procedures with explicit idemp
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-      ignoreDeprecations: "6.0", baseUrl: root,
+      ignoreDeprecations: "6.0",
       paths: { typebox: [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -164,7 +163,7 @@ test("generated client enforces route idempotency without a command binding", as
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-      ignoreDeprecations: "6.0", baseUrl: root,
+      ignoreDeprecations: "6.0",
       paths: { typebox: [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -236,7 +235,7 @@ test("feature transition route bindings carry command governance into generated 
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-      ignoreDeprecations: "6.0", baseUrl: root,
+      ignoreDeprecations: "6.0",
       paths: { typebox: [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -345,7 +344,6 @@ test("generated client and OpenAPI honor the enhanced strict baseline with schem
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0",
-      baseUrl: root,
       paths: { "typebox": [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -390,7 +388,7 @@ test("generated client infers Type.Module recursive request and response contrac
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-      ignoreDeprecations: "6.0", baseUrl: root,
+      ignoreDeprecations: "6.0",
       paths: { typebox: [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -441,7 +439,7 @@ test("generated client uses encoded request types and decoded response types for
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-      ignoreDeprecations: "6.0", baseUrl: root,
+      ignoreDeprecations: "6.0",
       paths: { typebox: [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -486,7 +484,7 @@ test("generated client requires params when a params schema exists without a pat
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-      ignoreDeprecations: "6.0", baseUrl: root,
+      ignoreDeprecations: "6.0",
       paths: { "typebox": [typeboxPath] },
     }));
     expect((await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
@@ -516,7 +514,7 @@ test("changing the shared route contract rejects stale callers without handwritt
         strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
         noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
-        ignoreDeprecations: "6.0", baseUrl: root,
+        ignoreDeprecations: "6.0",
         paths: { "typebox": [typeboxPath] },
       }));
       return (await ts.getPreEmitDiagnostics(program)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
