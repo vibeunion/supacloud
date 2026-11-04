@@ -46,29 +46,4 @@ describe("remote dev tools", () => {
         await expect(tool!({ action: "status" })).rejects.toThrow("forbidden for production");
     });
 
-    test("generates Drizzle migrations and previews SupaCloud apply without writing by default", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-drizzle-"));
-        await writeFile(join(root, "drizzle.config.ts"), "export default {}\n");
-        const commands: string[] = [];
-        const databaseCalls: any[] = [];
-        let tool: ((args: any) => Promise<any>) | undefined;
-        registerRemoteDevTools({ tool(_name, _description, _schema, handler) { tool = handler; } }, {
-            cwd: root,
-            projectRef: "test-project",
-            environment: "test",
-            execute: async (command) => {
-                commands.push(command);
-                return { exitCode: 0, stdout: "generated", stderr: "" };
-            },
-            runDatabase: async (args) => {
-                databaseCalls.push(args);
-                return { content: [{ type: "text", text: "dry-run ok" }] };
-            },
-        });
-        const response = await tool!({ action: "migrate", project_dir: root });
-        expect(response.isError).not.toBe(true);
-        expect(commands).toEqual(["drizzle-kit"]);
-        expect(databaseCalls).toEqual([{ action: "push_migrations", dir: "supabase/migrations", dry_run: true, strict: true }]);
-        expect(response.content[0].text).toContain('"applied": false');
-    });
 });

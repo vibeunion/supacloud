@@ -86,7 +86,9 @@
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/commands": "file:../commands",
     "@supacloud/delivery": "file:../delivery",
-    "@graphql-tools/utils": "^12.0.4"
+    "@graphql-tools/utils": "^12.0.4",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   },
   "engines": {
     "bun": ">=1.4.4"

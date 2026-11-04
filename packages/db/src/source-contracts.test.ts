@@ -10,7 +10,7 @@ const roots: string[] = [];
 const config: DatabaseSourcesConfig = {
   version: 1, schema: ["db/schema.ts"], functions: "db/functions", migrations: "migrations",
   contracts: "db/contracts", audit: "output/database-audit", consumers: ["src", "scripts", "tests"],
-  auditConsumers: [], role: "service_role",
+  auditConsumers: [], trustedHosts: ["src/host"], role: "service_role",
 };
 const source = `CREATE FUNCTION public.lookup(p_id bigint, p_values numeric[] DEFAULT '{}')
 RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;

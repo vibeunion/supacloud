@@ -1,3 +1,4 @@
+import { compileModel } from "../../db/src/model";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -170,10 +171,11 @@ native("generated review task lifecycle", () => {
     }
     await symlink(resolve(import.meta.dir, ".."), join(root, "node_modules/@supacloud/elysia"));
     await symlink(resolve(import.meta.dir, "../../supacloud-js"), join(root, "node_modules/@supacloud/js"));
-    for (const name of ["drizzle-orm", "drizzle-kit"]) {
+    for (const name of ["@zenstackhq"]) {
       await rm(join(root, "node_modules", name), { recursive: true, force: true });
       await symlink(resolve(import.meta.dir, "../../db/node_modules", name), join(root, "node_modules", name));
     }
+    await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
     const sources = await databaseSources(root, "generate");
     if (!sources.ok) throw new Error(JSON.stringify(sources.findings));
     const options = compileOptionsFromConfig(await loadSupacloudConfig(root), root);

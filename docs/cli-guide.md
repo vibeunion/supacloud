@@ -151,11 +151,6 @@ and the existing `SUPACLOUD_SSH_*` settings. A repository may add a `dev` sectio
     "compileRoot": ".",
     "compileOutDir": "generated",
     "compileStrict": true,
-    "database": {
-      "drizzleConfig": "drizzle.config.ts",
-      "migrationsDir": "supabase/migrations",
-      "strict": true
-    },
     "excludes": ["node_modules", ".git", ".env*", "dist"]
   }
 }
@@ -168,13 +163,18 @@ explicit (`dev sync --target db`); file watching does not execute migrations
 automatically. When `dev.compile` is enabled, `@supacloud/compiler` runs before
 sync; generated factories and `app.manifest.json` must be written inside the
 selected sync tree or be included by the project target. Compilation errors stop
-the sync and reload. `dev migrate` runs `drizzle-kit generate`, performs a
-SupaCloud migration dry-run, and only applies when `--apply` is explicitly set:
+the sync and reload. Migration candidates are generated locally and reviewed before
+using the existing SupaCloud database plan/apply workflow:
 
 ```bash
-supacloud --env test dev migrate
-supacloud --env test dev migrate --apply
+bun run db:generate
+bun run db:diff -- --candidate db/migration-candidates/change.sql
 ```
+
+Set `SUPACLOUD_MODEL_DATABASE_URL` explicitly to a local/shadow database. Candidate
+generation never applies SQL. Promote reviewed SQL to the existing migration
+directory, then use `supacloud db plan` and `supacloud db apply` with the selected
+environment and exact approved digest. See [upgrade steps](architecture/zenstack-upgrade.md).
 
 For executable application delivery, bind the application in the selected profile
 or repository-root `supacloud.json`. Static-only sites omit `application` entirely.
@@ -317,7 +317,7 @@ never returns the connection URL. See
 
 `db context` is a read-only, structured context projection for AI agents. It
 returns only the selected database modules or object and includes each
-maintained source/test path, the Drizzle-versus-SQL ownership boundary,
+maintained source/test path, the ZModel-versus-SQL ownership boundary,
 protected/generated paths, and focused verification commands. It does not
 read or rewrite the historical migration directory.
 

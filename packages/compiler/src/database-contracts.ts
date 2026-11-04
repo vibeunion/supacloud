@@ -13,8 +13,8 @@ export interface DatabaseContractsOptions {
   outDir: string;
   /** Official PostgREST snapshot. Omit when the project does not use PostgREST. */
   postgrestTypes?: string;
-  /** Drizzle query-builder module. Omit when the project does not use Drizzle. */
-  drizzleSchema?: string;
+  /** ZenStack query-builder module. Omit when the project does not use ZenStack. */
+  modelSchema?: string;
   /** Explicit identity/role label for reviewing snapshot provenance. Not an authorization proof. */
   role: string;
   /** Role-scoped pg_graphql snapshot exported by graphql-schema. Omit when GraphQL is unused. */
@@ -33,7 +33,7 @@ function importPath(out: string, path: string): string {
 
 export function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Expected database contracts configuration");
-  const allowed = ["rootDir", "outDir", "postgrestTypes", "drizzleSchema", "role", "graphql", "migrations"];
+  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "role", "graphql", "migrations"];
   if (Object.keys(value).some((name) => !allowed.includes(name))) throw new TypeError("Unknown database contracts option");
   const field = (name: string) => {
     const result: unknown = Reflect.get(value, name);
@@ -45,10 +45,10 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
     return field(name);
   };
   const postgrestTypes = optionalPath("postgrestTypes");
-  const drizzleSchema = optionalPath("drizzleSchema");
+  const modelSchema = optionalPath("modelSchema");
   const graphqlPresent = Object.hasOwn(value, "graphql");
-  if (!postgrestTypes && !drizzleSchema && !graphqlPresent) {
-    throw new TypeError("Database contracts require postgrestTypes, drizzleSchema, or graphql");
+  if (!postgrestTypes && !modelSchema && !graphqlPresent) {
+    throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
   }
   let graphql: GraphqlOptions | undefined;
   if (graphqlPresent) {
@@ -63,7 +63,7 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
   return {
     rootDir: resolve(directory, field("rootDir")), outDir: resolve(directory, field("outDir")),
     ...(postgrestTypes ? { postgrestTypes: resolve(directory, postgrestTypes) } : {}),
-    ...(drizzleSchema ? { drizzleSchema: resolve(directory, drizzleSchema) } : {}),
+    ...(modelSchema ? { modelSchema: resolve(directory, modelSchema) } : {}),
     role: field("role"),
     ...(graphql ? { graphql } : {}),
     migrations: migrations.map((file) => resolve(directory, file)),
@@ -88,9 +88,9 @@ async function assertPostgrestSnapshot(path: string): Promise<void> {
 export async function generateDatabaseContracts(options: DatabaseContractsOptions, check = false) {
   const rootDir = resolve(options.rootDir), outDir = resolve(options.outDir);
   const postgrestTypes = options.postgrestTypes ? resolve(rootDir, options.postgrestTypes) : undefined;
-  const drizzleSchema = options.drizzleSchema ? resolve(rootDir, options.drizzleSchema) : undefined;
-  if (!postgrestTypes && !drizzleSchema && !options.graphql) {
-    throw new TypeError("Database contracts require postgrestTypes, drizzleSchema, or graphql");
+  const modelSchema = options.modelSchema ? resolve(rootDir, options.modelSchema) : undefined;
+  if (!postgrestTypes && !modelSchema && !options.graphql) {
+    throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
   }
   if (postgrestTypes) await assertPostgrestSnapshot(postgrestTypes);
   const artifacts = options.graphql ? await renderGraphql({ rootDir, outDir, graphql: options.graphql }) : { diagnostics: [], files: {} };
@@ -103,14 +103,14 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
     inputs[relative(rootDir, absolute).replaceAll("\\", "/")] = hash(await readFile(absolute, "utf8"));
   };
   if (postgrestTypes) await addInput(postgrestTypes);
-  if (drizzleSchema) {
-    await addInput(drizzleSchema);
-    // Track local type imports too: a split Drizzle schema must invalidate the contract.
-    await using drizzleProgram = (await ts.createProgram([drizzleSchema], {
+  if (modelSchema) {
+    await addInput(modelSchema);
+    // Track local type imports too: a split ZenStack schema must invalidate the contract.
+    await using modelProgram = (await ts.createProgram([modelSchema], {
       noEmit: true, moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext,
       target: ts.ScriptTarget.ES2022, types: [], skipLibCheck: true,
     }));
-    for (const source of drizzleProgram.getSourceFiles()) {
+    for (const source of modelProgram.getSourceFiles()) {
       if (!source.isDeclarationFile && !source.fileName.includes("/node_modules/")) await addInput(source.fileName);
     }
   }
@@ -124,7 +124,7 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
     barrel.push(`export type { Database } from ${JSON.stringify(importPath(outDir, postgrestTypes))};`);
     barrel.push('export type { QueryData, QueryResult, QueryError } from "@supabase/supabase-js";');
   }
-  if (drizzleSchema) barrel.push(`export type DrizzleSchema = typeof import(${JSON.stringify(importPath(outDir, drizzleSchema))});`);
+  if (modelSchema) barrel.push(`export type ModelSchema = typeof import(${JSON.stringify(importPath(outDir, modelSchema))});`);
   if (options.graphql) barrel.push('export * from "./graphql";');
   barrel.push("");
   const files: Record<string, string> = { ...artifacts.files, "database.ts": barrel.join("\n") };

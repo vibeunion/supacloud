@@ -206,7 +206,7 @@
     {
       "name": "ContextPack",
       "kind": "type",
-      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"drizzle-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"zmodel-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
     },
     {
       "name": "ContractManifest",
@@ -281,7 +281,7 @@
     {
       "name": "DatabaseContractsOptions",
       "kind": "type",
-      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    drizzleSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    migrations: readonly string[];\n}"
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    migrations: readonly string[];\n}"
     },
     {
       "name": "DatabaseGovernanceOptions",
@@ -1129,11 +1129,6 @@
       "signature": "export interface RuntimeBindingsResult {\n    projection: RuntimeBindingsProjection;\n    diagnostics: EnvironmentBindingDiagnostic[];\n}"
     },
     {
-      "name": "scanDrizzleSql",
-      "kind": "value",
-      "signature": "export declare function scanDrizzleSql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Promise<Diagnostic[]>;"
-    },
-    {
       "name": "scanGeneratedArtifacts",
       "kind": "value",
       "signature": "export declare function scanGeneratedArtifacts(artifacts: Record<string, string | undefined>, strict?: boolean): Promise<Diagnostic[]>;"
@@ -1142,6 +1137,11 @@
       "name": "scanProductionSource",
       "kind": "value",
       "signature": "export declare function scanProductionSource(options: TypeSafetyScanOptions): Promise<Diagnostic[]>;"
+    },
+    {
+      "name": "scanQuerySql",
+      "kind": "value",
+      "signature": "export declare function scanQuerySql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Promise<Diagnostic[]>;"
     },
     {
       "name": "schemaFromSource",

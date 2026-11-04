@@ -2,7 +2,6 @@ export {
   defineDatabaseModule,
   type DatabaseModule,
   type DatabaseModuleOptions,
-  type DrizzleTableLike,
   type FunctionDecl,
   type GrantDecl,
   type PolicyDecl,

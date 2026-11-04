@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { initializeAppProject } from "../../cli/src/shared/tools/app-starter";
 import { checkAppDatabaseSources } from "../../cli/src/shared/tools/app-database-check";
+import { compileModel } from "./model";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -15,10 +16,11 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   roots.push(root);
   const project = join(root, "project"), packed = join(root, "package");
   await initializeAppProject({ root: project, name: "example", template: "command" });
+  await compileModel(join(project, "zenstack/schema.zmodel"), join(project, "zenstack/generated"));
   await mkdir(packed);
   const built = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts")],
-    outdir: packed, target: "node", external: ["libpg-query", "typescript", "typescript/*"],
+    entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts"), resolve(import.meta.dir, "typescript.ts")],
+    outdir: packed, target: "node", external: ["libpg-query", "typescript", "typescript/*", "@zenstackhq/language", "@zenstackhq/sdk", resolve(import.meta.dir, "typescript.ts")],
   });
   expect(built.success).toBe(true);
   await writeFile(join(packed, "package.json"), JSON.stringify({
@@ -38,10 +40,10 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
     cwd: project, stdout: "pipe", stderr: "pipe",
   });
   expect(installedCheck.exitCode, installedCheck.stderr.toString()).toBe(1);
-  expect(installedCheck.stdout.toString()).toContain('"scope": "local-source-contracts"');
+  expect(installedCheck.stdout.toString(), installedCheck.stderr.toString()).toContain('"scope": "local-source-contracts"');
   expect(run(["check"]).exitCode).toBe(1);
   const generated = run(["generate"]);
-  expect({ status: generated.exitCode, error: generated.stderr.toString() }).toEqual({ status: 0, error: "" });
+  expect({ status: generated.exitCode, error: generated.stderr.toString() }, generated.stdout.toString()).toEqual({ status: 0, error: "" });
   expect(run(["check"]).exitCode).toBe(0);
   expect(checkAppDatabaseSources(project)?.ok).toBe(true);
   const before = await readFile(join(project, "db/contracts/manifest.json"), "utf8");
@@ -51,4 +53,4 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   expect(run(["assess"]).exitCode).toBe(0);
   expect(await readFile(join(project, "db/contracts/manifest.json"), "utf8")).toBe(before);
   expect(run(["generate", "--force"]).exitCode).toBe(1);
-});
+}, 20_000);

@@ -7,29 +7,16 @@ SQL that must bind to a target-specific application ID, HTTPS URL or resource
 name. One-off account transfers and production data cleanup remain separately
 reviewed operations.
 
-## Drizzle v1 Boundary
+## Model and migration boundary
 
-Reviewed against the Drizzle v1 PostgreSQL documentation on 2026-09-08:
-official documentation repository commit
-`dae09afd99baa6362ece434cfa7bab60ef4b8692`.
+ZModel owns the maintained structure; `supacloud-model diff` emits SQL candidates.
+Review and promote forward SQL into the existing migration directory. SupaCloud
+remains the only executor and applied-migration ledger. Do not run Prisma migrate
+dev/deploy or ZenStack db push against that same history.
 
-- [Upgrade to v1](https://orm.drizzle.team/docs/upgrade-v1):
-  v1 removes the journal file and groups SQL and snapshots in migration folders.
-  Do not run `drizzle-kit up` automatically on an application's existing history.
-- [Custom migrations](https://orm.drizzle.team/docs/kit-custom-migrations):
-  `drizzle-kit generate --custom` is the extension point for custom SQL.
-- [Migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate):
-  migration execution reads applied history and supports separate configuration
-  files for different deployment targets.
-
-Those documents do not define this parameter-rendering API. This is a SupaCloud
-extension, not a claim that Drizzle automatically reconciles account changes.
-The renderer accepts `20260908100000_binding/migration.sql` as well as legacy
-flat SQL filenames. It neither discovers nor changes snapshots, migration
-identities, order, or metadata. Call it on a deployment copy, never write its
-output over generated source SQL. When SupaCloud is the executor, continue using
-its canonical applied-migration ledger; do not additionally execute
-`drizzle-kit migrate` against that same migration stream.
+The renderer accepts explicitly selected nested `migration.sql` and flat SQL
+files. It does not discover or alter model sources, snapshots, migration IDs or
+order. Render only a deployment copy; never overwrite committed source SQL.
 
 ## Usage
 
@@ -110,7 +97,7 @@ historical reconciliation must use target-specific reviewed evidence.
 
 The CLI does not automatically enable this API. An application deployment
 adapter must supply the selected sources and target, then use its existing
-executor. In particular, this API does not add recursive Drizzle-folder discovery
+executor. In particular, this API does not add recursive migration-folder discovery
 to the CLI's legacy flat-directory `push_migrations` command.
 
 ## Acceptance

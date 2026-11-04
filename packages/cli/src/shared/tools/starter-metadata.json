@@ -22,11 +22,15 @@
     },
     "db": {
       "version": "0.20.5",
-      "peerDependencies": {
-        "drizzle-orm": "1.0.0-rc.5-5935859"
+      "dependencies": {
+        "@zenstackhq/orm": "3.10.0",
+        "@zenstackhq/schema": "3.10.0",
+        "@zenstackhq/plugin-policy": "3.10.0"
       },
       "devDependencies": {
-        "drizzle-kit": "1.0.0-rc.5-5935859"
+        "@zenstackhq/cli": "3.10.0",
+        "prisma": "6.19.3",
+        "pg": "8.23.1"
       }
     },
     "sdk": {

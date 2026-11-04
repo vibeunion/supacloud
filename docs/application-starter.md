@@ -60,7 +60,7 @@ does not bypass overwrite protection.
 
 The explicit `--template command` reference contains:
 
-- Drizzle table declarations and inferred row types, separate migration/introspection
+- ZModel table declarations and inferred row types, separate migration/introspection
   candidate outputs, a database-source contract gate and live Catalog reconciliation
   in default check/build;
 - three separated framework packages, TypeScript configuration and strict compiler capabilities;
@@ -80,8 +80,8 @@ publication, `bun run scripts/check_app_starter.ts` tests locally packed artifac
 together; this is not evidence that those versions already exist on npm.
 
 The command template includes database tooling; the minimal template does not
-install Drizzle or require `db:generate`. For the command template, `db:generate`
-is an explicit first-use setup step after installation; commit `db/contracts/`.
+install ZenStack or require `db:generate`. For the command template, `db:generate`
+is an explicit first-use setup step after installation; commit `zenstack/generated/` and `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
 New command projects generate `db/modules.ts` at the compiler's default
 `databaseGovernance.moduleFile` path; the generated config fixes `mode` to
@@ -98,7 +98,7 @@ assessment, source boundaries, precision and migration adoption.
 
 Database First is the only GraphQL server-schema model when GraphQL is explicitly
 selected. The command starter does not generate a GraphQL schema or query. Change
-Drizzle/SQL declarations, migrate, then export an intended-role database snapshot
+ZModel/SQL declarations, migrate, then export an intended-role database snapshot
 before adding a Query Contract. Do not hand-edit exported schemas or add GraphQL
 resolver classes. After database/grant changes and before promotion, use
 `graphql-schema --check` against the selected database, then refresh intentionally

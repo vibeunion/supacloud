@@ -1,8 +1,8 @@
 export const STARTER_REVIEW_QUERY = `import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ReviewRow } from "../../db/schema";
 
-// This read projection uses SQL column names shared with the Drizzle source.
-// Do not expose camelCase Drizzle property names as PostgREST column names.
+// This read projection uses SQL column names shared with the model source.
+// Do not expose camelCase model property names as PostgREST column names.
 export type ReviewSummary = Pick<ReviewRow, "id" | "state" | "version">;
 export type ReviewReadDatabase = {
   public: {

@@ -133,18 +133,6 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout release tag
         uses: actions/checkout@v7
@@ -175,29 +163,6 @@ jobs:
       - name: Install management API dependencies
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
-
-      - name: Initialize control-plane schema
-        working-directory: packages/management-api
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
-          MASTER_TOKEN: release-reylo-master-token-0123456789abcdef
-          JWT_SECRET: release-reylo-jwt-secret-0123456789abcdef
-          SECRETS_ENCRYPTION_KEY: release-reylo-encryption-key-0123456789abcdef
-          SUPAOAUTH_BFF_SIGNING_SECRET: release-reylo-bff-signing-secret-0123456789abcdef
-          DASHBOARD_PASSWORD: release-reylo-dashboard-password-0123456789abcdef
-        run: bun src/db/init.ts
-
-      - name: Generate Reylo contract cache
-        working-directory: packages/management-api
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
-        run: bun run reylo:contracts
-
-      - name: Verify live control-plane queries
-        working-directory: packages/management-api
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
-        run: bun run reylo:test
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime

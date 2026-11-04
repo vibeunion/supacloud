@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@supacloud/db/typescript";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
-import { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
+import { scanQuerySql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
 
 const DEFAULT_EXCLUDES = [
@@ -50,13 +50,13 @@ export async function scanGeneratedArtifacts(
       ts.ScriptKind.TS,
     ));
     for (const node of descendantsOfKind(sourceFile, isAnyKeyword)) {
-      diagnostics.push(makeDiagnostic(
+      diagnostics.push({ ...makeDiagnostic(
         "generated-any",
         `生成产物 ${file} 包含 any；严格生成模式要求使用 unknown、具体接口或泛型约束。`,
         sourceFile,
         node,
         strict,
-      ));
+      ), file });
     }
   }
   return diagnostics;
@@ -155,7 +155,7 @@ export async function scanProductionSource(options: TypeSafetyScanOptions): Prom
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), rootDir,
       options.allowAlternativeLibraries === undefined ? {} : { allowAlternativeLibraries: options.allowAlternativeLibraries },
     )));
-    diagnostics.push(...(await scanDrizzleSql(
+    diagnostics.push(...(await scanQuerySql(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
     )));
     const scanner = ts.createScanner(false, sourceFile.languageVariant, sourceFile.text);

@@ -109,7 +109,7 @@ with permission to race arbitrary filesystem operations.
 The mandatory check is read-only and fails on drift. Per-producer release-please
 JSON extra-file updates keep embedded package versions aligned with release PRs.
 The checker validates those mappings too. Changes to external dependency policies
-(e.g. RxJS or Drizzle constraints) require a reviewed sync; version updates alone
+(e.g. RxJS or ZModel constraints) require a reviewed sync; version updates alone
 do not silently rewrite them. Existing release tooling, permissions and publication
 conditions remain in place. This does not force a new CLI release for every producer
 release; the CLI embeds the tuple in its next normal build/release.

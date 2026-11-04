@@ -21,24 +21,6 @@ describe('defineDatabaseModule', () => {
     expect(module.tables).toEqual(['public.cases', 'app.orders']);
   });
 
-  test('drizzle 形表对象提取 schema.name', () => {
-    const casesTable = { _: { name: 'cases', schema: 'public' } };
-    const module = defineDatabaseModule({
-      name: 'cases',
-      tables: [casesTable],
-    });
-    expect(module.tables).toEqual(['public.cases']);
-  });
-
-  test('drizzle 形表对象无 schema 时默认 public', () => {
-    const profilesTable = { _: { name: 'profiles' } };
-    const module = defineDatabaseModule({
-      name: 'iam',
-      tables: [profilesTable],
-    });
-    expect(module.tables).toEqual(['public.profiles']);
-  });
-
   test('声明数组原样透传', () => {
     const module = defineDatabaseModule({
       name: 'cases',

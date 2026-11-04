@@ -70,11 +70,14 @@
   "overrides": {
     "@supacloud/contracts": "file:../contracts",
     "@graphql-tools/utils": "^12.0.4",
-    "@whatwg-node/promise-helpers": "2.0.0"
+    "@whatwg-node/promise-helpers": "2.0.0",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.118.0",
-    "drizzle-orm": "1.0.0-rc.5-5935859",
-    "@types/bun": "^1.4.4"
+    "@types/bun": "^1.4.4",
+    "@zenstackhq/schema": "3.10.0",
+    "@zenstackhq/orm": "3.10.0"
   }
 }

@@ -22,7 +22,7 @@ export async function buildReferenceUpgradeArchive(directory: string, signal: Ab
 ALTER TABLE public.starter_application ADD COLUMN delivery_revision integer NOT NULL DEFAULT 2;
 ALTER TABLE public.starter_attachment_results ADD COLUMN writer_revision text NOT NULL DEFAULT 'v1';
 `],
-    ["src/reference-revision.ts", `import { SQL } from "bun";
+    ["src/host/reference-revision.ts", `import { SQL } from "bun";
 export async function requireReferenceRevision(signal: AbortSignal) {
   signal.throwIfAborted();
   const socket = process.env["DATABASE_SOCKET_PATH"];
@@ -60,14 +60,14 @@ export async function requireReferenceRevision(signal: AbortSignal) {
   } finally { await pool.close({ timeout: 5 }); }
 }
 `],
-    ["src/delivery-host-v2.ts", `import { createDeliveryApplication as original } from "./delivery-host";
+    ["src/host/delivery-host-v2.ts", `import { createDeliveryApplication as original } from "../delivery-host";
 import { requireReferenceRevision } from "./reference-revision";
 export async function createDeliveryApplication(...args: Parameters<typeof original>) {
   await requireReferenceRevision(args[1].signal);
   return original(...args);
 }
 `],
-    ["src/delivery-worker-v2.ts", `import { createDeliveryWorker as original } from "./delivery-worker";
+    ["src/host/delivery-worker-v2.ts", `import { createDeliveryWorker as original } from "../delivery-worker";
 import { requireReferenceRevision } from "./reference-revision";
 export async function createDeliveryWorker(...args: Parameters<typeof original>) {
   await requireReferenceRevision(args[1].signal);

@@ -245,7 +245,7 @@ describe("db governance tools", () => {
             security: "definer",
             transaction: "required",
         });
-        expect(context.maintenance.structureSource).toBe("drizzle");
+        expect(context.maintenance.structureSource).toBe("zmodel");
         expect(context.maintenance.behaviorSource).toBe("sql");
         expect(context.maintenance.protectedPaths).toContain("migrations/");
         expect(context.verification).toContain("supacloud db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"");

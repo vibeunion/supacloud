@@ -8,13 +8,13 @@ administrator credentials. Production migration, deployment and live acceptance
 are separate from implementation and local tests.
 
 Non-goals: automatic production migration, a second deployment orchestrator,
-replacing established Drizzle sources, or treating unavailable telemetry as healthy.
+replacing established ZModel sources, or treating unavailable telemetry as healthy.
 
 ## Capability map
 
 | Area | SupaCloud implementation | Acceptance boundary |
 | --- | --- | --- |
-| Declarative schemas | Allowlisted official CLI generate/sync and pg-delta diff; sync generates without applying by default | Requires a compatible upstream CLI; not a replacement for an existing Drizzle source |
+| Declarative schemas | Allowlisted official CLI generate/sync and pg-delta diff; sync generates without applying by default | Requires a compatible upstream CLI; not a replacement for an existing ZModel source |
 | Configuration | Project-bound `config_pull`, preview first, explicit local overwrite confirmation | Reads upstream Supabase configuration, not SupaCloud Management settings |
 | App-user MCP | Project JWT verification, exact user-token forwarding to PostgREST, protected-resource discovery | Existing project OAuth issuer required for discovery; real client login and RLS replay remain a deployment gate |
 | Compute | Delivery declarations, release validation, allocation budget, systemd CPU/memory enforcement and readiness checks | Shared Linux host/process isolation, not a private VM or arbitrary container platform |

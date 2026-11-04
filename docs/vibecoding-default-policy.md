@@ -22,7 +22,7 @@ The goal is to reduce architectural entropy, not to remove advanced capabilities
 | Continuous event protocol | `AsyncIterable<TEvent>` | RxJS/Angular integration where that boundary is the better fit |
 | Reactive library | RxJS, the existing project-wide library | No second Observable/stream library without a recorded requirement |
 | HTTP byte stream | Native `Response` / `ReadableStream<Uint8Array>` | Convert only at an explicit ecosystem boundary |
-| Database structure | Drizzle schema + append-only migration | No second ORM or hand-maintained structure source |
+| Database structure | ZModel schema + append-only migration | No second ORM or hand-maintained structure source |
 | Database governance | `defineDatabaseModule`, SQL lint and Catalog reconciliation | Disabling governance is a recorded migration exception |
 | Ordinary reads | PostgREST / `supabase-js` | GraphQL for an explicit Query Contract |
 | Cross-table writes | Command / RPC with permission, transaction, idempotency and audit | Controlled CRUD for simple single-table operations |

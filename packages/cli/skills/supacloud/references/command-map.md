@@ -20,7 +20,7 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Read database rows or metadata | `database query` and database inspection actions | `SELECT`/read-only by default |
 | Create schema/function/RPC/trigger/RLS/index/grant/extension | `supabase migration_new`, then edit SQL | Never direct remote DDL |
 | Generate migration from local schema changes | `supabase db_diff` | Review generated SQL before use |
-| Generate migration from declarative SQL | `supabase db_schema_declarative_sync` | Defaults to no-apply; preserve an existing Drizzle/schema authority |
+| Generate migration from declarative SQL | `supabase db_schema_declarative_sync` | Defaults to no-apply; preserve an existing ZModel/schema authority |
 | Capture declarative schema files | `supabase db_schema_declarative_generate` | Explicit DSN or upstream linked project; overwrite requires approval |
 | Pull official Supabase configuration | `supabase config_pull` | Preview by default; local write requires `dry_run=false` and `yes`; not SupaCloud settings |
 | Run the official local stack | `supabase stack_start`, `stack_prepare`, `stack_status`, `stack_stop` | Docker default; native alpha requires `SUPACLOUD_ENABLE_NATIVE_STACK=1` |

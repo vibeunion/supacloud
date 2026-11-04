@@ -28,8 +28,8 @@
       "@supacloud/db/bun": ["./packages/db/src/command-bun.ts"],
       "@supacloud/db/source-contracts": ["./packages/db/src/source-contracts.ts"],
       "@supacloud/db/sql-analysis": ["./packages/db/src/sql-analysis.ts"],
-      "@supacloud/db/drizzle": ["./packages/db/src/drizzle.ts"],
-      "@supacloud/db/drizzle-bun": ["./packages/db/src/drizzle-bun.ts"]
+      "@supacloud/db/zenstack": ["./packages/db/src/zenstack.ts"],
+      "@supacloud/db/model": ["./packages/db/src/model.ts"]
     },
     "typeRoots": ["./packages/compiler/node_modules/@types"],
     "allowImportingTsExtensions": true,

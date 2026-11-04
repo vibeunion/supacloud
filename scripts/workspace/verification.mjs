@@ -15,6 +15,11 @@ export function verificationTargets(workspace, project) {
     const dependency = resolveProject(workspace, alias);
     result.push({ projects: [dependency.name], target: 'repo-build', params: 'ignore' });
   }
+  if (project.name === '@supacloud/db') {
+    // The migration regression exercises the CLI's actual command validation.
+    // Install that source consumer without adding it to the production DB graph.
+    result.push({ projects: [resolveProject(workspace, 'cli').name], target: 'repo-install', params: 'ignore' });
+  }
   return result;
 }
 

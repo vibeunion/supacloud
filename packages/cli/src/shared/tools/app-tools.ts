@@ -549,7 +549,7 @@ interface ProjectContextPack {
         writeTransport: "command-rpc";
         writeRetry: "disabled";
         externalOutcome: "receipt-reconcile";
-        databaseSource: "drizzle-append-only";
+        databaseSource: "zmodel-append-only";
     };
 }
 
@@ -677,7 +677,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             writeTransport: "command-rpc",
             writeRetry: "disabled",
             externalOutcome: "receipt-reconcile",
-            databaseSource: "drizzle-append-only",
+            databaseSource: "zmodel-append-only",
         },
     };
     if (args.format === "json") return textResult(JSON.stringify(project, null, 2));

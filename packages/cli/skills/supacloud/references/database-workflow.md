@@ -43,7 +43,7 @@ supacloud supabase db_schema_declarative_sync --name <intent> --strict_coverage
 
 The adapter defaults to no-apply. Review the generated migration, then use the
 same local verification and controlled remote push steps above. Do not introduce
-a second declarative source over Drizzle-generated schemas. Verify the installed
+a second declarative source over ZModel-generated schemas. Verify the installed
 official CLI supports this experimental command before changing project config.
 
 `supabase config_pull` previews official Supabase settings. Applying that local
