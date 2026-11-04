@@ -1,5 +1,5 @@
 {
-  "lockfileVersion": 2,
+  "lockfileVersion": 3,
   "configVersion": 1,
   "workspaces": {
     "": {
@@ -15,13 +15,15 @@
     },
   },
   "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2",
+      "effect": "3.21.0",
+    },
     "@supacloud/admin": "file:../admin",
     "@supacloud/cli": "file:../cli",
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/db": "file:../db",
     "@supacloud/delivery": "file:../delivery",
-    "deepmerge-ts": "8.0.2",
-    "effect": "3.21.0",
   },
   "packages": {
     "@ardatan/relay-compiler": ["@ardatan/relay-compiler@13.0.2", "", { "dependencies": { "@babel/runtime": "^8.0.0", "immutable": "^5.1.9", "invariant": "^2.2.4" }, "peerDependencies": { "graphql": "*" } }, "sha512-VFpv9UP820SiwDUPYtq7PmD3jifzZlevkQ26bhbSzFeruSTys0eHzQCZyKg+IhgmZzwPI9AFjPe26ABNjGeIKg=="],

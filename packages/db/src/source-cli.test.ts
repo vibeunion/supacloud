@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { initializeAppProject } from "../../cli/src/shared/tools/app-starter";
 import { checkAppDatabaseSources } from "../../cli/src/shared/tools/app-database-check";
+import { compileModel } from "./model";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -15,6 +16,7 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   roots.push(root);
   const project = join(root, "project"), packed = join(root, "package");
   await initializeAppProject({ root: project, name: "example", template: "command" });
+  await compileModel(join(project, "zenstack/schema.zmodel"), join(project, "zenstack/generated"));
   await mkdir(packed);
   const built = await Bun.build({
     entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts")],

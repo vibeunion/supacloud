@@ -42,7 +42,7 @@ test("default checks run before regeneration and ZenStack candidate paths never 
   expect(files["package.json"]).toContain('"supacloud-model diff"');
   expect(files["zenstack/schema.zmodel"]).toContain("@@allow");
   expect(files[".gitignore"]).toContain("output/database-audit/");
-  expect(files["AGENTS.md"]).toContain("ZModel");
+  expect(files["AGENTS.md"]).toContain("schema.zmodel");
   expect(files["AGENTS.md"]).toContain("Do not introduce any/@ts-ignore");
   const plain = appTemplateFiles("example", "minimal", {
     "@supacloud/js": "^0.40.0",

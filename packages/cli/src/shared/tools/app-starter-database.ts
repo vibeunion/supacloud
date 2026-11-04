@@ -169,7 +169,8 @@ export const STARTER_DATABASE_GUIDE = `
 ## Model and migration workflow
 
 Maintain zenstack/schema.zmodel. Run \`bun run db:generate\` to compile model and RPC
-contracts; commit generated types with their sources. \`bun run db:check\` compares
+contracts; commit generated types with their sources. Do not introduce any/@ts-ignore
+to bypass model or contract diagnostics. \`bun run db:check\` compares
 fresh generation without writing files or opening a database. Model read policies
 complement existing database RLS; command writes still use the shared transaction,
 receipt and audit boundary, not unrestricted CRUD. SQL constraints, RPCs and RLS
