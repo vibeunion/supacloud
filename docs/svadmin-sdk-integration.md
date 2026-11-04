@@ -239,13 +239,17 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 
 ### Web Console upgrade baseline
 
-The Web Console tracks this published SVAdmin line, verified on November 2, 2026:
+The Web Console tracks this published SVAdmin line, verified on November 4, 2026:
 
-- `@svadmin/core` `0.71.0`
-- `@svadmin/ui` `0.110.0`
-- `@svadmin/elysia` `0.14.22`
-- `@svadmin/sveltekit` `0.13.19`
-- `@svadmin/ai-elements` `0.13.7`
+- `@svadmin/core` `0.75.0`
+- `@svadmin/ui` `0.113.0`
+- `@svadmin/elysia` `0.14.26`
+- `@svadmin/sveltekit` `0.13.23`
+- `@svadmin/ai-elements` `0.13.10`
+
+The upgrade includes the core typed `Result` / `DomainError` layer introduced
+in 0.72. Existing data-provider, resource-contract and mutation-hook usage is
+unchanged; the console does not consume `safeMutate` directly.
 
 List and settings pages that repeated a local loading, empty, and error shell now
 use `PagePattern`. Pages with a client-side search use `FilterToolbar`. The
