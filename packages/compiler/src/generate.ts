@@ -104,6 +104,7 @@ const INTERFACES = `export interface CompiledRoute {
     },
   ) => Promise<unknown> | unknown;
   directInvoker?: (controller: unknown, context: unknown) => Promise<unknown> | unknown;
+  directInvokerFast?: (controller: Record<string, unknown>, handler: (...args: unknown[]) => unknown, context: unknown) => Promise<unknown> | unknown;
   executionMode?: "direct" | "pipeline";
 }
 
@@ -792,6 +793,9 @@ class ModuleGenerator {
         const needsContext = handlerParams.some((parameter) => parameter.kind === "context");
         const direct = factoryOfScope(controller.scope) === "services"
           && route.command === undefined
+          && route.effect === undefined
+          && (this.module.aspects?.length ?? 0) === 0
+          && !handlerParams.some((parameter) => parameter.kind === "cookie")
           && (route.aspects?.length ?? 0) === 0
           && !hasResponseMap
           && route.parse !== "none"
@@ -917,14 +921,21 @@ class ModuleGenerator {
           `return handler.call(ctrl, ${callArgs}); }`,
         );
         if (direct) {
-          const directArgs = invokerArgs.map((argument) => argument.replaceAll("req.", "ctx.").replaceAll("req)", "ctx)"));
+          const directArgs = invokerArgs.map((argument) => argument.replaceAll("req.", "context.").replaceAll("req)", "context)"));
           const directCallArgs = directArgs.length > 0 ? directArgs.join(", ") : "";
+          const directContext = directArgs.length > 0
+            ? "const context = ctx as { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }; "
+            : "";
           fields.push(
             `directInvoker: (ctrl: unknown, ctx: unknown) => { ` +
             `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
             `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
             `if (!isFunction(handler)) throw new TypeError("Route handler ${route.handler} is not callable"); ` +
-            `return handler.call(ctrl, ${directCallArgs}); }`,
+            `${directContext}return handler.call(ctrl, ${directCallArgs}); }`,
+          );
+          fields.push(
+            `directInvokerFast: (ctrl: Record<string, unknown>, handler: (...args: unknown[]) => unknown, ctx: unknown) => { ` +
+            `${directContext}return handler.call(ctrl, ${directCallArgs}); }`,
           );
           fields.push('executionMode: "direct"');
         } else {

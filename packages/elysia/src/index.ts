@@ -144,6 +144,12 @@ export interface CompiledRoute {
   ) => Promise<unknown> | unknown;
   /** Compiler-emitted Elysia-context invoker for routes without SupaCloud stages. */
   directInvoker?: <Controller extends CompiledControllerInvokerTarget>(controller: Controller, context: unknown) => Promise<unknown> | unknown;
+  /** Generated invoker accepting a controller and method validated at registration. */
+  directInvokerFast?: (
+    controller: Record<string, unknown>,
+    handler: (...args: unknown[]) => unknown,
+    context: unknown,
+  ) => unknown | Promise<unknown>;
   /** Compiler-selected execution plan. Older artifacts default to the full pipeline. */
   executionMode?: "direct" | "pipeline";
   /** Class name of the @Command explicitly bound to this route. */
@@ -1198,6 +1204,14 @@ function controllerInstance(value: unknown): ControllerInstance | undefined {
   return isRecord(value) ? value : undefined;
 }
 
+function canUseDirectRoute(compiled: CompiledModule, controller: CompiledController, route: CompiledRoute): boolean {
+  return route.executionMode === "direct" && route.directInvoker !== undefined
+    && controller.scope === "application" && compiled.createRequestScope === undefined
+    && compiled.aspectPipeline === undefined && (compiled.aspects?.length ?? 0) === 0
+    && route.aspectPipeline === undefined && (route.aspects?.length ?? 0) === 0
+    && route.command === undefined && route.effect === undefined && route.responses === undefined;
+}
+
 function cookieValues(value: unknown): Record<string, unknown> | undefined {
   if (!isRecord(value)) return undefined;
   const result: Record<string, unknown> = {};
@@ -1251,7 +1265,7 @@ export function createModulePlugin<
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
     "effect",
-    "directInvoker", "executionMode",
+    "directInvoker", "directInvokerFast", "executionMode",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     "idempotency",
@@ -1345,9 +1359,12 @@ export function createModulePlugin<
     || options.onExecution !== undefined
     || compiled.createRequestScope !== undefined
     || compiled.aspectPipeline !== undefined
-    || compiled.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
+    || (compiled.aspects?.length ?? 0) > 0
+    || options.errorMapper !== undefined
+    || compiled.controllers.some((controller) => controller.routes.some((route) => !canUseDirectRoute(compiled, controller, route)));
   const basePlugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true);
-  const servicesPlugin = basePlugin.derive(() => ({ services }));
+  const servicesContext = { services };
+  const servicesPlugin = basePlugin.derive(() => servicesContext);
   const plugin = needsRequestState ? (servicesPlugin.derive((context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
       let complete: (() => void) | undefined;
@@ -1509,14 +1526,22 @@ export function createModulePlugin<
         });
       }
 
-      const directRoute = route.executionMode === "direct" && route.directInvoker !== undefined
+      const directRoute = canUseDirectRoute(compiled, controller, route)
+        && options.onExecution === undefined
         && policies.length === 0 && responsePolicies.length === 0 && mappingPolicies.length === 0;
+      const directController = directRoute && route.directInvokerFast !== undefined
+        ? controllerInstance(services[controller.serviceKey]) : undefined;
+      const directMethod = directController?.[route.handler];
+      const directInvokerFast = route.directInvokerFast;
+      const directHandler = directController && typeof directMethod === "function" && directInvokerFast
+        ? (ctx: HttpContext) => directInvokerFast(directController, directMethod as (...args: unknown[]) => unknown, ctx)
+        : (ctx: HttpContext) => route.directInvoker!(services[controller.serviceKey] as CompiledControllerInvokerTarget, ctx);
       // Keep the direct AOT path synchronous when the generated controller is
       // synchronous. An async wrapper would allocate a Promise for every
       // request and erase the benefit of bypassing the SupaCloud pipeline.
       // I have nothing but my burger and I want nothing more
       const handler = directRoute
-        ? (ctx: HttpContext) => route.directInvoker!(services[controller.serviceKey] as CompiledControllerInvokerTarget, ctx)
+        ? directHandler
         : async (ctx: HttpContext) => {
         const requestContext = requestContexts.get(ctx.request);
         const execute = async () => {
@@ -1832,7 +1857,7 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
       || options.onExecution !== undefined
       || module.createRequestScope !== undefined
       || module.aspectPipeline !== undefined
-      || module.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
+      || module.controllers.some((controller) => controller.routes.some((route) => !canUseDirectRoute(module, controller, route)));
     // The root owns shared HTTP hooks; mounting them again on each module
     // duplicates anonymous global hooks in Elysia 2.
     app.use(createModulePlugin(

@@ -38,7 +38,9 @@ export function createBunAotApplication<const Http extends AnyElysia = Elysia, R
   options: ApplicationOptions<Http, RequestContext>,
 ): BunAotApplication {
   const app = createApplication(options);
-  const fetch = app.handle.bind(app);
+  // I have nothing but my burger and I want nothing more
+  // Pass Requests directly to Elysia AOT without the async handle wrapper.
+  const fetch = app.fetch;
   return {
     app,
     fetch,

@@ -5,9 +5,9 @@
 每次 SupaCloud 核心版本发布后，在固定的 CI runner 上自动测量 SupaCloud
 编译适配器与原生主流框架的 HTTP 开销，用于两件事：
 
-1. 找出 SupaCloud 相对 Elysia 原生下界的额外开销，并定位优化方向；
-2. 在相同请求契约、运行时和客户端下，给出 SupaCloud 与 Express、Fastify、
-   NestJS/Express、NestJS/原生 Node 适配器的可复现对比。
+1. 找出 SupaCloud 相对同契约原生框架的额外开销，并定位优化方向；
+2. 在相同请求契约和客户端下，明确标注各自运行时，给出 SupaCloud 与 Express、Fastify、
+   NestJS/Express、NestJS/原生 Node、Gin 的可复现对比。
 
 “性能强”只能在同一场景、同一 runner、重复测量后成立。单次 CI 结果是
 信号，不是生产容量承诺。
@@ -22,7 +22,7 @@
 | NestJS + Express | Node 24 | 原生对手 |
 | NestJS + `@nestjs/platform-node` | Node 24 | 原生对手 |
 | Elysia 2 native + 同等契约 | Bun | SupaCloud 适配器的内部基线 |
-| Elysia 2 native bare | Bun | 纯传输下界，不作为产品对手 |
+| Gin | Go 1.27 | binding validator 标签 |
 
 SupaCloud 路径加载发布 tag 对应的本地 `@supacloud/elysia`，并重新构建
 其 `contracts → delivery → commands → db → compiler → app → elysia` 依赖链，
@@ -39,22 +39,22 @@ SupaCloud 路径加载发布 tag 对应的本地 `@supacloud/elysia`，并重新
 
 contract 基线要求所有路径校验同一组 TypeBox 语义：Elysia/SupaCloud 使用原生
 route schema，Fastify 使用 JSON Schema/Ajv，Express 和 Nest 使用 TypeBox
-middleware/pipe。若未来某个框架确实无法接入 TypeBox，Zod 只能作为单独标记的
+middleware/pipe；Gin 使用 Go binding validator 标签。Fastify 关闭类型自动转换，Gin 使用
+指针区分字段缺失与合法的 0、空字符串。计时前必须通过合法边界值与非法输入探针。
+本组场景由客户端校验响应值，不启用服务端 response schema。若未来某个框架确实无法接入 TypeBox，Zod 只能作为单独标记的
 validator 行，不能和 TypeBox 结果混成一个结论。
 
 报告记录每轮 RPS、P50/P95/P99、错误数、运行时和依赖版本。汇总使用轮次中位数，
 不把不同场景或不同 runner 混成一个总分。任何响应错误都会让 CI 失败。
 
-默认且唯一的 SupaCloud 路径使用编译器生成的 positional `invoker`。生产运行时
-不再保留旧的 input-object 兼容调用路径，避免 benchmark 和正式运行时出现两套
-性能与行为边界。
+SupaCloud 统一使用 `createApplication`，HTTP 路径为 Elysia AOT + `Bun.serve`。
+runner 在每次运行前通过当前编译器生成真实 invoker，不手工维护优化后的 descriptor。
+简单路由调用注册时解析的 controller 方法；aspect、command、Effect、request scope、
+执行观察和多状态响应契约仍保留完整 pipeline 语义。两条 Elysia 测试路径都直接使用 `app.fetch`。
 
-`createSupaCloudFramework` 已默认要求生成的 invoker；底层 `createApplication`
-仍允许手写测试模块显式使用 fallback，以便完成渐进迁移。正式编译产物不应依赖
-该 fallback。
-
-默认请求带有 Edge Runtime 提供的 `x-request-id`；使用
-`--request-id-mode generated` 才会测量缺少请求 ID 时的 UUID fallback 成本。
+默认请求带 `x-request-id`；`--request-id-mode generated` 省略该头。当前简单路由不需要
+request context，因此不能用这组结果推导 UUID 或复杂业务 pipeline 的成本。
+Gin 在计时前构建为独立二进制，报告记录进程实际 Go 版本。
 
 ## CI 与发布触发
 
@@ -65,7 +65,7 @@ artifact。基线比较初期不自动阻断发布，先积累同 runner 的稳�
 
 ## 优化闭环
 
-先看 SupaCloud 与 native Elysia 的差距，再看 SupaCloud 与四个原生对手的相对位置。
+先看 SupaCloud 与同契约 native Elysia 的差距，再看 SupaCloud 与其他原生对手的相对位置。
 如果差距集中在所有场景，优先检查插件注册、请求上下文、scope 查找和统一响应路径；
 如果只出现在 body 或 params，分别检查 schema decoder、解析和参数转换；如果只有
 P99 变差，检查 GC、日志和 after-response 生命周期。每次优化都要保留相同版本矩阵
@@ -80,7 +80,7 @@ P99 变差，检查 GC、日志和 after-response 生命周期。每次优化都
   那么 workflow checkout 该 Release tag，构建 SupaCloud 适配器并运行全部适配器
 
 场景: 所有框架使用同一请求契约
-  假设 benchmark 已启动五条产品路径和一条 native Elysia 下界路径
+  假设 benchmark 已启动所有带请求校验的产品路径
   当 runner 执行 static-json、path-params 和 json-body
   那么每条路径都使用相同的请求、响应字段、客户端、warmup 和并发配置
 

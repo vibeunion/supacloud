@@ -7,25 +7,29 @@ native mainstream framework installations:
 - Express on Node;
 - Fastify on Node;
 - NestJS on Express;
-- NestJS on the native Node adapter (`@nestjs/platform-node`).
+- NestJS on the native Node adapter (`@nestjs/platform-node`);
+- Gin on Go 1.27.
 
-It also records native Elysia 2/Bun twice: once with the same TypeBox contracts
-and once as a bare transport floor. The headline comparison is SupaCloud versus
-the four native Node framework paths; native Elysia is not presented as a
-competing product.
+It also records native Elysia 2/Bun with the same TypeBox contracts. Every adapter in the comparison validates the
+same request contract; an unvalidated bare transport baseline is excluded.
 
 The server contract is deliberately small so the result isolates routing,
 JSON serialization, path parameter matching and JSON body parsing. Every
 adapter runs in its own child process. A single Node `fetch` client drives all
 adapters over loopback with the same warmup, concurrency, request count and
 rotated scenario order. SupaCloud uses the release-tagged local
-`@supacloud/elysia` package, so its compiler/runtime path is measured rather
-than a hand-written Elysia route. The contract baseline validates params and
-body with the same TypeBox schemas: Elysia/SupaCloud use native route schemas,
-Fastify uses JSON Schema/Ajv, and Express/Nest use TypeBox middleware/pipes.
-No framework is allowed to skip validation in the contract comparison.
+`@supacloud/elysia` package. Before each run, `generate.mjs` uses that checkout's
+compiler to emit real route invokers from the benchmark controller graph. The contract baseline validates params and
+body with equivalent schemas: Elysia/SupaCloud use native route schemas,
+Fastify uses JSON Schema/Ajv, Express/Nest use TypeBox middleware/pipes, and
+Gin uses Go binding validator tags.
+Before timing, every adapter must accept zero and empty strings and reject missing,
+null, malformed and incorrectly typed body fields. Fastify coercion is disabled
+to match the other validators. Gin uses pointer fields to distinguish zero from
+missing values. All measured scenarios validate response values in the client;
+server-side response schemas are not part of this baseline.
 
-Run locally after installing Bun and Node 24:
+Run locally after installing Bun, Node 24 and Go 1.27:
 
 ```sh
 for package in contracts delivery commands db compiler app elysia; do
@@ -36,12 +40,18 @@ bun install --frozen-lockfile
 node runner.mjs --requests 10000 --rounds 5 --concurrency 32 --output report.json
 ```
 
+The runner builds Gin once before starting measurements and removes the temporary
+binary after the run. Runtime versions come from the running processes. SupaCloud
+and native Elysia both use `Bun.serve({ fetch: app.fetch })`.
+
 The benchmark uses compiler-generated route execution plans: direct routes call
 the Elysia-decoded context without a SupaCloud input envelope, while complex
 routes use the positional SupaCloud invoker. It provides an `x-request-id`
 header, matching the Edge Runtime request boundary.
 
-Use `--request-id-mode generated` to measure the fallback UUID path separately.
+Use `--request-id-mode generated` to omit the supplied request ID. These direct
+routes need no SupaCloud request context, so this does not itself exercise UUID
+generation; use a context-dependent business fixture for that measurement.
 Use `--only supacloud-elysia-bun,elysia-native-contract-bun` for a focused
 ablation or profiler run.
 

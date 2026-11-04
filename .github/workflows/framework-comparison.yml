@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
-      BUN_VERSION: "1.4.2"
+      BUN_VERSION: "1.4.4"
       REQUESTS: ${{ inputs.requests || '10000' }}
       ROUNDS: ${{ inputs.rounds || '5' }}
       CONCURRENCY: ${{ inputs.concurrency || '32' }}
@@ -64,6 +64,12 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: benchmarks/framework-comparison/gin-server/go.sum
+
       - name: Build the released SupaCloud Elysia adapter
         run: |
           for package in contracts delivery commands db compiler app elysia; do
@@ -79,6 +85,8 @@ jobs:
       - name: Run framework benchmark
         working-directory: benchmarks/framework-comparison
         env:
+          BENCHMARK_SOURCE_REF: ${{ inputs.ref || github.event.release.tag_name || github.sha }}
+          BENCHMARK_RELEASE_TAG: ${{ github.event.release.tag_name }}
           GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
         run: node runner.mjs --requests "$REQUESTS" --rounds "$ROUNDS" --concurrency "$CONCURRENCY" --output report.json
 
