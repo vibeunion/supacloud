@@ -1,5 +1,9 @@
 # Application Starter
 
+After initialization, follow the [feature development guide](feature-development.md)
+for model, command, Effect and migration ownership. Framework references and
+enforcement limits are recorded in the [static AOP decision](architecture/static-aop.md).
+
 ## Goal and Boundaries
 
 The developer's job is to create a typed, governed service and verify its behavior
@@ -111,8 +115,9 @@ attest database provenance or freshness.
 share the same watch/recompile/restart loop. It does not add a second watcher.
 `supacloud app watch` is the compile-only inspection command.
 For compatibility, `app dev --once` / `--watch=false` remain compile-only.
-Remote test-server sync, migration generation and remote reload remain
-`supacloud dev sync`, `supacloud dev migrate` and `supacloud dev watch`.
+Remote test-server sync and reload remain `supacloud dev sync` and
+`supacloud dev watch`. Generate migration candidates with `bun run db:diff`,
+review them, then use the existing `supacloud db plan` / `db apply` workflow.
 
 | Profile | Intended use | Requirement |
 | --- | --- | --- |
