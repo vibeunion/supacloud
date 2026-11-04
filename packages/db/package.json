@@ -79,7 +79,7 @@
     "@types/bun": "^1.4.4",
     "typescript": "^7.0.2",
     "@zenstackhq/cli": "3.10.0",
-    "prisma": "6.19.0",
+    "prisma": "6.19.3",
     "pg": "8.23.1"
   },
   "dependencies": {
@@ -95,9 +95,7 @@
   },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",
-    "@prisma/config": {
-      "deepmerge-ts": "8.0.2",
-      "effect": "3.21.0"
-    }
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   }
 }
