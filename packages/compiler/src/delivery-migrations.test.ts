@@ -51,7 +51,8 @@ test("immutable targets carry exact declared SQL and reject unsafe changes witho
       "migrations/unlisted.sql": "SELECT 'unlisted-private-value';",
     });
     const options = { rootDir: join(root, "src"), outDir: join(root, "generated"), strict: false,
-      generateClient: false, generatePermissions: false };
+      generateClient: false, generatePermissions: false,
+      commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true } };
     const settings = { version: 1, targets: [{ name: "cases", kind: "api", modules: ["case"] }],
       build: { migrations: declarations } };
     const first = await buildDeliveryProject(options, settings);
@@ -147,7 +148,8 @@ test("self-consistent artifact hashes do not bypass migration metadata validatio
       "migrations/002-roles.sql": "SELECT 2;",
     });
     const options = { rootDir: join(root, "src"), outDir: join(root, "generated"), strict: false,
-      generateClient: false, generatePermissions: false };
+      generateClient: false, generatePermissions: false,
+      commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true } };
     const built = await buildDeliveryProject(options, { version: 1, build: { migrations: declarations } });
     if (!built.ok) throw new Error(JSON.stringify(built.diagnostics));
     const delivery = join(root, "generated/delivery");

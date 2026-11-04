@@ -1,3 +1,4 @@
+import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { decodeDurableCommandReceipt, type DurableCommandReceipt } from "@supacloud/contracts";
@@ -148,6 +149,9 @@ test("one cross-module composition serves HTTP, event, schedule and trusted CLI 
       controller: { fulfill: ({ body, request, requestContext }: { body: unknown; request: Request; requestContext: unknown }) =>
         invoke(body, { request, requestContext }) },
     }),
+    registerRoutes(register: CompiledRouteRegistrar) {
+      register(this.controllers[0]!, this.controllers[0]!.routes[0]!, "/fulfill");
+    },
     controllers: [{ path: "/", serviceKey: "controller", scope: "application",
       routes: [{ method: "POST", path: "fulfill", handler: "fulfill", invoker: testInvoker("fulfill") }] }],
   };

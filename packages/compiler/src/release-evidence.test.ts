@@ -21,6 +21,7 @@ beforeAll(async () => {
   const built = await buildDeliveryProject({
     rootDir: root, outDir: join(root, "generated"), strict: false,
     generateClient: false, generatePermissions: false,
+    commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true },
   }, { version: 1 });
   if (!built.ok || !built.manifest) throw new Error(JSON.stringify(built.diagnostics));
   manifest = built.manifest;

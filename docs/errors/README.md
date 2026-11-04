@@ -113,6 +113,7 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC4026](SC4026.md) | `command-transaction-unsupported` | compiler |
 | [SC4027](SC4027.md) | `job-retry-idempotency-required` | compiler |
 | [SC4028](SC4028.md) | `command-reconcile-required` | compiler |
+| [SC4029](SC4029.md) | `command-executor-bypass` | compiler |
 | [SC5001](SC5001.md) | `unused-root-provider` | compiler |
 | [SC6001](SC6001.md) | `generated-any` | type-safety |
 | [SC6002](SC6002.md) | `source-any` | type-safety |

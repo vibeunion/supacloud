@@ -13,7 +13,7 @@ function graph(): ApplicationGraph {
       routes: [{ method: "POST", path: "/", handler: "create", command: "CreateOrder",
         idempotency: "required",
         schemaKinds: { body: "declared" }, aspects: [{ name: "Trace", expression: "PRIVATE" }] }],
-    }], commands: [{ name: "orders.create", className: "CreateOrder", transaction: "required", idempotency: "required" }],
+    }], commands: [{ name: "orders.create", className: "CreateOrder", permission: "orders:write", transaction: "required", idempotency: "required" }],
     jobs: [{ name: "orders.cleanup", className: "Cleanup", serviceKey: "Cleanup", scope: "job", mode: "task" }],
     queries: [], exports: [],
   }], resources: [{ name: "cleanup-queue", kind: "queue", className: "Queue", file: "src/queue.ts", line: 1, importPath: "src/queue" }],
@@ -28,7 +28,7 @@ const target: DeliveryTarget = {
   routes: [{ module: "orders", controller: "OrdersController", handler: "create", method: "POST", path: "/orders", command: "orders.create", reason: "default-http" }],
   jobs: [], externalTokens: [], requirements: { processIsolation: false, durableQueue: false, capabilities: [] }, runtimeStatus: "unchecked",
 };
-const render = (source: ApplicationGraph) => renderDeliveryTarget(source, target, { rootDir: "/project/src", outDir: "/project/generated" });
+const render = (source: ApplicationGraph) => renderDeliveryTarget(source, target, { rootDir: "/project/src", outDir: "/project/generated", commandCapabilities: { permission: true, transaction: true, idempotency: true } });
 
 test("serialized development context round trips without retaining caller-owned objects", () => {
   const context = createApplicationDevelopmentContext(graph());

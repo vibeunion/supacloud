@@ -38,6 +38,7 @@ import type {
 } from "./types";
 import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
 import { camelName, joinRoutePaths } from "./util";
+import { scanCommandBoundaries } from "./command-boundary";
 import { scanRuntimeDi } from "./static-di";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
@@ -577,6 +578,26 @@ export async function analyzeProject(
         queries: [],
         exports: rootProviders.map((p) => p.token),
       });
+    }
+  }
+
+  const governedClasses = modules.flatMap((module) => module.commands.flatMap((command) => {
+    const declaration = ctx.classesByName.get(command.className)?.decl;
+    return declaration ? [{ declaration, name: command.name }] : [];
+  }));
+  const boundRoutes = new Map<ts.MethodDeclaration, string>();
+  for (const module of modules) for (const controller of module.controllers) {
+    const declaration = ctx.classesByName.get(controller.className)?.decl;
+    for (const route of controller.routes) {
+      const command = module.commands.find((item) => item.className === route.command || item.name === route.command);
+      const method = declaration?.members.find((item): item is ts.MethodDeclaration =>
+        ts.isMethodDeclaration(item) && propertyName(item.name) === route.handler);
+      if (command && method) boundRoutes.set(method, command.name);
+    }
+  }
+  for (const source of sourceFiles) {
+    if (!/\.(?:test|spec)\.[cm]?tsx?$/.test(source.fileName)) {
+      ctx.diagnostics.push(...scanCommandBoundaries(source, sourcePath(rootDir, source.fileName), checker, governedClasses, boundRoutes));
     }
   }
 

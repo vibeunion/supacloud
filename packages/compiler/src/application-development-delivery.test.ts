@@ -10,6 +10,7 @@ import { APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES, APPLICATION_DEVELOPMENT_LIMI
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 
+const commandCapabilities = { permission: true, audit: true, transaction: true, idempotency: true };
 let root: string;
 let manifest: DeliveryBuildManifest;
 
@@ -21,7 +22,7 @@ beforeAll(async () => {
     "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
   });
   const built = await buildDeliveryProject({
-    rootDir: root, outDir: join(root, "generated"), strict: false,
+    rootDir: root, outDir: join(root, "generated"), strict: false, commandCapabilities,
     generateClient: false, generatePermissions: false,
   }, { version: 1 });
   if (!built.ok || !built.manifest) throw new Error(JSON.stringify(built.diagnostics));
@@ -116,7 +117,7 @@ test("archive budget round trips above interactive size and rejects oversized re
       "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"]!.replaceAll("() => {}", "(..._args: unknown[]) => {}"),
       [modulePath]: tagged(200),
     });
-    const options = { rootDir: join(project, "src"), outDir: join(project, "generated"), strict: false,
+    const options = { rootDir: join(project, "src"), outDir: join(project, "generated"), strict: false, commandCapabilities,
       generateClient: false, generatePermissions: false };
     const first = await buildDeliveryProject(options, { version: 1 });
     if (!first.ok) throw new Error(JSON.stringify(first.diagnostics));

@@ -552,3 +552,29 @@ it cannot bypass platform SQL policy or grant database privileges. Platform
 runtime prerequisites are separately managed, not implicitly bundled.
 Building an archive is not evidence of backward compatibility, applied migrations,
 successful activation, application rollback or recovered data.
+
+## Compiled execution contract migration
+
+Delivery builds now validate `app.manifest.json.executionPlan` against explicit
+`commandCapabilities` before emitting a bundle. Applications with commands must
+declare the capabilities of the adapters actually wired by their host; omitted
+capabilities are unavailable at this boundary. For a named database adapter:
+
+```ts
+commandCapabilities: {
+  requirePersistentAdapters: true,
+  permission: true,
+  rpc: {
+    orders: { boundary: "database", audit: true, idempotency: true, transaction: true },
+  },
+}
+```
+
+Declare every RPC branch. External adapters need reconciliation and must not
+claim a database transaction around a remote effect. These declarations are
+checked structurally; deployment still needs runtime adapter verification.
+
+Upgrade compiler and Elysia adapter together, regenerate artifacts, and rebuild
+the bundle. HTTP modules require the generated `registerRoutes` callback; old
+route-array fallback has been removed. See the [adapter migration](../elysia/README.md#static-route-registration-migration)
+and [command boundary migration](../app/EXECUTION.md#command-boundary-migration-sc4029).
