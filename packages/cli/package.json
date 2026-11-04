@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "prepare:db": "bun install --cwd ../contracts --frozen-lockfile && bun run --cwd ../contracts build && bun install --cwd ../db --force --frozen-lockfile && bun run --cwd ../db build && bun install --force --frozen-lockfile",
+    "prepare:db": "bun install --cwd ../contracts --frozen-lockfile && bun run --cwd ../contracts build && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --cwd ../db --force --frozen-lockfile && bun run --cwd ../db build && bun install --force --frozen-lockfile",
     "prebuild": "bun run prepare:db",
     "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source --external @supacloud/compiler --external @supacloud/db && bun run build:tool-runtime && bun run build:types",
     "build:tool-runtime": "bun build src/tool-runtime.ts --outdir dist --target node --external typebox && tsc -p tsconfig.tool-runtime.json --emitDeclarationOnly",
@@ -58,6 +58,8 @@
     "typebox": "1.4.3"
   },
   "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.21.0",
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/delivery": "file:../delivery",
     "@graphql-tools/utils": "^12.0.4"

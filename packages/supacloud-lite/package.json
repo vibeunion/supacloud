@@ -79,6 +79,8 @@
     "typescript": "^7.0.2"
   },
   "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.21.0",
     "@supacloud/db": "file:../db",
     "@supacloud/app": "file:../app",
     "@supacloud/compiler": "file:../compiler",

@@ -68,6 +68,8 @@
     "yauzl": "3.4.0"
   },
   "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.21.0",
     "fast-uri": "4.2.2",
     "hono": "^4.13.13",
     "@hono/node-server": "^2.1.5",

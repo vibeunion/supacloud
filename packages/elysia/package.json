@@ -63,6 +63,8 @@
     "typebox": "1.4.3"
   },
   "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.21.0",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/commands": "file:../commands",

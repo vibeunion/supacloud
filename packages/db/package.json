@@ -94,6 +94,8 @@
     "@zenstackhq/sdk": "3.10.0"
   },
   "overrides": {
-    "@supacloud/contracts": "file:../contracts"
+    "@supacloud/contracts": "file:../contracts",
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.21.0"
   }
 }

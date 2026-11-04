@@ -128,7 +128,7 @@ test("generated response types follow the database source and flag stale busines
 import { listReviews, type ReviewReadDatabase } from "./src/review/list-reviews";
 const result = await listReviews(createClient<ReviewReadDatabase>("https://test.invalid", "public-key"));
 const version: number | undefined = result.data[0]?.version;
-const state: "draft" | "approved" | undefined = result.data[0]?.state;
+const state: string | undefined = result.data[0]?.state;
 void version; void state;
 `);
   async function check() {
@@ -144,15 +144,19 @@ void version; void state;
   const first = await check();
   expect(first.output).toBe("");
   expect(first.code).toBe(0);
-  const schema = files["db/schema.ts"]!;
+  const modelPath = join(root, "zenstack/schema.zmodel");
+  const model = files["zenstack/schema.zmodel"]!;
   try {
-    await writeFile(join(root, "db/schema.ts"), schema.replace(
-      'version: integer().notNull()', 'version: text().notNull()'));
+    await writeFile(modelPath, model.replace("version Int", "version String"));
+    await compileModel(modelPath, join(root, "zenstack/generated"));
     const changed = await check();
     expect(changed.code).not.toBe(0);
     expect(changed.output).toContain("consumer.ts");
     expect(changed.output).toContain("string");
-  } finally { await writeFile(join(root, "db/schema.ts"), schema); }
+  } finally {
+    await writeFile(modelPath, model);
+    await compileModel(modelPath, join(root, "zenstack/generated"));
+  }
 }, 30_000);
 
 describe.skipIf(!bin)("existing starter RLS on disposable PostgreSQL (not a JWT gateway)", () => {

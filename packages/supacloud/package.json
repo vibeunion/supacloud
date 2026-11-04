@@ -37,6 +37,8 @@
     "@supacloud/admin": "^0.30.5"
   },
   "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.21.0",
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/cli": "file:../cli",
