@@ -1846,8 +1846,10 @@ async function declaredClassType(declaration: ClassDeclaration, ctx: AnalysisCon
 }
 
 async function typeArgumentsOf(type: ts.Type, ctx: AnalysisContext): Promise<readonly ts.Type[]> {
-  if (!isTypeReference(type)) return [];
-  const argumentsFromChecker = (await ctx.checker.getTypeArguments(type));
+  // TS 7 may expose an imported alias without reporting it as a type reference.
+  const argumentsFromChecker = isTypeReference(type)
+    ? await ctx.checker.getTypeArguments(type)
+    : [];
   if (argumentsFromChecker.length > 0) return argumentsFromChecker;
   return await type.getAliasTypeArguments();
 }
