@@ -15,7 +15,7 @@ function moduleFixture(): CompiledModule {
       serviceKey: "controller",
       scope: "application",
       routes: [
-        { method: "GET", path: "/json", handler: "json", invoker: (controller) => controller.json() },
+        { method: "GET", path: "/json", handler: "json", response: Type.Object({ ok: Type.Boolean() }), invoker: (controller) => controller.json() },
         { method: "GET", path: "/params/:id", handler: "params", params: Type.Object({ id: Type.String() }), invoker: (controller, input) => controller.params(input.params?.id) },
         { method: "POST", path: "/echo", handler: "echo", body: Type.Object({ value: Type.Number() }), invoker: (controller, input) => controller.echo(input.body) },
       ],
@@ -52,4 +52,12 @@ test("native Bun application rejects routes without generated invokers", () => {
   const module = moduleFixture();
   module.controllers[0]!.routes.push({ method: "GET", path: "/missing", handler: "missing" } as never);
   expect(() => createBunNativeApplication({ modules: [module] })).toThrow("requires a generated invoker");
+});
+
+test("native Bun application rejects complex routes that require the parity adapter", () => {
+  const module = moduleFixture();
+  module.controllers[0]!.routes.push({
+    method: "POST", path: "/command", handler: "echo", command: "Write", invoker: (controller, input) => controller.echo(input.body),
+  });
+  expect(() => createBunNativeApplication({ modules: [module] })).toThrow("full-parity Bun AOT adapter");
 });

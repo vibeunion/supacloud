@@ -42,6 +42,7 @@ type RouteEntry = {
   needsQuery: boolean;
   needsHeaders: boolean;
   needsCookie: boolean;
+  validateResponse: (value: unknown) => unknown;
 };
 
 type BunServe = (options: {
@@ -113,6 +114,12 @@ function responseFor(value: unknown): Response {
   return Response.json(value);
 }
 
+function responseSchema(route: CompiledRoute): unknown {
+  if (route.response !== undefined) return route.response;
+  if (route.responses === undefined) return undefined;
+  return route.responses[200] ?? route.responses["200"] ?? route.responses.default;
+}
+
 function errorResponse(error: unknown): Response {
   if (error instanceof Response) return error;
   return Response.json({ ok: false, code: "INTERNAL_SERVER_ERROR", message: "Internal server error" }, { status: 500 });
@@ -128,6 +135,9 @@ export function createBunNativeApplication(options: BunNativeApplicationOptions)
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         if (typeof route.invoker !== "function") throw new TypeError(`Route ${route.method} ${route.path} requires a generated invoker`);
+        if (route.command !== undefined || route.aspects?.length || route.aspectPipeline || route.data?.httpPolicies) {
+          throw new TypeError(`Route ${route.method} ${route.path} requires the full-parity Bun AOT adapter`);
+        }
         const path = joinPath(controller.path, route.path);
         const segments = routeSegments(path);
         const handlerParams = (route as CompiledRoute & { handlerParams?: Array<{ kind: string }> }).handlerParams ?? [];
@@ -141,6 +151,7 @@ export function createBunNativeApplication(options: BunNativeApplicationOptions)
           validateParams: compileSchema(route.params, "params", normalize),
           validateQuery: compileSchema(route.query, "query", normalize),
           needsQuery, needsHeaders, needsCookie,
+          validateResponse: compileSchema(responseSchema(route), "response", normalize),
         };
         const key = `${route.method} ${path}`;
         if (segments.some((segment) => segment.startsWith(":"))) {
@@ -182,7 +193,8 @@ export function createBunNativeApplication(options: BunNativeApplicationOptions)
       const controller = source?.[entry.controller.serviceKey];
       try {
         const result = await entry.route.invoker(controller, input);
-        return responseFor(result);
+        const validated = entry.validateResponse(result);
+        return responseFor(validated);
       } finally {
         if (requestScope && entry.module.destroyRequestScope) await entry.module.destroyRequestScope(requestScope);
       }
