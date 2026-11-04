@@ -239,17 +239,28 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 
 ### Web Console upgrade baseline
 
-The Web Console tracks this published SVAdmin line, verified on November 4, 2026:
+The Web Console tracks the newest jointly compatible published SVAdmin line
+verified against npm on 2026-11-05:
 
-- `@svadmin/core` `0.75.0`
-- `@svadmin/ui` `0.113.0`
-- `@svadmin/elysia` `0.14.26`
+- `@svadmin/core` `0.74.0`
+- `@svadmin/ui` `0.112.0`
+- `@svadmin/elysia` `0.14.25`
 - `@svadmin/sveltekit` `0.13.23`
 - `@svadmin/ai-elements` `0.13.10`
 
-The upgrade includes the core typed `Result` / `DomainError` layer introduced
-in 0.72. Existing data-provider, resource-contract and mutation-hook usage is
-unchanged; the console does not consume `safeMutate` directly.
+The npm `latest` tags for Core (`0.75.0`), UI (`0.113.0`) and Elysia
+(`0.14.26`) are newer, but AI Elements `0.13.10` still requires Core
+`^0.74.0`. Keep the compatible set above until a matching AI Elements release
+is published. The source releases Core `0.76.0`, UI `0.114.0`, Elysia
+`0.14.27`, SvelteKit `0.13.25` and AI Elements `0.14.0` were not available
+on npm at verification time. Do not substitute local source packages or widen
+peer ranges to bypass this publication gap. Pin the transitive
+`@svadmin/devtools` dependency to `0.6.3`: UI allows `^0.6.3`, but `0.6.4`
+requires Core `^0.75.0`.
+
+Core 0.70 removed `useRelation`, `UseRelationOptions`, `appendTenantCacheKey`
+and `queryKeyMatchesTenant`; the Console does not use these retired APIs. Its
+existing TypeBox 1.x contracts and SvelteKit 3 configuration remain compatible.
 
 List and settings pages that repeated a local loading, empty, and error shell now
 use `PagePattern`. Pages with a client-side search use `FilterToolbar`. The
@@ -314,9 +325,12 @@ consumers from `$app/stores` to `$app/state`. The legacy TypeBox 0.34 marker
 bridge was removed because SVAdmin now consumes TypeBox 1.x directly.
 Fixed schemas use the strict `defineResource` entrypoint; only schemas built
 from live database column metadata retain a separate dynamic boundary.
-`bun run check` and `bun run build` remain release gates and were not rerun for
-this focused migration. The latter may still
-report existing bundle-size and ineffective dynamic-import warnings.
+`bun run check` and `bun run build` passed for the November 5 SVAdmin upgrade
+on the current main baseline. The targeted tables `page.test.ts` fixture also
+passed, covering column visibility persistence and installed SVAdmin Core peer
+compatibility. The build still reports existing alias-deprecation, bundle-size
+and ineffective dynamic-import warnings. These are local checks, not deployed
+backend acceptance.
 
 Earlier baseline Chromium acceptance used mocked HTTP responses, not production data:
 the Auth user list rendered, a valid create submission closed the form and

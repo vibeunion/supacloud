@@ -219,9 +219,21 @@ describe("database tables column visibility", () => {
     const packageJson: unknown = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.113.0" } });
-    expect(lockSource).toContain('"@svadmin/ui": "0.113.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.113.0"');
+    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.112.0" } });
+    expect(lockSource).toContain('"@svadmin/ui": "0.112.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.112.0"');
+  });
+
+  test("keeps every installed SVAdmin adapter compatible with the shared Core", async () => {
+    const core: { version: string } = await Bun.file(
+      new URL("node_modules/@svadmin/core/package.json", packageRoot),
+    ).json();
+    for (const name of ["ui", "elysia", "sveltekit", "ai-elements", "devtools"]) {
+      const adapter: { peerDependencies: { "@svadmin/core": string } } = await Bun.file(
+        new URL(`node_modules/@svadmin/${name}/package.json`, packageRoot),
+      ).json();
+      expect(Bun.semver.satisfies(core.version, adapter.peerDependencies["@svadmin/core"])).toBe(true);
+    }
   });
 
   test("keeps unavailable row estimates from rendering as negative counts", async () => {
