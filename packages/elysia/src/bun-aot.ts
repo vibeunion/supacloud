@@ -72,11 +72,21 @@ export function createBunApplication<const Http extends AnyElysia = Elysia, Requ
 ): BunApplication {
   const complex = options.modules?.some((module) =>
     module.createRequestScope !== undefined
+    || module.initializeServices !== undefined
+    || module.destroyServices !== undefined
     || module.controllers.some((controller) => controller.routes.some((route) =>
       route.command !== undefined
       || route.aspects?.length
       || route.aspectPipeline
-      || route.data?.httpPolicies !== undefined,
+      || route.data?.httpPolicies !== undefined
+      || route.responses !== undefined
+      || route.response !== undefined
+      || route.nativeResponse === true
+      || route.parse === "none"
+      || route.allowDeleteBody === true
+      || route.cookie !== undefined
+      || route.contract?.response === "binary"
+      || route.contract?.response === "stream",
     )),
   )
     || options.requestContext !== undefined
