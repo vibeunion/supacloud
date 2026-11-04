@@ -16,7 +16,7 @@ const STATIC_RESPONSE = Object.freeze({ ok: true, value: 42 });
 const BODY_RESPONSE = Object.freeze({ ok: true, value: 42, label: "benchmark" });
 const packageVersions = {
   ...(adapter === "elysia-native-bare-bun" || adapter === "elysia-native-contract-bun" || adapter === "supacloud-elysia-bun" ? { elysia: "2.0.0-rc.0" } : {}),
-  ...(adapter === "supacloud-elysia-bun" ? { supacloudElysia: process.env.SUPACLOUD_CORE_VERSION ?? "source-at-release-tag" } : {}),
+  ...(adapter === "supacloud-elysia-bun" || adapter === "supacloud-bun-native" ? { supacloudCore: process.env.SUPACLOUD_CORE_VERSION ?? "source-at-release-tag" } : {}),
   ...(adapter === "express" || adapter === "nestjs-express" ? { express: "5.3.0" } : {}),
   ...(adapter === "fastify" ? { fastify: "5.12.8" } : {}),
   ...(adapter.startsWith("nestjs-")
@@ -235,6 +235,43 @@ async function startSupaCloudElysia() {
   return { runtime: `bun ${Bun.version}`, close: () => server.stop(true) };
 }
 
+async function startSupaCloudBunNative() {
+  if (typeof Bun === "undefined") throw new Error("supacloud-bun-native must be started by Bun");
+  const [{ Type }, { createBunNativeApplication }] = await Promise.all([
+    import("typebox"),
+    import("@supacloud/elysia"),
+  ]);
+  const routes = [
+    {
+      method: "GET", path: "/json", handler: "json",
+      invoker: async (controller) => controller.json(),
+    },
+    {
+      method: "GET", path: "/params/:id", handler: "params", params: Type.Object({ id: Type.String() }),
+      invoker: async (controller, request) => controller.params(request.params?.id),
+    },
+    {
+      method: "POST", path: "/echo", handler: "echo", body: Type.Object({ value: Type.Number(), label: Type.String() }),
+      invoker: async (controller, request) => controller.echo(request.body),
+    },
+  ];
+  const app = createBunNativeApplication({
+    modules: [{
+      name: "framework-comparison-native",
+      createServices: () => ({
+        controller: {
+          json: () => STATIC_RESPONSE,
+          params: (id) => ({ ok: true, id }),
+          echo: (body) => ({ ...body, ok: true }),
+        },
+      }),
+      controllers: [{ path: "", serviceKey: "controller", scope: "application", routes }],
+    }],
+  });
+  const server = app.start({ hostname: HOST, port });
+  return { runtime: `bun ${Bun.version}`, close: () => server.stop(true) };
+}
+
 const starters = {
   express: startExpress,
   fastify: startFastify,
@@ -243,6 +280,7 @@ const starters = {
   "elysia-native-bare-bun": startElysia,
   "elysia-native-contract-bun": startElysiaContract,
   "supacloud-elysia-bun": startSupaCloudElysia,
+  "supacloud-bun-native": startSupaCloudBunNative,
 };
 const start = starters[adapter];
 if (!start) throw new Error(`Unknown adapter: ${adapter}`);

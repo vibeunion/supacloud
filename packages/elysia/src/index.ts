@@ -94,6 +94,14 @@ export type {
 } from "./documentation";
 export { createSupaCloudFramework } from "./framework";
 export type { SupaCloudFrameworkOptions } from "./framework";
+export { createBunNativeApplication } from "./bun-native";
+export type {
+  BunNativeApplication,
+  BunNativeApplicationOptions,
+  BunNativeRequestContextFactory,
+  BunNativeServeOptions,
+  BunNativeServer,
+} from "./bun-native";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
