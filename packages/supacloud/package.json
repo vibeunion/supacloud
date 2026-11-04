@@ -33,15 +33,10 @@
     "directory": "packages/supacloud"
   },
   "dependencies": {
-    "@supacloud/cli": "^0.115.4",
+    "@supacloud/cli": "^0.116.0",
     "@supacloud/admin": "^0.30.5"
   },
   "overrides": {
-    "@supacloud/compiler": "file:../compiler",
-    "@supacloud/delivery": "file:../delivery",
-    "@supacloud/db": "file:../db",
-    "@supacloud/cli": "file:../cli",
-    "@supacloud/admin": "file:../admin",
     "deepmerge-ts": "8.0.2",
     "prisma": "6.19.3"
   },
