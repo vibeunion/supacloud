@@ -239,7 +239,7 @@ async function startSupaCloudBunNative() {
   if (typeof Bun === "undefined") throw new Error("supacloud-bun-native must be started by Bun");
   const [{ Type }, { createBunNativeApplication }] = await Promise.all([
     import("typebox"),
-    import("@supacloud/elysia"),
+    import("@supacloud/elysia/bun"),
   ]);
   const routes = [
     {
