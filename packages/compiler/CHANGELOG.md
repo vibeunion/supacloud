@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.55.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.55.0...compiler-v0.55.1) (2026-11-04)
+
+
+### Performance Improvements
+
+* **runtime:** cache direct invokers and validate framework comparisons ([#2426](https://github.com/vibeunion/supacloud/issues/2426)) ([3b39f67](https://github.com/vibeunion/supacloud/commit/3b39f675ce99e81718c0f18bf352fdd74de9b146))
+* **runtime:** standardize createApplication and add framework benchmark ([#2425](https://github.com/vibeunion/supacloud/issues/2425)) ([411f1c2](https://github.com/vibeunion/supacloud/commit/411f1c294f7e59a982e7cd26ff2c51c2110b5a40))
+
 ## [0.55.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.54.0...compiler-v0.55.0) (2026-11-03)
 
 

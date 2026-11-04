@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/vibeunion/supacloud/compare/app-v0.36.0...app-v0.36.1) (2026-11-04)
+
+
+### Performance Improvements
+
+* **runtime:** standardize createApplication and add framework benchmark ([#2425](https://github.com/vibeunion/supacloud/issues/2425)) ([411f1c2](https://github.com/vibeunion/supacloud/commit/411f1c294f7e59a982e7cd26ff2c51c2110b5a40))
+
 ## [0.36.0](https://github.com/vibeunion/supacloud/compare/app-v0.35.0...app-v0.36.0) (2026-11-02)
 
 
