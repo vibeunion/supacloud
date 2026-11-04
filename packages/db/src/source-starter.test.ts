@@ -150,7 +150,8 @@ export function prepareArchivedDelivery() { throw new Error("Not used by source-
   for (const reject of [false, true]) {
     if (reject) builder.failNextBuild();
     const build = fixture.buildReferenceUpgradeArchive(join(root, "output/upgrade"), new AbortController().signal);
-    if (reject) await expect(build).rejects.toThrow("Synthetic archive build failure");
+    // Settle native compiler I/O before entering Bun's synchronous assertion matcher.
+    if (reject) expect(await build.catch((error: unknown) => error)).toMatchObject({ message: "Synthetic archive build failure" });
     else expect(await build).toEqual({ verified: true });
     expect(builder.observations.at(-1)?.migrations.map(item => item.path)).toEqual([
       ...migrations.map(name => "migrations/" + name), "migrations/006-reference-compatibility.sql",

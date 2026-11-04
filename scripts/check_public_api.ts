@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import * as ts from "../packages/compiler/src/typescript";
+import * as ts from "../packages/db/src/typescript";
 
 type ExportKind = "type" | "value" | "both";
 
@@ -94,7 +94,10 @@ async function packageProgram(target: ApiTarget): Promise<ts.Program> {
   const rootNames = parsed.fileNames.some(file => file === target.source)
     ? parsed.fileNames
     : [...parsed.fileNames, target.source];
-  return (await ts.createProgram(rootNames, { ...parsed.options, noEmit: true }));
+  return (await ts.createProgram(rootNames, { ...parsed.options, noEmit: true }, {
+    cwd: dirname(configPath),
+    ...(parsed.projectReferences === undefined ? {} : { projectReferences: parsed.projectReferences }),
+  }));
 }
 
 function symbolKind(symbol: ts.Symbol): ExportKind {

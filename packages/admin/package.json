@@ -50,6 +50,8 @@
     "@supacloud/db": "file:../db",
     "@supacloud/delivery": "file:../delivery",
     "@graphql-tools/utils": "^12.0.4",
-    "@supacloud/compiler": "file:../compiler"
+    "@supacloud/compiler": "file:../compiler",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   }
 }

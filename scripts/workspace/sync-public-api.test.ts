@@ -48,7 +48,8 @@ test("the public API collector rejects wildcard exports before any snapshot writ
   const f = fixture(), before = readFileSync(f.snapshot, "utf8");
   writeFileSync(f.source, "export * from './another';\n");
   writeFileSync(resolve(f.root, "another.ts"), "export const x = 1;\n");
-  await expect(f.generate()).rejects.toThrow("explicit exports");
+  // Settle native compiler I/O before entering Bun's synchronous assertion matcher.
+  expect(await f.generate().catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("explicit exports") });
   expect(readFileSync(f.snapshot, "utf8")).toBe(before);
 });
 
@@ -64,7 +65,7 @@ for (const [name, source] of [
     writeFileSync(resolve(f.root, "relay.ts"), "export { Missing } from './missing';\n");
     writeFileSync(resolve(f.root, "present.ts"), "export const Present = 1;\n");
     writeFileSync(f.source, source);
-    await expect(f.generate()).rejects.toThrow("Cannot resolve public API export Missing");
+    expect(await f.generate().catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Cannot resolve public API export Missing") });
     expect(readFileSync(f.snapshot, "utf8")).toBe(before);
   });
 }
@@ -86,7 +87,7 @@ test("resolved renamed type and value exports retain nonempty signatures and kin
 test("the public API collector recovers after missing declarations are built", async () => {
   const f = fixture(), before = readFileSync(f.snapshot, "utf8");
   writeFileSync(f.source, "export type { Missing } from './missing';\n");
-  await expect(f.generate()).rejects.toThrow("Cannot resolve public API export Missing");
+  expect(await f.generate().catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Cannot resolve public API export Missing") });
   writeFileSync(resolve(f.root, "missing.ts"), "export interface Missing { id: string; }\n");
   const actual = await collectPublicApi({ packageName: "@test/sync", source: f.source, snapshot: f.snapshot });
   expect(actual.exports[0]?.kind).toBe("type");
