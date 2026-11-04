@@ -1329,15 +1329,15 @@ export function createModulePlugin<
     : (options.commandExecutor ?? governanceExecutor);
   const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
 
-  const needsRequestState = options.requestContext !== undefined
-    || options.pendingWork !== undefined
+  const needsRequestState = ctxFactory !== defaultRequestContext
+    || pendingWork !== undefined
     || options.httpPolicies !== undefined
     || options.onExecution !== undefined
     || compiled.createRequestScope !== undefined
     || compiled.aspectPipeline !== undefined
     || compiled.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
   const basePlugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true);
-  const plugin = needsRequestState ? basePlugin.derive((context) => {
+  const plugin = (needsRequestState ? basePlugin.derive((context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
       let complete: (() => void) | undefined;
       try {
@@ -1357,7 +1357,7 @@ export function createModulePlugin<
       };
       const requestContext = ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
       return isPromiseLike(requestContext) ? requestContext.then(finish) : finish(requestContext);
-    }) : basePlugin;
+    }) : basePlugin) as unknown as Elysia;
 
   const createRequestScope = compiled.createRequestScope;
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
