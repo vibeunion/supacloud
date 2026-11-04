@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { DataProvider, ResourceDefinition, RouterProvider } from '@svadmin/core';
   import { Type } from 'typebox';
-  import { AdminApp, AutoTable } from '@svadmin/ui';
+  import AdminApp from '@svadmin/ui/components/AdminApp.svelte';
+  import AutoTable from '@svadmin/ui/components/AutoTable.svelte';
   import { defineSvadminResource } from '$lib/admin/svadmin-contract';
 
   const dataProvider = {
