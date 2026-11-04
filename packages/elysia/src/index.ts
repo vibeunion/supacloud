@@ -131,8 +131,8 @@ export interface CompiledRoute {
   /** True when the handler returns a native Response rather than a framework value. */
   nativeResponse?: boolean;
   /** Compiler-emitted positional invoker. */
-  invoker: (
-    controller: unknown,
+  invoker?: <Controller extends CompiledControllerInvokerTarget>(
+    controller: Controller,
     request: {
       params?: Record<string, unknown>;
       query?: Record<string, unknown>;
@@ -143,7 +143,7 @@ export interface CompiledRoute {
     },
   ) => Promise<unknown> | unknown;
   /** Compiler-emitted Elysia-context invoker for routes without SupaCloud stages. */
-  directInvoker?: (controller: unknown, context: unknown) => Promise<unknown> | unknown;
+  directInvoker?: <Controller extends CompiledControllerInvokerTarget>(controller: Controller, context: unknown) => Promise<unknown> | unknown;
   /** Compiler-selected execution plan. Older artifacts default to the full pipeline. */
   executionMode?: "direct" | "pipeline";
   /** Class name of the @Command explicitly bound to this route. */
@@ -154,6 +154,14 @@ export interface CompiledRoute {
   aspects?: ApplicationAspect[];
   aspectPipeline?: ApplicationAspectPipeline;
 }
+
+/**
+ * The generated invoker validates the controller at runtime, while hand-written
+ * descriptors often call a known method directly. Keep the target callable so
+ * those descriptors retain useful contextual types without weakening the
+ * compiled module contract to `any`.
+ */
+export type CompiledControllerInvokerTarget = Record<string, (...args: unknown[]) => unknown> & object;
 
 export interface CompiledCommand {
   rpc?: string;
@@ -1339,8 +1347,8 @@ export function createModulePlugin<
     || compiled.aspectPipeline !== undefined
     || compiled.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
   const basePlugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true);
-  const servicesContext = { services };
-  const plugin = (needsRequestState ? basePlugin.derive((context) => {
+  const servicesPlugin = basePlugin.derive(() => ({ services }));
+  const plugin = needsRequestState ? (servicesPlugin.derive((context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
       let complete: (() => void) | undefined;
       try {
@@ -1354,13 +1362,11 @@ export function createModulePlugin<
         ? AbortSignal.any([context.request.signal, pendingWork.signal]) : context.request.signal;
       const finish = (requestContext: unknown) => {
         requestContexts.set(context.request, requestContext);
-        // Elysia merges decorators across siblings. Resolve the original map
-        // locally so colliding service names cannot change module ownership.
-        return { services, requestContext };
+        return { requestContext };
       };
       const requestContext = ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
       return isPromiseLike(requestContext) ? requestContext.then(finish) : finish(requestContext);
-    }) : basePlugin.derive(() => servicesContext)) as unknown as Elysia;
+    }) as unknown as typeof servicesPlugin) : servicesPlugin;
 
   const createRequestScope = compiled.createRequestScope;
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
@@ -1510,7 +1516,7 @@ export function createModulePlugin<
       // request and erase the benefit of bypassing the SupaCloud pipeline.
       // I have nothing but my burger and I want nothing more
       const handler = directRoute
-        ? (ctx: HttpContext) => route.directInvoker!(services[controller.serviceKey], ctx)
+        ? (ctx: HttpContext) => route.directInvoker!(services[controller.serviceKey] as CompiledControllerInvokerTarget, ctx)
         : async (ctx: HttpContext) => {
         const requestContext = requestContexts.get(ctx.request);
         const execute = async () => {
@@ -1534,7 +1540,7 @@ export function createModulePlugin<
             requestContext,
           };
           const handlerCall = () => {
-            if (route.invoker) return route.invoker(instance, input);
+            if (route.invoker) return route.invoker(instance as CompiledControllerInvokerTarget, input);
             if (!isRecord(instance)) throw new TypeError("Route controller is not an object");
             const method = instance[route.handler];
             if (typeof method !== "function") throw new TypeError(`Route handler ${route.handler} is not callable`);
@@ -1817,9 +1823,26 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
   const moduleServices: Array<{ module: CompiledModule; services: Record<string, unknown> }> = [];
 
   for (const module of options.modules ?? []) {
+    for (const controller of module.controllers) {
+      for (const route of controller.routes) {
+        if (typeof route.invoker !== "function" && typeof route.directInvoker !== "function") {
+          throw new ApplicationError(
+            `Compiled route ${route.method} ${controller.path}${route.path} is missing a generated invoker`,
+            { code: "ROUTE_INVOKER_REQUIRED" },
+          );
+        }
+      }
+    }
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
     moduleServices.push({ module, services });
+    const moduleNeedsRequestState = options.pendingWork !== undefined
+      || options.requestContext !== undefined
+      || options.httpPolicies !== undefined
+      || options.onExecution !== undefined
+      || module.createRequestScope !== undefined
+      || module.aspectPipeline !== undefined
+      || module.controllers.some((controller) => controller.routes.some((route) => route.executionMode !== "direct"));
     // The root owns shared HTTP hooks; mounting them again on each module
     // duplicates anonymous global hooks in Elysia 2.
     app.use(createModulePlugin(
@@ -1828,7 +1851,7 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
       ctxFactory,
       { ...options, http: undefined },
       imported,
-      options.pendingWork ? pendingWork : undefined,
+      moduleNeedsRequestState ? pendingWork : undefined,
     ));
   }
 

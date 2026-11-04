@@ -132,6 +132,7 @@
         "name": "webhook.update.v1",
         "permission": "webhook.update",
         "rpc": "webhookUpdate",
+        "branches": [],
         "transaction": "required",
         "audit": "webhook.updated",
         "idempotency": "required"

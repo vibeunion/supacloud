@@ -13,6 +13,8 @@
     }
   ],
   "queries": [],
+  "jobs": [],
+  "features": [],
   "routes": [
     {
       "method": "GET",

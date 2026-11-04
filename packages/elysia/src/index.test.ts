@@ -149,7 +149,7 @@ function createCaseModule(captured: Captured): CompiledModule {
             query: t.Object({ title: t.String() }),
             response: t.Object({ id: t.String(), title: t.String() }),
             invoker: (controller, request) => {
-              const instance = controller as CaseController;
+              const instance = controller as unknown as CaseController;
               return instance.positional(
                 String(request.params?.id),
                 String(request.query?.title),
@@ -512,6 +512,7 @@ describe("createApplication", () => {
             method: "POST",
             path: "/:id/approve",
             handler: "approve",
+            invoker: testInvoker("approve"),
             command: "review.approve",
             params: t.Object({ id: t.String() }),
           }],

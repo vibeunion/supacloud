@@ -17,6 +17,14 @@ export interface CompiledRoute {
   cookie?: unknown;
   response?: unknown;
   responses?: Record<string | number, unknown>;
+  effect?: {
+    required: true;
+    errors?: Array<{ tag: string; status: number; code: string; message?: string }>;
+    dependencies?: string[];
+    retry?: "none" | "explicit";
+    maxAttempts?: number;
+    timeoutMs?: number;
+  };
   /** Compile-time ownership and transport classification for the route boundary. */
   contract?: {
     body?: "framework" | "domain";
@@ -28,6 +36,8 @@ export interface CompiledRoute {
   /** True when the handler returns a native Response rather than a framework value. */
   nativeResponse?: boolean;
   command?: string;
+  /** Transport-level idempotency contract, independent of route command binding. */
+  idempotency?: "required" | "none";
   guards?: string[];
   canMatch?: string[];
   canDeactivate?: string[];
@@ -53,19 +63,32 @@ export interface CompiledRoute {
       context?: unknown;
     },
   ) => Promise<unknown> | unknown;
+  directInvoker?: (controller: unknown, context: unknown) => Promise<unknown> | unknown;
+  executionMode?: "direct" | "pipeline";
 }
 
 export interface CompiledCommand {
   rpc?: string;
+  branches?: readonly CompiledCommandBranch[];
   className: string;
   name: string;
   permission: string;
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  tenantScope?: "required" | "none";
   standalone?: boolean;
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
+}
+
+export interface CompiledCommandBranch {
+  when: string;
+  rpc: string;
+  transaction?: "required" | "none" | string;
+  audit?: string;
+  idempotency?: "required" | "none" | string;
+  boundary?: "database" | "external";
 }
 
 export interface CompiledJob {
@@ -79,6 +102,7 @@ export interface CompiledJob {
   timeoutSec?: number;
   maxAttempts?: number;
   idempotency?: "required" | "none";
+  tenantScope?: "required" | "none";
   aspects?: CompiledAspect[];
   aspectPipeline?: CompiledAspectPipeline;
 }
@@ -159,9 +183,13 @@ function isFunction(value: unknown): value is (...args: unknown[]) => unknown {
   return typeof value === "function";
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function resolveFactoryValue(value: unknown): unknown {
-  if (!isRecord(value) || !isFunction(value.factory)) return undefined;
-  return value.factory();
+  if (!isRecord(value) || !isFunction(value["factory"])) return undefined;
+  return value["factory"]();
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
@@ -184,14 +212,14 @@ function destroyScopeInstances(
     for (const entry of [...plan].reverse()) {
       const value = scope[entry.key];
       const instance = entry.index === undefined ? value
-        : Array.isArray(value) ? value[entry.index] : undefined;
+        : isUnknownArray(value) ? value[entry.index] : undefined;
       if (seen.has(instance)) continue;
       seen.add(instance);
       try {
-        if (isRecord(instance) && isFunction(instance.onDestroy)) {
-          await instance.onDestroy();
-        } else if (isRecord(instance) && isFunction(instance.ngOnDestroy)) {
-          await instance.ngOnDestroy();
+        if (isRecord(instance) && isFunction(instance["onDestroy"])) {
+          await instance["onDestroy"]();
+        } else if (isRecord(instance) && isFunction(instance["ngOnDestroy"])) {
+          await instance["ngOnDestroy"]();
         }
       } catch (error) {
         errors.push(error);
@@ -214,11 +242,11 @@ async function initializeServiceInstances(
     const value = services[entry.key];
     const instance = entry.index === undefined
       ? value
-      : Array.isArray(value) ? value[entry.index] : undefined;
+      : isUnknownArray(value) ? value[entry.index] : undefined;
     if (seen.has(instance)) continue;
     seen.add(instance);
-    if (!isRecord(instance) || !isFunction(instance.onInit)) continue;
-    await instance.onInit();
+    if (!isRecord(instance) || !isFunction(instance["onInit"])) continue;
+    await instance["onInit"]();
   }
 }
 
@@ -232,13 +260,13 @@ async function destroyServiceInstances(
     const value = services[entry.key];
     const instance = entry.index === undefined
       ? value
-      : Array.isArray(value) ? value[entry.index] : undefined;
+      : isUnknownArray(value) ? value[entry.index] : undefined;
     if (seen.has(instance)) continue;
     seen.add(instance);
     if (!isRecord(instance)) continue;
-    const hook = isFunction(instance.onDestroy)
-      ? instance.onDestroy
-      : isFunction(instance.ngOnDestroy) ? instance.ngOnDestroy : undefined;
+    const hook = isFunction(instance["onDestroy"])
+      ? instance["onDestroy"]
+      : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
     if (!hook) continue;
     try {
       await hook.call(instance);
@@ -266,7 +294,7 @@ export function createCompiledModules(): CompiledApplicationModule[] {
         path: "/webhooks",
         serviceKey: "webhookController",
         scope: "request",
-        routes: [{ method: "POST", path: "/update", handler: "update", body: WebhookInputSchema, headers: WebhookHeadersSchema, responses: { "200": WebhookReceiptSchema }, invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); const handler = ctrl["update"]; if (typeof handler !== "function") throw new TypeError("Route handler update is not callable"); return await Reflect.apply(handler, ctrl, [req.body, req.headers?.["idempotency-key"]]); }, schemaKinds: {"body":"declared","headers":"declared","response":"declared"} }, { method: "GET", path: "/receipts/:key", handler: "receipt", params: WebhookKeySchema, responses: { "200": WebhookLookupSchema }, invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); const handler = ctrl["receipt"]; if (typeof handler !== "function") throw new TypeError("Route handler receipt is not callable"); return await Reflect.apply(handler, ctrl, [(req.params?.["key"] !== undefined ? req.params?.["key"] : undefined)]); }, schemaKinds: {"params":"declared","response":"declared"} }],
+        routes: [{ method: "POST", path: "/update", handler: "update", body: WebhookInputSchema, headers: WebhookHeadersSchema, responses: { "200": WebhookReceiptSchema }, invoker: (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); const handler = ctrl["update"]; if (!isFunction(handler)) throw new TypeError("Route handler update is not callable"); return handler.call(ctrl, req.body, req.headers?.["idempotency-key"]); }, executionMode: "pipeline", schemaKinds: {"body":"declared","headers":"declared","response":"declared"} }, { method: "GET", path: "/receipts/:key", handler: "receipt", params: WebhookKeySchema, responses: { "200": WebhookLookupSchema }, invoker: (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); const handler = ctrl["receipt"]; if (!isFunction(handler)) throw new TypeError("Route handler receipt is not callable"); return handler.call(ctrl, (req.params?.["key"] !== undefined ? req.params?.["key"] : undefined)); }, executionMode: "pipeline", schemaKinds: {"params":"declared","response":"declared"} }],
       }
     ],
       commands: [{ className: "UpdateWebhook", name: "webhook.update.v1", permission: "webhook.update", transaction: "required", audit: "webhook.updated", idempotency: "required", rpc: "webhookUpdate" }],
@@ -276,9 +304,9 @@ export function createCompiledModules(): CompiledApplicationModule[] {
 }
 
 export async function initializeApplication(services: Record<string, unknown>): Promise<void> {
-  const initializers = [services.environmentInitializer ?? services["supacloud.environment-initializer"], services.appInitializer ?? services["supacloud.app-initializer"]];
+  const initializers = [services["environmentInitializer"] ?? services["supacloud.environment-initializer"], services["appInitializer"] ?? services["supacloud.app-initializer"]];
   for (const group of initializers) {
-    if (Array.isArray(group)) {
+    if (isUnknownArray(group)) {
       for (const init of group) {
         if (isFunction(init)) await init();
       }
@@ -289,21 +317,21 @@ export async function initializeApplication(services: Record<string, unknown>): 
 }
 
 export async function destroyApplication(services: Record<string, unknown>): Promise<void> {
-  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services.destroyRef : undefined)
+  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services["destroyRef"] : undefined)
     ?? (Object.prototype.propertyIsEnumerable.call(services, "supacloud.destroy-ref") ? services["supacloud.destroy-ref"] : undefined);
-  if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {
-    await destroyRef.destroy();
-  } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {
-    for (const teardown of [...destroyRef._teardowns].reverse()) {
+  if (isRecord(destroyRef) && isFunction(destroyRef["destroy"])) {
+    await destroyRef["destroy"]();
+  } else if (isRecord(destroyRef) && isUnknownArray(destroyRef["_teardowns"])) {
+    for (const teardown of [...destroyRef["_teardowns"]].reverse()) {
       if (isFunction(teardown)) await teardown();
     }
   }
   const instances = Object.values(services);
   for (const inst of instances.reverse()) {
-    if (isRecord(inst) && isFunction(inst.onDestroy)) {
-      await inst.onDestroy();
-    } else if (isRecord(inst) && isFunction(inst.ngOnDestroy)) {
-      await inst.ngOnDestroy();
+    if (isRecord(inst) && isFunction(inst["onDestroy"])) {
+      await inst["onDestroy"]();
+    } else if (isRecord(inst) && isFunction(inst["ngOnDestroy"])) {
+      await inst["ngOnDestroy"]();
     }
   }
 }
@@ -312,7 +340,7 @@ function createWebhookServices(
   deps: Record<string, unknown>,
   imported: Record<string, Record<string, unknown>>,
 ) {
-  const updateWebhook = new UpdateWebhook(deps.webhookEnvironment as ConstructorParameters<typeof UpdateWebhook>[0]);
+  const updateWebhook = new UpdateWebhook(deps["webhookEnvironment"] as ConstructorParameters<typeof UpdateWebhook>[0]);
   return retainPlatformDependencies({ updateWebhook }, deps);
 }
 async function createWebhookRequestScope(
@@ -322,7 +350,7 @@ async function createWebhookRequestScope(
 ): Promise<Record<string, unknown>> {
   const scope: Record<string, unknown> = {};
   try {
-    const webhookController = new WebhookController(services.updateWebhook as ConstructorParameters<typeof WebhookController>[0], ctx as ConstructorParameters<typeof WebhookController>[1]);
+    const webhookController = new WebhookController(services["updateWebhook"] as ConstructorParameters<typeof WebhookController>[0], ctx as ConstructorParameters<typeof WebhookController>[1]);
     scope["webhookController"] = webhookController;
     return scope;
   } catch (error) {
