@@ -207,13 +207,13 @@ describe("createApplication", () => {
     expect(response.status).toBe(404);
   });
 
-  test("strict application profiles reject routes without generated invokers", () => {
+  test("application profiles safely execute routes without generated invokers", async () => {
     const missingInvokerRoute = {
       method: "GET" as const,
       path: "/read",
       handler: "read",
     } as unknown as CompiledRoute;
-    expect(() => createApplication({
+    const app = createApplication({
       modules: [{
         name: "missing-invoker",
         createServices: () => ({ controller: { read: () => ({ ok: true }) } }),
@@ -224,7 +224,10 @@ describe("createApplication", () => {
           routes: [missingInvokerRoute],
         }],
       }],
-    })).toThrow("missing a generated invoker");
+    });
+    const response = await app.handle(new Request("http://localhost/read"));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
   test("serves GET and POST routes with JSON responses", async () => {

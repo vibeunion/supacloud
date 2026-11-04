@@ -1823,16 +1823,6 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
   const moduleServices: Array<{ module: CompiledModule; services: Record<string, unknown> }> = [];
 
   for (const module of options.modules ?? []) {
-    for (const controller of module.controllers) {
-      for (const route of controller.routes) {
-        if (typeof route.invoker !== "function" && typeof route.directInvoker !== "function") {
-          throw new ApplicationError(
-            `Compiled route ${route.method} ${controller.path}${route.path} is missing a generated invoker`,
-            { code: "ROUTE_INVOKER_REQUIRED" },
-          );
-        }
-      }
-    }
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
     moduleServices.push({ module, services });
