@@ -87,7 +87,7 @@ async function dependencies(root: string) {
 async function typecheck(root: string, extra: string[] = []) {
   const config = await ts.readConfigFile(join(root, "tsconfig.json"), ts.sys.readFile);
   if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
-  const parsed = await ts.parseJsonConfigFileContent(config.config, ts.sys, root, {}, join(root, "tsconfig.json"));
+  const parsed = await ts.parseJsonConfigFileContent(config.config, ts.sys, root);
   await using program = await ts.createProgram([...parsed.fileNames, ...extra], { ...parsed.options, noEmit: true }, { cwd: root });
   return [...parsed.errors, ...await ts.getPreEmitDiagnostics(program)].map(item =>
     `${item.file?.fileName ?? "config"}: ${ts.flattenDiagnosticMessageText(item.messageText, "\n")}`);
