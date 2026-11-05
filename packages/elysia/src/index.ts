@@ -1618,7 +1618,7 @@ export function createModulePlugin<
           // the entire chain must still return the actual handler result.
           const invokeRoute = () => route.command
             ? composeAspects((_context, next) => modulePipeline(commandContext,
-              () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))))(commandContext, invoke)
+              () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))))(routeContext, invoke)
             : modulePipeline(routeContext, once(() => routePipeline(routeContext, invoke)));
           const invokeCommand = () => {
             if (!route.command) return invokeRoute();
