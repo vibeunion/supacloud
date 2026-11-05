@@ -183,7 +183,7 @@ test("HTTP route aspects cannot fabricate command success inside the transaction
     const module: CompiledModule = {
       name: "guarded", createServices: () => ({}),
       controllers: [{ path: "/", serviceKey: "handler", scope: "application", routes: [{
-        method: "POST", path: "/", handler: "execute", command: "guarded.execute",
+        method: "POST", path: "/", handler: "execute", command: "Guarded",
         invoker: () => { calls++; if (mode === "swallow") throw new Error("actual failure"); return { ok: true }; },
         aspects: [async (context, next) => {
           expect(context.kind).toBe("route");
