@@ -53,7 +53,8 @@ export class JobWorker {
     expect(Object.keys(firstServices)).toEqual([]);
     expect(Object.keys(secondServices)).toEqual([]);
     for (const [services, external, optional] of [
-      [firstServices, firstExternal, undefined], [secondServices, secondExternal, false],
+      [firstServices, firstExternal, null], [secondServices, secondExternal, false],
+      [module.createServices({ external: firstExternal, optionalExternal: undefined }, {}), firstExternal, undefined],
     ]) {
       const context = { requestId: Math.random() };
       const scope = await module.createRequestScope(services, context);
@@ -74,11 +75,11 @@ export class JobWorker {
   }
 });
 
-test("scoped optional and skip-self dependencies respect local, imported and platform precedence", async () => {
+test("scoped optional and skip-self dependencies follow application, imported and platform precedence", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-scope-precedence-"));
   try {
     const graph: ApplicationGraph = {
-      externalTokens: [],
+      externalTokens: ["CONFIG"],
       modules: [{
         name: "parent", className: "ParentModule", file: "source.ts", line: 1,
         imports: [], exports: ["CONFIG"], commands: [], queries: [], controllers: [],
@@ -86,14 +87,14 @@ test("scoped optional and skip-self dependencies respect local, imported and pla
           token: "CONFIG", kind: "value", tokenKind: "injection-token", useValueExpr: '"parent"',
           scope: "application", deps: [], exported: true, file: "source.ts", line: 1,
         }],
-      }, ...["withParent", "withoutParent"].map((name) => ({
+      }, ...["withParent", "withoutParent", "withParentNoLocal", "platformOnly"].map((name) => ({
         name, className: "ExampleModule", file: "source.ts", line: 1,
-        imports: name === "withParent" ? ["parent"] : [], exports: [], commands: [], queries: [],
-        providers: [{
+        imports: name.startsWith("withParent") ? ["parent"] : [], exports: [], commands: [], queries: [],
+        providers: [...(["withParent", "withoutParent"].includes(name) ? [{
           token: "CONFIG", kind: "value" as const, tokenKind: "injection-token" as const,
           useValueExpr: '"local"', scope: "application" as const, deps: [],
           exported: false, file: "source.ts", line: 1,
-        }, ...["LocalWorker", "ParentWorker"].map((token) => ({
+        }] : []), ...["LocalWorker", "ParentWorker"].map((token) => ({
           token, kind: "class" as const, tokenKind: "class" as const, useClass: token,
           importPath: "source", scope: "job" as const, deps: ["CONFIG"], optionalDeps: ["CONFIG"],
           ...(token === "ParentWorker" ? { skipSelfDeps: ["CONFIG"] } : {}),
@@ -121,9 +122,10 @@ test("scoped optional and skip-self dependencies respect local, imported and pla
       const services = child.createServices({ config: "platform" }, imported);
       const request = await child.createRequestScope(services, {}, imported);
       const job = await child.createJobScope(services, {}, imported);
-      expect(request.localController.config).toBe("local");
-      expect(job.localWorker.config).toBe("local");
-      const inherited = child.name === "withParent" ? "parent" : "platform";
+      const inherited = ["withParent", "withoutParent"].includes(child.name) ? "local"
+        : child.name === "withParentNoLocal" ? "parent" : "platform";
+      expect(request.localController.config).toBe(inherited);
+      expect(job.localWorker.config).toBe(inherited);
       expect(request.parentController.config).toBe(inherited);
       expect(job.parentWorker.config).toBe(inherited);
     }
