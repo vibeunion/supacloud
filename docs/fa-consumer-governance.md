@@ -59,6 +59,14 @@ audit/transaction/idempotency adapters are not also run for that command.
 These capability declarations are assertions by the host, not database proof:
 test the actual RPC transaction, receipt uniqueness, authorization and audit.
 
+A command that declares such an `rpc` is already durable at that adapter:
+`command-executor-bypass` (SC4029) therefore accepts calls to its `execute()`,
+because the adapter owns authorization, receipt, transaction and audit, and
+`validate` still fails the build when the configured adapter does not declare the
+capabilities the command requires. Reading the method into an alias, a callback
+or a destructured binding still fails closed, so an ungoverned invocation cannot
+be laundered through an RPC-declared command.
+
 `context <module> --json` contains direct-command execution plans and
 `routeContracts`. Contract labels are declarative. `Type.Unknown()`/`Type.Any()`
 and typed native Responses are conservatively identified; arbitrary wrappers

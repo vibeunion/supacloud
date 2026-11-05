@@ -2,7 +2,12 @@ import * as ts from "@supacloud/db/typescript";
 import { apiOrigin } from "./api-source";
 import type { Diagnostic } from "./types";
 
-interface GovernedClass { declaration: ts.ClassDeclaration; name: string; }
+interface GovernedClass {
+  declaration: ts.ClassDeclaration;
+  name: string;
+  /** Declared durable persistence boundary (the database RPC that owns receipt, audit and transaction). */
+  rpc?: string;
+}
 type CommandMember = ts.MethodDeclaration | ts.PropertyDeclaration;
 
 /** A conservative source check for typed command references, not a JavaScript sandbox. */
@@ -71,6 +76,12 @@ export async function scanCommandBoundaries(
     if (!command) return false;
     // Reading a method into an alias or callback escapes the checked boundary.
     if (!ts.isCallExpression(node.parent) || node.parent.expression !== node) return false;
+    // A command that declares a database RPC boundary is already durable at the
+    // RPC: authorization, receipt, transaction and audit are enforced inside it,
+    // and the configured adapter must satisfy every declared capability (validate.ts).
+    // Extracting the method as a value still escapes this check, so callers cannot
+    // launder an ungoverned invocation through the RPC-declared command.
+    if (command.rpc !== undefined) return true;
     for (let owner = node.parent.parent; owner; owner = owner.parent) {
       if (ts.isMethodDeclaration(owner)) {
         if (owner.parent === method.parent && (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))

@@ -594,7 +594,7 @@ export async function analyzeProject(
 
   const governedClasses = modules.flatMap((module) => module.commands.flatMap((command) => {
     const declaration = ctx.classesByName.get(command.className)?.decl;
-    return declaration ? [{ declaration, name: command.name }] : [];
+    return declaration ? [{ declaration, name: command.name, ...(command.rpc === undefined ? {} : { rpc: command.rpc }) }] : [];
   }));
   const boundRoutes = new Map<ts.MethodDeclaration, string>();
   for (const module of modules) for (const controller of module.controllers) {
