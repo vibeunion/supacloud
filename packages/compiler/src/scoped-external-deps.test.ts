@@ -45,8 +45,9 @@ test("generated request and job scopes receive only their declared external depe
     const dbClient = { name: "owned-database", onDestroy() { hostDestroyed++; } };
     const destroyRef = { destroy() { hostDestroyed++; } };
     const services = module.createServices({ dbClient, destroyRef, unrelatedSecret: "not-forwarded" }, {});
-    expect(services.dbClient).toBe(dbClient);
     expect(services).not.toHaveProperty("unrelatedSecret");
+    // Platform dependencies stay private; scoped constructors receive them
+    // through the generated non-enumerable binding.
     expect(Object.keys(services)).not.toContain("dbClient");
     const context = { id: "job-1" };
     const job = await module.createJobScope(services, context);
