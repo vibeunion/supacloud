@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.57.0...compiler-v0.57.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **compiler:** treat RPC-declared commands as a governed boundary ([#2446](https://github.com/vibeunion/supacloud/issues/2446)) ([7319951](https://github.com/vibeunion/supacloud/commit/7319951f11f2ab1301278623b32eecd111f81d0b))
+
 ## [0.57.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.56.0...compiler-v0.57.0) (2026-11-05)
 
 
