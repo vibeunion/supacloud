@@ -22,7 +22,13 @@
     "packages/edge-runtime": {
       "release-type": "node",
       "component": "edge-runtime",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "/packages/supacloud-lite/src/compat-matrix.ts"
+        }
+      ]
     },
     "packages/pgredis-runtime": {
       "release-type": "node",
