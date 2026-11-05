@@ -1680,7 +1680,7 @@ describe("@supacloud/js", () => {
         pollingIntervalMs: interval, onUpdate() {},
       }])).toThrow("Invalid task timer interval");
     }
-    for (const key of ["realtimeTimeoutMs", "reconcileIntervalMs"]) {
+    for (const key of ["realtimeTimeoutMs", "realtimeRecoveryIntervalMs", "reconcileIntervalMs"]) {
       for (const interval of invalidValues) {
         expect(() => Reflect.apply(client.tasks.subscribe, client.tasks, ["task-1", {
           realtime: { schema: "public", table: "task_updates" }, [key]: interval, onUpdate() {},
@@ -2040,6 +2040,55 @@ describe("@supacloud/js", () => {
 
     subscription.unsubscribe();
     expect(getSpy).toHaveBeenCalled();
+  });
+
+  test("subscribe retries realtime while polling and reconciles before switching back", async () => {
+    const { supabase, channelInstance, removeChannel } = createFakeSupabase();
+    const states: string[] = [];
+    const handlers: Array<(status: string, error?: unknown) => void | Promise<void>> = [];
+    channelInstance.subscribe.mockImplementation((...args: unknown[]) => {
+      const [handler] = args as [((status: string, error?: unknown) => void | Promise<void>)?];
+      if (!handler) throw new Error("Missing realtime status handler");
+      handlers.push(handler);
+      return channelInstance;
+    });
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+      pollingIntervalMs: 1,
+    });
+    const getSpy = spyOn(client.tasks, "get")
+      .mockResolvedValue({ id: "tsk_123", status: "running", progress: 10, project_ref: "proj_1" });
+
+    const subscription = client.tasks.subscribe("tsk_123", {
+      realtime: { schema: "public", table: "task_updates" },
+      realtimeTimeoutMs: 0,
+      realtimeRecoveryIntervalMs: 5,
+      reconcileIntervalMs: 0,
+      stopOnTerminal: false,
+      onUpdate() {},
+      onStateChange(state) { states.push(state); },
+    });
+
+    try {
+      expect(handlers).toHaveLength(1);
+      await handlers[0]?.("CHANNEL_ERROR", new Error("realtime down"));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(subscription.connectionState).toBe("polling");
+      expect(handlers.length).toBeGreaterThanOrEqual(2);
+
+      await handlers[1]?.("SUBSCRIBED");
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(subscription.connectionState).toBe("realtime");
+      expect(states).toContain("polling");
+      expect(states).toContain("realtime");
+      expect(getSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      subscription.unsubscribe();
+    }
+    expect(removeChannel).toHaveBeenCalled();
   });
 
   test("subscribe reconciles while realtime is connected", async () => {

@@ -165,7 +165,9 @@ subscription delivery and cleanup. CRUD/auth providers need not change.
 
 The SDK defaults task subscriptions to Management API polling. Realtime requires
 an explicitly published application-owned table; do not assume an internal
-`public.tasks` table exists.
+`public.tasks` table exists. When an opted-in Realtime channel fails, the SDK
+keeps polling, periodically retries the channel, and reads the authoritative task
+once before switching back to Realtime.
 
 ## Next integration steps
 
