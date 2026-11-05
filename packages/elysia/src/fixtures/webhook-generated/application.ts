@@ -164,14 +164,62 @@ export interface CompiledModule {
 type CompiledAspectObserver = (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>;
 type CompiledAspectPipeline = (context: CompiledAspectContext, next: () => unknown | Promise<unknown>, observe?: CompiledAspectObserver) => unknown | Promise<unknown>;
 
-function compiledAspectNext(next: () => unknown | Promise<unknown>, state: { active: boolean }): () => Promise<unknown> {
-  let called = false;
-  return async () => {
-    if (!state.active) throw new Error("Aspect continuation is closed");
-    if (called) throw new Error("Aspect continuation called multiple times");
+function compiledAspectError(code: string): Error & { code: string } {
+  const message = code === "ASPECT_CONTINUATION_REUSED" ? "Aspect continuation called multiple times"
+    : code === "ASPECT_CONTINUATION_CLOSED" ? "Aspect continuation is closed" : code;
+  return Object.assign(new Error(message), { name: "AspectExecutionError", code });
+}
+function freezeCompiledAspectData(value: unknown, ancestors = new Set<object>()): void {
+  if (typeof value === "function" || typeof value === "symbol") throw compiledAspectError("ASPECT_RESULT_NOT_DATA");
+  if (value !== null && typeof value === "object") {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if ((!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) || ancestors.has(value)) {
+      throw compiledAspectError("ASPECT_RESULT_NOT_DATA");
+    }
+    ancestors.add(value);
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor?.get || descriptor?.set) throw compiledAspectError("ASPECT_RESULT_NOT_DATA");
+      if (descriptor && "value" in descriptor) freezeCompiledAspectData(descriptor.value as unknown, ancestors);
+    }
+    ancestors.delete(value);
+    Object.freeze(value);
+  }
+}
+async function compiledAspectStep(context: CompiledAspectContext, handler: () => unknown | Promise<unknown>, run: (next: () => Promise<unknown>) => unknown | Promise<unknown>): Promise<unknown> {
+  const strict = context.kind === "command";
+  let active = true, called = false, settled = false, failed = false;
+  let failure: unknown, value: unknown;
+  let pending: Promise<unknown> | undefined;
+  let violation: Error | undefined;
+  const next = (): Promise<unknown> => {
+    if (!active || called) {
+      violation = compiledAspectError(active ? "ASPECT_CONTINUATION_REUSED" : "ASPECT_CONTINUATION_CLOSED");
+      return Promise.reject(violation);
+    }
     called = true;
-    return await next();
+    pending = Promise.resolve().then(handler).then(result => {
+      if (strict) freezeCompiledAspectData(result);
+      value = result;
+      return result;
+    });
+    void pending.then(() => { settled = true; }, error => { settled = true; failed = true; failure = error; });
+    return pending;
   };
+  try {
+    const result = await run(next);
+    if (pending && !settled) throw compiledAspectError("ASPECT_CONTINUATION_UNAWAITED");
+    if (strict) {
+      if (violation) throw violation;
+      if (!called) throw compiledAspectError("ASPECT_CONTINUATION_REQUIRED");
+      if (failed) throw failure;
+      if (!Object.is(result, value)) throw compiledAspectError("ASPECT_RESULT_REPLACED");
+    }
+    return result;
+  } finally {
+    active = false;
+    if (pending) await pending.catch(() => {});
+  }
 }
 function observeCompiledAspect(observe: CompiledAspectObserver | undefined, stage: string, run: () => unknown | Promise<unknown>): unknown | Promise<unknown> {
   return observe ? observe(stage, run) : run();
