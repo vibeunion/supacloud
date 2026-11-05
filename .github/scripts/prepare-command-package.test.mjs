@@ -183,7 +183,8 @@ test('publication keeps npm overrides compatible with ranged direct dependencies
     ['@supacloud/compiler', { name: '@supacloud/compiler', version: '0.57.0' }],
   ]);
   const result = prepareCommandPackage(input, localSiblings);
-  assert.equal(result.package.overrides['@supacloud/compiler'], '^0.57.0');
+  const overrides = /** @type {Record<string, string>} */ (result.package['overrides']);
+  assert.equal(overrides['@supacloud/compiler'], '^0.57.0');
   assert.deepEqual(result.required, []);
 });
 test('publication resolves the admin CLI dependency before npm publish', () => {

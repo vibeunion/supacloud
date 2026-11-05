@@ -29,6 +29,7 @@ export function prepareCommandPackage(candidate, siblings) {
   const required = new Set();
   /** @type {Map<string, string>} */
   const directSpecs = new Map();
+  /** @param {string} section */
   const resolveSection = (section) => {
     const entries = next[section];
     if (entries === undefined) return;
@@ -56,7 +57,11 @@ export function prepareCommandPackage(candidate, siblings) {
   }
   for (const section of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     const entries = next[section];
-    if (isRecord(entries)) for (const [name, range] of Object.entries(entries)) directSpecs.set(name, range);
+    if (isRecord(entries)) {
+      for (const [name, range] of Object.entries(entries)) {
+        if (typeof range === 'string') directSpecs.set(name, range);
+      }
+    }
   }
   resolveSection('overrides');
   return { package: next, required: [...required].sort() };
