@@ -21,7 +21,7 @@ import {
 } from "@supacloud/query";
 export {
   createProcedureClient, createQueryAdapter, createQueryKey, invalidateByTags,
-  type QueryAdapter, type QueryAdapterOptions,
+  type ProcedureSource, type ProceduresOf, type QueryAdapter, type QueryAdapterOptions,
 } from "@supacloud/query";
 import {
   SupaCloudQueueError, queueJsonSnapshot, queueMessage,
@@ -317,6 +317,23 @@ export type SupaCloudClientOptions<TClient extends SupabaseClient = SupabaseClie
   getAccessToken?: () => Promise<string | null> | string | null;
   pollingIntervalMs?: number;
   realtimeTransport?: RealtimeTransport | null;
+};
+
+/**
+ * Compatibility-lane access remains owned by the caller's Supabase client.
+ * This facade never creates a second session store or protocol client.
+ */
+export type SupaCloudCompatibilitySurface<TClient extends SupabaseClient = SupabaseClient> = {
+  readonly supabase: TClient;
+};
+
+/**
+ * Application-lane access is compiler-generated and intentionally separate
+ * from compatibility CRUD so domain writes have an explicit API boundary.
+ */
+export type SupaCloudApplicationSurface<TApiClient extends ProcedureSource> = {
+  readonly procedures: ProceduresOf<TApiClient>;
+  readonly queryAdapter: (options: QueryAdapterOptions) => QueryAdapter<TApiClient>;
 };
 
 export class SupaCloudTaskSubmitError extends Error {
@@ -2002,6 +2019,7 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
 
 type SupaCloudClientBase<TClient extends SupabaseClient> = {
   readonly supabase: TClient;
+  readonly compat: SupaCloudCompatibilitySurface<TClient>;
   readonly projectRef: string;
   readonly managementApiUrl: string;
   readonly auth: {
@@ -2024,13 +2042,33 @@ type SupaCloudClientBase<TClient extends SupabaseClient> = {
   };
 };
 
-type SupaCloudClientWithProcedures<TClient extends SupabaseClient, TProcedures> =
+type SupaCloudClientWithApplication<
+  TClient extends SupabaseClient,
+  TApiClient extends ProcedureSource,
+> =
   SupaCloudClientBase<TClient> & {
-    readonly procedures: TProcedures;
+    readonly procedures: ProceduresOf<TApiClient>;
+    readonly app: SupaCloudApplicationSurface<TApiClient>;
+    queryAdapter(options: QueryAdapterOptions): QueryAdapter<TApiClient>;
+    withClient<T extends ProcedureSource>(
+      apiClient: T,
+    ): SupaCloudClientWithApplication<TClient, T>;
+    withApp<T extends ProcedureSource>(
+      apiClient: T,
+    ): SupaCloudClientWithApplication<TClient, T>;
+  };
+
+type SupaCloudClientUnbound<TClient extends SupabaseClient> =
+  SupaCloudClientBase<TClient> & {
+    readonly procedures: undefined;
+    readonly app: undefined;
     queryAdapter(options: QueryAdapterOptions): ReturnType<typeof createQueryAdapter>;
     withClient<T extends ProcedureSource>(
       apiClient: T,
-    ): SupaCloudClientWithProcedures<TClient, ProceduresOf<T>>;
+    ): SupaCloudClientWithApplication<TClient, T>;
+    withApp<T extends ProcedureSource>(
+      apiClient: T,
+    ): SupaCloudClientWithApplication<TClient, T>;
   };
 
 function openSupabaseChannel(
@@ -2047,22 +2085,27 @@ function openSupabaseChannel(
   }) as unknown as SupaCloudRealtimeChannel;
 }
 
-interface SupaCloudClientBinding<TBase> {
-  withClient<T extends ProcedureSource>(apiClient: T): TBase & SupaCloudClientBinding<TBase> & {
-    procedures: ProceduresOf<T>;
-    queryAdapter(adapterOptions: QueryAdapterOptions): QueryAdapter<T>;
+function createApplicationSurface<TApiClient extends ProcedureSource>(
+  apiClient: TApiClient,
+): SupaCloudApplicationSurface<TApiClient> {
+  return {
+    procedures: createProcedureClient(apiClient),
+    queryAdapter: (options: QueryAdapterOptions) => createQueryAdapter(apiClient, options),
   };
 }
 
 export function createSupaCloudClient<
   TClient extends SupabaseClient = SupabaseClient,
-  TApiClient extends ProcedureSource | undefined = undefined,
+  TApiClient extends ProcedureSource = ProcedureSource,
 >(
-  options: SupaCloudClientOptions<TClient> & { apiClient?: TApiClient },
-): SupaCloudClientWithProcedures<
-  TClient,
-  TApiClient extends ProcedureSource ? ProceduresOf<TApiClient> : undefined
-> {
+  options: SupaCloudClientOptions<TClient> & { apiClient: TApiClient },
+): SupaCloudClientWithApplication<TClient, TApiClient>;
+export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
+  options: SupaCloudClientOptions<TClient> & { apiClient?: undefined },
+): SupaCloudClientUnbound<TClient>;
+export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
+  options: SupaCloudClientOptions<TClient> & { apiClient?: ProcedureSource },
+): unknown {
   const normalized: Required<SupaCloudClientOptions<TClient>> = {
     ...options,
     managementApiUrl: normalizeBaseUrl(options.managementApiUrl),
@@ -2087,6 +2130,7 @@ export function createSupaCloudClient<
 
   const instance = {
     supabase: options.supabase,
+    compat: { supabase: options.supabase } as SupaCloudCompatibilitySurface<TClient>,
     projectRef: normalized.projectRef,
     managementApiUrl: normalized.managementApiUrl,
     auth: {
@@ -2112,23 +2156,33 @@ export function createSupaCloudClient<
     },
   };
 
-  const withClient: SupaCloudClientBinding<typeof instance>["withClient"] = (apiClient) => {
+  const withClient = <T extends ProcedureSource>(
+    apiClient: T,
+  ): SupaCloudClientWithApplication<TClient, T> => {
+    const app = createApplicationSurface(apiClient);
     return {
       ...instance,
-      procedures: createProcedureClient(apiClient),
-      queryAdapter: (adapterOptions: QueryAdapterOptions) => createQueryAdapter(apiClient, adapterOptions),
+      app,
+      procedures: app.procedures,
+      queryAdapter: app.queryAdapter,
       withClient,
+      withApp: withClient,
     };
   };
 
+  const app = options.apiClient === undefined
+    ? undefined
+    : createApplicationSurface(options.apiClient);
+
   return {
     ...instance,
-    procedures: (options.apiClient === undefined ? undefined : createProcedureClient(options.apiClient)) as
-      TApiClient extends ProcedureSource ? ProceduresOf<TApiClient> : undefined,
+    app: app as SupaCloudApplicationSurface<ProcedureSource> | undefined,
+    procedures: app === undefined ? undefined : app.procedures,
     queryAdapter: (adapterOptions: QueryAdapterOptions) => {
-      if (options.apiClient === undefined) throw new Error("No procedure client attached");
-      return createQueryAdapter(options.apiClient, adapterOptions);
+      if (app === undefined) throw new Error("No procedure client attached");
+      return app.queryAdapter(adapterOptions);
     },
     withClient,
-  };
+    withApp: withClient,
+  } as SupaCloudClientUnbound<TClient> | SupaCloudClientWithApplication<TClient, ProcedureSource>;
 }

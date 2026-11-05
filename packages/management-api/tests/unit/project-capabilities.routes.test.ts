@@ -84,6 +84,28 @@ describe("project capability negotiation", () => {
     expect(body.auth_runtime).toBe("gotrue");
     expect(body.platform_version).toBeTruthy();
     expect(body.environment).toBeTruthy();
+    expect(body.api_surfaces).toEqual({
+      compatibility: {
+        owner: "postgrest",
+        protocol: "supabase-project",
+        client: "@supabase/supabase-js",
+        purpose: "project-data-access",
+        authorization: "postgresql-grants-rls-rpc",
+      },
+      business: {
+        owner: "supacloud-application",
+        protocol: "generated-procedure",
+        client: "compiler-generated-client",
+        purpose: "domain-commands-and-queries",
+        authorization: "application-rpc-and-rls",
+      },
+    });
+    expect(body.schema_authority).toEqual({
+      implementation: "sql",
+      governance: "db.manifest",
+      fact: "postgresql.catalog",
+      generated: "supacloud-compiler",
+    });
     expect(body.capabilities.webhook_delivery_v2).toMatchObject({ available: true, source: "supacloud" });
     expect(body.capabilities.business_organizations_v1).toMatchObject({
       available: true,
