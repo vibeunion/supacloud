@@ -5,9 +5,6 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
 import { compileProject, checkProject } from "./compile";
-const { isScopeViolation }: {
-  isScopeViolation(owner: "application" | "request" | "job", dependency: "application" | "request" | "job"): boolean;
-} = await import(pathToFileURL(resolve(import.meta.dir, "../../app/src/scope.ts")).href);
 import { renderApplication } from "./generate";
 import { validateGraph } from "./validate";
 import { RUNTIME_SOURCE, FIXTURE_TSCONFIG } from "./fixtures/runtime-source";
@@ -118,14 +115,12 @@ export const OPTIONAL = new InjectionToken<string>("optional");
 }, 30_000);
 
 test("controller visibility, conflicting flags and sibling lifetimes are compile errors even with writeOnError", async () => {
-  expect(isScopeViolation("request", "job")).toBe(true);
-  expect(isScopeViolation("job", "request")).toBe(true);
-  expect(isScopeViolation("request", "application")).toBe(false);
   const cases = [
     { code: "missing-deps", source: `@Injectable() export class Consumer { constructor(@Optional() readonly unbound: string | null) {} }\n@Module({name:"feature",providers:[Consumer]}) export class Feature {}` },
     { code: "module-boundary", source: `@Injectable() export class Hidden {}\n@Module({name:"private",providers:[Hidden]}) export class Private {}\n@Controller("/") export class View { constructor(readonly hidden: Hidden) {} }\n@Module({name:"feature",imports:[Private],controllers:[View]}) export class Feature {}` },
     { code: "conflicting-injection-flags", source: `export const TOKEN = new InjectionToken<string>("token");\n@Injectable() export class Consumer { constructor(@Self() @SkipSelf() @Optional() @Inject(TOKEN) readonly value: string | null) {} }\n@Module({name:"feature",providers:[Consumer]}) export class Feature {}` },
     { code: "scope-violation", source: `@Injectable({scope:"request"}) export class RequestValue {}\n@Injectable({scope:"job"}) export class Worker { constructor(readonly value: RequestValue) {} }\n@Module({name:"feature",providers:[RequestValue,Worker]}) export class Feature {}` },
+    { code: "scope-violation", source: `@Injectable({scope:"job"}) export class JobValue {}\n@Injectable({scope:"request"}) export class RequestService { constructor(readonly value: JobValue) {} }\n@Module({name:"feature",providers:[JobValue,RequestService]}) export class Feature {}` },
     { code: "scope-violation", source: `@Injectable({scope:"request"}) export class RequestValue {}\n@Injectable({scope:"application"}) @Controller("/") export class View { constructor(readonly value: RequestValue) {} }\n@Module({name:"feature",providers:[RequestValue],controllers:[View]}) export class Feature {}` },
     { code: "scope-violation", source: `@Injectable() export class Consumer { constructor(@Inject(REQUEST_CONTEXT) readonly context: unknown) {} }\n@Module({name:"feature",providers:[Consumer]}) export class Feature {}` },
     { code: "mixed-multi-provider-scopes", source: `export const ITEMS = new InjectionToken<string[]>("items");\n@Module({name:"feature",providers:[{provide:ITEMS,useValue:"a",multi:true},{provide:ITEMS,useValue:"b",multi:true,scope:"request"}]}) export class Feature {}` },
