@@ -67,6 +67,8 @@ export interface FunctionalInjectNode {
 }
 
 export interface AspectRefNode {
+  /** Operation-specific factory binding, verified against the selected static boundary. */
+  operation?: { kind: "route" | "command" | "job"; name: string };
   /** Exact project-local source path for context packs. */
   file?: string;
   /** Exported symbol name used in the generated static import. */
@@ -163,6 +165,13 @@ export type DiagnosticFix =
       route: string;
     };
 
+export interface DependencyOptions {
+  optional?: boolean;
+  self?: boolean;
+  skipSelf?: boolean;
+  host?: boolean;
+}
+
 export interface ProviderNode {
   /** Token name (InjectionToken variable name or class name). */
   token: string;
@@ -175,11 +184,13 @@ export interface ProviderNode {
   scope: Scope;
   /** Token names in constructor/factory parameter order. */
   deps: string[];
-  /** Parameter tokens that are marked @Optional() (receive undefined if unresolved). */
+  /** Parameter-indexed modifiers; takes precedence over legacy token summaries. */
+  dependencyOptions?: DependencyOptions[];
+  /** Parameter tokens that are marked @Optional() (receive null if unresolved). */
   optionalDeps?: string[];
-  /** Parameter tokens marked @Self() (must be resolved from current module's own providers). */
+  /** Parameter tokens marked @Self() (must be resolved at the current scope). */
   selfDeps?: string[];
-  /** Parameter tokens marked @SkipSelf() (must NOT be resolved from current module's own providers). */
+  /** Parameter tokens marked @SkipSelf() (skip the current scope; a scoped consumer may use its module application parent). */
   skipSelfDeps?: string[];
   /** Parameter tokens marked @Host(). */
   hostDeps?: string[];
@@ -313,6 +324,8 @@ export interface ControllerNode {
   path: string;
   scope: Scope;
   deps: string[];
+  /** Parameter-indexed modifiers; takes precedence over legacy token summaries. */
+  dependencyOptions?: DependencyOptions[];
   /** Class implements OnDestroy interface or onDestroy method. */
   hasOnDestroy?: boolean;
   /** Class exposes an application startup hook. */
@@ -390,6 +403,8 @@ export interface JobNode {
 
 /** Static provider information exposed to deployment and tooling consumers. */
 export interface ExecutionPlanProvider {
+  /** Effective injection modifiers in parameter order. */
+  dependencyOptions?: DependencyOptions[];
   token: string;
   kind: ProviderKind;
   scope: Scope;

@@ -106,7 +106,7 @@
     {
       "name": "AspectRefNode",
       "kind": "type",
-      "signature": "export interface AspectRefNode {\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
+      "signature": "export interface AspectRefNode {\n    operation?: {\n        kind: \"route\" | \"command\" | \"job\";\n        name: string;\n    };\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
       "name": "assessMigration",
@@ -216,7 +216,7 @@
     {
       "name": "ControllerNode",
       "kind": "type",
-      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
+      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    dependencyOptions?: DependencyOptions[];\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
     },
     {
       "name": "createApplicationDevelopmentContext",
@@ -404,6 +404,11 @@
       "signature": "export interface DependencyGraphIndex {\n    getAffectedModules(changedFiles: string[]): string[];\n}"
     },
     {
+      "name": "DependencyOptions",
+      "kind": "type",
+      "signature": "export interface DependencyOptions {\n    optional?: boolean;\n    self?: boolean;\n    skipSelf?: boolean;\n    host?: boolean;\n}"
+    },
+    {
       "name": "DevelopmentSchemaKind",
       "kind": "type",
       "signature": "export type DevelopmentSchemaKind = \"opaque\" | \"declared\";"
@@ -561,7 +566,7 @@
     {
       "name": "ExecutionPlanProvider",
       "kind": "type",
-      "signature": "export interface ExecutionPlanProvider {\n    token: string;\n    kind: ProviderKind;\n    scope: Scope;\n    deps: string[];\n    optionalDeps: string[];\n    selfDeps: string[];\n    skipSelfDeps: string[];\n    hostDeps: string[];\n    multi: boolean;\n    exported: boolean;\n    lifecycle: {\n        init: boolean;\n        destroy: boolean;\n    };\n}"
+      "signature": "export interface ExecutionPlanProvider {\n    dependencyOptions?: DependencyOptions[];\n    token: string;\n    kind: ProviderKind;\n    scope: Scope;\n    deps: string[];\n    optionalDeps: string[];\n    selfDeps: string[];\n    skipSelfDeps: string[];\n    hostDeps: string[];\n    multi: boolean;\n    exported: boolean;\n    lifecycle: {\n        init: boolean;\n        destroy: boolean;\n    };\n}"
     },
     {
       "name": "ExecutionPlanProviderEdge",
@@ -986,7 +991,7 @@
     {
       "name": "ProviderNode",
       "kind": "type",
-      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
+      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    dependencyOptions?: DependencyOptions[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
       "name": "pullGraphqlSchema",

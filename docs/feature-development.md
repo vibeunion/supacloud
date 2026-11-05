@@ -46,6 +46,13 @@ migrations/            # 只追加的已审查迁移
 不为每个模型机械增加 Repository、Service、Controller。只有需要替换外部系统、
 复用业务规则或明确隔离基础设施时才新增端口。
 
+后续功能遵循三个固定参考：Micronaut 的编译分析与直接生成、NestJS 的 feature
+模块组织、Angular 的构造器 DI。模块通过 exports 公开应用端口，需要转发时显式
+重导出。request/job provider 留在本 feature；跨 feature 传递身份与数据，不能注入
+另一个 feature 的短生命周期实例。Optional 参数使用 `T | null`，Self/SkipSelf
+按参数选择；不要通过 imports 排列解决 Token 冲突。详细语义与升级说明见
+[静态 DI profile](architecture/static-aop.md#已实施的静态服务端-di-语义)。
+
 ## 从需求到交付
 
 1. **定义业务动作。** 写清输入/结果、当前权限、状态转换、并发冲突、幂等键以及
@@ -119,6 +126,7 @@ bun run db:diff -- --candidate output/database-audit/change.sql
 | --- | --- |
 | 模型、策略、原生驱动、共享事务 | [zenstack-upgrade.test.ts](../packages/db/src/zenstack-upgrade.test.ts) |
 | TypeBox 命令、receipt 重放与再次授权 | [typebox.test.ts](../packages/commands/src/typebox.test.ts) |
+| 模块重导出、DI 修饰符、生命周期、typed aspect 编译绑定 | [framework-architecture.test.ts](../packages/compiler/src/framework-architecture.test.ts) |
 | 切面顺序、单次 continuation、作用域销毁 | [static-di-aop.test.ts](../packages/compiler/src/static-di-aop.test.ts) |
 | 编译入口防绕过、executionPlan | [execution-contract.test.ts](../packages/compiler/src/execution-contract.test.ts) |
 | typed aspect、模型 HTTP/Worker 共用命令、审计回滚 | [app-model-command-starter.test.ts](../packages/cli/src/shared/tools/app-model-command-starter.test.ts) |

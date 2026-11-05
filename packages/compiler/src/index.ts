@@ -178,6 +178,7 @@ export type {
   ExecutionPlanRoute,
   ControllerNode,
   DependencyGraphCache,
+  DependencyOptions,
   DependencyGraphIndex,
   Diagnostic,
   DiagnosticFix,
