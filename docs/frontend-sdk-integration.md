@@ -8,7 +8,7 @@ should not assemble a second authentication system to call a business endpoint.
 
 | Responsibility | Owner |
 | --- | --- |
-| User session, database CRUD, Storage and Realtime | Existing `@supabase/supabase-js` client, also exposed as `supacloud.supabase` |
+| User session, compatibility database CRUD, Storage and Realtime | Existing `@supabase/supabase-js` client, exposed as `supacloud.compat.supabase` (the root `supacloud.supabase` alias remains) |
 | SupaCloud task receipts, status and authorized task actions | `@supacloud/js` |
 | Business-specific HTTP/query types and response validation | Compiler-generated application clients |
 | Authenticated business-command transport and confirmation composition | `@supacloud/js/contracts`, reusing `@supacloud/contracts/client` |
@@ -48,30 +48,43 @@ the current user, and leave operator APIs on a trusted server.
 
 ```ts
 import { createClient } from "@supabase/supabase-js";
-import { createSupaCloudClient } from "@supacloud/js";
-import { createSupaCloudApiFetch } from "@supacloud/js";
+import { createSupaCloudClient, createSupaCloudProcedureClient } from "@supacloud/js";
 import { createApiClient } from "./generated/client";
 
 const supabase = createClient("https://project.example.com", "publishable-key");
 
-const supacloud = createSupaCloudClient({
+const platform = createSupaCloudClient({
   supabase,
   managementApiUrl: "https://management.example.com",
   projectRef: "project-ref",
 });
 
-const api = createApiClient({
-  fetch: createSupaCloudApiFetch({ supabase, functionName: "app-api" }),
+const app = createSupaCloudProcedureClient({
+  supabase,
+  functionName: "app-api",
+  generated: createApiClient,
 });
+
+const supacloud = platform.withApp(app);
+const api = supacloud.app.procedures;
 
 export { supabase, supacloud, api };
 ```
 
-The generated client accepts a standard fetch function without Bun-specific
-static properties. `createSupaCloudApiFetch` delegates each call to the
-official `supabase.functions.invoke()` transport, so Supabase auth, apikey,
-CORS and session refresh remain owned by `supabase-js`. It forwards only the
-application request headers and never replaces the caller's session store.
+The compatibility and business lanes share the same Supabase client. The
+generated procedure facade delegates authenticated transport to
+`supabase.functions.invoke()`, so Supabase auth, apikey, CORS and session
+refresh remain owned by `supabase-js`. It never creates a second session store.
+
+For compatibility reads and low-risk CRUD, keep the call visibly on the
+compatibility lane:
+
+```ts
+const rows = await supacloud.compat.supabase
+  .from("cases")
+  .select("id, status")
+  .eq("status", "open");
+```
 
 Generated routes also expose a procedure facade:
 
