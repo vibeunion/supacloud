@@ -27,9 +27,12 @@ export function prepareCommandPackage(candidate, siblings) {
   const next = structuredClone(candidate);
   /** @type {Set<string>} */
   const required = new Set();
-  for (const section of ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies', 'overrides']) {
+  /** @type {Map<string, string>} */
+  const directSpecs = new Map();
+  /** @param {string} section */
+  const resolveSection = (section) => {
     const entries = next[section];
-    if (entries === undefined) continue;
+    if (entries === undefined) return;
     if (!isRecord(entries)) throw new Error(`Invalid ${section}`);
     for (const [name, range] of Object.entries(entries)) {
       if (typeof range !== 'string') throw new Error(`Invalid ${section}.${name}`);
@@ -40,11 +43,27 @@ export function prepareCommandPackage(candidate, siblings) {
       }
       const version = packageVersion(sibling, name);
       stableVersionPrecedence(version, name);
-      entries[name] = version;
+      // npm requires an override to exactly match a direct dependency spec.
+      // Keep ranges such as ^0.57.0 aligned while local direct dependencies
+      // have already been normalized to their published exact version.
+      entries[name] = section === 'overrides' && directSpecs.has(name)
+        ? directSpecs.get(name) : version;
       // Overrides only affect the root install, not consumers of this package.
       if (section !== 'devDependencies' && section !== 'overrides') required.add(`${name}@${version}`);
     }
+  };
+  for (const section of ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies']) {
+    resolveSection(section);
   }
+  for (const section of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    const entries = next[section];
+    if (isRecord(entries)) {
+      for (const [name, range] of Object.entries(entries)) {
+        if (typeof range === 'string') directSpecs.set(name, range);
+      }
+    }
+  }
+  resolveSection('overrides');
   return { package: next, required: [...required].sort() };
 }
 
