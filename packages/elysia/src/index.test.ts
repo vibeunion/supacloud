@@ -1052,7 +1052,7 @@ describe("composeAspects and executeJob", () => {
       kind: "route",
       name: "test",
       input: {},
-    }, () => "ok")).rejects.toThrow("next() called multiple times");
+    }, () => "ok")).rejects.toMatchObject({ code: "ASPECT_CONTINUATION_REUSED" });
   });
 
   test("executes a job with static aspects and destroys its job scope", async () => {

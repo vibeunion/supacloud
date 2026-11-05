@@ -59,15 +59,29 @@ test("custom error mapping still receives the response validation error and requ
   });
 });
 
-test("native Response passthrough is unchanged and must be validated by the handler", async () => {
-  const app = createApplication({
-    modules: [commandModule(() => Response.json({ id: 42 }, { headers: { "x-receipt": "native" } }))],
-    commandExecutor: (_invocation, next) => next(),
-  });
+test("ordinary HTTP routes preserve native Response passthrough and handler validation", async () => {
+  const compiled = commandModule(() => Response.json({ id: 42 }, { headers: { "x-receipt": "native" } }));
+  delete compiled.controllers[0]!.routes[0]!.command;
+  compiled.commands = [];
+  const app = createApplication({ modules: [compiled] });
   const response = await app.handle(new Request("http://localhost/receipt", { method: "POST" }));
   expect(response.status).toBe(200);
   expect(response.headers.get("x-receipt")).toBe("native");
   expect(await response.json()).toEqual({ id: 42 });
+});
+
+test("command routes reject native responses without replaying the handler", async () => {
+  let writes = 0;
+  let observed: unknown;
+  const app = createApplication({
+    modules: [commandModule(() => { writes++; return Response.json({ id: "receipt" }); })],
+    commandExecutor: (_invocation, next) => next(),
+    errorMapper: error => { observed = error; return new Response(null, { status: 500 }); },
+  });
+  const response = await app.handle(new Request("http://localhost/receipt", { method: "POST" }));
+  expect(response.status).toBe(500);
+  expect(observed).toMatchObject({ code: "ASPECT_RESULT_NOT_DATA" });
+  expect(writes).toBe(1);
 });
 
 test("error mapping retains request context for every module", async () => {
