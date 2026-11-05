@@ -60,8 +60,9 @@ export async function scanCommandBoundaries(
     }
     if (initializers.length !== 1 || !ts.isCallExpression(initializers[0]!)) return false;
     const origin = await apiOrigin(initializers[0]!.expression, checker);
-    return origin?.module === "@supacloud/commands"
-      && ["createTransactionalCommand", "createExternalCommand"].includes(origin.name);
+    return (origin?.module === "@supacloud/commands"
+      && ["createTransactionalCommand", "createExternalCommand"].includes(origin.name))
+      || (origin?.module === "@supacloud/commands/typebox" && origin.name === "createTypeBoxTransactionalCommand");
   };
   const allowed = async (node: ts.Node, method: CommandMember): Promise<boolean> => {
     if (await isDurableForwarder(method)) return true;

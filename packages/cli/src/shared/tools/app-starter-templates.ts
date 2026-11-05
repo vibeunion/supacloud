@@ -3,7 +3,7 @@ import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-env
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata } = starterMetadata.packages;
 
-export type StarterTemplate = "minimal" | "command";
+export type StarterTemplate = "minimal" | "command" | "model-command";
 export interface StarterSdkDependencies {
   "@supacloud/js": string;
   "@supabase/supabase-js": string;
@@ -89,7 +89,7 @@ export function createCompiledModules(): never {
 }
 `;
 
-function baseFiles(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
+export function baseTemplateFiles(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
@@ -154,7 +154,7 @@ export default defineSupacloudConfig();
 
 function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
-    ...baseFiles(name, sdkDependencies),
+    ...baseTemplateFiles(name, sdkDependencies),
     "src/features/health/contracts.ts": `import { t } from "elysia";
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,

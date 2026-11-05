@@ -2,6 +2,9 @@
 
 Status: implemented; focused local validation is recorded below. This document is not deployment evidence.
 
+For day-to-day feature work, start with the [feature development guide](../feature-development.md).
+The [static AOP decision](static-aop.md) explains framework references and current enforcement limits.
+
 ## Decision
 
 New model authoring uses ZModel. ZenStack owns model inference and data policies;

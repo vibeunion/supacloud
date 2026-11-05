@@ -1,5 +1,9 @@
 # Application Starter
 
+After initialization, follow the [feature development guide](feature-development.md)
+for model, command, Effect and migration ownership. Framework references and
+enforcement limits are recorded in the [static AOP decision](architecture/static-aop.md).
+
 ## Goal and Boundaries
 
 The developer's job is to create a typed, governed service and verify its behavior
@@ -20,6 +24,40 @@ attachments, Worker or GraphQL examples. Use `--template command` for the comple
 durable reference described below. HTTP routes and background jobs are added
 through `app generate`; there are no separate `http` or `edge` starter templates.
 Existing applications are not reorganized.
+
+For a ZenStack-backed HTTP/Worker feature, use `--template model-command`:
+
+```sh
+supacloud app init --root ./orders --name orders --template model-command
+cd orders
+bun install
+bun run db:generate
+bun run compile
+bun run check
+```
+
+This recipe provides create/approve/read operations, TypeBox contracts, Effect
+routes and a typed compiled approval aspect inside the durable transaction.
+HTTP and `host.worker(claim, signal)` share identity resolution, operation keys,
+receipts and audit. Version conflicts are persisted `outcome: "conflict"`
+decisions. Same-key/different-input requests fail; replay rechecks current access.
+The Worker entry consumes an already verified claim through an application-owned
+identity authority; it does not introduce a queue scheduler or claim loop.
+
+Apply its reviewed migrations through the existing database ledger, provision a
+non-owner login with `model_orders_app` membership, and supply `IdentityAuthority`.
+The host rejects superuser, BYPASSRLS and table-owner membership. The role is private
+to the trusted host: ZenStack enforces tenant/owner filtering, while the SQL policy
+restricts access to that role. It must not be granted to browser/PostgREST users.
+Set an explicit loopback `SUPACLOUD_MODEL_DATABASE_URL` and `MODEL_IDENTITY_MODULE`
+before `bun run dev`. This recipe starts the compiled model host; recompile after
+source changes. Startup never migrates or supplies a default identity provider.
+
+The [focused model starter regression](../packages/cli/src/shared/tools/app-model-command-starter.test.ts)
+compiles and typechecks emitted files and exercises HTTP/Worker behavior against
+disposable PostgreSQL when `SUPACLOUD_STARTER_POSTGRES_BIN` is set. Queue delivery,
+publication and deployment require their own acceptance. The existing `command`
+recipe remains the native-SQL/RLS reference for more complex workflows.
 
 After the CLI release containing this command is published:
 
@@ -79,8 +117,8 @@ New compiler and runtime fixes must be published with the CLI feature. Before
 publication, `bun run scripts/check_app_starter.ts` tests locally packed artifacts
 together; this is not evidence that those versions already exist on npm.
 
-The command template includes database tooling; the minimal template does not
-install ZenStack or require `db:generate`. For the command template, `db:generate`
+The command and model-command templates include database tooling; the minimal template does not
+install ZenStack or require `db:generate`. For both database templates, `db:generate`
 is an explicit first-use setup step after installation; commit `zenstack/generated/` and `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
 New command projects generate `db/modules.ts` at the compiler's default
@@ -111,8 +149,9 @@ attest database provenance or freshness.
 share the same watch/recompile/restart loop. It does not add a second watcher.
 `supacloud app watch` is the compile-only inspection command.
 For compatibility, `app dev --once` / `--watch=false` remain compile-only.
-Remote test-server sync, migration generation and remote reload remain
-`supacloud dev sync`, `supacloud dev migrate` and `supacloud dev watch`.
+Remote test-server sync and reload remain `supacloud dev sync` and
+`supacloud dev watch`. Generate migration candidates with `bun run db:diff`,
+review them, then use the existing `supacloud db plan` / `db apply` workflow.
 
 | Profile | Intended use | Requirement |
 | --- | --- | --- |

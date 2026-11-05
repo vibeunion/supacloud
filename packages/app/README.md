@@ -154,22 +154,35 @@ Use one `around(context, next)` function for cross-cutting behavior at the
 module, route, command, or job boundary:
 
 ```ts
-import type { Aspect } from "@supacloud/app";
+import { Module, type Aspect } from "@supacloud/app";
 
-const auditAspect: Aspect = async (context, next) => {
-  const result = await next();
-  await audit.write(context, result);
-  return result;
-};
+// A minimal pass-through: await/return the single continuation.
+export const operationAspect: Aspect = async (_context, next) => await next();
 
-@Module({ name: "case", aspects: [auditAspect] })
+@Module({ name: "case", aspects: [operationAspect] })
 export class CaseModule {}
 ```
 
-Aspect references must be explicit function identifiers. The compiler rejects
-variables, spread expressions, strings, dynamic pointcuts, Proxy, and runtime
-aspect registration. Angular remains the DI runtime; aspects are SupaCloud
-compiler metadata and generated execution order.
+Declare aspects in an array literal of directly resolvable function identifiers.
+The compiler rejects nonliteral arrays, spread expressions, strings and call
+expressions in that declaration. Dynamic pointcuts, Proxy interception and
+runtime aspect registration are not supported. Angular provides the compatibility DI
+runtime; compiled factories use direct constructor calls. Aspects are SupaCloud
+compiler metadata and generated execution order. Durable business audit belongs
+inside the Command transaction; do not add an independent audit write after
+`next()`. Use the existing execution observer for best-effort telemetry.
+
+For operation-specific types, declare a named `defineOperationAspect({ kind,
+name, input, result, capabilities }, callback)` using literal kind/name and
+trusted validators/selectors, then reference it in `aspects`. The callback gets
+immutable input, typed results and only selected capabilities. Command pipelines
+reject fabricated success, result replacement, swallowed downstream failures and
+reused continuations; results must be plain data. See [execution contracts](EXECUTION.md#explicit-aspects-no-service-method-interception)
+for transport behavior and limits.
+
+See the [feature development guide](../../docs/feature-development.md) and
+[static AOP decision](../../docs/architecture/static-aop.md) for ownership,
+framework references, and the distinction between enforced and planned rules.
 
 ### Command Runtime Contract
 

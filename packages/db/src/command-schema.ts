@@ -1,14 +1,5 @@
-/** Install through the application's normal migration flow, never during a request. */
-export const COMMAND_PERSISTENCE_SQL = `
-DO $runtime$
-BEGIN
-  IF to_regprocedure('supacloud_workflows.start_run(uuid,text,text,text,jsonb,integer)') IS NULL
-    OR to_regprocedure('supacloud_commands.status(jsonb)') IS NULL THEN
-    RAISE EXCEPTION 'Install the SupaCloud Commands/Workflow/PGMQ runtime before command persistence';
-  END IF;
-END
-$runtime$;
-CREATE SCHEMA IF NOT EXISTS supacloud_commands;
+/** Transactional commands share these receipt/audit tables with the full workflow runtime. */
+export const COMMAND_RECEIPT_SQL = `CREATE SCHEMA IF NOT EXISTS supacloud_commands;
 REVOKE ALL ON SCHEMA supacloud_commands FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS supacloud_commands.execution_receipts (
   tenant_id text NOT NULL,
@@ -79,7 +70,19 @@ AFTER INSERT OR UPDATE ON supacloud_commands.execution_receipts
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW WHEN (NEW.status = 'rejected')
 EXECUTE FUNCTION supacloud_commands.require_rejection_audit();
-CREATE OR REPLACE FUNCTION supacloud_commands.enqueue_execution_recovery()
+`;
+
+/** Install through the application's normal migration flow, never during a request. */
+export const COMMAND_PERSISTENCE_SQL = `
+DO $runtime$
+BEGIN
+  IF to_regprocedure('supacloud_workflows.start_run(uuid,text,text,text,jsonb,integer)') IS NULL
+    OR to_regprocedure('supacloud_commands.status(jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'Install the SupaCloud Commands/Workflow/PGMQ runtime before command persistence';
+  END IF;
+END
+$runtime$;
+${COMMAND_RECEIPT_SQL}CREATE OR REPLACE FUNCTION supacloud_commands.enqueue_execution_recovery()
 RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $recovery$
 DECLARE submission jsonb;
 BEGIN

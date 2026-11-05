@@ -569,6 +569,7 @@ IDE 和 AI agent 做状态机漂移检查。
 - 含 request/job 级 provider 或 controller 的模块同时生成异步静态 `create<Name>RequestScope` / `create<Name>JobScope` 与 `destroy<Name>RequestScope(scope)` / `destroy<Name>JobScope(scope)`；factory 在构造中途失败时按编译期确定的逆创建顺序回滚已知 `onDestroy` 方法，不会运行时扫描或解析 Token。
 - `@Host()` 在 EnvironmentInjector 作用域中保留元数据但不改变解析，因为 SupaCloud 没有 Angular 元素注入器树；`@Self()` / `@SkipSelf()` 由静态 factory 按当前 scope 与模块可见性执行。
 - AOP 只支持静态边界：`ModuleOptions.aspects`、`RouteOptions.aspects`、`CommandOptions.aspects` 和 `JobOptions.aspects` 必须是显式数组字面量，元素必须是可解析的函数标识符。生成器会直接 import aspect 并生成固定顺序的 onion chain，不使用 Proxy、Reflect 扫描、动态 pointcut 或运行时注册。
+- typed aspect 可使用真实 `@supacloud/app`、`/core`、`/execution` 的 `defineOperationAspect` 初始化命名变量；`kind`、`name` 必须为静态字面量。输入/结果校验器与 capability 选择器提供类型缩窄。生成的 Command 管线要求成功返回来自一次 next，拒绝结果替换及吞掉下游失败，并递归冻结普通数据结果。详见 [静态 AOP 约束](../../docs/architecture/static-aop.md)。
 - 执行顺序为 `commandGovernance -> module -> route -> command -> handler`，授权拒绝不会运行业务切面；Job 使用 `module -> job -> executor -> run/execute`，并在 finally 中销毁 job scope。
 - services 对象的 key 为 token 名的 camelCase：`CaseService → caseService`、`CASE_REPOSITORY → caseRepository`、`LOGGER → logger`。
 - controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, headers?, cookie?, response?, responses? }] }`，schema 直接引用 import 进来的对象。
