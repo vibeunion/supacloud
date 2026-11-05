@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.14.4...pgredis-runtime-v0.15.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+
+### Features
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
 ## [0.14.4](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.14.3...pgredis-runtime-v0.14.4) (2026-11-02)
 
 
