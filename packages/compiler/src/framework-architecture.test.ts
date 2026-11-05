@@ -5,7 +5,9 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
 import { compileProject, checkProject } from "./compile";
-import { isScopeViolation } from "../../app/src/scope";
+const { isScopeViolation }: {
+  isScopeViolation(owner: "application" | "request" | "job", dependency: "application" | "request" | "job"): boolean;
+} = await import(pathToFileURL(resolve(import.meta.dir, "../../app/src/scope.ts")).href);
 import { renderApplication } from "./generate";
 import { validateGraph } from "./validate";
 import { RUNTIME_SOURCE, FIXTURE_TSCONFIG } from "./fixtures/runtime-source";
