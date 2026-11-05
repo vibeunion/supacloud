@@ -105,6 +105,24 @@ function extracted(command: RpcWrite) { return command.execute; }
   });
 });
 
+test("RPC-declared commands still reject calls to arbitrary methods", async () => {
+  await project(`import { Command, Module } from './runtime';
+@Command({name: 'rpc.write', permission: 'items:write', rpc: 'fa_write_item',
+  transaction: 'required', audit: 'written', idempotency: 'required'})
+export class RpcWrite {
+  execute() { return 1; }
+  dangerous() { return 2; }
+}
+@Module({name: 'rpc', providers: [RpcWrite]}) class RpcModule {}
+function safe(command: RpcWrite) { return command.execute(); }
+function unsafe(command: RpcWrite) { return command.dangerous(); }
+`, async (root) => {
+    const graph = await analyzeProject(root);
+    const errors = graph.diagnostics?.filter((item) => item.code === "command-executor-bypass") ?? [];
+    expect(errors).toHaveLength(1);
+  });
+});
+
 test("incremental analysis rejects new bypasses without stale diagnostics after repair", async () => {
   await project(declarations, async (root) => {
     const cache = createDependencyGraphCache();

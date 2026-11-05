@@ -81,7 +81,7 @@ export async function scanCommandBoundaries(
     // and the configured adapter must satisfy every declared capability (validate.ts).
     // Extracting the method as a value still escapes this check, so callers cannot
     // launder an ungoverned invocation through the RPC-declared command.
-    if (command.rpc !== undefined) return true;
+    if (command.rpc !== undefined && propertyName(method.name) === "execute") return true;
     for (let owner = node.parent.parent; owner; owner = owner.parent) {
       if (ts.isMethodDeclaration(owner)) {
         if (owner.parent === method.parent && (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))
