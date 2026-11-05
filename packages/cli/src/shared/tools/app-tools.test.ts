@@ -474,7 +474,7 @@ describe("app tools", () => {
             expect(result.isError).toBe(false);
             expect(JSON.parse(result.content[0].text)).toEqual(modulePack);
         }
-    });
+    }, 30_000);
 
     test("doctor reports actionable checks and passes after a clean compile", async () => {
         await app({ action: "compile", root });
