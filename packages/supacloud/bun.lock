@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.31.0",
-        "@supacloud/cli": "^0.117.0",
+        "@supacloud/cli": "^0.117.1",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
@@ -65,7 +65,7 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.31.0", "", { "dependencies": { "@supacloud/cli": "0.117.0", "@supacloud/delivery": "0.25.0", "ssh2": "^1.17.0", "typebox": "1.4.3" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-xR5QRKLcFiml1GWF9t5pFPINubzGUF+4MhvsamwKYqSDwQhiTFJ0s01t4tWuaDMyHuXc90zgNywSyrYalNCrSA=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.117.0", "", { "dependencies": { "@supacloud/compiler": "^0.57.0", "@supacloud/db": "0.21.0", "@supacloud/delivery": "0.25.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-2aLrdAaaxc6/x6765OHLGKr+Mi4JwPrA9YXyg1Zi+XGdM2pQB1TdXAhCWH62OD8IcU6Yp/BglU0/sOnfg/qAhA=="],
+    "@supacloud/cli": ["@supacloud/cli@0.117.1", "", { "dependencies": { "@supacloud/compiler": "^0.57.0", "@supacloud/db": "0.21.0", "@supacloud/delivery": "0.25.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-ciCrtiC0XhVUdG9DjdcbOSzKjjJlofZh07iqY3Wza4X2PUj7EHaXc3aIa6ohhLoWykMSZxnwCHU3ozdBbcV/wA=="],
 
     "@supacloud/compiler": ["@supacloud/compiler@0.57.0", "", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "0.21.0", "@supacloud/delivery": "0.25.0", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "bin": { "supacloud-compiler": "dist/cli.js" } }, "sha512-PITXqrBfXz5O2ntLP9yK/xlEz38TZDxAOMvMVOBb/k+0nZ/vdJoDTAJzYAxnw2nLBt4FkRO+CD1Xk//ItE5VpA=="],
 
@@ -326,6 +326,8 @@
     "zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
 
     "zod-validation-error": ["zod-validation-error@4.0.2", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-Q6/nZLe6jxuU80qb/4uJ4t5v2VEZ44lzQjPDhYJNztRQ4wyWc6VF3D3Kb/fAuPetZQnhS3hnajCf9CsWesghLQ=="],
+
+    "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.117.0", "", { "dependencies": { "@supacloud/compiler": "^0.57.0", "@supacloud/db": "0.21.0", "@supacloud/delivery": "0.25.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-2aLrdAaaxc6/x6765OHLGKr+Mi4JwPrA9YXyg1Zi+XGdM2pQB1TdXAhCWH62OD8IcU6Yp/BglU0/sOnfg/qAhA=="],
 
     "@zenstackhq/sdk/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
   }
