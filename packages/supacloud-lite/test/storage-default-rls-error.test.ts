@@ -65,3 +65,41 @@ describe('Storage default RLS error message (no user-authored objects policy)', 
     expect(upload.error!.message).toContain('storage.objects RLS')
   })
 })
+
+test('storage upload only requires an INSERT policy', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-storage-insert-only-'))
+  let project: RunningProjectServer | undefined
+  try {
+    await mkdir(join(rootDir, 'supabase', 'migrations'), { recursive: true })
+    await writeFile(
+      join(rootDir, 'supabase', 'migrations', '0001_insert_only.sql'),
+      `create policy insert_only on storage.objects
+         for insert to authenticated
+         with check (bucket_id = 'images');`,
+    )
+    await writeFile(
+      join(rootDir, 'supabase', 'config.toml'),
+      '[auth.email]\nenable_confirmations = false\n\n[storage]\nfile_size_limit = "1MiB"\n\n[storage.buckets.images]\npublic = false\nallowed_mime_types = ["text/plain"]\n',
+    )
+    project = await startProjectServer({ projectDir: rootDir, port: 0, log: () => {} })
+    const client = createClient(project.url, project.backend.anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    })
+    const { error: signUpError } = await client.auth.signUp({
+      email: 'insert-only@example.com',
+      password: 'correct-horse-battery-staple',
+    })
+    expect(signUpError).toBeNull()
+
+    const upload = await client.storage.from('images').upload(
+      'submission.txt',
+      new TextEncoder().encode('accepted'),
+      { contentType: 'text/plain' },
+    )
+    expect(upload.error).toBeNull()
+    expect(upload.data?.path).toBe('submission.txt')
+  } finally {
+    await project?.close()
+    await rm(rootDir, { recursive: true, force: true })
+  }
+}, 60_000)
