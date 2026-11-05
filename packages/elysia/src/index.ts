@@ -8,7 +8,7 @@ import type {
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
 import { requireFeatureRequestContext } from "@supacloud/app";
-import { composeAspects as composeApplicationAspects } from "@supacloud/app/execution";
+import { composeAspects as composeApplicationAspects, invokeAspect, freezeAspectData } from "@supacloud/app/execution";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
 import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
@@ -1619,10 +1619,11 @@ export function createModulePlugin<
           };
           // A route aspect keeps its HTTP context, but inside a command boundary
           // the entire chain must still return the actual handler result. Native
-          // Response passthrough remains valid when no aspect participates.
+          // Response identity is preserved at this transport boundary.
           const invokeRoute = () => route.command && routeHasAspects
-            ? composeAspects((_context, next) => modulePipeline(commandContext,
-              () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))))(commandContext, invoke)
+            ? invokeAspect(commandContext, (_context, next) => modulePipeline(commandContext,
+              () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))), invoke,
+              result => { if (!(result instanceof Response)) freezeAspectData(result); })
             : modulePipeline(route.command ? commandContext : routeContext,
               once(() => routePipeline(routeContext, once(() => route.command
                 ? commandPipeline!(commandContext, once(invoke))
