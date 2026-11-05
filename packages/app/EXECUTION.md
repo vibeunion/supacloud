@@ -115,8 +115,9 @@ business aspects inside their transaction; outer HTTP formatting is separate.
 
 ## Compile framework features instead of adding a runtime framework
 
-SupaCloud uses its own application declarations, informed by NestJS and AdonisJS,
-to target the existing Elysia host and static DI factories. It does not accept
+SupaCloud follows Micronaut for compile-time AOP/DI architecture, NestJS for
+feature module organization, and Angular for DI semantics. Its own declarations
+target the existing Elysia host and static factories. It does not accept
 those frameworks' decorators or provide their full runtime compatibility.
 The generated execution plan is inspection metadata; the request path uses the
 already generated invokers and pipelines, without reflection, `Proxy`, or runtime
@@ -145,6 +146,17 @@ The compiled environment scopes have no Angular element-injector tree; `@Host()`
 does not introduce a DOM boundary. Angular Router metadata such as `canMatch` is
 not automatically executable by the Elysia adapter. Use its supported HTTP policy
 contract for HTTP checks and the command executor for business authorization.
+
+Validation, generated factories and manifests share one static dependency resolver.
+Public module re-exports preserve origin identity; ambiguous imports fail compilation.
+Modifiers are parameter-specific: Optional returns null for missing bindings,
+Self stays in the current scope, and SkipSelf starts at its parent. Required external
+bindings must be own properties and fail immediately if absent. Application providers
+cannot depend on request/job providers, and request/job cannot depend on each other.
+Cross-module scoped borrowing is rejected; share application ports and explicit data.
+Multi contributions complete in declaration order before consumers, aliases preserve
+identity, and repeated destruction runs owned hooks once. See the supported
+[DI profile and migration](../../docs/architecture/static-aop.md#已实施的静态服务端-di-语义).
 
 Generated modules also contain a static `registerRoutes(register)` callback. The
 Elysia adapter requires this callback for modules with HTTP routes and does not
@@ -241,7 +253,7 @@ Existing adapter and compiler suites should also pass before merging.
 ## 中文实施边界
 
 本次新增可直接调用的应用层执行入口，并复用现有 `commandExecutor` 和编译产物契约。
-应用执行入口不依赖 Elysia；Elysia 2 beta 只处理 HTTP 宿主职责。没有引入 Nestelia、
+应用执行入口不依赖 Elysia；Elysia 2 只处理 HTTP 宿主职责。没有引入 Nestelia、
 反射容器或新的装饰器框架，也没有改写现有编译器生成链。
 
 事务、幂等、审计、项目身份绑定仍由明确配置的适配器和授权器负责；它们不是自动获得的能力。

@@ -12,8 +12,8 @@ export type Scope = (typeof SCOPES)[number];
 export const DEFAULT_SCOPE: Scope = "application";
 
 /**
- * Lifetime rank: longer-lived scopes have a lower rank. A provider may only
- * depend on providers of the same or a longer-lived (lower rank) scope.
+ * Relative lifetime for diagnostics. Request and job have equal duration rank
+ * but are sibling scopes; use isScopeViolation to check dependency compatibility.
  */
 export const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
   application: 0,
@@ -22,5 +22,5 @@ export const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
 };
 
 export function isScopeViolation(from: Scope, to: Scope): boolean {
-  return SCOPE_LIFETIME_RANK[to] > SCOPE_LIFETIME_RANK[from];
+  return to !== "application" && from !== to;
 }

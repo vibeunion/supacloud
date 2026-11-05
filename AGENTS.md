@@ -17,6 +17,9 @@
 
 ## Architecture defaults
 
+- Primary references: Micronaut for compile-time AOP/DI analysis and direct code generation; NestJS for feature Module/Provider/Controller organization; Angular for constructor token, modifier, alias/multi and lifecycle semantics. The supported server profile is documented in `docs/architecture/static-aop.md`.
+- Keep feature providers private unless explicitly exported; re-export through declared imports. Request/job providers remain in their owning feature, and share application ports across features. Optional missing dependencies are `null`; use parameter-level modifiers and nullable types.
+
 - Organize application work by feature. Keep TypeBox public contracts, ZModel data structure/policies and ordinary TypeScript domain rules in their respective owners.
 - New server-side model reads use an identity-bound read facade; model writes use the existing durable Command transaction. Existing PostgREST/RPC paths retain role-scoped contracts and RLS; ZenStack policies do not protect those paths.
 - Trusted hosts verify identity and bind the database/store. Business handlers receive `transaction.db`; do not expose raw clients, identity setters, nested transactions or policy controls. Keep `trustedHosts` narrowly scoped.

@@ -10,6 +10,7 @@ import type {
   CommandBranchNode,
   ControllerNode,
   DependencyGraphCache,
+  DependencyOptions,
   Diagnostic,
   EffectErrorMappingNode,
   EffectCompilerOptions,
@@ -457,7 +458,7 @@ export async function analyzeProject(
     if (!allRegisteredClasses.has(name)) {
       const injectable = (await parseInjectableOptions(classInfo.decl, ctx));
       if (injectable?.providedIn === "root") {
-        const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = (await classDeps(classInfo.decl, ctx));
+        const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = await classDeps(classInfo.decl, ctx);
         const file = sourcePath(ctx.rootDir, classInfo.file);
         const line = lineOf(classInfo.decl);
         if (missing) {
@@ -470,6 +471,7 @@ export async function analyzeProject(
           useClass: name,
           scope: injectable.scope ?? "application",
           deps,
+          ...(dependencyOptions.length > 0 ? { dependencyOptions } : {}),
           ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
           ...(selfDeps.length > 0 ? { selfDeps } : {}),
           ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
@@ -561,11 +563,18 @@ export async function analyzeProject(
     if (existingRoot) {
       modules = modules.map((module) => module === existingRoot ? {
         ...module,
-        providers: [...module.providers, ...rootProviders],
         controllers: [...module.controllers, ...standaloneControllers],
         commands: [...module.commands, ...standaloneCommands],
-        exports: [...new Set([...module.exports, ...rootProviders.map((provider) => provider.token)])],
       } : module);
+      if (rootProviders.length) {
+        // Root defaults must initialize independently of the app's feature imports.
+        // Merging them into AppModule creates a hidden feature -> app -> feature cycle.
+        let rootName = "root";
+        while (modules.some(module => module.name === rootName)) rootName = "_" + rootName;
+        modules.unshift({ name: rootName, className: "SupaCloudRootProviders", file: rootProviders[0]!.file,
+          line: 1, imports: [], providers: rootProviders, controllers: [], commands: [], queries: [],
+          exports: rootProviders.map(provider => provider.token) });
+      }
     } else {
       const fallbackFile = rootProviders[0]?.file ?? standaloneControllers[0]?.file ?? "root.ts";
       modules.unshift({
@@ -866,6 +875,7 @@ async function parseModule(
       useClass: className,
       scope,
       deps: deps.deps,
+      dependencyOptions: deps.dependencyOptions,
       ...(deps.optionalDeps.length > 0 ? { optionalDeps: deps.optionalDeps } : {}),
       ...(deps.selfDeps.length > 0 ? { selfDeps: deps.selfDeps } : {}),
       ...(deps.skipSelfDeps.length > 0 ? { skipSelfDeps: deps.skipSelfDeps } : {}),
@@ -1394,10 +1404,10 @@ async function parseProvider(
     const decl = (await resolveDeclaration(unwrappedEl, ctx))[0];
     const cls = decl && ts.isClassDeclaration(decl) ? decl : undefined;
     const className = cls?.name?.text ?? unwrappedEl.text;
-    const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = cls
-      ? (await classDeps(cls, ctx))
-      : { deps: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], functionalInjects: [], missing: false };
-    const injectable = cls ? (await parseInjectableOptions(cls, ctx)) : undefined;
+    const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = cls
+      ? await classDeps(cls, ctx)
+      : { deps: [], dependencyOptions: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], functionalInjects: [], missing: false };
+    const injectable = cls ? await parseInjectableOptions(cls, ctx) : undefined;
     if (missing) {
       warn(ctx, "missing-deps", `provider ${className} 的部分构造依赖无法静态解析`, file, line);
     }
@@ -1408,6 +1418,7 @@ async function parseProvider(
       useClass: className,
       scope: (await resolveScope({ ...(cls ? { cls } : {}), tokenName: className }, ctx)),
       deps,
+      ...(dependencyOptions.length > 0 ? { dependencyOptions } : {}),
       ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
       ...(selfDeps.length > 0 ? { selfDeps } : {}),
       ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
@@ -1442,6 +1453,7 @@ async function parseProvider(
     const cls = decl && ts.isClassDeclaration(decl) ? decl : undefined;
     const useClass = cls?.name?.text ?? nodeText(unwrappedClass);
     let deps = explicitDeps;
+    let dependencyOptions: DependencyOptions[] = [];
     let optionalDeps: string[] = [];
     let selfDeps: string[] = [];
     let skipSelfDeps: string[] = [];
@@ -1451,11 +1463,13 @@ async function parseProvider(
       const result = (await classDeps(cls, ctx));
       if (deps.length === 0) {
         deps = result.deps;
+        dependencyOptions = result.dependencyOptions;
         optionalDeps = result.optionalDeps;
         selfDeps = result.selfDeps;
         skipSelfDeps = result.skipSelfDeps;
         hostDeps = result.hostDeps;
       } else {
+        dependencyOptions = deps.map((_, index) => result.dependencyOptions[index] ?? {});
         optionalDeps = result.optionalDeps.filter((dep) => deps.includes(dep));
         selfDeps = result.selfDeps.filter((dep) => deps.includes(dep));
         skipSelfDeps = result.skipSelfDeps.filter((dep) => deps.includes(dep));
@@ -1466,8 +1480,8 @@ async function parseProvider(
         warn(ctx, "missing-deps", `provider ${token} (useClass ${useClass}) 的部分构造依赖无法静态解析`, file, line);
       }
     }
-    const injectable = cls ? (await parseInjectableOptions(cls, ctx)) : undefined;
-    (await validateProviderCompatibility(provideExpr, useClassExpr, "class", token, ctx, file, line));
+    const injectable = cls ? await parseInjectableOptions(cls, ctx) : undefined;
+    await validateProviderCompatibility(provideExpr, useClassExpr, "class", token, ctx, file, line, multi === true);
     return {
       token,
       tokenKind,
@@ -1477,6 +1491,7 @@ async function parseProvider(
         ...(explicitScope ? { explicit: explicitScope } : {}), ...(cls ? { cls } : {}), tokenName: token,
       }, ctx)),
       deps,
+      ...(dependencyOptions.length > 0 ? { dependencyOptions } : {}),
       ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
       ...(selfDeps.length > 0 ? { selfDeps } : {}),
       ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
@@ -1494,8 +1509,8 @@ async function parseProvider(
   }
 
   if (useValueExpr) {
-    (await validateProviderCompatibility(provideExpr, useValueExpr, "value", token, ctx, file, line));
-    const importPath = ts.isIdentifier(useValueExpr) ? (await importPathOf(useValueExpr, ctx)) : undefined;
+    await validateProviderCompatibility(provideExpr, useValueExpr, "value", token, ctx, file, line, multi === true);
+    const importPath = ts.isIdentifier(useValueExpr) ? await importPathOf(useValueExpr, ctx) : undefined;
     return {
       token,
       tokenKind,
@@ -1520,8 +1535,8 @@ async function parseProvider(
             : useFactoryExpr.text;
         })()
       : nodeText(useFactoryExpr);
-    (await validateProviderCompatibility(provideExpr, useFactoryExpr, "factory", token, ctx, file, line));
-    const importPath = ts.isIdentifier(useFactoryExpr) ? (await importPathOf(useFactoryExpr, ctx)) : undefined;
+    await validateProviderCompatibility(provideExpr, useFactoryExpr, "factory", token, ctx, file, line, multi === true);
+    const importPath = ts.isIdentifier(useFactoryExpr) ? await importPathOf(useFactoryExpr, ctx) : undefined;
     return {
       token,
       tokenKind,
@@ -1539,7 +1554,7 @@ async function parseProvider(
 
   if (useExistingExpr) {
     const target = (await tokenNameOf(useExistingExpr, ctx)).name;
-    (await validateProviderCompatibility(provideExpr, useExistingExpr, "existing", token, ctx, file, line));
+    await validateProviderCompatibility(provideExpr, useExistingExpr, "existing", token, ctx, file, line, multi === true);
     return {
       token,
       tokenKind,
@@ -1781,9 +1796,11 @@ async function validateProviderCompatibility(
   ctx: AnalysisContext,
   file: string,
   line: number,
+  multi = false,
 ): Promise<void> {
-  const expected = (await providerTokenValueType(provideExpr, ctx));
-  const actual = (await providerImplementationType(implementationExpr, kind, ctx));
+  const contract = await providerTokenValueType(provideExpr, ctx);
+  const expected = multi && contract ? ((await ctx.checker.getIndexTypeOfType(contract, ts.IndexKind.Number)) ?? contract) : contract;
+  const actual = await providerImplementationType(implementationExpr, kind, ctx);
   if (!expected || !actual || isUnknownOrAny(expected) || isUnknownOrAny(actual)) return;
   if ((await ctx.checker.isTypeAssignableTo(actual, expected))) return;
 
@@ -2053,7 +2070,7 @@ async function parseController(
     }
   }
 
-  const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = (await classDeps(decl, ctx));
+  const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = await classDeps(decl, ctx);
   const file = sourcePath(ctx.rootDir, decl.getSourceFile().fileName);
   if (missing) {
     warn(ctx, "missing-deps", `controller ${decl.name?.text} 的部分构造依赖无法静态解析`, file, lineOf(decl));
@@ -2756,6 +2773,7 @@ async function parseController(
     deps,
     ...(hasDestroyHook(decl) ? { hasOnDestroy: true } : {}),
     ...(hasInitHook(decl) ? { hasOnInit: true } : {}),
+    ...(dependencyOptions.length > 0 ? { dependencyOptions } : {}),
     ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
     ...(selfDeps.length > 0 ? { selfDeps } : {}),
     ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
@@ -3055,6 +3073,7 @@ async function classDeps(
   ctx: AnalysisContext,
 ): Promise<{
   deps: string[];
+  dependencyOptions: DependencyOptions[];
   optionalDeps: string[];
   selfDeps: string[];
   skipSelfDeps: string[];
@@ -3065,6 +3084,7 @@ async function classDeps(
   const injectable = (await parseInjectableOptions(cls, ctx));
   const ctor = cls.members.find(ts.isConstructorDeclaration);
   const deps: string[] = injectable?.deps ? [...injectable.deps] : [];
+  const dependencyOptions: DependencyOptions[] = deps.map(() => ({}));
   const optionalDeps: string[] = [];
   const selfDeps: string[] = [];
   const skipSelfDeps: string[] = [];
@@ -3084,12 +3104,14 @@ async function classDeps(
       const tokenName = injected ?? paramTypeTokenName(param, ctx);
       if (tokenName) {
         deps.push(tokenName);
+        dependencyOptions.push({ optional: isOptional, self: selfIndices.has(index), skipSelf: skipSelfIndices.has(index), host: hostIndices.has(index) });
         if (isOptional) optionalDeps.push(tokenName);
         if (selfIndices.has(index)) selfDeps.push(tokenName);
         if (skipSelfIndices.has(index)) skipSelfDeps.push(tokenName);
         if (hostIndices.has(index)) hostDeps.push(tokenName);
       } else {
-        if (!isOptional) missing = true;
+        // Optional changes absence handling, not the requirement for a static token.
+        missing = true;
       }
     });
   }
@@ -3143,7 +3165,7 @@ async function classDeps(
     }
   }
 
-  return { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing };
+  return { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing };
 }
 
 /** Fallback for constructor parameter type name: only used if type name references a known class or known InjectionToken variable. */
@@ -3400,15 +3422,16 @@ function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
   return expr && ts.isArrayLiteralExpression(expr) ? [...expr.elements] : [];
 }
 
-async function isOperationAspectFactory(expression: ts.Expression, checker: ts.TypeChecker): Promise<boolean> {
-  if (!ts.isCallExpression(expression)) return false;
+async function operationAspectContract(expression: ts.Expression, checker: ts.TypeChecker): Promise<AspectRefNode["operation"]> {
+  if (!ts.isCallExpression(expression)) return undefined;
   const origin = await apiOrigin(expression.expression, checker);
   if (origin?.name !== "defineOperationAspect"
-    || !["@supacloud/app", "@supacloud/app/core", "@supacloud/app/execution"].includes(origin.module)) return false;
+    || !["@supacloud/app", "@supacloud/app/core", "@supacloud/app/execution"].includes(origin.module)) return undefined;
   const contract = expression.arguments[0];
-  return contract !== undefined && ts.isObjectLiteralExpression(contract)
-    && ["route", "command", "job"].includes(stringLiteralProp(contract, "kind") ?? "")
-    && !!stringLiteralProp(contract, "name");
+  if (!contract || !ts.isObjectLiteralExpression(contract) || contract.properties.some(ts.isSpreadAssignment)) return undefined;
+  const kind = stringLiteralProp(contract, "kind");
+  const name = stringLiteralProp(contract, "name");
+  return (kind === "route" || kind === "command" || kind === "job") && name?.trim() ? { kind, name } : undefined;
 }
 
 async function parseAspectRefs(
@@ -3450,9 +3473,11 @@ async function parseAspectRefs(
     let declaration: ts.Declaration | undefined;
     for (const candidate of await resolveDeclaration(element, ctx)) {
       if (ts.isFunctionDeclaration(candidate)
-        || (ts.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+        || (ts.isVariableDeclaration(candidate)
+          && ts.isVariableDeclarationList(candidate.parent) && (candidate.parent.flags & ts.NodeFlags.Const) !== 0
+          && candidate.initializer !== undefined
           && (ts.isArrowFunction(candidate.initializer) || ts.isFunctionExpression(candidate.initializer)
-            || await isOperationAspectFactory(candidate.initializer, ctx.checker)))) {
+            || (await operationAspectContract(candidate.initializer, ctx.checker)) !== undefined))) {
         declaration = candidate;
         break;
       }
@@ -3479,8 +3504,11 @@ async function parseAspectRefs(
     if (!name) continue;
     const declaredFile = declaration.getSourceFile().fileName;
     const projectLocal = isProjectSourcePath(declaredFile, ctx.rootDir);
-    const importModule = projectLocal ? undefined : (await importModuleOf(element, ctx));
+    const importModule = projectLocal ? undefined : await importModuleOf(element, ctx);
+    const operation = ts.isVariableDeclaration(declaration) && declaration.initializer
+      ? await operationAspectContract(declaration.initializer, ctx.checker) : undefined;
     refs.push({
+      ...(operation ? { operation } : {}),
       ...(projectLocal ? { file: sourcePath(ctx.rootDir, declaredFile) } : {}),
       name,
       expression: element.text,

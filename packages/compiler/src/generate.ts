@@ -24,6 +24,7 @@ import { buildContractManifest, type ContractManifest } from "./contract-manifes
 import { featureTransitionForRoute } from "./feature";
 import { resolveModuleBoundaries } from "./profiles";
 import { createExecutionPlans } from "./inspect";
+import { dependencyFlags, moduleDependencies, resolveDependency } from "./di-resolution";
 
 function usesDirectInvoker(controller: ControllerNode, route: RouteNode): boolean {
   return factoryOfScope(controller.scope) === "services"
@@ -244,6 +245,12 @@ export interface CompiledModule {
 }`;
 
 const TYPE_GUARDS = `type CompiledAspectObserver = (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>;
+
+function readCompiledDependency(values: Record<string, unknown> | undefined, key: string, token: string, optional: boolean): unknown {
+  if (values && Object.hasOwn(values, key)) return values[key];
+  if (optional) return null;
+  throw Object.assign(new Error("Missing compiled dependency: " + token), { code: "COMPILED_DEPENDENCY_MISSING", token });
+}
 type CompiledAspectPipeline = (context: CompiledAspectContext, next: () => unknown | Promise<unknown>, observe?: CompiledAspectObserver) => unknown | Promise<unknown>;
 
 function compiledAspectError(code: string): Error & { code: string } {
@@ -325,6 +332,7 @@ function resolveFactoryValue(value: unknown): unknown {
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
+const serviceDestructions = new WeakMap<object, Promise<void>>();
 const platformDependencies = new WeakMap<object, Record<string, unknown>>();
 
 function retainPlatformDependencies<T extends Record<string, unknown>>(services: T, deps: Record<string, unknown>): T {
@@ -382,31 +390,37 @@ async function initializeServiceInstances(
   }
 }
 
-async function destroyServiceInstances(
+function destroyServiceInstances(
   services: Record<string, unknown>,
   plan: readonly CompiledServiceLifecycleEntry[],
 ): Promise<void> {
-  const errors: unknown[] = [];
-  const seen = new Set<unknown>();
-  for (const entry of [...plan].reverse()) {
-    const value = services[entry.key];
-    const instance = entry.index === undefined
-      ? value
-      : isUnknownArray(value) ? value[entry.index] : undefined;
-    if (seen.has(instance)) continue;
-    seen.add(instance);
-    if (!isRecord(instance)) continue;
-    const hook = isFunction(instance["onDestroy"])
-      ? instance["onDestroy"]
-      : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
-    if (!hook) continue;
-    try {
-      await hook.call(instance);
-    } catch (error) {
-      errors.push(error);
+  const pending = serviceDestructions.get(services);
+  if (pending) return pending;
+  const destruction = Promise.resolve().then(async () => {
+    const errors: unknown[] = [];
+    const seen = new Set<unknown>();
+    for (const entry of [...plan].reverse()) {
+      const value = services[entry.key];
+      const instance = entry.index === undefined
+        ? value
+        : isUnknownArray(value) ? value[entry.index] : undefined;
+      if (seen.has(instance)) continue;
+      seen.add(instance);
+      if (!isRecord(instance)) continue;
+      const hook = isFunction(instance["onDestroy"])
+        ? instance["onDestroy"]
+        : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
+      if (!hook) continue;
+      try {
+        await hook.call(instance);
+      } catch (error) {
+        errors.push(error);
+      }
     }
-  }
-  if (errors.length > 0) throw new AggregateError(errors, "Application service destruction failed");
+    if (errors.length > 0) throw new AggregateError(errors, "Application service destruction failed");
+  });
+  serviceDestructions.set(services, destruction);
+  return destruction;
 }
 `;
 
@@ -438,7 +452,7 @@ export function renderApplication(
   graph: ApplicationGraph,
   options: GenerateOptions,
 ): RenderedArtifacts {
-  let modules = topoSortModules(graph.modules);
+  let modules = topoSortModules(graph);
   if (options.treeShakeUnusedProviders) {
     const referencedTokens = new Set<string>();
     for (const mod of graph.modules) {
@@ -557,6 +571,7 @@ export function renderApplication(
         kind: provider.kind,
         scope: provider.scope,
         deps: [...provider.deps],
+        dependencyOptions: provider.deps.map((token, index) => dependencyFlags(provider, token, index)),
         optionalDeps: [...(provider.optionalDeps ?? [])],
         selfDeps: [...(provider.selfDeps ?? [])],
         skipSelfDeps: [...(provider.skipSelfDeps ?? [])],
@@ -565,22 +580,11 @@ export function renderApplication(
         exported: provider.exported,
         lifecycle: { init: provider.scope === "application" && provider.kind !== "existing" && provider.hasOnInit === true, destroy: provider.kind !== "existing" && provider.hasOnDestroy === true },
       }));
-      const providerEdges = [...module.providers, ...module.controllers].flatMap((owner) => owner.deps.map((dependency) => {
-        const self = owner.selfDeps?.includes(dependency) === true;
-        const skipSelf = owner.skipSelfDeps?.includes(dependency) === true;
-        const own = module.providers.find((provider) => provider.token === dependency);
-        const imported = module.imports.map((name) => modules.find((candidate) => candidate.name === name))
-          .find((candidate) => candidate?.exports.includes(dependency));
-        const root = modules.find((candidate) => candidate.providers.some((provider) =>
-          provider.token === dependency && provider.providedIn === "root"));
-        const context = (owner.scope === "request" && isRequestContextToken(dependency, graph.tokenNames))
-          || (owner.scope === "job" && isJobContextToken(dependency, graph.tokenNames));
-        const relation = context ? "context" as const
-          : !skipSelf && own && (own.scope === owner.scope || (own.scope === "application" && !self)) ? "local" as const
-          : self ? "unresolved" as const
-          : imported ? "imported" as const
-          : root ? "root" as const
-          : graph.externalTokens.includes(dependency) ? "external" as const : "unresolved" as const;
+      const providerEdges = [...module.providers, ...module.controllers].flatMap((owner) => owner.deps.map((dependency, index) => {
+        const resolution = resolveDependency(graph, module, dependency, owner.scope, dependencyFlags(owner, dependency, index));
+        const relation = resolution.kind === "provider" ? resolution.relation
+          : resolution.kind === "context" ? "context" as const
+          : resolution.kind === "external" ? "external" as const : "unresolved" as const;
         return { from: "token" in owner ? owner.token : owner.className, to: dependency, relation };
       }));
       const scopeTokens = (scope: Scope) => [
@@ -808,15 +812,16 @@ function factoryOfScope(scope: Scope): FactoryKind {
 }
 
 /** Topologically sorts modules by imports (dependees first), preserving original relative ordering. */
-function topoSortModules(modules: ModuleNode[]): ModuleNode[] {
+function topoSortModules(graph: ApplicationGraph): ModuleNode[] {
+  const modules = graph.modules;
   const byName = new Map(modules.map((m) => [m.name, m]));
   const visited = new Set<string>();
   const result: ModuleNode[] = [];
   const visit = (module: ModuleNode): void => {
     if (visited.has(module.name)) return;
     visited.add(module.name);
-    for (const importName of module.imports) {
-      const dep = byName.get(importName);
+    for (const dependency of moduleDependencies(graph, module)) {
+      const dep = byName.get(dependency);
       if (dep && dep !== module) visit(dep);
     }
     result.push(module);
@@ -897,6 +902,7 @@ class ImportManager {
 /** Factory functions and CompiledModule descriptor generation for a single module. */
 class ModuleGenerator {
   private readonly pascal: string;
+  private multiInstance = 0;
   /** Token -> local variable name within each factory. */
   private readonly locals: Record<FactoryKind, Map<string, string>> = {
     services: new Map(),
@@ -1321,6 +1327,12 @@ class ModuleGenerator {
         const list = multiGroups.get(emitted.key) ?? [];
         list.push(emitted.expr);
         multiGroups.set(emitted.key, list);
+        if (providers.filter(item => item.token === provider.token).at(-1) === provider) {
+          const local = this.localVar(provider.token, kind);
+          lines.push(`const ${local} = [${list.join(", ")}];`);
+          returns.set(emitted.key, local);
+          if (scoped) lines.push(`scope[${JSON.stringify(emitted.key)}] = ${local};`);
+        }
       } else {
         const emitted = this.emitProvider(provider, kind, false);
         if (emitted.constLine) lines.push(emitted.constLine);
@@ -1329,9 +1341,6 @@ class ModuleGenerator {
         }
         returns.set(emitted.key, emitted.expr);
       }
-    }
-    for (const [key, exprs] of multiGroups) {
-      returns.set(key, `[${exprs.join(", ")}]`);
     }
     for (const controller of controllers) {
       const emitted = this.emitController(controller, kind);
@@ -1345,32 +1354,12 @@ class ModuleGenerator {
       lines.push(`return scope;`);
       return lines.join("\n");
     }
-    // Scoped factories have no deps argument. Carry only external tokens they
-    // actually read from services, without exposing the entire host dependency bag.
+    // Scoped factories retain the platform binding privately without exposing it
+    // as a provider or an enumerable service property.
     const entries = [...returns.entries()].map(([key, expr]) =>
       key === expr ? key : `${key}: ${expr}`,
     );
-    const borrowed = new Set<string>();
-    for (const node of [...this.module.providers, ...this.module.controllers]) {
-      const scopeKind = factoryOfScope(node.scope);
-      if (scopeKind === "services") continue;
-      for (const token of node.deps) {
-        if (!this.graph.externalTokens.includes(token)) continue;
-        const key = camelName(token);
-        const expression = this.depExpr(token, scopeKind, this.depOptions(node, token));
-        if (expression === `services[${JSON.stringify(key)}]` || expression === `(services[${JSON.stringify(key)}] ?? undefined)`) {
-          if (!returns.has(key)) borrowed.add(key);
-        }
-      }
-    }
-    if (borrowed.size > 0) {
-      // Borrowed host resources must not enter enumerable instance teardown or
-      // the Worker's merged owned-services collection.
-      const descriptors = [...borrowed].map((key) => `${key}: { value: deps[${JSON.stringify(key)}] }`);
-      lines.push(`return retainPlatformDependencies(Object.defineProperties({ ${entries.join(", ")} }, { ${descriptors.join(", ")} }), deps);`);
-    } else {
-      lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
-    }
+    lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
     return lines.join("\n");
   }
 
@@ -1384,9 +1373,9 @@ class ModuleGenerator {
       case "class": {
         const useClass = this.imports.add(provider.useClass ?? provider.token, provider.importPath, provider.importModule);
         const args = provider.deps
-          .map((dep, index) => this.typedDepExpr(dep, kind, this.depOptions(provider, dep), `ConstructorParameters<typeof ${useClass}>[${index}]`))
+          .map((dep, index) => this.typedDepExpr(dep, kind, this.depOptions(provider, dep, index), `ConstructorParameters<typeof ${useClass}>[${index}]`))
           .join(", ");
-        const local = this.localVar(isMulti ? (provider.useClass ?? `${provider.token}Item`) : provider.token, kind);
+        const local = this.localVar(isMulti ? `multiItem${++this.multiInstance}` : provider.token, kind);
         return {
           constLine: `const ${local} = new ${useClass}(${args});`,
           key,
@@ -1397,21 +1386,21 @@ class ModuleGenerator {
         const expr = provider.importPath || provider.importModule
           ? this.imports.add(provider.useValueExpr ?? "undefined", provider.importPath, provider.importModule)
           : (provider.useValueExpr ?? "undefined");
-        const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
+        const local = this.localVar(isMulti ? `multiItem${++this.multiInstance}` : provider.token, kind);
         return { constLine: `const ${local} = ${expr};`, key, expr: local };
       }
       case "factory": {
         if (provider.tokenKind === "injection-token" && !provider.useFactoryName) {
           const tokenIdent = this.imports.add(provider.token, provider.importPath, provider.importModule);
-          const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
+          const local = this.localVar(isMulti ? `multiItem${++this.multiInstance}` : provider.token, kind);
           const constLine = `const ${local} = resolveFactoryValue(${tokenIdent});`;
           return { constLine, key, expr: local };
         }
         const factory = this.imports.add(provider.useFactoryName ?? "", provider.importPath, provider.importModule);
         const args = provider.deps
-          .map((dep, index) => this.typedDepExpr(dep, kind, this.depOptions(provider, dep), `Parameters<typeof ${factory}>[${index}]`))
+          .map((dep, index) => this.typedDepExpr(dep, kind, this.depOptions(provider, dep, index), `Parameters<typeof ${factory}>[${index}]`))
           .join(", ");
-        const local = this.localVar(isMulti ? (provider.useFactoryName ?? `${provider.token}Item`) : provider.token, kind);
+        const local = this.localVar(isMulti ? `multiItem${++this.multiInstance}` : provider.token, kind);
         return { constLine: `const ${local} = ${factory}(${args});`, key, expr: local };
       }
       case "existing": {
@@ -1434,7 +1423,7 @@ class ModuleGenerator {
   ): { constLine: string; key: string; expr: string } {
     const className = this.imports.add(controller.className, controller.importPath);
     const args = controller.deps
-      .map((dep, index) => this.typedDepExpr(dep, kind, this.depOptions(controller, dep), `ConstructorParameters<typeof ${className}>[${index}]`))
+      .map((dep, index) => this.typedDepExpr(dep, kind, this.depOptions(controller, dep, index), `ConstructorParameters<typeof ${className}>[${index}]`))
       .join(", ");
     const key = camelName(controller.className);
     const local = this.localVar(controller.className, kind);
@@ -1467,16 +1456,8 @@ class ModuleGenerator {
    * Services exported by imported modules (imported.<module>.<key>, accessed via services param in
    * request/job factories) > Platform deps (deps.<camelName>).
    */
-  private depOptions(
-    node: Pick<ProviderNode, "optionalDeps" | "selfDeps" | "skipSelfDeps" | "hostDeps"> | Pick<ControllerNode, "optionalDeps" | "selfDeps" | "skipSelfDeps">,
-    token: string,
-  ): { optional: boolean; self: boolean; skipSelf: boolean; host: boolean } {
-    return {
-      optional: node.optionalDeps?.includes(token) ?? false,
-      self: node.selfDeps?.includes(token) ?? false,
-      skipSelf: node.skipSelfDeps?.includes(token) ?? false,
-      host: "hostDeps" in node ? (node.hostDeps?.includes(token) ?? false) : false,
-    };
+  private depOptions(node: ProviderNode | ControllerNode, token: string, index = 0) {
+    return dependencyFlags(node, token, index);
   }
 
   private typedDepExpr(
@@ -1490,7 +1471,7 @@ class ModuleGenerator {
     // providers keep their inferred type so incorrect DI wiring still fails tsc.
     const localProvider = this.module.providers.find((provider) =>
       this.locals[kind].get(provider.token) === expression);
-    if (expression === "undefined" || (localProvider &&
+    if (expression === "undefined" || expression === "null" || (localProvider &&
       !(localProvider.kind === "factory" && !localProvider.useFactoryName))) return expression;
     return `${expression} as ${type}`;
   }
@@ -1500,77 +1481,38 @@ class ModuleGenerator {
     kind: FactoryKind,
     options: { optional?: boolean; self?: boolean; skipSelf?: boolean; host?: boolean } = {},
   ): string {
-    const isOptional = options.optional ?? false;
-    const isSelf = options.self ?? false;
-    const isSkipSelf = options.skipSelf ?? false;
-    if (kind === "request" && isRequestContextToken(token, this.graph.tokenNames)) return "ctx";
-    if (kind === "job" && isJobContextToken(token, this.graph.tokenNames)) return "ctx";
-
-    const own = this.module.providers.find((p) => p.token === token);
-    const ownIsLocal = own && factoryOfScope(own.scope) === kind;
-    if (own && ownIsLocal && !isSkipSelf) {
-      if (factoryOfScope(own.scope) === kind && own.kind !== "existing") {
+    const scope = kind === "services" ? "application" : kind;
+    const resolution = resolveDependency(this.graph, this.module, token, scope, options);
+    const read = (bag: string, optional = options.optional === true) =>
+      `readCompiledDependency(${bag}, ${JSON.stringify(camelName(token))}, ${JSON.stringify(token)}, ${optional})`;
+    if (resolution.kind === "context") return "ctx";
+    if (resolution.kind === "provider") {
+      const { module, provider } = resolution.target;
+      if (module === this.module && provider.scope === scope) {
+        if (provider.kind === "existing" && !provider.multi) {
+          return this.depExpr(provider.useExisting ?? token, kind, this.depOptions(provider, provider.useExisting ?? token));
+        }
         return this.locals[kind].get(token) ?? camelName(token);
       }
-      if (own.kind === "existing") {
-        return this.depExpr(own.useExisting ?? token, kind, options);
-      }
+      return module === this.module ? read("services") : read(`imported[${JSON.stringify(module.name)}]`);
     }
-    if (own && factoryOfScope(own.scope) === "services" && kind !== "services" && !isSkipSelf && !isSelf) {
-      return `services[${JSON.stringify(camelName(token))}]`;
-    }
-    if (isSelf) {
-      return isOptional ? "undefined" : `services[${JSON.stringify(camelName(token))}]`;
-    }
+    if (resolution.kind === "external") return read(kind === "services" ? "deps" : "platformDependencies.get(services)");
+    // Invalid graphs are blocked by compileProject. Direct render callers still fail closed.
+    return options.optional && resolution.kind === "missing" ? "null" : read("undefined", false);
 
-    // @Host() is intentionally a no-op for EnvironmentInjector-style scopes:
-    // SupaCloud has no element-injector tree to impose a host boundary.
-    for (const importName of this.module.imports) {
-      const imported = this.graph.modules.find((m) => m.name === importName);
-      if (!imported?.exports.includes(token)) continue;
-      if (kind === "services") return `imported[${JSON.stringify(importName)}][${JSON.stringify(camelName(token))}]`;
-      return `imported[${JSON.stringify(importName)}][${JSON.stringify(camelName(token))}]`;
-    }
-
-    for (const mod of this.graph.modules) {
-      const rootProv = mod.providers.find((p) => p.token === token && p.providedIn === "root");
-      if (rootProv) {
-        return `imported[${JSON.stringify(mod.name)}][${JSON.stringify(camelName(token))}]`;
-      }
-    }
-
-    if (isSelf) return isOptional ? "undefined" : `services[${JSON.stringify(camelName(token))}]`;
-    if (kind === "services") return isOptional ? `(deps[${JSON.stringify(camelName(token))}] ?? undefined)` : `deps[${JSON.stringify(camelName(token))}]`;
-    if (isSkipSelf) {
-      const external = `platformDependencies.get(services)?.[${JSON.stringify(camelName(token))}]`;
-      return isOptional ? `(${external} ?? undefined)` : external;
-    }
-    // request/job factories have no deps parameter; platform/external tokens are also passed via services.
-    return isOptional ? `(services[${JSON.stringify(camelName(token))}] ?? undefined)` : `services[${JSON.stringify(camelName(token))}]`;
   }
 }
 
 /** Stable topological sort of providers within a factory: providers depending on peers in the same factory are placed after them. */
 function orderProviders(providers: ProviderNode[]): ProviderNode[] {
-  const remaining = [...providers];
-  const emitted = new Set<string>();
+  const groups = new Map<string, ProviderNode[]>();
+  for (const provider of providers) groups.set(provider.token, [...(groups.get(provider.token) ?? []), provider]);
   const result: ProviderNode[] = [];
-  while (remaining.length > 0) {
-    const index = remaining.findIndex((p) =>
-      p.deps.every((dep) => {
-        const depProvider = providers.find((x) => x.token === dep);
-        return !depProvider || emitted.has(dep);
-      }),
-    );
-    if (index === -1) {
-      // Circular dependency: output in original order (validateGraph already reported circular-dependency).
-      result.push(...remaining.splice(0));
-      break;
-    }
-    const [provider] = remaining.splice(index, 1);
-    if (!provider) throw new Error("Provider ordering selected an unavailable provider");
-    emitted.add(provider.token);
-    result.push(provider);
+  while (groups.size > 0) {
+    const next = [...groups].find(([, items]) => items.every(provider => provider.deps.every((dep, index) =>
+      dependencyFlags(provider, dep, index).skipSelf || !groups.has(dep))));
+    if (!next) { result.push(...[...groups.values()].flat()); break; }
+    result.push(...next[1]); groups.delete(next[0]);
   }
   return result;
 }

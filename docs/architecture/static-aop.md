@@ -5,24 +5,54 @@
 
 ## 决策
 
-SupaCloud 保持显式、可检查的编译执行模型。AOP 实现方向优先参考 Micronaut
-的编译期解析和代码生成；借鉴 Angular 的 DI/生命周期和显式函数链，NestJS
-的服务端职责划分，以及 AdonisJS 的 HTTP 生命周期与开发约定。
-不承诺四者的 API 兼容，也不为这个设计引入新运行时。
+SupaCloud 的主参考固定为：**AOP 编译架构参考 Micronaut，业务组织参考 NestJS，
+DI 语义参考 Angular**。三者分别指导编译、模块归属与依赖解析，不引入新的服务端
+框架运行时，也不承诺完整 API 兼容。AdonisJS 仅作 HTTP 开发体验的补充参考；
+现有 Elysia 继续承担 HTTP 宿主。
 
-Angular 不是完整的服务端 AOP 规范。它的 HTTP interceptor 作用于 HttpClient；
-不能直接决定服务端事务、持久回执或后台任务的执行语义。Nest interceptor
-围绕框架处理器运行，也不意味着普通 service 方法自动被拦截。
-
-| 参考 | 借鉴内容 | SupaCloud 的取舍 |
+| 主参考 | 实施内容 | 明确边界 |
 | --- | --- | --- |
-| Angular | Token、DI 作用域、销毁语义、按声明顺序执行的函数 interceptor | 编译入口使用构造器工厂；不把浏览器路由守卫或动态 `inject()` 带入编译业务路径 |
-| NestJS | Module/Provider/Controller，guard、pipe、interceptor、filter 的职责分离 | 映射为现有声明、TypeBox、HTTP policy、静态切面及错误契约；不再叠加反射容器或 RxJS 执行层 |
-| AdonisJS | HTTP middleware 层次、显式路由绑定、脚手架与生命周期约定 | 由 Elysia 宿主与现有 CLI 承担；不引入 Lucid 或新的容器/迁移系统 |
-| Micronaut | 在编译期解析 DI/AOP，提前发现结构错误，生成执行代码 | 学习编译时处理原则；保留直接函数调用，不照搬 JVM 代理类或透明方法级拦截 |
+| Micronaut | 语义分析、依赖图校验、生成直接工厂和固定切面调用链；错误在产物生成前报告 | 不照搬 JVM 代理类或透明方法拦截 |
+| NestJS | 按业务功能组织 Module/Provider/Controller；模块默认私有，显式 exports/re-exports | TypeBox、HTTP policy、Effect 错误契约和 Command 沿用现有职责，不增加 RxJS 执行层 |
+| Angular | 构造参数 Token、Optional/Self/SkipSelf、root 默认值、alias/multi、作用域与销毁 | 使用静态服务端作用域；不引入 DOM injector、运行时 inject() 或隐式 scope 冒泡 |
 
 Angular 的运行时兼容适配层仍然存在。编译后的服务端请求路径使用显式工厂，
 与兼容层的运行时 injector API 是不同入口。本决策不删除或替换兼容层。
+
+## 已实施的静态服务端 DI 语义
+
+验证、工厂生成与 executionPlan 共用同一个依赖解析器。跨模块只能沿显式导出解析，
+可以重导出 Token 或已导入的 Module；菱形路径保留原始实例，两个不同来源则报
+`SC2013`，不能依靠 imports 顺序偶然选中。Controller 与 Provider 执行相同门禁。
+
+| 声明 | 生成行为 |
+| --- | --- |
+| 普通构造参数 | 本模块 → 公开 imports → root 默认 provider → 显式平台 Token |
+| `@Self()` | 只解析当前作用域，不向 application 父作用域或 imports 回退 |
+| `@SkipSelf()` | 跳过当前作用域；request/job 可使用所属模块的 application 父作用域，然后公开 imports/root/platform |
+| `@Optional()` | 无可见绑定时返回 `null`；不放宽作用域、歧义或循环依赖规则 |
+| 同 Token 的多个参数 | 按参数索引分别解析修饰符；同一参数 Self + SkipSelf 报 `SC2014` |
+| `useExisting` | 复用原实例或同一个 multi 数组，不重复构造/销毁 |
+| `multi: true` | 所有贡献按声明顺序组成数组，先完成全部贡献再构造消费者；混合 scope 报 `SC2016` |
+| `providedIn: "root"` | 自动默认 provider 独立于 app 的 feature imports 初始化；隐式依赖也参与循环检查 |
+
+application 不能持有 request/job 实例；request 与 job 是兄弟作用域，也不能互相注入。
+跨模块借用 request/job provider 报 `SC2015`：把它留在所属 feature，通过 application
+端口显式传递身份和业务数据。当前静态 profile 不实现跨模块 scope 冒泡。
+`@Host()` 保留语义元数据，但没有 DOM 宿主边界。
+
+平台 Token 必须是依赖对象的自有属性；必需绑定缺失时抛出
+`COMPILED_DEPENDENCY_MISSING`，继承属性不能满足绑定。显式绑定的 `undefined`
+保留原值，Optional 只处理不存在的绑定。请求/任务 scope 并发隔离，构造失败逆序
+清理已创建对象；scope 和 application 的销毁均去重，重复调用不再执行 hook。
+
+typed aspect 必须使用 `const` 静态引用，契约使用字面量且不含 spread；操作 kind/name
+必须与绑定位置一致，否则报 `SC4030`。路由名为 `METHOD /完整路径`，module 通用
+切面使用普通函数。这些结构错误以及无效 DI 图不能通过 `writeOnError` 生成产物。
+
+升级时重新编译全部受影响应用；把 Optional 的缺失判断由 `undefined` 改为 `null`
+并声明可空类型，清理依赖旧 imports 顺序或跨模块 scope 借用的代码。不要手改
+生成文件。回归证据见 [framework-architecture.test.ts](../../packages/compiler/src/framework-architecture.test.ts)。
 
 ## 只有一套业务执行边界
 
@@ -74,6 +104,7 @@ Nest interceptor 再把 RxJS 加到服务端命令管线。数据库模型和策
 
 | 能力 | 当前证据 / 限制 |
 | --- | --- |
+| 模块导出、逐参数 DI、root/multi/alias、清理和 typed aspect 静态绑定 | `framework-architecture.test.ts`，生成 TypeScript 校验与运行验证 |
 | 显式切面引用、静态调用顺序、作用域隔离 | `static-di-aop.test.ts`，生成 `aspectPipeline` |
 | continuation 单次使用、关闭后失效与等待已开始工作 | [execution 实现契约](../../packages/app/EXECUTION.md#execution-guarantees-and-limits) |
 | 类型可见的裸 Command 调用检查 | `SC4029`；不是全程序信息流或安全沙箱 |
@@ -103,6 +134,8 @@ route/job 切面仍可短路或映射；进入绑定 Command 的 HTTP 路由后�
 - [SupaCloud application execution](../../packages/app/EXECUTION.md)
 - [编译切面回归](../../packages/compiler/src/static-di-aop.test.ts)
 - [编译执行契约回归](../../packages/compiler/src/execution-contract.test.ts)
+- [Angular hierarchical DI](https://angular.dev/guide/di/hierarchical-dependency-injection)：Token 查找与 Self/SkipSelf/Optional 的语义参考。
+- [NestJS modules](https://docs.nestjs.com/modules)：feature 模块和公开 provider 组织。
 - [Angular functional interceptors](https://angular.dev/guide/http/interceptors)：官方推荐显式函数 interceptor，并说明按配置顺序组成链。
 - [NestJS interceptors](https://docs.nestjs.com/interceptors)：处理器执行上下文和 RxJS CallHandler 边界。
 - [AdonisJS middleware](https://docs.adonisjs.com/guides/basics/middleware)：server/router/named 三类 HTTP middleware。

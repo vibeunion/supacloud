@@ -40,10 +40,13 @@ class CaseController {
   constructor(@Inject(DB_CLIENT) private readonly db: unknown) {}
 }`,
   SC2004: `const SELF = { provide: TOKEN, useExisting: TOKEN };`,
-  SC2005: `@Module({ name: "child", providers: [TOKEN] })
-class ChildModule {}
-// @SkipSelf() cannot resolve a token from the current module.
-class Consumer { constructor(@SkipSelf() value: typeof TOKEN) {} }`,
+  SC2005: `const TOKEN = new InjectionToken<string>("value");
+@Injectable() class Consumer {
+  constructor(@SkipSelf() @Inject(TOKEN) readonly value: string) {}
+}
+// The local application binding is skipped; no parent/imported binding exists.
+@Module({ name: "child", providers: [{ provide: TOKEN, useValue: "local" }, Consumer] })
+class ChildModule {}`,
   SC2006: `@Module({ name: "billing", exports: [PRIVATE_TOKEN] })
 class BillingModule {}`,
   SC2007: `const Alias = { provide: PUBLIC_TOKEN, useExisting: MissingToken };`,
@@ -55,6 +58,25 @@ const provider = { provide: COUNT, useValue: "not a number" };`,
   SC2011: `const providers = makeEnvironmentProviders(loadProvidersAtRuntime());`,
   SC2012: `import { inject } from "@supacloud/app";
 class Service { repository = inject(Repository); }`,
+  SC2013: `@Module({ name: "a", providers: [{ provide: PORT, useValue: "a" }], exports: [PORT] }) class A {}
+@Module({ name: "b", providers: [{ provide: PORT, useValue: "b" }], exports: [PORT] }) class B {}
+@Injectable() class Consumer { constructor(@Inject(PORT) readonly port: string) {} }
+@Module({ name: "feature", imports: [A, B], providers: [Consumer] }) class Feature {}`,
+  SC2014: `@Injectable() class Consumer {
+  constructor(@Self() @SkipSelf() @Inject(PORT) readonly port: string) {}
+}`,
+  SC2015: `@Injectable({ scope: "request" }) class RequestValue {}
+@Module({ name: "other", providers: [RequestValue], exports: [RequestValue] }) class Other {}
+@Controller("/") class View { constructor(readonly value: RequestValue) {} }
+@Module({ name: "feature", imports: [Other], controllers: [View] }) class Feature {}`,
+  SC2016: `@Module({ name: "feature", providers: [
+  { provide: ITEMS, useValue: "a", multi: true, scope: "application" },
+  { provide: ITEMS, useValue: "b", multi: true, scope: "request" },
+] }) class Feature {}`,
+  SC4030: `const aspect = defineOperationAspect({
+  kind: "command", name: "orders.approve", input: decode, result: decode, capabilities: () => ({}),
+}, async (_context, next) => next());
+@Command({ name: "orders.reject", permission: "orders:reject", aspects: [aspect] }) class Reject {}`,
   SC6007: `import { sql } from "kysely";
 const count = sql<number>\`count(*)\`;`,
   SC6008: `import { sql } from "kysely";
@@ -696,6 +718,12 @@ function cause(entry: DiagnosticEntry): string {
 
 function fix(entry: DiagnosticEntry): string {
   const names = entry.names.join("` or `");
+  if (entry.code === "SC2005") return "Provide a public parent/imported binding, or remove @SkipSelf() when the local scope is intended. A request/job consumer may resolve its owning module's application provider as a parent.";
+  if (entry.code === "SC2013") return "Use an explicit local binding or import a single public provider. Re-exporting the same original provider through multiple paths is allowed; distinct origins are ambiguous.";
+  if (entry.code === "SC2014") return "Choose @Self() or @SkipSelf() for each parameter. Different parameters may use different modifiers for the same token.";
+  if (entry.code === "SC2015") return "Keep request/job providers in their owning feature. Export an application-scoped port and pass request/job data explicitly across features.";
+  if (entry.code === "SC2016") return "Give all contributions to a multi token the same scope. Use separate tokens for different lifetimes.";
+  if (entry.code === "SC4030") return "Bind the typed aspect to its exact kind and operation name. Route names are METHOD /full/path. Use a generic function for module-wide aspects.";
   if (entry.code === "SC2012") return "Use typed constructor parameters and compiler-generated scope factories instead of runtime inject() or injection contexts.";
   if (entry.code === "SC6007") return "Keep raw SQL results unknown and validate them with an explicit result decoder.";
   if (entry.code === "SC6008") return "Use parameterized SQL templates for values; raw SQL must be a static literal.";

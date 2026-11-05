@@ -1489,6 +1489,9 @@ export function createModulePlugin<
       const commandPipeline = route.command
         ? descriptorPipeline(command ?? {}, "command", options.onExecution)
         : undefined;
+      const routeHasAspects = compiled.aspectPipeline !== undefined || (compiled.aspects?.length ?? 0) > 0
+        || route.aspectPipeline !== undefined || (route.aspects?.length ?? 0) > 0
+        || command?.aspectPipeline !== undefined || (command?.aspects?.length ?? 0) > 0;
       const routeInvoker = route.invoker;
       if (mappingPolicies.length > 0) {
         const responseValidators = Validator.response(schema.response, { normalize: options.normalize ?? true });
@@ -1615,12 +1618,16 @@ export function createModulePlugin<
             metadata: command ?? route,
           };
           // A route aspect keeps its HTTP context, but inside a command boundary
-          // the entire chain must still return the actual handler result.
-          const invokeRoute = () => route.command
+          // the entire chain must still return the actual handler result. Native
+          // Response identity is preserved at this transport boundary.
+          const invokeRoute = () => route.command && routeHasAspects
             ? invokeAspect(commandContext, (_context, next) => modulePipeline(commandContext,
               () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))), invoke,
               result => { if (!(result instanceof Response)) freezeAspectData(result); })
-            : modulePipeline(routeContext, once(() => routePipeline(routeContext, invoke)));
+            : modulePipeline(route.command ? commandContext : routeContext,
+              once(() => routePipeline(routeContext, once(() => route.command
+                ? commandPipeline!(commandContext, once(invoke))
+                : invoke()))));
           const invokeCommand = () => {
             if (!route.command) return invokeRoute();
             if (!command) {
