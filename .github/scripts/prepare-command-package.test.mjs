@@ -173,6 +173,19 @@ test('publication resolves local dependencies and overrides without mutating dev
   assert.equal(input.dependencies['@supacloud/db'], 'file:../db');
   assert.deepEqual(prepareCommandPackage({ name: '@supacloud/contracts' }, siblings).required, []);
 });
+test('publication keeps npm overrides compatible with ranged direct dependencies', () => {
+  const input = {
+    name: '@supacloud/cli',
+    dependencies: { '@supacloud/compiler': '^0.57.0' },
+    overrides: { '@supacloud/compiler': 'file:../compiler' },
+  };
+  const localSiblings = new Map([
+    ['@supacloud/compiler', { name: '@supacloud/compiler', version: '0.57.0' }],
+  ]);
+  const result = prepareCommandPackage(input, localSiblings);
+  assert.equal(result.package.overrides['@supacloud/compiler'], '^0.57.0');
+  assert.deepEqual(result.required, []);
+});
 test('publication resolves the admin CLI dependency before npm publish', () => {
   const input = {
     name: '@supacloud/admin',
