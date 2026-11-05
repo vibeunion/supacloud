@@ -200,7 +200,7 @@ test("standalone plugins map explicit response contract errors to server failure
   expect((await response.json()).code).toBe("RESPONSE_VALIDATION_ERROR");
 });
 
-test("ordinary HTTP binary and streaming responses still bypass JSON validation", async () => {
+test("binary and streaming native responses still bypass JSON validation", async () => {
   const bytes = new Uint8Array([0, 255, 1, 128]);
   for (const body of [
     bytes,
@@ -211,12 +211,12 @@ test("ordinary HTTP binary and streaming responses still bypass JSON validation"
       },
     }),
   ]) {
-    const compiled = receiptModule(() => new Response(body, {
-      status: 202, headers: { "content-type": "application/octet-stream" },
-    }));
-    delete compiled.controllers[0]!.routes[0]!.command;
-    compiled.commands = [];
-    const app = createApplication({ modules: [compiled] });
+    const app = createApplication({
+      modules: [receiptModule(() => new Response(body, {
+        status: 202, headers: { "content-type": "application/octet-stream" },
+      }))],
+      commandExecutor: (_invocation, next) => next(),
+    });
     const response = await app.handle(new Request("http://localhost/receipt", { method: "POST" }));
 
     expect(response.status).toBe(202);
