@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/query-v0.5.3...query-v0.6.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+
+### Features
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
 ## [0.5.3](https://github.com/vibeunion/supacloud/compare/query-v0.5.2...query-v0.5.3) (2026-11-03)
 
 

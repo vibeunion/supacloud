@@ -14,6 +14,24 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.117.0](https://github.com/vibeunion/supacloud/compare/cli-v0.116.0...cli-v0.117.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431))
+
+### Features
+
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431)) ([6d817df](https://github.com/vibeunion/supacloud/commit/6d817df37c4f5fdd39d6ea53a6ccd61903abb598))
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2435](https://github.com/vibeunion/supacloud/issues/2435)) ([a2032fc](https://github.com/vibeunion/supacloud/commit/a2032fc812a90079df660481cc61dbcb1b3c75df))
+
 ## [0.116.0](https://github.com/vibeunion/supacloud/compare/cli-v0.115.4...cli-v0.116.0) (2026-11-04)
 
 
