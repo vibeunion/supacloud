@@ -3,7 +3,7 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.57.1"
+      "version": "0.57.2"
     },
     "app": {
       "version": "0.38.0",
@@ -21,7 +21,7 @@
       "version": "0.16.0"
     },
     "db": {
-      "version": "0.21.0",
+      "version": "0.21.1",
       "dependencies": {
         "@zenstackhq/orm": "3.10.0",
         "@zenstackhq/schema": "3.10.0",
@@ -34,7 +34,7 @@
       }
     },
     "sdk": {
-      "version": "0.47.0",
+      "version": "0.47.1",
       "peerDependencies": {
         "@supabase/supabase-js": "^2.118.0"
       }

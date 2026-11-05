@@ -4,8 +4,8 @@
   "packages/edge-runtime": "0.38.0",
   "packages/pgredis-runtime": "0.15.0",
   "packages/query": "0.6.0",
-  "packages/supacloud-js": "0.47.0",
-  "packages/cli": "0.117.1",
+  "packages/supacloud-js": "0.47.1",
+  "packages/cli": "0.117.2",
   "packages/admin": "0.31.0",
   "packages/supacloud": "0.19.2",
   "packages/function-adapter": "0.9.0",
@@ -15,8 +15,8 @@
   "packages/app-svelte": "0.10.0",
   "packages/app": "0.38.0",
   "packages/delivery": "0.25.0",
-  "packages/compiler": "0.57.1",
+  "packages/compiler": "0.57.2",
   "packages/elysia": "0.40.0",
-  "packages/db": "0.21.0",
+  "packages/db": "0.21.1",
   "packages/testing": "0.9.0"
 }
