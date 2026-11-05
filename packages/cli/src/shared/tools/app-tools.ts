@@ -149,7 +149,7 @@ export interface AppToolArguments {
     wait?: boolean;
     timeout_seconds?: number;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource" | "feature";
-    template?: "minimal" | "command";
+    template?: "minimal" | "command" | "model-command";
     name?: string;
     module?: string;
     permission?: string;
@@ -197,10 +197,15 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
     const { root, name, files } = await initializeAppProject({ root: args.root, name: args.name, template });
     const next = [
         "bun install",
-        ...(template === "command" ? ["bun run db:generate"] : []),
+        ...(template !== "minimal" ? ["bun run db:generate"] : []),
+        ...(template === "model-command" ? ["bun run compile"] : []),
         "bun run check",
+        ...(template === "model-command" ? ["# Follow README.md: apply reviewed local migrations, provision the application role and configure IdentityAuthority before dev."] : []),
         "bun run dev",
     ];
+    const note = template === "model-command"
+        ? "Requires an explicitly selected database, reviewed migrations and trusted HTTP/worker identity authority; see README.md."
+        : "Local demo only. Production requires persistent governance and identity adapters; see README.md.";
     if (args.format === "json") return textResult(JSON.stringify({
         version: 1,
         ok: true,
@@ -209,13 +214,13 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
         template,
         files,
         next,
-        note: "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
+        note,
     }, null, 2));
     return textResult([
         `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
         `cd '${root.replaceAll("'", "'\\''")}'`,
         ...next,
-        "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
+        note,
     ].join("\n"));
 }
 
@@ -1882,7 +1887,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
-            template: optional(stringEnum(["minimal", "command"]), "[init] Minimal application by default; command adds the persistent governed-command reference"),
+            template: optional(stringEnum(["minimal", "command", "model-command"]), "[init] Minimal by default; command adds the native-SQL reference; model-command adds ZenStack HTTP/worker commands"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),

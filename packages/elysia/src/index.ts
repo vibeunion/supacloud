@@ -8,6 +8,7 @@ import type {
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
 import { requireFeatureRequestContext } from "@supacloud/app";
+import { composeAspects as composeApplicationAspects } from "@supacloud/app/execution";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
 import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
@@ -319,20 +320,7 @@ export function composeAspects(
   const active = aspects.filter(
     (aspect): aspect is ApplicationAspect => typeof aspect === "function",
   );
-  if (active.length === 0) return (_context, next) => next();
-  return (context, next) => {
-    let index = -1;
-    const dispatch = (current: number): Promise<unknown> => {
-      if (current <= index) {
-        return Promise.reject(new Error("next() called multiple times"));
-      }
-      index = current;
-      const aspect = active[current];
-      if (!aspect) return Promise.resolve(next());
-      return Promise.resolve(aspect(context, () => dispatch(current + 1)));
-    };
-    return dispatch(0);
-  };
+  return composeApplicationAspects(...active);
 }
 
 function observedAspects(
@@ -1626,12 +1614,12 @@ export function createModulePlugin<
             services,
             metadata: command ?? route,
           };
-          const invokeRoute = () => modulePipeline(
-            route.command ? commandContext : routeContext,
-            once(() => routePipeline(routeContext, once(() => route.command
-              ? commandPipeline!(commandContext, once(invoke))
-              : invoke()))),
-          );
+          // A route aspect keeps its HTTP context, but inside a command boundary
+          // the entire chain must still return the actual handler result.
+          const invokeRoute = () => route.command
+            ? composeAspects((_context, next) => modulePipeline(commandContext,
+              () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))))(commandContext, invoke)
+            : modulePipeline(routeContext, once(() => routePipeline(routeContext, invoke)));
           const invokeCommand = () => {
             if (!route.command) return invokeRoute();
             if (!command) {

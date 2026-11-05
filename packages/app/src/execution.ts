@@ -2,7 +2,7 @@
  * Portable, explicit application execution. This entry point has no Elysia,
  * Angular, reflection, database, or HTTP-host runtime dependency.
  */
-import type { Aspect } from "./aspect";
+import { invokeAspect, type Aspect } from "./aspect";
 import type { CommandRuntimeCapabilities, CommandRuntimeInvocation } from "./command_runtime";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution_observer";
 import { requireFeatureRequestContext } from "./feature_context";
@@ -10,6 +10,8 @@ import { requireFeatureRequestContext } from "./feature_context";
 export { executionRequestId, executionTrace, observeExecution } from "./execution_observer";
 export type { ExecutionEvent, ExecutionObserver } from "./execution_observer";
 export type { Aspect, AspectContext, AspectKind, AspectNext } from "./aspect";
+export { defineOperationAspect, AspectExecutionError } from "./aspect";
+export type { OperationAspectContext, OperationAspectContract, ReadonlyAspectData } from "./aspect";
 
 export type ExecutionNext<Result = unknown> = () => Result | Promise<Result>;
 export type ExecutionMiddleware<Context, Result = unknown> = (
@@ -83,7 +85,15 @@ export function composeExecution<Context, Result = unknown>(
 
 /** Compatible with compiler-emitted AspectContext and aspectPipeline slots. */
 export function composeAspects(...aspects: Aspect[]): Aspect {
-  return composeExecution(...aspects);
+  const steps = aspects.slice();
+  if (steps.some(step => typeof step !== "function")) throw new TypeError("Aspects must be callable");
+  return (context, next) => {
+    const dispatch = (index: number): Promise<unknown> => {
+      const step = steps[index];
+      return step ? invokeAspect(context, step, () => dispatch(index + 1)) : Promise.resolve().then(next);
+    };
+    return dispatch(0);
+  };
 }
 
 /** HTTP callers may carry a Request; jobs/Workflow callers do not need to fake one. */

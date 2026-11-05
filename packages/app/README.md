@@ -172,6 +172,14 @@ compiler metadata and generated execution order. Durable business audit belongs
 inside the Command transaction; do not add an independent audit write after
 `next()`. Use the existing execution observer for best-effort telemetry.
 
+For operation-specific types, declare a named `defineOperationAspect({ kind,
+name, input, result, capabilities }, callback)` using literal kind/name and
+trusted validators/selectors, then reference it in `aspects`. The callback gets
+immutable input, typed results and only selected capabilities. Command pipelines
+reject fabricated success, result replacement, swallowed downstream failures and
+reused continuations; results must be plain data. See [execution contracts](EXECUTION.md#explicit-aspects-no-service-method-interception)
+for transport behavior and limits.
+
 See the [feature development guide](../../docs/feature-development.md) and
 [static AOP decision](../../docs/architecture/static-aop.md) for ownership,
 framework references, and the distinction between enforced and planned rules.

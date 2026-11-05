@@ -44,3 +44,5 @@ export type {
 } from "./route_contract";
 export type { Scope } from "./scope";
 export type { Aspect, AspectContext, AspectNext } from "./aspect";
+export { defineOperationAspect, AspectExecutionError } from "./aspect";
+export type { OperationAspectContext, OperationAspectContract, ReadonlyAspectData } from "./aspect";

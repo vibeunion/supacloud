@@ -40,6 +40,7 @@ import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
 import { camelName, joinRoutePaths } from "./util";
 import { scanCommandBoundaries } from "./command-boundary";
 import { scanRuntimeDi } from "./static-di";
+import { apiOrigin } from "./api-source";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
 const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
@@ -3409,6 +3410,17 @@ function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
   return expr && ts.isArrayLiteralExpression(expr) ? [...expr.elements] : [];
 }
 
+function isOperationAspectFactory(expression: ts.Expression, checker: ts.TypeChecker): boolean {
+  if (!ts.isCallExpression(expression)) return false;
+  const origin = apiOrigin(expression.expression, checker);
+  if (origin?.name !== "defineOperationAspect"
+    || !["@supacloud/app", "@supacloud/app/core", "@supacloud/app/execution"].includes(origin.module)) return false;
+  const contract = expression.arguments[0];
+  return contract !== undefined && ts.isObjectLiteralExpression(contract)
+    && ["route", "command", "job"].includes(stringLiteralProp(contract, "kind") ?? "")
+    && !!stringLiteralProp(contract, "name");
+}
+
 function parseAspectRefs(
   expression: Expression | undefined,
   ctx: AnalysisContext,
@@ -3450,7 +3462,8 @@ function parseAspectRefs(
       || (ts.isVariableDeclaration(candidate)
         && candidate.initializer !== undefined
         && (ts.isArrowFunction(candidate.initializer)
-          || ts.isFunctionExpression(candidate.initializer))),
+          || ts.isFunctionExpression(candidate.initializer)
+          || isOperationAspectFactory(candidate.initializer, ctx.checker))),
     );
     if (!declaration) {
       ctx.diagnostics.push({
@@ -3459,7 +3472,7 @@ function parseAspectRefs(
         message: `${owner} 引用了 '${element.text}'，但它不是可静态解析的 aspect 函数`,
         file: sourcePath(ctx.rootDir, element.getSourceFile().fileName),
         line: lineOf(element),
-        suggestion: "aspect 必须是函数声明、箭头函数或函数表达式的直接引用。",
+        suggestion: "aspect 必须直接引用函数声明、箭头函数、函数表达式，或由 defineOperationAspect 使用字面量 kind/name 初始化的变量。",
         errorCode: "SC4011",
         docsUrl: "https://supacloud.dev/errors/SC4011",
       });

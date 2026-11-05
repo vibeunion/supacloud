@@ -2,6 +2,8 @@
 // frontend applications use their framework and @supacloud/js.
 export { SCOPES, DEFAULT_SCOPE, SCOPE_LIFETIME_RANK, isScopeViolation } from "./scope";
 export type { Scope } from "./scope";
+export { defineOperationAspect, AspectExecutionError } from "./aspect";
+export type { OperationAspectContext, OperationAspectContract, ReadonlyAspectData } from "./aspect";
 export type {
   Aspect,
   AspectContext,

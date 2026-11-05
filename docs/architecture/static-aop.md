@@ -1,6 +1,6 @@
 # 静态 AOP 的参考与边界
 
-状态：架构选择与开发约束；下文明确区分已有实现和后续强化方向。
+状态：架构选择、已实现的静态切面约束及验证边界。
 日常功能开发从[功能迭代手册](../feature-development.md)进入。
 
 ## 决策
@@ -52,9 +52,10 @@ HTTP / Worker / 可信 CLI
 
 ## 切面的开发规则
 
-1. **显式绑定。** 使用编译器支持的函数引用；顺序写在声明中，第一项在最外层。
+1. **显式绑定。** 使用函数引用或 `defineOperationAspect` 静态工厂声明的引用；
+   工厂的 `kind`、`name` 使用字面量，顺序写在声明中，第一项在最外层。
    不按字符串方法名、运行时扫描或 Proxy 自动匹配方法。
-2. **只执行一次。** 正常路径 `return next()` 或 `return await next()`；拒绝可不调用。
+2. **只执行一次。** 正常路径 `return next()` 或 `return await next()`；拒绝必须抛错。
    不重用、保存、后台延迟调用 `next`，不在切面中重试业务处理器。
 3. **保留业务边界。** Command 切面在已授权的业务 continuation 内运行；
    不创建第二个 receipt、事务或审计账本，不伪造成功回执。
@@ -78,12 +79,22 @@ Nest interceptor 再把 RxJS 加到服务端命令管线。数据库模型和策
 | 类型可见的裸 Command 调用检查 | `SC4029`；不是全程序信息流或安全沙箱 |
 | 执行计划、路由注册及适配器能力校验 | `executionPlan`、`registerRoutes`、`validateExecutionManifest`；元数据不证明运行时持久化 |
 | 原始模型客户端不进入业务层 | 源导入门禁及只读/事务 facade；可信 host 仍须正确验证身份 |
-| 参数/结果/错误的细粒度切面类型 | 当前 `AspectContext` 仍含 `unknown` 和开放记录，未实现操作专属 capability 类型 |
-| 切面不能伪造成功或绕过业务处理 | 当前单次 `next` 检查不证明此语义；现由约束、评审及行为测试保证 |
+| 操作专属输入、结果与 capability | `defineOperationAspect` 通过输入/结果校验器和显式 capability 选择器推导类型；回调没有开放 services、原始 Request 或任意身份切换入口 |
+| Command 切面保留业务执行结果 | portable、Elysia 和编译管线都要求成功返回来自一次 next；拒绝替换结果、吞掉下游失败及捕获后继续的重复 next |
+| HTTP/Worker 模型命令模板 | `app init --template model-command`；同一 durable facade、编译切面、身份解析与原子 receipt/audit |
 
-下一步优先补一份经过 HTTP 与 Worker 验证的全模型业务模板，再针对真实使用
-需求收紧 Aspect 输入和能力类型。不要先增加一套 guard/pipe/filter/aspect 的
-平行注册系统，也不要把“完整参考某框架”作为无边界重构目标。
+typed 回调接收输入的冻结副本；结果必须保持同一值/引用，普通对象和数组递归冻结。
+Command 结果中的 Date、Response、类实例、访问器、函数和循环对象会被拒绝；
+先转成契约数据，再在协议层构造响应。结果校验器只能缩窄类型，不能转换结果。
+route/job 切面仍可短路或映射；进入绑定 Command 的 HTTP 路由后，整个业务切面链
+仍须保留处理器结果。handler 自行调用 durable facade 的路由，其 HTTP 包装仍属于
+协议层；将业务切面放在 facade 的事务内，不能把外层 HTTP 映射当作持久化保证。
+
+校验器和 capability 选择器是可信边界，类型检查不是 JavaScript 安全沙箱；
+显式授予的能力仍须正确实现。切面不能撤销适配器自行提前提交或远端副作用。
+证据集中在 [model-command 回归](../../packages/cli/src/shared/tools/app-model-command-starter.test.ts)，
+真实 PostgreSQL 用例需设置 `SUPACLOUD_STARTER_POSTGRES_BIN`。它验证 HTTP/Worker
+处理器，不宣称完整 PGMQ 调度或生产部署验收。无需新建平行的 guard/pipe/filter 注册系统。
 
 ## 实现与官方参考
 

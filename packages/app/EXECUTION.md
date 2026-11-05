@@ -92,6 +92,27 @@ For commands, put aspects inside the authorized handler continuation, not around
 the complete executor. Calling a raw service method is still a raw call: it does
 not magically acquire governance. Route every governed entry through the executor.
 
+Use `defineOperationAspect` from `/core` or `/execution` for operation-specific
+types. Its literal `kind` and `name`, input/result validators and explicit
+capability selector define the callback contract. The callback receives only
+`kind`, `name`, a deep-readonly input copy and selected capabilities. Validators
+are trusted narrowing boundaries; the result validator must return the same
+value/reference, not transform it. The compiler accepts a direct named variable
+initialized by this factory, without a runtime registry.
+
+Command aspects must call `next` once to return successfully, propagate downstream
+failure and return the same result. Returning without `next`, replacing its result,
+or catching a repeated-continuation error cannot produce success. Results are
+recursively frozen data: plain objects, arrays and primitives. Convert Date,
+Response, custom instances, accessors and cyclic objects before this boundary.
+Typed inputs are cloned and frozen; explicitly selected service capabilities
+remain trusted ports. This is not a JavaScript security sandbox.
+
+Route/job aspects retain short-circuit and mapping semantics. For an HTTP route
+explicitly bound to a Command, an enclosing integrity guard also checks the route
+aspect chain against its handler result. Handler-owned durable commands put
+business aspects inside their transaction; outer HTTP formatting is separate.
+
 ## Compile framework features instead of adding a runtime framework
 
 SupaCloud uses its own application declarations, informed by NestJS and AdonisJS,
@@ -161,7 +182,8 @@ boundary, including method extraction and destructuring. The check runs on
 incremental analysis too, and `writeOnError` cannot emit a bypassing application.
 Use a route explicitly bound to that command, an `executeCompiledCommand`
 handler with a literal command name, or a durable facade whose method only
-forwards to a readonly `createTransactionalCommand` / `createExternalCommand`
+forwards to a readonly `createTransactionalCommand`, `createTypeBoxTransactionalCommand`
+(from `@supacloud/commands/typebox`) or `createExternalCommand`
 executor. Import aliases are supported; matching a method name alone is not
 proof of governance. Ordinary ungoverned service calls are unaffected.
 

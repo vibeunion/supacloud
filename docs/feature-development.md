@@ -76,7 +76,7 @@ migrations/            # 只追加的已审查迁移
 live Catalog `enforce` 使用明确选择环境的只读连接。
 
 **业务执行契约。** 裸 Command 类、编译绑定的 Command 和
-`createTransactionalCommand` 返回的持久化 facade 不可混用。遵循
+`createTransactionalCommand` / `createTypeBoxTransactionalCommand` 返回的持久化 facade 不可混用。遵循
 [执行管线](../packages/app/EXECUTION.md)的入口：已绑定路由、
 `executeCompiledCommand` 或受支持的 durable facade。`SC4029` 检查类型可见的
 绕过调用；它不证明任意动态 JavaScript 都无法绕过边界。
@@ -121,6 +121,7 @@ bun run db:diff -- --candidate output/database-audit/change.sql
 | TypeBox 命令、receipt 重放与再次授权 | [typebox.test.ts](../packages/commands/src/typebox.test.ts) |
 | 切面顺序、单次 continuation、作用域销毁 | [static-di-aop.test.ts](../packages/compiler/src/static-di-aop.test.ts) |
 | 编译入口防绕过、executionPlan | [execution-contract.test.ts](../packages/compiler/src/execution-contract.test.ts) |
+| typed aspect、模型 HTTP/Worker 共用命令、审计回滚 | [app-model-command-starter.test.ts](../packages/cli/src/shared/tools/app-model-command-starter.test.ts) |
 | 跨步骤业务组合和恢复 | [fulfillment 示例](../packages/elysia/src/examples/fulfillment.ts)及[说明](framework-composition.md) |
 
 上表用于选择与当前修改直接相关的一项，不是要求顺次运行全部文件。
@@ -131,7 +132,11 @@ PostgreSQL 工具目录；未设置时会跳过，必须在结果中说明。它
 现有 `--template command` 的审批、附件和恢复是可运行的业务参考，但其写入
 仍含可信原生 SQL、RLS 和锁处理。参考其契约与治理组织；新增模型写入按
 `createZenStackDatabase(...).forIdentity(...)` 和 Command `transaction.db` 接入。
-当前没有覆盖所有这些路径的一份全模型端到端模板，不把分层测试称作该模板已完成。
+模型业务使用 `supacloud app init --root ./orders --name orders --template model-command`。
+该模板提供创建/审批/读取订单、TypeBox、Effect 路由、编译命令切面、可信 host 和
+Worker 处理器。HTTP/Worker 复用原操作键和当前权限解析；它不另建队列消费循环。
+先生成模型与源契约，再编译；按生成的 README 应用正向迁移、配置独立数据库角色
+和真实 IdentityAuthority。原生 SQL 的复杂 `command` 模板继续保留。
 
 ## 评审与后续框架演进
 
@@ -139,6 +144,8 @@ PostgreSQL 工具目录；未设置时会跳过，必须在结果中说明。它
 跨入口保持、失败能否被真实证明、迁移是否追加、生成物是否来自本次源文件。
 编译通过、数据库行为通过、npm 发布、合并和部署分别报告。
 
-后续框架工作按独立任务推进：先补全 ZenStack 模型写入的 HTTP/Worker 业务模板，
-再考虑更精确的 aspect capability 类型和命令切面禁止伪造成功结果的校验。
-这些是待实现事项，现阶段不宣称已由编译器强制。
+新业务切面优先使用 `defineOperationAspect`，显式提供输入、结果校验器与最小
+capability 选择器。Command 切面成功返回必须来自一次 next，结果保持原值，不能
+吞掉下游失败。只读类型与运行时冻结同时生效；拒绝业务操作时抛出契约错误。
+具体能力和限制见静态 AOP 设计。后续演进应围绕真实业务缺口增加局部门禁，
+不引入第二套容器、反射拦截或事务执行系统。
