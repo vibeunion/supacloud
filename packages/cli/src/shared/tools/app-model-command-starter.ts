@@ -1,4 +1,4 @@
-import { COMMAND_RECEIPT_SQL } from "@supacloud/db";
+import { COMMAND_RECEIPT_SQL } from "./command-receipts";
 import metadata from "./starter-metadata.json" with { type: "json" };
 import { baseTemplateFiles, type StarterSdkDependencies } from "./app-starter-templates";
 
