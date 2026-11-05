@@ -84,6 +84,45 @@ function ordinary(service: Unrelated) { return service.execute(); }
   });
 });
 
+test("RPC-declared commands are governed at the database RPC, not at the call site", async () => {
+  await project(declarations + `
+@Command({name: 'rpc.write', permission: 'items:write', rpc: 'fa_write_item',
+  transaction: 'required', audit: 'written', idempotency: 'required'})
+export class RpcWrite { execute() { return 1; } }
+@Module({name: 'rpc', providers: [RpcWrite]}) class RpcModule {}
+class Service {
+  constructor(private readonly command: RpcWrite) {}
+  private async helper() { return this.command.execute(); }
+  run() { return this.helper(); }
+}
+function extracted(command: RpcWrite) { return command.execute; }
+`, async (root) => {
+    const graph = await analyzeProject(root);
+    const errors = graph.diagnostics?.filter((item) => item.code === "command-executor-bypass") ?? [];
+    // The helper call is allowed: the RPC owns receipt, audit and transaction.
+    // Extracting the method as a value still fails closed.
+    expect(errors).toHaveLength(1);
+  });
+});
+
+test("RPC-declared commands still reject calls to arbitrary methods", async () => {
+  await project(`import { Command, Module } from './runtime';
+@Command({name: 'rpc.write', permission: 'items:write', rpc: 'fa_write_item',
+  transaction: 'required', audit: 'written', idempotency: 'required'})
+export class RpcWrite {
+  execute() { return 1; }
+  dangerous() { return 2; }
+}
+@Module({name: 'rpc', providers: [RpcWrite]}) class RpcModule {}
+function safe(command: RpcWrite) { return command.execute(); }
+function unsafe(command: RpcWrite) { return command.dangerous(); }
+`, async (root) => {
+    const graph = await analyzeProject(root);
+    const errors = graph.diagnostics?.filter((item) => item.code === "command-executor-bypass") ?? [];
+    expect(errors).toHaveLength(1);
+  });
+});
+
 test("incremental analysis rejects new bypasses without stale diagnostics after repair", async () => {
   await project(declarations, async (root) => {
     const cache = createDependencyGraphCache();
