@@ -1,4 +1,4 @@
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import type { Diagnostic } from "./types";
 
 export const SQL_SAFETY_DIAGNOSTIC_CODES = {
@@ -10,20 +10,20 @@ export const SQL_SAFETY_DIAGNOSTIC_CODES = {
  * Check Kysely SQL operations using resolved symbols, including aliases and
  * re-exports. This is a type-escape guard, not an SQL parser or injection proof.
  */
-export function scanQuerySql(
+export async function scanQuerySql(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   file: string,
   strict: boolean,
-): Diagnostic[] {
+): Promise<Diagnostic[]> {
   const diagnostics: Diagnostic[] = [];
-  const importedSql = (expression: ts.Expression): boolean => {
-    const symbol = checker.getSymbolAtLocation(
+  const importedSql = async (expression: ts.Expression): Promise<boolean> => {
+    const symbol = (await checker.getSymbolAtLocation(
       ts.isPropertyAccessExpression(expression) ? expression.name : expression,
-    );
+    ));
     if (!symbol) return false;
-    const target = symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
-    return target.name === "sql" && (target.declarations ?? []).some((declaration) =>
+    const target = symbol.flags & ts.SymbolFlags.Alias ? (await checker.getAliasedSymbol(symbol)) : symbol;
+    return target.name === "sql" && ((await ts.declarationsOf(target))).some((declaration) =>
       /(?:^|\/)node_modules\/kysely\//.test(declaration.getSourceFile().fileName.replaceAll("\\", "/")));
   };
   const report = (code: keyof typeof SQL_SAFETY_DIAGNOSTIC_CODES, node: ts.Node, message: string) => {
@@ -32,22 +32,22 @@ export function scanQuerySql(
       message, file, line: sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
     });
   };
-  const visit = (node: ts.Node): void => {
-    if (ts.isTaggedTemplateExpression(node) && importedSql(node.tag)
+  const visit = async (node: ts.Node): Promise<void> => {
+    if (ts.isTaggedTemplateExpression(node) && (await importedSql(node.tag))
       && node.typeArguments?.some((type) => type.kind !== ts.SyntaxKind.UnknownKeyword)) {
       report("sql-result-assertion", node,
         "Kysely sql<T> asserts a result type without checking SQL or decoding rows. Use sql<unknown> and a schema decoder at the result boundary.");
     }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-      && node.expression.name.text === "raw" && importedSql(node.expression.expression)) {
+      && node.expression.name.text === "raw" && (await importedSql(node.expression.expression))) {
       const argument = node.arguments[0];
       if (!argument || (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument))) {
         report("sql-raw-dynamic", node,
           "Dynamic sql.raw bypasses parameter binding. Interpolate values with sql templates; keep reviewed static DDL in migrations.");
       }
     }
-    ts.forEachChild(node, visit);
+    (await ts.forEachChildAsync(node, visit));
   };
-  visit(sourceFile);
+  (await visit(sourceFile));
   return diagnostics;
 }

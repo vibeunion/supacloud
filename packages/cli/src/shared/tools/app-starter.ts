@@ -70,7 +70,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
                 ...dbMetadata.devDependencies,
                 "@types/bun": "^1.4.4",
-                typescript: "^7.0.2",
+                typescript: "7.1.0-beta",
             },
         }),
         "tsconfig.json": json({

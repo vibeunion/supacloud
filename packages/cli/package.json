@@ -61,10 +61,10 @@
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/delivery": "file:../delivery",
     "@graphql-tools/utils": "^12.0.4",
-    "deepmerge-ts": "8.0.2",
-    "prisma": "6.19.3",
     "@supacloud/compiler": "file:../compiler",
-    "@supacloud/db": "file:../db"
+    "@supacloud/db": "file:../db",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.118.0",
@@ -72,6 +72,6 @@
     "@types/bun": "^1.4.4",
     "effect": "4.0.5",
     "elysia": "2.0.0-rc.1",
-    "typescript": "^7.0.2"
+    "typescript": "7.1.0-beta"
   }
 }

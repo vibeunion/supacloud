@@ -165,4 +165,4 @@ export class WebhookModule {}
     }));
     expect(await Bun.file(join(root, "generated/application.ts")).text()).toBe(generated);
   } finally { await rm(root, { recursive: true, force: true }); }
-});
+}, 30_000);

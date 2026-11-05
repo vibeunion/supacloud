@@ -169,9 +169,10 @@ describe("app dev actual CLI regressions", () => {
         const root = await fixture();
         const failure = new Error("progress transport unavailable");
         const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
-        await expect(runAppTool({ action: "watch", root }, {
+        const result = await runAppTool({ action: "watch", root }, {
             onDevProgress() { throw failure; },
-        })).rejects.toBe(failure);
+        }).catch((error: unknown) => error);
+        expect(result).toBe(failure);
         expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
     });
 

@@ -13,7 +13,7 @@ test("new packages are discovered and missing checks cannot pass silently", asyn
     await writeFile(join(directory, "entry.ts"), "export const entry = 1;");
     const project = discoverTypeSafetyProjects(root)[0];
     if (!project) throw new Error("Package was not discovered");
-    const result = inspectTypeSafetyProject(project);
+    const result = (await inspectTypeSafetyProject(project));
     expect(result.errors).toEqual(["Missing tsconfig.json"]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -48,11 +48,11 @@ test("strict flags and source coverage are both checked with inherited JSONC con
     await writeFile(join(directory, "entry.ts"), "export const entry = 1;");
     await writeFile(join(directory, "omitted.ts"), "export const omitted = 1;");
     const project = { name: "fixture", directory, configs: ["tsconfig.json"], svelte: false };
-    expect(inspectTypeSafetyProject(project)).toMatchObject({ errors: [], files: 1 });
+    expect((await inspectTypeSafetyProject(project))).toMatchObject({ errors: [], files: 1 });
     await writeFile(join(directory, "tsconfig.json"), JSON.stringify({
       extends: "./base.json", compilerOptions: { strict: false }, include: ["*.ts"],
     }));
-    expect(inspectTypeSafetyProject(project)).toMatchObject({
+    expect((await inspectTypeSafetyProject(project))).toMatchObject({
       errors: ["tsconfig.json: strict must be true"],
     });
     await writeFile(join(directory, "tsconfig.json"), JSON.stringify({
@@ -60,7 +60,7 @@ test("strict flags and source coverage are both checked with inherited JSONC con
       compilerOptions: { strict: true, skipLibCheck: false, strictNullChecks: false },
       include: ["*.ts"],
     }));
-    expect(inspectTypeSafetyProject(project)).toMatchObject({
+    expect((await inspectTypeSafetyProject(project))).toMatchObject({
       errors: [
         "tsconfig.json: skipLibCheck must be true",
         "tsconfig.json: strictNullChecks must not override strict",
@@ -80,12 +80,12 @@ test("JavaScript is covered only when checked; Svelte build output is not author
     await writeFile(join(directory, "launcher.cjs"), "module.exports = 1;");
     await writeFile(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions, include: ["*.cjs"] }));
     const project = { name: "fixture", directory, configs: ["tsconfig.json"], svelte: true };
-    expect(inspectTypeSafetyProject(project)).toMatchObject({ errors: [], files: 0 });
+    expect((await inspectTypeSafetyProject(project))).toMatchObject({ errors: [], files: 0 });
     await writeFile(join(directory, "tsconfig.json"), JSON.stringify({
       compilerOptions: { ...compilerOptions, checkJs: true }, include: ["*.cjs"],
     }));
-    expect(inspectTypeSafetyProject(project)).toMatchObject({ errors: [], files: 1 });
-    expect(inspectTypeSafetyProject({ ...project, svelte: false })).toMatchObject({ errors: [], files: 1 });
+    expect((await inspectTypeSafetyProject(project))).toMatchObject({ errors: [], files: 1 });
+    expect((await inspectTypeSafetyProject({ ...project, svelte: false }))).toMatchObject({ errors: [], files: 1 });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -101,7 +101,7 @@ test("production inventory reports files selected by the production config", asy
     }));
     await writeFile(join(directory, "src", "entry.ts"), "export const entry = 1;");
     const project = { name: "fixture", directory, configs: ["tsconfig.json"], svelte: false };
-    expect(inspectTypeSafetyProject(project)).toMatchObject({ errors: [], files: 1 });
+    expect((await inspectTypeSafetyProject(project))).toMatchObject({ errors: [], files: 1 });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

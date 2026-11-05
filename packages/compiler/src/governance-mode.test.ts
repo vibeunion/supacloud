@@ -37,13 +37,13 @@ test("invalid governance fails closed, preserves artifacts and repairs through e
     expect(await readFile(join(outDir, "application.ts"), "utf8")).toBe(artifact);
     const fix: DiagnosticFix = JSON.parse(JSON.stringify(diagnostic?.fix));
     if (fix.type !== "set_command_mode") throw new Error("Expected command mode fix");
-    await expect(applyDiagnosticFix(fix, { rootDir: root })).rejects.toThrow("explicit");
+    expect(await applyDiagnosticFix(fix, { rootDir: root }).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("explicit") });
     const chosen = { ...fix, value: "required" as const };
     const preview = await applyDiagnosticFix(chosen, { rootDir: root });
     expect(preview.changed).toBe(true);
     expect(await readFile(join(root, "src/case.module.ts"), "utf8")).toContain(mode);
     await applyDiagnosticFix(chosen, { rootDir: root, dryRun: false });
-    await expect(applyDiagnosticFix(chosen, { rootDir: root, dryRun: false })).rejects.toThrow("changed");
+    expect(await applyDiagnosticFix(chosen, { rootDir: root, dryRun: false }).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("changed") });
     const repaired = await compileProject({ rootDir: root, outDir });
     expect(repaired.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   }

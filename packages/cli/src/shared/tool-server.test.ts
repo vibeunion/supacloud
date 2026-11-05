@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { Type } from "typebox";
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { runCli } from "./cli";
 import { decodedSchema, optional, stringEnum, withDescription, type ToolArguments, type ToolSchema } from "./schema";
 import { registerTool, type ToolCallback, type ToolInvocation, type ToolResult, type ToolServer, type ToolTextContent } from "./tool-server";
@@ -206,6 +206,46 @@ test.each(rowFixtures)("database $action rejects malformed response rows", async
     }
 });
 
+async function sourcePolicyFailures(file: string, text: string): Promise<string[]> {
+    const source = await ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const failures: string[] = [];
+    const checkedComments = new Set<number>();
+    const visit = (node: ts.Node): void => {
+        if (node.kind === ts.SyntaxKind.AnyKeyword) failures.push(`${file}: explicit any`);
+        // Use parsed token boundaries so interpolated templates and regular expressions
+        // cannot be mistaken for comments or leave the TS 7 scanner at a bare '#'.
+        const comments = [
+            ...ts.getLeadingCommentRanges(text, node.pos) ?? [],
+            ...ts.getTrailingCommentRanges(text, node.end) ?? [],
+        ];
+        for (const comment of comments) {
+            if (checkedComments.has(comment.pos)) continue;
+            checkedComments.add(comment.pos);
+            if (/@ts-(ignore|nocheck|expect-error)\b/.test(text.slice(comment.pos, comment.end))) {
+                failures.push(`${file}: suppressed checking`);
+            }
+        }
+        for (const child of node.getChildren(source)) visit(child);
+    };
+    visit(source);
+    return failures;
+}
+
+test("source policy handles Markdown templates while distinguishing comments from literal content", async () => {
+    const literal = 'const markdown = `# Heading ${1}\n# Next\n// @ts-ignore`;\n'
+        + 'const pattern = /@ts-ignore/;\n';
+    expect(await sourcePolicyFailures("literal.ts", literal)).toEqual([]);
+    expect(await sourcePolicyFailures("invalid.ts", literal
+        + '// @ts-ignore\nconst value: any = 1;\n'
+        + 'const result = (1 /* @ts-expect-error */);\n'
+        + '/* @ts-nocheck */\n')).toEqual([
+        "invalid.ts: suppressed checking",
+        "invalid.ts: explicit any",
+        "invalid.ts: suppressed checking",
+        "invalid.ts: suppressed checking",
+    ]);
+});
+
 test("CLI production sources contain no explicit any or checking suppressions", async () => {
     const root = resolve(import.meta.dir, "..");
     const files = await readdir(root, { recursive: true });
@@ -213,19 +253,7 @@ test("CLI production sources contain no explicit any or checking suppressions", 
     for (const file of files) {
         if (!file.endsWith(".ts") || /\.(test|spec)\.ts$/.test(file)) continue;
         const text = await readFile(resolve(root, file), "utf8");
-        const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-        const visit = (node: ts.Node): void => {
-            if (node.kind === ts.SyntaxKind.AnyKeyword) failures.push(`${file}: explicit any`);
-            ts.forEachChild(node, visit);
-        };
-        visit(source);
-        const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, text);
-        for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
-            if ((kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia)
-                && /@ts-(ignore|nocheck|expect-error)\b/.test(scanner.getTokenText())) {
-                failures.push(`${file}: suppressed checking`);
-            }
-        }
+        failures.push(...await sourcePolicyFailures(file, text));
     }
     expect(failures).toEqual([]);
 });

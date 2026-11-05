@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { databaseSources, parseDatabaseSourcesConfig, type DatabaseSourcesConfig } from "./source-contracts";
 import { migrationFunctionIdentities, rpcSourceContract, renderRpcSourceTypes } from "./rpc-source-contracts";
 
@@ -183,22 +183,23 @@ type UnknownResult = Assert<unknown extends RpcResult<"public.lookup"> ? true : 
   const diagnostics = async (text: string) => {
     const path = join(root, "compile.ts");
     await file(root, "compile.ts", text);
-    return ts.getPreEmitDiagnostics(ts.createProgram([path], {
+    await using program = await ts.createProgram([path], {
       strict: true, noEmit: true, skipLibCheck: true, types: [], target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    }));
+    });
+    return await ts.getPreEmitDiagnostics(program);
   };
   expect((await diagnostics(base)).map(item => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   expect((await diagnostics(base + 'const invalid: RpcArgs<"public.lookup"> = { p_id: true };')).length).toBeGreaterThan(0);
 });
 
-test("new source modules pass scoped strict TypeScript diagnostics", () => {
+test("new source modules pass scoped strict TypeScript diagnostics", async () => {
   const files = ["source-contracts.ts", "rpc-source-contracts.ts", "source-contracts-cli.ts", "source-contracts.test.ts"]
     .map(name => resolve(import.meta.dir, name));
-  const program = ts.createProgram(files, {
+  await using program = (await ts.createProgram(files, {
     strict: true, noEmit: true, skipLibCheck: true, types: ["bun"], target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-  });
-  const diagnostics = ts.getPreEmitDiagnostics(program).filter(item => !item.file || files.includes(resolve(item.file.fileName)));
+  }));
+  const diagnostics = (await ts.getPreEmitDiagnostics(program)).filter(item => !item.file || files.includes(resolve(item.file.fileName)));
   expect(diagnostics.map(item => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
 });

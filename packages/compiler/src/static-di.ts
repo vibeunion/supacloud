@@ -1,4 +1,4 @@
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import type { Diagnostic } from "./types";
 import { scanReactiveSource } from "./reactive-analysis";
 import { apiOrigin, bindApiSource } from "./api-source";
@@ -10,7 +10,7 @@ const runtimeApis = new Set([
 ]);
 
 /** Reject runtime DI imports even in constructors, factory functions and aliased imports. */
-export function scanRuntimeDi(source: ts.SourceFile, file: string): Diagnostic[] {
+export async function scanRuntimeDi(source: ts.SourceFile, file: string): Promise<Diagnostic[]> {
   const diagnostics: Diagnostic[] = [];
   const namespaces = new Set<string>();
   const report = (node: ts.Node) => {
@@ -31,7 +31,7 @@ export function scanRuntimeDi(source: ts.SourceFile, file: string): Diagnostic[]
       || !(/^@supacloud\/app(?:\/|$)/.test(statement.moduleSpecifier.text)
         || statement.moduleSpecifier.text === "@angular/core")) continue;
     if (ts.isImportDeclaration(statement)) {
-      if (statement.importClause?.isTypeOnly) continue;
+      if (statement.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       const binding = statement.importClause?.namedBindings;
       if (binding && ts.isNamespaceImport(binding)) namespaces.add(binding.name.text);
       if (binding && ts.isNamedImports(binding)) for (const item of binding.elements) {
@@ -45,18 +45,18 @@ export function scanRuntimeDi(source: ts.SourceFile, file: string): Diagnostic[]
     }
   }
   if (namespaces.size > 0) {
-    const bound = bindApiSource(source);
-    const protectedNamespace = (expression: ts.Expression): boolean => {
-      const origin = apiOrigin(expression, bound.checker);
+    await using bound = (await bindApiSource(source));
+    const protectedNamespace = async (expression: ts.Expression): Promise<boolean> => {
+      const origin = (await apiOrigin(expression, bound.checker));
       return origin?.name === "*" && (origin.module === "@angular/core" || /^@supacloud\/app(?:\/|$)/.test(origin.module));
     };
-    const visit = (node: ts.Node): void => {
-      if (ts.isPropertyAccessExpression(node) && protectedNamespace(node.expression) && runtimeApis.has(node.name.text)) report(node);
-      if (ts.isElementAccessExpression(node) && protectedNamespace(node.expression)
+    const visit = async (node: ts.Node): Promise<void> => {
+      if (ts.isPropertyAccessExpression(node) && (await protectedNamespace(node.expression)) && runtimeApis.has(node.name.text)) report(node);
+      if (ts.isElementAccessExpression(node) && (await protectedNamespace(node.expression))
         && (!ts.isStringLiteral(node.argumentExpression) || runtimeApis.has(node.argumentExpression.text))) report(node);
-      ts.forEachChild(node, visit);
+      (await ts.forEachChildAsync(node, visit));
     };
-    visit(bound.source);
+    (await visit(bound.source));
   }
-  return [...diagnostics, ...scanReactiveSource(source, file), ...scanHttpProviderImports(source, file)];
+  return [...diagnostics, ...(await scanReactiveSource(source, file)), ...(await scanHttpProviderImports(source, file))];
 }

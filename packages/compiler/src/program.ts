@@ -1,302 +1,128 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { compileTraits, type TraitCompilation, type TraitRecord } from "./traits";
 
-export interface IncrementalProgramSession {
-  /** The current TypeScript program used as the semantic compilation boundary. */
+export interface IncrementalProgramSession extends AsyncDisposable {
   getProgram(): ts.Program;
-  /** The current TypeScript type checker. */
   getTypeChecker(): ts.TypeChecker;
-  /** Update the program while preserving TypeScript's incremental state. */
-  update(rootNames: string[], changedPaths?: string[]): ProgramUpdate;
-  /** Local Angular-style metadata records compiled from the current Program. */
+  update(rootNames: string[], changedPaths?: string[]): Promise<ProgramUpdate>;
   getTraits(): readonly TraitRecord[];
-  /** TypeScript syntactic diagnostics for the current Program. */
-  getDiagnostics(): readonly ts.Diagnostic[];
-  /** Emit the current TypeScript program using the builder's incremental state. */
-  emit(): ts.EmitResult;
-  /** Drop the retained builder and source versions. */
-  reset(): void;
+  getDiagnostics(): Promise<readonly ts.Diagnostic[]>;
+  emit(): Promise<ts.EmitOutput>;
+  reset(): Promise<void>;
 }
+export interface ProgramUpdate { changedFiles: string[]; reusedFiles: string[]; program: ts.Program; }
 
-export interface ProgramUpdate {
-  changedFiles: string[];
-  reusedFiles: string[];
-  program: ts.Program;
-}
-
-interface ProjectConfig {
-  options: ts.CompilerOptions;
-  errors: readonly ts.Diagnostic[];
-  projectReferences?: readonly ts.ProjectReference[];
-  configFingerprint: string;
-}
-
-interface CachedSourceFile {
-  sourceFile: ts.SourceFile;
-  version: string;
-  parseKey: string;
-}
-
-/**
- * Angular-style semantic boundary around TypeScript's incremental program.
- *
- * This deliberately owns only TypeScript program state. SupaCloud metadata
- * handlers and ApplicationGraph linking remain separate layers.
- */
+/** Retains native snapshots without Node-only synchronous transport or TS 6 objects. */
 export function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession {
   const rootDir = resolve(projectRoot);
-  let projectConfig = readProjectConfig(rootDir);
-  let projectConfigKey = configKey(projectConfig);
-  let builder: ts.EmitAndSemanticDiagnosticsBuilderProgram | undefined;
+  let api: ts.API | undefined;
+  let snapshot: ts.Snapshot | undefined;
+  let program: ts.Program | undefined;
   let traits: TraitCompilation | undefined;
-  const sourceFileCache = new Map<string, CachedSourceFile>();
-
-  return {
-    getProgram(): ts.Program {
-      if (!builder) {
-        throw new Error("incremental TypeScript program has not been initialized");
-      }
-      return builder.getProgram();
+  let configuration = "";
+  let errors: readonly ts.Diagnostic[] = [];
+  let versions = new Map<string, string>();
+  const emitted = new Map<string, string>();
+  let pending: Promise<unknown> = Promise.resolve();
+  const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = pending.then(operation, operation);
+    pending = result.catch(() => {});
+    return result;
+  };
+  async function release(): Promise<void> {
+    const oldSnapshot = snapshot;
+    const oldApi = api;
+    snapshot = undefined; api = undefined; program = undefined; traits = undefined;
+    versions.clear(); emitted.clear(); configuration = ""; errors = [];
+    try { await oldSnapshot?.dispose(); } finally { await oldApi?.close(); }
+  }
+  const session: IncrementalProgramSession = {
+    getProgram() {
+      if (!program) throw new Error("incremental TypeScript program has not been initialized");
+      return program;
     },
-
-    getTypeChecker(): ts.TypeChecker {
-      return this.getProgram().getTypeChecker();
-    },
-
-    update(rootNames, changedPaths = rootNames): ProgramUpdate {
-      const oldProgram = builder?.getProgram();
-      const oldSourceFiles = new Map(
-        oldProgram?.getSourceFiles().map((sourceFile) => [canonical(sourceFile.fileName), sourceFile]) ?? [],
-      );
-
-      const nextProjectConfig = readProjectConfig(rootDir);
-      const nextProjectConfigKey = configKey(nextProjectConfig);
-      const configChanged = nextProjectConfigKey !== projectConfigKey;
-      const previousBuilder = configChanged ? undefined : builder;
-      if (configChanged) {
-        sourceFileCache.clear();
-        traits = undefined;
-      }
-      projectConfig = nextProjectConfig;
-      projectConfigKey = nextProjectConfigKey;
-
-      const normalizedRoots = [...new Set(rootNames.map((file) => resolve(rootDir, file)))].sort();
-      const normalizedChanged = [...new Set(changedPaths.map((file) => resolve(rootDir, file)))];
-      const invalidatedPaths = new Set(normalizedChanged.map(canonical));
-      for (const sourceFile of oldSourceFiles.values()) {
-        if (sourceVersion(sourceFile.fileName) !== sourceFileVersion(sourceFile)) {
-          invalidatedPaths.add(canonical(sourceFile.fileName));
-        }
-      }
-      const invalidateAllResolutions = configChanged || [...invalidatedPaths].some((fileName) => {
-        const wasInProgram = oldSourceFiles.has(fileName);
-        return wasInProgram !== existsSync(fileName);
-      });
-      for (const fileName of normalizedChanged) {
-        if (!existsSync(fileName)) sourceFileCache.delete(canonical(fileName));
-      }
-
-      const host = createHost(
-        projectConfig.options,
-        rootDir,
-        sourceFileCache,
-        invalidatedPaths,
-        invalidateAllResolutions,
-      );
-      builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(
-        normalizedRoots,
-        projectConfig.options,
-        host,
-        previousBuilder,
-        projectConfig.errors,
-        projectConfig.projectReferences,
-      );
-
-      const program = builder.getProgram();
-      const changedFiles: string[] = [];
-      const reusedFiles: string[] = [];
-      const currentPaths = new Set(program.getSourceFiles().map((file) => canonical(file.fileName)));
-      for (const sourceFile of program.getSourceFiles()) {
-        if (sourceFile.isDeclarationFile) continue;
-        const previous = oldSourceFiles.get(canonical(sourceFile.fileName));
-        if (previous && previous === sourceFile) {
-          reusedFiles.push(sourceFile.fileName);
+    getTypeChecker() { return session.getProgram().getTypeChecker(); },
+    update(rootNames, changedPaths = rootNames) {
+      return serialize(async () => {
+        api ??= new ts.API({ cwd: rootDir });
+        const configPath = join(rootDir, "tsconfig.json");
+        const config = existsSync(configPath) ? await api.parseConfigFile(configPath) : {
+          options: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+            moduleResolution: ts.ModuleResolutionKind.Bundler, experimentalDecorators: true,
+            allowJs: false, skipLibCheck: true }, errors: [], projectReferences: undefined,
+        };
+        const roots = [...new Set(rootNames.map(path => resolve(rootDir, path)))].sort();
+        const nextConfiguration = JSON.stringify([roots, config.options, config.projectReferences, config.errors]);
+        const configChanged = configuration !== nextConfiguration;
+        const changed = new Set(changedPaths.map(path => resolve(rootDir, path)));
+        for (const [path, previous] of versions) if (version(path) !== previous) changed.add(path);
+        const previousSnapshot = snapshot;
+        let next: ts.Snapshot;
+        if (!snapshot || configChanged) {
+          next = await api.createSnapshot({ createPrograms: [{ rootFiles: roots, compilerOptions: config.options,
+            options: { projectReferences: config.projectReferences, configFileParsingDiagnostics: config.errors } }] });
         } else {
-          changedFiles.push(sourceFile.fileName);
+          const notifications: ts.FileNotifications = { changed: [], created: [], deleted: [] };
+          for (const path of changed) {
+            if (!existsSync(path)) notifications.deleted!.push(path);
+            else if (!versions.has(path)) notifications.created!.push(path);
+            else notifications.changed!.push(path);
+          }
+          next = await snapshot.update({ fileNotifications: notifications, ensurePrograms: [session.getProgram().native.id] });
         }
-      }
-      for (const [path, sourceFile] of oldSourceFiles) {
-        if (!sourceFile.isDeclarationFile && !currentPaths.has(path)) {
-          changedFiles.push(sourceFile.fileName);
-        }
-      }
-      for (const path of sourceFileCache.keys()) {
-        if (!currentPaths.has(path)) sourceFileCache.delete(path);
-      }
-
-      traits = compileTraits(program, traits, new Set(changedFiles));
-      return { changedFiles, reusedFiles, program };
-    },
-
-    getTraits(): readonly TraitRecord[] {
-      return traits?.all ?? [];
-    },
-
-    getDiagnostics(): readonly ts.Diagnostic[] {
-      if (!builder) return projectConfig.errors;
-      const program = builder.getProgram();
-      return [
-        ...projectConfig.errors,
-        ...program.getSyntacticDiagnostics(),
-      ];
-    },
-
-    emit(): ts.EmitResult {
-      if (!builder) {
-        throw new Error("incremental TypeScript program has not been initialized");
-      }
-      return builder.emit();
-    },
-
-    reset(): void {
-      builder = undefined;
-      projectConfig = readProjectConfig(rootDir);
-      projectConfigKey = configKey(projectConfig);
-      traits = undefined;
-      sourceFileCache.clear();
-    },
-  };
-}
-
-function createHost(
-  options: ts.CompilerOptions,
-  rootDir: string,
-  sourceFileCache: Map<string, CachedSourceFile>,
-  invalidatedPaths: Set<string>,
-  invalidateAllResolutions: boolean,
-): ts.CompilerHost {
-  const host = ts.createIncrementalCompilerHost(options, {
-    ...ts.sys,
-    getCurrentDirectory: () => rootDir,
-  });
-  host.hasInvalidatedResolutions = (filePath) =>
-    invalidateAllResolutions || invalidatedPaths.has(canonical(filePath));
-  const originalGetSourceFile = host.getSourceFile.bind(host);
-  host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
-    const key = canonical(fileName);
-    const text = host.readFile(fileName);
-    if (text === undefined) {
-      sourceFileCache.delete(key);
-      return originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
-    }
-
-    const version = hashText(text);
-    const parseKey = sourceFileParseKey(languageVersion);
-    const cached = sourceFileCache.get(key);
-    if (!shouldCreateNewSourceFile && cached?.version === version && cached.parseKey === parseKey) {
-      return cached.sourceFile;
-    }
-
-    const sourceFile = originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
-    if (sourceFile) {
-      sourceFileCache.set(key, { sourceFile, version: hashText(sourceFile.text), parseKey });
-    } else {
-      sourceFileCache.delete(key);
-    }
-    return sourceFile;
-  };
-  return host;
-}
-
-function canonical(fileName: string): string {
-  const normalized = resolve(fileName);
-  return ts.sys.useCaseSensitiveFileNames ? normalized : normalized.toLowerCase();
-}
-
-function sourceFileParseKey(
-  languageVersion: ts.ScriptTarget | ts.CreateSourceFileOptions,
-): string {
-  return typeof languageVersion === "number"
-    ? `target:${languageVersion}`
-    : JSON.stringify({
-        languageVersion: languageVersion.languageVersion,
-        impliedNodeFormat: languageVersion.impliedNodeFormat,
-        jsDocParsingMode: languageVersion.jsDocParsingMode,
+        try {
+          const native = configChanged || !program ? next.operation.createdPrograms?.[0]
+            : next.getProgram(program.native.id);
+          if (!native) throw new Error("Updated TypeScript program is missing");
+          const loaded = await ts.Program.load(native, api);
+          const changedFiles: string[] = [];
+          const reusedFiles: string[] = [];
+          const nextVersions = new Map<string, string>();
+          for (const source of loaded.getSourceFiles()) {
+            const hash = digest(source.text);
+            nextVersions.set(source.fileName, hash);
+            if (source.isDeclarationFile) continue;
+            if (!configChanged && versions.get(source.fileName) === hash) reusedFiles.push(source.fileName);
+            else changedFiles.push(source.fileName);
+          }
+          for (const source of program?.getSourceFiles() ?? []) {
+            if (!source.isDeclarationFile && !nextVersions.has(source.fileName)) changedFiles.push(source.fileName);
+          }
+          const nextTraits = compileTraits(loaded, configChanged ? undefined : traits, new Set(changedFiles));
+          snapshot = next; program = loaded; versions = nextVersions; traits = nextTraits;
+          configuration = nextConfiguration; errors = ts.diagnostics(config.errors);
+          if (configChanged) emitted.clear();
+          return { changedFiles, reusedFiles, program: loaded };
+        } catch (error) { await next.dispose(); throw error; }
+        finally { if (snapshot === next) await previousSnapshot?.dispose(); }
       });
-}
-
-function configKey(config: ProjectConfig): string {
-  return JSON.stringify({
-    options: config.options,
-    projectReferences: config.projectReferences,
-    configFingerprint: config.configFingerprint,
-  });
-}
-
-function hashText(text: string): string {
-  return createHash("sha1").update(text).digest("hex");
-}
-
-function sourceVersion(fileName: string): string {
-  try {
-    return hashText(readFileSync(fileName, "utf8"));
-  } catch {
-    return "missing";
-  }
-}
-
-function sourceFileVersion(sourceFile: ts.SourceFile): string | undefined {
-  const descriptor = Object.getOwnPropertyDescriptor(sourceFile, "version");
-  return typeof descriptor?.value === "string" ? descriptor.value : undefined;
-}
-
-function readProjectConfig(rootDir: string): ProjectConfig {
-  const configPath = join(rootDir, "tsconfig.json");
-  if (!existsSync(configPath)) {
-    return {
-      options: {
-        target: ts.ScriptTarget.ES2022,
-        module: ts.ModuleKind.ESNext,
-        moduleResolution: ts.ModuleResolutionKind.Bundler,
-        experimentalDecorators: true,
-        allowJs: false,
-        skipLibCheck: true,
-      },
-      errors: [],
-      configFingerprint: "defaults",
-    };
-  }
-
-  const configReads = new Map<string, string>();
-  const readConfig = (fileName: string): string | undefined => {
-    const text = ts.sys.readFile(fileName);
-    configReads.set(canonical(fileName), text === undefined ? "missing" : hashText(text));
-    return text;
+    },
+    getTraits() { return traits?.all ?? []; },
+    getDiagnostics() { return serialize(async () => [...errors, ...(program ? await program.getSyntacticDiagnostics() : [])]); },
+    emit() {
+      return serialize(async () => {
+        const result = await session.getProgram().native.emitToString();
+        if (!result.emitSkipped) {
+          for (const [fileName, file] of result.outputFiles) {
+            const hash = digest(file.text);
+            if (emitted.get(fileName) === hash) continue;
+            mkdirSync(dirname(fileName), { recursive: true });
+            writeFileSync(fileName, file.text);
+            emitted.set(fileName, hash);
+          }
+        }
+        return result;
+      });
+    },
+    reset() { return serialize(release); },
+    async [Symbol.asyncDispose]() { return (await session.reset()); },
   };
-  const config: ReturnType<typeof ts.readConfigFile> = ts.readConfigFile(
-    configPath,
-    readConfig,
-  );
-  if (config.error) {
-    return {
-      options: {},
-      errors: [config.error],
-      configFingerprint: JSON.stringify([...configReads]),
-    };
-  }
-
-  const parsed = ts.parseJsonConfigFileContent(
-    config.config,
-    { ...ts.sys, readFile: readConfig },
-    dirname(configPath),
-  );
-  return {
-    options: parsed.options,
-    errors: parsed.errors,
-    ...(parsed.projectReferences === undefined ? {} : { projectReferences: parsed.projectReferences }),
-    configFingerprint: JSON.stringify([...configReads]),
-  };
+  return session;
+}
+function digest(text: string): string { return createHash("sha256").update(text).digest("hex"); }
+function version(path: string): string {
+  try { return digest(readFileSync(path, "utf8")); } catch { return "missing"; }
 }

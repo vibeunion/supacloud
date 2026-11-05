@@ -1,4 +1,4 @@
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { apiOrigin } from "./api-source";
 import type { Diagnostic } from "./types";
 
@@ -6,28 +6,31 @@ interface GovernedClass { declaration: ts.ClassDeclaration; name: string; }
 type CommandMember = ts.MethodDeclaration | ts.PropertyDeclaration;
 
 /** A conservative source check for typed command references, not a JavaScript sandbox. */
-export function scanCommandBoundaries(
+export async function scanCommandBoundaries(
   source: ts.SourceFile,
   file: string,
   checker: ts.TypeChecker,
   commands: readonly GovernedClass[],
   boundRoutes: ReadonlyMap<ts.MethodDeclaration, string>,
-): Diagnostic[] {
+): Promise<Diagnostic[]> {
   const diagnostics: Diagnostic[] = [];
   const byDeclaration = new Map(commands.map((command) => [command.declaration, command]));
-  const readonly = (node: ts.Node): boolean => ts.canHaveModifiers(node)
-    && (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false);
-  const propertyName = (node: ts.Node): string | undefined =>
-    ts.isIdentifier(node) || ts.isPrivateIdentifier(node) || ts.isStringLiteral(node) ? node.text : undefined;
-  const commandMethod = (symbol: ts.Symbol | undefined): CommandMember | undefined =>
-    symbol?.declarations?.find((node): node is CommandMember =>
-      (ts.isMethodDeclaration(node) || (ts.isPropertyDeclaration(node)
-        && checker.getTypeAtLocation(node).getCallSignatures().length > 0))
-      && ts.isClassDeclaration(node.parent) && byDeclaration.has(node.parent));
+  const readonly = (node: ts.PropertyDeclaration): boolean =>
+    node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+  const propertyName = (node: ts.Node | undefined): string | undefined =>
+    node && (ts.isIdentifier(node) || ts.isPrivateIdentifier(node) || ts.isStringLiteral(node)) ? node.text : undefined;
+  const commandMethod = async (symbol: ts.Symbol | undefined): Promise<CommandMember | undefined> => {
+    for (const node of await ts.declarationsOf(symbol)) {
+      if (!ts.isClassDeclaration(node.parent) || !byDeclaration.has(node.parent)) continue;
+      if (ts.isMethodDeclaration(node)) return node;
+      if (ts.isPropertyDeclaration(node) && (await (await checker.getTypeAtLocation(node)).getCallSignatures()).length > 0) return node;
+    }
+    return undefined;
+  };
 
   // Existing durable-command facades may expose a pure forwarding method. Only
   // readonly fields initialized by the actual package factory qualify.
-  const isDurableForwarder = (method: CommandMember): boolean => {
+  const isDurableForwarder = async (method: CommandMember): Promise<boolean> => {
     if (!ts.isMethodDeclaration(method) || !method.body || method.body.statements.length !== 1 || !ts.isClassDeclaration(method.parent)) return false;
     const statement = method.body.statements[0];
     if (!statement || !ts.isReturnStatement(statement) || !statement.expression) return false;
@@ -56,14 +59,16 @@ export function scanCommandBoundaries(
       }
     }
     if (initializers.length !== 1 || !ts.isCallExpression(initializers[0]!)) return false;
-    const origin = apiOrigin(initializers[0]!.expression, checker);
+    const origin = await apiOrigin(initializers[0]!.expression, checker);
     return (origin?.module === "@supacloud/commands"
       && ["createTransactionalCommand", "createExternalCommand"].includes(origin.name))
       || (origin?.module === "@supacloud/commands/typebox" && origin.name === "createTypeBoxTransactionalCommand");
   };
-  const allowed = (node: ts.Node, method: CommandMember): boolean => {
-    if (isDurableForwarder(method)) return true;
-    const command = byDeclaration.get(method.parent as ts.ClassDeclaration)!;
+  const allowed = async (node: ts.Node, method: CommandMember): Promise<boolean> => {
+    if (await isDurableForwarder(method)) return true;
+    if (!ts.isClassDeclaration(method.parent)) return false;
+    const command = byDeclaration.get(method.parent);
+    if (!command) return false;
     // Reading a method into an alias or callback escapes the checked boundary.
     if (!ts.isCallExpression(node.parent) || node.parent.expression !== node) return false;
     for (let owner = node.parent.parent; owner; owner = owner.parent) {
@@ -77,7 +82,7 @@ export function scanCommandBoundaries(
         if (!ts.isPropertyAssignment(property) || propertyName(property.name) !== "handler"
           || !ts.isObjectLiteralExpression(property.parent) || !ts.isCallExpression(property.parent.parent)) return false;
         const call = property.parent.parent;
-        const origin = apiOrigin(call.expression, checker);
+        const origin = await apiOrigin(call.expression, checker);
         const selection = property.parent.properties.find((item): item is ts.PropertyAssignment =>
           ts.isPropertyAssignment(item) && propertyName(item.name) === "command");
         return origin?.module === "@supacloud/elysia" && origin.name === "executeCompiledCommand"
@@ -97,25 +102,25 @@ export function scanCommandBoundaries(
       suggestion: "Use a durable command facade, an explicitly bound route, or executeCompiledCommand with a literal command and handler continuation. Do not extract raw command methods.",
     });
   };
-  const visit = (node: ts.Node): void => {
+  const visit = async (node: ts.Node): Promise<void> => {
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const symbol = ts.isPropertyAccessExpression(node) ? checker.getSymbolAtLocation(node.name)
-        : ts.isStringLiteral(node.argumentExpression) ? checker.getTypeAtLocation(node.expression).getProperty(node.argumentExpression.text) : undefined;
-      const method = commandMethod(symbol);
-      if (method && !allowed(node, method)) report(node);
+      const symbol = ts.isPropertyAccessExpression(node) ? await checker.getSymbolAtLocation(node.name)
+        : ts.isStringLiteral(node.argumentExpression) ? await (await checker.getTypeAtLocation(node.expression)).getProperty(node.argumentExpression.text) : undefined;
+      const method = await commandMethod(symbol);
+      if (method && !await allowed(node, method)) report(node);
       if (ts.isElementAccessExpression(node) && !ts.isStringLiteral(node.argumentExpression)) {
-        const symbol = checker.getTypeAtLocation(node.expression).getSymbol();
-        if (symbol?.declarations?.some((decl) => ts.isClassDeclaration(decl) && byDeclaration.has(decl))) report(node);
+        const symbol = await (await checker.getTypeAtLocation(node.expression)).getSymbol();
+        if ((await ts.declarationsOf(symbol)).some(decl => ts.isClassDeclaration(decl) && byDeclaration.has(decl))) report(node);
       }
     } else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)
       && ts.isVariableDeclaration(node.parent.parent) && node.parent.parent.initializer) {
       const name = propertyName(node.propertyName ?? node.name);
-      const type = checker.getTypeAtLocation(node.parent.parent.initializer);
-      const method = name ? commandMethod(type.getProperty(name)) : undefined;
-      if (method && !isDurableForwarder(method)) report(node);
+      const type = await checker.getTypeAtLocation(node.parent.parent.initializer);
+      const method = name ? await commandMethod(await type.getProperty(name)) : undefined;
+      if (method && !await isDurableForwarder(method)) report(node);
     }
-    ts.forEachChild(node, visit);
+    await ts.forEachChildAsync(node, visit);
   };
-  visit(source);
+  await visit(source);
   return diagnostics;
 }

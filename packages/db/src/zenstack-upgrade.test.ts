@@ -3,7 +3,7 @@ import { SQL } from "bun";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { CompiledQuery } from "kysely";
 import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
 import { compileModel, modelProcess } from "./model";
@@ -35,8 +35,8 @@ test("real model types, source boundaries and stale contracts fail closed", asyn
   await symlink(resolve(import.meta.dir, "../node_modules"), join(root, "node_modules"));
   const consumer = join(root, "consumer.ts");
   await writeFile(consumer, 'import type { ReviewRow } from "./db/schema"; const row: ReviewRow = { id: "1", ownerId: "owner", state: "draft", version: 1 }; void row;');
-  const program = ts.createProgram([consumer], { strict: true, skipLibCheck: true, noEmit: true, types: [], target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
-  expect(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  await using program = await ts.createProgram([consumer], { strict: true, skipLibCheck: true, noEmit: true, types: [], target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
+  expect((await ts.getPreEmitDiagnostics(program)).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
   await writeFile(join(root, "src/escape.ts"), 'export { ZenStackClient as Client } from "@zenstackhq/orm";');
   expect((await databaseSources(root, "generate")).findings.some(f => f.code === "model-boundary")).toBe(true);
   await rm(join(root, "src/escape.ts"));
@@ -162,10 +162,10 @@ import { schema } from "./schema";
 const host = createZenStackDatabase(schema, new SQL("postgres://unused"), {});
 const row: ModelResult<ModelSchema["schema"], "Note"> = { id: "1", owner: "alice", value: 1 };
 void [host, row];`);
-  const program = ts.createProgram([consumer], { strict: true, skipLibCheck: true, noEmit: true,
+  await using program = await ts.createProgram([consumer], { strict: true, skipLibCheck: true, noEmit: true,
     types: ["bun"], typeRoots: [join(root, "node_modules/@types")], target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
-  expect(ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  expect((await ts.getPreEmitDiagnostics(program)).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
 });
 
 test("removed dev migration action and config fail before remote execution", async () => {

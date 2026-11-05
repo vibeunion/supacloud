@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import type { CompileOptions } from "./types";
 import { assertGraphqlOptions } from "./graphql-options";
 

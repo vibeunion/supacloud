@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { checkProject, compileProject } from "./compile";
 import { renderOpenApi } from "./generate";
 import { exportGeneratedOpenApiJson, loadGeneratedOpenApiDocument, OpenApiDocumentError } from "./openapi-tools";
@@ -101,7 +101,7 @@ describe("OpenAPI generator", () => {
           "void json;",
         ].join("\n"),
       });
-      const program = ts.createProgram([join(root, "consumer.ts")], {
+      await using program = (await ts.createProgram([join(root, "consumer.ts")], {
         noEmit: true,
         strict: true,
         skipLibCheck: true,
@@ -109,8 +109,8 @@ describe("OpenAPI generator", () => {
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler,
         types: [],
-      });
-      expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+      }));
+      expect((await ts.getPreEmitDiagnostics(program)).map((diagnostic) =>
         ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
 
       const schemas = await import(pathToFileURL(join(root, "src/contracts.ts")).href);
@@ -246,7 +246,7 @@ export const OrderResponse = {
         ].join("\n"),
       });
 
-      const program = ts.createProgram([join(root, "consumer.ts")], {
+      await using program = (await ts.createProgram([join(root, "consumer.ts")], {
         noEmit: true,
         strict: true,
         skipLibCheck: true,
@@ -254,8 +254,8 @@ export const OrderResponse = {
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler,
         types: [],
-      });
-      expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+      }));
+      expect((await ts.getPreEmitDiagnostics(program)).map((diagnostic) =>
         ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
 
       const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
@@ -368,7 +368,7 @@ export const OrderResponse = {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test("marks root-optional request bodies as optional in OpenAPI", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-optional-body-"));

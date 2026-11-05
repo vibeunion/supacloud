@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "../packages/compiler/node_modules/@typescript/typescript6/lib/typescript.js";
+import * as ts from "../packages/compiler/src/typescript";
 import { createClient } from "../packages/supacloud-js/node_modules/@supabase/supabase-js";
 import {
   CommandAuthenticationError,
@@ -63,26 +63,26 @@ afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-test("generated client accepts the SDK authenticated transport under Bun types without a cast", () => {
-  const program = ts.createProgram([join(root, "consumer.ts")], {
+test("generated client accepts the SDK authenticated transport under Bun types without a cast", async () => {
+  await using program = (await ts.createProgram([join(root, "consumer.ts")], {
     strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
     noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler, types: ["bun"],
     typeRoots: [join(root, "node_modules/@types")],
     skipLibCheck: true,
-  });
-  const diagnostics = ts.getPreEmitDiagnostics(program)
+  }));
+  const diagnostics = (await ts.getPreEmitDiagnostics(program))
     .map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
   expect(diagnostics).toEqual([]);
 });
 
-test("frontend SDK acceptance typechecks with the repository tools configuration", () => {
-  const config = ts.readConfigFile(join(repo, "tsconfig.tools.json"), ts.sys.readFile);
+test("frontend SDK acceptance typechecks with the repository tools configuration", async () => {
+  const config = (await ts.readConfigFile(join(repo, "tsconfig.tools.json"), ts.sys.readFile));
   expect(config.error).toBeUndefined();
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, repo);
+  const parsed = (await ts.parseJsonConfigFileContent(config.config, ts.sys, repo));
   expect(parsed.errors).toEqual([]);
-  const program = ts.createProgram([import.meta.path], parsed.options);
-  const diagnostics = ts.getPreEmitDiagnostics(program)
+  await using program = (await ts.createProgram([import.meta.path], parsed.options));
+  const diagnostics = (await ts.getPreEmitDiagnostics(program))
     .map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
   expect(diagnostics).toEqual([]);
 });

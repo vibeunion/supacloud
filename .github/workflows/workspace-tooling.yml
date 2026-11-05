@@ -34,8 +34,10 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile
       - name: Install local delivery dependencies
         run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile --cwd packages/delivery
-      - name: Install existing Compiler parser
-        run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile --cwd packages/compiler
+      - name: Install database tooling and Compiler parser
+        run: |
+          bun install --ignore-scripts --frozen-lockfile --backend=copyfile --cwd packages/db
+          bun install --ignore-scripts --frozen-lockfile --backend=copyfile --cwd packages/compiler
       - name: Workspace and source-boundary regression tests
         run: |
           bun run test:workspace

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import ts from "../../packages/compiler/node_modules/@typescript/typescript6";
+import * as ts from "../../packages/compiler/src/typescript";
 import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,8 +11,8 @@ const bin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 
 // Execute the shipped connection expression, without importing application adapters
 // or rebuilding the starter/compiler. AST selection fails if the source contract moves.
-function extract(source: string): string {
-  const ast = ts.createSourceFile("host.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+async function extract(source: string): Promise<string> {
+  const ast = await ts.createSourceFile("host.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const helpers = ast.statements.filter(ts.isFunctionDeclaration)
     .filter(node => ["required", "databaseConnection"].includes(node.name?.text ?? ""));
   if (helpers.some(node => node.name?.text === "databaseConnection")) {
@@ -35,7 +35,7 @@ test.skipIf(!bin)("shipped HTTP/worker/upgrade connection expressions override a
   try {
     await pg.exec("CREATE DATABASE starter_connection_target");
     const fixture = await readFile(new URL("../fixtures/starter-delivery-compatibility.fixture", import.meta.url), "utf8");
-    const ast = ts.createSourceFile("fixture.ts", fixture, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const ast = await ts.createSourceFile("fixture.ts", fixture, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     let upgrade: string | undefined;
     const visit = (node: ts.Node) => {
       if (ts.isArrayLiteralExpression(node) && node.elements.length === 2
@@ -55,7 +55,7 @@ test.skipIf(!bin)("shipped HTTP/worker/upgrade connection expressions override a
       const path = join(directory, `${name}.ts`);
       await writeFile(path, `import { SQL } from "bun";
 const signal = new AbortController().signal;
-${extract(source!)}
+${await extract(source!)}
 // Simulate management configuration loading between options capture and pool construction.
 process.env.DATABASE_URL = process.env.PROBE_MANAGEMENT_URL;
 const pool = new SQL({...connection,max:1,connectionTimeout:2});

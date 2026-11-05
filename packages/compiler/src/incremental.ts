@@ -17,7 +17,7 @@ export interface IncrementalCompileResult extends CompileResult {
 
 export interface IncrementalCompiler {
   compile(options: CompileOptions, changedPaths?: string[]): Promise<IncrementalCompileResult>;
-  reset(): void;
+  reset(): Promise<void>;
   getCache?(): DependencyGraphCache;
 }
 
@@ -87,7 +87,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
       previousCache = activeCache;
       return { ...result, stats };
     },
-    reset(): void {
+    async reset(): Promise<void> {
       previousSnapshot = undefined;
       previousResult = undefined;
       previousCache = undefined;
@@ -95,7 +95,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
       cache.fileHashes.clear();
       cache.generatedHashes?.clear();
       delete cache.dependencyGraph;
-      cache.programSession?.reset();
+      await cache.programSession?.reset();
     },
     getCache(): DependencyGraphCache {
       return cache;

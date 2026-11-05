@@ -66,21 +66,20 @@ const read = readDeliveryExecutableArchive("missing");
 void [unactivated, activated, read];
 `);
   await run('node', ['--input-type=module', '-e', `
-import ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { readDeliveryExecutableArchive } from "@supacloud/delivery";
 import { parseDeliveryBuildManifest } from "@supacloud/compiler";
 if (typeof readDeliveryExecutableArchive !== "function" || typeof parseDeliveryBuildManifest !== "function") {
   throw new Error("Missing package exports");
 }
-const program = ts.createProgram(["consumer.ts"], {
+await using program = await ts.createProgram(["consumer.ts"], {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
   moduleResolution: ts.ModuleResolutionKind.Bundler, strict: true,
   skipLibCheck: true, noEmit: true, types: ["bun"],
 });
-const errors = ts.getPreEmitDiagnostics(program);
-if (errors.length) throw new Error(ts.formatDiagnosticsWithColorAndContext(errors, {
-  getCanonicalFileName: path => path, getCurrentDirectory: () => process.cwd(), getNewLine: () => "\\n",
-}));
+const errors = await ts.getPreEmitDiagnostics(program);
+if (errors.length) throw new Error(errors.map(error =>
+  [error.file?.fileName ?? "consumer.ts", "TS" + error.code + ":", error.messageText].join(" ")).join("\\n"));
 `], { cwd: consumer, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 });
   console.log('Delivery/compiler tarballs: isolated npm install, Node exports and public types passed without overrides.');
 } finally {

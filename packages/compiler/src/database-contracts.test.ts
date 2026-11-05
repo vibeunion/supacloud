@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { generateDatabaseContracts, parseDatabaseContractsOptions } from "./database-contracts";
 import { writeFixtureProject } from "./fixtures/helpers";
 
@@ -39,7 +39,7 @@ test("single entry generates native read types, decoders and source/migration dr
     await writeFixtureProject(root, { "migrations/001.sql": "CREATE TABLE public.orders(id text);" });
     expect((await generateDatabaseContracts(options, true)).upToDate).toBe(false);
     await writeFixtureProject(root, { "src/orders.graphql": "query Orders { missing }" });
-    await expect(generateDatabaseContracts(options)).rejects.toThrow();
+    expect(await generateDatabaseContracts(options).catch((error: unknown) => error)).toBeInstanceOf(Error);
     expect(await readFile(join(root, "generated/database.ts"), "utf8")).toBe(barrel);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -88,11 +88,11 @@ void [rows, extra, wrong, row, invalidRow, result, invalidResult];`,
       modelSchema: "schema.ts", role: "authenticated", migrations: [],
       graphql: { schema: "schema.graphql", documents: ["orders.graphql"] },
     });
-    const program = ts.createProgram([join(root, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(root, "consumer.ts")], {
       strict: true, noEmit: true, skipLibCheck: true, types: [],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

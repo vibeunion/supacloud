@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { compileProject, checkProject } from "./compile";
 import { compileOptionsFromConfig } from "./config";
 import { renderGraphql } from "./graphql";
@@ -11,12 +11,12 @@ import { renderGraphqlValidators } from "./graphql-runtime";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { CompileOptions, GraphqlOptions } from "./types";
 
-test("GraphQL validators resolve the virtual source using native path separators", () => {
-  const validators = renderGraphqlValidators(
+test("GraphQL validators resolve the virtual source using native path separators", async () => {
+  const validators = (await renderGraphqlValidators(
     'export type PingQuery = { __typename?: "Query"; ping: string };\nexport type RemoveMutation = { remove: boolean };',
     ["Ping", "Remove"],
     new Map([["Remove", "mutation"]]),
-  );
+  ));
   expect(validators).toContain("export function parsePingQuery");
   expect(validators).toContain("export function parseRemoveMutation");
   expect(validators).toContain('"Remove": RemoveMutation;');
@@ -254,13 +254,13 @@ function decode<Name extends keyof GraphqlQueryResults>(name: Name, value: unkno
 }
 const generic: DetailQuery = decode("Detail", wire);
 `);
-    const program = ts.createProgram([join(options.outDir, "consumer.ts")], {
+    await using program = (await ts.createProgram([join(options.outDir, "consumer.ts")], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noImplicitOverride: true, noPropertyAccessFromIndexSignature: true, noFallthroughCasesInSwitch: true,
       skipLibCheck: false, noEmit: true, types: [],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   });
 
   test("TypedDocumentNode output shares enum and input types without duplicate declarations", async () => {
@@ -274,13 +274,13 @@ const generic: DetailQuery = decode("Detail", wire);
     const source = await readFile(path, "utf8");
     expect(source.match(/export type State =/g)).toHaveLength(1);
     expect(source.match(/export type Filter =/g)).toHaveLength(1);
-    const program = ts.createProgram([path], {
+    await using program = (await ts.createProgram([path], {
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noImplicitOverride: true, noPropertyAccessFromIndexSignature: true, noFallthroughCasesInSwitch: true,
       skipLibCheck: false, noEmit: true, types: [],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   });
 
   test("generated validators participate in drift checks and invalid mappings preserve successful artifacts", async () => {
@@ -301,15 +301,15 @@ const generic: DetailQuery = decode("Detail", wire);
 });
 
 test.each(["any", "Date", "() => string", "[string, ...number[]]", "Record<number, string>"])(
-  "validator generation refuses unsafe or unrepresentable result type %s", (type) => {
-    expect(() => renderGraphqlValidators(`export type UnsafeQuery = ${type};`, ["Unsafe"])).toThrow("Unsupported GraphQL result wire type");
+  "validator generation refuses unsafe or unrepresentable result type %s", async (type) => {
+    expect(await renderGraphqlValidators(`export type UnsafeQuery = ${type};`, ["Unsafe"]).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Unsupported GraphQL result wire type") });
   },
 );
 
-test("validator generation reports missing or invalid operation types", () => {
-  expect(() => renderGraphqlValidators("export type Other = string;", ["Missing"])).toThrow("Missing generated operation type");
-  expect(() => renderGraphqlValidators("export type BadQuery = Missing;", ["Bad"])).toThrow("Generated GraphQL types cannot be validated");
-  expect(() => renderGraphqlValidators(
+test("validator generation reports missing or invalid operation types", async () => {
+  expect(await renderGraphqlValidators("export type Other = string;", ["Missing"]).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Missing generated operation type") });
+  expect(await renderGraphqlValidators("export type BadQuery = Missing;", ["Bad"]).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Generated GraphQL types cannot be validated") });
+  expect(await renderGraphqlValidators(
     "export type GraphqlQueryResults = string; export type ValidQuery = string;", ["Valid"],
-  )).toThrow("conflicts with the generated result registry");
+  ).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("conflicts with the generated result registry") });
 });

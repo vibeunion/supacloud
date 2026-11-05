@@ -766,7 +766,7 @@
     {
       "name": "IncrementalProgramSession",
       "kind": "type",
-      "signature": "export interface IncrementalProgramSession {\n    getProgram(): ts.Program;\n    getTypeChecker(): ts.TypeChecker;\n    update(rootNames: string[], changedPaths?: string[]): ProgramUpdate;\n    getTraits(): readonly TraitRecord[];\n    getDiagnostics(): readonly ts.Diagnostic[];\n    emit(): ts.EmitResult;\n    reset(): void;\n}"
+      "signature": "export interface IncrementalProgramSession extends AsyncDisposable {\n    getProgram(): ts.Program;\n    getTypeChecker(): ts.TypeChecker;\n    update(rootNames: string[], changedPaths?: string[]): Promise<ProgramUpdate>;\n    getTraits(): readonly TraitRecord[];\n    getDiagnostics(): Promise<readonly ts.Diagnostic[]>;\n    emit(): Promise<ts.EmitOutput>;\n    reset(): Promise<void>;\n}"
     },
     {
       "name": "inspectRouteContracts",
@@ -816,7 +816,7 @@
     {
       "name": "migrateRouteResponse",
       "kind": "value",
-      "signature": "declare function migrateRouteResponse(source: string, fileName: string): SourceMigrationResult;"
+      "signature": "declare function migrateRouteResponse(source: string, fileName: string): Promise<SourceMigrationResult>;"
     },
     {
       "name": "MigrationAssessmentFinding",
@@ -1136,17 +1136,17 @@
     {
       "name": "scanGeneratedArtifacts",
       "kind": "value",
-      "signature": "export declare function scanGeneratedArtifacts(artifacts: Record<string, string | undefined>, strict?: boolean): Diagnostic[];"
+      "signature": "export declare function scanGeneratedArtifacts(artifacts: Record<string, string | undefined>, strict?: boolean): Promise<Diagnostic[]>;"
     },
     {
       "name": "scanProductionSource",
       "kind": "value",
-      "signature": "export declare function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[];"
+      "signature": "export declare function scanProductionSource(options: TypeSafetyScanOptions): Promise<Diagnostic[]>;"
     },
     {
       "name": "scanQuerySql",
       "kind": "value",
-      "signature": "export declare function scanQuerySql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Diagnostic[];"
+      "signature": "export declare function scanQuerySql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Promise<Diagnostic[]>;"
     },
     {
       "name": "schemaFromSource",
@@ -1191,7 +1191,7 @@
     {
       "name": "SupaCloudMigration",
       "kind": "type",
-      "signature": "export interface SupaCloudMigration {\n    id: string;\n    from: string;\n    to: string;\n    description: string;\n    apply(source: string, fileName: string): SourceMigrationResult;\n}"
+      "signature": "export interface SupaCloudMigration {\n    id: string;\n    from: string;\n    to: string;\n    description: string;\n    apply(source: string, fileName: string): SourceMigrationResult | Promise<SourceMigrationResult>;\n}"
     },
     {
       "name": "TokenKind",

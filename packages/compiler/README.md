@@ -743,7 +743,11 @@ export default defineSupacloudConfig({
 supacloud-compiler check --root ./app --out ./app/generated --strict
 ```
 
-程序化调用可直接使用 `scanGeneratedArtifacts()` 和 `scanProductionSource()` 获取结构化诊断。
+程序化调用需 `await scanGeneratedArtifacts()` 和 `await scanProductionSource()` 获取结构化诊断。
+
+编译工具链固定为官方 TypeScript `7.1.0-beta`，内部使用 `typescript/async`，可直接运行于 Bun 1.4.4。源码解析、类型查询和迁移不再依赖 TypeScript 6 或 Node 同步 API。Svelte 的 `svelte-check` 是唯一例外：暂留 TS 6，并通过 `@typescript/native` 使用同一 TS 7.1 beta。
+
+`IncrementalProgramSession.update()`、`getDiagnostics()`、`emit()`、`reset()` 现在返回 Promise。会话支持 `await using`，更新后不要继续使用上一快照的 checker/type/symbol；自主管理缓存的调用方需 `await session.reset()` 释放原生进程。`IncrementalCompiler.reset()` 同样需要等待，watch 关闭会自动清理。内置源码迁移返回 Promise，自定义迁移仍可同步返回结果。
 
 ## 开发模式
 

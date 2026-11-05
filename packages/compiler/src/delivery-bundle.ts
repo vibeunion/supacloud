@@ -1,7 +1,7 @@
 import { isBuiltin } from "node:module";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { digest } from "./delivery-files";
 import { staticDeliveryImports } from "./delivery-imports";
 import { parseDeliveryBundleResponse, type DeliveryBundleRequest } from "./delivery-bundle-protocol";
@@ -92,7 +92,7 @@ export async function bundleDeliveryTargetInProcess(
           if (args.path === entry) return { contents: code, loader: "ts" };
           const bytes = await readFile(args.path);
           inputs.set(resolve(args.path), digest(bytes));
-          return { contents: staticDeliveryImports(args.path, bytes), loader: args.loader };
+          return { contents: (await staticDeliveryImports(args.path, bytes)), loader: args.loader };
         });
       },
     }],
@@ -121,7 +121,7 @@ export async function bundleDeliveryTargetInProcess(
     }
     const bytes = new Uint8Array(await output.arrayBuffer());
     if (/\.[cm]?js$/.test(path)) {
-      const source = ts.createSourceFile(path, new TextDecoder().decode(bytes), ts.ScriptTarget.Latest, true);
+      const source = (await ts.createSourceFile(path, new TextDecoder().decode(bytes), ts.ScriptTarget.Latest, true));
       function check(node: ts.Node): void {
         const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
           ? node.moduleSpecifier
@@ -130,7 +130,7 @@ export async function bundleDeliveryTargetInProcess(
             || (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "require"
               && ts.isMetaProperty(node.expression.expression) && node.expression.expression.keywordToken === ts.SyntaxKind.ImportKeyword))
             ? node.arguments[0] : undefined;
-        if (specifier && ts.isStringLiteralLike(specifier)) {
+        if (specifier && ts.isStringLiteralLikeNode(specifier)) {
           if (!isBuiltin(specifier.text) && specifier.text !== "bun" && !specifier.text.startsWith("bun:")) {
             throw new Error("Independent bundles cannot retain external package imports.");
           }

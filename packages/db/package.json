@@ -30,6 +30,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./typescript": {
+      "supacloud-source": "./src/typescript.ts",
+      "types": "./dist/typescript.d.ts",
+      "import": "./dist/typescript.js"
+    },
     "./zenstack": {
       "types": "./dist/zenstack.d.ts",
       "import": "./dist/zenstack.js"
@@ -44,6 +49,8 @@
     }
   },
   "files": [
+    "src/typescript.ts",
+    "src/typescript-source.ts",
     "NOTICE",
     "LICENSE-APACHE-2.0.txt",
     "dist",
@@ -52,7 +59,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/command-bun.ts src/model.ts src/model-cli.ts src/zenstack.ts src/bun-dialect.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --root src --outdir dist --target node --external bun --external @supacloud/contracts --external @zenstackhq/orm --external @zenstackhq/schema --external @zenstackhq/plugin-policy --external kysely --external libpg-query --external @typescript/typescript6 --external @zenstackhq/language --external @zenstackhq/sdk",
+    "build:js": "bun build src/index.ts src/typescript.ts src/command-bun.ts src/model.ts src/model-cli.ts src/zenstack.ts src/bun-dialect.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --root src --outdir dist --target node --external bun --external @supacloud/contracts --external @zenstackhq/orm --external @zenstackhq/schema --external @zenstackhq/plugin-policy --external kysely --external libpg-query --external typescript --external 'typescript/*' --external @zenstackhq/language --external @zenstackhq/sdk",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -77,15 +84,14 @@
     "typebox": "1.4.3",
     "@sinclair/typebox": "0.34.52",
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2",
     "@zenstackhq/cli": "3.10.0",
     "prisma": "6.19.3",
     "pg": "8.23.1"
   },
   "dependencies": {
-    "@typescript/typescript6": "^6.0.2",
     "libpg-query": "18.1.5",
     "@supacloud/contracts": "file:../contracts",
+    "typescript": "7.1.0-beta",
     "@zenstackhq/orm": "3.10.0",
     "@zenstackhq/schema": "3.10.0",
     "@zenstackhq/plugin-policy": "3.10.0",

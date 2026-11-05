@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { compileProject, checkProject } from "./compile";
 import { renderApplication } from "./generate";
 import { validateGraph } from "./validate";
@@ -24,12 +24,12 @@ async function fixture(source: string) {
   return root;
 }
 const options = (root: string) => ({ rootDir: join(root, "src"), outDir: join(root, "generated"), requireRouteContracts: false, strict: true });
-function typecheck(root: string) {
-  const program = ts.createProgram([join(root, "generated/application.ts")], {
+async function typecheck(root: string) {
+  await using program = await ts.createProgram([join(root, "generated/application.ts")], {
     strict: true, noEmit: true, skipLibCheck: true, types: [], experimentalDecorators: true,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
   });
-  return ts.getPreEmitDiagnostics(program).map(item => ts.flattenDiagnosticMessageText(item.messageText, "\n"));
+  return (await ts.getPreEmitDiagnostics(program)).map(item => ts.flattenDiagnosticMessageText(item.messageText, "\n"));
 }
 interface CompiledModule {
   name: string;
@@ -69,7 +69,7 @@ let sequence: number = 0;
 `);
   const result = await compileProject(options(root));
   expect(result.diagnostics.filter(item => item.severity === "error")).toEqual([]);
-  expect(typecheck(root)).toEqual([]);
+  expect(await typecheck(root)).toEqual([]);
   const descriptors = await modules(root);
   const imported: Record<string, Record<string, unknown>> = {};
   for (const module of descriptors) imported[module.name] = module.createServices({}, imported);
@@ -101,7 +101,7 @@ export const OPTIONAL = new InjectionToken<string>("optional");
 `);
   const result = await compileProject(options(root));
   expect(result.diagnostics.filter(item => item.severity === "error")).toEqual([]);
-  expect(typecheck(root)).toEqual([]);
+  expect(await typecheck(root)).toEqual([]);
   const descriptors = await modules(root);
   const imported: Record<string, Record<string, unknown>> = {};
   const rootModule = descriptors.find(module => module.name === "root")!;
@@ -190,7 +190,7 @@ export const ALIAS = new InjectionToken<string[]>("alias");
 `);
   const result = await compileProject(options(root));
   expect(result.diagnostics.filter(item => item.severity === "error")).toEqual([]);
-  expect(typecheck(root)).toEqual([]);
+  expect(await typecheck(root)).toEqual([]);
   const descriptor = (await modules(root))[0]!;
   const services = descriptor.createServices({}, {});
   const [first, second] = await Promise.all([

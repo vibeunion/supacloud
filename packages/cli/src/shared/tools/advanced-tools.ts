@@ -1096,7 +1096,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 try {
                     if (/@ts-(?:ignore|nocheck|expect-error)\b/.test(sourceCode)) {
                         const { scanProductionSource } = await import("@supacloud/compiler");
-                        const suppression = scanProductionSource({ rootDir: tmpDir, include: ["index.ts"] })
+                        const suppression = (await scanProductionSource({ rootDir: tmpDir, include: ["index.ts"] }))
                             .find((diagnostic) => diagnostic.code === "source-type-suppression");
                         if (suppression) {
                             return {

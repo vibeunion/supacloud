@@ -36,7 +36,7 @@
   "devDependencies": {
     "typebox": "1.4.3",
     "@types/bun": "1.4.4",
-    "typescript": "7.0.2"
+    "typescript": "7.1.0-beta"
   },
   "peerDependencies": {
     "typebox": "1.4.3"
