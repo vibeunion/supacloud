@@ -31,6 +31,14 @@ this does not remove the requirement to declare permission, implement real
 runtime governance or satisfy any other compiler diagnostics. Restore the
 strict profile before claiming default-policy acceptance.
 
+## Command execution boundary
+
+All business commands use the Command-first boundary. A command backed by a
+named RPC may be used through a bound route, a durable facade, or
+`executeCompiledCommand`, but a raw `command.execute()` call remains an
+`SC4029` executor-bypass diagnostic. RPC is a persistence adapter capability;
+it does not make direct command method calls a governed entry point.
+
 ## Startup and execution
 
 `createApplication` and `createModulePlugin` check registered Command descriptors
