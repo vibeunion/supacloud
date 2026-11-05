@@ -162,6 +162,12 @@ export interface CompiledModule {
 }
 
 type CompiledAspectObserver = (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>;
+
+function readCompiledDependency(values: Record<string, unknown> | undefined, key: string, token: string, optional: boolean): unknown {
+  if (values && Object.hasOwn(values, key)) return values[key];
+  if (optional) return null;
+  throw Object.assign(new Error("Missing compiled dependency: " + token), { code: "COMPILED_DEPENDENCY_MISSING", token });
+}
 type CompiledAspectPipeline = (context: CompiledAspectContext, next: () => unknown | Promise<unknown>, observe?: CompiledAspectObserver) => unknown | Promise<unknown>;
 
 function compiledAspectError(code: string): Error & { code: string } {
@@ -243,6 +249,7 @@ function resolveFactoryValue(value: unknown): unknown {
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
+const serviceDestructions = new WeakMap<object, Promise<void>>();
 const platformDependencies = new WeakMap<object, Record<string, unknown>>();
 
 function retainPlatformDependencies<T extends Record<string, unknown>>(services: T, deps: Record<string, unknown>): T {
@@ -300,31 +307,37 @@ async function initializeServiceInstances(
   }
 }
 
-async function destroyServiceInstances(
+function destroyServiceInstances(
   services: Record<string, unknown>,
   plan: readonly CompiledServiceLifecycleEntry[],
 ): Promise<void> {
-  const errors: unknown[] = [];
-  const seen = new Set<unknown>();
-  for (const entry of [...plan].reverse()) {
-    const value = services[entry.key];
-    const instance = entry.index === undefined
-      ? value
-      : isUnknownArray(value) ? value[entry.index] : undefined;
-    if (seen.has(instance)) continue;
-    seen.add(instance);
-    if (!isRecord(instance)) continue;
-    const hook = isFunction(instance["onDestroy"])
-      ? instance["onDestroy"]
-      : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
-    if (!hook) continue;
-    try {
-      await hook.call(instance);
-    } catch (error) {
-      errors.push(error);
+  const pending = serviceDestructions.get(services);
+  if (pending) return pending;
+  const destruction = Promise.resolve().then(async () => {
+    const errors: unknown[] = [];
+    const seen = new Set<unknown>();
+    for (const entry of [...plan].reverse()) {
+      const value = services[entry.key];
+      const instance = entry.index === undefined
+        ? value
+        : isUnknownArray(value) ? value[entry.index] : undefined;
+      if (seen.has(instance)) continue;
+      seen.add(instance);
+      if (!isRecord(instance)) continue;
+      const hook = isFunction(instance["onDestroy"])
+        ? instance["onDestroy"]
+        : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
+      if (!hook) continue;
+      try {
+        await hook.call(instance);
+      } catch (error) {
+        errors.push(error);
+      }
     }
-  }
-  if (errors.length > 0) throw new AggregateError(errors, "Application service destruction failed");
+    if (errors.length > 0) throw new AggregateError(errors, "Application service destruction failed");
+  });
+  serviceDestructions.set(services, destruction);
+  return destruction;
 }
 
 
@@ -394,7 +407,7 @@ function createWebhookServices(
   deps: Record<string, unknown>,
   imported: Record<string, Record<string, unknown>>,
 ) {
-  const updateWebhook = new UpdateWebhook(deps["webhookEnvironment"] as ConstructorParameters<typeof UpdateWebhook>[0]);
+  const updateWebhook = new UpdateWebhook(readCompiledDependency(deps, "webhookEnvironment", "WEBHOOK_ENVIRONMENT", false) as ConstructorParameters<typeof UpdateWebhook>[0]);
   return retainPlatformDependencies({ updateWebhook }, deps);
 }
 async function createWebhookRequestScope(
@@ -404,7 +417,7 @@ async function createWebhookRequestScope(
 ): Promise<Record<string, unknown>> {
   const scope: Record<string, unknown> = {};
   try {
-    const webhookController = new WebhookController(services["updateWebhook"] as ConstructorParameters<typeof WebhookController>[0], ctx as ConstructorParameters<typeof WebhookController>[1]);
+    const webhookController = new WebhookController(readCompiledDependency(services, "updateWebhook", "UpdateWebhook", false) as ConstructorParameters<typeof WebhookController>[0], ctx as ConstructorParameters<typeof WebhookController>[1]);
     scope["webhookController"] = webhookController;
     return scope;
   } catch (error) {
