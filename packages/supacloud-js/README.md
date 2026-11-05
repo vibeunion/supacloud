@@ -446,12 +446,13 @@ That table must expose the platform task `id`, `project_ref` and `status`,
 and have appropriate publication, SELECT privileges and row-level policies.
 The SDK does not create the table or grant access. Schema/table names must be
 simple identifiers of at most 63 characters. Explicit Realtime subscriptions
-retain Management polling on connection failure and periodic reconciliation.
+retain Management polling on connection failure, retry Realtime while polling,
+and perform periodic reconciliation after reconnecting.
 An omitted source no longer guesses `public.tasks`; malformed source options
 are rejected before opening a channel.
 Polling intervals must be integer milliseconds from 1 through 2,147,483,647.
-Realtime connection timeout and reconciliation intervals accept the same
-range plus 0 to disable that timer. Invalid explicit values, including null,
+Realtime connection timeout, recovery, and reconciliation intervals accept the
+same range plus 0 to disable that timer. Invalid explicit values, including null,
 are rejected before authentication or subscription work. The computed default
 reconciliation interval is capped at the same maximum.
 Subscription options are captured at creation. Callbacks must be functions,

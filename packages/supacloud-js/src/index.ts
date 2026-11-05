@@ -287,6 +287,7 @@ export type SupaCloudTaskSubscribeOptions<TResult = unknown> = {
   realtime?: { schema: string; table: string };
   pollingIntervalMs?: number;
   realtimeTimeoutMs?: number;
+  realtimeRecoveryIntervalMs?: number;
   reconcileIntervalMs?: number;
   onUpdate: (task: SupaCloudTaskSnapshot<TResult>) => void;
   onStateChange?: (
@@ -865,7 +866,7 @@ function captureTaskSubscribeOptions<TResult>(
     throw new Error("Invalid task subscription options");
   }
   const allowed = new Set([
-    "realtime", "pollingIntervalMs", "realtimeTimeoutMs", "reconcileIntervalMs",
+    "realtime", "pollingIntervalMs", "realtimeTimeoutMs", "realtimeRecoveryIntervalMs", "reconcileIntervalMs",
     "onUpdate", "onStateChange", "onError", "stopOnTerminal",
   ]);
   for (const key of Reflect.ownKeys(options)) {
@@ -1450,12 +1451,16 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     let channel: RealtimeChannel | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let realtimeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let realtimeRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
     let mode: SupaCloudTaskSubscribeState = "connecting";
     const pollingIntervalMs = taskTimerMs(
       options.pollingIntervalMs === undefined ? this.options.pollingIntervalMs : options.pollingIntervalMs,
     );
     const realtimeTimeoutMs = taskTimerMs(options.realtimeTimeoutMs === undefined ? 10000 : options.realtimeTimeoutMs, true);
+    const realtimeRecoveryIntervalMs = taskTimerMs(options.realtimeRecoveryIntervalMs === undefined
+      ? Math.min(MAX_TASK_TIMER_MS, Math.max(30000, pollingIntervalMs * 10))
+      : options.realtimeRecoveryIntervalMs, true);
     const reconcileIntervalMs = taskTimerMs(options.reconcileIntervalMs === undefined
       ? Math.min(MAX_TASK_TIMER_MS, Math.max(30000, pollingIntervalMs * 10))
       : options.reconcileIntervalMs, true);
@@ -1505,6 +1510,13 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       }
     };
 
+    const stopRealtimeRecovery = () => {
+      if (realtimeRecoveryTimer) {
+        clearTimeout(realtimeRecoveryTimer);
+        realtimeRecoveryTimer = null;
+      }
+    };
+
     const stopReconcile = () => {
       if (reconcileTimer) {
         clearTimeout(reconcileTimer);
@@ -1527,6 +1539,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       readController.abort();
       stopPolling();
       stopRealtimeTimeout();
+      stopRealtimeRecovery();
       stopReconcile();
       try { await teardownRealtime(); }
       finally { setMode("closed"); }
@@ -1588,42 +1601,47 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       }, reconcileIntervalMs);
     };
 
+    const scheduleRealtimeRecovery = () => {
+      if (closed || !realtime || mode !== "polling" || realtimeRecoveryIntervalMs <= 0) return;
+      stopRealtimeRecovery();
+      realtimeRecoveryTimer = setTimeout(() => {
+        realtimeRecoveryTimer = null;
+        startRealtime();
+      }, realtimeRecoveryIntervalMs);
+    };
+
     const startPolling = (error?: unknown) => {
       if (closed) return;
       stopPolling();
       stopRealtimeTimeout();
       stopReconcile();
+      stopRealtimeRecovery();
       setMode("polling", { error });
       void pollOnce();
+      scheduleRealtimeRecovery();
     };
 
-    const subscription = {
-      get connectionState() { return mode; },
-      unsubscribe() { void close(); },
-    };
-    if (!realtime) {
-      startPolling();
-      return subscription;
-    }
-
-    channel = this.options.supabase
-      .channel(`supacloud-task:${this.options.projectRef}:${taskId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: realtime.schema,
-          table: realtime.table,
-          filter: `id=eq.${taskId}`,
-        },
-        (payload) => {
-          const next = payload.new && Object.keys(payload.new).length > 0
-            ? payload.new
-            : payload.old;
-          if (next) emitTask(next);
-        },
-      );
-    channel.subscribe(async (status, error) => {
+    const startRealtime = () => {
+      if (closed || !realtime || channel) return;
+      stopRealtimeRecovery();
+      channel = this.options.supabase
+        .channel(`supacloud-task:${this.options.projectRef}:${taskId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: realtime.schema,
+            table: realtime.table,
+            filter: `id=eq.${taskId}`,
+          },
+          (payload) => {
+            const next = payload.new && Object.keys(payload.new).length > 0
+              ? payload.new
+              : payload.old;
+            if (next) emitTask(next);
+          },
+        );
+      channel.subscribe(async (status, error) => {
         if (closed) return;
 
         if (status === "SUBSCRIBED") {
@@ -1646,21 +1664,39 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
           status === "CLOSED"
         ) {
           await teardownRealtime();
-          startPolling(error);
+          if (mode === "polling") {
+            scheduleRealtimeRecovery();
+          } else {
+            startPolling(error);
+          }
         }
       });
 
-    if (!closed && realtimeTimeoutMs > 0) {
-      realtimeTimeoutTimer = setTimeout(() => {
-        if (!closed && mode === "connecting") {
-          void teardownRealtime().finally(() => {
-            startPolling(new Error("SupaCloud Realtime subscription timed out"));
-          });
-        }
-      }, realtimeTimeoutMs);
-    }
+      if (!closed && channel && mode !== "realtime" && realtimeTimeoutMs > 0) {
+        realtimeTimeoutTimer = setTimeout(() => {
+          if (!closed && channel) {
+            void teardownRealtime().finally(() => {
+              if (mode === "polling") {
+                scheduleRealtimeRecovery();
+              } else {
+                startPolling(new Error("SupaCloud Realtime subscription timed out"));
+              }
+            });
+          }
+        }, realtimeTimeoutMs);
+      }
+    };
 
+    const subscription = {
+      get connectionState() { return mode; },
+      unsubscribe() { void close(); },
+    };
+    if (!realtime) {
+      startPolling();
+      return subscription;
+    }
     setMode("connecting");
+    startRealtime();
 
     return subscription;
   }

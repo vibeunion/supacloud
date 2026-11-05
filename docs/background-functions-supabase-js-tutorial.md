@@ -158,6 +158,7 @@ subscription.unsubscribe();
 
 1. try `postgres_changes` on `public.tasks`
 2. switch to polling if the channel times out or errors
+3. retry Realtime while polling and read the authoritative task before switching back
 
 This keeps task UX alive even when Realtime is degraded.
 
