@@ -2,7 +2,6 @@ export {
   defineDatabaseModule,
   type DatabaseModule,
   type DatabaseModuleOptions,
-  type DrizzleTableLike,
   type FunctionDecl,
   type GrantDecl,
   type PolicyDecl,
@@ -92,7 +91,7 @@ export {
   type RpcTransport,
 } from './rpc.js';
 
-export { COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "./command-schema";
+export { COMMAND_RECEIPT_SQL, COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "./command-schema";
 export { defineReadQuery, decodePostgrestQuery, QueryBoundaryError, type QueryEvent, type QueryObserver, type ReadQueryDefinition } from "./query";
 export {
   createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding,

@@ -1,3 +1,4 @@
+import { compileModel } from "../../packages/db/src/model";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { appStarterFiles } from "../../packages/cli/src/shared/tools/app-starter";
@@ -14,6 +15,7 @@ export async function prepareStarterSourceFixture(root: string): Promise<void> {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), content);
   }
+  await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
   await symlink(join(repo, "packages/elysia/node_modules"), join(root, "node_modules"), "dir");
   const config = record(JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8")));
   const compilerOptions = record(config["compilerOptions"]);
@@ -31,8 +33,6 @@ export async function prepareStarterSourceFixture(root: string): Promise<void> {
     "@supacloud/js": [join(repo, "packages/supacloud-js/src/index.ts")],
     "@supacloud/js/contracts": [join(repo, "packages/supacloud-js/src/contracts.ts")],
     "@supabase/supabase-js": [join(repo, "packages/cli/node_modules/@supabase/supabase-js")],
-    "drizzle-orm": [join(repo, "packages/db/node_modules/drizzle-orm")],
-    "drizzle-orm/*": [join(repo, "packages/db/node_modules/drizzle-orm/*")],
     "#starter-postgres": [join(repo, "scripts/lib/starter-postgres.ts")],
     "#starter-lite": [join(repo, "scripts/lib/starter-lite.ts")],
     "#starter-svadmin": [join(repo, "scripts/lib/starter-svadmin.ts")],

@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startProjectServer } from '../src/project-runtime.js'
 import { compileProject } from '@supacloud/compiler'
 import { initializeAppProject } from '../../cli/src/shared/tools/app-starter.js'
+import { compileModel } from '../../db/src/model.js'
 import { readJson } from './support/contracts.js'
 
 test('current generated starter runs through Lite bundling, routes, contracts and command governance', async () => {
@@ -13,6 +14,7 @@ test('current generated starter runs through Lite bundling, routes, contracts an
   let running: Awaited<ReturnType<typeof startProjectServer>> | undefined
   try {
     await initializeAppProject({ root: project, name: 'lite-compatibility', template: 'command' })
+    await compileModel(join(project, 'zenstack/schema.zmodel'), join(project, 'zenstack/generated'))
     const dependencies = join(project, 'node_modules')
     const installed = join(import.meta.dir, '../node_modules')
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
@@ -28,10 +30,16 @@ test('current generated starter runs through Lite bundling, routes, contracts an
     }
     // Compile the shipped command host against the same workspace contracts as its adapters.
     for (const [name, directory] of [
-      ['commands', 'commands'], ['db', 'db'], ['contracts', 'contracts'], ['js', 'supacloud-js'],
+      ['commands', 'commands'], ['db', 'db'], ['contracts', 'contracts'],
     ] as const) {
       await symlink(join(import.meta.dir, '../..', directory), join(dependencies, '@supacloud', name), linkType)
     }
+    // Copy the SDK without its own node_modules so it resolves the project's
+    // single Supabase declaration graph on Windows as well as POSIX.
+    await cp(join(import.meta.dir, '../../supacloud-js'), join(dependencies, '@supacloud', 'js'), {
+      recursive: true,
+      filter: (source) => !source.split(/[\\/]/).includes('node_modules'),
+    })
     const result = await compileProject({
       rootDir: join(project, 'src'), outDir: join(project, 'generated'),
       commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true },

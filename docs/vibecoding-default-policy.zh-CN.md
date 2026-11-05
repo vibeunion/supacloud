@@ -21,7 +21,7 @@
 | 持续事件协议 | `AsyncIterable<TEvent>` | 已有 RxJS/Angular 事件组合使用 RxJS 适配器 |
 | RxJS 选择 | 项目内唯一的响应式事件库 | 不再引入第二个 Observable/stream 库 |
 | HTTP 字节流 | 原生 `Response` / `ReadableStream<Uint8Array>` | 需要生态适配时在边界转换 |
-| 数据库结构 | Drizzle schema + append-only migration | 不建立第二套 ORM 或手工结构来源 |
+| 数据库结构 | ZModel schema + append-only migration | 不建立第二套 ORM 或手工结构来源 |
 | 数据库治理 | `defineDatabaseModule`、SQL lint、Catalog reconcile | 关闭治理只能是有记录的迁移例外 |
 | 普通读取 | PostgREST / `supabase-js` | GraphQL 仅用于明确的 Query Contract |
 | 跨表写入 | Command / RPC + 权限、事务、幂等、审计 | 单表简单写入可使用受控 CRUD |

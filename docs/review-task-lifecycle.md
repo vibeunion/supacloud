@@ -46,7 +46,7 @@ original submission, not the latest runtime state.
 
 The generated client and OpenAPI are derived from `task-contracts.ts` and the
 route contracts. SQL result decoders are explicitly checked against the
-Drizzle-inferred row projections; incompatible field changes fail in the
+ZModel-inferred row projections; incompatible field changes fail in the
 maintained host code, not a manually edited generated type.
 Use the existing `createAuthenticatedFetch` integration to
 resolve the current session token per call; do not introduce another session
@@ -200,7 +200,7 @@ Unbound objects and incomplete external registration need separate reconciliatio
 
 | Path | Maintained source | Verification boundary |
 | --- | --- | --- |
-| Paginated queries | `list-reviews.ts`, Drizzle row projection and existing RLS | See [query acceptance](starter-review-query.md); this increment does not change PostgREST |
+| Paginated queries | `list-reviews.ts`, ZModel row projection and existing RLS | See [query acceptance](starter-review-query.md); this increment does not change PostgREST |
 | Business writes | `createTransactionalCommandGovernance`, approval contracts and PostgreSQL host | See [transaction defaults](transactional-command-defaults.md); approval and enqueue are also exercised here |
 | Background work | Job, Worker, task contracts and recovery host | This file's generated-client/HTTP/PostgreSQL/Worker acceptance |
 | Result recovery | Job output schema and durable result adapter | See [result recovery](attachment-result-recovery.md); explicit recovery also reuses the result here |

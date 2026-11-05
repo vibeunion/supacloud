@@ -1,0 +1,83 @@
+import { ZenStackClient, type AuthType, type ClientOptions, type QueryOptions, type ModelOperations } from "@zenstackhq/orm";
+import { PolicyPlugin } from "@zenstackhq/plugin-policy";
+import type { SchemaDef, GetModels } from "@zenstackhq/schema";
+import type { CommandStore, CommandRetentionStore } from "@supacloud/contracts";
+import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
+import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding } from "./command-adapter";
+
+const reads = ["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"] as const;
+const operations = [...reads, "create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert", "delete", "deleteMany"] as const;
+const typing = { typing: { exactQueryArgs: true } } as const;
+type Delegate<S extends SchemaDef, M extends GetModels<S>, K extends string> = Pick<ModelOperations<S, M, typeof typing>, Extract<K, keyof ModelOperations<S, M, typeof typing>>>;
+export type ModelClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof operations[number]> };
+export type ModelReadClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof reads[number]> };
+export interface ModelCommandTransaction<S extends SchemaDef> { readonly db: ModelClient<S> }
+
+/** Copy only operation closures. Never return the ORM delegate (it can retain its client). */
+function facade<S extends SchemaDef>(schema: S, client: object, allowed: typeof reads, assertActive: () => void): ModelReadClient<S>;
+function facade<S extends SchemaDef>(schema: S, client: object, allowed: typeof operations, assertActive: () => void): ModelClient<S>;
+function facade(schema: SchemaDef, client: object, allowed: readonly string[], assertActive: () => void): object {
+  return Object.freeze(Object.fromEntries(Object.keys(schema.models).map((name) => {
+    const key = name[0]!.toLowerCase() + name.slice(1);
+    const delegate: unknown = Reflect.get(client, key);
+    if (!delegate || typeof delegate !== "object") throw new Error(`Missing model delegate: ${key}`);
+    const methods = allowed.map(method => {
+      const invoke: unknown = Reflect.get(delegate, method);
+      if (typeof invoke !== "function") throw new Error(`Unsupported model operation: ${method}`);
+      return [method, async (...args: unknown[]) => { assertActive(); return await Reflect.apply(invoke, delegate, args); }];
+    });
+    return [key, Object.freeze(Object.fromEntries(methods))];
+  })));
+}
+
+/** Trusted composition root only. Options permit schema-required computed fields/procedures. */
+export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: BunSqlPool, options: Omit<ClientOptions<S>, keyof QueryOptions<S> | "dialect" | "plugins" | "validateInput" | "skipValidationForComputedFields">) {
+  const reserved = ["dialect", "plugins", "typing", "omit", "allowQueryTimeOmitOverride", "slicing", "validateInput", "skipValidationForComputedFields"];
+  if (Object.keys(options).some(key => reserved.includes(key))) throw new Error("Model facade validation and capabilities cannot be overridden");
+  // Query typing/omission/slicing and validation switches are not configurable on this facade.
+  // Only private CommandStore SQL can access raw methods. Public facades contain no client,
+  // query builder, raw SQL, plugin controls, identity setter or nested transaction methods.
+  const client = new ZenStackClient(schema, {
+    ...options, ...typing, dialect: new BunPostgresDialect(pool),
+    plugins: [new PolicyPlugin({ dangerouslyAllowRawSql: true })],
+  } as unknown as ClientOptions<S>);
+  let disposed = false;
+  const assertOpen = () => { if (disposed) throw new Error("Database is disposed"); };
+  return Object.freeze({
+    forIdentity(identity: AuthType<S>, submission?: CommandSubmissionBinding) {
+      assertOpen();
+      if (identity === null || identity === undefined) throw new Error("Verified database identity is required");
+      const scoped = client.$setAuth(structuredClone(identity));
+      type InternalTransaction = CommandTransaction & ModelCommandTransaction<S>;
+      const database: CommandDatabase<InternalTransaction> = {
+        transaction: (work) => {
+          assertOpen();
+          return scoped.$transaction(async (tx) => {
+            let active = true;
+            const assertActive = () => { assertOpen(); if (!active) throw new Error("Command transaction is closed"); };
+            try {
+              return await work({
+                db: facade<S>(schema, tx, operations, assertActive),
+                query: async (text, parameters = []) => {
+                  assertActive();
+                  return await tx.$queryRawUnsafe<unknown>(text, ...parameters);
+                },
+              });
+            } finally { active = false; }
+          });
+        },
+      };
+      const internal = createPostgresCommandStore(database, submission ? { submission } : {});
+      const commandStore: CommandStore<ModelCommandTransaction<S>> & CommandRetentionStore = {
+        transaction: run => internal.transaction(session => run({
+          ...session, transaction: Object.freeze({ db: session.transaction.db }),
+        })),
+        redactCompleted: scope => internal.redactCompleted(scope),
+      };
+      const models: ModelReadClient<S> = facade<S>(schema, scoped, reads, assertOpen);
+      return Object.freeze({ models, commandStore: Object.freeze(commandStore) });
+    },
+    // The caller owns pool.close().
+    async dispose() { disposed = true; await client.$disconnect(); },
+  });
+}

@@ -1,10 +1,14 @@
+> New applications use [ZModel and the model candidate workflow](architecture/zenstack-upgrade.md).
+> The SQL-first procedure below is only for explicitly selected legacy SQL projects.
+> Never run both structure generators against one migration history.
+
 # Database Adoption Workflow
 
 ## Scope
 
 The goal is to align an existing database with Supabase declarative SQL sources,
 then review and deliver forward migrations. SQL is the structural source of truth;
-Drizzle is a derived query/type model, not a second migration generator here.
+This optional legacy path has its own maintained SQL source. It is not the new starter default.
 No command overwrites an adopted schema, imports production data, generates a
 down migration or claims that structure comparison proves application behavior.
 The existing migration executor and deployment ledger remain authoritative.
@@ -103,9 +107,9 @@ by default, and no seed or application config. Set `--db_major_version` only whe
 the shadow must match a non-18 source; supported values are 15-18.
 It does not import arbitrary project hooks, linked targets or credentials.
 Custom extension/bootstrap requirements must be validated in the project's
-official workflow first. This is an opt-in SQL-first path; legacy Drizzle-first
+official workflow first. This is an opt-in SQL-first path; model-first
 projects must choose and migrate their source ownership explicitly, never run
-both generators against the same maintained migration history. Derive Drizzle
+both generators against the same maintained migration history. Derive ZModel
 query models/types after adoption, without treating them as another authoring source.
 `db context` identifies projects with `supabase/schemas` as SQL-first and treats
 `db/schema.ts` as derived; projects without that directory retain the legacy hints.

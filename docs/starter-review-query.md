@@ -1,7 +1,7 @@
 # Starter Review Query
 
 The command starter now emits `src/review/list-reviews.ts`. It reuses a
-user-scoped Supabase client, selects a Drizzle-derived read projection, validates
+user-scoped Supabase client, selects a ZModel-derived read projection, validates
 one-based pagination, sorts by the primary key, and preserves PostgREST errors.
 It does not introduce a controller, session store or authorization wrapper.
 
@@ -27,7 +27,7 @@ It does not introduce a controller, session store or authorization wrapper.
 Existing applications may copy the maintained query source into their business
 module and use their existing user-scoped client, typed with
 `ReviewReadDatabase`. This is a narrow read projection, not a second database
-schema: its fields come from `ReviewRow`. SQL names and Drizzle property names
+schema: its fields come from `ReviewRow`. SQL names and ZModel property names
 must be explicitly mapped when they differ. Writes remain governed Commands.
 
 No migration is added or rewritten. The existing starter migration 003 must

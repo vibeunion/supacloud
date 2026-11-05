@@ -1,5 +1,8 @@
 # Application Framework
 
+日常迭代先读[功能开发手册](feature-development.md)。AOP、DI 和服务端框架的
+参考取舍见[静态 AOP 设计](architecture/static-aop.md)。
+
 SupaCloud 应用框架为大型项目提供 Angular 风格的工程模型：**模块、依赖注入、作用域、命令/查询分层**，但通过静态编译消除运行时反射开销，并编译为 Elysia 插件在 Edge Runtime 上运行。
 
 ```
@@ -40,7 +43,7 @@ import { Module, DB_CLIENT } from "@supacloud/app";
   imports: [AuditModule],
   providers: [
     CaseService,
-    { provide: CASE_REPOSITORY, useClass: DrizzleCaseRepository, deps: [DB_CLIENT] },
+    { provide: CASE_REPOSITORY, useClass: CaseRepository, deps: [DB_CLIENT] },
     AcceptCaseCommand,
   ],
   controllers: [CaseController],

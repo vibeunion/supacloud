@@ -1,0 +1,17 @@
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+plugin policy {
+  provider = "@zenstackhq/plugin-policy"
+}
+type Principal {
+  id String
+  @@auth()
+}
+model Note {
+  id String @id
+  owner String
+  value Int
+  @@allow("all", auth() != null && owner == auth().id)
+}

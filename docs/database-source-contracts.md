@@ -2,7 +2,7 @@
 
 ## Boundary
 
-Database-enabled starters separate Drizzle structure, maintained function sources,
+Database-enabled starters separate ZModel structure, maintained function sources,
 append-only migrations, derived RPC contracts and audit dumps. HTTP/Edge-only
 starters do not require a database. This is not a new migration executor or ledger.
 SQL size is not a violation; consuming an audit dump as application/type/test input is.
@@ -58,21 +58,27 @@ Configuration is `database.sources.json` at the project root:
 ```json
 {
   "version": 1,
-  "schema": ["db/schema.ts"],
+  "schema": ["zenstack/schema.zmodel", "zenstack/generated/schema.ts", "db/schema.ts"],
   "functions": "db/functions",
   "migrations": "migrations",
   "contracts": "db/contracts",
   "audit": "output/database-audit",
   "consumers": ["src", "scripts", "tests"],
   "auditConsumers": [],
+  "trustedHosts": ["src/host"],
   "role": "service_role"
 }
 ```
 
 Paths are project-relative and must not traverse symlinks. Source, migration,
 contract and audit locations cannot overlap. Freshness follows relative TypeScript
-schema imports (extensionless, `.ts`, or directory `index.ts`); list additional
+schema imports (extensionless, `.ts`, `.js` mapped to `.ts`, or directory `index.ts`) and local ZModel imports; list additional
 local schema entrypoints explicitly instead of relying on path aliases.
+ZModel entrypoints require fresh generated output in their adjacent `generated/` directory.
+The model compiler runs offline before source manifest generation, so stale model
+output cannot be approved by merely refreshing hashes. `trustedHosts` explicitly
+marks infrastructure; ordinary `src` code cannot value-import raw database libraries
+or host implementations. Inject model capabilities and use type-only contracts.
 Each maintained SQL file owns one
 schema-qualified function and its own explicit EXECUTE grants/revocations.
 Overloads use distinct files. Internal functions remain sources but are excluded
@@ -105,7 +111,7 @@ audit dumps, and remain allowed.
 
 1. Run assessment and review the reported dump references.
 2. Keep the existing migration directory and deployment ledger unchanged.
-3. Capture/review Drizzle structure and function sources against a local migration
+3. Capture/review ZModel structure and function sources against a local migration
    replay. Do not silently import an unverified production dump.
 4. Add the configuration and replace ordinary dump consumers.
 5. Generate and commit contracts; wire `supacloud-db check` before generators in
@@ -113,7 +119,7 @@ audit dumps, and remain allowed.
 6. Keep full SQL exports only under the ignored audit directory. Use an explicit
    existing dump command and selected database target; these tools never connect.
 
-Drizzle introspection and migration drafts go to separate candidate directories;
+ZModel introspection and migration drafts go to separate candidate directories;
 review them before promoting a forward migration through the existing ledger.
 Reverting the adoption commit restores the prior source/tooling layout without
 rolling back a database. Back up uncommitted dumps before removing tracked copies.

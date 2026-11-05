@@ -138,7 +138,7 @@ supacloud db context --root . --module_file db/modules.ts --module cases
 supacloud db context --root . --module_file db/modules.ts --target public.case_create
 ```
 
-The result identifies the Drizzle structure source, SQL behavior source,
+The result identifies the ZModel structure source, SQL behavior source,
 object-specific tests and focused verification commands. Agents should edit
 maintained sources and add forward migrations; they should not scan full schema
 dumps, edit generated files, or rewrite applied migrations.

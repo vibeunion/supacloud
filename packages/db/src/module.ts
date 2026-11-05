@@ -55,16 +55,11 @@ export interface GrantDecl {
   source: string;
 }
 
-/** Internal structure shape of Drizzle Table (type-level compatibility only, does not import drizzle-orm) */
-export interface DrizzleTableLike {
-  _: { name: string; schema?: string };
-}
-
-export type TableRef = string | DrizzleTableLike;
+export type TableRef = string;
 
 export interface DatabaseModuleOptions {
   name: string;
-  /** Owning tables: Drizzle table object or schema-qualified table name */
+  /** Owning tables: schema-qualified table name */
   tables?: TableRef[];
   policies?: PolicyDecl[];
   functions?: FunctionDecl[];
@@ -83,9 +78,8 @@ export interface DatabaseModule {
 }
 
 function normalizeTable(ref: TableRef): string {
-  if (typeof ref === 'string') return ref;
-  const schema = ref._.schema ?? 'public';
-  return `${schema}.${ref._.name}`;
+  if (typeof ref !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$/.test(ref)) throw new Error('Expected a schema-qualified table name');
+  return ref;
 }
 
 export function defineDatabaseModule(options: DatabaseModuleOptions): DatabaseModule {

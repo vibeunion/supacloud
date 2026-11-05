@@ -106,7 +106,7 @@
     {
       "name": "AspectRefNode",
       "kind": "type",
-      "signature": "export interface AspectRefNode {\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
+      "signature": "export interface AspectRefNode {\n    operation?: {\n        kind: \"route\" | \"command\" | \"job\";\n        name: string;\n    };\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
       "name": "assessMigration",
@@ -206,7 +206,7 @@
     {
       "name": "ContextPack",
       "kind": "type",
-      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"drizzle-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"zmodel-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
     },
     {
       "name": "ContractManifest",
@@ -216,7 +216,7 @@
     {
       "name": "ControllerNode",
       "kind": "type",
-      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
+      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    dependencyOptions?: DependencyOptions[];\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
     },
     {
       "name": "createApplicationDevelopmentContext",
@@ -281,7 +281,7 @@
     {
       "name": "DatabaseContractsOptions",
       "kind": "type",
-      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    drizzleSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    migrations: readonly string[];\n}"
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    migrations: readonly string[];\n}"
     },
     {
       "name": "DatabaseGovernanceOptions",
@@ -402,6 +402,11 @@
       "name": "DependencyGraphIndex",
       "kind": "type",
       "signature": "export interface DependencyGraphIndex {\n    getAffectedModules(changedFiles: string[]): string[];\n}"
+    },
+    {
+      "name": "DependencyOptions",
+      "kind": "type",
+      "signature": "export interface DependencyOptions {\n    optional?: boolean;\n    self?: boolean;\n    skipSelf?: boolean;\n    host?: boolean;\n}"
     },
     {
       "name": "DevelopmentSchemaKind",
@@ -561,7 +566,7 @@
     {
       "name": "ExecutionPlanProvider",
       "kind": "type",
-      "signature": "export interface ExecutionPlanProvider {\n    token: string;\n    kind: ProviderKind;\n    scope: Scope;\n    deps: string[];\n    optionalDeps: string[];\n    selfDeps: string[];\n    skipSelfDeps: string[];\n    hostDeps: string[];\n    multi: boolean;\n    exported: boolean;\n    lifecycle: {\n        init: boolean;\n        destroy: boolean;\n    };\n}"
+      "signature": "export interface ExecutionPlanProvider {\n    dependencyOptions?: DependencyOptions[];\n    token: string;\n    kind: ProviderKind;\n    scope: Scope;\n    deps: string[];\n    optionalDeps: string[];\n    selfDeps: string[];\n    skipSelfDeps: string[];\n    hostDeps: string[];\n    multi: boolean;\n    exported: boolean;\n    lifecycle: {\n        init: boolean;\n        destroy: boolean;\n    };\n}"
     },
     {
       "name": "ExecutionPlanProviderEdge",
@@ -986,7 +991,7 @@
     {
       "name": "ProviderNode",
       "kind": "type",
-      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
+      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    dependencyOptions?: DependencyOptions[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
       "name": "pullGraphqlSchema",
@@ -1129,11 +1134,6 @@
       "signature": "export interface RuntimeBindingsResult {\n    projection: RuntimeBindingsProjection;\n    diagnostics: EnvironmentBindingDiagnostic[];\n}"
     },
     {
-      "name": "scanDrizzleSql",
-      "kind": "value",
-      "signature": "export declare function scanDrizzleSql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Diagnostic[];"
-    },
-    {
       "name": "scanGeneratedArtifacts",
       "kind": "value",
       "signature": "export declare function scanGeneratedArtifacts(artifacts: Record<string, string | undefined>, strict?: boolean): Diagnostic[];"
@@ -1142,6 +1142,11 @@
       "name": "scanProductionSource",
       "kind": "value",
       "signature": "export declare function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[];"
+    },
+    {
+      "name": "scanQuerySql",
+      "kind": "value",
+      "signature": "export declare function scanQuerySql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Diagnostic[];"
     },
     {
       "name": "schemaFromSource",

@@ -5,6 +5,7 @@ import { validateGraph } from "./validate";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
+import { blocksStaticCompilation } from "./di-resolution";
 import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
 import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
@@ -50,14 +51,12 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
   diagnostics.push(...databaseDiagnostics);
   if (databaseDiagnostics.length) return { diagnostics, graph, written: [] };
-  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed" || item.code === "command-executor-bypass")) {
-    return { diagnostics, graph, written: [] };
-  }
   if (options.strict) {
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
   }
+  if (diagnostics.some(blocksStaticCompilation)) return { diagnostics, graph, written: [] };
   const typeSafety = resolveTypeSafety(options);
   const graphql = await renderOptionalGraphql(options);
   if (graphql.contract) graph.graphql = graphql.contract;
@@ -129,15 +128,15 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   if (databaseDiagnostics.length) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };
   }
-  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed" || item.code === "command-executor-bypass")) {
-    return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI or command boundary violations must be migrated before compilation."] };
-  }
   if (options.strict) {
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
   }
 
+  if (diagnostics.some(blocksStaticCompilation)) {
+    return { diagnostics, graph, upToDate: false, mismatches: ["Static DI, aspect or command boundary violations must be fixed before compilation."] };
+  }
   const typeSafety = resolveTypeSafety(options);
   const graphql = await renderOptionalGraphql(options);
   if (graphql.contract) graph.graphql = graphql.contract;

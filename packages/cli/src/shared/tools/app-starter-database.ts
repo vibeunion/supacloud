@@ -1,82 +1,92 @@
 export const STARTER_DATABASE_CONFIG = {
   version: 1,
-  schema: ["db/schema.ts"],
+  schema: ["zenstack/schema.zmodel", "zenstack/generated/schema.ts", "db/schema.ts"],
   functions: "db/functions",
   migrations: "migrations",
   contracts: "db/contracts",
   audit: "output/database-audit",
   consumers: ["src", "scripts", "tests"],
   auditConsumers: [],
+  trustedHosts: ["src/host", "src/delivery-host.ts", "src/delivery-worker.ts"],
   role: "starter_review_http",
 };
 
-export const STARTER_DATABASE_SCHEMA = `import { sql } from "drizzle-orm";
-import { boolean, check, integer, jsonb, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
+export const STARTER_DATABASE_MODEL = `datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+plugin policy {
+  provider = "@zenstackhq/plugin-policy"
+}
+type Principal {
+  id String
+  canApprove Boolean
+  @@auth()
+}
+model Application {
+  singleton Boolean @id @default(true)
+  projectId String @map("project_id")
+  tenantId String @map("tenant_id")
+  @@map("starter_application")
+  @@allow("read", auth() != null)
+}
+model Review {
+  id String @id
+  ownerId String @map("owner_id")
+  state String
+  version Int
+  attachment Attachment?
+  results AttachmentResult[]
+  @@map("starter_reviews")
+  @@allow("read", auth() != null && (ownerId == auth().id || auth().canApprove))
+}
+model Member {
+  subject String @id
+  enabled Boolean @default(true)
+  canApprove Boolean @default(false) @map("can_approve")
+  storageSubject String? @unique @db.Uuid @map("storage_subject")
+  @@map("starter_members")
+  @@allow("read", auth() != null && subject == auth().id)
+}
+model Attachment {
+  reviewId String @id @map("review_id")
+  review Review @relation(fields: [reviewId], references: [id])
+  artifactId String @unique @db.Uuid @map("artifact_id")
+  ownerId String @map("owner_id")
+  runId String @unique @db.Uuid @map("run_id")
+  objectPath String @unique @map("object_path")
+  retries AttachmentRetry[]
+  @@map("starter_attachments")
+  @@allow("read", auth() != null && ownerId == auth().id)
+}
+model AttachmentResult {
+  reviewId String @map("review_id")
+  review Review @relation(fields: [reviewId], references: [id])
+  version Int
+  artifactId String @db.Uuid @map("artifact_id")
+  result Json
+  @@id([reviewId, version, artifactId])
+  @@map("starter_attachment_results")
+  @@allow("read", auth() != null && review.ownerId == auth().id)
+}
+model AttachmentRetry {
+  runId String @id @db.Uuid @map("run_id")
+  reviewId String @map("review_id")
+  attachment Attachment @relation(fields: [reviewId], references: [reviewId])
+  previousRunId String @unique @db.Uuid @map("previous_run_id")
+  generation Int
+  @@unique([reviewId, generation])
+  @@map("starter_attachment_retries")
+  @@allow("read", auth() != null && attachment.ownerId == auth().id)
+}
+`;
 
-// Structure for the reviewed starter migrations. Grants/policies stay in those migrations.
-export const application = pgTable.withRLS("starter_application", {
-  singleton: boolean().default(true).primaryKey(),
-  projectId: text("project_id").notNull(),
-  tenantId: text("tenant_id").notNull(),
-}, table => [
-  check("starter_application_singleton_check", sql\`\${table.singleton}\`),
-  check("starter_application_project_id_check", sql\`length(\${table.projectId}) > 0\`),
-  check("starter_application_tenant_id_check", sql\`length(\${table.tenantId}) > 0\`),
-]);
-
-export const reviews = pgTable.withRLS("starter_reviews", {
-  id: text().primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  state: text({ enum: ["draft", "approved"] }).notNull(),
-  version: integer().notNull(),
-}, table => [
-  check("starter_reviews_state_check", sql\`\${table.state} IN ('draft', 'approved')\`),
-  check("starter_reviews_version_check", sql\`\${table.version} > 0\`),
-]);
-
-export const members = pgTable.withRLS("starter_members", {
-  subject: text().primaryKey(),
-  enabled: boolean().default(true).notNull(),
-  canApprove: boolean("can_approve").default(false).notNull(),
-  storageSubject: uuid("storage_subject").unique(),
-});
-
-export const attachments = pgTable.withRLS("starter_attachments", {
-  reviewId: text("review_id").primaryKey().references(() => reviews.id),
-  artifactId: uuid("artifact_id").notNull().unique(),
-  ownerId: text("owner_id").notNull(),
-  runId: uuid("run_id").notNull().unique(),
-  objectPath: text("object_path").notNull().unique(),
-});
-
-export const attachmentResults = pgTable.withRLS("starter_attachment_results", {
-  reviewId: text("review_id").notNull().references(() => reviews.id),
-  version: integer().notNull(),
-  artifactId: uuid("artifact_id").notNull(),
-  result: jsonb().$type<unknown>().notNull(),
-}, table => [
-  primaryKey({ columns: [table.reviewId, table.version, table.artifactId] }),
-  check("starter_attachment_results_version_check", sql\`\${table.version} >= 2\`),
-]);
-
-export const attachmentRetries = pgTable.withRLS("starter_attachment_retries", {
-  runId: uuid("run_id").primaryKey(),
-  reviewId: text("review_id").notNull().references(() => attachments.reviewId),
-  previousRunId: uuid("previous_run_id").notNull().unique(),
-  generation: integer().notNull(),
-}, table => [
-  unique("starter_attachment_retries_review_id_generation_key").on(table.reviewId, table.generation),
-  check("starter_attachment_retries_generation_check", sql\`\${table.generation} > 0\`),
-  check("starter_attachment_retries_check", sql\`\${table.runId} <> \${table.previousRunId}\`),
-]);
-
-export type ReviewRow = typeof reviews.$inferSelect;
-export type NewReview = typeof reviews.$inferInsert;
+export const STARTER_DATABASE_SCHEMA = `export type { Review as ReviewRow, Attachment as AttachmentRow, AttachmentRetry as AttachmentRetryRow } from "../zenstack/generated/models";
+import type { Review } from "../zenstack/generated/models";
+export type NewReview = Review;
 `;
 
 export const STARTER_DATABASE_MODULES = `import { defineDatabaseModule } from "@supacloud/db";
-import { getTableConfig } from "drizzle-orm/pg-core";
-import { application, reviews, members, attachments, attachmentResults, attachmentRetries } from "./schema";
 
 const backendPolicies = [
   ["starter_backend_binding_read", "public.starter_application", "select", ["starter_review_http", "starter_review_worker"]],
@@ -99,10 +109,7 @@ const backendPolicies = [
 // The module is the single live-Catalog ownership contract for starter tables.
 export default defineDatabaseModule({
   name: "starter",
-  tables: [application, reviews, members, attachments, attachmentResults, attachmentRetries].map(table => {
-    const config = getTableConfig(table);
-    return (config.schema ?? "public") + "." + config.name;
-  }),
+  tables: ["public.starter_application", "public.starter_reviews", "public.starter_members", "public.starter_attachments", "public.starter_attachment_results", "public.starter_attachment_retries"],
   policies: [
     ...([
       ["starter_http_retry_read", "select", "starter_review_http"],
@@ -159,41 +166,23 @@ ROLLBACK;
 `;
 
 export const STARTER_DATABASE_GUIDE = `
-## Database Source Workflow
+## Model and migration workflow
 
-Drizzle owns table declarations and inferred row types in db/schema.ts.
-Use the existing @supacloud/db/drizzle-bun adapters for typed queries and governed
-transactions; never replace permission, idempotency or audit checks with plain CRUD.
-Opaque JSON still needs runtime decoding.
+Maintain zenstack/schema.zmodel. Run \`bun run db:generate\` to compile model and RPC
+contracts; commit generated types with their sources. Do not introduce any/@ts-ignore
+to bypass model or contract diagnostics. \`bun run db:check\` compares
+fresh generation without writing files or opening a database. Model read policies
+complement existing database RLS; command writes still use the shared transaction,
+receipt and audit boundary, not unrestricted CRUD. SQL constraints, RPCs and RLS
+remain explicit reviewed migrations when the model language cannot express them.
 
-After installing dependencies, run \`bun run db:generate\` once and commit db/contracts/.
-The default \`bun run check\` and build fail on stale database contracts before any
-compiler regeneration. After an intentional source change, run db:generate again,
-review the diff, then run check.
-The command starter uses the default database governance module path
-\`db/modules.ts\` and fixes \`databaseGovernance.mode = "check"\`: compile/check/build
-run the offline source-contract gate without a database. Use \`bun run dev:integration\`
-with the CLI's explicit loopback database URL, or set databaseGovernance.mode to
-"enforce" with an explicitly supplied \`DATABASE_URL\`, to run SQL lint and live
-Catalog reconciliation. Missing connections, stale source contracts and Catalog
-drift fail closed; no contracts or migrations are silently regenerated.
-
-- Maintain one schema-qualified function with explicit grants per db/functions/*.sql.
-- Preserve migrations/ and its existing executor/ledger. Add forward migrations only.
-- \`bun run db:diff\` generates Drizzle drafts under db/migration-candidates/, never
-  into the deployment directory. The starter has existing SQL history, so establish
-  and review a matching Drizzle baseline before promoting any draft; the first
-  draft is not automatically an incremental production migration.
-- \`bun run db:pull\` requires an explicitly selected DATABASE_URL and writes only
-  output/database-audit/drizzle-candidate/. Review candidates; never overwrite source blindly.
-- Full SQL dumps belong under the ignored output/database-audit/ directory. They are
-  audit/recovery artifacts, never ordinary type, application or test inputs.
-- \`bun run db:assess\` explains adoption/findings without writing or connecting.
-- GraphQL/PostgREST exports remain legitimate protocol contracts. This check is not
-  proof of deployed schema, effective role permissions or complete RLS equivalence.
-
-Do not introduce any/@ts-ignore to bypass a contract. Use Drizzle-inferred types,
-preserve bigint/numeric precision and decode unknown results at the boundary.
+Use \`bun run db:diff -- --candidate output/database-audit/change.sql\` with an
+explicit read-only SUPACLOUD_MODEL_DATABASE_URL. Review the SQL, then promote a new
+forward migration through the existing SupaCloud plan/apply ledger. Never run
+zen migrate deploy or db push against a managed production database.
+\`bun run db:pull -- --candidate output/database-audit/schema.zmodel\` writes a
+review candidate only; it never overwrites the maintained model. Add policies
+before adopting introspection output. Keep one migration history and preserve RLS.
 `;
 
 export function starterDatabaseFiles(): Record<string, string> {
@@ -203,22 +192,6 @@ export function starterDatabaseFiles(): Record<string, string> {
     "db/modules.ts": STARTER_DATABASE_MODULES,
     "tests/database-governance.sql": STARTER_DATABASE_TEST,
     "db/functions/README.md": "Maintain one schema-qualified function and its explicit EXECUTE ACL per SQL file. No RPC functions are needed by the initial transactional starter.\n",
-    "drizzle.config.ts": `import { defineConfig } from "drizzle-kit";
-export default defineConfig({
-  dialect: "postgresql",
-  schema: "./db/schema.ts",
-  out: "./db/migration-candidates",
-});
-`,
-    "drizzle.pull.config.ts": `import { defineConfig } from "drizzle-kit";
-const url = process.env["DATABASE_URL"];
-if (!url) throw new Error("Select an explicit DATABASE_URL for introspection");
-export default defineConfig({
-  dialect: "postgresql",
-  schema: "./db/schema.ts",
-  out: "./output/database-audit/drizzle-candidate",
-  dbCredentials: { url },
-});
-`,
+    "zenstack/schema.zmodel": STARTER_DATABASE_MODEL,
   };
 }

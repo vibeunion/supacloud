@@ -1,5 +1,6 @@
 import type {
   ApplicationGraph,
+  AspectRefNode,
   ControllerNode,
   Diagnostic,
   DiagnosticFix,
@@ -12,13 +13,8 @@ import type {
 import { dirname, relative, sep } from "node:path";
 import { resolveModuleBoundaries } from "./profiles";
 import { findClosestMatch } from "./util";
+import { dependencyFlags, moduleDependencies, exportedProviders, resolveDependency, scopeCanDependOn } from "./di-resolution";
 import { featureTransitionForRoute, validateFeatureSpec } from "./feature";
-
-const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
-  application: 0,
-  request: 1,
-  job: 1,
-};
 
 export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: string }> = {
   "circular-dependency": { code: "SC1001", docsUrl: "https://supacloud.dev/errors/SC1001" },
@@ -64,6 +60,10 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "provider-type-mismatch": { code: "SC2010", docsUrl: "https://supacloud.dev/errors/SC2010" },
   "unsupported-provider-helper": { code: "SC2011", docsUrl: "https://supacloud.dev/errors/SC2011" },
   "runtime-injection-disallowed": { code: "SC2012", docsUrl: "https://supacloud.dev/errors/SC2012" },
+  "ambiguous-dependency": { code: "SC2013", docsUrl: "https://supacloud.dev/errors/SC2013" },
+  "conflicting-injection-flags": { code: "SC2014", docsUrl: "https://supacloud.dev/errors/SC2014" },
+  "cross-module-scoped-dependency": { code: "SC2015", docsUrl: "https://supacloud.dev/errors/SC2015" },
+  "mixed-multi-provider-scopes": { code: "SC2016", docsUrl: "https://supacloud.dev/errors/SC2016" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -74,6 +74,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "invalid-job-scope": { code: "SC4007", docsUrl: "https://supacloud.dev/errors/SC4007" },
   "dynamic-aspect-reference": { code: "SC4010", docsUrl: "https://supacloud.dev/errors/SC4010" },
   "invalid-aspect-reference": { code: "SC4011", docsUrl: "https://supacloud.dev/errors/SC4011" },
+  "aspect-operation-mismatch": { code: "SC4030", docsUrl: "https://supacloud.dev/errors/SC4030" },
   "invalid-command-mode": { code: "SC4012", docsUrl: "https://supacloud.dev/errors/SC4012" },
   "invalid-command-rpc": { code: "SC4013", docsUrl: "https://supacloud.dev/errors/SC4013" },
   "command-rpc-unavailable": { code: "SC4014", docsUrl: "https://supacloud.dev/errors/SC4014" },
@@ -225,29 +226,9 @@ export function validateGraph(
     }
   }
 
-  /** Resolves a token using the static equivalent of the current injector level. */
-  function resolveDep(
-    module: ModuleNode,
-    token: string,
-    flags: { self?: boolean; skipSelf?: boolean } = {},
-  ): ProviderRef | undefined {
-    if (!flags.skipSelf) {
-      const own = module.providers.find((p) => p.token === token);
-      if (own) return { module, provider: own };
-    }
-    if (flags.self) return undefined;
-    for (const importName of module.imports) {
-      const imported = graph.modules.find((m) => m.name === importName);
-      if (!imported || !imported.exports.includes(token)) continue;
-      const provider = imported.providers.find((p) => p.token === token);
-      if (provider) return { module: imported, provider };
-    }
-    // Check if any module provides it as root-scoped (Angular providedIn: 'root')
-    for (const mod of graph.modules) {
-      const rootProvider = mod.providers.find((p) => p.token === token && p.providedIn === "root");
-      if (rootProvider) return { module: mod, provider: rootProvider };
-    }
-    return undefined;
+  function resolveDep(module: ModuleNode, token: string, flags: { self?: boolean; skipSelf?: boolean } = {}, scope: Scope = "application"): ProviderRef | undefined {
+    const resolved = resolveDependency(graph, module, token, scope, flags);
+    return resolved.kind === "provider" ? resolved.target : undefined;
   }
 
   const error = (
@@ -291,12 +272,76 @@ export function validateGraph(
     });
   };
 
+  function validateDependencies(module: ModuleNode, owner: ProviderNode | ControllerNode): void {
+    const ownerName = "token" in owner ? owner.token : owner.className;
+    const fail = (code: string, message: string, suggestion?: string, fix?: DiagnosticFix) =>
+      error(code, message, owner.file, "line" in owner ? owner.line : undefined, suggestion, fix);
+    for (const [index, token] of owner.deps.entries()) {
+      const flags = dependencyFlags(owner, token, index);
+      if (flags.self && flags.skipSelf) {
+        fail("conflicting-injection-flags", `${ownerName}: ${token} cannot use both @Self() and @SkipSelf().`);
+        continue;
+      }
+      const resolution = resolveDependency(graph, module, token, owner.scope, flags);
+      if (resolution.kind === "ambiguous") {
+        fail("ambiguous-dependency", `${ownerName}: ${token} has multiple visible providers in ${resolution.candidates.map(item => item.module.name).join(", ")}. Declare an explicit local binding.`);
+      } else if (resolution.kind === "context") {
+        if (owner.scope !== resolution.scope) fail("scope-violation", `${ownerName} (${owner.scope}) cannot inject ${resolution.scope} context ${token}.`);
+      } else if (resolution.kind === "provider") {
+        const target = resolution.target;
+        if (!scopeCanDependOn(owner.scope, target.provider.scope)) {
+          fail("scope-violation", `${ownerName} (${owner.scope}) cannot depend on ${token} (${target.provider.scope}).`,
+            "Keep execution context in its owning scope, or inject an application port and pass context explicitly.",
+            "token" in owner ? { type: "change_provider_scope", targetFile: owner.file, provider: owner.token, from: owner.scope, to: target.provider.scope } : undefined);
+        } else if (target.module !== module && target.provider.scope !== "application") {
+          fail("cross-module-scoped-dependency", `${ownerName}: ${token} belongs to the ${target.provider.scope} scope of module ${target.module.name}. Keep scoped providers in their owning feature and share an application port.`);
+        }
+      } else if (resolution.kind === "missing" && !flags.optional) {
+        const privateOwner = globalProviders.get(token);
+        if (flags.self || flags.skipSelf) {
+          fail(flags.self ? "self-dependency-violation" : "skip-self-dependency-violation",
+            `${ownerName}: ${token} is not visible in ${module.name} with ${flags.self ? "@Self()" : "@SkipSelf()"}.`,
+            "Provide a binding at the selected scope or correct the parameter modifier.");
+        } else if (privateOwner) {
+          const path = relative(dirname(module.file), privateOwner.module.file).replace(/\.(tsx?|mts|cts)$/, "").split(sep).join("/");
+          fail("module-boundary", `${ownerName}: ${token} from ${privateOwner.module.name} is not visible in ${module.name}.`,
+            `Import and explicitly export ${token} from ${privateOwner.module.name}.`, {
+              type: "add_module_import", targetFile: module.file, module: privateOwner.module.name,
+              provider: token, symbol: privateOwner.module.className, targetModule: module.name,
+              importPath: path.startsWith(".") ? path : `./${path}`,
+            });
+        } else if (token.includes("TOKEN") || token.endsWith("Token") || (token.length > 2 && token === token.toUpperCase())) {
+          fail("missing-token-factory", `InjectionToken '${token}' referenced by '${ownerName}' has no visible provider or default factory.`,
+            `Provide '${token}' in @Module({ providers: [...] }) or declare it with new InjectionToken('${token}', { factory: () => ... }).`);
+        } else {
+          fail("unresolved-token", `${ownerName}: ${token} is not visible in ${module.name}.`,
+            `Provide ${token} or declare it @Optional().`, { type: "add_provider", targetFile: module.file, token, module: module.name });
+        }
+      }
+    }
+  }
+
   const modulesByName = new Map<string, ModuleNode>();
   const commandsByName = new Map<string, { module: ModuleNode; className: string }>();
   const routesByKey = new Map<string, { module: ModuleNode; controller: ControllerNode }>();
   const declaredRoutes: Array<{ method: string; path: string; fullPath: string; rawFullPath: string; controller: ControllerNode; module: ModuleNode; handler: string; redirectTo?: string }> = [];
 
+  function validateAspects(aspects: AspectRefNode[] | undefined, file: string, kind?: "route" | "command" | "job", name?: string): void {
+    for (const aspect of aspects ?? []) {
+      if (aspect.operation && (aspect.operation.kind !== kind || aspect.operation.name !== name)) {
+        error("aspect-operation-mismatch", `Aspect ${aspect.name} targets ${aspect.operation.kind} ${aspect.operation.name}, but is bound to ${kind ?? "module"} ${name ?? "boundary"}.`, file,
+          undefined, "Bind typed aspects to their exact operation; use generic functions for module-wide aspects.");
+      }
+    }
+  }
+
   for (const module of graph.modules) {
+    validateAspects(module.aspects, module.file);
+    for (const command of module.commands) validateAspects(command.aspects, module.file, "command", command.name);
+    for (const job of module.jobs ?? []) validateAspects(job.aspects, module.file, "job", job.name);
+    for (const controller of module.controllers) for (const route of controller.routes) {
+      validateAspects(route.aspects, controller.file, "route", `${route.method} ${joinRoutePaths(controller.path, route.path)}`);
+    }
     if (module.featureSpec) {
       for (const diagnostic of validateFeatureSpec(module.featureSpec, module)) {
         const meta = COMPILER_DIAGNOSTIC_CODES[diagnostic.code];
@@ -695,38 +740,7 @@ export function validateGraph(
         }
       }
 
-      if (controller.selfDeps && controller.selfDeps.length > 0) {
-        for (const dep of controller.selfDeps) {
-          const own = module.providers.find((p) =>
-            p.token === dep && p.scope === controller.scope,
-          );
-          if (!own) {
-            error(
-              "self-resolution-failed",
-              `模块 ${module.name} 的 controller ${controller.className} 参数标记了 @Self()，但 ${dep} 未在当前模块内部提供`,
-              controller.file,
-              undefined,
-              `Provide '${dep}' in module '${module.name}' or remove @Self().`,
-            );
-          }
-        }
-      }
-      if (controller.skipSelfDeps && controller.skipSelfDeps.length > 0) {
-        for (const dep of controller.skipSelfDeps) {
-          const own = module.providers.find((p) =>
-            p.token === dep && p.scope === controller.scope,
-          );
-          if (own) {
-            error(
-              "skip-self-resolution-failed",
-              `模块 ${module.name} 的 controller ${controller.className} 参数标记了 @SkipSelf()，但 ${dep} 在当前模块内部声明了 provider`,
-              controller.file,
-              undefined,
-              `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
-            );
-          }
-        }
-      }
+      validateDependencies(module, controller);
     }
   }
 
@@ -802,6 +816,7 @@ export function validateGraph(
       const first = seen.get(provider.token);
       if (first) {
         if (first.multi && provider.multi) {
+          if (first.scope !== provider.scope) error("mixed-multi-provider-scopes", `Multi token ${provider.token} must use one scope in module ${module.name}.`, provider.file, provider.line);
           continue;
         }
         error(
@@ -816,121 +831,7 @@ export function validateGraph(
       }
     }
 
-    // scope-violation / module boundary: check dependencies of each provider.
-    for (const provider of module.providers) {
-      if (provider.selfDeps && provider.selfDeps.length > 0) {
-        for (const dep of provider.selfDeps) {
-          const own = module.providers.find((p) =>
-            p.token === dep && p.scope === provider.scope,
-          );
-          if (!own) {
-            error(
-              "self-resolution-failed",
-              `模块 ${module.name} 的 provider ${provider.token} 参数标记了 @Self()，但 ${dep} 未在当前模块内部提供`,
-              provider.file,
-              provider.line,
-              `Provide '${dep}' in module '${module.name}' or remove @Self().`,
-            );
-          }
-        }
-      }
-      if (provider.skipSelfDeps && provider.skipSelfDeps.length > 0) {
-        for (const dep of provider.skipSelfDeps) {
-          const own = module.providers.find((p) =>
-            p.token === dep && p.scope === provider.scope,
-          );
-          if (own) {
-            error(
-              "skip-self-resolution-failed",
-              `模块 ${module.name} 的 provider ${provider.token} 参数标记了 @SkipSelf()，但 ${dep} 在当前模块内部声明了 provider`,
-              provider.file,
-              provider.line,
-              `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
-            );
-          }
-        }
-      }
-      for (const dep of provider.deps) {
-        const isOptional = provider.optionalDeps?.includes(dep);
-        const resolved = resolveDep(module, dep, {
-          self: provider.selfDeps?.includes(dep) ?? false,
-          skipSelf: provider.skipSelfDeps?.includes(dep) ?? false,
-        });
-        if (!resolved) {
-          if (isOptional) {
-            continue;
-          }
-          if (!graph.externalTokens.includes(dep)) {
-            if (globalProviders.has(dep)) {
-              const owner = globalProviders.get(dep);
-              if (!owner) continue;
-              error(
-                "module-boundary",
-                `模块 ${module.name} 的 provider ${provider.token} 依赖 ${dep}，该 token 由模块 ${owner.module.name} 提供但未被 import`,
-                provider.file,
-                provider.line,
-                `Import module '${owner.module.name}' in '${module.name}', add '${dep}' to '${owner.module.name}' exports, or mark @Injectable({ providedIn: 'root' }).`,
-                {
-                  type: "add_module_import",
-                  targetFile: module.file,
-                  module: owner.module.name,
-                  provider: dep,
-                  symbol: owner.module.className,
-                  targetModule: module.name,
-                  importPath: (() => {
-                    const value = relative(dirname(module.file), owner.module.file)
-                      .replace(/\.(tsx?|mts|cts)$/, "").split(sep).join("/");
-                    return value.startsWith(".") ? value : `./${value}`;
-                  })(),
-                },
-              );
-            } else if (dep.includes("TOKEN") || dep.endsWith("Token") || (dep.length > 2 && dep === dep.toUpperCase())) {
-              error(
-                "missing-token-factory",
-                `InjectionToken '${dep}' referenced by provider '${provider.token}' has no provider in module '${module.name}' and no default factory function.`,
-                provider.file,
-                provider.line,
-                `Provide '${dep}' in @Module({ providers: [...] }) or declare it with new InjectionToken('${dep}', { factory: () => ... }).`,
-              );
-            } else {
-              error(
-                "unresolved-token",
-                `模块 ${module.name} 的 provider ${provider.token} 依赖的 token ${dep} 无法解析`,
-                provider.file,
-                provider.line,
-                `Provide '${dep}' in a module, mark constructor parameter @Optional(), or define @Injectable({ providedIn: 'root' }).`,
-                {
-                  type: "add_provider",
-                  targetFile: module.file,
-                  token: dep,
-                  module: module.name,
-                },
-              );
-            }
-          }
-          continue;
-        }
-        // Controllers belong to request scope and are not restricted here (can depend on application).
-        if (
-          SCOPE_LIFETIME_RANK[resolved.provider.scope] > SCOPE_LIFETIME_RANK[provider.scope]
-        ) {
-          error(
-            "scope-violation",
-            `模块 ${module.name} 的 ${provider.scope} provider ${provider.token} 不能依赖 ${resolved.provider.scope} provider ${dep}`,
-            provider.file,
-            provider.line,
-            `Change provider '${provider.token}' scope to '${resolved.provider.scope}', or inject a factory/context instead.`,
-            {
-              type: "change_provider_scope",
-              targetFile: provider.file,
-              provider: provider.token,
-              from: provider.scope,
-              to: resolved.provider.scope,
-            },
-          );
-        }
-      }
-    }
+    for (const provider of module.providers) validateDependencies(module, provider);
 
     // command-missing-permission: Commands without permission declarations must not generate adoptable applications.
     for (const command of module.commands) {
@@ -1163,9 +1064,14 @@ export function validateGraph(
   // Angular Ivy-style export validation (SC2006)
   for (const module of graph.modules) {
     for (const expToken of module.exports) {
-      const resolved = resolveDep(module, expToken);
-      if (resolved) continue;
-      if (module.imports.includes(expToken)) continue;
+      const exportedModule = graph.modules.find(item => item.name === expToken || item.className === expToken);
+      if (exportedModule && module.imports.includes(exportedModule.name)) continue;
+      const resolved = exportedProviders(graph, module, expToken);
+      if (resolved.length === 1) continue;
+      if (resolved.length > 1) {
+        error("ambiguous-dependency", `Module ${module.name} re-exports ambiguous token ${expToken}.`, module.file, module.line);
+        continue;
+      }
 
       error(
         "export-unprovided-token",
@@ -1276,10 +1182,11 @@ function detectCycles(
     module: ModuleNode,
     token: string,
     flags?: { self?: boolean; skipSelf?: boolean },
+    scope?: Scope,
   ) => ProviderRef | undefined,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const nodeId = (ref: ProviderRef) => `${ref.module.name}:${ref.provider.token}`;
+  const nodeId = (ref: ProviderRef) => `${ref.module.name}:${ref.provider.token}:${ref.module.providers.indexOf(ref.provider)}`;
   const nodes: ProviderRef[] = graph.modules.flatMap((module) =>
     module.providers.map((provider) => ({ module, provider })),
   );
@@ -1308,7 +1215,7 @@ function detectCycles(
           message: `provider 循环依赖: ${path}`,
           file: ref.provider.file,
           line: ref.provider.line,
-          suggestion: "Break the cycle by extracting common dependencies into a separate service or injecting @Optional().",
+          suggestion: "Break the cycle by extracting a shared port. @Optional() does not break a cycle when the provider exists.",
           ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
         });
       }
@@ -1316,12 +1223,13 @@ function detectCycles(
     }
     state.set(id, "visiting");
     stack.push(ref);
-    for (const dep of ref.provider.deps) {
-      const resolved = resolveDep(ref.module, dep, {
-        self: ref.provider.selfDeps?.includes(dep) ?? false,
-        skipSelf: ref.provider.skipSelfDeps?.includes(dep) ?? false,
-      });
-      if (resolved) visit(resolved);
+    for (const [index, dep] of ref.provider.deps.entries()) {
+      const resolved = resolveDep(ref.module, dep, dependencyFlags(ref.provider, dep, index), ref.provider.scope);
+      if (resolved) {
+        for (const provider of resolved.module.providers.filter(item => item.token === resolved.provider.token)) {
+          visit({ module: resolved.module, provider });
+        }
+      }
     }
     stack.pop();
     state.set(id, "done");
@@ -1402,9 +1310,9 @@ function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
         diagnostics.push({
           severity: "error",
           code: "circular-module-import",
-          message: `Module circular import detected: ${cycle.join(" -> ")}`,
+          message: `Module initialization cycle detected: ${cycle.join(" -> ")}`,
           ...(mod ? { file: mod.file, line: mod.line } : {}),
-          suggestion: "Refactor module imports into a unidirectional acyclic graph.",
+          suggestion: "Refactor module imports and implicit root dependencies into a unidirectional acyclic graph.",
           ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
         });
       }
@@ -1415,7 +1323,7 @@ function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
     stack.push(name);
     const mod = moduleMap.get(name);
     if (mod) {
-      for (const importName of mod.imports) {
+      for (const importName of moduleDependencies(graph, mod)) {
         if (moduleMap.has(importName)) {
           visit(importName);
         }

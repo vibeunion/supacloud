@@ -83,7 +83,7 @@ export const AcceptResult = {
 import { DB_CLIENT } from "../shared/tokens";
 
 @Injectable()
-export class DrizzleCaseRepository {
+export class CaseRepository {
   constructor(@Inject(DB_CLIENT) readonly db: unknown) {}
 }
 `,
@@ -146,7 +146,7 @@ export class CaseController {
   "src/features/case/case.module.ts": `import { Module } from "../../runtime";
 import { CASE_REPOSITORY, CASE_SERVICE } from "../shared/tokens";
 import { AuditModule } from "../audit/audit.module";
-import { DrizzleCaseRepository } from "./case.repository";
+import { CaseRepository } from "./case.repository";
 import { CaseService } from "./case.service";
 import { AcceptCaseCommand } from "./accept-case.command";
 import { CaseController } from "./case.controller";
@@ -155,7 +155,7 @@ import { CaseController } from "./case.controller";
   name: "case",
   imports: [AuditModule],
   providers: [
-    { provide: CASE_REPOSITORY, useClass: DrizzleCaseRepository },
+    { provide: CASE_REPOSITORY, useClass: CaseRepository },
     CaseService,
     { provide: CASE_SERVICE, useExisting: CaseService },
     AcceptCaseCommand,

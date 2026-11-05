@@ -62,7 +62,7 @@ export interface DatabaseAiContext {
     target: string | null;
     objects: DatabaseAiContextObject[];
     maintenance: {
-        structureSource: "drizzle" | "declarative-sql";
+        structureSource: "zmodel" | "declarative-sql";
         behaviorSource: "sql";
         generatedPaths: string[];
         protectedPaths: string[];
@@ -197,7 +197,7 @@ export function buildDatabaseAiContext(
     const allObjects = selected.flatMap(moduleObjects);
     const objects = target ? allObjects.filter((object) => objectMatchesTarget(object, target)) : allObjects;
     if (target && objects.length === 0) throw new Error(`未找到数据库对象: ${target}`);
-    const sqlFirst = existsSync(join(root, "supabase/schemas"));
+    const sqlFirst = !existsSync(join(root, "zenstack/schema.zmodel")) && existsSync(join(root, "supabase/schemas"));
     return {
         version: 1,
         scope: "database-ai-context",
@@ -206,14 +206,14 @@ export function buildDatabaseAiContext(
         target: target ?? null,
         objects,
         maintenance: {
-            structureSource: sqlFirst ? "declarative-sql" : "drizzle",
+            structureSource: sqlFirst ? "declarative-sql" : "zmodel",
             behaviorSource: "sql",
-            generatedPaths: [...(sqlFirst ? ["db/schema.ts"] : []), "generated/", "bootstrap/schema.sql", "output/database-audit/"],
+            generatedPaths: [...(sqlFirst ? ["db/schema.ts"] : ["zenstack/generated/"]), "generated/", "bootstrap/schema.sql", "output/database-audit/"],
             protectedPaths: ["migrations/", "supabase/migrations/", "generated/"],
             forwardMigrationPath: sqlFirst ? "supabase/migrations/<timestamp>_<intent>.sql" : "migrations/<timestamp>_<intent>.sql",
             rules: [
                 "Edit the selected maintained source, not a generated snapshot.",
-                ...(sqlFirst ? ["Author structure in supabase/schemas SQL; derive Drizzle query models, never run a second migration generator."] : []),
+                ...(sqlFirst ? ["Author structure in supabase/schemas SQL; derive query models, never run a second migration generator."] : []),
                 "Keep RPC, RLS, trigger and grant behavior in explicit SQL sources.",
                 "Create a new forward migration; never rewrite an applied migration.",
                 "Run lint, focused behavior tests and catalog reconciliation after edits.",

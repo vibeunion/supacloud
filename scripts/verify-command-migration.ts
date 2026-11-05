@@ -33,6 +33,11 @@ await run(resolve(root, "packages/query"), ["install", "--frozen-lockfile"]);
 await run(resolve(root, "packages/query"), ["run", "build"]);
 for (const name of ["contracts", "commands", "compiler", "db", "app", "app-svelte", "supacloud-js", "elysia"]) {
   const cwd = resolve(root, "packages", name);
+  // db tests import the CLI source; install it after the compiler build so its
+  // file dependency carries the generated declarations and typebox resolution.
+  if (name === "db") {
+    await run(resolve(root, "packages/cli"), ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);
+  }
   // Bun copies file dependencies; refresh them after upstream builds.
   await run(cwd, ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);
   if (name === "elysia") await run(cwd, ["run", "generate:example"]);

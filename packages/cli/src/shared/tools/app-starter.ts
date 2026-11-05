@@ -4,6 +4,7 @@ import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
 import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates";
+import { modelCommandTemplateFiles } from "./app-model-command-starter";
 import { STARTER_REVIEW_JOB, STARTER_REVIEW_JOB_TEST } from "./app-starter-review-job";
 import { STARTER_ATTACHMENT_POSTGRES, STARTER_ATTACHMENT_SCHEMA } from "./app-starter-attachments";
 import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from "./app-starter-attachment-worker";
@@ -37,11 +38,11 @@ export function appStarterFiles(name: string): Record<string, string> {
                 compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
                 "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
                 typecheck: "tsc --noEmit",
-                "db:generate": "supacloud-db generate",
-                "db:check": "supacloud-db check",
+                "db:generate": "supacloud-model generate && supacloud-db generate",
+                "db:check": "supacloud-model check && supacloud-db check",
                 "db:assess": "supacloud-db assess",
-                "db:diff": "drizzle-kit generate --config drizzle.config.ts",
-                "db:pull": "drizzle-kit pull --config drizzle.pull.config.ts",
+                "db:diff": "supacloud-model diff",
+                "db:pull": "supacloud-model pull",
                 check: "bun run db:check && bun run compile && bun run check:generated && bun run typecheck && bun run test",
                 test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
                 dev: "bun --no-env-file scripts/environment.ts development bun scripts/dev.ts",
@@ -58,7 +59,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/commands": `^${commandsMetadata.version}`,
                 "@supacloud/contracts": `^${contractsMetadata.version}`,
                 "@supacloud/db": `^${dbMetadata.version}`,
-                "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
+                ...dbMetadata.dependencies,
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 effect: "4.0.5",
@@ -67,7 +68,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
-                "drizzle-kit": dbMetadata.devDependencies["drizzle-kit"],
+                ...dbMetadata.devDependencies,
                 "@types/bun": "^1.4.4",
                 typescript: "^7.0.2",
             },
@@ -82,7 +83,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 useUnknownInCatchVariables: true,
                 noEmit: true, types: ["bun"],
             },
-            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/modules.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
+            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/modules.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "zenstack/generated/**/*.ts"],
         }),
         "bunfig.toml": "env = false\n",
         ".gitignore": [
@@ -621,7 +622,7 @@ The projection is not a full database export and grants no write access.
 
 GraphQL is not generated or enabled by this starter. For a specific Query Contract,
 explicitly configure graphql.schema with a role-scoped database export and add
-checked query documents. Drizzle and append-only migrations remain the database
+checked query documents. ZModel and append-only migrations remain the database
 authority; the export is a protocol snapshot, not a second schema source.
 
 ## Environments
@@ -938,10 +939,13 @@ export async function initializeAppProject(options: { root?: string; name?: stri
         throw new Error("app init requires an empty directory (an existing .git directory is allowed)");
     }
     const template = options.template ?? "minimal";
-    const files = template === "command" ? appStarterFiles(name) : appTemplateFiles(name, template, {
+    const sdk = {
         "@supacloud/js": `^${sdkMetadata.version}`,
         "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
-    });
+    };
+    const files = template === "command" ? appStarterFiles(name)
+        : template === "model-command" ? modelCommandTemplateFiles(name, sdk)
+        : appTemplateFiles(name, template, sdk);
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });

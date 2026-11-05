@@ -46,7 +46,12 @@
     {
       "name": "AspectContext",
       "kind": "type",
-      "signature": "export interface AspectContext {\n    kind: AspectKind;\n    name: string;\n    input: unknown;\n    request?: Request;\n    requestContext?: unknown;\n    scope?: Record<string, unknown>;\n    services?: Record<string, unknown>;\n    metadata?: unknown;\n}"
+      "signature": "export interface AspectContext<Input = unknown, Services extends object = Record<string, unknown>> {\n    readonly kind: AspectKind;\n    readonly name: string;\n    readonly input: Input;\n    readonly request?: Request;\n    readonly requestContext?: unknown;\n    readonly scope?: Record<string, unknown>;\n    readonly services?: Services;\n    readonly metadata?: unknown;\n}"
+    },
+    {
+      "name": "AspectExecutionError",
+      "kind": "both",
+      "signature": "export declare class AspectExecutionError extends Error {\n    readonly code: string;\n    constructor(code: string);\n}"
     },
     {
       "name": "AspectKind",
@@ -362,6 +367,11 @@
       "name": "defineModule",
       "kind": "value",
       "signature": "export declare function defineModule(options: ModuleOptions): Type<unknown>;"
+    },
+    {
+      "name": "defineOperationAspect",
+      "kind": "value",
+      "signature": "export declare function defineOperationAspect<Input, Result, Capabilities extends object>(contract: OperationAspectContract<Input, Result, Capabilities>, run: (context: OperationAspectContext<Input, Capabilities>, next: () => Promise<ReadonlyAspectData<Result>>) => ReadonlyAspectData<Result> | Promise<ReadonlyAspectData<Result>>): Aspect;"
     },
     {
       "name": "defineRouteContract",
@@ -1154,6 +1164,16 @@
       "signature": "export interface OnInit {\n    onInit(): void | Promise<void>;\n}"
     },
     {
+      "name": "OperationAspectContext",
+      "kind": "type",
+      "signature": "export interface OperationAspectContext<Input, Capabilities extends object> {\n    readonly kind: AspectKind;\n    readonly name: string;\n    readonly input: ReadonlyAspectData<Input>;\n    readonly capabilities: Readonly<Capabilities>;\n}"
+    },
+    {
+      "name": "OperationAspectContract",
+      "kind": "type",
+      "signature": "export interface OperationAspectContract<Input, Result, Capabilities extends object> {\n    readonly kind: AspectKind;\n    readonly name: string;\n    readonly input: (value: unknown) => Input;\n    readonly result: (value: unknown) => Result;\n    readonly capabilities: (context: AspectContext) => Capabilities;\n}"
+    },
+    {
       "name": "Optional",
       "kind": "value",
       "signature": "export declare function Optional(): ParameterDecorator;"
@@ -1302,6 +1322,11 @@
       "name": "QueryOptions",
       "kind": "type",
       "signature": "export interface QueryOptions {\n    name: string;\n    permission?: string;\n    tenantScope?: \"required\" | \"none\";\n}"
+    },
+    {
+      "name": "ReadonlyAspectData",
+      "kind": "type",
+      "signature": "export type ReadonlyAspectData<T> = T extends (...args: never[]) => unknown ? T : T extends object ? {\n    readonly [K in keyof T]: ReadonlyAspectData<T[K]>;\n} : T;"
     },
     {
       "name": "RedirectCommand",

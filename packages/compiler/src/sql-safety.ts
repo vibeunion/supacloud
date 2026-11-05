@@ -7,10 +7,10 @@ export const SQL_SAFETY_DIAGNOSTIC_CODES = {
 } as const;
 
 /**
- * Check Drizzle SQL operations using resolved symbols, including aliases and
+ * Check Kysely SQL operations using resolved symbols, including aliases and
  * re-exports. This is a type-escape guard, not an SQL parser or injection proof.
  */
-export function scanDrizzleSql(
+export function scanQuerySql(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   file: string,
@@ -24,7 +24,7 @@ export function scanDrizzleSql(
     if (!symbol) return false;
     const target = symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
     return target.name === "sql" && (target.declarations ?? []).some((declaration) =>
-      /(?:^|\/)node_modules\/drizzle-orm\//.test(declaration.getSourceFile().fileName.replaceAll("\\", "/")));
+      /(?:^|\/)node_modules\/kysely\//.test(declaration.getSourceFile().fileName.replaceAll("\\", "/")));
   };
   const report = (code: keyof typeof SQL_SAFETY_DIAGNOSTIC_CODES, node: ts.Node, message: string) => {
     diagnostics.push({
@@ -36,7 +36,7 @@ export function scanDrizzleSql(
     if (ts.isTaggedTemplateExpression(node) && importedSql(node.tag)
       && node.typeArguments?.some((type) => type.kind !== ts.SyntaxKind.UnknownKeyword)) {
       report("sql-result-assertion", node,
-        "Drizzle sql<T> asserts a result type without checking SQL or decoding rows. Use sql<unknown> and a schema decoder at the result boundary.");
+        "Kysely sql<T> asserts a result type without checking SQL or decoding rows. Use sql<unknown> and a schema decoder at the result boundary.");
     }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
       && node.expression.name.text === "raw" && importedSql(node.expression.expression)) {

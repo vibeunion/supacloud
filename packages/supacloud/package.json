@@ -39,5 +39,9 @@
   "devDependencies": {
     "@types/bun": "^1.4.4",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   }
 }

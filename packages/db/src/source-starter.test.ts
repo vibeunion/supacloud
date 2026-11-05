@@ -3,13 +3,19 @@ import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/prom
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as ts from "@typescript/typescript6";
-import { initializeAppProject, appStarterFiles } from "../../cli/src/shared/tools/app-starter";
+import { initializeAppProject as initializeFiles, appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
 import { databaseSources } from "./source-contracts";
 import { lintModule } from "./lint";
 import type { DatabaseModule } from "./module";
 import { pathToFileURL } from "node:url";
 
+import { compileModel } from "./model";
+async function initializeAppProject(options: Parameters<typeof initializeFiles>[0]) {
+  const result = await initializeFiles(options);
+  await compileModel(join(result.root, "zenstack/schema.zmodel"), join(result.root, "zenstack/generated"));
+  return result;
+}
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -28,25 +34,24 @@ test("database starter ships a source contract and live module ownership without
   expect(await readFile(join(root, "db/contracts/rpc-types.ts"), "utf8")).not.toContain("any");
   expect(await readFile(join(root, "db/modules.ts"), "utf8")).toContain('name: "starter"');
 });
-test("default checks run before regeneration and Drizzle candidate paths never replace the deployment ledger", () => {
+test("default checks run before regeneration and ZenStack candidate paths never replace the deployment ledger", () => {
   const files = appStarterFiles("example");
   expect(files["package.json"]).toContain('"check": "bun run db:check &&');
   expect(files["package.json"]).toContain('"build": "bun run db:check &&');
-  expect(files["package.json"]).toContain('"drizzle-orm": "1.0.0-rc.5-5935859"');
-  expect(files["package.json"]).toContain('"drizzle-kit": "1.0.0-rc.5-5935859"');
-  expect(files["drizzle.config.ts"]).toContain("./db/migration-candidates");
-  expect(files["drizzle.pull.config.ts"]).toContain("./output/database-audit/drizzle-candidate");
+  expect(files["package.json"]).toContain('"@zenstackhq/orm": "3.10.0"');
+  expect(files["package.json"]).toContain('"supacloud-model diff"');
+  expect(files["zenstack/schema.zmodel"]).toContain("@@allow");
   expect(files[".gitignore"]).toContain("output/database-audit/");
-  expect(files["AGENTS.md"]).toContain("Drizzle owns table declarations");
+  expect(files["AGENTS.md"]).toContain("schema.zmodel");
   expect(files["AGENTS.md"]).toContain("Do not introduce any/@ts-ignore");
   const plain = appTemplateFiles("example", "minimal", {
     "@supacloud/js": "^0.40.0",
     "@supabase/supabase-js": "^2.118.0",
   });
-  expect(plain["package.json"]).not.toContain("drizzle");
+  expect(plain["package.json"]).not.toContain("@zenstackhq");
   expect(plain["database.sources.json"]).toBeUndefined();
 });
-test("generated database module loads real Drizzle names and its SQL passes governance", async () => {
+test("generated database module loads real ZenStack names and its SQL passes governance", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-module-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -62,7 +67,7 @@ test("generated database module loads real Drizzle names and its SQL passes gove
     expect(await readFile(join(root, policy.source), "utf8")).toContain(`CREATE POLICY ${policy.name} ON ${policy.table}`);
   }
 });
-test("generated Drizzle declarations and configuration typecheck; inferred row types reject invalid states", async () => {
+test("generated ZenStack declarations and configuration typecheck; inferred row types reject invalid states", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-types-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -74,7 +79,7 @@ const insert: NewReview = row;`;
   const diagnostics = async (text: string) => {
     await writeFile(path, text);
     return ts.getPreEmitDiagnostics(ts.createProgram([
-      path, join(root, "drizzle.config.ts"), join(root, "drizzle.pull.config.ts"),
+      path, join(root, "zenstack/generated/schema.ts"),
     ], {
       strict: true, noEmit: true, skipLibCheck: true, types: ["bun"],
       typeRoots: [join(root, "node_modules/@types")],
@@ -85,23 +90,20 @@ const insert: NewReview = row;`;
   expect((await diagnostics(source + '\nconst invalid: NewReview = { ...row, state: true };')).map(item => item.code)).toContain(2322);
 });
 
-test("Drizzle generates real SQL drafts without changing deployment migrations", async () => {
+test("ZenStack generates real SQL drafts without changing deployment migrations", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-diff-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
   await symlink(resolve(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
   const migrationNames = await readdir(join(root, "migrations"));
   const before = await Promise.all(migrationNames.map(name => readFile(join(root, "migrations", name), "utf8")));
-  const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../node_modules/drizzle-kit/bin.cjs"),
-    "generate", "--config", "drizzle.config.ts"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../node_modules/prisma/build/index.js"),
+    "migrate", "diff", "--from-empty", "--to-schema-datamodel", "zenstack/generated/schema.prisma", "--script", "--output", "candidate.sql"], { cwd: root, stdout: "pipe", stderr: "pipe" });
   const [code, stdout, stderr] = await Promise.all([
     child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
   ]);
   expect(code, stdout + stderr).toBe(0);
-  const drafts = await readdir(join(root, "db/migration-candidates"), { recursive: true });
-  const sqlFile = drafts.find(name => name.endsWith(".sql"));
-  expect(sqlFile).toBeDefined();
-  expect(await readFile(join(root, "db/migration-candidates", sqlFile!), "utf8")).toContain("starter_reviews");
+  expect(await readFile(join(root, "candidate.sql"), "utf8")).toContain("starter_reviews");
   expect(await readdir(join(root, "migrations"))).toEqual(migrationNames);
   expect(await Promise.all(migrationNames.map(name => readFile(join(root, "migrations", name), "utf8")))).toEqual(before);
 }, 30_000);

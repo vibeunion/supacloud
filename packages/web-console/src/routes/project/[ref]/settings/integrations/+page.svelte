@@ -24,7 +24,7 @@
     { id: "auth0", name: "Auth0", description: "使用 Auth0 作为外部认证提供者，通过 JWT 进行联合认证", icon: "🔐", category: "认证", enabled: false, docsUrl: "https://auth0.com/docs" },
     { id: "cloudflare", name: "Cloudflare", description: "在 Cloudflare Workers 中使用 Supabase，自带连接池优化", icon: "☁️", category: "CDN/边缘", enabled: false, docsUrl: "https://developers.cloudflare.com" },
     { id: "prisma", name: "Prisma", description: "使用 Prisma ORM 连接你的 Supabase PostgreSQL 数据库", icon: "🔷", category: "ORM", enabled: false, docsUrl: "https://www.prisma.io/docs" },
-    { id: "drizzle", name: "Drizzle ORM", description: "轻量级 TypeScript ORM，原生支持 Supabase PostgreSQL", icon: "💧", category: "ORM", enabled: false, docsUrl: "https://orm.drizzle.team" },
+    { id: "zenstack", name: "ZenStack", description: "ZModel 模型与数据策略，通过 Bun SQL 连接 PostgreSQL", icon: "💧", category: "ORM", enabled: false, docsUrl: "https://zenstack.dev/docs" },
   ]);
 
   const categories = $derived([...new Set(integrations.map(i => i.category))]);

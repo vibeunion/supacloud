@@ -19,7 +19,7 @@ test("single entry generates native read types, decoders and source/migration dr
     });
     const options = parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated",
-      postgrestTypes: "database.types.ts", drizzleSchema: "db/schema.ts",
+      postgrestTypes: "database.types.ts", modelSchema: "db/schema.ts",
       graphql: { schema: "graphql/schema.graphql", documents: ["src/*.graphql"] },
       migrations: ["migrations/001.sql"],
     }, root);
@@ -50,7 +50,7 @@ test("configuration rejects unknown options and requires real input paths", () =
   expect(() => parseDatabaseContractsOptions({ mode: "code-first" }, "/tmp")).toThrow();
 });
 
-test("generated barrel retains real PostgREST projections, Drizzle row types and GraphQL result types", async () => {
+test("generated barrel retains real PostgREST projections, ZenStack row types and GraphQL result types", async () => {
   const root = await mkdtemp(join(tmpdir(), "database-contract-consumer-"));
   try {
     await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
@@ -60,13 +60,12 @@ test("generated barrel retains real PostgREST projections, Drizzle row types and
           Insert: { id?: string; title?: string | null }; Update: { title?: string | null }; Relationships: [] } };
         Views: {}; Functions: {}; Enums: {}; CompositeTypes: {};
       } };`,
-      "schema.ts": `import { pgTable, text } from "drizzle-orm/pg-core";
-        export const orders = pgTable("orders", { id: text().primaryKey(), title: text() });`,
+      "schema.ts": await readFile(join(import.meta.dir, "../../db/tests/fixtures/model/generated/schema.ts"), "utf8"),
       "schema.graphql": `type Order { id: ID! title: String } type Query { orders: [Order!]! }`,
       "orders.graphql": `query Orders { orders { id title } }`,
       "consumer.ts": `
 import { createClient } from "@supabase/supabase-js";
-import type { Database, QueryData, DrizzleSchema, OrdersQuery } from "./generated/database";
+import type { Database, QueryData, ModelSchema, OrdersQuery } from "./generated/database";
 const client = createClient<Database>("https://example.test", "public");
 const query = client.from("orders").select("id");
 type Rows = QueryData<typeof query>;
@@ -75,9 +74,9 @@ const rows: Rows = [{ id: "1" }];
 const extra: Rows = [{ id: "1", title: "hidden" }];
 // @ts-expect-error Selected types come from Database.
 const wrong: Rows = [{ id: 1 }];
-type Row = DrizzleSchema["orders"]["$inferSelect"];
-const row: Row = { id: "1", title: null };
-// @ts-expect-error Drizzle row shape remains independent from GraphQL envelope.
+type Row = import("@zenstackhq/orm").ModelResult<ModelSchema["schema"], "Note">;
+const row: Row = { id: "1", owner: "alice", value: 1 };
+// @ts-expect-error ZenStack row shape remains independent from GraphQL envelope.
 const invalidRow: Row = { orders: [] };
 const result: OrdersQuery = { orders: [{ id: "1", title: null }] };
 // @ts-expect-error GraphQL result values remain schema-owned.
@@ -86,7 +85,7 @@ void [rows, extra, wrong, row, invalidRow, result, invalidResult];`,
     });
     await generateDatabaseContracts({
       rootDir: root, outDir: join(root, "generated"), postgrestTypes: "database.types.ts",
-      drizzleSchema: "schema.ts", role: "authenticated", migrations: [],
+      modelSchema: "schema.ts", role: "authenticated", migrations: [],
       graphql: { schema: "schema.graphql", documents: ["orders.graphql"] },
     });
     const program = ts.createProgram([join(root, "consumer.ts")], {
@@ -108,18 +107,18 @@ test("uses only the protocols named in the configuration", async () => {
     });
     expect(() => parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
-    }, root)).toThrow("postgrestTypes, drizzleSchema, or graphql");
+    }, root)).toThrow("postgrestTypes, modelSchema, or graphql");
 
     const postgrest = parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
       postgrestTypes: "database.types.ts",
     }, root);
-    expect(postgrest.drizzleSchema).toBeUndefined();
+    expect(postgrest.modelSchema).toBeUndefined();
     expect(postgrest.graphql).toBeUndefined();
     await generateDatabaseContracts(postgrest);
     const postgrestBarrel = await readFile(join(root, "generated/database.ts"), "utf8");
     expect(postgrestBarrel).toContain("export type { Database }");
-    expect(postgrestBarrel).not.toContain("DrizzleSchema");
+    expect(postgrestBarrel).not.toContain("ModelSchema");
     expect(postgrestBarrel).not.toContain("./graphql");
 
     const graphql = parseDatabaseContractsOptions({
@@ -132,15 +131,15 @@ test("uses only the protocols named in the configuration", async () => {
     expect(graphqlBarrel).not.toContain("Database");
     expect(await readFile(join(root, "generated/graphql.ts"), "utf8")).toContain("parseHealthQuery");
 
-    const drizzle = parseDatabaseContractsOptions({
+    const model = parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
-      drizzleSchema: "db/schema.ts",
+      modelSchema: "db/schema.ts",
     }, root);
-    await generateDatabaseContracts(drizzle);
-    const drizzleBarrel = await readFile(join(root, "generated/database.ts"), "utf8");
-    expect(drizzleBarrel).toContain("DrizzleSchema");
-    expect(drizzleBarrel).not.toContain("export type { Database }");
-    expect(drizzleBarrel).not.toContain("./graphql");
+    await generateDatabaseContracts(model);
+    const modelBarrel = await readFile(join(root, "generated/database.ts"), "utf8");
+    expect(modelBarrel).toContain("ModelSchema");
+    expect(modelBarrel).not.toContain("export type { Database }");
+    expect(modelBarrel).not.toContain("./graphql");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

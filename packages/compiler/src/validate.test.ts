@@ -851,12 +851,12 @@ describe("validateGraph：坏 fixture 诊断", () => {
     };
 
     const diags = validateGraph(sampleGraph);
-    const selfDiag = diags.find((d) => d.code === "self-resolution-failed");
+    const selfDiag = diags.find((d) => d.code === "self-dependency-violation");
     expect(selfDiag).toBeDefined();
     expect(selfDiag?.message).toContain("@Self()");
   });
 
-  test("skipSelfDeps rejects provider declared in own module", () => {
+  test("skipSelfDeps rejects a missing parent binding after skipping the local provider", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -899,7 +899,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     };
 
     const diags = validateGraph(sampleGraph);
-    const skipDiag = diags.find((d) => d.code === "skip-self-resolution-failed");
+    const skipDiag = diags.find((d) => d.code === "skip-self-dependency-violation");
     expect(skipDiag).toBeDefined();
     expect(skipDiag?.message).toContain("@SkipSelf()");
   });

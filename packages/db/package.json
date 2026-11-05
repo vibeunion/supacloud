@@ -8,7 +8,8 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "supacloud-sql-impact": "./dist/sql-impact-cli.js",
-    "supacloud-db": "./dist/source-contracts-cli.js"
+    "supacloud-db": "./dist/source-contracts-cli.js",
+    "supacloud-model": "./dist/model-cli.js"
   },
   "exports": {
     "./source-contracts": {
@@ -20,14 +21,6 @@
       "types": "./dist/sql-analysis.d.ts",
       "import": "./dist/sql-analysis.js"
     },
-    "./drizzle": {
-      "types": "./dist/drizzle.d.ts",
-      "import": "./dist/drizzle.js"
-    },
-    "./drizzle-bun": {
-      "types": "./dist/drizzle-bun.d.ts",
-      "import": "./dist/drizzle-bun.js"
-    },
     "./bun": {
       "types": "./dist/command-bun.d.ts",
       "import": "./dist/command-bun.js"
@@ -36,6 +29,18 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./zenstack": {
+      "types": "./dist/zenstack.d.ts",
+      "import": "./dist/zenstack.js"
+    },
+    "./bun-dialect": {
+      "types": "./dist/bun-dialect.d.ts",
+      "import": "./dist/bun-dialect.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "import": "./dist/model.js"
     }
   },
   "files": [
@@ -47,14 +52,13 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/command-bun.ts src/drizzle.ts src/drizzle-bun.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --outdir dist --target node --external bun --external @supacloud/contracts --external drizzle-orm --external libpg-query --external @typescript/typescript6",
+    "build:js": "bun build src/index.ts src/command-bun.ts src/model.ts src/model-cli.ts src/zenstack.ts src/bun-dialect.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --root src --outdir dist --target node --external bun --external @supacloud/contracts --external @zenstackhq/orm --external @zenstackhq/schema --external @zenstackhq/plugin-policy --external kysely --external libpg-query --external @typescript/typescript6 --external @zenstackhq/language --external @zenstackhq/sdk",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
-    "typecheck:drizzle": "tsc -p tsconfig.drizzle.json --noEmit"
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },
   "keywords": [
     "supacloud",
@@ -72,25 +76,26 @@
   "devDependencies": {
     "typebox": "1.4.3",
     "@sinclair/typebox": "0.34.52",
-    "drizzle-orm": "1.0.0-rc.5-5935859",
-    "drizzle-kit": "1.0.0-rc.5-5935859",
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "@zenstackhq/cli": "3.10.0",
+    "prisma": "6.19.3",
+    "pg": "8.23.1"
   },
   "dependencies": {
     "@typescript/typescript6": "^6.0.2",
     "libpg-query": "18.1.5",
-    "@supacloud/contracts": "file:../contracts"
-  },
-  "peerDependencies": {
-    "drizzle-orm": "1.0.0-rc.5-5935859"
-  },
-  "peerDependenciesMeta": {
-    "drizzle-orm": {
-      "optional": true
-    }
+    "@supacloud/contracts": "file:../contracts",
+    "@zenstackhq/orm": "3.10.0",
+    "@zenstackhq/schema": "3.10.0",
+    "@zenstackhq/plugin-policy": "3.10.0",
+    "kysely": "0.29.0",
+    "@zenstackhq/language": "3.10.0",
+    "@zenstackhq/sdk": "3.10.0"
   },
   "overrides": {
-    "@supacloud/contracts": "file:../contracts"
+    "@supacloud/contracts": "file:../contracts",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   }
 }

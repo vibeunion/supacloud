@@ -85,7 +85,7 @@ describe("analyzeProject：provider 解析", () => {
 
     const repository = requireValue(caseModule.providers[0]);
     expect(repository.kind).toBe("class");
-    expect(repository.useClass).toBe("DrizzleCaseRepository");
+    expect(repository.useClass).toBe("CaseRepository");
     expect(repository.deps).toEqual(["DB_CLIENT"]);
 
     const service = requireValue(caseModule.providers[1]);

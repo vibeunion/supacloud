@@ -22,7 +22,7 @@ function input(type = 'uuid', value = testId) {
 }
 
 describe('controlled migration bindings', () => {
-  test('supports Drizzle v1 migration.sql paths without rewriting sources or snapshots', () => {
+  test('supports nested migration.sql paths without rewriting sources or snapshots', () => {
     const options = input();
     const before = JSON.stringify(options);
     const result = renderMigrationBindings(options);

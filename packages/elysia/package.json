@@ -66,7 +66,9 @@
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/commands": "file:../commands",
-    "@graphql-tools/utils": "^12.0.4"
+    "@graphql-tools/utils": "^12.0.4",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
   },
   "peerDependencies": {
     "elysia": "2.0.0-rc.1"

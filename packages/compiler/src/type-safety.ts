@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@typescript/typescript6";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
-import { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
+import { scanQuerySql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
 
 const DEFAULT_EXCLUDES = [
@@ -157,7 +157,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), rootDir,
       options.allowAlternativeLibraries === undefined ? {} : { allowAlternativeLibraries: options.allowAlternativeLibraries },
     ));
-    diagnostics.push(...scanDrizzleSql(
+    diagnostics.push(...scanQuerySql(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
     ));
     const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, sourceFile.languageVariant, sourceFile.text);

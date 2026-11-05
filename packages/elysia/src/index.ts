@@ -8,6 +8,7 @@ import type {
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
 import { requireFeatureRequestContext } from "@supacloud/app";
+import { composeAspects as composeApplicationAspects, invokeAspect, freezeAspectData } from "@supacloud/app/execution";
 import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
 import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
@@ -319,20 +320,7 @@ export function composeAspects(
   const active = aspects.filter(
     (aspect): aspect is ApplicationAspect => typeof aspect === "function",
   );
-  if (active.length === 0) return (_context, next) => next();
-  return (context, next) => {
-    let index = -1;
-    const dispatch = (current: number): Promise<unknown> => {
-      if (current <= index) {
-        return Promise.reject(new Error("next() called multiple times"));
-      }
-      index = current;
-      const aspect = active[current];
-      if (!aspect) return Promise.resolve(next());
-      return Promise.resolve(aspect(context, () => dispatch(current + 1)));
-    };
-    return dispatch(0);
-  };
+  return composeApplicationAspects(...active);
 }
 
 function observedAspects(
@@ -1501,6 +1489,9 @@ export function createModulePlugin<
       const commandPipeline = route.command
         ? descriptorPipeline(command ?? {}, "command", options.onExecution)
         : undefined;
+      const routeHasAspects = compiled.aspectPipeline !== undefined || (compiled.aspects?.length ?? 0) > 0
+        || route.aspectPipeline !== undefined || (route.aspects?.length ?? 0) > 0
+        || command?.aspectPipeline !== undefined || (command?.aspects?.length ?? 0) > 0;
       const routeInvoker = route.invoker;
       if (mappingPolicies.length > 0) {
         const responseValidators = Validator.response(schema.response, { normalize: options.normalize ?? true });
@@ -1626,12 +1617,17 @@ export function createModulePlugin<
             services,
             metadata: command ?? route,
           };
-          const invokeRoute = () => modulePipeline(
-            route.command ? commandContext : routeContext,
-            once(() => routePipeline(routeContext, once(() => route.command
-              ? commandPipeline!(commandContext, once(invoke))
-              : invoke()))),
-          );
+          // A route aspect keeps its HTTP context, but inside a command boundary
+          // the entire chain must still return the actual handler result. Native
+          // Response identity is preserved at this transport boundary.
+          const invokeRoute = () => route.command && routeHasAspects
+            ? invokeAspect(commandContext, (_context, next) => modulePipeline(commandContext,
+              () => routePipeline(routeContext, () => commandPipeline!(commandContext, next))), invoke,
+              result => { if (!(result instanceof Response)) freezeAspectData(result); })
+            : modulePipeline(route.command ? commandContext : routeContext,
+              once(() => routePipeline(routeContext, once(() => route.command
+                ? commandPipeline!(commandContext, once(invoke))
+                : invoke()))));
           const invokeCommand = () => {
             if (!route.command) return invokeRoute();
             if (!command) {

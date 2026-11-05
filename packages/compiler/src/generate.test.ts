@@ -213,7 +213,7 @@ for (const module of createUnscopedModules()) {
         return `${diagnostic.file?.fileName}:${position ? position.line + 1 : "?"}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")}`;
       });
       expect(diagnostics).toEqual([]);
-      expect(rendered.applicationCode).toContain('deps["db"] as Parameters<typeof makeLabel>[0]');
+      expect(rendered.applicationCode).toContain('readCompiledDependency(deps, "db", "DB", false) as Parameters<typeof makeLabel>[0]');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -239,7 +239,7 @@ for (const module of createUnscopedModules()) {
       'import { createLogger } from "../src/features/audit/logger";',
     );
     expect(applicationCode).toContain(
-      'import { DrizzleCaseRepository } from "../src/features/case/case.repository";',
+      'import { CaseRepository } from "../src/features/case/case.repository";',
     );
     expect(applicationCode).toContain(
       'import { AcceptParams, AcceptResult, CreateCaseBody } from "../src/features/case/contracts";',
@@ -373,10 +373,10 @@ export class LifecycleController {
       "const auditService = new AuditService(auditConfig, logger);",
     );
     expect(applicationCode).toContain(
-      'const caseRepository = new DrizzleCaseRepository(deps["dbClient"] as ConstructorParameters<typeof DrizzleCaseRepository>[0]);',
+      'const caseRepository = new CaseRepository(readCompiledDependency(deps, "dbClient", "DB_CLIENT", false) as ConstructorParameters<typeof CaseRepository>[0]);',
     );
     expect(applicationCode).toContain(
-      'const caseService = new CaseService(caseRepository, imported["audit"]["auditService"] as ConstructorParameters<typeof CaseService>[1]);',
+      'const caseService = new CaseService(caseRepository, readCompiledDependency(imported["audit"], "auditService", "AUDIT_SERVICE", false) as ConstructorParameters<typeof CaseService>[1]);',
     );
     expect(applicationCode).toContain(
       "const acceptCaseCommand = new AcceptCaseCommand(caseService);",
@@ -433,7 +433,7 @@ export class LifecycleController {
   test("request 工厂：REQUEST_CONTEXT 传 ctx，其余从 services 解析", () => {
     expect(applicationCode).toContain("createCaseRequestScope");
     expect(applicationCode).toContain(
-      'const caseController = new CaseController(services["caseRepository"] as ConstructorParameters<typeof CaseController>[0], imported["audit"]["auditService"] as ConstructorParameters<typeof CaseController>[1], ctx as ConstructorParameters<typeof CaseController>[2]);',
+      'const caseController = new CaseController(readCompiledDependency(services, "caseRepository", "CASE_REPOSITORY", false) as ConstructorParameters<typeof CaseController>[0], readCompiledDependency(imported["audit"], "auditService", "AUDIT_SERVICE", false) as ConstructorParameters<typeof CaseController>[1], ctx as ConstructorParameters<typeof CaseController>[2]);',
     );
   });
 
@@ -738,7 +738,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     }
   });
 
-  test("compilation preserves working artifacts by default and permits explicit diagnostic emission", async () => {
+  test("compilation preserves working artifacts when invalid DI blocks diagnostic emission", async () => {
     const badRoot = await mkdtemp(join(tmpdir(), "supacloud-compiler-error-"));
     const badOut = join(badRoot, "generated");
     await writeFixtureProject(badRoot, GOOD_PROJECT_FILES);
@@ -752,7 +752,8 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     expect(failed.written).toEqual([]);
     expect(await readFile(join(badOut, "application.ts"), "utf8")).toBe(original);
     const diagnosticOutput = await compileProject({ rootDir: badRoot, outDir: badOut, writeOnError: true });
-    expect(diagnosticOutput.written.length).toBeGreaterThan(0);
+    expect(diagnosticOutput.written).toEqual([]);
+    expect(await readFile(join(badOut, "application.ts"), "utf8")).toBe(original);
   });
 });
 
