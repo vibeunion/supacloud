@@ -738,7 +738,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     }
   });
 
-  test("compilation preserves working artifacts by default and permits explicit diagnostic emission", async () => {
+  test("compilation preserves working artifacts when invalid DI blocks diagnostic emission", async () => {
     const badRoot = await mkdtemp(join(tmpdir(), "supacloud-compiler-error-"));
     const badOut = join(badRoot, "generated");
     await writeFixtureProject(badRoot, GOOD_PROJECT_FILES);
@@ -752,7 +752,8 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     expect(failed.written).toEqual([]);
     expect(await readFile(join(badOut, "application.ts"), "utf8")).toBe(original);
     const diagnosticOutput = await compileProject({ rootDir: badRoot, outDir: badOut, writeOnError: true });
-    expect(diagnosticOutput.written.length).toBeGreaterThan(0);
+    expect(diagnosticOutput.written).toEqual([]);
+    expect(await readFile(join(badOut, "application.ts"), "utf8")).toBe(original);
   });
 });
 

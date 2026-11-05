@@ -1359,7 +1359,20 @@ class ModuleGenerator {
     const entries = [...returns.entries()].map(([key, expr]) =>
       key === expr ? key : `${key}: ${expr}`,
     );
-    lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
+    const borrowed = new Set<string>();
+    for (const owner of [...this.module.providers, ...this.module.controllers].filter(item => item.scope !== "application")) {
+      for (const [index, token] of owner.deps.entries()) {
+        const resolution = resolveDependency(this.graph, this.module, token, owner.scope, dependencyFlags(owner, token, index));
+        const key = camelName(token);
+        if (resolution.kind === "external" && !returns.has(key)) borrowed.add(key);
+      }
+    }
+    if (borrowed.size > 0) {
+      const descriptors = [...borrowed].map(key => `${JSON.stringify(key)}: { value: deps[${JSON.stringify(key)}] }`);
+      lines.push(`return retainPlatformDependencies(Object.defineProperties({ ${entries.join(", ")} }, { ${descriptors.join(", ")} }), deps);`);
+    } else {
+      lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
+    }
     return lines.join("\n");
   }
 
