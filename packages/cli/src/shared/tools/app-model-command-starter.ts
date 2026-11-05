@@ -1,4 +1,7 @@
-import { COMMAND_RECEIPT_SQL } from "@supacloud/db";
+import receiptSchema from "./model-command-receipts.json" with { type: "json" };
+
+// Embed the maintained SQL asset so source starters load before DB packages are built.
+const COMMAND_RECEIPT_SQL = receiptSchema.sql;
 import metadata from "./starter-metadata.json" with { type: "json" };
 import { baseTemplateFiles, type StarterSdkDependencies } from "./app-starter-templates";
 

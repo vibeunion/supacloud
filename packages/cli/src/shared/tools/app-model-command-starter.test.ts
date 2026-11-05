@@ -8,6 +8,7 @@ import * as ts from "@typescript/typescript6";
 import { initializeAppProject } from "./app-starter";
 import { compileProject, renderApplication, type ApplicationGraph } from "@supacloud/compiler";
 import { compileModel } from "@supacloud/db/model";
+import { COMMAND_RECEIPT_SQL } from "@supacloud/db";
 import { databaseSources } from "@supacloud/db/source-contracts";
 import { composeAspects, defineOperationAspect, type Aspect } from "../../../../app/dist/execution.js";
 import { createApplication, type CompiledModule } from "../../../../elysia/dist/index.js";
@@ -160,6 +161,7 @@ test("HTTP route aspects cannot fabricate command success inside the transaction
 test("model-command generates a strictly typed and governed application for HTTP and workers", async () => {
   const root = await temporary();
   await initializeAppProject({ root, name: "orders", template: "model-command" });
+  expect(await readFile(join(root, "migrations/001-command-receipts.sql"), "utf8")).toBe(COMMAND_RECEIPT_SQL);
   await dependencies(root);
   await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
   const sources = await databaseSources(root, "generate");
@@ -214,6 +216,7 @@ const postgres = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 test.skipIf(!postgres)("real model HTTP/worker flow isolates tenants, replays receipts, rejects revocation and rolls back failed audit", async () => {
   const root = await temporary();
   await initializeAppProject({ root, name: "orders", template: "model-command" });
+  expect(await readFile(join(root, "migrations/001-command-receipts.sql"), "utf8")).toBe(COMMAND_RECEIPT_SQL);
   await dependencies(root);
   await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
   await databaseSources(root, "generate");
