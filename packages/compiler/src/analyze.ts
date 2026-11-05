@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { relative, resolve as resolvePath, sep } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { createIncrementalProgramSession } from "./program";
 import type {
   ApplicationGraph,
@@ -234,13 +234,14 @@ export async function analyzeProject(
 ): Promise<ApplicationGraph> {
   const session = cache?.programSession ?? createIncrementalProgramSession(rootDir);
   if (cache) cache.programSession = session;
-  const rootNames = ts.sys.readDirectory(
+  await using ownedSession = cache ? undefined : session;
+  const rootNames = (await ts.sys.readDirectory(
     rootDir,
     [".ts", ".tsx"],
     ["node_modules", "dist"],
     include ?? DEFAULT_INCLUDE,
-  );
-  const update = session.update(rootNames, changedPaths);
+  ));
+  const update = await (ownedSession ?? session).update(rootNames, changedPaths);
   const program = update.program;
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles()
@@ -279,7 +280,7 @@ export async function analyzeProject(
     }
   }
   const nativeTraitFiles = new Map<string, Set<string>>();
-  for (const diagnostic of session.getDiagnostics()) {
+  for (const diagnostic of (await session.getDiagnostics())) {
     ctx.diagnostics.push(toCompilerDiagnostic(diagnostic, rootDir));
   }
   for (const trait of session.getTraits()) {
@@ -289,7 +290,7 @@ export async function analyzeProject(
   }
   for (const sf of sourceFiles) {
     if (!/\.(?:test|spec)\.[cm]?tsx?$/.test(sf.fileName)) {
-      ctx.diagnostics.push(...scanRuntimeDi(sf, sourcePath(rootDir, sf.fileName)));
+      ctx.diagnostics.push(...(await scanRuntimeDi(sf, sourcePath(rootDir, sf.fileName))));
     }
     indexFile(sf, ctx);
   }
@@ -393,10 +394,10 @@ export async function analyzeProject(
         continue;
       }
       const diagBefore = ctx.diagnostics.length;
-      const parsed = parseModule(c, nameByNode, ctx);
+      const parsed = (await parseModule(c, nameByNode, ctx));
       const moduleDiagnostics = ctx.diagnostics.slice(diagBefore);
 
-      const ownedFiles = collectModuleSourceClosure(parsed, ctx);
+      const ownedFiles = (await collectModuleSourceClosure(parsed, ctx));
 
       const fileHashes: Record<string, string> = {};
       for (const f of ownedFiles) {
@@ -426,7 +427,7 @@ export async function analyzeProject(
     ctx.diagnostics = finalDiagnostics;
     modules = finalModules;
   } else {
-    modules = candidates.map((c) => parseModule(c, nameByNode, ctx));
+    modules = (await ts.asyncMap(candidates, async (c) => (await parseModule(c, nameByNode, ctx))));
   }
   modules.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 
@@ -455,9 +456,9 @@ export async function analyzeProject(
 
   for (const [name, classInfo] of ctx.classesByName.entries()) {
     if (!allRegisteredClasses.has(name)) {
-      const injectable = parseInjectableOptions(classInfo.decl, ctx);
+      const injectable = (await parseInjectableOptions(classInfo.decl, ctx));
       if (injectable?.providedIn === "root") {
-        const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = classDeps(classInfo.decl, ctx);
+        const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = await classDeps(classInfo.decl, ctx);
         const file = sourcePath(ctx.rootDir, classInfo.file);
         const line = lineOf(classInfo.decl);
         if (missing) {
@@ -493,7 +494,7 @@ export async function analyzeProject(
         const arg = decoratorArguments(controllerDec)[0];
         const isStandalone = arg && ts.isObjectLiteralExpression(arg) && booleanProp(arg, "standalone");
         if (isStandalone) {
-          const ctrl = parseController(classInfo.decl, ctx);
+          const ctrl = (await parseController(classInfo.decl, ctx));
           if (ctrl) standaloneControllers.push(ctrl);
         }
       }
@@ -509,13 +510,13 @@ export async function analyzeProject(
           const branches = checkedBranches(meta, ctx);
           const audit = stringLiteralProp(meta, "audit");
           const standaloneName = stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name;
-          const standaloneUses = parseInfraResourceUseRefs(
+          const standaloneUses = (await parseInfraResourceUseRefs(
             infraResourceProp(meta, "uses", ctx),
             ctx,
             `command ${standaloneName}`,
             sourcePath(ctx.rootDir, classInfo.file),
             lineOf(classInfo.decl),
-          );
+          ));
           rejectUndeclaredResourceUses(standaloneUses, standaloneResourceNames, ctx,
             `command ${standaloneName}`, sourcePath(ctx.rootDir, classInfo.file), lineOf(classInfo.decl));
           standaloneCommands.push({
@@ -529,11 +530,11 @@ export async function analyzeProject(
             idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             standalone: true,
             ...(standaloneUses.length > 0 ? { uses: standaloneUses } : {}),
-            aspects: parseAspectRefs(
+            aspects: (await parseAspectRefs(
               getProp(meta, "aspects"),
               ctx,
               `command ${classInfo.decl.name?.text ?? name}`,
-            ),
+            )),
           });
         }
       }
@@ -593,7 +594,7 @@ export async function analyzeProject(
 
   const governedClasses = modules.flatMap((module) => module.commands.flatMap((command) => {
     const declaration = ctx.classesByName.get(command.className)?.decl;
-    return declaration ? [{ declaration, name: command.name }] : [];
+    return declaration ? [{ declaration, name: command.name, ...(command.rpc === undefined ? {} : { rpc: command.rpc }) }] : [];
   }));
   const boundRoutes = new Map<ts.MethodDeclaration, string>();
   for (const module of modules) for (const controller of module.controllers) {
@@ -607,7 +608,7 @@ export async function analyzeProject(
   }
   for (const source of sourceFiles) {
     if (!/\.(?:test|spec)\.[cm]?tsx?$/.test(source.fileName)) {
-      ctx.diagnostics.push(...scanCommandBoundaries(source, sourcePath(rootDir, source.fileName), checker, governedClasses, boundRoutes));
+      ctx.diagnostics.push(...await scanCommandBoundaries(source, sourcePath(rootDir, source.fileName), checker, governedClasses, boundRoutes));
     }
   }
 
@@ -680,7 +681,7 @@ export async function analyzeProject(
  * Keeping this closure in the cache prevents shared source edits from being
  * incorrectly treated as cache hits.
  */
-function collectModuleSourceClosure(module: ModuleNode, ctx: AnalysisContext): Set<string> {
+async function collectModuleSourceClosure(module: ModuleNode, ctx: AnalysisContext): Promise<Set<string>> {
   const seeds = new Set<string>();
   const addRelativeModule = (path: string | undefined): void => {
     if (!path) return;
@@ -717,12 +718,7 @@ function collectModuleSourceClosure(module: ModuleNode, ctx: AnalysisContext): S
         moduleName = statement.moduleReference.expression.text;
       }
       if (!moduleName || moduleName.startsWith("node:")) continue;
-      const resolved = ts.resolveModuleName(
-        moduleName,
-        sourceFile.fileName,
-        ctx.program.getCompilerOptions(),
-        ts.sys,
-      ).resolvedModule?.resolvedFileName;
+      const resolved = (await ctx.program.resolveModuleName(moduleName, sourceFile.fileName)).resolvedModule?.resolvedFileName;
       if (resolved && isProjectSourcePath(resolved, ctx.rootDir) && !enqueued.has(resolved)) {
         enqueued.add(resolved);
         queue.push(resolved);
@@ -797,31 +793,30 @@ function parseTokenVariable(decl: VariableDeclaration, file: string): TokenInfo 
   return info;
 }
 
-function parseModule(
+async function parseModule(
   candidate: { node: AstNode; options: ObjectLiteralExpression; className: string; file: string; line: number },
   nameByNode: Map<AstNode, string>,
   ctx: AnalysisContext,
-): ModuleNode {
+): Promise<ModuleNode> {
   const { options, className, file, line } = candidate;
   const name = nameByNode.get(candidate.node) ?? className;
-  const featureSpec = parseFeatureSpec(getProp(options, "spec"), ctx);
+  const featureSpec = (await parseFeatureSpec(getProp(options, "spec"), ctx));
 
   const tags = arrayProp(options, "tags")
     .map((el) => (ts.isStringLiteral(el) ? el.text : nodeText(el).replace(/['"]/g, "")))
     .filter(Boolean);
-  const aspects = parseAspectRefs(
+  const aspects = (await parseAspectRefs(
     getProp(options, "aspects"),
     ctx,
     `module ${name}`,
-  );
-  const moduleResourceNames = parseModuleInfraResources(
+  ));
+  const moduleResourceNames = (await parseModuleInfraResources(
     infraResourceProp(options, "resources", ctx), ctx, `module ${name}`, sourcePath(ctx.rootDir, file), line,
-  );
+  ));
 
-  const imports = arrayProp(options, "imports")
-    .map((el) => {
+  const imports = (await ts.asyncMap(arrayProp(options, "imports"), async (el) => {
       const unwrapped = unwrapForwardRef(el);
-      const decl = ts.isIdentifier(unwrapped) ? resolveDeclaration(unwrapped, ctx)[0] : undefined;
+      const decl = ts.isIdentifier(unwrapped) ? (await resolveDeclaration(unwrapped, ctx))[0] : undefined;
       if (decl) {
         const known = nameByNode.get(decl);
         if (known) return known;
@@ -834,15 +829,15 @@ function parseModule(
         if (ts.isVariableDeclaration(decl)) return variableName(decl);
       }
       return nodeText(el);
-    })
+    }))
     .filter((v, i, arr) => arr.indexOf(v) === i);
 
-  const exports = arrayProp(options, "exports").map((el) => tokenNameOf(el, ctx).name);
+  const exports = (await ts.asyncMap(arrayProp(options, "exports"), async (el) => (await tokenNameOf(el, ctx)).name));
   const exportsSet = new Set(exports);
 
   const providers: ProviderNode[] = [];
-  for (const el of expandProviderExpressions(arrayProp(options, "providers"), ctx)) {
-    const parsedProviders = parseFunctionalProvider(el, exportsSet, ctx);
+  for (const el of (await expandProviderExpressions(arrayProp(options, "providers"), ctx))) {
+    const parsedProviders = (await parseFunctionalProvider(el, exportsSet, ctx));
     if (parsedProviders) {
       providers.push(...parsedProviders);
       continue;
@@ -858,20 +853,20 @@ function parseModule(
       );
       continue;
     }
-    const provider = parseProvider(el, exportsSet, ctx);
+    const provider = (await parseProvider(el, exportsSet, ctx));
     if (provider) providers.push(provider);
   }
   for (const el of arrayProp(options, "jobs")) {
     if (!ts.isIdentifier(el)) continue;
-    const decl = resolveDeclaration(el, ctx)[0];
+    const decl = (await resolveDeclaration(el, ctx))[0];
     if (!decl || !ts.isClassDeclaration(decl)) continue;
     const className = decl.name?.text ?? el.text;
     const registeredProvider = providers.find((provider) =>
       provider.token === className || provider.useClass === className,
     );
     if (registeredProvider) continue;
-    const deps = classDeps(decl, ctx);
-    const injectable = parseInjectableOptions(decl, ctx);
+    const deps = (await classDeps(decl, ctx));
+    const injectable = (await parseInjectableOptions(decl, ctx));
     const scope = injectable?.scope ?? "job";
     providers.push({
       token: className,
@@ -897,7 +892,7 @@ function parseModule(
 
   const controllers: ControllerNode[] = [];
   for (const el of arrayProp(options, "controllers")) {
-    const controller = parseController(el, ctx);
+    const controller = (await parseController(el, ctx));
     if (controller) controllers.push(controller);
   }
 
@@ -905,24 +900,24 @@ function parseModule(
   // in commands/jobs/queries arrays.
   const handlerClasses: ClassDeclaration[] = [];
   const seenHandlers = new Set<string>();
-  const collectHandler = (expr: Expression) => {
+  const collectHandler = async (expr: Expression) => {
     if (!ts.isIdentifier(expr)) return;
-    const decl = resolveDeclaration(expr, ctx)[0];
+    const decl = (await resolveDeclaration(expr, ctx))[0];
     if (decl && ts.isClassDeclaration(decl) && !seenHandlers.has(decl.name?.text ?? "")) {
       seenHandlers.add(decl.name?.text ?? "");
       handlerClasses.push(decl);
     }
   };
   for (const el of arrayProp(options, "providers")) {
-    if (ts.isIdentifier(el)) collectHandler(el);
+    if (ts.isIdentifier(el)) (await collectHandler(el));
     if (ts.isObjectLiteralExpression(el)) {
       const useClass = getProp(el, "useClass");
-      if (useClass) collectHandler(useClass);
+      if (useClass) (await collectHandler(useClass));
     }
   }
-  arrayProp(options, "commands").forEach(collectHandler);
-  arrayProp(options, "jobs").forEach(collectHandler);
-  arrayProp(options, "queries").forEach(collectHandler);
+  (await ts.asyncForEach(arrayProp(options, "commands"), collectHandler));
+  (await ts.asyncForEach(arrayProp(options, "jobs"), collectHandler));
+  (await ts.asyncForEach(arrayProp(options, "queries"), collectHandler));
   ctx.moduleHandlerFiles.set(name, [...new Set(
     [...handlerClasses].map((cls) => sourcePath(ctx.rootDir, cls.getSourceFile().fileName)),
   )].sort());
@@ -935,23 +930,23 @@ function parseModule(
     if (commandDec) {
       const meta = decoratorObjectArg(commandDec);
       if (meta) {
-        const aspects = parseAspectRefs(
+        const aspects = (await parseAspectRefs(
           getProp(meta, "aspects"),
           ctx,
           `command ${cls.name?.text ?? "<anonymous>"}`,
-        );
+        ));
         const permission = stringLiteralProp(meta, "permission");
         const rpc = checkedRpc(meta, ctx);
         const branches = checkedBranches(meta, ctx);
         const audit = stringLiteralProp(meta, "audit");
         const commandName = stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>";
-        const uses = parseInfraResourceUseRefs(
+        const uses = (await parseInfraResourceUseRefs(
           infraResourceProp(meta, "uses", ctx),
           ctx,
           `command ${commandName}`,
           sourcePath(ctx.rootDir, cls.getSourceFile().fileName),
           lineOf(cls),
-        );
+        ));
         rejectUndeclaredResourceUses(uses, moduleResourceNames, ctx, `command ${commandName}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
         const tenantScope = commandModeProp(meta, "tenantScope");
         commands.push({
@@ -974,7 +969,7 @@ function parseModule(
     if (jobDec) {
       const meta = decoratorObjectArg(jobDec);
       if (meta) {
-        const injectable = parseInjectableOptions(cls, ctx);
+        const injectable = (await parseInjectableOptions(cls, ctx));
         const className = cls.name?.text ?? "<anonymous>";
         const provider = providers.find((candidate) =>
           candidate.token === className || candidate.useClass === className,
@@ -992,19 +987,19 @@ function parseModule(
             docsUrl: "https://supacloud.dev/errors/SC4007",
           });
         }
-        const aspects = parseAspectRefs(
+        const aspects = (await parseAspectRefs(
           getProp(meta, "aspects"),
           ctx,
           `job ${className}`,
-        );
-        const contract = parseJobOptions(meta, className, ctx);
-        const jobUses = parseInfraResourceUseRefs(
+        ));
+        const contract = (await parseJobOptions(meta, className, ctx));
+        const jobUses = (await parseInfraResourceUseRefs(
           infraResourceProp(meta, "uses", ctx),
           ctx,
           `job ${stringLiteralProp(meta, "name") ?? className}`,
           sourcePath(ctx.rootDir, cls.getSourceFile().fileName),
           lineOf(cls),
-        );
+        ));
         rejectUndeclaredResourceUses(jobUses, moduleResourceNames, ctx, `job ${stringLiteralProp(meta, "name") ?? className}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
         const tenantScope = commandModeProp(meta, "tenantScope");
         jobs.push({
@@ -1054,30 +1049,30 @@ function parseModule(
   };
 }
 
-function parseFeatureSpec(
+async function parseFeatureSpec(
   input: Expression | undefined,
   ctx: AnalysisContext,
   seen = new Set<ts.Node>(),
-): FeatureSpecNode | undefined {
+): Promise<FeatureSpecNode | undefined> {
   if (!input) return undefined;
   if (seen.has(input)) return undefined;
   seen.add(input);
   if (ts.isIdentifier(input)) {
     const local = input.getSourceFile().statements.flatMap((statement) =>
       ts.isVariableStatement(statement) ? [...statement.declarationList.declarations] : []);
-    const resolved = resolveDeclaration(input, ctx)[0];
+    const resolved = (await resolveDeclaration(input, ctx))[0];
     const decl = (resolved && ts.isVariableDeclaration(resolved) ? resolved : undefined) ??
       ctx.variablesByName.get(input.text) ??
       local.find((candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === input.text) ??
       descendantsOfKind<VariableDeclaration>(input.getSourceFile(), ts.isVariableDeclaration)
         .find((candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === input.text);
-    if (decl && ts.isVariableDeclaration(decl)) return parseFeatureSpec(decl.initializer, ctx, seen);
+    if (decl && ts.isVariableDeclaration(decl)) return (await parseFeatureSpec(decl.initializer, ctx, seen));
   }
   if (ts.isCallExpression(input) && nodeText(input.expression) === "defineFeatureSpec") {
-    return parseFeatureSpec(input.arguments[0], ctx, seen);
+    return (await parseFeatureSpec(input.arguments[0], ctx, seen));
   }
   if (ts.isAsExpression(input) || ts.isSatisfiesExpression(input) || ts.isParenthesizedExpression(input)) {
-    return parseFeatureSpec(input.expression, ctx, seen);
+    return (await parseFeatureSpec(input.expression, ctx, seen));
   }
   const invalid = (): undefined => {
     ctx.diagnostics.push({
@@ -1226,26 +1221,26 @@ function parseFeaturePersistence(input: ObjectLiteralExpression): FeaturePersist
 }
 
 /** Resolves route options passed inline, through a const, or via defineRouteContract. */
-function resolveStaticObjectLiteral(
+async function resolveStaticObjectLiteral(
   input: Expression | undefined,
   ctx: AnalysisContext,
   seen = new Set<ts.Node>(),
-): ObjectLiteralExpression | undefined {
+): Promise<ObjectLiteralExpression | undefined> {
   if (!input || seen.has(input)) return undefined;
   seen.add(input);
   if (ts.isAsExpression(input) || ts.isSatisfiesExpression(input) || ts.isParenthesizedExpression(input)) {
-    return resolveStaticObjectLiteral(input.expression, ctx, seen);
+    return (await resolveStaticObjectLiteral(input.expression, ctx, seen));
   }
   if (ts.isIdentifier(input)) {
-    const declaration = resolveDeclaration(input, ctx).find(ts.isVariableDeclaration);
+    const declaration = (await resolveDeclaration(input, ctx)).find(ts.isVariableDeclaration);
     return declaration?.initializer
-      ? resolveStaticObjectLiteral(declaration.initializer, ctx, seen)
+      ? (await resolveStaticObjectLiteral(declaration.initializer, ctx, seen))
       : undefined;
   }
   if (ts.isCallExpression(input)) {
     const expressionName = nodeText(input.expression);
     if (expressionName === "defineRouteContract" || expressionName.endsWith(".defineRouteContract")) {
-      return resolveStaticObjectLiteral(input.arguments[0], ctx, seen);
+      return (await resolveStaticObjectLiteral(input.arguments[0], ctx, seen));
     }
     return undefined;
   }
@@ -1253,40 +1248,40 @@ function resolveStaticObjectLiteral(
 }
 
 /** Resolves an array literal passed inline, through a const, or through `as const` / satisfies. */
-function resolveStaticArrayLiteral(
+async function resolveStaticArrayLiteral(
   input: Expression | undefined,
   ctx: AnalysisContext,
   seen = new Set<ts.Node>(),
-): ts.ArrayLiteralExpression | undefined {
+): Promise<ts.ArrayLiteralExpression | undefined> {
   if (!input || seen.has(input)) return undefined;
   seen.add(input);
   if (ts.isAsExpression(input) || ts.isSatisfiesExpression(input) || ts.isParenthesizedExpression(input)) {
-    return resolveStaticArrayLiteral(input.expression, ctx, seen);
+    return (await resolveStaticArrayLiteral(input.expression, ctx, seen));
   }
   if (ts.isIdentifier(input)) {
-    const declaration = resolveDeclaration(input, ctx).find(ts.isVariableDeclaration);
+    const declaration = (await resolveDeclaration(input, ctx)).find(ts.isVariableDeclaration);
     const list = declaration?.parent;
     const isConst = Boolean(list && ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0);
     return isConst && declaration?.initializer
-      ? resolveStaticArrayLiteral(declaration.initializer, ctx, seen)
+      ? (await resolveStaticArrayLiteral(declaration.initializer, ctx, seen))
       : undefined;
   }
   return ts.isArrayLiteralExpression(input) ? input : undefined;
 }
 
-function routePolicyProperty(
+async function routePolicyProperty(
   object: ObjectLiteralExpression,
   name: string,
   ctx: AnalysisContext,
   seen = new Set<ts.Node>(),
-): { value?: Expression; unresolved: boolean } {
+): Promise<{ value?: Expression; unresolved: boolean }> {
   if (seen.has(object)) return { unresolved: true };
   const ancestry = new Set(seen).add(object);
   let result: { value?: Expression; unresolved: boolean } = { unresolved: false };
   for (const property of object.properties) {
     if (ts.isSpreadAssignment(property)) {
-      const spread = resolveStaticObjectLiteral(property.expression, ctx);
-      const nested = spread ? routePolicyProperty(spread, name, ctx, ancestry) : { unresolved: true };
+      const spread = (await resolveStaticObjectLiteral(property.expression, ctx));
+      const nested = spread ? (await routePolicyProperty(spread, name, ctx, ancestry)) : { unresolved: true };
       if (nested.unresolved || nested.value !== undefined) result = nested;
     } else if (ts.isComputedPropertyName(property.name)) {
       result = { unresolved: true };
@@ -1395,24 +1390,24 @@ function checkedRouteTags(
   return tags;
 }
 
-function parseProvider(
+async function parseProvider(
   el: Expression,
   exportsSet: Set<string>,
   ctx: AnalysisContext,
-): ProviderNode | undefined {
+): Promise<ProviderNode | undefined> {
   const file = sourcePath(ctx.rootDir, el.getSourceFile().fileName);
   const line = lineOf(el);
 
   const unwrappedEl = unwrapForwardRef(el);
   // Bare class reference -> class provider, token = class name
   if (ts.isIdentifier(unwrappedEl)) {
-    const decl = resolveDeclaration(unwrappedEl, ctx)[0];
+    const decl = (await resolveDeclaration(unwrappedEl, ctx))[0];
     const cls = decl && ts.isClassDeclaration(decl) ? decl : undefined;
     const className = cls?.name?.text ?? unwrappedEl.text;
     const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = cls
-      ? classDeps(cls, ctx)
+      ? await classDeps(cls, ctx)
       : { deps: [], dependencyOptions: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], functionalInjects: [], missing: false };
-    const injectable = cls ? parseInjectableOptions(cls, ctx) : undefined;
+    const injectable = cls ? await parseInjectableOptions(cls, ctx) : undefined;
     if (missing) {
       warn(ctx, "missing-deps", `provider ${className} 的部分构造依赖无法静态解析`, file, line);
     }
@@ -1421,7 +1416,7 @@ function parseProvider(
       tokenKind: "class",
       kind: "class",
       useClass: className,
-      scope: resolveScope({ ...(cls ? { cls } : {}), tokenName: className }, ctx),
+      scope: (await resolveScope({ ...(cls ? { cls } : {}), tokenName: className }, ctx)),
       deps,
       ...(dependencyOptions.length > 0 ? { dependencyOptions } : {}),
       ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
@@ -1442,9 +1437,9 @@ function parseProvider(
   if (!ts.isObjectLiteralExpression(el)) return undefined;
   const provideExpr = getProp(el, "provide");
   if (!provideExpr) return undefined;
-  const { name: token, kind: tokenKind } = tokenNameOf(provideExpr, ctx);
+  const { name: token, kind: tokenKind } = (await tokenNameOf(provideExpr, ctx));
   const explicitScope = parseScopeProp(el);
-  const explicitDeps = arrayProp(el, "deps").map((d) => tokenNameOf(d, ctx).name);
+  const explicitDeps = (await ts.asyncMap(arrayProp(el, "deps"), async (d) => (await tokenNameOf(d, ctx)).name));
   const multi = booleanProp(el, "multi");
 
   const useClassExpr = getProp(el, "useClass");
@@ -1454,7 +1449,7 @@ function parseProvider(
 
   if (useClassExpr) {
     const unwrappedClass = unwrapForwardRef(useClassExpr);
-    const decl = ts.isIdentifier(unwrappedClass) ? resolveDeclaration(unwrappedClass, ctx)[0] : undefined;
+    const decl = ts.isIdentifier(unwrappedClass) ? (await resolveDeclaration(unwrappedClass, ctx))[0] : undefined;
     const cls = decl && ts.isClassDeclaration(decl) ? decl : undefined;
     const useClass = cls?.name?.text ?? nodeText(unwrappedClass);
     let deps = explicitDeps;
@@ -1465,7 +1460,7 @@ function parseProvider(
     let hostDeps: string[] = [];
     let functionalInjects: FunctionalInjectNode[] = [];
     if (cls) {
-      const result = classDeps(cls, ctx);
+      const result = (await classDeps(cls, ctx));
       if (deps.length === 0) {
         deps = result.deps;
         dependencyOptions = result.dependencyOptions;
@@ -1485,16 +1480,16 @@ function parseProvider(
         warn(ctx, "missing-deps", `provider ${token} (useClass ${useClass}) 的部分构造依赖无法静态解析`, file, line);
       }
     }
-    const injectable = cls ? parseInjectableOptions(cls, ctx) : undefined;
-    validateProviderCompatibility(provideExpr, useClassExpr, "class", token, ctx, file, line, multi === true);
+    const injectable = cls ? await parseInjectableOptions(cls, ctx) : undefined;
+    await validateProviderCompatibility(provideExpr, useClassExpr, "class", token, ctx, file, line, multi === true);
     return {
       token,
       tokenKind,
       kind: "class",
       useClass,
-      scope: resolveScope({
+      scope: (await resolveScope({
         ...(explicitScope ? { explicit: explicitScope } : {}), ...(cls ? { cls } : {}), tokenName: token,
-      }, ctx),
+      }, ctx)),
       deps,
       ...(dependencyOptions.length > 0 ? { dependencyOptions } : {}),
       ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
@@ -1514,14 +1509,14 @@ function parseProvider(
   }
 
   if (useValueExpr) {
-    validateProviderCompatibility(provideExpr, useValueExpr, "value", token, ctx, file, line, multi === true);
-    const importPath = ts.isIdentifier(useValueExpr) ? importPathOf(useValueExpr, ctx) : undefined;
+    await validateProviderCompatibility(provideExpr, useValueExpr, "value", token, ctx, file, line, multi === true);
+    const importPath = ts.isIdentifier(useValueExpr) ? await importPathOf(useValueExpr, ctx) : undefined;
     return {
       token,
       tokenKind,
       kind: "value",
       useValueExpr: nodeText(useValueExpr),
-      scope: resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx),
+      scope: (await resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx)),
       deps: [],
       ...(multi === undefined ? {} : { multi }),
       exported: exportsSet.has(token),
@@ -1533,21 +1528,21 @@ function parseProvider(
 
   if (useFactoryExpr) {
     const factoryName = ts.isIdentifier(useFactoryExpr)
-      ? (() => {
-          const decl = resolveDeclaration(useFactoryExpr, ctx)[0];
+      ? await (async () => {
+          const decl = (await resolveDeclaration(useFactoryExpr, ctx))[0];
           return decl && (ts.isFunctionDeclaration(decl) || ts.isVariableDeclaration(decl))
             ? (ts.isFunctionDeclaration(decl) ? decl.name?.text : variableName(decl)) ?? useFactoryExpr.text
             : useFactoryExpr.text;
         })()
       : nodeText(useFactoryExpr);
-    validateProviderCompatibility(provideExpr, useFactoryExpr, "factory", token, ctx, file, line, multi === true);
-    const importPath = ts.isIdentifier(useFactoryExpr) ? importPathOf(useFactoryExpr, ctx) : undefined;
+    await validateProviderCompatibility(provideExpr, useFactoryExpr, "factory", token, ctx, file, line, multi === true);
+    const importPath = ts.isIdentifier(useFactoryExpr) ? await importPathOf(useFactoryExpr, ctx) : undefined;
     return {
       token,
       tokenKind,
       kind: "factory",
       useFactoryName: factoryName,
-      scope: resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx),
+      scope: (await resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx)),
       deps: explicitDeps,
       ...(multi === undefined ? {} : { multi }),
       exported: exportsSet.has(token),
@@ -1558,14 +1553,14 @@ function parseProvider(
   }
 
   if (useExistingExpr) {
-    const target = tokenNameOf(useExistingExpr, ctx).name;
-    validateProviderCompatibility(provideExpr, useExistingExpr, "existing", token, ctx, file, line, multi === true);
+    const target = (await tokenNameOf(useExistingExpr, ctx)).name;
+    await validateProviderCompatibility(provideExpr, useExistingExpr, "existing", token, ctx, file, line, multi === true);
     return {
       token,
       tokenKind,
       kind: "existing",
       useExisting: target,
-      scope: resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx),
+      scope: (await resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx)),
       deps: [target],
       ...(multi === undefined ? {} : { multi }),
       exported: exportsSet.has(token),
@@ -1582,19 +1577,19 @@ function parseProvider(
  * expressions before graph analysis. The generated application still contains
  * only direct static providers.
  */
-function expandProviderExpressions(
+async function expandProviderExpressions(
   expressions: readonly Expression[],
   ctx: AnalysisContext,
   seen = new Set<string>(),
-): Expression[] {
+): Promise<Expression[]> {
   const result: Expression[] = [];
   for (const expression of expressions) {
     if (ts.isSpreadElement(expression)) {
-      result.push(...expandProviderExpressions([expression.expression], ctx, seen));
+      result.push(...(await expandProviderExpressions([expression.expression], ctx, seen)));
       continue;
     }
     if (ts.isIdentifier(expression)) {
-      const declaration = resolveDeclaration(expression, ctx)[0];
+      const declaration = (await resolveDeclaration(expression, ctx))[0];
       if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
         const key = `${declaration.getSourceFile().fileName}:${declaration.pos}`;
         if (seen.has(key)) continue;
@@ -1603,7 +1598,7 @@ function expandProviderExpressions(
           const nested = initializer.arguments[0];
           if (nested && ts.isArrayLiteralExpression(nested)) {
             seen.add(key);
-            result.push(...expandProviderExpressions([...nested.elements], ctx, seen));
+            result.push(...(await expandProviderExpressions([...nested.elements], ctx, seen)));
             seen.delete(key);
             continue;
           }
@@ -1613,7 +1608,7 @@ function expandProviderExpressions(
     if (ts.isCallExpression(expression) && isProviderHelper(expression, "makeEnvironmentProviders")) {
       const nested = expression.arguments[0];
       if (nested && ts.isArrayLiteralExpression(nested)) {
-        result.push(...expandProviderExpressions([...nested.elements], ctx, seen));
+        result.push(...(await expandProviderExpressions([...nested.elements], ctx, seen)));
         continue;
       }
     }
@@ -1626,11 +1621,11 @@ function isProviderHelper(expression: ts.CallExpression, name: string): boolean 
   return nodeText(expression.expression).split(".").pop() === name;
 }
 
-function parseFunctionalProvider(
+async function parseFunctionalProvider(
   expression: Expression,
   exportsSet: Set<string>,
   ctx: AnalysisContext,
-): ProviderNode[] | undefined {
+): Promise<ProviderNode[] | undefined> {
   if (!ts.isCallExpression(expression)) return undefined;
   const helper = nodeText(expression.expression).split(".").pop();
   const args = expression.arguments;
@@ -1641,15 +1636,15 @@ function parseFunctionalProvider(
     const tokenExpr = args[0];
     const valueExpr = args[1];
     if (!tokenExpr || !valueExpr) return [];
-    const { name: token, kind: tokenKind } = tokenNameOf(tokenExpr, ctx);
-    validateProviderCompatibility(tokenExpr, valueExpr, "value", token, ctx, file, line);
-    const importPath = ts.isIdentifier(valueExpr) ? importPathOf(valueExpr, ctx) : undefined;
+    const { name: token, kind: tokenKind } = (await tokenNameOf(tokenExpr, ctx));
+    (await validateProviderCompatibility(tokenExpr, valueExpr, "value", token, ctx, file, line));
+    const importPath = ts.isIdentifier(valueExpr) ? (await importPathOf(valueExpr, ctx)) : undefined;
     return [{
       token,
       tokenKind,
       kind: "value",
       useValueExpr: nodeText(valueExpr),
-      scope: resolveScope({ tokenName: token }, ctx),
+      scope: (await resolveScope({ tokenName: token }, ctx)),
       deps: [],
       exported: exportsSet.has(token),
       file,
@@ -1662,7 +1657,7 @@ function parseFunctionalProvider(
     const initializer = args[0];
     if (!initializer) return [];
     const token = helper === "provideAppInitializer" ? "APP_INITIALIZER" : "ENVIRONMENT_INITIALIZER";
-    const importPath = ts.isIdentifier(initializer) ? importPathOf(initializer, ctx) : undefined;
+    const importPath = ts.isIdentifier(initializer) ? (await importPathOf(initializer, ctx)) : undefined;
     return [{
       token,
       tokenKind: "injection-token",
@@ -1682,7 +1677,7 @@ function parseFunctionalProvider(
     const providers: ProviderNode[] = [];
     const routes = args[0];
     if (routes) {
-      const importPath = ts.isIdentifier(routes) ? importPathOf(routes, ctx) : undefined;
+      const importPath = ts.isIdentifier(routes) ? (await importPathOf(routes, ctx)) : undefined;
       providers.push({
         token: "ROUTE_CONFIG",
         tokenKind: "injection-token",
@@ -1713,9 +1708,9 @@ function parseFunctionalProvider(
         });
       } else if (featureName === "withTitleStrategy" && feature.arguments[0]) {
         const strategy = feature.arguments[0];
-        const isClass = ts.isIdentifier(strategy) && Boolean(resolveDeclaration(strategy, ctx)
+        const isClass = ts.isIdentifier(strategy) && Boolean((await resolveDeclaration(strategy, ctx))
           .find((declaration) => ts.isClassDeclaration(declaration)));
-        const importPath = ts.isIdentifier(strategy) ? importPathOf(strategy, ctx) : undefined;
+        const importPath = ts.isIdentifier(strategy) ? (await importPathOf(strategy, ctx)) : undefined;
         providers.push({
           token: "TITLE_STRATEGY",
           tokenKind: "injection-token",
@@ -1756,7 +1751,7 @@ function parseFunctionalProvider(
             ? [...interceptorArg.elements]
             : [interceptorArg];
           for (const value of values) {
-            const importPath = ts.isIdentifier(value) ? importPathOf(value, ctx) : undefined;
+            const importPath = ts.isIdentifier(value) ? (await importPathOf(value, ctx)) : undefined;
             providers.push({
               token: "HTTP_INTERCEPTORS",
               tokenKind: "injection-token",
@@ -1793,7 +1788,7 @@ function parseFunctionalProvider(
  * application still uses static factories and never performs runtime type
  * inspection or dynamic dependency resolution.
  */
-function validateProviderCompatibility(
+async function validateProviderCompatibility(
   provideExpr: Expression,
   implementationExpr: Expression,
   kind: "class" | "value" | "factory" | "existing",
@@ -1802,18 +1797,18 @@ function validateProviderCompatibility(
   file: string,
   line: number,
   multi = false,
-): void {
-  const contract = providerTokenValueType(provideExpr, ctx);
-  const expected = multi && contract ? (ctx.checker.getIndexTypeOfType(contract, ts.IndexKind.Number) ?? contract) : contract;
-  const actual = providerImplementationType(implementationExpr, kind, ctx);
+): Promise<void> {
+  const contract = await providerTokenValueType(provideExpr, ctx);
+  const expected = multi && contract ? ((await ctx.checker.getIndexTypeOfType(contract, ts.IndexKind.Number)) ?? contract) : contract;
+  const actual = await providerImplementationType(implementationExpr, kind, ctx);
   if (!expected || !actual || isUnknownOrAny(expected) || isUnknownOrAny(actual)) return;
-  if (ctx.checker.isTypeAssignableTo(actual, expected)) return;
+  if ((await ctx.checker.isTypeAssignableTo(actual, expected))) return;
 
   const providerKind = kind === "class" ? "useClass" : `use${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
   ctx.diagnostics.push({
     severity: "error",
     code: "provider-type-mismatch",
-    message: `Provider '${tokenName}' 的 ${providerKind} 类型不满足 Token 契约：需要 ${ctx.checker.typeToString(expected, provideExpr)}，实际为 ${ctx.checker.typeToString(actual, implementationExpr)}`,
+    message: `Provider '${tokenName}' 的 ${providerKind} 类型不满足 Token 契约：需要 ${(await ctx.checker.typeToString(expected, provideExpr))}，实际为 ${(await ctx.checker.typeToString(actual, implementationExpr))}`,
     file,
     line,
     errorCode: "SC2010",
@@ -1821,89 +1816,84 @@ function validateProviderCompatibility(
   });
 }
 
-function providerTokenValueType(expr: Expression, ctx: AnalysisContext): ts.Type | undefined {
-  const type = ctx.checker.getTypeAtLocation(expr);
-  const typeArguments = typeArgumentsOf(type, ctx);
+async function providerTokenValueType(expr: Expression, ctx: AnalysisContext): Promise<ts.Type | undefined> {
+  const type = (await ctx.checker.getTypeAtLocation(expr));
+  const typeArguments = (await typeArgumentsOf(type, ctx));
   if (typeArguments.length > 0) return typeArguments[0];
 
   if (ts.isIdentifier(expr)) {
-    const declaration = resolveDeclaration(expr, ctx)[0];
+    const declaration = (await resolveDeclaration(expr, ctx))[0];
     if (declaration && ts.isClassDeclaration(declaration)) {
-      return declaredClassType(declaration, ctx);
+      return (await declaredClassType(declaration, ctx));
     }
   }
   return undefined;
 }
 
-function providerImplementationType(
+async function providerImplementationType(
   expr: Expression,
   kind: "class" | "value" | "factory" | "existing",
   ctx: AnalysisContext,
-): ts.Type | undefined {
+): Promise<ts.Type | undefined> {
   if (kind === "class" || kind === "existing") {
     if (ts.isIdentifier(expr)) {
-      const declaration = resolveDeclaration(expr, ctx)[0];
+      const declaration = (await resolveDeclaration(expr, ctx))[0];
       if (declaration && ts.isClassDeclaration(declaration)) {
-        return declaredClassType(declaration, ctx);
+        return (await declaredClassType(declaration, ctx));
       }
     }
-    const type = ctx.checker.getTypeAtLocation(expr);
-    const typeArguments = typeArgumentsOf(type, ctx);
+    const type = (await ctx.checker.getTypeAtLocation(expr));
+    const typeArguments = (await typeArgumentsOf(type, ctx));
     return typeArguments.length > 0 ? typeArguments[0] : undefined;
   }
 
   if (kind === "factory") {
-    const type = ctx.checker.getTypeAtLocation(expr);
-    const signature = ctx.checker.getSignaturesOfType(type, ts.SignatureKind.Call)[0];
-    return signature?.getReturnType();
+    const type = (await ctx.checker.getTypeAtLocation(expr));
+    const signature = (await ctx.checker.getSignaturesOfType(type, ts.SignatureKind.Call))[0];
+    return (await signature?.getReturnType());
   }
 
-  return ctx.checker.getTypeAtLocation(expr);
+  return (await ctx.checker.getTypeAtLocation(expr));
 }
 
-function declaredClassType(declaration: ClassDeclaration, ctx: AnalysisContext): ts.Type | undefined {
+async function declaredClassType(declaration: ClassDeclaration, ctx: AnalysisContext): Promise<ts.Type | undefined> {
   const name = declaration.name;
   if (!name) return undefined;
-  const symbol = ctx.checker.getSymbolAtLocation(name);
-  return symbol ? ctx.checker.getDeclaredTypeOfSymbol(symbol) : undefined;
+  const symbol = (await ctx.checker.getSymbolAtLocation(name));
+  return symbol ? (await ctx.checker.getDeclaredTypeOfSymbol(symbol)) : undefined;
 }
 
-function typeArgumentsOf(type: ts.Type, ctx: AnalysisContext): readonly ts.Type[] {
-  if (!isTypeReference(type)) return [];
-  const argumentsFromChecker = ctx.checker.getTypeArguments(type);
+async function typeArgumentsOf(type: ts.Type, ctx: AnalysisContext): Promise<readonly ts.Type[]> {
+  // TS 7 may expose an imported alias without reporting it as a type reference.
+  const argumentsFromChecker = isTypeReference(type)
+    ? await ctx.checker.getTypeArguments(type)
+    : [];
   if (argumentsFromChecker.length > 0) return argumentsFromChecker;
-  const reference = type as ts.TypeReference & {
-    resolvedTypeArguments?: readonly ts.Type[];
-    aliasTypeArguments?: readonly ts.Type[];
-  };
-  if (reference.resolvedTypeArguments && reference.resolvedTypeArguments.length > 0) {
-    return reference.resolvedTypeArguments;
-  }
-  return reference.aliasTypeArguments ?? [];
+  return await type.getAliasTypeArguments();
 }
 
 function isTypeReference(type: ts.Type): type is ts.TypeReference {
-  return "target" in type;
+  return type.isTypeReference();
 }
 
-function effectTypeArgumentsOf(
+async function effectTypeArgumentsOf(
   type: ts.Type | undefined,
   ctx: AnalysisContext,
-): readonly [ts.Type, ts.Type, ts.Type] | undefined {
+): Promise<readonly [ts.Type, ts.Type, ts.Type] | undefined> {
   if (!type) return undefined;
   const reference = isTypeReference(type) ? type : undefined;
-  const target = reference?.target ?? type;
-  const symbol = target.aliasSymbol ?? target.getSymbol();
-  const text = ctx.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
-  if (symbol?.getName() !== "Effect" && !/^(?:Effect\.)?Effect</.test(text)) return undefined;
-  const args = typeArgumentsOf(type, ctx);
+  const target = await reference?.getTarget() ?? type;
+  const symbol = (await target.getAliasSymbol()) ?? (await target.getSymbol());
+  const text = (await ctx.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation));
+  if (symbol?.name !== "Effect" && !/^(?:Effect\.)?Effect</.test(text)) return undefined;
+  const args = (await typeArgumentsOf(type, ctx));
   return args.length >= 3
     ? [args[0]!, args[1]!, args[2]!]
     : undefined;
 }
 
-function effectTypeName(type: ts.Type, location: ts.Node, ctx: AnalysisContext): string {
-  return ctx.checker.typeToString(type, location, ts.TypeFormatFlags.NoTruncation);
+async function effectTypeName(type: ts.Type, location: ts.Node, ctx: AnalysisContext): Promise<string> {
+  return (await ctx.checker.typeToString(type, location, ts.TypeFormatFlags.NoTruncation));
 }
 
 function stringLiteralTypeValue(type: ts.Type): string | undefined {
@@ -1912,64 +1902,64 @@ function stringLiteralTypeValue(type: ts.Type): string | undefined {
     : undefined;
 }
 
-function effectFailureTags(
+async function effectFailureTags(
   type: ts.Type,
   location: ts.Node,
   ctx: AnalysisContext,
-): { tags: string[]; invalid: boolean } {
+): Promise<{ tags: string[]; invalid: boolean }> {
   if ((type.flags & ts.TypeFlags.Never) !== 0) return { tags: [], invalid: false };
   if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
     return { tags: [], invalid: true };
   }
-  if (type.isUnion()) {
-    return type.types.reduce<{ tags: string[]; invalid: boolean }>(
-      (result, part) => {
-        const next = effectFailureTags(part, location, ctx);
+  if (type.isUnionType()) {
+    return (await ts.asyncReduce<ts.Type, { tags: string[]; invalid: boolean }>((await type.getTypes()),
+      async (result, part) => {
+        const next = (await effectFailureTags(part, location, ctx));
         result.tags.push(...next.tags);
         result.invalid ||= next.invalid;
         return result;
       },
       { tags: [], invalid: false },
-    );
+    ));
   }
-  const apparent = ctx.checker.getApparentType(type);
+  const apparent = (await ctx.checker.getApparentType(type));
   for (const propertyName of ["_tag", "tag"]) {
-    const property = ctx.checker.getPropertyOfType(apparent, propertyName);
+    const property = (await ctx.checker.getPropertyOfType(apparent, propertyName));
     if (!property) continue;
-    const propertyType = ctx.checker.getTypeOfSymbolAtLocation(property, location);
+    const propertyType = (await ctx.checker.getTypeOfSymbolAtLocation(property, location));
     const tag = stringLiteralTypeValue(propertyType);
     if (tag) return { tags: [tag], invalid: false };
   }
   return { tags: [], invalid: true };
 }
 
-function effectEnvironmentNames(
+async function effectEnvironmentNames(
   type: ts.Type,
   location: ts.Node,
   ctx: AnalysisContext,
-): { names: string[]; invalid: boolean } {
+): Promise<{ names: string[]; invalid: boolean }> {
   if ((type.flags & ts.TypeFlags.Never) !== 0) return { names: [], invalid: false };
   if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
     return { names: [], invalid: true };
   }
-  if (type.isUnion() || type.isIntersection()) {
-    return type.types.reduce<{ names: string[]; invalid: boolean }>(
-      (result, part) => {
-        const next = effectEnvironmentNames(part, location, ctx);
+  if (type.isUnionType() || type.isIntersectionType()) {
+    return (await ts.asyncReduce<ts.Type, { names: string[]; invalid: boolean }>((await type.getTypes()),
+      async (result, part) => {
+        const next = (await effectEnvironmentNames(part, location, ctx));
         result.names.push(...next.names);
         result.invalid ||= next.invalid;
         return result;
       },
       { names: [], invalid: false },
-    );
+    ));
   }
   const literal = stringLiteralTypeValue(type);
   if (literal) return { names: [literal], invalid: false };
-  const symbolName = type.getSymbol()?.getName();
+  const symbolName = (await type.getSymbol())?.name;
   if (symbolName && symbolName !== "__type" && symbolName !== "__object") {
     return { names: [symbolName], invalid: false };
   }
-  const text = effectTypeName(type, location, ctx).trim();
+  const text = (await effectTypeName(type, location, ctx)).trim();
   if (text && text !== "object") return { names: [text], invalid: false };
   return { names: [], invalid: true };
 }
@@ -2050,16 +2040,16 @@ function isUnknownOrAny(type: ts.Type): boolean {
   return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
 }
 
-function parseController(
+async function parseController(
   input: Expression | ClassDeclaration,
   ctx: AnalysisContext,
-): ControllerNode | undefined {
+): Promise<ControllerNode | undefined> {
   let decl: ClassDeclaration | undefined;
   if (ts.isClassDeclaration(input)) {
     decl = input;
   } else {
     const unwrapped = unwrapForwardRef(input);
-    const resolved = ts.isIdentifier(unwrapped) ? resolveDeclaration(unwrapped, ctx)[0] : undefined;
+    const resolved = ts.isIdentifier(unwrapped) ? (await resolveDeclaration(unwrapped, ctx))[0] : undefined;
     if (resolved && ts.isClassDeclaration(resolved)) {
       decl = resolved;
     }
@@ -2080,20 +2070,20 @@ function parseController(
     }
   }
 
-  const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = classDeps(decl, ctx);
+  const { deps, dependencyOptions, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = await classDeps(decl, ctx);
   const file = sourcePath(ctx.rootDir, decl.getSourceFile().fileName);
   if (missing) {
     warn(ctx, "missing-deps", `controller ${decl.name?.text} 的部分构造依赖无法静态解析`, file, lineOf(decl));
   }
 
-  const injectable = parseInjectableOptions(decl, ctx);
+  const injectable = (await parseInjectableOptions(decl, ctx));
   const routes: RouteNode[] = [];
   const schemaImports: Record<string, string> = {};
   const classGuards: string[] = [];
   for (const dec of decoratorsOf(decl)) {
     if (decoratorName(dec) === "UseGuards") {
       for (const gArg of decoratorArguments(dec)) {
-        classGuards.push(tokenText(gArg, ctx));
+        classGuards.push((await tokenText(gArg, ctx)));
       }
     }
   }
@@ -2111,9 +2101,9 @@ function parseController(
         path: routePath,
         handler: propertyName(method.name),
       };
-      const signature = ctx.checker.getSignatureFromDeclaration(method);
-      const returnType = signature?.getReturnType();
-      const resultType = returnType && ctx.checker.typeToString(returnType);
+      const signature = (await ctx.checker.getSignatureFromDeclaration(method));
+      const returnType = (await signature?.getReturnType());
+      const resultType = returnType && (await ctx.checker.typeToString(returnType));
       if (resultType && /\bResponse\b/.test(resultType)) route.nativeResponse = true;
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
@@ -2227,11 +2217,11 @@ function parseController(
         const mArgs = decoratorArguments(mDec);
         if (dName === "UseGuards") {
           for (const gArg of mArgs) {
-            routeGuards.push(tokenText(gArg, ctx));
+            routeGuards.push((await tokenText(gArg, ctx)));
           }
         } else if (dName === "CanDeactivate") {
           for (const gArg of mArgs) {
-            routeCanDeactivate.push(tokenText(gArg, ctx));
+            routeCanDeactivate.push((await tokenText(gArg, ctx)));
           }
         } else if (dName === "Title") {
           const tArg = mArgs[0];
@@ -2251,7 +2241,7 @@ function parseController(
               if (ts.isPropertyAssignment(prop)) {
                 const rName = propertyName(prop.name);
                 const init = prop.initializer;
-                if (init) resolvers[rName] = tokenText(init, ctx);
+                if (init) resolvers[rName] = (await tokenText(init, ctx));
               }
             }
             if (Object.keys(resolvers).length > 0) {
@@ -2262,15 +2252,15 @@ function parseController(
       }
 
       const optionsArg = args[1];
-      const optionsObject = resolveStaticObjectLiteral(optionsArg, ctx);
+      const optionsObject = (await resolveStaticObjectLiteral(optionsArg, ctx));
       if (optionsObject) {
         const permission = stringLiteralProp(optionsObject, "permission");
         if (permission !== undefined) route.permission = permission;
-        const parsePolicy = routePolicyProperty(optionsObject, "parse", ctx);
-        const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
+        const parsePolicy = (await routePolicyProperty(optionsObject, "parse", ctx));
+        const deletePolicy = (await routePolicyProperty(optionsObject, "allowDeleteBody", ctx));
         const idempotency = checkedRouteIdempotency(optionsObject, ctx, route.handler);
         if (idempotency !== undefined) route.idempotency = idempotency;
-        const tagsPolicy = routePolicyProperty(optionsObject, "tags", ctx);
+        const tagsPolicy = (await routePolicyProperty(optionsObject, "tags", ctx));
         if (parsePolicy.unresolved || deletePolicy.unresolved || tagsPolicy.unresolved) {
           ctx.diagnostics.push({ severity: "error", code: "unresolved-route-body-policy", file,
             message: `Route ${route.handler} body policy must be statically resolvable; dynamic spreads, computed keys and shorthand policies are unsupported.` });
@@ -2318,7 +2308,7 @@ function parseController(
         }
         const effectExpr = getProp(optionsObject, "effect");
         if (effectExpr) {
-          const effectObject = resolveStaticObjectLiteral(effectExpr, ctx);
+          const effectObject = (await resolveStaticObjectLiteral(effectExpr, ctx));
           if (!effectObject) {
             ctx.diagnostics.push({
               severity: "error",
@@ -2409,7 +2399,7 @@ function parseController(
             }
             const dependenciesExpr = getProp(effectObject, "dependencies");
             if (dependenciesExpr !== undefined) {
-              const dependenciesArray = resolveStaticArrayLiteral(dependenciesExpr, ctx);
+              const dependenciesArray = (await resolveStaticArrayLiteral(dependenciesExpr, ctx));
               if (!dependenciesArray
                 || dependenciesArray.elements.some((element) => !ts.isStringLiteral(element) || element.text.trim().length === 0)) {
                 ctx.diagnostics.push({
@@ -2439,7 +2429,7 @@ function parseController(
             }
             const errorsExpr = getProp(effectObject, "errors");
             if (errorsExpr !== undefined) {
-              const errorsArray = resolveStaticArrayLiteral(errorsExpr, ctx);
+              const errorsArray = (await resolveStaticArrayLiteral(errorsExpr, ctx));
               if (!errorsArray) {
                 ctx.diagnostics.push({
                   severity: "error",
@@ -2528,7 +2518,7 @@ function parseController(
               }
             }
             route.effect = effect;
-            const effectArguments = effectTypeArgumentsOf(returnType, ctx);
+            const effectArguments = (await effectTypeArgumentsOf(returnType, ctx));
             const promiseReturn = Boolean(resultType && /\bPromise(?:<|\s)/.test(resultType));
             if (promiseReturn) {
               pushEffectDiagnostic(
@@ -2553,14 +2543,14 @@ function parseController(
             }
             if (effectArguments) {
               const [, failureType, environmentType] = effectArguments;
-              const failure = effectFailureTags(failureType, method, ctx);
+              const failure = (await effectFailureTags(failureType, method, ctx));
               if (ctx.effectOptions.requireTaggedErrorTypes && failure.invalid) {
                 pushEffectDiagnostic(
                   ctx,
                   "effect-error-type",
                   file,
                   lineOf(method),
-                  `Route ${route.handler} must use never or a tagged failure union in Effect's error channel, not ${effectTypeName(failureType, method, ctx)}.`,
+                  `Route ${route.handler} must use never or a tagged failure union in Effect's error channel, not ${(await effectTypeName(failureType, method, ctx))}.`,
                   "Replace unknown/any with never or a union of objects carrying a literal _tag.",
                 );
               } else if (ctx.effectOptions.requireTaggedErrorTypes && effect.errors !== undefined && !failure.invalid) {
@@ -2578,7 +2568,7 @@ function parseController(
                 }
               }
 
-              const environment = effectEnvironmentNames(environmentType, method, ctx);
+              const environment = (await effectEnvironmentNames(environmentType, method, ctx));
               if (ctx.effectOptions.requireExactDependencyTypes && effect.dependencies !== undefined) {
                 if (environment.invalid) {
                   pushEffectDiagnostic(
@@ -2635,14 +2625,14 @@ function parseController(
           const schemaExpr = getProp(optionsObject, field);
           if (schemaExpr && ts.isIdentifier(schemaExpr)) {
             route[field] = nodeText(schemaExpr);
-            const importPath = importPathOf(schemaExpr, ctx);
+            const importPath = (await importPathOf(schemaExpr, ctx));
             if (importPath) schemaImports[schemaExpr.text] = importPath;
-            const declaration = resolveDeclaration(schemaExpr, ctx)[0];
-            const opaque = isOpaqueSchema(schemaExpr, declaration, ctx);
+            const declaration = (await resolveDeclaration(schemaExpr, ctx))[0];
+            const opaque = (await isOpaqueSchema(schemaExpr, declaration, ctx));
             (route.schemaKinds ??= {})[field] = opaque ? "opaque" : "declared";
           }
         }
-        const responsesObject = resolveStaticObjectLiteral(responsesExpr, ctx);
+        const responsesObject = (await resolveStaticObjectLiteral(responsesExpr, ctx));
         if (responsesObject) {
           const responses: Record<string, string> = {};
           const selectors = new Map<string, string>();
@@ -2688,10 +2678,10 @@ function parseController(
               continue;
             }
             responses[canonical] = schemaExpr.text;
-            const importPath = importPathOf(schemaExpr, ctx);
+            const importPath = (await importPathOf(schemaExpr, ctx));
             if (importPath) schemaImports[schemaExpr.text] = importPath;
-            const declaration = resolveDeclaration(schemaExpr, ctx)[0];
-            const opaque = isOpaqueSchema(schemaExpr, declaration, ctx);
+            const declaration = (await resolveDeclaration(schemaExpr, ctx))[0];
+            const opaque = (await isOpaqueSchema(schemaExpr, declaration, ctx));
             const previousKind = route.schemaKinds?.response;
             (route.schemaKinds ??= {}).response = opaque || previousKind === "opaque" ? "opaque" : "declared";
           }
@@ -2699,7 +2689,7 @@ function parseController(
         }
         const commandExpr = getProp(optionsObject, "command");
         if (commandExpr && ts.isIdentifier(commandExpr)) {
-          const commandDecl = resolveDeclaration(commandExpr, ctx)[0];
+          const commandDecl = (await resolveDeclaration(commandExpr, ctx))[0];
           route.command = commandDecl && ts.isClassDeclaration(commandDecl)
             ? (commandDecl.name?.text ?? commandExpr.text)
             : commandExpr.text;
@@ -2707,14 +2697,14 @@ function parseController(
         const guardsExpr = getProp(optionsObject, "guards");
         if (guardsExpr && ts.isArrayLiteralExpression(guardsExpr)) {
           for (const el of guardsExpr.elements) {
-            routeGuards.push(tokenText(el, ctx));
+            routeGuards.push((await tokenText(el, ctx)));
           }
         }
         const canMatchExpr = getProp(optionsObject, "canMatch");
         if (canMatchExpr && ts.isArrayLiteralExpression(canMatchExpr)) {
           const canMatchList: string[] = [];
           for (const el of canMatchExpr.elements) {
-            canMatchList.push(tokenText(el, ctx));
+            canMatchList.push((await tokenText(el, ctx)));
           }
           if (canMatchList.length > 0) {
             route.canMatch = canMatchList;
@@ -2723,7 +2713,7 @@ function parseController(
         const canDeactivateExpr = getProp(optionsObject, "canDeactivate");
         if (canDeactivateExpr && ts.isArrayLiteralExpression(canDeactivateExpr)) {
           for (const el of canDeactivateExpr.elements) {
-            routeCanDeactivate.push(tokenText(el, ctx));
+            routeCanDeactivate.push((await tokenText(el, ctx)));
           }
         }
         const resolversExpr = getProp(optionsObject, "resolvers");
@@ -2733,7 +2723,7 @@ function parseController(
             if (ts.isPropertyAssignment(prop)) {
               const rName = propertyName(prop.name);
               const init = prop.initializer;
-              if (init) resolvers[rName] = tokenText(init, ctx);
+              if (init) resolvers[rName] = (await tokenText(init, ctx));
             }
           }
           if (Object.keys(resolvers).length > 0) {
@@ -2759,11 +2749,11 @@ function parseController(
         if (dataExpr && ts.isObjectLiteralExpression(dataExpr)) {
           route.data = { ...route.data, ...parseObjectLiteralValues(dataExpr) };
         }
-        const aspects = parseAspectRefs(
+        const aspects = (await parseAspectRefs(
           getProp(optionsObject, "aspects"),
           ctx,
           `route ${httpMethod} ${routePath}`,
-        );
+        ));
         if (aspects.length > 0) route.aspects = aspects;
       }
       if (routeGuards.length > 0) {
@@ -2797,11 +2787,11 @@ function parseController(
   };
 }
 
-function parseJobOptions(
+async function parseJobOptions(
   meta: ObjectLiteralExpression,
   owner: string,
   ctx: AnalysisContext,
-): Partial<Pick<JobNode, "input" | "output" | "schemaKinds" | "schemaImports" | "mode" | "timeoutSec" | "maxAttempts" | "idempotency">> {
+): Promise<Partial<Pick<JobNode, "input" | "output" | "schemaKinds" | "schemaImports" | "mode" | "timeoutSec" | "maxAttempts" | "idempotency">>> {
   const result: Partial<Pick<JobNode, "input" | "output" | "schemaKinds" | "schemaImports" | "mode" | "timeoutSec" | "maxAttempts" | "idempotency">> = {};
   const mode = parseJobEnum(meta, "mode", JOB_MODES, owner, ctx, "invalid-job-mode", "SC4018");
   const effectiveMode = mode ?? "task";
@@ -2858,8 +2848,8 @@ function parseJobOptions(
       );
       continue;
     }
-    const declaration = resolveDeclaration(expression, ctx)[0];
-    const importPath = importPathOf(expression, ctx);
+    const declaration = (await resolveDeclaration(expression, ctx))[0];
+    const importPath = (await importPathOf(expression, ctx));
     if (!declaration || !importPath) {
       jobOptionError(
         ctx,
@@ -2873,7 +2863,7 @@ function parseJobOptions(
     }
     result[field] = expression.text;
     schemaImports[expression.text] = importPath;
-    schemaKinds[field] = jobSchemaKind(expression, declaration, ctx);
+    schemaKinds[field] = (await jobSchemaKind(expression, declaration, ctx));
   }
   if (Object.keys(schemaImports).length > 0) result.schemaImports = schemaImports;
   if (Object.keys(schemaKinds).length > 0) result.schemaKinds = schemaKinds;
@@ -2950,44 +2940,44 @@ function jobOptionError(
   });
 }
 
-function jobSchemaKind(
+async function jobSchemaKind(
   identifier: Identifier,
   declaration: ts.Declaration,
   ctx: AnalysisContext,
-): JobSchemaKind {
-  return isOpaqueSchema(identifier, declaration, ctx) ? "opaque" : "declared";
+): Promise<JobSchemaKind> {
+  return (await isOpaqueSchema(identifier, declaration, ctx)) ? "opaque" : "declared";
 }
 
 /** 判断边界自身是否接受任意值，不把嵌套扩展字段误当作整个边界无校验。 */
-function isOpaqueSchema(
+async function isOpaqueSchema(
   identifier: Identifier,
   declaration: ts.Declaration | undefined,
   ctx: AnalysisContext,
-): boolean {
-  function opaque(type: ts.Type, seen: Set<ts.Type>): boolean {
+): Promise<boolean> {
+  async function opaque(type: ts.Type, seen: Set<ts.Type>): Promise<boolean> {
     if (seen.has(type)) return false;
     const nextSeen = new Set(seen).add(type);
-    const kindProperty = type.getProperty("~kind");
-    const kind = kindProperty && ctx.checker.getTypeOfSymbolAtLocation(kindProperty, identifier);
-    if (kind?.isStringLiteral()) {
+    const kindProperty = (await type.getProperty("~kind"));
+    const kind = kindProperty && (await ctx.checker.getTypeOfSymbolAtLocation(kindProperty, identifier));
+    if (kind?.isStringLiteralType()) {
       if (kind.value === "Unknown" || kind.value === "Any") return true;
       if (kind.value === "Union" || kind.value === "Intersect") {
-        const property = type.getProperty(kind.value === "Union" ? "anyOf" : "allOf");
+        const property = (await type.getProperty(kind.value === "Union" ? "anyOf" : "allOf"));
         if (!property) return true;
-        const members = ctx.checker.getIndexTypeOfType(
-          ctx.checker.getTypeOfSymbolAtLocation(property, identifier), ts.IndexKind.Number,
-        );
+        const members = (await ctx.checker.getIndexTypeOfType(
+          (await ctx.checker.getTypeOfSymbolAtLocation(property, identifier)), ts.IndexKind.Number,
+        ));
         if (!members) return true;
-        const branches = members.isUnion() ? members.types : [members];
+        const branches = members.isUnionType() ? (await members.getTypes()) : [members];
         return kind.value === "Union"
-          ? branches.some((branch) => opaque(branch, nextSeen))
-          : branches.every((branch) => opaque(branch, nextSeen));
+          ? (await ts.asyncSome(branches, async (branch) => (await opaque(branch, nextSeen))))
+          : (await ts.asyncEvery(branches, async (branch) => (await opaque(branch, nextSeen))));
       }
       return false;
     }
-    return /^T(?:Unknown|Any)\b/.test(ctx.checker.typeToString(type));
+    return /^T(?:Unknown|Any)\b/.test((await ctx.checker.typeToString(type)));
   }
-  if (opaque(ctx.checker.getTypeAtLocation(identifier), new Set())) return true;
+  if ((await opaque((await ctx.checker.getTypeAtLocation(identifier)), new Set()))) return true;
   const initializer = declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
   return Boolean(initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression)
     && ["Unknown", "Any"].includes(initializer.expression.name.text));
@@ -3078,10 +3068,10 @@ function checkedBranches(meta: ObjectLiteralExpression, ctx: AnalysisContext): C
  * @Injectable({ deps }) > constructor @Inject parameter decorator > constructor parameter type name
  * (only when type name is a known class / known token); otherwise marked missing.
  */
-function classDeps(
+async function classDeps(
   cls: ClassDeclaration,
   ctx: AnalysisContext,
-): {
+): Promise<{
   deps: string[];
   dependencyOptions: DependencyOptions[];
   optionalDeps: string[];
@@ -3090,8 +3080,8 @@ function classDeps(
   hostDeps: string[];
   functionalInjects: FunctionalInjectNode[];
   missing: boolean;
-} {
-  const injectable = parseInjectableOptions(cls, ctx);
+}> {
+  const injectable = (await parseInjectableOptions(cls, ctx));
   const ctor = cls.members.find(ts.isConstructorDeclaration);
   const deps: string[] = injectable?.deps ? [...injectable.deps] : [];
   const dependencyOptions: DependencyOptions[] = deps.map(() => ({}));
@@ -3103,7 +3093,7 @@ function classDeps(
   let missing: boolean = false;
 
   if (!injectable?.deps && ctor && ctor.parameters.length > 0) {
-    const injectParams = parseInjectParams(cls, ctx);
+    const injectParams = (await parseInjectParams(cls, ctx));
     const optionalIndices = parseOptionalParams(cls);
     const selfIndices = parseModifierParams(cls, "Self");
     const skipSelfIndices = parseModifierParams(cls, "SkipSelf");
@@ -3134,7 +3124,7 @@ function classDeps(
       if (callName === "inject") {
         const [tokenArg, optionsArg] = init.arguments;
         if (tokenArg) {
-          const tokenName = tokenText(tokenArg, ctx);
+          const tokenName = (await tokenText(tokenArg, ctx));
           const unwrappedToken = unwrapForwardRef(tokenArg);
           const known = ts.isStringLiteral(unwrappedToken)
             || (ts.isIdentifier(unwrappedToken)
@@ -3157,11 +3147,11 @@ function classDeps(
           if (options.skipSelf && !skipSelfDeps.includes(tokenName)) skipSelfDeps.push(tokenName);
           if (options.host && !hostDeps.includes(tokenName)) hostDeps.push(tokenName);
           if (!functionalInjects.some((entry) => entry.token === tokenName)) {
-            const declaration = ts.isIdentifier(unwrappedToken) ? resolveDeclaration(unwrappedToken, ctx)[0] : undefined;
+            const declaration = ts.isIdentifier(unwrappedToken) ? (await resolveDeclaration(unwrappedToken, ctx))[0] : undefined;
             const localFile = declaration && isProjectSourcePath(declaration.getSourceFile().fileName, ctx.rootDir)
               ? declaration.getSourceFile().fileName : undefined;
             const importModule = declaration && !localFile && ts.isIdentifier(unwrappedToken)
-              ? importModuleOf(unwrappedToken, ctx) : undefined;
+              ? (await importModuleOf(unwrappedToken, ctx)) : undefined;
             functionalInjects.push({
               token: tokenName,
               expression: nodeText(unwrappedToken),
@@ -3192,10 +3182,10 @@ function paramTypeTokenName(param: ParameterDeclaration, ctx: AnalysisContext): 
 // AST Utilities
 // ---------------------------------------------------------------------------
 
-function parseInjectableOptions(
+async function parseInjectableOptions(
   cls: ClassDeclaration,
   ctx?: AnalysisContext,
-): { scope?: Scope; providedIn?: "root"; deps?: string[] } | undefined {
+): Promise<{ scope?: Scope; providedIn?: "root"; deps?: string[] } | undefined> {
   const dec = findDecorator(cls, "Injectable");
   if (!dec) return undefined;
   const obj = decoratorObjectArg(dec);
@@ -3206,22 +3196,22 @@ function parseInjectableOptions(
   return {
     ...(scope && isScope(scope) ? { scope } : {}),
     ...(providedIn === "root" ? { providedIn } : {}),
-    ...(depsExpr ? { deps: arrayProp(obj, "deps").map((el) => (ctx ? tokenNameOf(el, ctx).name : nodeText(el))) } : {}),
+    ...(depsExpr ? { deps: (await ts.asyncMap(arrayProp(obj, "deps"), async (el) => (ctx ? (await tokenNameOf(el, ctx)).name : nodeText(el)))) } : {}),
   };
 }
 
 /** Constructor @Inject(token) parameter decorator -> parameter index -> token name. */
-function parseInjectParams(cls: ClassDeclaration, ctx: AnalysisContext): Map<number, string> {
+async function parseInjectParams(cls: ClassDeclaration, ctx: AnalysisContext): Promise<Map<number, string>> {
   const result = new Map<number, string>();
   const ctor = cls.members.find(ts.isConstructorDeclaration);
   if (!ctor) return result;
-  ctor.parameters.forEach((param, index) => {
+  (await ts.asyncForEach(ctor.parameters, async (param, index) => {
     for (const dec of decoratorsOf(param)) {
       if (decoratorName(dec) !== "Inject") continue;
       const arg = decoratorArguments(dec)[0];
-      if (arg) result.set(index, tokenText(arg, ctx));
+      if (arg) result.set(index, (await tokenText(arg, ctx)));
     }
-  });
+  }));
   return result;
 }
 
@@ -3267,24 +3257,24 @@ function unwrapForwardRef(expr: Expression): Expression {
   return expr;
 }
 
-function tokenText(expr: Expression, ctx: AnalysisContext): string {
+async function tokenText(expr: Expression, ctx: AnalysisContext): Promise<string> {
   const unwrapped = unwrapForwardRef(expr);
   if (ts.isStringLiteral(unwrapped)) return unwrapped.text;
   if (ts.isIdentifier(unwrapped)) {
-    const decl = resolveDeclaration(unwrapped, ctx)[0];
+    const decl = (await resolveDeclaration(unwrapped, ctx))[0];
     if (decl && ts.isClassDeclaration(decl)) return decl.name?.text ?? unwrapped.text;
     if (decl && ts.isVariableDeclaration(decl)) return variableName(decl);
   }
   return nodeText(unwrapped);
 }
 
-function resolveScope(
+async function resolveScope(
   input: { explicit?: Scope; cls?: ClassDeclaration; tokenName: string },
   ctx: AnalysisContext,
-): Scope {
+): Promise<Scope> {
   if (input.explicit) return input.explicit;
   if (input.cls) {
-    const injectable = parseInjectableOptions(input.cls, ctx);
+    const injectable = (await parseInjectableOptions(input.cls, ctx));
     if (injectable?.scope) return injectable.scope;
   }
   const token = ctx.tokensByName.get(input.tokenName);
@@ -3293,10 +3283,10 @@ function resolveScope(
 }
 
 /** Identifier -> token name + kind (resolves across imports to declaration). */
-function tokenNameOf(expr: Expression, ctx: AnalysisContext): { name: string; kind: TokenKind } {
+async function tokenNameOf(expr: Expression, ctx: AnalysisContext): Promise<{ name: string; kind: TokenKind }> {
   const unwrapped = unwrapForwardRef(expr);
   if (ts.isIdentifier(unwrapped)) {
-    const decl = resolveDeclaration(unwrapped, ctx)[0];
+    const decl = (await resolveDeclaration(unwrapped, ctx))[0];
     if (decl && ts.isClassDeclaration(decl)) {
       return { name: decl.name?.text ?? nodeText(expr), kind: "class" };
     }
@@ -3312,10 +3302,10 @@ function tokenNameOf(expr: Expression, ctx: AnalysisContext): { name: string; ki
 }
 
 /** Resolves identifier to its declarations (following import aliases). */
-function resolveDeclaration(id: Identifier, ctx: AnalysisContext): ts.Declaration[] {
-  let symbol = ctx.checker.getSymbolAtLocation(id);
+async function resolveDeclaration(id: Identifier, ctx: AnalysisContext): Promise<ts.Declaration[]> {
+  let symbol = (await ctx.checker.getSymbolAtLocation(id));
   if (!symbol) return [];
-  let declarations = symbol.declarations ?? [];
+  let declarations = (await ts.declarationsOf(symbol));
   for (let guard: number = 0; guard < 4; guard += 1) {
     const isAlias = declarations.some(
       (d) =>
@@ -3323,24 +3313,24 @@ function resolveDeclaration(id: Identifier, ctx: AnalysisContext): ts.Declaratio
     );
     if (!isAlias) break;
     if (!(symbol.flags & ts.SymbolFlags.Alias)) break;
-    const aliased = ctx.checker.getAliasedSymbol(symbol);
+    const aliased = (await ctx.checker.getAliasedSymbol(symbol));
     symbol = aliased;
-    declarations = aliased.declarations ?? [];
+    declarations = (await ts.declarationsOf(aliased));
   }
   return declarations;
 }
 
 /** File path where identifier is defined (relative to rootDir, stripped of extension) for import generation. */
-function importPathOf(id: Identifier, ctx: AnalysisContext): string | undefined {
-  const decl = resolveDeclaration(id, ctx)[0];
+async function importPathOf(id: Identifier, ctx: AnalysisContext): Promise<string | undefined> {
+  const decl = (await resolveDeclaration(id, ctx))[0];
   if (decl) return modulePath(ctx.rootDir, decl.getSourceFile().fileName);
   return undefined;
 }
 
 /** Package specifier for an imported symbol declared outside the project source tree. */
-function importModuleOf(id: Identifier, ctx: AnalysisContext): string | undefined {
-  const symbol = ctx.checker.getSymbolAtLocation(id);
-  const declarations = symbol?.declarations ?? [];
+async function importModuleOf(id: Identifier, ctx: AnalysisContext): Promise<string | undefined> {
+  const symbol = (await ctx.checker.getSymbolAtLocation(id));
+  const declarations = (await ts.declarationsOf(symbol));
   for (const declaration of declarations) {
     let current: ts.Node | undefined = declaration;
     while (current) {
@@ -3381,7 +3371,7 @@ function getProp(obj: ObjectLiteralExpression, name: string): Expression | undef
   );
   if (!prop) return undefined;
   if (ts.isPropertyAssignment(prop)) return prop.initializer;
-  if (ts.isShorthandPropertyAssignment(prop)) return prop.name;
+  if (ts.isShorthandPropertyAssignment(prop)) return ts.isIdentifier(prop.name) ? prop.name : undefined;
   return undefined;
 }
 
@@ -3432,9 +3422,9 @@ function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
   return expr && ts.isArrayLiteralExpression(expr) ? [...expr.elements] : [];
 }
 
-function operationAspectContract(expression: ts.Expression, checker: ts.TypeChecker): AspectRefNode["operation"] {
+async function operationAspectContract(expression: ts.Expression, checker: ts.TypeChecker): Promise<AspectRefNode["operation"]> {
   if (!ts.isCallExpression(expression)) return undefined;
-  const origin = apiOrigin(expression.expression, checker);
+  const origin = await apiOrigin(expression.expression, checker);
   if (origin?.name !== "defineOperationAspect"
     || !["@supacloud/app", "@supacloud/app/core", "@supacloud/app/execution"].includes(origin.module)) return undefined;
   const contract = expression.arguments[0];
@@ -3444,11 +3434,11 @@ function operationAspectContract(expression: ts.Expression, checker: ts.TypeChec
   return (kind === "route" || kind === "command" || kind === "job") && name?.trim() ? { kind, name } : undefined;
 }
 
-function parseAspectRefs(
+async function parseAspectRefs(
   expression: Expression | undefined,
   ctx: AnalysisContext,
   owner: string,
-): AspectRefNode[] {
+): Promise<AspectRefNode[]> {
   if (!expression) return [];
   if (!ts.isArrayLiteralExpression(expression)) {
     ctx.diagnostics.push({
@@ -3480,15 +3470,18 @@ function parseAspectRefs(
       continue;
     }
 
-    const declaration = resolveDeclaration(element, ctx).find((candidate) =>
-      ts.isFunctionDeclaration(candidate)
-      || (ts.isVariableDeclaration(candidate)
-        && ts.isVariableDeclarationList(candidate.parent) && (candidate.parent.flags & ts.NodeFlags.Const) !== 0
-        && candidate.initializer !== undefined
-        && (ts.isArrowFunction(candidate.initializer)
-          || ts.isFunctionExpression(candidate.initializer)
-          || operationAspectContract(candidate.initializer, ctx.checker) !== undefined)),
-    );
+    let declaration: ts.Declaration | undefined;
+    for (const candidate of await resolveDeclaration(element, ctx)) {
+      if (ts.isFunctionDeclaration(candidate)
+        || (ts.isVariableDeclaration(candidate)
+          && ts.isVariableDeclarationList(candidate.parent) && (candidate.parent.flags & ts.NodeFlags.Const) !== 0
+          && candidate.initializer !== undefined
+          && (ts.isArrowFunction(candidate.initializer) || ts.isFunctionExpression(candidate.initializer)
+            || (await operationAspectContract(candidate.initializer, ctx.checker)) !== undefined))) {
+        declaration = candidate;
+        break;
+      }
+    }
     if (!declaration) {
       ctx.diagnostics.push({
         severity: "error",
@@ -3511,9 +3504,9 @@ function parseAspectRefs(
     if (!name) continue;
     const declaredFile = declaration.getSourceFile().fileName;
     const projectLocal = isProjectSourcePath(declaredFile, ctx.rootDir);
-    const importModule = projectLocal ? undefined : importModuleOf(element, ctx);
+    const importModule = projectLocal ? undefined : await importModuleOf(element, ctx);
     const operation = ts.isVariableDeclaration(declaration) && declaration.initializer
-      ? operationAspectContract(declaration.initializer, ctx.checker) : undefined;
+      ? await operationAspectContract(declaration.initializer, ctx.checker) : undefined;
     refs.push({
       ...(operation ? { operation } : {}),
       ...(projectLocal ? { file: sourcePath(ctx.rootDir, declaredFile) } : {}),
@@ -3629,7 +3622,7 @@ function sourcePath(rootDir: string, absFile: string): string {
 /** Strip syntax-only wrappers; never evaluate arbitrary resource expressions. */
 function unwrapInfraResourceExpression(value: Expression): Expression {
   while (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)
-    || ts.isTypeAssertionExpression(value) || ts.isSatisfiesExpression(value)
+    || ts.isTypeAssertion(value) || ts.isSatisfiesExpression(value)
     || ts.isNonNullExpression(value)) {
     value = value.expression;
   }
@@ -3638,7 +3631,7 @@ function unwrapInfraResourceExpression(value: Expression): Expression {
 
 /** A present but unsupported declaration must not look like an omitted field. */
 function infraResourceProp(obj: ObjectLiteralExpression, name: "resources" | "uses", ctx: AnalysisContext): Expression | undefined {
-  const members = obj.properties.filter((member) => member.name && propertyName(member.name) === name);
+  const members = obj.properties.filter((member) => "name" in member && member.name && propertyName(member.name) === name);
   if (members.length === 0) return undefined;
   const member = members[0]!;
   if (members.length !== 1 || !ts.isPropertyAssignment(member)
@@ -3659,7 +3652,7 @@ function indexInfraResource(cls: ClassDeclaration, className: string, sf: Source
   const options = decoratorObjectArg(decorator);
   if (!options || options.properties.some((property) => !ts.isPropertyAssignment(property)
     || ts.isComputedPropertyName(property.name))
-    || new Set(options.properties.map((property) => property.name && propertyName(property.name))).size !== options.properties.length) {
+    || new Set(options.properties.map((property) => "name" in property && property.name && propertyName(property.name))).size !== options.properties.length) {
     pushResourceError(ctx, "invalid-resource-kind", "@InfraResource 需要静态的 { name, kind } 对象参数", file, line,
       "使用 @InfraResource({ name: \"orders-db\", kind: \"database\" })，不要使用对象展开或重复属性。");
     return;
@@ -3690,17 +3683,17 @@ function indexInfraResource(cls: ClassDeclaration, className: string, sf: Source
 }
 
 /** Resolve the actual declaration, not a project-global class-name fallback. */
-function resolveInfraResourceRef(el: Expression, ctx: AnalysisContext, owner: string, file: string, line: number): string | undefined {
+async function resolveInfraResourceRef(el: Expression, ctx: AnalysisContext, owner: string, file: string, line: number): Promise<string | undefined> {
   const unwrapped = unwrapInfraResourceExpression(unwrapForwardRef(unwrapInfraResourceExpression(el)));
   const identifier = ts.isIdentifier(unwrapped) ? unwrapped
     : ts.isPropertyAccessExpression(unwrapped) && ts.isIdentifier(unwrapped.name) ? unwrapped.name : undefined;
-  let symbol = identifier ? ctx.checker.getSymbolAtLocation(identifier) : undefined;
+  let symbol = identifier ? (await ctx.checker.getSymbolAtLocation(identifier)) : undefined;
   const visited = new Set<TsSymbol>();
   while (symbol && (symbol.flags & ts.SymbolFlags.Alias) && !visited.has(symbol)) {
     visited.add(symbol);
-    symbol = ctx.checker.getAliasedSymbol(symbol);
+    symbol = (await ctx.checker.getAliasedSymbol(symbol));
   }
-  const declaration = symbol?.declarations?.find(ts.isClassDeclaration);
+  const declaration = (await ts.declarationsOf(symbol)).find(ts.isClassDeclaration);
   const resource = declaration ? ctx.infraResources.get(declaration) : undefined;
   if (!resource) {
     pushResourceError(ctx, "unknown-resource", `${owner} 引用的资源 '${nodeText(el)}' 未声明为 @InfraResource`,
@@ -3710,7 +3703,7 @@ function resolveInfraResourceRef(el: Expression, ctx: AnalysisContext, owner: st
   return resource.name;
 }
 
-function parseModuleInfraResources(value: Expression | undefined, ctx: AnalysisContext, owner: string, file: string, line: number): Set<string> {
+async function parseModuleInfraResources(value: Expression | undefined, ctx: AnalysisContext, owner: string, file: string, line: number): Promise<Set<string>> {
   const names = new Set<string>();
   if (!value) return names;
   const array = unwrapInfraResourceExpression(value);
@@ -3720,13 +3713,13 @@ function parseModuleInfraResources(value: Expression | undefined, ctx: AnalysisC
     return names;
   }
   for (const element of array.elements) {
-    const resource = resolveInfraResourceRef(element, ctx, owner, file, lineOf(element));
+    const resource = (await resolveInfraResourceRef(element, ctx, owner, file, lineOf(element)));
     if (resource) names.add(resource);
   }
   return names;
 }
 
-function parseInfraResourceUseRefs(value: Expression | undefined, ctx: AnalysisContext, owner: string, file: string, line: number): InfraResourceUseRef[] {
+async function parseInfraResourceUseRefs(value: Expression | undefined, ctx: AnalysisContext, owner: string, file: string, line: number): Promise<InfraResourceUseRef[]> {
   if (!value) return [];
   const array = unwrapInfraResourceExpression(value);
   if (!ts.isArrayLiteralExpression(array)) {
@@ -3741,7 +3734,7 @@ function parseInfraResourceUseRefs(value: Expression | undefined, ctx: AnalysisC
       || entry.properties.some((property) => !ts.isPropertyAssignment(property)
         || ts.isComputedPropertyName(property.name)
         || !["resource", "operations"].includes(propertyName(property.name)))
-      || new Set(entry.properties.map((property) => property.name && propertyName(property.name))).size !== entry.properties.length) {
+      || new Set(entry.properties.map((property) => "name" in property && property.name && propertyName(property.name))).size !== entry.properties.length) {
       pushResourceError(ctx, "unknown-resource", `${owner} 的 uses 项必须是显式的 { resource, operations } 对象`,
         file, lineOf(element), "使用显式属性，不要使用对象/数组展开、简写、计算属性或重复属性。");
       continue;
@@ -3752,7 +3745,7 @@ function parseInfraResourceUseRefs(value: Expression | undefined, ctx: AnalysisC
         "在该 uses 项中显式指定 resource: ResourceClass。");
       continue;
     }
-    const resource = resolveInfraResourceRef(resourceEl, ctx, owner, file, lineOf(resourceEl));
+    const resource = (await resolveInfraResourceRef(resourceEl, ctx, owner, file, lineOf(resourceEl)));
     if (!resource) continue;
     const operationsEl = getProp(entry, "operations");
     const operations = new Set<InfraResourceOperation>();

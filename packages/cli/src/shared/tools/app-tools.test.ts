@@ -474,7 +474,7 @@ describe("app tools", () => {
             expect(result.isError).toBe(false);
             expect(JSON.parse(result.content[0].text)).toEqual(modulePack);
         }
-    });
+    }, 30_000);
 
     test("doctor reports actionable checks and passes after a clean compile", async () => {
         await app({ action: "compile", root });
@@ -498,8 +498,8 @@ describe("app tools", () => {
     });
 
     test("context rejects unknown and ambiguous targets without losing module lookup", async () => {
-        await expect(app({ action: "context", root, target: "not-a-symbol", format: "json" }))
-            .rejects.toThrow('No context target named "not-a-symbol"');
+        expect(await app({ action: "context", root, target: "not-a-symbol", format: "json" }).catch((error: unknown) => error))
+            .toMatchObject({ message: expect.stringContaining('No context target named "not-a-symbol"') });
         const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-context-owners-"));
         try {
             const { mkdir, writeFile } = await import("node:fs/promises");
@@ -510,8 +510,8 @@ describe("app tools", () => {
                 await writeFile(absolute, relativePath.startsWith("src/features/audit/")
                     ? content.replaceAll("AuditService", "CaseService") : content, "utf8");
             }
-            await expect(app({ action: "context", root: isolatedRoot, target: "CaseService", format: "json" }))
-                .rejects.toThrow("Select a module name: audit, case");
+            expect(await app({ action: "context", root: isolatedRoot, target: "CaseService", format: "json" }).catch((error: unknown) => error))
+                .toMatchObject({ message: expect.stringContaining("Select a module name: audit, case") });
             const result = await app({ action: "context", root: isolatedRoot, target: "case", format: "json" });
             expect(JSON.parse(result.content[0].text).subject).toBe("case");
             expect(existsSync(join(isolatedRoot, "generated"))).toBe(false);

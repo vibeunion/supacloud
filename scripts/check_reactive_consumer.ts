@@ -115,7 +115,8 @@ async function compile(project) {
   const [code, stdout, stderr] = await Promise.all([
     child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
   ]);
-  assert.ok(code === 0 || code === 1, "TypeScript did not complete normally: " + stdout + stderr);
+  // TypeScript 7.1 beta reports declaration diagnostics with exit code 2.
+  assert.ok(code === 0 || code === 1 || code === 2, "TypeScript did not complete normally: " + stdout + stderr);
   return { code, diagnostics: (stdout + stderr).trim() };
 }
 const framework = await compile("tsconfig.framework.json");

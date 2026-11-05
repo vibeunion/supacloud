@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/lite",
-  "version": "0.37.2",
+  "version": "0.38.0",
   "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite or native PostgreSQL",
   "type": "module",
   "license": "Apache-2.0",
@@ -76,7 +76,7 @@
     "effect": "4.0.5",
     "elysia": "2.0.0-rc.1",
     "jose": "^6.2.13",
-    "typescript": "^7.0.2"
+    "typescript": "7.1.0-beta"
   },
   "overrides": {
     "@supacloud/db": "file:../db",

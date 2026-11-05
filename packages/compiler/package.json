@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/compiler",
-  "version": "0.56.0",
+  "version": "0.57.0",
   "description": "Static compiler for @supacloud/app metadata: builds the application graph from AST, validates it, and generates reflection-free factory code",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,7 +33,7 @@
     "prepare:db": "bun install --cwd ../contracts --frozen-lockfile && bun run --cwd ../contracts build && bun install --cwd ../db --force --frozen-lockfile && bun run --cwd ../db build && bun install --force --frozen-lockfile",
     "prebuild": "bun run prepare:db",
     "pretypecheck": "bun run prepare:db",
-    "build:js": "bun build src/index.ts src/diagnostics.ts src/cli.ts src/delivery-bundle-worker.ts src/database-governance-worker.ts --outdir dist --target node --conditions=supacloud-source --external @typescript/typescript6 --external @supacloud/db --external @supacloud/db/source-contracts --external graphql --external '@graphql-codegen/*'",
+    "build:js": "bun build src/index.ts src/diagnostics.ts src/cli.ts src/delivery-bundle-worker.ts src/database-governance-worker.ts --outdir dist --target node --conditions=supacloud-source --external typescript --external 'typescript/*' --external @supacloud/db --external @supacloud/db/source-contracts --external graphql --external '@graphql-codegen/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build && bun run test:package",
@@ -64,8 +64,8 @@
     "@graphql-codegen/typed-document-node": "^7.2.0",
     "@graphql-codegen/typescript-operations": "^6.1.10",
     "@graphql-typed-document-node/core": "^3.2.0",
-    "@typescript/typescript6": "^6.0.2",
-    "graphql": "^16"
+    "graphql": "^16",
+    "typescript": "7.1.0-beta"
   },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",
@@ -77,7 +77,6 @@
   "devDependencies": {
     "@supabase/supabase-js": "2.118.0",
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2",
     "@zenstackhq/schema": "3.10.0",
     "@zenstackhq/orm": "3.10.0"
   }

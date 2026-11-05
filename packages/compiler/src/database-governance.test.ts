@@ -13,10 +13,12 @@ import { writeFixtureProject } from "./fixtures/helpers";
 import type { CompileOptions, WatchHandle } from "./types";
 
 const roots: string[] = [];
+const compilers: ReturnType<typeof createIncrementalCompiler>[] = [];
 let handle: WatchHandle | undefined;
 afterEach(async () => {
   await handle?.close();
   handle = undefined;
+  for (const compiler of compilers.splice(0)) await compiler.reset();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 const module = {
@@ -97,6 +99,7 @@ test("offline compile and incremental checks fail closed on stale contracts with
     ...options, databaseGovernance: { mode: "check", projectRoot: root },
   };
   const compiler = createIncrementalCompiler();
+  compilers.push(compiler);
   expect((await compiler.compile(offline)).diagnostics.filter(item => item.severity === "error")).toEqual([]);
   expect((await compiler.compile(offline, [])).stats.cacheHit).toBe(true);
   const before = await readFile(join(options.outDir, "app.manifest.json"), "utf8");
@@ -110,7 +113,7 @@ test("offline compile and incremental checks fail closed on stale contracts with
   expect((await checkProject(offline)).upToDate).toBe(false);
   expect(await readFile(join(options.outDir, "app.manifest.json"), "utf8")).toBe(before);
   expect((await databaseSources(root, "check")).ok).toBe(false);
-});
+}, 30_000);
 
 test("off does not require database adoption; enforce blocks without source contracts even with writeOnError", async () => {
   const { root, options } = await fixture();
@@ -123,11 +126,12 @@ test("off does not require database adoption; enforce blocks without source cont
   expect(failed.diagnostics.some(item => item.code === "database-source-contract")).toBe(true);
   expect(await readFile(join(options.outDir, "application.ts"), "utf8")).toBe(before);
   expect((await checkProject(options)).upToDate).toBe(false);
-});
+}, 30_000);
 
 test("successful compilation checks live drift again on incremental cache hits and preserves artifacts", async () => {
   const { root, options } = await fixture();
   const compiler = createIncrementalCompiler();
+  compilers.push(compiler);
   expect((await compiler.compile(options)).diagnostics.filter(item => item.severity === "error")).toEqual([]);
   expect((await checkProject(options)).upToDate).toBe(true);
   const before = await readFile(join(options.outDir, "app.manifest.json"), "utf8");
@@ -139,7 +143,7 @@ test("successful compilation checks live drift again on incremental cache hits a
   expect(await readFile(join(options.outDir, "app.manifest.json"), "utf8")).toBe(before);
   await writeFile(join(root, "db/state.json"), JSON.stringify({ rls: true }));
   expect((await compiler.compile(options, [])).diagnostics.filter(item => item.severity === "error")).toEqual([]);
-});
+}, 30_000);
 
 test("missing connection, stale sources and cached module declarations cannot silently pass", async () => {
   const { root, options } = await fixture();

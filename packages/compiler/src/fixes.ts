@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import type { DiagnosticFix } from "./types";
 
 export interface ApplyDiagnosticFixOptions {
@@ -39,7 +39,8 @@ export async function applyDiagnosticFix(
   if (options.expectedSourceHash !== undefined && options.expectedSourceHash !== sourceHash) {
     throw new Error("Fix source changed since preview; analyze the project again");
   }
-  let source = parse(file, original);
+  const originalSource = await parse(file, original);
+  let source = originalSource;
   let content: string;
 
   switch (fix.type) {
@@ -53,14 +54,15 @@ export async function applyDiagnosticFix(
       if (!current || current.initializer.getText(source) !== fix.expectedExpression) {
         throw new Error("Command mode changed since diagnosis; analyze the project again");
       }
-      content = replaceProperty(source, object, fix.property, ts.factory.createStringLiteral(fix.value));
+      content = (await replaceProperty(source, object, fix.property, ts.factory.createStringLiteral(fix.value, ts.TokenFlags.None)));
       break;
     }
     case "add_module_import": {
       if (!fix.importPath || !fix.symbol) throw new Error("Module fix requires importPath and symbol");
       identifier(fix.symbol);
-      const withImport = importSymbol(source, fix.importPath, fix.symbol);
-      source = parse(file, withImport);
+      const withImport = (await importSymbol(source, fix.importPath, fix.symbol));
+      const importedSource = await parse(file, withImport);
+      source = importedSource;
       const object = unique(
         moduleObjects(source).filter((candidate) =>
           !fix.targetModule || stringProperty(candidate, "name") === fix.targetModule),
@@ -76,10 +78,10 @@ export async function applyDiagnosticFix(
       if (values.some(ts.isSpreadElement)) throw new Error("Module imports cannot contain spread elements");
       content = values.some((value) => ts.isIdentifier(value) && value.text === fix.symbol)
         ? withImport
-        : replaceProperty(source, object, "imports", ts.factory.createArrayLiteralExpression([
+        : (await replaceProperty(source, object, "imports", ts.factory.createArrayLiteralExpression([
           ...values,
           ts.factory.createIdentifier(fix.symbol),
-        ]));
+        ])));
       break;
     }
     case "add_command_permission": {
@@ -93,7 +95,7 @@ export async function applyDiagnosticFix(
       if (current && (!ts.isStringLiteral(current.initializer) || current.initializer.text !== permission)) {
         throw new Error("Command permission already exists with a different value");
       }
-      content = current ? original : replaceProperty(source, object, "permission", ts.factory.createStringLiteral(permission));
+      content = current ? original : (await replaceProperty(source, object, "permission", ts.factory.createStringLiteral(permission, ts.TokenFlags.None)));
       break;
     }
     case "add_route_parameter_binding": {
@@ -119,13 +121,14 @@ export async function applyDiagnosticFix(
       const edited = original.slice(0, parameter.getStart(source)) +
         `@${binding}(${JSON.stringify(fix.parameter)}) ` +
         original.slice(parameter.getStart(source));
-      content = importSymbol(parse(file, edited), framework.moduleSpecifier.text, binding);
+      const editedSource = await parse(file, edited);
+      content = await importSymbol(editedSource, framework.moduleSpecifier.text, binding);
       break;
     }
     default:
       throw new Error(`Diagnostic fix '${fix.type}' requires a manual semantic decision; no files changed`);
   }
-  parse(file, content);
+  await parse(file, content);
   const result = { file, changed: content !== original, content, sourceHash };
   if (options.dryRun === false && result.changed) {
     const temporary = `${file}.supacloud-fix-${randomUUID()}`;
@@ -140,16 +143,16 @@ export async function applyDiagnosticFix(
   return result;
 }
 
-function parse(file: string, text: string): ts.SourceFile {
-  const result = ts.transpileModule(text, {
+async function parse(file: string, text: string): Promise<ts.SourceFile> {
+  const result = (await ts.transpileModule(text, {
     fileName: file,
     reportDiagnostics: true,
     compilerOptions: { target: ts.ScriptTarget.ESNext, experimentalDecorators: true },
-  });
+  }));
   if (result.diagnostics?.some((item) => item.category === ts.DiagnosticCategory.Error)) {
     throw new Error("Cannot fix syntactically invalid TypeScript");
   }
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  return (await ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS));
 }
 
 function unique<T>(items: readonly T[], description: string): T {
@@ -184,20 +187,18 @@ function stringProperty(object: ts.ObjectLiteralExpression, key: string): string
   return value && ts.isStringLiteral(value) ? value.text : undefined;
 }
 
-function replaceProperty(
+async function replaceProperty(
   source: ts.SourceFile,
   object: ts.ObjectLiteralExpression,
   key: string,
   value: ts.Expression,
-): string {
+): Promise<string> {
   const previous = property(object, key);
-  const replacement = ts.factory.createPropertyAssignment(key, value);
-  const properties = object.properties.map((item) => item === previous ? replacement : item);
-  if (!previous) properties.push(replacement);
-  const updated = ts.factory.updateObjectLiteralExpression(object, properties);
-  return source.text.slice(0, object.getStart(source)) +
-    ts.createPrinter().printNode(ts.EmitHint.Expression, updated, source) +
-    source.text.slice(object.end);
+  const text = await ts.printNode(value);
+  if (previous) return source.text.slice(0, previous.initializer.getStart(source)) + text + source.text.slice(previous.initializer.end);
+  const position = object.end - 1;
+  const separator = object.properties.length && !object.properties.hasTrailingComma ? "," : "";
+  return source.text.slice(0, position) + `${separator} ${key}: ${text}` + source.text.slice(position);
 }
 
 function findClass(source: ts.SourceFile, name: string): ts.ClassDeclaration {
@@ -234,7 +235,7 @@ function moduleObjects(source: ts.SourceFile): ts.ObjectLiteralExpression[] {
   return result;
 }
 
-function importSymbol(source: ts.SourceFile, path: string, symbol: string): string {
+async function importSymbol(source: ts.SourceFile, path: string, symbol: string): Promise<string> {
   identifier(symbol);
   const current = resolve(source.fileName).replace(/\.(tsx?|mts|cts)$/, "");
   const target = resolve(dirname(source.fileName), path).replace(/\.(tsx?|mts|cts)$/, "");
@@ -244,7 +245,7 @@ function importSymbol(source: ts.SourceFile, path: string, symbol: string): stri
   if (matches.length > 1) throw new Error(`Ambiguous imports from '${path}'`);
   const match = matches[0];
   if (match && ts.isImportDeclaration(match) && match.importClause?.namedBindings &&
-    ts.isNamedImports(match.importClause.namedBindings) && !match.importClause.isTypeOnly) {
+    ts.isNamedImports(match.importClause.namedBindings) && match.importClause.phaseModifier !== ts.SyntaxKind.TypeKeyword) {
     if (match.importClause.namedBindings.elements.some((item) => item.name.text === symbol)) return source.text;
     const bindings = match.importClause.namedBindings;
     const updated = ts.factory.updateNamedImports(bindings, [
@@ -252,7 +253,7 @@ function importSymbol(source: ts.SourceFile, path: string, symbol: string): stri
       ts.factory.createImportSpecifier(false, undefined, ts.factory.createIdentifier(symbol)),
     ]);
     return source.text.slice(0, bindings.getStart(source)) +
-      ts.createPrinter().printNode(ts.EmitHint.Unspecified, updated, source) +
+      (await ts.printNode(updated)) +
       source.text.slice(bindings.end);
   }
   if (match) throw new Error(`Import from '${path}' is not a named value import`);

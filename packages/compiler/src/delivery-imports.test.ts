@@ -6,22 +6,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFixtureProject } from "./fixtures/helpers";
 
-const convert = (source: string) => new TextDecoder().decode(
-  staticDeliveryImports("/fixture/entry.js", new TextEncoder().encode(source)),
+const convert = async (source: string) => new TextDecoder().decode(
+  (await staticDeliveryImports("/fixture/entry.js", new TextEncoder().encode(source))),
 );
 const wrapper = "function load(specifier) { return import(specifier); }";
 
-test("expands private import helpers only when every reference is a literal call", () => {
-  const output = convert(`${wrapper}
+test("expands private import helpers only when every reference is a literal call", async () => {
+  const output = (await convert(`${wrapper}
     export async function run() { return Promise.all([load("node:fs/promises"), load("strtok3")]); }
-  `);
+  `));
   expect(output).toContain('import("node:fs/promises")');
   expect(output).toContain('import("strtok3")');
   expect(output).not.toContain("function load");
   expect(output).not.toContain("import(specifier)");
 });
 
-test("rejects escaped, exported, reassigned, side-effecting and open import helpers", () => {
+test("rejects escaped, exported, reassigned, side-effecting and open import helpers", async () => {
   for (const source of [
     `${wrapper} export const run = load;`,
     `${wrapper} export const object = { load };`,
@@ -40,16 +40,16 @@ test("rejects escaped, exported, reassigned, side-effecting and open import help
       export const run = () => load("node:fs");`,
     `${wrapper} export const run = () => load("node:fs"); export const other = () => import(process.env.MODULE);`,
     `${wrapper} load("node:fs");`,
-  ]) expect(() => convert(source)).toThrow("Computed module loading");
+  ]) expect(await convert(source).catch((error: unknown) => error)).toMatchObject({ message: expect.stringContaining("Computed module loading") });
 });
 
-test("does not rewrite shadowed bindings and preserves files without computed imports", () => {
+test("does not rewrite shadowed bindings and preserves files without computed imports", async () => {
   const source = 'export const run = () => import("node:path");';
-  expect(convert(source)).toBe(source);
-  const output = convert(`${wrapper}
+  expect((await convert(source))).toBe(source);
+  const output = (await convert(`${wrapper}
     export const run = () => load("node:fs");
     export function another(load) { return load("unrelated"); }
-  `);
+  `));
   expect(output).toContain('import("node:fs")');
   expect(output).toContain('load("unrelated")');
 });

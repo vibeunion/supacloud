@@ -2,7 +2,9 @@ import { compileModel } from "./model";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "typescript/ast";
+import { API } from "typescript/async";
+import { forEachChild, withSourceFile } from "./typescript-source";
 import { migrationFunctionIdentities, rpcSourceContract, renderRpcSourceTypes, type RpcSourceContract } from "./rpc-source-contracts";
 
 export interface DatabaseSourcesConfig {
@@ -128,12 +130,12 @@ function staticPaths(source: ts.SourceFile): Array<{ value: string; line: number
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
       bindings.set(node.name.text, node.initializer);
     }
-    ts.forEachChild(node, collect);
+    forEachChild(node, collect);
   };
   collect(source);
   const evaluate = (node: ts.Node, depth = 0): string | undefined => {
     if (depth > 12) return;
-    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isStringLiteralLikeNode(node)) return node.text;
     if (ts.isIdentifier(node)) {
       const binding = bindings.get(node.text);
       return binding ? evaluate(binding, depth + 1) : undefined;
@@ -167,7 +169,7 @@ function staticPaths(source: ts.SourceFile): Array<{ value: string; line: number
   const visit = (node: ts.Node) => {
     const value = evaluate(node);
     if (value !== undefined) references.push({ value, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 });
-    ts.forEachChild(node, visit);
+    forEachChild(node, visit);
   };
   visit(source);
   return references;
@@ -193,26 +195,33 @@ async function boundaryFindings(
     && (config ? schemaInputs.includes(file) || config.consumers.some(directory => within(file, directory))
       : !within(file, "output") && !within(file, "generated")));
   const findings: SourceFinding[] = [];
-  const configFile = ts.findConfigFile(root, ts.sys.fileExists);
-  const compilerOptions = configFile ? ts.parseJsonConfigFileContent(
-    ts.readConfigFile(configFile, ts.sys.readFile).config, ts.sys, dirname(configFile),
-  ).options : {};
-  const resolutionCache = ts.createModuleResolutionCache(root, path => path, compilerOptions);
+  await using api = new API({ cwd: root });
+  let configDirectory = root;
+  let configFile: string | undefined;
+  for (;;) {
+    const candidate = join(configDirectory, "tsconfig.json");
+    if (await exists(candidate)) { configFile = candidate; break; }
+    const parent = dirname(configDirectory);
+    if (parent === configDirectory) break;
+    configDirectory = parent;
+  }
+  const compilerOptions = configFile ? (await api.parseConfigFile(configFile)).options : {};
+  await using resolver = await api.createModuleResolver(compilerOptions);
   for (const file of consumers) {
     if (config?.auditConsumers.includes(file)) continue;
-    const source = ts.createSourceFile(file, await readFile(await safePath(root, file), "utf8"), ts.ScriptTarget.Latest, true);
+    await withSourceFile(file, await readFile(await safePath(root, file), "utf8"), async source => {
     if (file.startsWith("src/") && !config?.trustedHosts.some(host => within(file, host)) && !/\.(test|spec)\.[cm]?tsx?$/.test(file)) {
-      const checkBoundary = (node: ts.Node) => {
+      const checkBoundary = async (node: ts.Node): Promise<void> => {
         const module = (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) ? node.moduleSpecifier
           : ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
             || ts.isIdentifier(node.expression) && node.expression.text === "require") ? node.arguments[0] : undefined;
-        const typeOnly = ts.isImportDeclaration(node) && (node.importClause?.isTypeOnly
+        const typeOnly = ts.isImportDeclaration(node) && (node.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
           || node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
           && !node.importClause.name && node.importClause.namedBindings.elements.every(item => item.isTypeOnly))
           || ts.isExportDeclaration(node) && node.isTypeOnly;
         if (module && ts.isStringLiteral(module) && !typeOnly) {
           const name = module.text;
-          const resolved = ts.resolveModuleName(name, resolve(root, file), compilerOptions, ts.sys, resolutionCache).resolvedModule;
+          const resolved = (await resolver.resolveModuleName(name, resolve(root, dirname(file)))).resolvedModule;
           const local = slash(relative(root, resolved?.resolvedFileName ?? resolve(root, dirname(file), name)));
           if (/^(?:@zenstackhq\/|kysely(?:$|\/)|bun(?:$|:)|(?:pg|postgres)(?:$|\/)|@prisma\/client(?:$|\/)|@supacloud\/db(?:$|\/))/.test(name)
             || config?.trustedHosts.some(host => within(local, host) || within(`${local}.ts`, host))) {
@@ -220,9 +229,11 @@ async function boundaryFindings(
               code: "model-boundary", message: "Database construction and host imports belong in src/host; inject policy model capabilities into business code." });
           }
         }
-        ts.forEachChild(node, checkBoundary);
+        const children: ts.Node[] = [];
+        forEachChild(node, child => { children.push(child); });
+        for (const child of children) await checkBoundary(child);
       };
-      checkBoundary(source);
+      await checkBoundary(source);
     }
     const reported = new Set<number>();
     for (const reference of staticPaths(source)) {
@@ -237,6 +248,7 @@ async function boundaryFindings(
         findings.push({ file, line: reference.line, code: "audit-input", message: "Ordinary source references an audit dump or audit-only script; use maintained sources or migration replay." });
       }
     }
+    });
   }
   return findings;
 }
@@ -281,17 +293,16 @@ export async function databaseSources(
       await input(file);
       // Follow local schema imports so splitting tables does not weaken freshness.
       const visitImports = async (path: string) => {
-        const tree = ts.createSourceFile(path, await input(path), ts.ScriptTarget.Latest, true);
         const imports: string[] = [];
         const visit = (node: ts.Node) => {
           if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
             && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
             && node.moduleSpecifier.text.startsWith(".")) imports.push(node.moduleSpecifier.text);
-          ts.forEachChild(node, visit);
+          forEachChild(node, visit);
         };
         if (path.endsWith(".zmodel")) {
           for (const match of (await input(path)).matchAll(/\bimport\s+["'](\.[^"']+)["']/g)) imports.push(match[1]!);
-        } else visit(tree);
+        } else await withSourceFile(path, await input(path), tree => visit(tree));
         for (const specifier of imports) {
           const base = slash(relative(root, resolve(root, dirname(path), specifier)));
           const candidates = path.endsWith(".zmodel") ? [base, `${base}.zmodel`] : [base, base.replace(/\.js$/, ".ts"), `${base}.ts`, `${base}/index.ts`];

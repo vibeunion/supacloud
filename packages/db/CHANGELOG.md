@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/db-v0.20.5...db-v0.21.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431))
+
+### Features
+
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431)) ([6d817df](https://github.com/vibeunion/supacloud/commit/6d817df37c4f5fdd39d6ea53a6ccd61903abb598))
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
 ## [0.20.5](https://github.com/vibeunion/supacloud/compare/db-v0.20.4...db-v0.20.5) (2026-11-03)
 
 

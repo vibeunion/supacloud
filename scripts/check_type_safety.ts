@@ -9,7 +9,7 @@ if (args.some((arg) => !["--test", "--inventory", "--json"].includes(arg))) {
 }
 
 const compilerTypeScript = join(
-  root, "packages", "compiler", "node_modules", "@typescript", "typescript6", "lib", "typescript.js",
+  root, "packages", "compiler", "node_modules", "typescript", "dist", "api", "async", "api.js",
 );
 if (!existsSync(compilerTypeScript)) {
   const install = spawnSync("bun", ["install", "--frozen-lockfile"], {
@@ -158,7 +158,7 @@ for (const project of projects) {
   execute(project.name, project.directory, "sync", svelteKit, ["sync"]);
 }
 
-const inventory = projects.map(inspectTypeSafetyProject);
+const inventory = await Promise.all(projects.map(inspectTypeSafetyProject));
 for (const item of inventory) {
   if (item.errors.length) {
     failed = true;

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.56.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.55.2...web-console-v0.56.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431))
+
+### Features
+
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431)) ([6d817df](https://github.com/vibeunion/supacloud/commit/6d817df37c4f5fdd39d6ea53a6ccd61903abb598))
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
+
+### Miscellaneous Chores
+
+* **web-console:** upgrade compatible SVAdmin packages ([#2438](https://github.com/vibeunion/supacloud/issues/2438)) ([abae475](https://github.com/vibeunion/supacloud/commit/abae475497dd6947992e484386716c7471634070))
+* **web-console:** upgrade SVAdmin packages to latest npm releases ([#2439](https://github.com/vibeunion/supacloud/issues/2439)) ([ec634b7](https://github.com/vibeunion/supacloud/commit/ec634b7392e5c526c2643c92509b04e6f3359f11))
+
 ## [0.55.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.55.1...web-console-v0.55.2) (2026-11-03)
 
 

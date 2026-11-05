@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import * as ts from "../packages/compiler/node_modules/@typescript/typescript6/lib/typescript.js";
+import * as ts from "../packages/compiler/src/typescript";
 
 export interface TypeSafetyProject {
   name: string;
@@ -62,7 +62,7 @@ export function discoverTypeSafetyProjects(root: string): TypeSafetyProject[] {
   return projects;
 }
 
-export function inspectTypeSafetyProject(project: TypeSafetyProject): TypeSafetyInventory {
+export async function inspectTypeSafetyProject(project: TypeSafetyProject): Promise<TypeSafetyInventory> {
   const errors: string[] = [];
   const covered = new Set<string>();
   for (const name of project.configs) {
@@ -71,20 +71,19 @@ export function inspectTypeSafetyProject(project: TypeSafetyProject): TypeSafety
       errors.push(`Missing ${name}`);
       continue;
     }
-    const read = ts.readConfigFile(path, ts.sys.readFile);
+    const read = (await ts.readConfigFile(path, ts.sys.readFile));
     if (read.error) {
       errors.push(ts.flattenDiagnosticMessageText(read.error.messageText, "\n"));
       continue;
     }
-    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, project.directory, {}, path, undefined, [
-      { extension: ".svelte", isMixedContent: true, scriptKind: ts.ScriptKind.Deferred },
-    ]);
+    const parsed = (await ts.parseJsonConfigFileContent(read.config, ts.sys, project.directory));
     for (const error of parsed.errors) errors.push(ts.flattenDiagnosticMessageText(error.messageText, "\n"));
+    const options: ts.CompilerOptions = parsed.options;
     for (const option of requiredOptions) {
-      if (parsed.options[option] !== true) errors.push(`${name}: ${option} must be true`);
+      if (options[option] !== true) errors.push(`${name}: ${option} must be true`);
     }
     for (const option of strictOptions) {
-      if (parsed.options[option] === false) errors.push(`${name}: ${option} must not override strict`);
+      if (options[option] === false) errors.push(`${name}: ${option} must not override strict`);
     }
     for (const file of parsed.fileNames) {
       if (/\.[cm]?js$/.test(file) && parsed.options.checkJs !== true) continue;

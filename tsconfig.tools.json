@@ -12,7 +12,6 @@
     "types": ["bun", "node"],
     "ignoreDeprecations": "6.0",
     "paths": {
-      "@typescript/typescript6": ["./packages/compiler/node_modules/@typescript/typescript6"],
       "@supacloud/contracts": ["./packages/contracts/src/index.ts"],
       "@supacloud/contracts/client": ["./packages/contracts/src/client.ts"],
       "@supacloud/contracts/browser": ["./packages/contracts/src/browser.ts"],

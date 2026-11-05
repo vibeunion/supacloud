@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.15.2...contracts-v0.16.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+
+### Features
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
 ## [0.15.2](https://github.com/vibeunion/supacloud/compare/contracts-v0.15.1...contracts-v0.15.2) (2026-10-31)
 
 

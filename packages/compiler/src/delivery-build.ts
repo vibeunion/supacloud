@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, realpath, rename, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { checkProject } from "./compile";
 import { createDeliveryPlan } from "./delivery-plan";
 import { parseDeliveryOptions, type DeliveryDiagnostic } from "./delivery-schema";
@@ -48,7 +48,7 @@ export async function buildDeliveryProject(
     const generatedRoot = resolve(project, relative(lexicalProject, options.outDir));
     if (inside(generatedRoot, sourceRoot)) throw new Error("Output must not contain the application source root.");
     const configInputs = new Map<string, string>();
-    const parsedConfig = ts.getParsedCommandLineOfConfigFile(await realpath(configPath), {}, {
+    const parsedConfig = (await ts.getParsedCommandLineOfConfigFile(await realpath(configPath), {}, {
       ...ts.sys,
       readFile(path) {
         const contents = readFileSync(path, "utf8");
@@ -56,7 +56,7 @@ export async function buildDeliveryProject(
         return contents;
       },
       onUnRecoverableConfigFileDiagnostic() { throw new Error("Invalid project TypeScript configuration."); },
-    });
+    }));
     if (!parsedConfig || parsedConfig.errors.length > 0) throw new Error("Invalid project TypeScript configuration.");
 
     phase = "compiler-checks";
@@ -193,20 +193,19 @@ export async function buildDeliveryProject(
           ...(rendered!.permissionsCode === undefined ? {} : { "permissions.ts": rendered!.permissionsCode }),
         };
       }
-      const unsafe = scanGeneratedArtifacts(generated, true);
+      const unsafe = (await scanGeneratedArtifacts(generated, true));
       if (unsafe.some((item) => item.severity === "error")) return failed(unsafe);
       for (const [name, contents] of Object.entries(generated)) await writeArtifact(stage, `generated/${name}`, contents);
 
       {
         // Widen only the emit-path boundary to include compiler-owned source.
         // All application strictness and project-reference settings are preserved.
-        const program = ts.createProgram({
-          rootNames: [...parsedConfig.fileNames.filter((path) => !inside(generatedRoot, path)),
+        await using program = await ts.createProgram( [...parsedConfig.fileNames.filter((path) => !inside(generatedRoot, path)),
             ...Object.keys(generated).map((name) => join(stage, "generated", name))],
-          options: { ...parsedConfig.options, rootDir: project },
+          { ...parsedConfig.options, rootDir: project }, {
           ...(parsedConfig.projectReferences ? { projectReferences: parsedConfig.projectReferences } : {}),
         });
-        const diagnostics = ts.getPreEmitDiagnostics(program);
+        const diagnostics = (await ts.getPreEmitDiagnostics(program));
         if (diagnostics.some((item) => item.category === ts.DiagnosticCategory.Error)) {
           return failed(diagnostics.filter((item) => item.category === ts.DiagnosticCategory.Error).map((item) => ({
             severity: "error", code: "delivery-generated-type-error",

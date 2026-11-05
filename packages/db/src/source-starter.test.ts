@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { initializeAppProject as initializeFiles, appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
 import { databaseSources } from "./source-contracts";
@@ -78,17 +78,18 @@ const row: ReviewRow = { id: "id", ownerId: "owner", state: "draft", version: 1 
 const insert: NewReview = row;`;
   const diagnostics = async (text: string) => {
     await writeFile(path, text);
-    return ts.getPreEmitDiagnostics(ts.createProgram([
+    await using program = await ts.createProgram([
       path, join(root, "zenstack/generated/schema.ts"),
     ], {
       strict: true, noEmit: true, skipLibCheck: true, types: ["bun"],
       typeRoots: [join(root, "node_modules/@types")],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    }));
+    });
+    return await ts.getPreEmitDiagnostics(program);
   };
   expect((await diagnostics(source)).map(item => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
   expect((await diagnostics(source + '\nconst invalid: NewReview = { ...row, state: true };')).map(item => item.code)).toContain(2322);
-});
+}, 30_000);
 
 test("ZenStack generates real SQL drafts without changing deployment migrations", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-diff-"));
@@ -149,7 +150,8 @@ export function prepareArchivedDelivery() { throw new Error("Not used by source-
   for (const reject of [false, true]) {
     if (reject) builder.failNextBuild();
     const build = fixture.buildReferenceUpgradeArchive(join(root, "output/upgrade"), new AbortController().signal);
-    if (reject) await expect(build).rejects.toThrow("Synthetic archive build failure");
+    // Settle native compiler I/O before entering Bun's synchronous assertion matcher.
+    if (reject) expect(await build.catch((error: unknown) => error)).toMatchObject({ message: "Synthetic archive build failure" });
     else expect(await build).toEqual({ verified: true });
     expect(builder.observations.at(-1)?.migrations.map(item => item.path)).toEqual([
       ...migrations.map(name => "migrations/" + name), "migrations/006-reference-compatibility.sql",

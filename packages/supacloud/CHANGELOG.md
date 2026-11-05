@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.19.2](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.1...supacloud-v0.19.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2445](https://github.com/vibeunion/supacloud/issues/2445)) ([2298e8a](https://github.com/vibeunion/supacloud/commit/2298e8a4ad6b77af68d2de904791924a09c24af8))
+
+## [0.19.1](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.0...supacloud-v0.19.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2442](https://github.com/vibeunion/supacloud/issues/2442)) ([7124a5e](https://github.com/vibeunion/supacloud/commit/7124a5e33a4be69b9297cb8bac4253d1d9e08abc))
+
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/supacloud-v0.18.25...supacloud-v0.19.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437))
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431))
+
+### Features
+
+* adopt ZenStack and enforce static AOP and DI architecture ([#2431](https://github.com/vibeunion/supacloud/issues/2431)) ([6d817df](https://github.com/vibeunion/supacloud/commit/6d817df37c4f5fdd39d6ea53a6ccd61903abb598))
+* **compiler:** migrate to TypeScript 7.1 beta async APIs ([#2437](https://github.com/vibeunion/supacloud/issues/2437)) ([454a0ed](https://github.com/vibeunion/supacloud/commit/454a0edef665f379c58658fe60354c52d705b902))
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2436](https://github.com/vibeunion/supacloud/issues/2436)) ([7909b96](https://github.com/vibeunion/supacloud/commit/7909b96fafa7b38afd6410c566e646381d329bd3))
+
 ## [0.18.25](https://github.com/vibeunion/supacloud/compare/supacloud-v0.18.24...supacloud-v0.18.25) (2026-11-04)
 
 

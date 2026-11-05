@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/commands",
-  "version": "0.11.2",
+  "version": "0.12.0",
   "description": "Storage-independent durable command execution and recovery",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,7 +36,7 @@
   "devDependencies": {
     "typebox": "1.4.3",
     "@types/bun": "1.4.4",
-    "typescript": "7.0.2"
+    "typescript": "7.1.0-beta"
   },
   "peerDependencies": {
     "typebox": "1.4.3"

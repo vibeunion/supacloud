@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/contracts",
-  "version": "0.15.2",
+  "version": "0.16.0",
   "description": "SupaCloud command protocol with optional client and browser entrypoints",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -57,7 +57,7 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
-    "typescript": "7.0.2"
+    "typescript": "7.1.0-beta"
   },
   "license": "Apache-2.0",
   "repository": {

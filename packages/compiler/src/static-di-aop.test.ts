@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { renderApplication } from "./generate";
 import { compileProject } from "./compile";
 import { scanRuntimeDi } from "./static-di";
@@ -11,18 +11,18 @@ import { writeFixtureProject } from "./fixtures/helpers";
 import { RUNTIME_SOURCE, FIXTURE_TSCONFIG } from "./fixtures/runtime-source";
 import type { ApplicationGraph } from "./types";
 
-test("runtime DI is rejected through aliases and namespaces without confusing declarations", () => {
-  const diagnostics = scanRuntimeDi(ts.createSourceFile("main.ts", `
+test("runtime DI is rejected through aliases and namespaces without confusing declarations", async () => {
+  const diagnostics = (await scanRuntimeDi((await ts.createSourceFile("main.ts", `
 import { inject as resolve, Module } from "@supacloud/app";
 import * as app from "@supacloud/app";
 const a = app.createEnvironmentInjector([]);
 const b = app["inject"];
-`, ts.ScriptTarget.Latest, true), "main.ts");
+`, ts.ScriptTarget.Latest, true)), "main.ts"));
   expect(diagnostics.map((item) => item.errorCode)).toEqual(["SC2012", "SC2012", "SC2012"]);
-  expect(scanRuntimeDi(ts.createSourceFile("main.ts", `
+  expect((await scanRuntimeDi((await ts.createSourceFile("main.ts", `
 import { Inject, Injectable, Module } from "@supacloud/app";
 import type { EnvironmentInjector } from "@supacloud/app";
-`, ts.ScriptTarget.Latest, true), "main.ts")).toEqual([]);
+`, ts.ScriptTarget.Latest, true)), "main.ts"))).toEqual([]);
 });
 
 test("compile refuses property injection even with writeOnError", async () => {
@@ -107,11 +107,11 @@ export async function run(mode: string) {
   return { calls, error, events: [...events], distinct: a.worker !== b.worker };
 }`,
     });
-    const program = ts.createProgram([join(root, "runner.ts")], {
+    await using program = (await ts.createProgram([join(root, "runner.ts")], {
       strict: true, noEmit: true, skipLibCheck: true, types: [],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-    });
-    expect(ts.getPreEmitDiagnostics(program).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
+    }));
+    expect((await ts.getPreEmitDiagnostics(program)).map((item) => ts.flattenDiagnosticMessageText(item.messageText, "\n"))).toEqual([]);
     const loaded: unknown = await import(pathToFileURL(join(root, "runner.ts")).href);
     if (!loaded || typeof loaded !== "object" || !("run" in loaded) || typeof loaded.run !== "function") throw new Error("Missing runner");
     expect(await loaded.run("ok")).toEqual({

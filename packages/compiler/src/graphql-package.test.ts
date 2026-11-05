@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import * as ts from "@typescript/typescript6";
+import * as ts from "./typescript";
 import { writeFixtureProject } from "./fixtures/helpers";
 
 const temporary: string[] = [];
@@ -66,9 +66,9 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-function diagnostics(path: string): string[] {
-  const program = ts.createProgram([path], consumerOptions);
-  return ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+async function diagnostics(path: string): Promise<string[]> {
+  await using program = (await ts.createProgram([path], consumerOptions));
+  return (await ts.getPreEmitDiagnostics(program)).map((diagnostic) =>
     ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
 }
 
@@ -127,9 +127,9 @@ const id: string | undefined = result.orders[0]?.id;
 const total: string | undefined = result.orders[0]?.total;
 ${hasStatus ? 'const status: "OPEN" | "CLOSED" | undefined = result.orders[0]?.status;' : ""}
 `);
-      expect(diagnostics(validConsumer)).toEqual([]);
+      expect((await diagnostics(validConsumer))).toEqual([]);
 
-      const source = ts.createSourceFile(filename, generated, ts.ScriptTarget.Latest, true);
+      const source = (await ts.createSourceFile(filename, generated, ts.ScriptTarget.Latest, true));
       const declarations = source.statements.flatMap((statement) =>
         ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement) || ts.isEnumDeclaration(statement)
           ? [statement.name.text] : []);
@@ -144,7 +144,7 @@ const variables: Variables = ${scenario.invalid};
 declare const result: Result;
 result.orders[0]?.internal;
 `);
-      const rejected = diagnostics(invalidConsumer);
+      const rejected = (await diagnostics(invalidConsumer));
       expect(rejected.some((message) => message.includes("is not assignable to type"))).toBe(true);
       expect(rejected.some((message) => message.includes("Property 'internal' does not exist"))).toBe(true);
     }, 20_000);

@@ -118,7 +118,7 @@ export function baseTemplateFiles(name: string, sdkDependencies: StarterSdkDepen
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
         "@types/bun": "^1.4.4",
-        typescript: "^7.0.2",
+        typescript: "7.1.0-beta",
       },
     }),
     "tsconfig.json": json({

@@ -6,51 +6,51 @@ import { tmpdir } from "node:os";
 import { migrateProject, migrateRouteResponse, SUPACLOUD_MIGRATIONS, type SupaCloudMigration } from "./migrations";
 import { migrationDependencies } from "./migration-policy";
 
-test("migrates deprecated route response schemas to an explicit 200 response map", () => {
+test("migrates deprecated route response schemas to an explicit 200 response map", async () => {
   const source = `
 const Result = {};
 @Get("/items", { response: Result })
 class ItemsController {}
 const unrelated = { response: Result };
 `;
-  const result = migrateRouteResponse(source, "src/items.ts");
+  const result = (await migrateRouteResponse(source, "src/items.ts"));
   expect(result.issues).toEqual([]);
   expect(result.replacements).toBe(1);
   expect(result.content).toContain('responses: { 200: Result }');
   expect(result.content).toContain("const unrelated = { response: Result }");
 });
 
-test("schema builder calls without a route-options argument remain untouched", () => {
+test("schema builder calls without a route-options argument remain untouched", async () => {
   const source = `
 const QuerySchema = Type.Transform(Type.String()).Decode(Number).Encode(String);
 const single = Get("/without-options");
 @Get("/items", { query: QuerySchema, response: Result })
 class ItemsController {}
 `;
-  const result = migrateRouteResponse(source, "src/schema.ts");
+  const result = (await migrateRouteResponse(source, "src/schema.ts"));
   expect(result.replacements).toBe(1);
   expect(result.content).toContain("Type.Transform(Type.String()).Decode(Number).Encode(String)");
   expect(result.content).toContain('Get("/without-options")');
   expect(result.content).toContain("responses: { 200: Result }");
 });
 
-test("migrates route options resolved through a local const and defineRouteContract", () => {
-  const result = migrateRouteResponse(`
+test("migrates route options resolved through a local const and defineRouteContract", async () => {
+  const result = (await migrateRouteResponse(`
 const defineRouteContract = <T>(value: T): T => value;
 const routeOptions = defineRouteContract({ response: Result });
 @Get("/items", routeOptions)
 class ItemsController {}
-`, "src/items.ts");
+`, "src/items.ts"));
   expect(result.issues).toEqual([]);
   expect(result.replacements).toBe(1);
   expect(result.content).toContain("const routeOptions = defineRouteContract({ responses: { 200: Result } });");
 });
 
-test("does not guess when a route already has a response map", () => {
-  const result = migrateRouteResponse(
+test("does not guess when a route already has a response map", async () => {
+  const result = (await migrateRouteResponse(
     `@Get("/items", { response: Legacy, responses: { 201: Created } }) class ItemsController {}`,
     "src/items.ts",
-  );
+  ));
   expect(result.changed).toBe(false);
   expect(result.issues).toMatchObject([{ code: "route-response-conflict", file: "src/items.ts", line: 1 }]);
 });
