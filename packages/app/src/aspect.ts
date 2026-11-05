@@ -81,6 +81,8 @@ export async function invokeAspect<Context extends { readonly kind: AspectKind }
   context: Context,
   aspect: (context: Context, next: () => Promise<Result>) => Result | Promise<Result>,
   handler: () => Result | Promise<Result>,
+  // Transport adapters can validate native responses without relaxing result identity.
+  validateResult: (value: Result) => void = freezeAspectData,
 ): Promise<Result> {
   const strict = context.kind === "command";
   let active = true, called = false, settled = false, failed = false;
@@ -94,7 +96,7 @@ export async function invokeAspect<Context extends { readonly kind: AspectKind }
     }
     called = true;
     pending = Promise.resolve().then(handler).then(result => {
-      if (strict) freezeAspectData(result);
+      if (strict) validateResult(result);
       value = result;
       return result;
     });

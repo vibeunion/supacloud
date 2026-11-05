@@ -84,8 +84,10 @@ Nest interceptor 再把 RxJS 加到服务端命令管线。数据库模型和策
 | HTTP/Worker 模型命令模板 | `app init --template model-command`；同一 durable facade、编译切面、身份解析与原子 receipt/audit |
 
 typed 回调接收输入的冻结副本；结果必须保持同一值/引用，普通对象和数组递归冻结。
-Command 结果中的 Date、Response、类实例、访问器、函数和循环对象会被拒绝；
+Command 业务切面结果中的 Date、Response、类实例、访问器、函数和循环对象会被拒绝；
 先转成契约数据，再在协议层构造响应。结果校验器只能缩窄类型，不能转换结果。
+HTTP 协议包装仍可透传处理器返回的原生 Response、状态、头和流；它继续校验
+continuation、结果身份和失败，不能由路由切面跳过处理器或替换成功响应。
 route/job 切面仍可短路或映射；进入绑定 Command 的 HTTP 路由后，整个业务切面链
 仍须保留处理器结果。handler 自行调用 durable facade 的路由，其 HTTP 包装仍属于
 协议层；将业务切面放在 facade 的事务内，不能把外层 HTTP 映射当作持久化保证。

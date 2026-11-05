@@ -178,17 +178,26 @@ test("typed aspects validate the operation and expose only explicit immutable da
 
 test("HTTP route aspects cannot fabricate command success inside the transaction boundary", async () => {
   const { createApplication } = await elysiaRuntime();
-  for (const mode of ["skip", "replace", "swallow", "ok"] as const) {
+  for (const mode of ["skip", "replace", "swallow", "ok", "response", "replace-response"] as const) {
     let calls = 0, commits = 0, rollbacks = 0;
     const module: CompiledModule = {
       name: "guarded", createServices: () => ({}),
       controllers: [{ path: "/", serviceKey: "handler", scope: "application", routes: [{
         method: "POST", path: "/", handler: "execute", command: "Guarded",
-        invoker: () => { calls++; if (mode === "swallow") throw new Error("actual failure"); return { ok: true }; },
+        invoker: () => {
+          calls++;
+          if (mode === "swallow") throw new Error("actual failure");
+          return mode === "response" || mode === "replace-response"
+            ? new Response("native", { status: 202, headers: { "x-receipt": "native" } }) : { ok: true };
+        },
         aspects: [async (context, next) => {
           expect(context.kind).toBe("route");
           if (mode === "skip") return { fake: true };
-          try { const result = await next(); return mode === "replace" ? { fake: true } : result; }
+          try {
+            const result = await next();
+            if (mode === "replace-response") return new Response("forged", { status: 201 });
+            return mode === "replace" ? { fake: true } : result;
+          }
           catch (error) { if (mode === "swallow") return { fake: true }; throw error; }
         }],
       }] }],
@@ -200,10 +209,15 @@ test("HTTP route aspects cannot fabricate command success inside the transaction
       catch (error) { rollbacks++; throw error; }
     } });
     const response = await app.handle(new Request("http://localhost/", { method: "POST" }));
-    expect(response.status).toBe(mode === "ok" ? 200 : 500);
+    const success = mode === "ok" || mode === "response";
+    expect(response.status).toBe(mode === "response" ? 202 : success ? 200 : 500);
+    if (mode === "response") {
+      expect(response.headers.get("x-receipt")).toBe("native");
+      expect(await response.text()).toBe("native");
+    }
     expect(calls).toBe(mode === "skip" ? 0 : 1);
-    expect(commits).toBe(mode === "ok" ? 1 : 0);
-    expect(rollbacks).toBe(mode === "ok" ? 0 : 1);
+    expect(commits).toBe(success ? 1 : 0);
+    expect(rollbacks).toBe(success ? 0 : 1);
   }
 });
 

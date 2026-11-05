@@ -10,7 +10,7 @@ import { requireFeatureRequestContext } from "./feature_context";
 export { executionRequestId, executionTrace, observeExecution } from "./execution_observer";
 export type { ExecutionEvent, ExecutionObserver } from "./execution_observer";
 export type { Aspect, AspectContext, AspectKind, AspectNext } from "./aspect";
-export { defineOperationAspect, AspectExecutionError } from "./aspect";
+export { defineOperationAspect, AspectExecutionError, invokeAspect, freezeAspectData } from "./aspect";
 export type { OperationAspectContext, OperationAspectContract, ReadonlyAspectData } from "./aspect";
 
 export type ExecutionNext<Result = unknown> = () => Result | Promise<Result>;
