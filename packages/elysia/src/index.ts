@@ -73,6 +73,15 @@ export {
   runCompiledEffect,
 } from "./effect";
 export type { CompiledEffectDescriptor, SupaCloudEffectRuntime } from "./effect";
+export { createZenStackReadPlugin } from "./zenstack-read";
+export type {
+  ZenStackReadAdapterOptions,
+  ZenStackReadIdentityBinding,
+  ZenStackReadInput,
+  ZenStackReadModels,
+  ZenStackReadOperation,
+  ZenStackReadResource,
+} from "./zenstack-read";
 export type {
   ElysiaRouteContext,
   ElysiaRouteDefinition,

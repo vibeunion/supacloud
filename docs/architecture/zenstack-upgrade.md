@@ -114,6 +114,17 @@ from ordinary `src` consumers; type-only model contracts remain allowed. This
 is a compiler/source convention plus a restricted runtime API, not a JavaScript
 sandbox. Keep least-privilege roles and RLS for paths such as PostgREST and RPC.
 
+For generic read-heavy admin surfaces, `@supacloud/elysia` provides
+`createZenStackReadPlugin`. It mounts only explicit GET/HEAD resources, binds a
+verified identity for every request, accepts TypeBox contracts and argument
+builders, and invokes only the read methods exposed by `ModelReadClient`. It
+does not expose writes, raw clients or arbitrary CRUD routes. Durable writes
+remain Commands using `transaction.db`; business routes remain compiler-emitted
+Elysia routes. The official `@zenstackhq/server` automatic Elysia handler is not
+the default integration: its 3.10 peer baseline targets Elysia 1.x, while this
+adapter targets the repository's Elysia 2 runtime and keeps one application
+boundary.
+
 ## Breaking command and API mapping
 
 | Removed | Replacement |
