@@ -17,6 +17,14 @@
           "deps": [
             "WEBHOOK_ENVIRONMENT"
           ],
+          "dependencyOptions": [
+            {
+              "optional": false,
+              "self": false,
+              "skipSelf": false,
+              "host": false
+            }
+          ],
           "exported": false,
           "file": "webhook.module.ts",
           "line": 5,
@@ -31,6 +39,20 @@
           "deps": [
             "UpdateWebhook",
             "REQUEST_CONTEXT"
+          ],
+          "dependencyOptions": [
+            {
+              "optional": false,
+              "self": false,
+              "skipSelf": false,
+              "host": false
+            },
+            {
+              "optional": false,
+              "self": false,
+              "skipSelf": false,
+              "host": false
+            }
           ],
           "routes": [
             {
@@ -150,6 +172,14 @@
             "scope": "application",
             "deps": [
               "WEBHOOK_ENVIRONMENT"
+            ],
+            "dependencyOptions": [
+              {
+                "optional": false,
+                "self": false,
+                "skipSelf": false,
+                "host": false
+              }
             ],
             "optionalDeps": [],
             "selfDeps": [],
