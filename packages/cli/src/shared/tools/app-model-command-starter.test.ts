@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as ts from "@typescript/typescript6";
+import * as ts from "@supacloud/db/typescript";
 import { initializeAppProject } from "./app-starter";
 import { COMMAND_RECEIPT_SQL } from "./command-receipts";
 import { compileProject, renderApplication, type ApplicationGraph } from "@supacloud/compiler";
@@ -84,12 +84,12 @@ async function dependencies(root: string) {
   await symlink(join(repo, "packages/db/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
 }
 
-function typecheck(root: string, extra: string[] = []) {
-  const config = ts.readConfigFile(join(root, "tsconfig.json"), ts.sys.readFile);
+async function typecheck(root: string, extra: string[] = []) {
+  const config = await ts.readConfigFile(join(root, "tsconfig.json"), ts.sys.readFile);
   if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root, {}, join(root, "tsconfig.json"));
-  const program = ts.createProgram([...parsed.fileNames, ...extra], { ...parsed.options, noEmit: true });
-  return [...parsed.errors, ...ts.getPreEmitDiagnostics(program)].map(item =>
+  const parsed = await ts.parseJsonConfigFileContent(config.config, ts.sys, root, {}, join(root, "tsconfig.json"));
+  await using program = await ts.createProgram([...parsed.fileNames, ...extra], { ...parsed.options, noEmit: true }, { cwd: root });
+  return [...parsed.errors, ...await ts.getPreEmitDiagnostics(program)].map(item =>
     `${item.file?.fileName ?? "config"}: ${ts.flattenDiagnosticMessageText(item.messageText, "\n")}`);
 }
 
@@ -240,7 +240,7 @@ defineOperationAspect({ kind: "command", name: "typed", input: validate, result:
   return result;
 });
 `);
-  expect(typecheck(root, [assertions])).toEqual([]);
+  expect(await typecheck(root, [assertions])).toEqual([]);
   expect((await databaseSources(root)).ok).toBe(true);
 }, 120_000);
 
