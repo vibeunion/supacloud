@@ -87,6 +87,7 @@ const blockingCodes = new Set([
   "circular-module-import", "scope-violation", "module-boundary", "module-boundary-violation", "duplicate-token", "duplicate-module",
   "unresolved-token", "missing-deps", "provider-type-mismatch", "unsupported-provider-helper", "missing-token-factory", "unresolved-alias-target", "self-dependency-violation", "skip-self-dependency-violation", "export-unprovided-token", "self-referencing-alias",
   "ambiguous-dependency", "conflicting-injection-flags", "cross-module-scoped-dependency", "mixed-multi-provider-scopes",
+  "effect-contract-required",
   "dynamic-aspect-reference", "invalid-aspect-reference", "aspect-operation-mismatch",
 ]);
 /** Invalid static wiring never becomes an executable artifact, including writeOnError. */
