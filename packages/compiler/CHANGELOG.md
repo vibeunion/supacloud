@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.57.1...compiler-v0.57.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* pin npmjs registry for ZenStack workspace checks ([#2451](https://github.com/vibeunion/supacloud/issues/2451)) ([07e74f9](https://github.com/vibeunion/supacloud/commit/07e74f97e92e436a7dbc509ad4a980be7762a84b))
+
 ## [0.57.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.57.0...compiler-v0.57.1) (2026-11-05)
 
 

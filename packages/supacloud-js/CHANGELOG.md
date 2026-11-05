@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.47.0...supacloud-js-v0.47.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **js:** recover realtime subscriptions from polling ([#2450](https://github.com/vibeunion/supacloud/issues/2450)) ([30c05e3](https://github.com/vibeunion/supacloud/commit/30c05e3a0009fc658490d6a76724d9f25146e4d1))
+
 ## [0.47.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.46.0...supacloud-js-v0.47.0) (2026-11-05)
 
 
