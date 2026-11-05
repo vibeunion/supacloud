@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/vibeunion/supacloud/compare/db-v0.21.0...db-v0.21.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* pin npmjs registry for ZenStack workspace checks ([#2451](https://github.com/vibeunion/supacloud/issues/2451)) ([07e74f9](https://github.com/vibeunion/supacloud/commit/07e74f97e92e436a7dbc509ad4a980be7762a84b))
+
 ## [0.21.0](https://github.com/vibeunion/supacloud/compare/db-v0.20.5...db-v0.21.0) (2026-11-05)
 
 
