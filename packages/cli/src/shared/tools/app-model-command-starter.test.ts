@@ -6,13 +6,56 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@typescript/typescript6";
 import { initializeAppProject } from "./app-starter";
+import { COMMAND_RECEIPT_SQL } from "./command-receipts";
 import { compileProject, renderApplication, type ApplicationGraph } from "@supacloud/compiler";
+import { COMMAND_RECEIPT_SQL as DATABASE_COMMAND_RECEIPT_SQL } from "@supacloud/db";
 import { compileModel } from "@supacloud/db/model";
 import { databaseSources } from "@supacloud/db/source-contracts";
-import { composeAspects, defineOperationAspect, type Aspect } from "../../../../app/dist/execution.js";
-import { createApplication, type CompiledModule } from "../../../../elysia/dist/index.js";
 
 const repo = resolve(import.meta.dir, "../../../../..");
+type AspectContext = { readonly kind: "command" | "route"; readonly name: string; readonly input: unknown };
+type MaybePromise<T> = T | Promise<T>;
+type Aspect = (context: AspectContext, next: () => MaybePromise<unknown>) => MaybePromise<unknown>;
+interface AspectDefinition {
+  kind: "command";
+  name: string;
+  input: (value: unknown) => unknown;
+  result: (value: unknown) => unknown;
+  capabilities: (context: { services?: Record<string, unknown> }) => Record<string, unknown>;
+}
+interface AppExecution {
+  composeAspects(aspect: Aspect): Aspect;
+  defineOperationAspect(
+    definition: AspectDefinition,
+    handler: (context: { capabilities: Record<string, unknown>; input: { version: number } }, next: () => MaybePromise<unknown>) => MaybePromise<unknown>,
+  ): Aspect;
+}
+interface ElysiaRuntime {
+  createApplication(options: { modules: CompiledModule[]; commandExecutor: (invocation: unknown, next: () => MaybePromise<unknown>) => MaybePromise<unknown> }): { handle(request: Request): Promise<Response> };
+}
+interface CompiledRoute {
+  method: "POST";
+  path: string;
+  handler: string;
+  command: string;
+  invoker: () => unknown;
+  aspects: Aspect[];
+}
+interface CompiledModule {
+  name: string;
+  createServices(): Record<string, unknown>;
+  controllers: Array<{ path: string; serviceKey: string; scope: "application"; routes: CompiledRoute[] }>;
+  commands: Array<{ className: string; name: string; permission: string; transaction: "required" }>;
+  registerRoutes(register: (controller: CompiledModule["controllers"][number], route: CompiledRoute, prefix: string) => void): void;
+}
+async function appExecution(): Promise<AppExecution> {
+  // The focused starter gate builds these packages first; other workspaces only
+  // typecheck or skip this test, so keep the build products out of the static graph.
+  return await import(pathToFileURL(join(repo, "packages/app/dist/execution.js")).href) as AppExecution;
+}
+async function elysiaRuntime(): Promise<ElysiaRuntime> {
+  return await import(pathToFileURL(join(repo, "packages/elysia/dist/index.js")).href) as ElysiaRuntime;
+}
 interface StarterPostgres {
   exec(sql: string): Promise<void>;
   close(): Promise<void>;
@@ -50,6 +93,10 @@ function typecheck(root: string, extra: string[] = []) {
     `${item.file?.fileName ?? "config"}: ${ts.flattenDiagnosticMessageText(item.messageText, "\n")}`);
 }
 
+test("starter receipt schema stays byte-identical to the database package", () => {
+  expect(COMMAND_RECEIPT_SQL).toBe(DATABASE_COMMAND_RECEIPT_SQL);
+});
+
 test("portable and generated command aspects preserve results, failures and continuation lifetime", async () => {
   const root = await temporary();
   const source = `
@@ -80,6 +127,7 @@ export async function boundary(context: { input: unknown }, next: () => Promise<
   await writeFile(join(root, "generated/application.ts"), generated);
   const loaded: { boundary: Aspect; captured?: () => unknown } = await import(pathToFileURL(join(root, "source.ts")).href);
   const compiled: { createCompiledModules(): Array<{ aspectPipeline: Aspect }> } = await import(pathToFileURL(join(root, "generated/application.ts")).href);
+  const { composeAspects } = await appExecution();
   for (const pipeline of [composeAspects(loaded.boundary), compiled.createCompiledModules()[0]!.aspectPipeline]) {
     const context = (input: string) => ({ kind: "command" as const, name: "test", input });
     let calls = 0;
@@ -108,6 +156,7 @@ export async function boundary(context: { input: unknown }, next: () => Promise<
 });
 
 test("typed aspects validate the operation and expose only explicit immutable data and capabilities", async () => {
+  const { defineOperationAspect } = await appExecution();
   const decodeInput = (value: unknown): { version: number } => {
     if (!value || typeof value !== "object" || !("version" in value) || typeof value.version !== "number") throw new TypeError("input");
     return value as { version: number };
@@ -128,6 +177,7 @@ test("typed aspects validate the operation and expose only explicit immutable da
 });
 
 test("HTTP route aspects cannot fabricate command success inside the transaction boundary", async () => {
+  const { createApplication } = await elysiaRuntime();
   for (const mode of ["skip", "replace", "swallow", "ok"] as const) {
     let calls = 0, commits = 0, rollbacks = 0;
     const module: CompiledModule = {
