@@ -1149,11 +1149,6 @@
       "signature": "export declare function scanQuerySql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Promise<Diagnostic[]>;"
     },
     {
-      "name": "scanQuerySql",
-      "kind": "value",
-      "signature": "export declare function scanQuerySql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Diagnostic[];"
-    },
-    {
       "name": "schemaFromSource",
       "kind": "value",
       "signature": "export declare function schemaFromSource(source: string, path?: string): GraphQLSchema;"
