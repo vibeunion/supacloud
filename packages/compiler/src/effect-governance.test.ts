@@ -7,6 +7,7 @@ import { validateEffectPolicies, validateJobPolicies } from "./effect-governance
 import { analyzeProject } from "./analyze";
 import { compileOptionsFromConfig } from "./config";
 import { compileProject } from "./compile";
+import { renderApplication } from "./generate";
 import { writeFixtureProject } from "./fixtures/helpers";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 
@@ -58,6 +59,52 @@ test("requires explicit Effect route contracts when enabled", () => {
     code: "effect-contract-required",
     errorCode: "SC3036",
   }));
+});
+
+test("allows simple Promise routes while keeping command routes on Effect", () => {
+  const simple = graphWith(undefined);
+  simple.modules[0]!.controllers[0]!.routes[0]!.effectMode = "simple";
+  expect(validateEffectPolicies(simple, {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+  })).toEqual([]);
+
+  const command = graphWith(undefined, {
+    className: "SaveOrderCommand",
+    name: "orders.save",
+    transaction: "required",
+    idempotency: "required",
+  });
+  command.modules[0]!.controllers[0]!.routes[0]!.effectMode = "simple";
+  expect(validateEffectPolicies(command, { requireRouteEffects: true })).toContainEqual(expect.objectContaining({
+    code: "effect-contract-required",
+  }));
+});
+
+test("analyzes effect:false as the explicit simple route profile", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: false })
+  list(): Promise<{ readonly ok: true }> {
+    return Promise.resolve({ ok: true });
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.modules[0]?.controllers[0]?.routes[0]?.effectMode).toBe("simple");
+    expect(graph.modules[0]?.controllers[0]?.routes[0]?.effect).toBeUndefined();
+    expect(graph.diagnostics ?? []).toEqual([]);
+    expect(renderApplication(graph, { rootDir: root, outDir: join(root, "generated") }).applicationCode)
+      .toContain('effectMode: "simple"');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("requires mappings and dependencies and blocks retry on non-idempotent commands", () => {

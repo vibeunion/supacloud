@@ -279,6 +279,8 @@ export interface RouteNode {
   responses?: Record<string, string>;
   /** Static Effect execution contract for this route. */
   effect?: EffectRouteNode;
+  /** Simple route profile: handler may return a Promise/value without Effect governance. */
+  effectMode?: "simple";
   /** @Command-decorated class explicitly bound by the route. */
   command?: string;
   /** Route guards executed before handler (Angular CanActivateFn style). */
@@ -434,6 +436,7 @@ export interface ExecutionPlanRoute {
   invoker: "direct" | "pipeline";
   commandBoundary?: "route" | "handler";
   effect?: EffectRouteNode;
+  effectMode?: "simple";
   stages: string[];
   command?: string;
   guards: string[];

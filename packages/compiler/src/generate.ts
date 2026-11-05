@@ -108,6 +108,8 @@ const INTERFACES = `export interface CompiledRoute {
     maxAttempts?: number;
     timeoutMs?: number;
   };
+  /** Simple route profile; no Effect interpreter or error mapping is required. */
+  effectMode?: "simple";
   /** Compile-time ownership and transport classification for the route boundary. */
   contract?: {
     body?: "framework" | "domain";
@@ -609,6 +611,7 @@ export function renderApplication(
           executor: route.command === undefined ? "route" as const : "command" as const,
           ...(command === undefined ? {} : { commandBoundary: route.command === undefined ? "handler" as const : "route" as const }),
           ...(route.effect === undefined ? {} : { effect: route.effect }),
+          ...(route.effectMode === undefined ? {} : { effectMode: route.effectMode }),
           invoker: isPipeline ? "pipeline" as const : "direct" as const,
           stages: operationPlans.find((plan) => plan.module === module.name && plan.kind === "route"
             && plan.name === `${route.method} ${joinRoutePaths(controller.path, route.path)}`)!.stages,
@@ -1051,6 +1054,7 @@ class ModuleGenerator {
         if (route.effect !== undefined) {
           fields.push(`effect: ${JSON.stringify(route.effect)}`);
         }
+        if (route.effectMode !== undefined) fields.push(`effectMode: ${JSON.stringify(route.effectMode)}`);
         if (idempotency !== undefined) {
           fields.push(`idempotency: ${JSON.stringify(idempotency)}`);
         }

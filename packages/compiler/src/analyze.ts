@@ -2308,6 +2308,9 @@ async function parseController(
         }
         const effectExpr = getProp(optionsObject, "effect");
         if (effectExpr) {
+          if (effectExpr.kind === ts.SyntaxKind.FalseKeyword) {
+            route.effectMode = "simple";
+          } else {
           const effectObject = (await resolveStaticObjectLiteral(effectExpr, ctx));
           if (!effectObject) {
             ctx.diagnostics.push({
@@ -2619,6 +2622,7 @@ async function parseController(
                 );
               }
             }
+          }
           }
         }
         for (const field of ["body", "params", "query", "headers", "cookie", "response"] as const) {

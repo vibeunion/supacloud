@@ -186,9 +186,9 @@ export class OrdersController {
   approve(@Param("id") id: string, @Body() input: { expectedVersion: number }, @Headers("idempotency-key") key: string): Effect.Effect<OrderReceipt, OrderFailure, never> {
     return Effect.tryPromise({ try: () => this.orders.approve(this.context, key, { id, expectedVersion: input.expectedVersion }), catch: publicFailure });
   }
-  @Get("/:id", { params: Params, responses: { 200: ReadResult }, effect: { required: true, dependencies: [], errors: errors, retry: "none" } })
-  read(@Param("id") id: string): Effect.Effect<Awaited<ReturnType<OrderPort["read"]>>, OrderFailure, never> {
-    return Effect.tryPromise({ try: () => this.orders.read(this.context, id), catch: publicFailure });
+  @Get("/:id", { params: Params, responses: { 200: ReadResult }, effect: false })
+  read(@Param("id") id: string): Promise<Awaited<ReturnType<OrderPort["read"]>>> {
+    return this.orders.read(this.context, id);
   }
 }
 

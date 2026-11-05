@@ -34,6 +34,19 @@ export function validateEffectPolicies(
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const label = routeLabel(route, controller.path);
+        if (route.effectMode === "simple") {
+          const featureTransition = featureTransitionForRoute(module, controller, route);
+          const commandRef = route.command ?? featureTransition?.command;
+          if (commandRef !== undefined) {
+            diagnostics.push(diagnostic(
+              "effect-contract-required",
+              `Route ${label} cannot use effect: false when it enters command ${commandRef}.`,
+              controller.file,
+              "Keep Effect enabled for durable commands; effect: false is only for simple non-command routes.",
+            ));
+          }
+          continue;
+        }
         if (options.requireRouteEffects && route.effect === undefined) {
           diagnostics.push(diagnostic(
             "effect-contract-required",

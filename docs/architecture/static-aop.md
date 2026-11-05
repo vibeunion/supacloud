@@ -96,7 +96,8 @@ HTTP / Worker / 可信 CLI
 6. **不透明拦截普通方法。** 普通 TypeScript 函数仍是普通调用，需要治理的动作
    显式进入 executor。这样调用图和失败边界能够被编译器与评审者检查。
 
-Effect 是单次执行的组合和错误模型；纯计算保持 TypeScript。不要为了模仿
+Effect 是复杂执行的组合和错误模型；简单的非 Command CRUD 读可以使用 `effect: false`
+返回 Promise，纯计算保持 TypeScript。不要为了模仿
 Nest interceptor 再把 RxJS 加到服务端命令管线。数据库模型和策略由 ZenStack
 负责，驱动由 Bun SQL 负责，两者均不承担切面编排。
 

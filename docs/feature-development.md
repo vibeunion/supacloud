@@ -88,8 +88,10 @@ live Catalog `enforce` 使用明确选择环境的只读连接。
 `executeCompiledCommand` 或受支持的 durable facade。`SC4029` 检查类型可见的
 绕过调用；它不证明任意动态 JavaScript 都无法绕过边界。
 
-**Effect 契约。** 路由声明依赖、对应的 tagged errors、必要的 timeout，默认
-`retry: "none"`。生产代码不自行 `Effect.run*`。纯规则无需包装成 Effect；
+**Effect 契约。** 复杂路由、外部副作用、Worker 和多步骤编排声明依赖、对应的
+tagged errors、必要的 timeout，默认 `retry: "none"`。简单的非 Command CRUD 读
+路由可以显式使用 `effect: false` 返回 Promise；这不会关闭 TypeBox、DI、模块边界
+或普通错误处理。生产代码不自行 `Effect.run*`。纯规则无需包装成 Effect；
 已有异步 Command 也不因接入路由而获得第二套事务。详细约束见
 [Effect governance](effect-governance.md)。
 
