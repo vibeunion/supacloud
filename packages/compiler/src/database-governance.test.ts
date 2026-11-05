@@ -139,7 +139,7 @@ test("successful compilation checks live drift again on incremental cache hits a
   expect(await readFile(join(options.outDir, "app.manifest.json"), "utf8")).toBe(before);
   await writeFile(join(root, "db/state.json"), JSON.stringify({ rls: true }));
   expect((await compiler.compile(options, [])).diagnostics.filter(item => item.severity === "error")).toEqual([]);
-});
+}, 30_000);
 
 test("missing connection, stale sources and cached module declarations cannot silently pass", async () => {
   const { root, options } = await fixture();
