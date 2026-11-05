@@ -93,9 +93,10 @@ read(id: string): Promise<OrderResponse> {
 ```
 
 `effect: false` only removes the Effect interpreter and Effect failure mapping
-from that route. TypeBox request/response contracts, module boundaries, DI,
-authorization and ordinary adapter error handling still apply. It cannot be
-used on a route that enters a durable Command or feature transition. Commands,
+from that route. It is limited to GET/HEAD/OPTIONS reads. TypeBox
+request/response contracts, module boundaries, DI, authorization and ordinary
+adapter error handling still apply. It cannot be used on a route that enters a
+durable Command or feature transition. Commands,
 workers, external effects, multi-step orchestration and routes that need typed
 failures, timeout or explicit retry continue to declare an Effect contract.
 

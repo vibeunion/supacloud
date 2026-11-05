@@ -63,12 +63,19 @@ test("requires explicit Effect route contracts when enabled", () => {
 
 test("allows simple Promise routes while keeping command routes on Effect", () => {
   const simple = graphWith(undefined);
+  simple.modules[0]!.controllers[0]!.routes[0]!.method = "GET";
   simple.modules[0]!.controllers[0]!.routes[0]!.effectMode = "simple";
   expect(validateEffectPolicies(simple, {
     requireRouteEffects: true,
     requireErrorMappings: true,
     requireDependencies: true,
   })).toEqual([]);
+
+  const write = graphWith(undefined);
+  write.modules[0]!.controllers[0]!.routes[0]!.effectMode = "simple";
+  expect(validateEffectPolicies(write, { requireRouteEffects: true })).toContainEqual(expect.objectContaining({
+    code: "effect-contract-required",
+  }));
 
   const command = graphWith(undefined, {
     className: "SaveOrderCommand",

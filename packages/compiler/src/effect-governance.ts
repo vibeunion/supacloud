@@ -37,12 +37,14 @@ export function validateEffectPolicies(
         if (route.effectMode === "simple") {
           const featureTransition = featureTransitionForRoute(module, controller, route);
           const commandRef = route.command ?? featureTransition?.command;
-          if (commandRef !== undefined) {
+          if (commandRef !== undefined || !["GET", "HEAD", "OPTIONS"].includes(route.method)) {
             diagnostics.push(diagnostic(
               "effect-contract-required",
-              `Route ${label} cannot use effect: false when it enters command ${commandRef}.`,
+              commandRef === undefined
+                ? `Route ${label} cannot use effect: false for a write operation.`
+                : `Route ${label} cannot use effect: false when it enters command ${commandRef}.`,
               controller.file,
-              "Keep Effect enabled for durable commands; effect: false is only for simple non-command routes.",
+              "Keep Effect enabled for writes and durable commands; effect: false is only for simple read routes.",
             ));
           }
           continue;
