@@ -2,6 +2,13 @@
 
 `@supacloud/db` 把 RLS 策略、RPC 函数、触发器与授权提升为**一等资源**：SQL 文件仍是实现来源，Manifest 是治理来源，PostgreSQL Catalog 是事实来源。三者通过对账（reconcile）保持一致。
 
+This is also SupaCloud's single schema authority chain:
+
+PostgREST and compiler-generated business clients consume this chain. Do not add
+Prisma/ZModel or another production schema source; improve CRUD ergonomics by
+generating derived APIs within the existing Compiler, Drizzle and RPC governance
+boundaries.
+
 ```
 SQL 源文件（实现）
   -> defineDatabaseModule（声明/所有权）

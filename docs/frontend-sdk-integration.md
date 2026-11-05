@@ -19,6 +19,25 @@ Existing Supabase and svadmin providers remain valid. There is no requirement to
 replace CRUD with Commands, introduce frontend DI, or migrate existing reads to
 GraphQL. The starter's query choice does not change the SDK's ownership boundary.
 
+## API surface contract
+
+SupaCloud exposes two deliberate application-facing surfaces. The compatibility
+surface is the PostgREST-backed project data plane used by `@supabase/supabase-js`.
+The business surface is the compiler-generated procedure client for domain queries,
+cross-table commands, idempotency and workflow semantics. They share the same
+verified identity, but they do not share the same write policy.
+
+| Surface | Owner | Use it for | Final authorization boundary |
+| --- | --- | --- | --- |
+| Compatibility | PostgREST | Existing Supabase clients, ordinary reads and low-risk CRUD | PostgreSQL grants, RLS and RPC |
+| Business | SupaCloud application runtime | Domain commands, cross-table writes, state transitions and tasks | Application RPC and PostgreSQL RLS |
+
+Business tables must not expose a second unrestricted write path through the
+compatibility surface. A project can inspect the negotiated surface and schema
+authority through `GET /v1/projects/:ref/capabilities` before selecting a client.
+This metadata is descriptive; authorization is still enforced by the runtime and
+database.
+
 ## Compose Existing Clients
 
 Create the Supabase client once in browser application setup. The URLs below are
