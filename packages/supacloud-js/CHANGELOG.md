@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.47.1...supacloud-js-v0.48.0) (2026-11-06)
+
+
+### Features
+
+* **api:** publish compatibility and business API surfaces ([#2456](https://github.com/vibeunion/supacloud/issues/2456)) ([9fd20d1](https://github.com/vibeunion/supacloud/commit/9fd20d1d82ce7bc1217046f270c146e94fcfb2d5))
+
 ## [0.47.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.47.0...supacloud-js-v0.47.1) (2026-11-05)
 
 

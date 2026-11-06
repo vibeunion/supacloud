@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.57.2...compiler-v0.58.0) (2026-11-06)
+
+
+### Features
+
+* make Effect optional for simple CRUD routes ([#2455](https://github.com/vibeunion/supacloud/issues/2455)) ([bbff2c9](https://github.com/vibeunion/supacloud/commit/bbff2c98f95793c0f051bbb995bddbba20ae5bbe))
+
 ## [0.57.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.57.1...compiler-v0.57.2) (2026-11-05)
 
 

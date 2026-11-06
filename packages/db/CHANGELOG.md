@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/db-v0.21.1...db-v0.22.0) (2026-11-06)
+
+
+### Features
+
+* **db:** 命令事务暴露 lock(keys) 写序列化原语 ([#2458](https://github.com/vibeunion/supacloud/issues/2458)) ([a55c3c2](https://github.com/vibeunion/supacloud/commit/a55c3c20c98ebbd592993a2197d16a2a0a617444))
+
 ## [0.21.1](https://github.com/vibeunion/supacloud/compare/db-v0.21.0...db-v0.21.1) (2026-11-05)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.40.0...elysia-v0.41.0) (2026-11-06)
+
+
+### Features
+
+* make Effect optional for simple CRUD routes ([#2455](https://github.com/vibeunion/supacloud/issues/2455)) ([bbff2c9](https://github.com/vibeunion/supacloud/commit/bbff2c98f95793c0f051bbb995bddbba20ae5bbe))
+
 ## [0.40.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.39.0...elysia-v0.40.0) (2026-11-05)
 
 
