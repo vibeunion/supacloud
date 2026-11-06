@@ -22,6 +22,30 @@ type Capability = {
   managed_by_owner?: boolean;
 };
 
+const API_SURFACES = {
+  compatibility: {
+    owner: "postgrest",
+    protocol: "supabase-project",
+    client: "@supabase/supabase-js",
+    purpose: "project-data-access",
+    authorization: "postgresql-grants-rls-rpc",
+  },
+  business: {
+    owner: "supacloud-application",
+    protocol: "generated-procedure",
+    client: "compiler-generated-client",
+    purpose: "domain-commands-and-queries",
+    authorization: "application-rpc-and-rls",
+  },
+} as const;
+
+const SCHEMA_AUTHORITY = {
+  implementation: "sql",
+  governance: "db.manifest",
+  fact: "postgresql.catalog",
+  generated: "supacloud-compiler",
+} as const;
+
 function available(source: Capability["source"], version: string): Capability {
   return { available: true, source, version, reason_code: null };
 }
@@ -163,6 +187,8 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
       auth_runtime: "gotrue",
       schema_version: 1,
       storage_backend: storage.backend,
+      api_surfaces: API_SURFACES,
+      schema_authority: SCHEMA_AUTHORITY,
       capabilities,
     };
   })

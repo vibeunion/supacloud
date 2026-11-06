@@ -585,16 +585,18 @@ export class StorageHandler {
            set metadata = excluded.metadata, owner = excluded.owner, owner_id = excluded.owner_id,
                updated_at = now(), version = excluded.version`
       : ''
-    let inserted: ObjectRow | undefined
     try {
-      const result = await this.db.withContext(ctx, (query) =>
+      // Do not use RETURNING here. PostgreSQL evaluates RETURNING through the
+      // caller's SELECT policy, which would make an otherwise valid INSERT
+      // policy insufficient for an upload. The object id is already known and
+      // the storage API only needs it in the response.
+      await this.db.withContext(ctx, (query) =>
         query(
           `insert into storage.objects (id, bucket_id, name, owner, owner_id, metadata, version)
-           values ($1, $2, $3, $4::uuid, $5, $6::jsonb, $7) ${conflictClause} returning *`,
+           values ($1, $2, $3, $4::uuid, $5, $6::jsonb, $7) ${conflictClause}`,
           [objectId, bucketId, key, ownership.legacyOwner, ownership.ownerId, JSON.stringify(metadata), version]
         )
       )
-      inserted = result.rows[0] as ObjectRow | undefined
     } catch (error) {
       if (isRlsDenied(error)) {
         // Clean up the staged bytes, then surface an actionable RLS hint
@@ -604,9 +606,8 @@ export class StorageHandler {
       }
       await this.discardStagedBytes(stagedKey, error)
     }
-    if (!inserted) return this.discardStagedBytes(stagedKey, new Error('storage metadata insert returned no row'))
     if (previous) await this.cleanupObjectRows([previous])
-    return inserted.id
+    return objectId
   }
 
   // ── resumable (TUS) uploads ───────────────────────────────────────────────
@@ -871,7 +872,7 @@ export class StorageHandler {
       await this.db.withContext(ctx, async (query) => {
         await query(
           `insert into storage.objects (bucket_id, name, owner, owner_id, metadata, version)
-           values ($1, $2, $3::uuid, $4, $5::jsonb, $6) ${conflictClause} returning id`,
+           values ($1, $2, $3::uuid, $4, $5::jsonb, $6) ${conflictClause}`,
           [
             bucketId,
             key,
