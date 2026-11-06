@@ -119,7 +119,7 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                   // reviewable STABLE helper into a writing VOLATILE one, and a cached
                   // verdict would keep trusting the old definition.
                   const resolved = (await tx.$queryRawUnsafe<unknown>(
-                    `SELECT prokind::text AS kind, provolatile::text AS volatility
+                    `SELECT prokind::text AS kind, provolatile::text AS volatility, proretset AS returns_set
                        FROM pg_catalog.pg_proc p
                        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
                       WHERE n.nspname = $1 AND p.proname = $2 AND p.pronargs = $3`,
@@ -130,6 +130,7 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                   if (signature === undefined || signature["kind"] !== "f") throw new CommandError("COMMAND_INPUT_INVALID");
                   const volatility = signature["volatility"];
                   if (volatility !== "s" && volatility !== "i") throw new CommandError("COMMAND_INPUT_INVALID");
+                  if (signature["returns_set"] === true) throw new CommandError("COMMAND_INPUT_INVALID");
                   const placeholders = args.map((_, index) => `$${index + 1}`).join(", ");
                   const rows = (await tx.$queryRawUnsafe<unknown>(
                     `SELECT "${schemaName}"."${procName}"(${placeholders}) AS result`,

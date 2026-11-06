@@ -245,6 +245,7 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
       CREATE SCHEMA helpers;
       CREATE FUNCTION helpers.note_count() RETURNS bigint LANGUAGE sql STABLE AS 'SELECT count(*) FROM public."Note"';
       CREATE FUNCTION helpers.note_label(text) RETURNS text LANGUAGE sql STABLE AS 'SELECT $1 || ''-ok''';
+      CREATE FUNCTION helpers.note_values() RETURNS SETOF integer LANGUAGE sql STABLE AS 'SELECT value FROM public."Note"';
       CREATE FUNCTION helpers.sneaky_touch() RETURNS integer LANGUAGE plpgsql VOLATILE AS
         'BEGIN INSERT INTO public."Note" VALUES (''sneaky'',''alice'',0); RETURN 1; END';
       CREATE AGGREGATE helpers.total(integer) (sfunc = int4pl, stype = integer);
@@ -272,6 +273,8 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
             .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
         }
         await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.total", [1])))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.note_values")))
           .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
         for (const name of ["helpers.missing", "note_count", "helpers.note_count; DROP TABLE \"Note\"", "helpers.\"note_count\"", "pg_catalog.now"]) {
           await expect(alice.commandStore.transaction(s => s.transaction.readFunction(name)))
