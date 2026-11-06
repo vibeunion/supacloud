@@ -181,3 +181,57 @@ test("removed dev migration action and config fail before remote execution", asy
   await expect(invoke({ action: "status" })).rejects.toThrow("dev.database was removed");
   expect(calls).toBe(0);
 });
+
+test.skipIf(!postgresBin)("model command lock serializes writers, is transaction-scoped and deadlock-free", async () => {
+  const server = await startStarterPostgres(postgresBin!);
+  try {
+    await server.exec('CREATE TABLE "Note" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL);');
+    await server.exec(COMMAND_PERSISTENCE_SQL.slice(COMMAND_PERSISTENCE_SQL.indexOf("CREATE SCHEMA"), COMMAND_PERSISTENCE_SQL.indexOf("CREATE OR REPLACE FUNCTION")));
+    await server.withConnection(async url => {
+      const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
+      try {
+        const alice = db.forIdentity({ id: "alice" });
+        // 占位锁必须在事务结束后释放：第二个事务拿到锁时第一个已经提交。
+        let committed = false;
+        const holder = alice.commandStore.transaction(async session => {
+          await session.transaction.lock(["inventory:lot-1"]);
+          await Bun.sleep(150);
+          committed = true;
+        });
+        await Bun.sleep(40);
+        const follower = alice.commandStore.transaction(async session => {
+          await session.transaction.lock(["inventory:lot-1"]);
+          // 拿到锁的那一刻，持有者必然已经提交，证明锁是事务作用域而不是连接泄漏。
+          expect(committed).toBe(true);
+          await session.transaction.db.note.create({ data: { id: "after-lock", owner: "alice", value: 1 } });
+        });
+        await Promise.all([holder, follower]);
+        expect(await alice.models.note.count()).toBe(1);
+        // 同一组键的顺序不影响获取：并发两端不会互相死锁。
+        const ordered = await Promise.all([
+          alice.commandStore.transaction(async s => { await s.transaction.lock(["b", "a", "c"]); await Bun.sleep(60); }),
+          alice.commandStore.transaction(async s => { await s.transaction.lock(["c", "a", "b"]); await Bun.sleep(60); }),
+        ]);
+        expect(ordered).toHaveLength(2);
+        // 回滚同样释放锁，不残留到下一个命令。
+        await expect(alice.commandStore.transaction(async s => {
+          await s.transaction.lock(["inventory:lot-2"]); throw new Error("rollback");
+        })).rejects.toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
+        await alice.commandStore.transaction(async s => {
+          await s.transaction.lock(["inventory:lot-2"]); await s.transaction.db.note.create({ data: { id: "after-rollback", owner: "alice", value: 2 } });
+        });
+        expect(await alice.models.note.count()).toBe(2);
+        // 键集合错误必须在发 SQL 前失败，不能退化成共享哈希。
+        for (const keys of [[], ["  "], Array.from({ length: 17 }, (_, i) => `k${i}`), ["x".repeat(201)]]) {
+          await expect(alice.commandStore.transaction(s => s.transaction.lock(keys)))
+            .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        }
+        // 命令事务只暴露 db + lock，原始 SQL 仍然不可达。
+        await alice.commandStore.transaction(async session => {
+          expect(Reflect.has(session.transaction, "query")).toBe(false);
+          expect(Reflect.has(session.transaction, "lock")).toBe(true);
+        });
+      } finally { await db.dispose(); await pool.close(); }
+    });
+  } finally { await server.close(); }
+}, 30_000);
