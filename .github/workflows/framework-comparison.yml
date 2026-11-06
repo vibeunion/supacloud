@@ -91,7 +91,7 @@ jobs:
         run: node runner.mjs --requests "$REQUESTS" --rounds "$ROUNDS" --concurrency "$CONCURRENCY" --output report.json
 
       - name: Upload benchmark report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: framework-comparison-${{ github.run_id }}
           path: |
