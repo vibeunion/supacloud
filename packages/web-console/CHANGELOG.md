@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.56.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.56.0...web-console-v0.56.1) (2026-11-06)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @tailwindcss/postcss in /packages/web-console ([#2472](https://github.com/vibeunion/supacloud/issues/2472)) ([60b5965](https://github.com/vibeunion/supacloud/commit/60b5965578990c5d8f30c8d90a3c0e1bf3d7b84f))
+* **deps-dev:** bump @tailwindcss/vite in /packages/web-console ([#2476](https://github.com/vibeunion/supacloud/issues/2476)) ([6af82e8](https://github.com/vibeunion/supacloud/commit/6af82e8c690a85e11e618318bd1c78d0754fedd7))
+* **deps-dev:** bump bits-ui in /packages/web-console ([#2474](https://github.com/vibeunion/supacloud/issues/2474)) ([dd6991f](https://github.com/vibeunion/supacloud/commit/dd6991f604461459464631830754903d199a56a5))
+* **deps-dev:** bump tailwindcss in /packages/web-console ([#2470](https://github.com/vibeunion/supacloud/issues/2470)) ([7c24d72](https://github.com/vibeunion/supacloud/commit/7c24d722355a8dab1c4bb7ce7671cd6aaef50915))
+* **deps:** bump @tanstack/svelte-query in /packages/web-console ([#2475](https://github.com/vibeunion/supacloud/issues/2475)) ([baf236f](https://github.com/vibeunion/supacloud/commit/baf236ffcb24f5cf64798744e701e2b61f51ae8f))
+
 ## [0.56.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.55.2...web-console-v0.56.0) (2026-11-05)
 
 
