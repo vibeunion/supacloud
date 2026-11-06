@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/db-v0.22.0...db-v0.23.0) (2026-11-06)
+
+
+### Features
+
+* **db:** expose readFunction for existing read-only SQL definitions ([c19d30d](https://github.com/vibeunion/supacloud/commit/c19d30d935aa97156d1a241180aa32c7ef0a37ba))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/db-v0.21.1...db-v0.22.0) (2026-11-06)
 
 
