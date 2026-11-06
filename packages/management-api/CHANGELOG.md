@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.131.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.130.0...management-api-v0.131.0) (2026-11-06)
+
+
+### Features
+
+* **api:** publish compatibility and business API surfaces ([#2456](https://github.com/vibeunion/supacloud/issues/2456)) ([9fd20d1](https://github.com/vibeunion/supacloud/commit/9fd20d1d82ce7bc1217046f270c146e94fcfb2d5))
+
 ## [0.130.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.129.0...management-api-v0.130.0) (2026-11-05)
 
 

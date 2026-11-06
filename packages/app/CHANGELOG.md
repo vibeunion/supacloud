@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/app-v0.38.0...app-v0.39.0) (2026-11-06)
+
+
+### Features
+
+* make Effect optional for simple CRUD routes ([#2455](https://github.com/vibeunion/supacloud/issues/2455)) ([bbff2c9](https://github.com/vibeunion/supacloud/commit/bbff2c98f95793c0f051bbb995bddbba20ae5bbe))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/app-v0.37.0...app-v0.38.0) (2026-11-05)
 
 

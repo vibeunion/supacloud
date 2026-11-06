@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.38.0...supacloud-lite-v0.38.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **lite:** allow uploads with insert-only storage policies ([#2454](https://github.com/vibeunion/supacloud/issues/2454)) ([7b47297](https://github.com/vibeunion/supacloud/commit/7b472971a84f73c3a5bdf821b7c56085efeb28f1))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.37.2...supacloud-lite-v0.38.0) (2026-11-05)
 
 

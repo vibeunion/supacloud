@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.118.0](https://github.com/vibeunion/supacloud/compare/cli-v0.117.2...cli-v0.118.0) (2026-11-06)
+
+
+### Features
+
+* make Effect optional for simple CRUD routes ([#2455](https://github.com/vibeunion/supacloud/issues/2455)) ([bbff2c9](https://github.com/vibeunion/supacloud/commit/bbff2c98f95793c0f051bbb995bddbba20ae5bbe))
+
 ## [0.117.2](https://github.com/vibeunion/supacloud/compare/cli-v0.117.1...cli-v0.117.2) (2026-11-05)
 
 
