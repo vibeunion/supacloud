@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.9.0...function-adapter-v0.9.1) (2026-11-06)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @sveltejs/kit in /packages/function-adapter ([#2471](https://github.com/vibeunion/supacloud/issues/2471)) ([f354a44](https://github.com/vibeunion/supacloud/commit/f354a444687957f1b5d4663e1578e6c2bb2653d7))
+* **deps-dev:** bump typescript in /packages/function-adapter ([#2473](https://github.com/vibeunion/supacloud/issues/2473)) ([75e40b3](https://github.com/vibeunion/supacloud/commit/75e40b3001bbda0a6aab010198f4f63bb885c796))
+
 ## [0.9.0](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.8.3...function-adapter-v0.9.0) (2026-11-05)
 
 
