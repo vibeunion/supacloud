@@ -235,3 +235,63 @@ test.skipIf(!postgresBin)("model command lock serializes writers, is transaction
     });
   } finally { await server.close(); }
 }, 30_000);
+
+test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejects write-capable ones", async () => {
+  const server = await startStarterPostgres(postgresBin!);
+  try {
+    await server.exec('CREATE TABLE "Note" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL);');
+    await server.exec(COMMAND_PERSISTENCE_SQL.slice(COMMAND_PERSISTENCE_SQL.indexOf("CREATE SCHEMA"), COMMAND_PERSISTENCE_SQL.indexOf("CREATE OR REPLACE FUNCTION")));
+    await server.exec(`
+      CREATE SCHEMA helpers;
+      CREATE FUNCTION helpers.note_count() RETURNS bigint LANGUAGE sql STABLE AS 'SELECT count(*) FROM public."Note"';
+      CREATE FUNCTION helpers.note_label(text) RETURNS text LANGUAGE sql STABLE AS 'SELECT $1 || ''-ok''';
+      CREATE FUNCTION helpers.note_values() RETURNS SETOF integer LANGUAGE sql STABLE AS 'SELECT value FROM public."Note"';
+      CREATE FUNCTION helpers.sneaky_touch() RETURNS integer LANGUAGE plpgsql VOLATILE AS
+        'BEGIN INSERT INTO public."Note" VALUES (''sneaky'',''alice'',0); RETURN 1; END';
+      CREATE AGGREGATE helpers.total(integer) (sfunc = int4pl, stype = integer);
+    `);
+    await server.withConnection(async url => {
+      const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
+      try {
+        const alice = db.forIdentity({ id: "alice" });
+        // 同事务可见性：命令里刚写的行，SQL 函数必须看得见；回滚后一起消失。
+        await expect(alice.commandStore.transaction(async session => {
+          expect(await session.transaction.readFunction("helpers.note_count")).toBe(0);
+          await session.transaction.db.note.create({ data: { id: "in-tx", owner: "alice", value: 1 } });
+          expect(Number(await session.transaction.readFunction("helpers.note_count"))).toBe(1);
+          throw new Error("rollback");
+        })).rejects.toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
+        expect(await alice.models.note.count()).toBe(0);
+        await alice.commandStore.transaction(async session => {
+          expect(await session.transaction.readFunction("helpers.note_label", ["abc"])).toBe("abc-ok");
+          await session.transaction.db.note.create({ data: { id: "committed", owner: "alice", value: 2 } });
+          expect(Number(await session.transaction.readFunction("helpers.note_count"))).toBe(1);
+        });
+        // 写能力的三类形态都被拒：VOLATILE、聚合、不可解析的名字。
+        for (const name of ["helpers.sneaky_touch"]) {
+          await expect(alice.commandStore.transaction(s => s.transaction.readFunction(name)))
+            .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        }
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.total", [1])))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.note_values")))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        for (const name of ["helpers.missing", "note_count", "helpers.note_count; DROP TABLE \"Note\"", "helpers.\"note_count\"", "pg_catalog.now"]) {
+          await expect(alice.commandStore.transaction(s => s.transaction.readFunction(name)))
+            .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        }
+        // 重载按参数个数解析；没有唯一匹配就失败，不猜。
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.note_label")))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.note_label", [{ nested: true } as never])))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        // 事务里仍然拿不到 query，也拿不到新的原始入口。
+        await alice.commandStore.transaction(async session => {
+          expect(Reflect.has(session.transaction, "query")).toBe(false);
+          expect(Reflect.has(session.transaction, "readFunction")).toBe(true);
+        });
+        expect(await alice.models.note.count()).toBe(1);
+      } finally { await db.dispose(); await pool.close(); }
+    });
+  } finally { await server.close(); }
+}, 30_000);

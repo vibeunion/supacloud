@@ -27,7 +27,31 @@ export interface ModelCommandTransaction<S extends SchemaDef> {
    * safe when every writer of the same key set holds the lock.
    */
   readonly lock: (keys: readonly string[]) => Promise<void>;
+  /**
+   * Call an existing schema-qualified read-only database function inside the
+   * command transaction.
+   *
+   * Models cover data. Some decisions also need a definition that already lives
+   * in SQL and must not be duplicated in TypeScript — an authorization
+   * predicate, a DTO projection, a status derivation with joins the model layer
+   * would have to re-derive. Reimplementing those in application code creates a
+   * second source of truth that silently drifts, so the platform offers a
+   * narrow bridge instead of raw SQL.
+   *
+   * The name must be schema-qualified and `pg_proc`-verified on every call:
+   * the function exists, is not an aggregate/window/procedure, and is
+   * `STABLE` or `IMMUTABLE`. A `VOLATILE` function may write or run DDL and is
+   * rejected. System schemas (`pg_*`, `information_schema`) are rejected too.
+   * Arguments are only positional scalars, bound as parameters.
+   *
+   * The call runs on the command connection, so it observes uncommitted writes
+   * of the same transaction and participates in its snapshot.
+   */
+  readonly readFunction: (name: string, args?: readonly (string | number | boolean | null)[]) => Promise<unknown>;
 }
+
+const functionName = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/;
+const systemSchemas = new Set(["pg_catalog", "information_schema", "pg_toast"]);
 
 /** Copy only operation closures. Never return the ORM delegate (it can retain its client). */
 function facade<S extends SchemaDef>(schema: S, client: object, allowed: typeof reads, assertActive: () => void): ModelReadClient<S>;
@@ -78,6 +102,44 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                   assertActive();
                   return await tx.$queryRawUnsafe<unknown>(text, ...parameters);
                 },
+                readFunction: async (name, args = []) => {
+                  if (typeof name !== "string" || !functionName.test(name)) {
+                    throw new CommandError("COMMAND_INPUT_INVALID");
+                  }
+                  const [schemaName, procName] = name.split(".") as [string, string];
+                  if (systemSchemas.has(schemaName) || schemaName.startsWith("pg_")) throw new CommandError("COMMAND_INPUT_INVALID");
+                  if (!Array.isArray(args) || args.length > 16) throw new CommandError("COMMAND_INPUT_INVALID");
+                  for (const arg of args) {
+                    if (arg === null || typeof arg === "string" || typeof arg === "boolean") continue;
+                    if (typeof arg === "number" && Number.isFinite(arg)) continue;
+                    throw new CommandError("COMMAND_INPUT_INVALID");
+                  }
+                  assertActive();
+                  // Volatility is re-checked on every call: CREATE OR REPLACE can turn a
+                  // reviewable STABLE helper into a writing VOLATILE one, and a cached
+                  // verdict would keep trusting the old definition.
+                  const resolved = (await tx.$queryRawUnsafe<unknown>(
+                    `SELECT prokind::text AS kind, provolatile::text AS volatility, proretset AS returns_set
+                       FROM pg_catalog.pg_proc p
+                       JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                      WHERE n.nspname = $1 AND p.proname = $2 AND p.pronargs = $3`,
+                    schemaName, procName, args.length,
+                  )) as readonly Record<string, unknown>[];
+                  if (!Array.isArray(resolved) || resolved.length !== 1) throw new CommandError("COMMAND_INPUT_INVALID");
+                  const signature = resolved[0];
+                  if (signature === undefined || signature["kind"] !== "f") throw new CommandError("COMMAND_INPUT_INVALID");
+                  const volatility = signature["volatility"];
+                  if (volatility !== "s" && volatility !== "i") throw new CommandError("COMMAND_INPUT_INVALID");
+                  if (signature["returns_set"] === true) throw new CommandError("COMMAND_INPUT_INVALID");
+                  const placeholders = args.map((_, index) => `$${index + 1}`).join(", ");
+                  const rows = (await tx.$queryRawUnsafe<unknown>(
+                    `SELECT "${schemaName}"."${procName}"(${placeholders}) AS result`,
+                    ...args,
+                  )) as readonly Record<string, unknown>[];
+                  const row = Array.isArray(rows) ? rows[0] : undefined;
+                  assertActive();
+                  return row === undefined ? undefined : row["result"];
+                },
                 lock: async (keys) => {
                   // Validate before touching the connection: a bad key set must
                   // fail the command, never silently serialize on a shared hash.
@@ -100,7 +162,9 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
       const internal = createPostgresCommandStore(database, submission ? { submission } : {});
       const commandStore: CommandStore<ModelCommandTransaction<S>> & CommandRetentionStore = {
         transaction: run => internal.transaction(session => run({
-          ...session, transaction: Object.freeze({ db: session.transaction.db, lock: session.transaction.lock }),
+          ...session, transaction: Object.freeze({
+            db: session.transaction.db, lock: session.transaction.lock, readFunction: session.transaction.readFunction,
+          }),
         })),
         redactCompleted: scope => internal.redactCompleted(scope),
       };

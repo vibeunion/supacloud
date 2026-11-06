@@ -101,8 +101,8 @@ capabilities fail after the transaction ends. Exact model query argument typing
 is enabled; validation and capability switches cannot be overridden. The host
 owns `pool.close()`.
 
-`session.transaction` exposes exactly two capabilities: `db` (model operations)
-and `lock(keys)`. `lock` takes transaction-scoped PostgreSQL advisory locks
+`session.transaction` exposes exactly three capabilities: `db` (model
+operations), `lock(keys)` and `readFunction(name, args)`. `lock` takes transaction-scoped PostgreSQL advisory locks
 (`pg_advisory_xact_lock`) on the command connection, deduplicates the keys and
 acquires them in sorted order, so it is released by commit or rollback, never
 survives into another command, and cannot deadlock against a command that takes
@@ -112,6 +112,26 @@ rows): without the lock, two commands can both pass the same invariant check.
 Keys are validated before any SQL is sent — an empty array, a blank key, more
 than 16 keys or a key longer than 200 characters is rejected as
 `COMMAND_INPUT_INVALID` rather than silently colliding on a shared hash.
+
+Models carry data, not every definition. An authorization predicate such as
+`fa_membership_can_access_case()` or a DTO projection such as
+`fa_notification_item_dto()` is stateful SQL over several tables; re-deriving it
+in TypeScript creates a second source of truth that drifts silently.
+`readFunction` is the narrow bridge for those: the caller passes a
+schema-qualified name plus positional scalar arguments, the platform verifies
+the definition in `pg_proc` on **every** call (exists, unique for that arity,
+`prokind = 'f'`, `provolatile IN ('s','i')`), and then invokes it with bound
+parameters on the command connection. `VOLATILE` functions can write or run DDL
+and are refused, as are system schemas; volatility is re-read every time because
+`CREATE OR REPLACE` can turn a reviewed helper into a writing one. Overloads are
+resolved by argument count only, so an ambiguous or unknown signature fails
+closed instead of guessing.
+
+This is not raw SQL: there is no statement text, no `SELECT` list and no
+`WHERE` clause to author. The reviewable surface stays "which published SQL
+definition may this command consult", and the answer is auditable in the
+database. The function authors remain trusted code, exactly as they were under
+the RPC-first boundary.
 
 Framework receipt SQL is enabled on the **private** client, because ZenStack's
 policy plugin blocks raw SQL by default. Raw SQL and policy/plugin controls are
