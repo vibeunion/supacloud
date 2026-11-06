@@ -79,7 +79,7 @@ function controller(context: unknown, lookup: Lookup["lookup"], failure?: Error,
 }
 function run(instance: Controller, method: Method) {
   const effect = getRoutes(ControllerClass).find(route => route.handler === method)?.effect;
-  if (effect?.required !== true) throw new Error("Missing generated Effect descriptor");
+  if (effect === false || effect?.required !== true) throw new Error("Missing generated Effect descriptor");
   const descriptor: CompiledEffectDescriptor = { ...effect, required: true };
   const program = method === "list" ? instance.list()
     : method === "detail" ? instance.detail(input.id)
