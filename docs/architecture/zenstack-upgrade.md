@@ -101,6 +101,18 @@ capabilities fail after the transaction ends. Exact model query argument typing
 is enabled; validation and capability switches cannot be overridden. The host
 owns `pool.close()`.
 
+`session.transaction` exposes exactly two capabilities: `db` (model operations)
+and `lock(keys)`. `lock` takes transaction-scoped PostgreSQL advisory locks
+(`pg_advisory_xact_lock`) on the command connection, deduplicates the keys and
+acquires them in sorted order, so it is released by commit or rollback, never
+survives into another command, and cannot deadlock against a command that takes
+the same key set in a different order. Use it when a write depends on an
+aggregate another transaction may extend concurrently (read-check-write across
+rows): without the lock, two commands can both pass the same invariant check.
+Keys are validated before any SQL is sent — an empty array, a blank key, more
+than 16 keys or a key longer than 200 characters is rejected as
+`COMMAND_INPUT_INVALID` rather than silently colliding on a shared hash.
+
 Framework receipt SQL is enabled on the **private** client, because ZenStack's
 policy plugin blocks raw SQL by default. Raw SQL and policy/plugin controls are
 absent from both business facades. Native operational SQL and the reference

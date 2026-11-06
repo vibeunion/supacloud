@@ -1,7 +1,7 @@
 import { ZenStackClient, type AuthType, type ClientOptions, type QueryOptions, type ModelOperations } from "@zenstackhq/orm";
 import { PolicyPlugin } from "@zenstackhq/plugin-policy";
 import type { SchemaDef, GetModels } from "@zenstackhq/schema";
-import type { CommandStore, CommandRetentionStore } from "@supacloud/contracts";
+import { CommandError, type CommandStore, type CommandRetentionStore } from "@supacloud/contracts";
 import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
 import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding } from "./command-adapter";
 
@@ -11,7 +11,23 @@ const typing = { typing: { exactQueryArgs: true } } as const;
 type Delegate<S extends SchemaDef, M extends GetModels<S>, K extends string> = Pick<ModelOperations<S, M, typeof typing>, Extract<K, keyof ModelOperations<S, M, typeof typing>>>;
 export type ModelClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof operations[number]> };
 export type ModelReadClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof reads[number]> };
-export interface ModelCommandTransaction<S extends SchemaDef> { readonly db: ModelClient<S> }
+export interface ModelCommandTransaction<S extends SchemaDef> {
+  readonly db: ModelClient<S>;
+  /**
+   * Serialize competing writes inside the command transaction.
+   *
+   * Keys are folded into 64-bit advisory locks (`pg_advisory_xact_lock`) on the
+   * command connection, so they are released when the transaction commits or
+   * rolls back and never leak to another command. Keys are deduplicated and
+   * acquired in sorted order, therefore two commands that take the same key set
+   * in a different order cannot deadlock each other.
+   *
+   * Use it when a decision depends on an aggregate that another transaction may
+   * insert into concurrently (write skew): read-then-check-then-write is only
+   * safe when every writer of the same key set holds the lock.
+   */
+  readonly lock: (keys: readonly string[]) => Promise<void>;
+}
 
 /** Copy only operation closures. Never return the ORM delegate (it can retain its client). */
 function facade<S extends SchemaDef>(schema: S, client: object, allowed: typeof reads, assertActive: () => void): ModelReadClient<S>;
@@ -62,6 +78,20 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                   assertActive();
                   return await tx.$queryRawUnsafe<unknown>(text, ...parameters);
                 },
+                lock: async (keys) => {
+                  // Validate before touching the connection: a bad key set must
+                  // fail the command, never silently serialize on a shared hash.
+                  if (!Array.isArray(keys) || keys.length === 0) throw new CommandError("COMMAND_INPUT_INVALID");
+                  if (keys.length > 16) throw new CommandError("COMMAND_INPUT_INVALID");
+                  const unique = [...new Set(keys.map((key) => {
+                    if (typeof key !== "string" || key.trim() === "") throw new CommandError("COMMAND_INPUT_INVALID");
+                    if (key.length > 200) throw new CommandError("COMMAND_INPUT_INVALID");
+                    return key;
+                  }))].sort();
+                  assertActive();
+                  for (const key of unique) await tx.$queryRawUnsafe<unknown>("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", key);
+                  assertActive();
+                },
               });
             } finally { active = false; }
           });
@@ -70,7 +100,7 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
       const internal = createPostgresCommandStore(database, submission ? { submission } : {});
       const commandStore: CommandStore<ModelCommandTransaction<S>> & CommandRetentionStore = {
         transaction: run => internal.transaction(session => run({
-          ...session, transaction: Object.freeze({ db: session.transaction.db }),
+          ...session, transaction: Object.freeze({ db: session.transaction.db, lock: session.transaction.lock }),
         })),
         redactCompleted: scope => internal.redactCompleted(scope),
       };
