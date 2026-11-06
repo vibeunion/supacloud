@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.38.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.0...edge-runtime-v0.38.1) (2026-11-06)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @types/node in /packages/edge-runtime ([#2464](https://github.com/vibeunion/supacloud/issues/2464)) ([f76a202](https://github.com/vibeunion/supacloud/commit/f76a202824b915c16350133caeaeb58bd8a72c6e))
+* **deps:** bump jose from 6.2.13 to 6.2.15 in /packages/edge-runtime ([#2466](https://github.com/vibeunion/supacloud/issues/2466)) ([ad7cbf2](https://github.com/vibeunion/supacloud/commit/ad7cbf242ab6937a0f59dd0b9c9b5769a63be28b))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.37.3...edge-runtime-v0.38.0) (2026-11-05)
 
 

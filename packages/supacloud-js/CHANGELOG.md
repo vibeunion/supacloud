@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.0...supacloud-js-v0.48.1) (2026-11-06)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @tanstack/svelte-query from 6.3.6 to 6.3.9 in /packages/supacloud-js ([#2465](https://github.com/vibeunion/supacloud/issues/2465)) ([7d26630](https://github.com/vibeunion/supacloud/commit/7d266306670e597febc47fdf07fc42d2b12c4897))
+
 ## [0.48.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.47.1...supacloud-js-v0.48.0) (2026-11-06)
 
 
