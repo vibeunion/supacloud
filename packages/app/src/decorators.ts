@@ -263,8 +263,8 @@ export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContra
   /** TypeBox schemas keyed by the HTTP response status code. */
   responses?: Schemas["responses"] extends Readonly<Record<string | number, unknown>>
     ? Schemas["responses"] : Readonly<Record<string | number, unknown>>;
-  /** Explicit Effect runtime contract for routes that return an Effect program. */
-  effect?: EffectRouteOptions;
+  /** Explicit Effect runtime contract; `false` opts a simple non-command route into Promise mode. */
+  effect?: EffectRouteOptions | false;
   /** Command class whose governance metadata must be enforced for this route. */
   command?: Type<unknown>;
   /** Angular-style functional route guards executed before handler. */

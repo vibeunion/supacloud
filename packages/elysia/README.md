@@ -65,6 +65,41 @@ evidence. A server using this adapter still installs Elysia; application metadat
 and business modules need not import native Elysia types. See the
 [dependency boundary and upgrade policy](../../docs/elysia-compatibility.md).
 
+## Identity-bound ZenStack read adapter
+
+`createZenStackReadPlugin` mounts explicit GET/HEAD resources on native Elysia 2.
+Each request calls `bindIdentity`, receives the read-only `models` facade from
+`createZenStackDatabase(...).forIdentity(...)`, and invokes one allow-listed
+ZenStack read operation. TypeBox contracts and argument builders are supplied
+per resource:
+
+```ts
+const read = createZenStackReadPlugin({
+  resources: [{
+    path: "/model/orders/:id",
+    model: "order",
+    operation: "findUnique",
+    contract: { params: Type.Object({ id: Type.String() }) },
+    args: ({ params, identity }) => ({
+      where: { tenantId: identity, id: params["id"] },
+    }),
+  }],
+  bindIdentity: async request => ({
+    identity: await verifyTenant(request),
+    models: database.forIdentity(await verifyPrincipal(request)).models,
+  }),
+});
+
+const app = new Elysia().use(read);
+```
+
+The adapter does not expose writes, raw clients, arbitrary model names, or
+automatic CRUD routes. Durable writes remain Commands and use
+`transaction.db`; business routes continue through the compiled module adapter.
+The official `@zenstackhq/server` Elysia handler is not used here because its
+current peer baseline targets Elysia 1.x and its generic CRUD surface would add
+another application boundary.
+
 Run `bun run test:conformance` in this package after building the local
 `@supacloud/contracts` and `@supacloud/app` dependencies and installing this
 package's dependencies. The suite runs through `app.handle(Request)` without a

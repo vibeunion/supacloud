@@ -75,6 +75,34 @@ The only production interpreter allowlisted by the workspace source gate is
 The compiler recognizes both the subpath imports used by existing starters
 (`effect/Effect`, `effect/Runtime`) and Effect 4 aggregate imports
 (`import { Effect } from "effect"`).
+
+## Simple CRUD routes
+
+Effect is required for routes by the strict default, but a simple non-command
+route may opt into Promise mode explicitly:
+
+```ts
+@Get("/:id", {
+  params: OrderParams,
+  responses: { 200: OrderResponse },
+  effect: false,
+})
+read(id: string): Promise<OrderResponse> {
+  return this.orders.read(id);
+}
+```
+
+`effect: false` only removes the Effect interpreter and Effect failure mapping
+from that route. It is limited to GET/HEAD/OPTIONS reads. TypeBox
+request/response contracts, module boundaries, DI, authorization and ordinary
+adapter error handling still apply. It cannot be used on a route that enters a
+durable Command or feature transition. Commands,
+workers, external effects, multi-step orchestration and routes that need typed
+failures, timeout or explicit retry continue to declare an Effect contract.
+
+This keeps the default strict for public governed applications while avoiding an
+`Effect.promise` wrapper around a single model read.
+
 Explicit `false` values are the opt-out mechanism for a migration boundary:
 
 ```ts

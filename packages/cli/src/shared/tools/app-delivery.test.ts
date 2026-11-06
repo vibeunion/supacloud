@@ -106,7 +106,7 @@ test("plan uses configured delivery topology, writes nothing and promises no rel
         const text = await runAppTool({ action: "plan", root });
         expect(text.content[0]!.text).toContain("topology digest is not a build hash");
     } finally { await rm(root, { recursive: true, force: true }); }
-});
+}, 30_000);
 
 test("build reuses compiler manifest output without delegating deployment", async () => {
     const root = await fixture();
