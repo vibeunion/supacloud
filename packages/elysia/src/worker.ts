@@ -54,6 +54,110 @@ export interface WorkerQueueFailureOptions {
   deadLetter?: boolean;
 }
 
+/** Minimal AMQP 0-9-1 channel shape; keeps RabbitMQ optional at package level. */
+export interface RabbitMqChannel {
+  prefetch(count: number): Promise<void> | void;
+  consume(queue: string, onMessage: (message: RabbitMqMessage | null) => void, options?: { noAck?: boolean }):
+    Promise<{ consumerTag: string }>;
+  ack(message: RabbitMqMessage): void;
+  nack(message: RabbitMqMessage, allUpTo?: boolean, requeue?: boolean): void;
+  cancel(consumerTag: string): Promise<void> | void;
+}
+
+export interface RabbitMqMessage {
+  content: Uint8Array;
+  fields: { deliveryTag: number };
+  properties?: Readonly<Record<string, unknown>>;
+}
+
+export interface RabbitMqQueuePortOptions {
+  queue: string;
+  channel: RabbitMqChannel;
+  prefetch?: number;
+  receiveTimeoutMs?: number;
+}
+
+/**
+ * Adapts an AMQP consumer to the same pull/ack/fail port used by the native
+ * SupaCloud queue client. The channel owns redelivery; the worker owns JSON
+ * decoding and business idempotency.
+ */
+export function createRabbitMqQueuePort(options: RabbitMqQueuePortOptions): WorkerQueuePort & { close(): Promise<void> } {
+  if (!options.channel || typeof options.channel.consume !== "function"
+    || typeof options.channel.ack !== "function" || typeof options.channel.nack !== "function"
+    || !/^[A-Za-z0-9_.:-]{1,255}$/.test(options.queue)) {
+    throw new TypeError("RabbitMQ queue port options are invalid");
+  }
+  const prefetch = options.prefetch ?? 1;
+  const timeoutMs = options.receiveTimeoutMs ?? 1000;
+  if (!Number.isSafeInteger(prefetch) || prefetch < 1 || prefetch > 4096
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
+    throw new TypeError("RabbitMQ queue port limits are invalid");
+  }
+  const buffered: Array<{ message: RabbitMqMessage; value: WorkerQueueMessage }> = [];
+  const pending: Array<(value: WorkerQueueMessage | null) => void> = [];
+  const deliveries = new Map<string, RabbitMqMessage>();
+  let consumer: { consumerTag: string } | undefined;
+  let starting: Promise<void> | undefined;
+  let closed = false;
+  const deliver = (message: RabbitMqMessage | null) => {
+    if (message === null) return;
+    const id = String(message.fields.deliveryTag);
+    let payload: unknown;
+    try { payload = JSON.parse(new TextDecoder().decode(message.content)); }
+    catch { options.channel.nack(message, false, false); return; }
+    const value: WorkerQueueMessage = { id, payload };
+    deliveries.set(id, message);
+    const waiter = pending.shift();
+    if (waiter) waiter(value);
+    else buffered.push({ message, value });
+  };
+  const start = async () => {
+    if (closed) throw new Error("RABBITMQ_QUEUE_CLOSED");
+    if (!starting) {
+      starting = Promise.resolve(options.channel.prefetch(prefetch))
+        .then(() => options.channel.consume(options.queue, deliver, { noAck: false }))
+        .then(value => { consumer = value; });
+    }
+    await starting;
+  };
+  const receive = async (): Promise<WorkerQueueMessage | null> => {
+    await start();
+    const item = buffered.shift();
+    if (item) return item.value;
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        const index = pending.indexOf(resolve);
+        if (index >= 0) pending.splice(index, 1);
+        resolve(null);
+      }, timeoutMs);
+      pending.push(value => { clearTimeout(timer); resolve(value); });
+    });
+  };
+  return {
+    receive,
+    ack(messageId) {
+      const message = deliveries.get(String(messageId));
+      if (!message) throw new Error("RABBITMQ_DELIVERY_UNKNOWN");
+      deliveries.delete(String(messageId));
+      options.channel.ack(message);
+    },
+    fail(messageId, failure) {
+      const message = deliveries.get(String(messageId));
+      if (!message) throw new Error("RABBITMQ_DELIVERY_UNKNOWN");
+      deliveries.delete(String(messageId));
+      options.channel.nack(message, false, failure?.deadLetter !== true);
+    },
+    async close() {
+      closed = true;
+      for (const resolve of pending.splice(0)) resolve(null);
+      if (consumer) await options.channel.cancel(consumer.consumerTag);
+      consumer = undefined;
+      starting = undefined;
+    },
+  };
+}
+
 /** Structural port implemented by `client.queue(name)` without a package dependency. */
 export interface WorkerQueuePort<
   TMessage extends WorkerQueueMessage = WorkerQueueMessage,

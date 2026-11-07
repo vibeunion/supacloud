@@ -228,9 +228,10 @@ export function createDeliveryPlan(
       target.execution = group;
     }
   }
-  if ([...targets.values()].reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
-    fail("delivery-execution-replica-limit", "A release supports at most 32 runtime targets including replicas.",
-      "Reduce the replica count or split independent applications.");
+  if ([...targets.values()].reduce((count, target) => count + (target.execution
+    ? (target.execution.replicas ?? 1) * (target.execution.shardCount ?? 1) : 1), 0) > 256) {
+    fail("delivery-execution-replica-limit", "A release supports at most 256 runtime targets including replicas and queue shards.",
+      "Reduce the replica or shard count, or split independent applications.");
   }
   const canonicalDiagnostics = [...new Map(diagnostics.map((item) => [JSON.stringify(item), item])).values()]
     .sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)));

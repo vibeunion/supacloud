@@ -1,3 +1,5 @@
+import { workerShardQueue } from "@supacloud/delivery/worker-execution";
+
 export interface WorkerTransaction {
   query(text: string, parameters?: readonly (string | number | boolean | null)[]): Promise<unknown>;
 }
@@ -43,16 +45,21 @@ export async function releaseWorkerOperation(
 }
 
 /** Operator/compatibility check. Pause admission first; never delete or move an old queue here. */
-export async function requireDrainedWorkerGroup(transaction: WorkerTransaction, projectRef: string, group: string, queue: string) {
+export async function requireDrainedWorkerGroup(
+  transaction: WorkerTransaction, projectRef: string, group: string, queue: string, shardCount = 1,
+) {
   parameters({ projectRef, group, operationId: "drain" });
   if (!/^scw_[a-z0-9_]{1,40}$/.test(queue)) throw new Error("WORKER_ADMISSION_INVALID");
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > 64) throw new Error("WORKER_ADMISSION_INVALID");
+  const queues = Array.from({ length: shardCount }, (_, shard) => workerShardQueue({ queue, shardCount }, shard));
+  const queueClauses = queues.map((_, index) => `(SELECT queue_length FROM pgmq.metrics($${index + 3}))`).join(" + ");
   const result = await transaction.query(`SELECT l.accepting,l.outstanding,
     (SELECT count(*)::integer FROM supacloud_worker.admission_tokens t
       WHERE t.group_name=l.group_name AND NOT t.released) AS held,
-    (SELECT queue_length FROM pgmq.metrics($3)) AS queued
+    COALESCE(${queueClauses},0)::bigint AS queued
     FROM supacloud_worker.admission_limits l
     WHERE l.group_name=$2 AND EXISTS(SELECT FROM supacloud_worker.installation WHERE singleton AND project_ref=$1)
-    FOR UPDATE OF l`, [projectRef, group, queue]);
+    FOR UPDATE OF l`, [projectRef, group, ...queues]);
   const zero = (value: unknown) => value === 0 || value === "0" || value === 0n;
   if (!Array.isArray(result) || result.length !== 1 || !result[0] || typeof result[0] !== "object"
     || result[0].accepting !== false || !zero(result[0].outstanding)

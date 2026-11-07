@@ -17,6 +17,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@pgflow/edge-worker@0.16.0": "../../patches/@pgflow%2Fedge-worker@0.16.0.patch",
+  },
   "packages": {
     "@henrygd/queue": ["@henrygd/queue@1.2.0", "", {}, "sha512-jW/BLSTpcvExDhqJGxtIPgGr2O0IFF8XUNDwEbfCfhrXT8a4xztQ9Lv6U/vbYzYC0xVWn+3zv6YnLUh3bEFUKA=="],
 

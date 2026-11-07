@@ -12,10 +12,16 @@ separate dimension. Version 1 supports Bun and the pinned pgflow queue adapter.
 Unsupported runtimes, hard-timeout claims and arbitrary scheduling tags fail
 configuration validation.
 
-An execution group binds exactly one compiled Job name, one versioned queue,
-one Worker target and one project. Multiple replicas consume that queue through
-the same existing engine. No new scheduler or task-result ledger is created.
+An execution group binds exactly one compiled Job name, one versioned queue
+family, one Worker target and one project. `shardCount` expands the family
+into deterministic queues such as `scw_reports_v1_s00` and `scw_reports_v1_s01`.
+Every replica consumes every shard; an `orderingKey` maps to one shard so
+unrelated keys can run concurrently while one key remains ordered. No new
+scheduler or task-result ledger is created.
 PGMQ/archive state is not a business completion receipt.
+
+The shard hash is FNV-1a over the UTF-8 bytes of the server-owned ordering key,
+so Bun, Go and other runtimes produce the same route for non-ASCII keys.
 
 ## Configuration
 
@@ -41,6 +47,7 @@ never wrap another polling Worker around pgflow.
       "executor": "pgflow-queue",
       "runtime": "bun",
       "queue": "scw_reports_v1",
+      "shardCount": 4,
       "taskKey": "report.generate",
       "definitionVersion": "1",
       "replicas": 1,
@@ -69,7 +76,10 @@ unclean exit while the engine is finishing its database poll.
 The group is included in the compilation plan, object input digest, immutable
 release inventory and runtime activation. Existing CLI build/import/configure/
 activate operations remain the delivery path; new generic endpoints are not
-required. Old schema readers reject unknown fields instead of ignoring policy.
+required. `shardCount` defaults to `1` for existing releases. The deployment
+operator must provision every derived PGMQ queue before starting workers and
+reapply queue grants after provisioning. Old schema readers reject unknown
+fields instead of ignoring policy.
 
 ## Systemd backend
 
@@ -83,6 +93,13 @@ termination and shutdown deadlines. Both broker implementations accept and
 validate the new resource directives. Readiness checks both `systemctl show`
 and the actual cgroup `cpu.max`, `memory.max`, `memory.swap.max` values. Missing
 controllers or unsupported resource reporting never count as verified limits.
+
+Application activation provisions the logical queue and every derived shard
+queue through the project database before installing or starting any worker.
+Provisioning is idempotent, so a lost response or deployment retry does not
+turn an already-created queue into a false failure. A queue whose observed
+partitioning or unlogged mode differs from the requested policy still fails
+closed.
 
 Do not install only the Management API change: deploy the corresponding
 `scripts/lib/systemd_unit_broker.sh` through the normal platform release path.
@@ -114,9 +131,9 @@ This is the residual host budget after API, database, maintenance and existing
 non-grouped services. It is not an application-controlled environment variable.
 Missing/invalid budgets block grouped allocations.
 
-The existing host-wide allocation transaction reserves maximum replicas,
-including engine AND domain connections. Concurrent allocations cannot both
-spend the last capacity. All unretired activation reservations count, even
+The existing host-wide allocation transaction reserves maximum replicas times
+shards, including engine AND domain connections. Concurrent allocations cannot
+both spend the last capacity. All unretired activation reservations count, even
 after a failed activation or process shutdown. This deliberately requires
 headroom for a replacement release until the prior activation is explicitly
 observed stopped/unrouted and retired through the existing retirement path.
@@ -125,8 +142,10 @@ Never delete metadata to recover capacity.
 ## Database preparation and admission
 
 Run the existing explicit pgflow installer for the target project's approved
-database/profile. Migration `supacloud_002` adds admission accounting after the
-existing pinned engine migrations. Startup performs no DDL.
+database/profile. Migrations `supacloud_002`, `supacloud_004` and `supacloud_005`
+add admission
+accounting and the shard-aware bounded enqueue path after the existing pinned
+engine migrations. Startup performs no DDL.
 
 An operator provisions `supacloud_worker.admission_limits` with the exact
 approved group name and maximum outstanding count. Application roles get
@@ -210,12 +229,22 @@ in-flight task or database migration is deleted or rewritten automatically.
 
 ## Metrics and acceptance
 
+## Optional external broker
+
+The default backend remains PGMQ. Applications that need an independent broker
+can use the AMQP queue port exported by `@supacloud/elysia`; RabbitMQ is not a
+runtime dependency of SupaCloud. Use manual acknowledgements, publisher
+confirms in the outbox dispatcher, a bounded prefetch and a dead-letter policy.
+The same message envelope and idempotency contract apply. Do not dual-publish
+the same operation during migration without a durable operation key and
+reconciliation.
+
 Health includes active/completed/failed/timed-out attempt counters, RSS and
 bounded execution/queue-wait histograms with bucket ceilings
 10/50/100/500/1000/5000/30000/+Inf milliseconds. Queue-wait is message age and
 therefore includes previous attempts for retries. Health reflects the domain
 probe and adapter lifecycle, not a guarantee of successful processing of every
-future message. Collect engine queue/oldest-age and database lock/pool metrics
+future message. Collect each shard's engine queue/oldest-age and database lock/pool metrics
 from the existing monitoring stack; keep operation IDs out of metric labels.
 
 `acceptWorkerMixedLoad` provides paired, fixed-offered-rate API measurements
@@ -243,8 +272,64 @@ It also exercises both broker validators, immutable artifact policy retention,
 activation reservation guards and fail-closed route retirement.
 It does not prove target-host cgroup enforcement or customer capacity.
 
+The Docker-backed local run on 2026-11-07 passed
+`SCW_RUNTIME_ACCEPTANCE=1 bun test packages/worker/tests/runtime.test.ts`.
+It exercised 300 concurrent CSV exports, fixed 50 requests/second API load,
+bounded worker cgroups, peak connection/memory checks, a killed worker with
+redelivery and one durable effect, checkpoint resume, and admission rollback.
+The separate `PGFLOW_DATABASE_ACCEPTANCE=1` run also passed installation,
+task API, and scheduled crash/recovery checks. These are local Linux-container
+evidence; the target-host script below remains required for host systemd,
+long-soak and customer-capacity sign-off.
+
 Release gates still outstanding until performed on the approved target:
 broker/platform rollout, least-privilege credentials, real cgroup readback,
 approved customer mixed-load targets, long-soak and operator recovery signoff.
 Implementation, local verification, merge, deployment and customer acceptance
 must remain separate states.
+
+## Target-host horizontal acceptance
+
+Run the executable acceptance from an approved Linux host after the release is
+deployed. It fails closed on macOS, missing target configuration, missing
+systemd units, a failed fixed-rate load gate, duplicate business effects, or a
+missing cgroup controller. The target service must expose these JSON endpoints:
+
+* `POST /acceptance/batch` returns `{ "operationId": "..." }` and starts a
+  bounded batch with an idempotency key derived from that operation ID.
+* `GET /acceptance/batch/{operationId}` returns `{ "completed": true }` only
+  after the durable batch is complete.
+* `GET /acceptance/effect/{operationId}` returns `{ "effectCount": 1 }` after
+  recovery. Any other count fails the run.
+* `GET /acceptance/request` returns `{ "ok": true }` for a normal API request.
+
+The crash and restart commands are explicit JSON argv arrays. The crash command
+must terminate the selected worker while the batch is in flight; the restart
+command must start the same immutable release. The script then waits for the
+batch, checks the single durable effect, and reads every derived unit's
+`systemctl show` properties plus `cpu.max`, `memory.max`, and
+`memory.swap.max`.
+
+Example for a 30-minute soak with two replicas and four shards:
+
+```sh
+WORKER_ACCEPTANCE_TARGET_URL=https://worker.example.test \
+WORKER_ACCEPTANCE_TOKEN="$TOKEN" \
+WORKER_ACCEPTANCE_UNITS_JSON='["supacloud-application-demo-a1-r1-s00.service","supacloud-application-demo-a1-r1-s01.service","supacloud-application-demo-a1-r1-s02.service","supacloud-application-demo-a1-r1-s03.service","supacloud-application-demo-a1-r2-s00.service","supacloud-application-demo-a1-r2-s01.service","supacloud-application-demo-a1-r2-s02.service","supacloud-application-demo-a1-r2-s03.service"]' \
+WORKER_ACCEPTANCE_REPLICAS=2 WORKER_ACCEPTANCE_SHARDS=4 \
+WORKER_ACCEPTANCE_DURATION_SECONDS=1800 WORKER_ACCEPTANCE_LONG_SOAK=true \
+WORKER_ACCEPTANCE_CRASH_COMMAND='["systemctl","kill","--kill-who=main","--signal=SIGKILL","supacloud-application-demo-a1-r1-s00.service"]' \
+WORKER_ACCEPTANCE_RESTART_COMMAND='["systemctl","restart","supacloud-application-demo-a1-r1-s00.service"]' \
+WORKER_ACCEPTANCE_CPU_LIMIT=0.5 WORKER_ACCEPTANCE_MEMORY_LIMIT_MIB=256 \
+bun run scripts/worker-horizontal-acceptance.ts
+```
+
+`WORKER_ACCEPTANCE_DURATION_SECONDS` accepts up to 86,400 seconds. The load
+gate still caps total offered requests at one million, so a longer soak must
+use an arrival rate that stays within that bound.
+
+The command writes a versioned JSON receipt. A successful receipt is target
+capacity and recovery evidence for the exact candidate, hardware, offered
+rate, replica/shard topology and cgroup state recorded in that file. A local
+unit test of the helpers or a skipped PostgreSQL test is not a substitute for
+this target-host result.

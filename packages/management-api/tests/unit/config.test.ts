@@ -43,6 +43,39 @@ describe("Config", () => {
     expect(config.s3Endpoint).toContain("http");
   });
 
+  test("should keep MQTT optional and default to the RabbitMQ provider", () => {
+    expect(config.mqttEnabled).toBe(false);
+    expect(config.mqttProvider).toBe("rabbitmq");
+    expect(config.mqttBrokerUrl).toBe("mqtt://127.0.0.1:1883");
+  });
+
+  test("should validate enabled RabbitMQ MQTT settings during startup", () => {
+    const configModule = resolve(import.meta.dir, "../../src/config.ts");
+    const result = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "-e",
+        `import { config } from ${JSON.stringify(configModule)}; process.stdout.write(JSON.stringify({ enabled: config.mqttEnabled, provider: config.mqttProvider }));`,
+      ],
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        SUPACLOUD_MANAGEMENT_ENV_FILE: "/nonexistent-management-env",
+        SUPACLOUD_LOCAL_ENV_FILE: "/nonexistent-local-env",
+        MQTT_ENABLED: "true",
+        MQTT_PROVIDER: "rabbitmq",
+        MQTT_BROKER_URL: "mqtt://rabbitmq:1883",
+        MQTT_BROKER_USERNAME: "supacloud",
+        MQTT_BROKER_PASSWORD: "test-password",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toEqual({ enabled: true, provider: "rabbitmq" });
+  });
+
   test("port should match numeric env/config resolution", () => {
     expect(Number.isInteger(config.port)).toBe(true);
     expect(config.port).toBeGreaterThan(0);

@@ -108,6 +108,11 @@ export interface Config {
   pgredisRuntimeInternalUrl: string;
   pgredisRuntimeInternalToken: string;
   pgredisRuntimeInternalTimeoutMs: number;
+  mqttEnabled: boolean;
+  mqttProvider: "rabbitmq";
+  mqttBrokerUrl: string;
+  mqttBrokerUsername: string;
+  mqttBrokerPassword: string;
   edgeFunctionsDir: string;
   logsEnabled: boolean;
   logCollectorJournalEnabled: boolean;
@@ -325,6 +330,17 @@ export const config: Config = {
   pgredisRuntimeInternalUrl: getEnv("PGREDIS_RUNTIME_INTERNAL_URL", "http://127.0.0.1:9010"),
   pgredisRuntimeInternalToken: getEnv("PGREDIS_RUNTIME_INTERNAL_TOKEN", ""),
   pgredisRuntimeInternalTimeoutMs: Number(getEnv("PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS", "5000")),
+  mqttEnabled: getEnv("MQTT_ENABLED", "false") === "true",
+  mqttProvider: (() => {
+    const provider = getEnv("MQTT_PROVIDER", "rabbitmq");
+    if (provider !== "rabbitmq") {
+      throw new Error('Unsupported MQTT_PROVIDER. Only "rabbitmq" is currently available.');
+    }
+    return provider as "rabbitmq";
+  })(),
+  mqttBrokerUrl: getEnv("MQTT_BROKER_URL", "mqtt://127.0.0.1:1883"),
+  mqttBrokerUsername: getEnv("MQTT_BROKER_USERNAME", ""),
+  mqttBrokerPassword: getEnv("MQTT_BROKER_PASSWORD", ""),
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
   logsEnabled: getEnv("SUPACLOUD_LOGS_ENABLED", "true") === "true",
   logCollectorJournalEnabled: getEnv("SUPACLOUD_LOG_COLLECTOR_JOURNAL_ENABLED", "true") === "true",
@@ -474,6 +490,14 @@ function validateConfig() {
   }
   if (!Number.isInteger(config.managementProjectPoolCacheSize) || config.managementProjectPoolCacheSize <= 0) {
     throw new Error("Invalid MANAGEMENT_PROJECT_POOL_CACHE_SIZE configuration. Must be a positive integer.");
+  }
+  if (config.mqttEnabled) {
+    if (!/^mqtts?:\/\/[^\s/]+(?::\d{1,5})?$/.test(config.mqttBrokerUrl)) {
+      throw new Error("Invalid MQTT_BROKER_URL configuration. Expected an mqtt:// or mqtts:// URL.");
+    }
+    if (!config.mqttBrokerUsername || !config.mqttBrokerPassword) {
+      throw new Error("MQTT_BROKER_USERNAME and MQTT_BROKER_PASSWORD are required when MQTT_ENABLED=true.");
+    }
   }
   for (const [name, limit] of [
     ["SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE", config.rateLimitPasswordPerMinute],

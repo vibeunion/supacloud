@@ -8,12 +8,14 @@ import {
   type TaskHandler,
 } from "./queue-handler.js";
 import { normalizeJobPolicy } from "./job-policy.js";
+import { adaptivePollInterval } from "./polling.js";
 export * from "./scriptc.js";
-export { workerExecutionFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
+export { workerExecutionFromEnvironment, workerShardFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
 export { createExecutionGroupWorker } from "./group-worker.js";
 export type { ExecutionGroupDomain, WorkerHealth } from "./group-worker.js";
 export { admitWorkerOperation, releaseWorkerOperation, requireDrainedWorkerGroup } from "./admission.js";
 export { createQueueJobMetrics, type QueueJobMetrics } from "./telemetry.js";
+export { adaptivePollInterval, type AdaptivePollingOptions, type AdaptivePollInterval } from "./polling.js";
 export type { WorkerAdmission, WorkerTransaction } from "./admission.js";
 export { measureWorkerApiLoad, acceptWorkerMixedLoad } from "./acceptance.js";
 export type { WorkerLoadSpec, WorkerLoadMeasurement, WorkerAcceptancePorts } from "./acceptance.js";
@@ -44,6 +46,7 @@ export interface ProcessWorkerOptions {
   connectionString: string;
   concurrency?: number;
   maxPgConnections?: number;
+  polling?: import("./polling.js").AdaptivePollingOptions;
   /** One in-flight message per worker instance; not a distributed queue lock. */
   serial?: boolean;
   /** Environment source used for startup validation; defaults to process.env. */
@@ -155,6 +158,9 @@ export function createPgflowQueueWorker<T>(
     ...config(options),
     queueName: options.queueName,
     visibilityTimeout: integer(options.visibilityTimeoutSeconds, 300, 15, 3600),
+    maxConcurrent: options.serial ? 1 : integer(options.concurrency, 4, 1, 32),
+    batchSize: options.serial ? 1 : integer(options.concurrency, 4, 1, 32),
+    pollIntervalMs: adaptivePollInterval(options.polling),
     retry: {
       strategy: "exponential",
       limit: policy.maxRetries,
@@ -183,7 +189,7 @@ export function createPgflowWorker<TFlow extends AnyFlow>(
   flow: CompatibleFlow<TFlow, SupabaseResources>,
   options: ProcessWorkerOptions,
 ) {
-  const flowConfig = config(options);
+  const flowConfig = { ...config(options), pollIntervalMs: adaptivePollInterval(options.polling) };
   const projectRef = options.projectRef;
   if (!/^scw_[a-z0-9_]{1,40}$/.test(flow.slug))
     throw new Error("WORKER_FLOW_INVALID");

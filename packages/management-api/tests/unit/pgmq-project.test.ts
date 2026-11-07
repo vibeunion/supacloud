@@ -140,7 +140,7 @@ test("the service has no generated-name resolver or second mapping path", async 
   expect(source).not.toContain("ensurePgmq");
   expect(source.match(/projectRepository\.findByRef\(/g)).toHaveLength(1);
   expect(source.match(/getProjectDb\(/g)).toHaveLength(1);
-  expect(source.match(/const db = await prepareProjectDb\(projectRef\)/g)).toHaveLength(14);
+  expect(source.match(/const db = await prepareProjectDb\(projectRef\)/g)).toHaveLength(15);
 });
 
 test("project mapping module compiles with strict full-library checking", async () => {

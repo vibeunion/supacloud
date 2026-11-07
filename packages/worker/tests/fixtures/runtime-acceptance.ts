@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { withPgflowDatabase, until } from "./database.js";
-import { renderRoles } from "../../scripts/roles.js";
+import { renderRoles, renderQueueGrants } from "../../scripts/roles.js";
 import { roleNames } from "../../scripts/scheduler.js";
 import { submitReport, downloadReport, LocalArtifacts, reportHandler } from "../../examples/reporting/report.js";
 import { submitBoundedTask } from "../../src/bounded-admission.js";
@@ -129,6 +129,7 @@ export async function runtimeAcceptance() {
 
       // The real worker uses a scoped runtime login, never the fixture installer.
       await psql(renderRoles("fixture"));
+      await psql(renderQueueGrants("fixture"));
       const { owner, worker } = roleNames("fixture");
       // Queue-only recipes provision their queue grants separately from Flow
       // publication. Exercise the invoker under the actual NOLOGIN owner.

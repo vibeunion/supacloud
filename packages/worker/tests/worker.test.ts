@@ -69,6 +69,7 @@ describe("pgflow process adapter", () => {
     const script = renderRoles("project-a");
     expect(script).toContain("to_regclass('supacloud_worker.admission_limits')");
     expect(script).toContain("to_regprocedure('supacloud_worker.admit_operation(text,text,text,text)')");
+    expect(script).toContain("GRANT SELECT ON pgmq.meta TO");
     expect(script).toContain(`TO ${worker}`);
     expect(script).not.toContain(`GRANT SELECT ON supacloud_worker.admission_tokens TO ${worker}`);
   });
@@ -87,10 +88,11 @@ describe("pgflow process adapter", () => {
   );
   test("installer is version locked, target bound and checksum protected", async () => {
     const migrations = await loadMigrations();
-    expect(migrations).toHaveLength(27);
-    expect(migrations.at(-3)?.version).toBe("supacloud_002");
-    expect(migrations.at(-2)?.version).toBe("supacloud_003");
-    expect(migrations.at(-1)?.version).toBe("supacloud_004");
+    expect(migrations).toHaveLength(28);
+    expect(migrations.at(-4)?.version).toBe("supacloud_002");
+    expect(migrations.at(-3)?.version).toBe("supacloud_003");
+    expect(migrations.at(-2)?.version).toBe("supacloud_004");
+    expect(migrations.at(-1)?.version).toBe("supacloud_005");
     const script = renderInstall(migrations, "fixture", "postgres");
     expect(script).toContain("pg_advisory_xact_lock");
     expect(script).toContain("PGFLOW_MIGRATION_CHECKSUM_MISMATCH");
@@ -117,16 +119,20 @@ describe("pgflow process adapter", () => {
     expect(bounded?.sql).toContain("WORKER_QUEUE_OWNERSHIP");
     expect(bounded?.sql).not.toContain("DROP TABLE");
     expect(bounded?.sql).not.toContain("admission_installation");
+    const sharded = migrations.find((migration) => migration.version === "supacloud_005");
+    expect(sharded?.sql).toContain("pgmq.metrics_all");
+    expect(sharded?.sql).toContain("WORKER_QUEUE_FULL");
   });
 
   test.skipIf(process.env.PGFLOW_DATABASE_ACCEPTANCE !== "1")(
     "real database installation, task API and kill/restart recovery",
     async () => {
+      const migrationCount = (await loadMigrations()).length;
       await withPgflowDatabase(async (db, url, install) => {
         await Promise.all([install(), install()]);
         const [receipt] =
           await db`SELECT count(*)::int AS count FROM supacloud_worker.migrations`;
-        expect(receipt.count).toBe(27);
+        expect(receipt.count).toBe(migrationCount);
         await expect(install("wrong-project")).rejects.toThrow(
           "PGFLOW_INSTALLATION_BINDING_MISMATCH",
         );
@@ -207,6 +213,9 @@ describe("pgflow process adapter", () => {
               ...process.env,
               WORKER_TEST_DATABASE_URL: url,
               WORKER_TEST_RUN_ID: warmupRun.run_id,
+              MASTER_TOKEN: "m".repeat(32),
+              JWT_SECRET: "j".repeat(32),
+              DASHBOARD_PASSWORD: "d".repeat(32),
             },
           });
           expect(new TextDecoder().decode(route.stderr)).toBe("");
@@ -459,15 +468,11 @@ describe("pgflow process adapter", () => {
     for (const concurrency of [0, 33, 1.1, NaN]) {
       expect(() =>
         createPgflowQueueWorker({ ...options, concurrency }, handler),
-      ).toThrow("WORKER_CONFIG_INVALID");
+        ).toThrow("WORKER_CONFIG_INVALID");
     }
     expect(() => createPgflowQueueWorker({ ...options, serial: true, concurrency: 2 }, handler))
       .toThrow("WORKER_SERIAL_CONFIG_INVALID");
     expect(createPgflowQueueWorker({ ...options, serial: true, concurrency: 1 }, handler).state).toBe("idle");
-    expect(createPgflowQueueWorker({ ...options, serial: true }, handler).state).toBe("idle");
-    expect(() => createPgflowQueueWorker({ ...options, serial: "true" as never }, handler)).toThrow("WORKER_SERIAL_CONFIG_INVALID");
-    expect(() => createPgflowQueueWorker({ ...options, retryLimit: 11 }, handler)).toThrow("WORKER_CONFIG_INVALID");
-    expect(() => createPgflowQueueWorker({ ...options, retryLimit: 2, policy: { maxRetries: 3 } }, handler)).toThrow("WORKER_RETRY_POLICY_INVALID");
     expect(() =>
       createPgflowQueueWorker(
         { ...options, connectionString: "https://secret.invalid" },

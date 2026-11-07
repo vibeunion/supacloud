@@ -105,6 +105,24 @@ Then boot the stack:
 docker compose up -d --build
 ```
 
+MQTT is optional. To start the RabbitMQ MQTT plugin, add the following values
+to `.env`; the `mqtt` Compose profile keeps the default stack free of RabbitMQ:
+
+```bash
+MQTT_ENABLED=true
+MQTT_PROVIDER=rabbitmq
+COMPOSE_PROFILES=mqtt
+RABBITMQ_DEFAULT_PASS=<random-password>
+MQTT_BROKER_PASSWORD=<same-random-password>
+docker compose --profile mqtt up -d --build
+```
+
+The profile builds the pinned RabbitMQ image with `rabbitmq_mqtt` enabled and
+exposes MQTT on `1883`, AMQP on `5672`, and the management UI on `15672`.
+`MQTT_PROVIDER` defaults to `rabbitmq`. Applications should use the standard
+MQTT endpoint and keep business acknowledgement/idempotency in their queue
+consumer; MQTT `PUBACK` only confirms broker receipt.
+
 When upgrading data created by a release that derived `enc:v1` values from
 `MASTER_TOKEN`, generate the new `.env` once with the old token supplied as
 `--legacy-secrets-encryption-key`. The key is written only to the root-only

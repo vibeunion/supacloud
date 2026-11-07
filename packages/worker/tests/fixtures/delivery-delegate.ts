@@ -37,13 +37,15 @@ const worker = await startQueueWorkerFromEnvironment({
   execute() {},
 });
 assert.equal(worker.state, "running");
-assert.deepEqual(received, {
+const normalizedReceived = { ...(received as unknown as Record<string, unknown>) };
+assert.equal(typeof normalizedReceived.pollIntervalMs, "function");
+delete normalizedReceived.pollIntervalMs;
+assert.deepEqual(normalizedReceived, {
   connectionString: "postgresql://worker:fixture@localhost/project_a",
   maxConcurrent: 2,
   batchSize: 2,
   maxPgConnections: 3,
   maxPollSeconds: 2,
-  pollIntervalMs: 200,
   queueName: "scw_reports",
   visibilityTimeout: 60,
   retry: { strategy: "exponential", limit: 1, baseDelay: 5, maxDelay: 300 },

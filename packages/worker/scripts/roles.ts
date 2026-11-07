@@ -28,6 +28,10 @@ END $roles$;
 -- The engine owner is NOLOGIN and owns only this tenant's engine objects.
 GRANT USAGE,CREATE ON SCHEMA pgflow TO ${owner};
 GRANT USAGE ON SCHEMA pgmq,realtime,supacloud_worker TO ${owner};
+-- Bounded admission uses pgmq.metrics_all() to aggregate every physical shard.
+-- The extension function runs with invoker rights, so expose only its queue
+-- inventory metadata; queue tables remain granted per provisioned queue below.
+GRANT SELECT ON pgmq.meta TO ${owner};
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA pgflow TO ${owner};
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA pgflow TO ${owner};
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgflow TO ${owner};
@@ -133,7 +137,10 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM supacloud_worker.installation WHERE project_ref='${projectRef}') THEN
     RAISE EXCEPTION 'PGFLOW_PROJECT_BINDING_MISMATCH';
   END IF;
-  FOR name IN SELECT flow_slug FROM pgflow.flows WHERE flow_slug ~ '^scw_[a-z0-9_]{1,40}$' LOOP
+  -- Sharded execution groups use queue names derived from a logical flow
+  -- (for example scw_reports_v1_s03), so grants must follow provisioned PGMQ
+  -- queues rather than only pgflow flow slugs.
+  FOR name IN SELECT queue_name FROM pgmq.list_queues() WHERE queue_name ~ '^scw_[a-z0-9_]{1,40}$' LOOP
     EXECUTE format('GRANT SELECT,UPDATE ON pgmq.%I TO ${worker}', 'q_'||name);
     EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON pgmq.%I,pgmq.%I TO ${owner}', 'q_'||name,'a_'||name);
     EXECUTE format('GRANT USAGE,SELECT ON SEQUENCE pgmq.%I TO ${owner}', 'q_'||name||'_msg_id_seq');

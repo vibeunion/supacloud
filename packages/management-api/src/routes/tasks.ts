@@ -146,6 +146,32 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(500, { message: "Failed to create queue", code: "500" });
         }
     })
+    .post("/queues/shards", {
+        body: t.Object({
+            queueName: t.Optional(t.String()),
+            queue_name: t.Optional(t.String()),
+            shardCount: t.Optional(t.Integer({ minimum: 1, maximum: 64 })),
+            shard_count: t.Optional(t.Integer({ minimum: 1, maximum: 64 })),
+            unlogged: t.Optional(t.Boolean()),
+        }),
+        detail: { tags: ["tasks"], summary: "Create all queues for a sharded worker group" },
+    }, async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(body.queueName || body.queue_name || "");
+            const shardCount = body.shardCount ?? body.shard_count ?? 1;
+            if (!queueName || !Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > 64) {
+                return status(400, { message: "Invalid queue shard configuration", code: "400" });
+            }
+            const queues = await pgmqService.createQueueShards(params.ref, queueName, shardCount,
+                body.unlogged === undefined ? {} : { unlogged: body.unlogged });
+            return status(201, { queue_name: queueName, shard_count: shardCount, queues });
+        } catch (err: unknown) {
+            if (err instanceof PgmqMutationError || err instanceof PgmqInventoryError) {
+                return status(503, { message: "Queue shard creation could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            }
+            return status(500, { message: "Failed to create queue shards", code: "500" });
+        }
+    })
     .delete("/queues/:queueName", { detail: { tags: ["tasks"], summary: "Drop a PGMQ queue" } }, async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);

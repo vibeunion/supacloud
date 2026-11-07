@@ -85,12 +85,16 @@ if (mode === "wrong-project" || mode === "edge-runtime") {
     concurrency: _concurrency,
     ...expected
   } = common;
+  assert.equal(typeof (received as { pollIntervalMs?: unknown }).pollIntervalMs, "function");
+  const normalizedReceived = { ...(received as Record<string, unknown>) };
+  delete normalizedReceived.pollIntervalMs;
+  const { pollIntervalMs: _expectedPollInterval, ...queueExpected } = expected;
   assert.deepEqual(
-    received,
+    normalizedReceived,
     mode === "flow"
-      ? expected
+      ? queueExpected
       : {
-          ...expected,
+          ...queueExpected,
           queueName: "scw_reports",
           visibilityTimeout: 300,
           retry: {

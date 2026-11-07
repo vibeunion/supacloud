@@ -4,6 +4,7 @@ import { PgmqProjectContextError, pgmqProjectRef, readPgmqProjectDatabase } from
 import { withRetry } from "../utils/retry";
 import { pgmqCreateOptions, pgmqInteger, pgmqListOptions, pgmqSeconds } from "../utils/pgmq-input";
 import { capturePgmqBatch } from "../utils/pgmq-batch";
+import { workerShardQueue } from "@supacloud/delivery";
 import { serializePgmqPayload } from "../utils/pgmq-payload";
 import { PgmqMutationError } from "../utils/pgmq-mutation";
 import {
@@ -130,6 +131,50 @@ async function createQueue(projectRef: string, queueName: string, options: { unl
   } catch {
     throw new PgmqMutationError();
   }
+}
+
+async function ensureQueue(projectRef: string, queueName: string, options: { unlogged?: boolean } = {}): Promise<void> {
+  assertPublicPgmqQueueName(queueName);
+  const { unlogged } = pgmqCreateOptions(options);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const existing: unknown = await db`
+      SELECT queue_name, created_at, is_partitioned, is_unlogged
+      FROM pgmq.list_queues() WHERE queue_name = ${queueName}
+    `;
+    const rows = readPgmqQueueInfo(existing);
+    if (rows.length === 1) {
+      const queue = rows[0]!;
+      if (queue.is_unlogged !== unlogged || queue.is_partitioned) throw new PgmqMutationError();
+      return;
+    }
+    if (rows.length !== 0) throw new PgmqMutationError();
+    if (unlogged) await db`SELECT pgmq.create_unlogged(${queueName})`;
+    else await db`SELECT pgmq.create(${queueName})`;
+    const created: unknown = await db`
+      SELECT queue_name, created_at, is_partitioned, is_unlogged
+      FROM pgmq.list_queues() WHERE queue_name = ${queueName}
+    `;
+    const confirmed = readPgmqQueueInfo(created);
+    const queue = confirmed[0];
+    if (confirmed.length !== 1 || !queue || queue.queue_name !== queueName
+      || queue.is_unlogged !== unlogged || queue.is_partitioned) throw new PgmqMutationError();
+  } catch (error) {
+    if (error instanceof PgmqMutationError) throw error;
+    throw new PgmqMutationError();
+  }
+}
+
+/** Provision a logical execution queue and all of its physical shard queues. */
+async function createQueueShards(
+  projectRef: string, queueName: string, shardCount: number, options: { unlogged?: boolean } = {},
+): Promise<string[]> {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > 64) {
+    throw new PgmqInventoryError(false);
+  }
+  const queues = Array.from({ length: shardCount }, (_, shard) => workerShardQueue({ queue: queueName, shardCount }, shard));
+  for (const queue of queues) await ensureQueue(projectRef, queue, options);
+  return queues;
 }
 
 async function dropQueue(projectRef: string, queueName: string): Promise<boolean> {
@@ -304,6 +349,8 @@ async function metricsAll(projectRef: string): Promise<PgmqQueueMetrics[]> {
 export const pgmqService = {
   createQueue: (projectRef: string, queueName: string, options?: { unlogged?: boolean }) =>
     createQueue(projectRef, queueName, options),
+  createQueueShards: (projectRef: string, queueName: string, shardCount: number, options?: { unlogged?: boolean }) =>
+    createQueueShards(projectRef, queueName, shardCount, options),
   dropQueue: (projectRef: string, queueName: string) =>
     dropQueue(projectRef, queueName),
   listQueues: (projectRef: string) =>

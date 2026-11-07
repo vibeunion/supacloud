@@ -104,6 +104,11 @@ await worker.start();
 // On an application-owned shutdown: await worker.stop().
 ```
 
+Execution groups may set `shardCount` to create deterministic physical queues.
+Use the same `orderingKey` for messages that must remain ordered; unrelated
+keys are routed independently. `workerShardQueue()` and `workerShardForKey()`
+resolve the queue without exposing physical names to application code.
+
 See `examples/report-worker.ts` for a typed domain integration factory. The
 decoder and authorization policy are mandatory. The handler context exposes
 project, queue, task, message ID, idempotency key, attempt and shutdown signal,
@@ -131,6 +136,10 @@ Only `scw_` queues are accepted to avoid taking over existing platform,
 approval or `supacloud_internal_*` queues. Do not run the old queue worker and
 pgflow worker against the same queue.
 
+RabbitMQ is an optional adapter exposed by `@supacloud/elysia`; it is not a
+package or deployment dependency of this worker. It uses manual acknowledgements
+and the same at-least-once/idempotency contract as PGMQ.
+
 ## Native Flow Worker
 
 Use the native DSL rather than a second DSL translating every pgflow feature:
@@ -145,6 +154,7 @@ const flow = new Flow<{ fileId: string }>({ slug: 'scw_report_v1' })
 const worker = createPgflowWorker(flow, {
   projectRef: 'project-a',
   connectionString: process.env.EDGE_WORKER_DB_URL!,
+  polling: { minIntervalMs: 25, maxIntervalMs: 1000, idleBackoffFactor: 1.5 },
 });
 await worker.start();
 ```
@@ -158,6 +168,13 @@ method still targets SupaCloud's linear workflow RPC.
 
 Version flow slugs when execution semantics change. Do not rewrite an active
 slug and assume existing runs are isolated from handler changes.
+
+Queue and native Flow workers use the same runtime adaptive polling policy:
+empty reads back off to `maxIntervalMs`, while a non-empty read immediately
+returns to `minIntervalMs`. The patched upstream poller keeps the handler
+context's `pollIntervalMs` numeric; only the internal read loop sees the
+provider. This avoids a fixed polling interval under horizontal load without
+changing the pgflow queue or retry contract.
 
 ## Process And Database Prerequisites
 
