@@ -7,21 +7,21 @@ import type { Json } from "@pgflow/edge-worker";
 export function workerExecutionFromEnvironment(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): WorkerExecutionGroup {
-  const encoded = environment.SUPACLOUD_WORKER_EXECUTION;
+  const encoded = environment["SUPACLOUD_WORKER_EXECUTION"];
   if (!encoded || encoded.length > 8192 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
     throw new Error("WORKER_EXECUTION_REQUIRED");
   }
   try {
     const group = parseWorkerExecutionGroup(JSON.parse(Buffer.from(encoded, "base64").toString("utf8")));
-    const replica = environment.SUPACLOUD_WORKER_REPLICA;
-    const shard = environment.SUPACLOUD_WORKER_SHARD ?? "0";
+    const replica = environment["SUPACLOUD_WORKER_REPLICA"];
+    const shard = environment["SUPACLOUD_WORKER_SHARD"] ?? "0";
     const shardCount = workerShardCount(group);
     const expectedTarget = shardCount === 1
       ? `${group.target}-r${replica}`
       : `${group.target}-r${replica}-s${Number(shard).toString(36).padStart(2, "0")}`;
     if (!replica || !/^[1-9][0-9]*$/.test(replica) || Number(replica) > group.replicas
       || !/^[0-9]+$/.test(shard) || Number(shard) >= shardCount
-      || environment.SUPACLOUD_TARGET !== expectedTarget) {
+      || environment["SUPACLOUD_TARGET"] !== expectedTarget) {
       throw new Error("WORKER_EXECUTION_BINDING_INVALID");
     }
     return group;
@@ -31,7 +31,7 @@ export function workerExecutionFromEnvironment(
 export function workerShardFromEnvironment(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): number {
-  const value = environment.SUPACLOUD_WORKER_SHARD ?? "0";
+  const value = environment["SUPACLOUD_WORKER_SHARD"] ?? "0";
   if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error("WORKER_SHARD_INVALID");
   return Number(value);
 }
