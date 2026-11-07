@@ -123,6 +123,22 @@ test("selects the matching RPC branch and rejects unmatched input", async () => 
   }, async () => 7, target as typeof module, [], { resource: "c" })).rejects.toMatchObject({ code: "COMMAND_BRANCH_UNMATCHED" });
 });
 
+test("explicit command branch fallback preserves fail-closed default and runs the handler", async () => {
+  const target = {
+    ...module,
+    commands: [{
+      ...module.commands?.[0]!, rpc: undefined, audit: undefined,
+      transaction: "none" as const, idempotency: "none" as const,
+      branchesFallback: "command" as const,
+      branches: [{ when: 'resource === "a"', rpc: "save_a", transaction: "none" as const, idempotency: "none" as const }],
+    }],
+  };
+  const events: string[] = [];
+  await expect(execute({ authorize: () => { events.push("authorize"); } }, async () => { events.push("handler"); return 9; }, target as typeof module, [], { resource: "unknown" }))
+    .resolves.toBe(9);
+  expect(events).toEqual(["authorize", "handler"]);
+});
+
 function preview(governance: Pick<CommandGovernance, "authorize">, previewFn: (input: number) => unknown,
   rpc = async () => { throw new Error("rpc executed"); },
   handler = async () => { throw new Error("handler executed"); }) {

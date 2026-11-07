@@ -352,6 +352,7 @@ export interface ControllerNode {
 export interface CommandNode {
   rpc?: string;
   branches?: CommandBranchNode[];
+  branchesFallback?: "reject" | "command";
   className: string;
   name: string;
   permission?: string;
@@ -463,6 +464,7 @@ export interface ExecutionPlanCommand {
   transaction: CommandNode["transaction"];
   idempotency: CommandNode["idempotency"];
   branches: CommandBranchNode[];
+  branchesFallback: "reject" | "command";
   tenantScope?: CommandNode["tenantScope"];
   requiredCapabilities: {
     permission: boolean;

@@ -124,6 +124,8 @@ export interface CommandOptions {
   rpc?: string;
   /** Conditional RPC adapters for commands whose persistence route depends on input. */
   branches?: CommandBranchOptions[];
+  /** Explicitly run the command handler when no branch selector matches. */
+  branchesFallback?: "reject" | "command";
   /** Permission identifier required to execute (e.g. "case.create"). */
   permission: string;
   /** Transaction requirement for the underlying write, e.g. "required". */

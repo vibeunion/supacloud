@@ -156,6 +156,7 @@ const INTERFACES = `export interface CompiledRoute {
 export interface CompiledCommand {
   rpc?: string;
   branches?: readonly CompiledCommandBranch[];
+  branchesFallback?: "reject" | "command";
   className: string;
   name: string;
   permission: string;
@@ -290,7 +291,7 @@ async function compiledAspectStep(context: CompiledAspectContext, handler: () =>
     }
     called = true;
     pending = Promise.resolve().then(handler).then(result => {
-      if (strict) freezeCompiledAspectData(result);
+      if (strict && !(result instanceof Response)) freezeCompiledAspectData(result);
       value = result;
       return result;
     });
@@ -556,6 +557,7 @@ export function renderApplication(
     permission: command.permission ?? null,
     rpc: command.rpc ?? null,
     branches: command.branches ?? [],
+    branchesFallback: command.branchesFallback ?? "reject",
     transaction: command.transaction ?? null,
     audit: command.audit ?? null,
     idempotency: command.idempotency ?? null,
@@ -640,6 +642,7 @@ export function renderApplication(
         transaction: command.transaction,
         idempotency: command.idempotency,
         branches: command.branches ?? [],
+        branchesFallback: command.branchesFallback ?? "reject",
         ...(command.tenantScope === undefined ? {} : { tenantScope: command.tenantScope }),
         requiredCapabilities: {
           permission: true,
@@ -1202,6 +1205,7 @@ class ModuleGenerator {
         `idempotency: ${JSON.stringify(command.idempotency)}`,
         ...(command.tenantScope ? [`tenantScope: ${JSON.stringify(command.tenantScope)}`] : []),
         ...(command.rpc ? [`rpc: ${JSON.stringify(command.rpc)}`] : []),
+        ...(command.branchesFallback ? [`branchesFallback: ${JSON.stringify(command.branchesFallback)}`] : []),
         ...(command.branches && command.branches.length > 0
           ? [`branches: ${JSON.stringify(command.branches)}`]
           : []),

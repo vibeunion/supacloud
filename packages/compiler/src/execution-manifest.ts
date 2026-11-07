@@ -30,6 +30,7 @@ export function validateExecutionManifest(
         ...(command.adapter === null ? {} : { rpc: command.adapter }),
         ...(command.audit === null ? {} : { audit: command.audit }),
         ...(command.branches.length === 0 ? {} : { branches: command.branches }),
+        ...(command.branchesFallback === undefined ? {} : { branchesFallback: command.branchesFallback }),
         transaction: command.transaction, idempotency: command.idempotency,
       })),
     })),

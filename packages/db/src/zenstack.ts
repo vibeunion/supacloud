@@ -11,6 +11,8 @@ const typing = { typing: { exactQueryArgs: true } } as const;
 type Delegate<S extends SchemaDef, M extends GetModels<S>, K extends string> = Pick<ModelOperations<S, M, typeof typing>, Extract<K, keyof ModelOperations<S, M, typeof typing>>>;
 export type ModelClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof operations[number]> };
 export type ModelReadClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof reads[number]> };
+export type ReadFunctionScalar = string | number | boolean | null;
+export type ReadFunctionArg = ReadFunctionScalar | readonly ReadFunctionScalar[];
 export interface ModelCommandTransaction<S extends SchemaDef> {
   readonly db: ModelClient<S>;
   /**
@@ -47,11 +49,20 @@ export interface ModelCommandTransaction<S extends SchemaDef> {
    * The call runs on the command connection, so it observes uncommitted writes
    * of the same transaction and participates in its snapshot.
    */
-  readonly readFunction: (name: string, args?: readonly (string | number | boolean | null)[]) => Promise<unknown>;
+  readonly readFunction: (name: string, args?: readonly ReadFunctionArg[]) => Promise<unknown>;
 }
 
 const functionName = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/;
 const systemSchemas = new Set(["pg_catalog", "information_schema", "pg_toast"]);
+
+function postgresArrayLiteral(values: readonly ReadFunctionScalar[]): string {
+  return `{${values.map((value) => {
+    if (value === null) return "NULL";
+    if (typeof value === "number") return String(value);
+    if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+    return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  }).join(",")}}`;
+}
 
 /** Copy only operation closures. Never return the ORM delegate (it can retain its client). */
 function facade<S extends SchemaDef>(schema: S, client: object, allowed: typeof reads, assertActive: () => void): ModelReadClient<S>;
@@ -110,19 +121,33 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                   if (systemSchemas.has(schemaName) || schemaName.startsWith("pg_")) throw new CommandError("COMMAND_INPUT_INVALID");
                   if (!Array.isArray(args) || args.length > 16) throw new CommandError("COMMAND_INPUT_INVALID");
                   for (const arg of args) {
-                    if (arg === null || typeof arg === "string" || typeof arg === "boolean") continue;
-                    if (typeof arg === "number" && Number.isFinite(arg)) continue;
-                    throw new CommandError("COMMAND_INPUT_INVALID");
+                    const values = Array.isArray(arg) ? arg : [arg];
+                    if (Array.isArray(arg) && values.some(value => Array.isArray(value))) throw new CommandError("COMMAND_INPUT_INVALID");
+                    for (const value of values) {
+                      if (value === null || typeof value === "string" || typeof value === "boolean") continue;
+                      if (typeof value === "number" && Number.isFinite(value)) continue;
+                      throw new CommandError("COMMAND_INPUT_INVALID");
+                    }
                   }
                   assertActive();
                   // Volatility is re-checked on every call: CREATE OR REPLACE can turn a
                   // reviewable STABLE helper into a writing VOLATILE one, and a cached
                   // verdict would keep trusting the old definition.
                   const resolved = (await tx.$queryRawUnsafe<unknown>(
-                    `SELECT prokind::text AS kind, provolatile::text AS volatility, proretset AS returns_set
+                    `SELECT prokind::text AS kind, provolatile::text AS volatility, proretset AS returns_set,
+                            COALESCE(array_agg(format_type(u.type_oid, NULL)::text ORDER BY u.ordinality)
+                              FILTER (WHERE u.ordinality IS NOT NULL), ARRAY[]::text[]) AS arg_types,
+                            COALESCE(array_agg((t.typelem <> 0) ORDER BY u.ordinality)
+                              FILTER (WHERE u.ordinality IS NOT NULL), ARRAY[]::boolean[]) AS arg_arrays,
+                            COALESCE(array_agg(COALESCE(et.typtype::text, '') ORDER BY u.ordinality)
+                              FILTER (WHERE u.ordinality IS NOT NULL), ARRAY[]::text[]) AS arg_element_kinds
                        FROM pg_catalog.pg_proc p
                        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-                      WHERE n.nspname = $1 AND p.proname = $2 AND p.pronargs = $3`,
+                       LEFT JOIN LATERAL unnest(p.proargtypes::oid[]) WITH ORDINALITY AS u(type_oid, ordinality) ON TRUE
+                       LEFT JOIN pg_catalog.pg_type t ON t.oid = u.type_oid
+                       LEFT JOIN pg_catalog.pg_type et ON et.oid = t.typelem
+                      WHERE n.nspname = $1 AND p.proname = $2 AND p.pronargs = $3
+                      GROUP BY p.prokind, p.provolatile, p.proretset`,
                     schemaName, procName, args.length,
                   )) as readonly Record<string, unknown>[];
                   if (!Array.isArray(resolved) || resolved.length !== 1) throw new CommandError("COMMAND_INPUT_INVALID");
@@ -131,10 +156,26 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                   const volatility = signature["volatility"];
                   if (volatility !== "s" && volatility !== "i") throw new CommandError("COMMAND_INPUT_INVALID");
                   if (signature["returns_set"] === true) throw new CommandError("COMMAND_INPUT_INVALID");
-                  const placeholders = args.map((_, index) => `$${index + 1}`).join(", ");
+                  const argTypes = signature["arg_types"];
+                  const argArrays = signature["arg_arrays"];
+                  const argElementKinds = signature["arg_element_kinds"];
+                  if (!Array.isArray(argTypes) || !Array.isArray(argArrays) || !Array.isArray(argElementKinds)
+                    || argTypes.length !== args.length || argArrays.length !== args.length || argElementKinds.length !== args.length) {
+                    throw new CommandError("COMMAND_INPUT_INVALID");
+                  }
+                  const placeholders = args.map((arg, index) => {
+                    const type = argTypes[index];
+                    const expectsArray = argArrays[index] === true;
+                    const elementKind = argElementKinds[index];
+                    if (typeof type !== "string" || !/^[A-Za-z0-9_$ .\"()[\],]+$/.test(type)
+                      || Array.isArray(arg) !== expectsArray
+                      || (expectsArray && !["b", "d", "e"].includes(elementKind))) throw new CommandError("COMMAND_INPUT_INVALID");
+                    return `$${index + 1}::${type}`;
+                  }).join(", ");
+                  const boundArgs = args.map(arg => Array.isArray(arg) ? postgresArrayLiteral(arg) : arg);
                   const rows = (await tx.$queryRawUnsafe<unknown>(
                     `SELECT "${schemaName}"."${procName}"(${placeholders}) AS result`,
-                    ...args,
+                    ...boundArgs,
                   )) as readonly Record<string, unknown>[];
                   const row = Array.isArray(rows) ? rows[0] : undefined;
                   assertActive();

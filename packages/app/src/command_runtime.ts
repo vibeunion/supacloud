@@ -11,6 +11,7 @@ export interface CommandRuntimeDescriptor {
   readonly permission?: string;
   readonly rpc?: string;
   readonly branches?: readonly CommandRuntimeBranch[];
+  readonly branchesFallback?: "reject" | "command";
   readonly transaction?: CommandRuntimeMode | string;
   readonly audit?: string;
   readonly idempotency?: CommandRuntimeMode | string;
