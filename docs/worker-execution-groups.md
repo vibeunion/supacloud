@@ -271,6 +271,16 @@ It also exercises both broker validators, immutable artifact policy retention,
 activation reservation guards and fail-closed route retirement.
 It does not prove target-host cgroup enforcement or customer capacity.
 
+The Docker-backed local run on 2026-11-07 passed
+`SCW_RUNTIME_ACCEPTANCE=1 bun test packages/worker/tests/runtime.test.ts`.
+It exercised 300 concurrent CSV exports, fixed 50 requests/second API load,
+bounded worker cgroups, peak connection/memory checks, a killed worker with
+redelivery and one durable effect, checkpoint resume, and admission rollback.
+The separate `PGFLOW_DATABASE_ACCEPTANCE=1` run also passed installation,
+task API, and scheduled crash/recovery checks. These are local Linux-container
+evidence; the target-host script below remains required for host systemd,
+long-soak and customer-capacity sign-off.
+
 Release gates still outstanding until performed on the approved target:
 broker/platform rollout, least-privilege credentials, real cgroup readback,
 approved customer mixed-load targets, long-soak and operator recovery signoff.
