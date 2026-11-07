@@ -28,6 +28,10 @@ END $roles$;
 -- The engine owner is NOLOGIN and owns only this tenant's engine objects.
 GRANT USAGE,CREATE ON SCHEMA pgflow TO ${owner};
 GRANT USAGE ON SCHEMA pgmq,realtime,supacloud_worker TO ${owner};
+-- Bounded admission uses pgmq.metrics_all() to aggregate every physical shard.
+-- The extension function runs with invoker rights, so expose only its queue
+-- inventory metadata; queue tables remain granted per provisioned queue below.
+GRANT SELECT ON pgmq.meta TO ${owner};
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA pgflow TO ${owner};
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA pgflow TO ${owner};
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgflow TO ${owner};

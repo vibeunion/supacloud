@@ -69,6 +69,7 @@ describe("pgflow process adapter", () => {
     const script = renderRoles("project-a");
     expect(script).toContain("to_regclass('supacloud_worker.admission_limits')");
     expect(script).toContain("to_regprocedure('supacloud_worker.admit_operation(text,text,text,text)')");
+    expect(script).toContain("GRANT SELECT ON pgmq.meta TO");
     expect(script).toContain(`TO ${worker}`);
     expect(script).not.toContain(`GRANT SELECT ON supacloud_worker.admission_tokens TO ${worker}`);
   });
