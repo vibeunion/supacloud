@@ -113,10 +113,15 @@ async function createQueue(projectRef: string, queueName: string, options: { unl
   const { unlogged } = pgmqCreateOptions(options);
   const db = await prepareProjectDb(projectRef);
   try {
-    if (unlogged) {
-      await db`SELECT pgmq.create_unlogged(${queueName})`;
-    } else {
-      await db`SELECT pgmq.create(${queueName})`;
+    try {
+      if (unlogged) {
+        await db`SELECT pgmq.create_unlogged(${queueName})`;
+      } else {
+        await db`SELECT pgmq.create(${queueName})`;
+      }
+    } catch {
+      // Queue provisioning is intentionally idempotent: deployment retries may
+      // race with a previous successful CREATE whose response was lost.
     }
     const rows: unknown = await db`
       SELECT queue_name, created_at, is_partitioned, is_unlogged

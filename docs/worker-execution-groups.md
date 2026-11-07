@@ -20,6 +20,9 @@ unrelated keys can run concurrently while one key remains ordered. No new
 scheduler or task-result ledger is created.
 PGMQ/archive state is not a business completion receipt.
 
+The shard hash is FNV-1a over the UTF-8 bytes of the server-owned ordering key,
+so Bun, Go and other runtimes produce the same route for non-ASCII keys.
+
 ## Configuration
 
 The following goes inside the existing application's `delivery` configuration.
@@ -90,6 +93,13 @@ termination and shutdown deadlines. Both broker implementations accept and
 validate the new resource directives. Readiness checks both `systemctl show`
 and the actual cgroup `cpu.max`, `memory.max`, `memory.swap.max` values. Missing
 controllers or unsupported resource reporting never count as verified limits.
+
+Application activation provisions the logical queue and every derived shard
+queue through the project database before installing or starting any worker.
+Provisioning is idempotent, so a lost response or deployment retry does not
+turn an already-created queue into a false failure. A queue whose observed
+partitioning or unlogged mode differs from the requested policy still fails
+closed.
 
 Do not install only the Management API change: deploy the corresponding
 `scripts/lib/systemd_unit_broker.sh` through the normal platform release path.

@@ -35,6 +35,7 @@ import { ApplicationDeployPlans } from "./application-deploy-plan";
 import { ApplicationDeploymentOrchestrator } from "./application-deployment-orchestrator";
 import { frontendReleaseService } from "./frontend-release.service";
 import { tenantRuntimeService } from "./tenant-runtime.service";
+import { provisionApplicationWorkerQueues } from "./application-worker-queues";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -151,6 +152,9 @@ export function createDefaultApplicationRouteComposition(
     readiness,
     allocations,
     ...createApplicationWorkerRetirementChecks(),
+    provisionWorkerQueues: async ({ projectRef, groups }) => {
+      await provisionApplicationWorkerQueues(projectRef, groups);
+    },
     files,
     runtime,
     gateway: gatewayService,

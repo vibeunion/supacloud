@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parseWorkerExecutionGroup, resolveWorkerRoute, workerResourceUsage, assertWorkerBudget,
-  workerShardCount, workerShardForKey, workerShardQueue, type WorkerExecutionGroup,
+  workerShardCount, workerShardForKey, workerShardQueue, validateWorkerExecution, type WorkerExecutionGroup,
 } from "../packages/delivery/src/worker-execution";
 import { parseDeliveryOptions } from "../packages/delivery/src/delivery-schema";
 import { createDeliveryPlan } from "../packages/compiler/src/delivery-plan";
@@ -121,6 +121,7 @@ function deploymentFixture(replaceRoute = false) {
       }) }, inventory: async () => [],
     }),
     verifyCompatibility: async () => { calls.push("compatibility"); },
+    provisionWorkerQueues: async () => {},
     files: { prepare: async () => { calls.push("files"); return "/unused"; } },
     runtime: {
       install: async value => { calls.push("install"); return applicationRuntimePlan(value); },
@@ -183,6 +184,7 @@ describe("worker execution groups", () => {
     expect(workerShardQueue(sharded, 0)).toBe("scw_reports_v1_s00");
     expect(workerShardQueue(sharded, 3)).toBe("scw_reports_v1_s03");
     expect(workerShardForKey(sharded, "tenant-a:report-1")).toBe(workerShardForKey(sharded, "tenant-a:report-1"));
+    expect(workerShardForKey(sharded, "租户-报告")).toBe(3);
     expect(() => workerShardQueue(sharded, 4)).toThrow("WORKER_SHARD_INVALID");
     expect(() => parseWorkerExecutionGroup({ ...sharded, queue: "scw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_v1" })).toThrow();
     const shardedInput = input();
@@ -199,6 +201,10 @@ describe("worker execution groups", () => {
       SUPACLOUD_WORKER_EXECUTION: encoded, SUPACLOUD_WORKER_REPLICA: "2",
       SUPACLOUD_WORKER_SHARD: "4", SUPACLOUD_TARGET: "jobs-r2-s04",
     })).toThrow("WORKER_EXECUTION_BINDING_INVALID");
+    expect(() => validateWorkerExecution([
+      { ...group, queue: "scw_shared_v1", shardCount: 2 },
+      { ...group, name: "other-group", target: "other-jobs", queue: "scw_shared_v1", taskKey: "other.generate" },
+    ])).toThrow("WORKER_EXECUTION_CONFLICT");
   });
 
   test("fixed offered-rate measurements count errors and saturation instead of hiding them", async () => {
@@ -390,6 +396,22 @@ describe("worker execution groups", () => {
     const f = deploymentFixture();
     expect((await new ApplicationDeploymentService(f.dependencies).activate(f.request)).replayed).toBe(false);
     expect(f.calls).toEqual(["compatibility", "files", "install", "start", "route"]);
+  });
+
+  test("group activation provisions every physical queue before starting workers", async () => {
+    const f = deploymentFixture();
+    const sharded = { ...group, shardCount: 4 };
+    f.request.runtime.release.targets[1]!.execution = sharded;
+    f.allocation.runtime.release.targets[1]!.execution = sharded;
+    const provisioned: string[] = [];
+    f.dependencies.provisionWorkerQueues = async ({ groups }) => {
+      provisioned.push(...groups.flatMap(candidate => Array.from({ length: candidate.shardCount ?? 1 }, (_, shard) =>
+        workerShardQueue(candidate, shard))));
+      f.calls.push("provision");
+    };
+    await new ApplicationDeploymentService(f.dependencies).activate(f.request);
+    expect(provisioned).toEqual(["scw_reports_v1_s00", "scw_reports_v1_s01", "scw_reports_v1_s02", "scw_reports_v1_s03"]);
+    expect(f.calls.slice(0, 3)).toEqual(["provision", "compatibility", "files"]);
   });
 
   test("route replacement requires successful old-group retirement evidence before stopping workers", async () => {

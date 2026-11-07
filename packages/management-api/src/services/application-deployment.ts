@@ -34,6 +34,10 @@ export interface ApplicationDeploymentDependencies {
     environment: ApplicationTargetEnvironment;
     migrations: Awaited<ReturnType<ApplicationMigrations["inspect"]>>;
   }): Promise<void>;
+  /** Ensure every physical worker queue exists before any replica starts. */
+  provisionWorkerQueues?(input: {
+    projectRef: string; groups: readonly WorkerExecutionGroup[];
+  }): Promise<void>;
   /** Observe paused admission, zero held operations and an empty old queue before retiring a route. */
   verifyWorkerRetirement?(input: {
     runtime: ApplicationRuntimeInput; previous: ApplicationActiveRecord; groups: readonly WorkerExecutionGroup[];
@@ -78,6 +82,7 @@ export class ApplicationDeploymentService {
     & Partial<Pick<ApplicationRuntimeAllocations, "read" | "retire">>;
   private readonly retirementVerifier?: ApplicationDeploymentDependencies["retirementVerifier"];
   private readonly verifyWorkerAllocationRetirement?: ApplicationDeploymentDependencies["verifyWorkerAllocationRetirement"];
+  private readonly provisionWorkerQueues: NonNullable<ApplicationDeploymentDependencies["provisionWorkerQueues"]>;
   private readonly active: Partial<Pick<ApplicationActiveStorage, "readForApplication" | "clear">>;
   private readonly storage: ApplicationReleaseStorage;
   private readonly withProjectLifecycle: NonNullable<ApplicationDeploymentDependencies["withProjectLifecycle"]>;
@@ -94,6 +99,9 @@ export class ApplicationDeploymentService {
     this.retirementVerifier = dependencies.retirementVerifier;
     this.verifyWorkerAllocationRetirement = dependencies.verifyWorkerAllocationRetirement;
     this.withProjectLifecycle = dependencies.withProjectLifecycle ?? (async (_ref, operation) => operation());
+    this.provisionWorkerQueues = dependencies.provisionWorkerQueues ?? (async () => {
+      throw new Error("WORKER_QUEUE_PROVISIONER_REQUIRED");
+    });
     const storage = dependencies.storage ?? new ApplicationReleaseStorage();
     this.storage = storage;
     const files = dependencies.files ?? new ApplicationRuntimeFiles(storage);
@@ -143,6 +151,12 @@ export class ApplicationDeploymentService {
         }
         const report = await migrations.inspect(input.release.project_ref, input.release.application_id, input.release.release_id);
         if (!report.project_migrations_applied) throw new Error("APPLICATION_MIGRATIONS_NOT_APPLIED");
+        const groups = input.release.targets.flatMap(target => target.execution ? [target.execution] : []);
+        if (groups.length) {
+          await this.provisionWorkerQueues({
+            projectRef: input.release.project_ref, groups: structuredClone(groups),
+          });
+        }
         // This callback must verify actual schema/runtime and operator provisioning;
         // matching project SQL identities alone is not application compatibility.
         await dependencies.verifyCompatibility({

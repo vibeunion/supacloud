@@ -73,8 +73,8 @@ export function workerShardForKey(group: Pick<WorkerExecutionGroup, "shardCount"
     throw new Error("WORKER_SHARD_KEY_INVALID");
   }
   let hash = 2166136261;
-  for (let index = 0; index < key.length; index += 1) {
-    hash ^= key.charCodeAt(index);
+  for (const byte of new TextEncoder().encode(key)) {
+    hash ^= byte;
     hash = Math.imul(hash, 16777619) >>> 0;
   }
   return hash % count;
@@ -99,10 +99,13 @@ export function validateWorkerExecution(groups: readonly WorkerExecutionGroup[])
   for (const candidate of groups) {
     const group = parseWorkerExecutionGroup(candidate);
     const route = `${group.taskKey}:${group.definitionVersion}`;
-    if (names.has(group.name) || targets.has(group.target) || queues.has(group.queue) || routes.has(route)) {
+    const physicalQueues = Array.from({ length: workerShardCount(group) }, (_, shard) => workerShardQueue(group, shard));
+    if (names.has(group.name) || targets.has(group.target) || queues.has(group.queue)
+      || physicalQueues.some(queue => queues.has(queue)) || routes.has(route)) {
       throw new Error("WORKER_EXECUTION_CONFLICT");
     }
-    names.add(group.name); targets.add(group.target); queues.add(group.queue); routes.add(route);
+    names.add(group.name); targets.add(group.target); queues.add(group.queue);
+    physicalQueues.forEach(queue => queues.add(queue)); routes.add(route);
   }
 }
 
