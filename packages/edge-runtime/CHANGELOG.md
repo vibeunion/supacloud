@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.1...edge-runtime-v0.38.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* **edge-runtime:** terminate stuck retired workers ([#2480](https://github.com/vibeunion/supacloud/issues/2480)) ([ba24c7e](https://github.com/vibeunion/supacloud/commit/ba24c7ec13686c9eaee7084758572e2c5dffcf29))
+
 ## [0.38.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.0...edge-runtime-v0.38.1) (2026-11-06)
 
 
