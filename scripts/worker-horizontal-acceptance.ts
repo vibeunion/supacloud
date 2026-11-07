@@ -143,7 +143,7 @@ function unitsFromEnvironment(): string[] {
 }
 
 async function main(): Promise<void> {
-  const evidencePath = process.env.WORKER_ACCEPTANCE_EVIDENCE_PATH?.trim()
+  const evidencePath = process.env["WORKER_ACCEPTANCE_EVIDENCE_PATH"]?.trim()
     || `worker-horizontal-acceptance-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
   const evidence: Record<string, unknown> = {
     schema: "supacloud.worker-horizontal-acceptance.v1",
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
       maxLatencyRegression: number("WORKER_ACCEPTANCE_MAX_LATENCY_REGRESSION", 1, 0, 20),
       drainTimeoutMs: integer("WORKER_ACCEPTANCE_DRAIN_TIMEOUT_SECONDS", 600, 1, 86_400) * 1000,
     };
-    if (process.env.WORKER_ACCEPTANCE_LONG_SOAK === "true" && spec.durationMs < 1_800_000) {
+    if (process.env["WORKER_ACCEPTANCE_LONG_SOAK"] === "true" && spec.durationMs < 1_800_000) {
       throw new Error("WORKER_ACCEPTANCE_LONG_SOAK_REQUIRES_30_MINUTES");
     }
     const expected = {
@@ -180,12 +180,12 @@ async function main(): Promise<void> {
       memoryLimitMiB: integer("WORKER_ACCEPTANCE_MEMORY_LIMIT_MIB", 256, 16, 1_048_576),
     };
     const maxQueueAgeSeconds = number("WORKER_ACCEPTANCE_MAX_QUEUE_AGE_SECONDS", 120, 0, 86_400);
-    const crash = parseJsonCommand(process.env.WORKER_ACCEPTANCE_CRASH_COMMAND, "CRASH");
-    const restart = parseJsonCommand(process.env.WORKER_ACCEPTANCE_RESTART_COMMAND, "RESTART");
-    const requestPath = process.env.WORKER_ACCEPTANCE_REQUEST_PATH?.trim() || "/acceptance/request";
-    const startBatchPath = process.env.WORKER_ACCEPTANCE_START_BATCH_PATH?.trim() || "/acceptance/batch";
-    const statusTemplate = process.env.WORKER_ACCEPTANCE_BATCH_STATUS_PATH?.trim() || "/acceptance/batch/{id}";
-    const effectTemplate = process.env.WORKER_ACCEPTANCE_EFFECT_PATH?.trim() || "/acceptance/effect/{id}";
+    const crash = parseJsonCommand(process.env["WORKER_ACCEPTANCE_CRASH_COMMAND"], "CRASH");
+    const restart = parseJsonCommand(process.env["WORKER_ACCEPTANCE_RESTART_COMMAND"], "RESTART");
+    const requestPath = process.env["WORKER_ACCEPTANCE_REQUEST_PATH"]?.trim() || "/acceptance/request";
+    const startBatchPath = process.env["WORKER_ACCEPTANCE_START_BATCH_PATH"]?.trim() || "/acceptance/batch";
+    const statusTemplate = process.env["WORKER_ACCEPTANCE_BATCH_STATUS_PATH"]?.trim() || "/acceptance/batch/{id}";
+    const effectTemplate = process.env["WORKER_ACCEPTANCE_EFFECT_PATH"]?.trim() || "/acceptance/effect/{id}";
     let peakOldestQueueAgeSeconds = 0;
     const mixed = await acceptWorkerMixedLoad(spec, {
       request: async signal => {
@@ -199,10 +199,10 @@ async function main(): Promise<void> {
       },
       startBatch: async () => {
         const body = await jsonRequest(startBatchPath, { method: "POST", body: JSON.stringify({ durationSeconds: spec.durationMs / 1000, replicas, shards }) });
-        if (typeof body.operationId !== "string" || !body.operationId) throw new Error("WORKER_ACCEPTANCE_BATCH_ID_INVALID");
+        if (typeof body["operationId"] !== "string" || !body["operationId"]) throw new Error("WORKER_ACCEPTANCE_BATCH_ID_INVALID");
         await command(crash);
         await command(restart);
-        return body.operationId;
+        return body["operationId"];
       },
       batchComplete: async (operationId, signal) => {
         const response = await fetch(url(statusTemplate.replace("{id}", encodeURIComponent(operationId))), {
@@ -217,33 +217,33 @@ async function main(): Promise<void> {
       },
     });
     const effect = await jsonRequest(effectTemplate.replace("{id}", encodeURIComponent(mixed.batchOperationId)));
-    if (effect.effectCount !== 1) throw new Error("WORKER_ACCEPTANCE_DUPLICATE_EFFECT");
+    if (effect["effectCount"] !== 1) throw new Error("WORKER_ACCEPTANCE_DUPLICATE_EFFECT");
     if (peakOldestQueueAgeSeconds > maxQueueAgeSeconds) throw new Error("WORKER_ACCEPTANCE_QUEUE_AGE_FAILED");
     const cgroups = await readCgroups(units, expected);
     if (cgroups.some(readback => !readback.passed)) throw new Error("WORKER_ACCEPTANCE_CGROUP_FAILED");
-    evidence.target = target;
-    evidence.candidate = candidate;
-    evidence.hardware = hardware;
-    evidence.workload = workload;
-    evidence.replicas = replicas;
-    evidence.shards = shards;
-    evidence.units = units;
-    evidence.spec = spec;
-    evidence.mixedLoad = mixed;
-    evidence.peakOldestQueueAgeSeconds = peakOldestQueueAgeSeconds;
-    evidence.maxQueueAgeSeconds = maxQueueAgeSeconds;
-    evidence.idempotentEffect = effect;
-    evidence.cgroups = cgroups;
-    evidence.status = mixed.passed ? "PASS" : "FAIL";
+    evidence["target"] = target;
+    evidence["candidate"] = candidate;
+    evidence["hardware"] = hardware;
+    evidence["workload"] = workload;
+    evidence["replicas"] = replicas;
+    evidence["shards"] = shards;
+    evidence["units"] = units;
+    evidence["spec"] = spec;
+    evidence["mixedLoad"] = mixed;
+    evidence["peakOldestQueueAgeSeconds"] = peakOldestQueueAgeSeconds;
+    evidence["maxQueueAgeSeconds"] = maxQueueAgeSeconds;
+    evidence["idempotentEffect"] = effect;
+    evidence["cgroups"] = cgroups;
+    evidence["status"] = mixed.passed ? "PASS" : "FAIL";
     if (!mixed.passed) throw new Error("WORKER_ACCEPTANCE_LOAD_GATE_FAILED");
   } catch (error) {
-    evidence.error = error instanceof Error ? error.message : String(error);
+    evidence["error"] = error instanceof Error ? error.message : String(error);
   } finally {
-    evidence.finishedAt = new Date().toISOString();
+    evidence["finishedAt"] = new Date().toISOString();
     await writeFile(evidencePath, JSON.stringify(evidence, null, 2));
     console.log(JSON.stringify({ ...evidence, evidencePath }, null, 2));
   }
-  if (evidence.status !== "PASS") process.exitCode = 2;
+  if (evidence["status"] !== "PASS") process.exitCode = 2;
 }
 
 if (import.meta.main) await main();
