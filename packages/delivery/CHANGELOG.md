@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.25.0...delivery-v0.26.0) (2026-11-07)
+
+
+### Features
+
+* **worker:** support horizontal queue scaling ([#2488](https://github.com/vibeunion/supacloud/issues/2488)) ([4aaa04e](https://github.com/vibeunion/supacloud/commit/4aaa04e0f65ca586e6f7db673fc861366b382614))
+
 ## [0.25.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.24.0...delivery-v0.25.0) (2026-11-05)
 
 

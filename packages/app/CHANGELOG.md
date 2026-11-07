@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/vibeunion/supacloud/compare/app-v0.39.0...app-v0.39.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **platform:** align command and database contracts ([#2491](https://github.com/vibeunion/supacloud/issues/2491)) ([866f534](https://github.com/vibeunion/supacloud/commit/866f5343974c6fe197328eaac18bf423ed2852c2))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/app-v0.38.0...app-v0.39.0) (2026-11-06)
 
 

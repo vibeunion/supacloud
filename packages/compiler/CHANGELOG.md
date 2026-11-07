@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.59.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.58.0...compiler-v0.59.0) (2026-11-07)
+
+
+### Features
+
+* **worker:** support horizontal queue scaling ([#2488](https://github.com/vibeunion/supacloud/issues/2488)) ([4aaa04e](https://github.com/vibeunion/supacloud/commit/4aaa04e0f65ca586e6f7db673fc861366b382614))
+
+
+### Bug Fixes
+
+* **platform:** align command and database contracts ([#2491](https://github.com/vibeunion/supacloud/issues/2491)) ([866f534](https://github.com/vibeunion/supacloud/commit/866f5343974c6fe197328eaac18bf423ed2852c2))
+
 ## [0.58.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.57.2...compiler-v0.58.0) (2026-11-06)
 
 
