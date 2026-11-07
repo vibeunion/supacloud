@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.132.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.131.0...management-api-v0.132.0) (2026-11-07)
+
+
+### Features
+
+* complete Supabase ecosystem capability contracts ([#2486](https://github.com/vibeunion/supacloud/issues/2486)) ([aded7aa](https://github.com/vibeunion/supacloud/commit/aded7aa0eb7d0c8011a0ae31c149f35c3c47ca04))
+* **worker:** support horizontal queue scaling ([#2488](https://github.com/vibeunion/supacloud/issues/2488)) ([4aaa04e](https://github.com/vibeunion/supacloud/commit/4aaa04e0f65ca586e6f7db673fc861366b382614))
+
 ## [0.131.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.130.0...management-api-v0.131.0) (2026-11-06)
 
 
