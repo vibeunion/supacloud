@@ -12,6 +12,7 @@ const db = new SQL(databaseUrl);
 let queries = 0;
 const modulePath = (path: string) => new URL(path, import.meta.url).pathname;
 mock.module(modulePath("../../src/db/index.ts"), () => ({
+  sql: db,
   getProjectDb() {
     queries++;
     return db;

@@ -126,11 +126,12 @@ describe("pgflow process adapter", () => {
   test.skipIf(process.env.PGFLOW_DATABASE_ACCEPTANCE !== "1")(
     "real database installation, task API and kill/restart recovery",
     async () => {
+      const migrationCount = (await loadMigrations()).length;
       await withPgflowDatabase(async (db, url, install) => {
         await Promise.all([install(), install()]);
         const [receipt] =
           await db`SELECT count(*)::int AS count FROM supacloud_worker.migrations`;
-        expect(receipt.count).toBe(26);
+        expect(receipt.count).toBe(migrationCount);
         await expect(install("wrong-project")).rejects.toThrow(
           "PGFLOW_INSTALLATION_BINDING_MISMATCH",
         );
@@ -211,6 +212,9 @@ describe("pgflow process adapter", () => {
               ...process.env,
               WORKER_TEST_DATABASE_URL: url,
               WORKER_TEST_RUN_ID: warmupRun.run_id,
+              MASTER_TOKEN: "m".repeat(32),
+              JWT_SECRET: "j".repeat(32),
+              DASHBOARD_PASSWORD: "d".repeat(32),
             },
           });
           expect(new TextDecoder().decode(route.stderr)).toBe("");
