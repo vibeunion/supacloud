@@ -54,6 +54,17 @@ sudo /usr/local/libexec/supacloud/backup_manager.sh verify
 
 如果 pgBackRest 缺失、stanza 不健康、仓库状态与 stanza 状态冲突或清单无法读取，命令会以非零状态码退出。平台绝不会将不可用的 Provider 伪造成空的备份列表。
 
+在发布或升级门禁中，再执行 SupaCloud 的确定性验收器：
+
+```bash
+bun scripts/verify-pigsty-backup-acceptance.ts \
+  --max-age-seconds 86400
+```
+
+验收器要求 Provider、仓库和最近一次已完成备份同时存在，并把过期、缺失或非
+`pigsty.pgbackrest` 的输入判为 `incomplete`。没有目标主机和真实 pgBackRest 回读时，
+只能用 `--input` 做格式测试，不能把测试回执当作生产恢复证据。
+
 ## 备份与 PITR 恢复
 
 ```bash

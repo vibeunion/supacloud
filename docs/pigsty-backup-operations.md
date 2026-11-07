@@ -60,6 +60,18 @@ It exits non-zero when pgBackRest is missing, the stanza is unhealthy, the
 repository status disagrees with the stanza status, or the inventory cannot be
 read. It never converts an unavailable provider into an empty backup list.
 
+For a release or upgrade gate, also run the deterministic SupaCloud acceptance
+checker:
+
+```bash
+bun scripts/verify-pigsty-backup-acceptance.ts --max-age-seconds 86400
+```
+
+The checker requires a ready provider, at least one repository, and a fresh
+completed backup. Without a target host and a real pgBackRest read-back, an
+`--input` fixture only tests the document contract; it is not production
+recovery evidence.
+
 ## Backup And PITR
 
 ```bash

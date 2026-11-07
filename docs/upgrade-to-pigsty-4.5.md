@@ -20,6 +20,17 @@ Upstream Pigsty v4.5.0 identifies PostgreSQL 18.6 as its current PostgreSQL 18 b
 3. Confirm there are no failed tenant migrations or unresolved PostgreSQL health alerts.
 4. Keep enough disk space for the Pigsty source, package metadata, and a configuration backup.
 
+The backup command and the backup acceptance contract are separate gates. Before
+changing the host, run `backup_manager.sh verify` and then:
+
+```bash
+bun scripts/verify-pigsty-backup-acceptance.ts --max-age-seconds 86400
+```
+
+An `incomplete` result blocks the upgrade. A JSON fixture passed with `--input`
+only checks the contract and does not establish that the host repository or PITR
+path works.
+
 The upgrade script also writes a timestamped `pigsty.yml.supabackup.*` file before re-running Pigsty configuration.
 
 ## Recommended upgrade
@@ -65,12 +76,21 @@ bash -n install.sh scripts/upgrade_pigsty.sh scripts/upgrade_pigsty_4_4_compat.s
 # Compatibility state
 sudo bash scripts/upgrade_pigsty_4_4_compat.sh --check
 
+# Fail-closed host upgrade gate (requires the target Pigsty host)
+sudo bash scripts/verify-pigsty-upgrade-acceptance.sh
+
 # Host health
 systemctl --failed
 sudo -u postgres psql -Atqc 'select version();'
 ```
 
 Also verify the Management API, project PostgREST/GoTrue services, Caddy routes, Grafana, backups, and at least one project SDK request.
+
+For a production claim, also retain a signed isolated restore receipt from
+[`scripts/test-project-restore-drill.ts`](../scripts/test-project-restore-drill.ts)
+using an approved snapshot. The local Docker restore drill and the backup
+readiness check are useful gates, but neither is production evidence until the
+target host and approved snapshot have been exercised.
 
 ## Rollback
 

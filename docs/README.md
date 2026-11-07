@@ -76,6 +76,8 @@
 - [Execution Engine Policy](./execution-engine-policy.md) - One execution owner per operation; default Workflows and explicit pgflow/approval integrations
 - [Vibecoding Evaluation](./vibecoding-evaluation.md) - Reproducible agent tasks and recorded context, repair, time and scope metrics
 - [Queues PGMQ Migration Guide](./queues-pgmq-migration.md) - Migration notes for Supabase Queues compatibility and SupaCloud queue extensions
+- [Supabase Ecosystem Capability Matrix](./supabase-ecosystem-capability-matrix.zh-CN.md) - Capability status, governance boundaries, and remaining work
+- [pgvector Hybrid Search Starter](./pgvector-hybrid-search.md) - Vector, full-text, RRF, and PGMQ embedding job template
 - [Durable Workflows](./durable-workflows.md) - Service-role-only PostgreSQL/PGMQ workflow execution and DBOS design rationale
 - [Application Business State Machines](./business-state-machines.md) - Maker-Checker transition RPC, audit, versioning, and XState projection pattern
 - [PowerSync Local-First Integration](./powersync-local-first.md) - Self-hosted sync boundary, replication readiness, RLS upload path, ELN conflicts, and cleanup
