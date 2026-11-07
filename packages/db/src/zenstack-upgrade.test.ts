@@ -243,8 +243,10 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
     await server.exec(COMMAND_PERSISTENCE_SQL.slice(COMMAND_PERSISTENCE_SQL.indexOf("CREATE SCHEMA"), COMMAND_PERSISTENCE_SQL.indexOf("CREATE OR REPLACE FUNCTION")));
     await server.exec(`
       CREATE SCHEMA helpers;
+      CREATE TYPE helpers.role AS ENUM ('reader', 'writer');
       CREATE FUNCTION helpers.note_count() RETURNS bigint LANGUAGE sql STABLE AS 'SELECT count(*) FROM public."Note"';
       CREATE FUNCTION helpers.note_label(text) RETURNS text LANGUAGE sql STABLE AS 'SELECT $1 || ''-ok''';
+      CREATE FUNCTION helpers.has_role(helpers.role[]) RETURNS boolean LANGUAGE sql STABLE AS 'SELECT ''writer''::helpers.role = ANY($1)';
       CREATE FUNCTION helpers.note_values() RETURNS SETOF integer LANGUAGE sql STABLE AS 'SELECT value FROM public."Note"';
       CREATE FUNCTION helpers.sneaky_touch() RETURNS integer LANGUAGE plpgsql VOLATILE AS
         'BEGIN INSERT INTO public."Note" VALUES (''sneaky'',''alice'',0); RETURN 1; END';
@@ -264,6 +266,7 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
         expect(await alice.models.note.count()).toBe(0);
         await alice.commandStore.transaction(async session => {
           expect(await session.transaction.readFunction("helpers.note_label", ["abc"])).toBe("abc-ok");
+          expect(await session.transaction.readFunction("helpers.has_role", [["reader", "writer"]])).toBe(true);
           await session.transaction.db.note.create({ data: { id: "committed", owner: "alice", value: 2 } });
           expect(Number(await session.transaction.readFunction("helpers.note_count"))).toBe(1);
         });
@@ -284,6 +287,10 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
         await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.note_label")))
           .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
         await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.note_label", [{ nested: true } as never])))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.has_role", [["reader", ["writer"]] as never])))
+          .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+        await expect(alice.commandStore.transaction(s => s.transaction.readFunction("helpers.has_role", ["writer"])))
           .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
         // 事务里仍然拿不到 query，也拿不到新的原始入口。
         await alice.commandStore.transaction(async session => {

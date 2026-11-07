@@ -509,6 +509,7 @@ export class LifecycleController {
     expect(rendered.applicationCode).toContain("aspects: [commandAspect]");
     expect(rendered.applicationCode).toContain('tenantScope: "required"');
     expect(rendered.applicationCode).toContain("aspects: [moduleAspect]");
+    expect(rendered.applicationCode).toContain("strict && !(result instanceof Response)");
     expect(rendered.applicationCode).toContain(
       'jobs: [{ className: "RebuildJob", name: "aspect.rebuild", serviceKey: "rebuildJob", scope: "job", }]',
     );

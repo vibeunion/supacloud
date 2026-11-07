@@ -71,6 +71,7 @@ export interface CompiledRoute {
 export interface CompiledCommand {
   rpc?: string;
   branches?: readonly CompiledCommandBranch[];
+  branchesFallback?: "reject" | "command";
   className: string;
   name: string;
   permission: string;
@@ -205,7 +206,7 @@ async function compiledAspectStep(context: CompiledAspectContext, handler: () =>
     }
     called = true;
     pending = Promise.resolve().then(handler).then(result => {
-      if (strict) freezeCompiledAspectData(result);
+      if (strict && !(result instanceof Response)) freezeCompiledAspectData(result);
       value = result;
       return result;
     });

@@ -508,6 +508,7 @@ export async function analyzeProject(
           const permission = stringLiteralProp(meta, "permission");
           const rpc = checkedRpc(meta, ctx);
           const branches = checkedBranches(meta, ctx);
+          const branchesFallback = checkedBranchesFallback(meta, ctx);
           const audit = stringLiteralProp(meta, "audit");
           const standaloneName = stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name;
           const standaloneUses = (await parseInfraResourceUseRefs(
@@ -525,6 +526,7 @@ export async function analyzeProject(
             ...(permission === undefined ? {} : { permission }),
             ...(rpc === undefined ? {} : { rpc }),
             ...(branches === undefined ? {} : { branches }),
+            ...(branchesFallback === undefined ? {} : { branchesFallback }),
             transaction: checkedCommandMode(meta, "transaction", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             ...(audit === undefined ? {} : { audit }),
             idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
@@ -938,6 +940,7 @@ async function parseModule(
         const permission = stringLiteralProp(meta, "permission");
         const rpc = checkedRpc(meta, ctx);
         const branches = checkedBranches(meta, ctx);
+        const branchesFallback = checkedBranchesFallback(meta, ctx);
         const audit = stringLiteralProp(meta, "audit");
         const commandName = stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>";
         const uses = (await parseInfraResourceUseRefs(
@@ -955,6 +958,7 @@ async function parseModule(
           ...(permission === undefined ? {} : { permission }),
           ...(rpc === undefined ? {} : { rpc }),
           ...(branches === undefined ? {} : { branches }),
+          ...(branchesFallback === undefined ? {} : { branchesFallback }),
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
@@ -3065,6 +3069,22 @@ function checkedBranches(meta: ObjectLiteralExpression, ctx: AnalysisContext): C
     });
   }
   return branches;
+}
+
+function checkedBranchesFallback(meta: ObjectLiteralExpression, ctx: AnalysisContext): "reject" | "command" | undefined {
+  const expression = getProp(meta, "branchesFallback");
+  if (!expression) return undefined;
+  const value = stringLiteralProp(meta, "branchesFallback");
+  if (value === "reject" || value === "command") return value;
+  ctx.diagnostics.push({
+    severity: "error",
+    code: "invalid-command-branches-fallback",
+    file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+    line: lineOf(expression),
+    message: "Command branchesFallback must be 'reject' or 'command'.",
+    suggestion: "Use branchesFallback: 'command' only when the command handler owns the unmatched-input boundary.",
+  });
+  return undefined;
 }
 
 /**

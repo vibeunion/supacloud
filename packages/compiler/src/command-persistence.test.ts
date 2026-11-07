@@ -68,6 +68,10 @@ import { Module, Command } from "./runtime";
 @Command({
   name: "config.resource.save",
   permission: "config.save",
+  branchesFallback: "command",
+  transaction: "required",
+  audit: "config.saved",
+  idempotency: "required",
   branches: [
     { when: 'resource === "a"', rpc: "save_a", transaction: "required", audit: "config.a.saved", idempotency: "required", boundary: "database" },
     { when: 'resource === "b"', rpc: "save_b", transaction: "none", audit: "config.b.saved", idempotency: "required", boundary: "external" },
@@ -80,7 +84,7 @@ export class ConfigModule {}
     const options = {
       rootDir: root, outDir: join(root, "generated"),
       commandCapabilities: {
-        requirePersistentAdapters: true, permission: true,
+        requirePersistentAdapters: true, permission: true, audit: true, transaction: true, idempotency: true,
         rpc: {
           save_a: { boundary: "database" as const, audit: true, transaction: true, idempotency: true },
           save_b: { boundary: "external" as const, audit: true, transaction: false, idempotency: true, reconcile: true },
@@ -93,6 +97,7 @@ export class ConfigModule {}
       expect.objectContaining({ when: 'resource === "a"', rpc: "save_a", transaction: "required" }),
       expect.objectContaining({ when: 'resource === "b"', rpc: "save_b", boundary: "external" }),
     ]);
+    expect(result.graph.modules[0]?.commands[0]?.branchesFallback).toBe("command");
     const generated = await Bun.file(join(root, "generated/application.ts")).text();
     expect(generated).toContain('"rpc":"save_a"');
     expect(generated).toContain('"rpc":"save_b"');

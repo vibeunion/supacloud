@@ -182,6 +182,7 @@ export type CompiledControllerInvokerTarget = Record<string, (...args: unknown[]
 export interface CompiledCommand {
   rpc?: string;
   branches?: readonly CompiledCommandBranch[];
+  branchesFallback?: "reject" | "command";
   className: string;
   name: string;
   permission?: string;
@@ -850,6 +851,7 @@ function selectCommandBranch(command: CompiledCommand, input: CommandInvocation[
       };
     }
   }
+  if (command.branchesFallback === "command") return command;
   throw new ApplicationError(`Command "${command.name}" has no matching RPC branch`, {
     status: 422,
     code: "COMMAND_BRANCH_UNMATCHED",
@@ -1099,6 +1101,11 @@ function assertCommandGovernanceReady(
     });
   }
   for (const command of compiled.commands ?? []) {
+    if (command.branchesFallback !== undefined && command.branchesFallback !== "reject" && command.branchesFallback !== "command") {
+      throw new ApplicationError(`Command "${command.name}" has an invalid branches fallback`, {
+        code: "COMMAND_BRANCH_FALLBACK_INVALID",
+      });
+    }
     if (command.rpc !== undefined && command.branches !== undefined) {
       throw new ApplicationError(`Command "${command.name}" declares both rpc and branches`, {
         code: "COMMAND_BRANCHES_CONFLICT",

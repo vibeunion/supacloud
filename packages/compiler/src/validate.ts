@@ -856,7 +856,13 @@ export function validateGraph(
       if (command.rpc && command.branches) {
         error("command-rpc-branches-conflict", `Command ${command.name} cannot declare both rpc and branches.`, module.file, module.line);
       }
+      if (command.branchesFallback !== undefined && command.branchesFallback !== "reject" && command.branchesFallback !== "command") {
+        error("command-branches-fallback-invalid", `Command ${command.name} has an invalid branches fallback.`, module.file, module.line);
+      }
       const branchAdapters = command.branches ?? [];
+      if (command.branchesFallback === "command" && branchAdapters.length === 0) {
+        error("command-branches-fallback-without-branches", `Command ${command.name} declares a fallback without branches.`, module.file, module.line);
+      }
       for (const branch of branchAdapters) {
         if (typeof options !== "object" ||
           !Object.hasOwn(options.commandCapabilities?.rpc ?? {}, branch.rpc)) {
@@ -908,6 +914,8 @@ export function validateGraph(
           || (branchCaps.length > 0 && branchCaps.some(({ branch }) => !branch.audit || branch.idempotency !== "required"))
           || (branchCaps.length > 0 && branchCaps.some(({ capabilities }) =>
             capabilities?.boundary === "external" && capabilities.reconcile !== true))
+          || (command.branchesFallback === "command" && (!command.audit || command.idempotency !== "required"
+            || command.transaction !== "required" || hostCaps.audit !== true || hostCaps.idempotency !== true || hostCaps.transaction !== true))
           || (command.rpc !== undefined && rpcCaps?.boundary === "database" && (rpcCaps.transaction !== true || command.transaction !== "required"))
           || (command.rpc === undefined && branchCaps.length === 0 && (hostCaps.audit !== true || hostCaps.idempotency !== true
             || hostCaps.transaction !== true || command.transaction !== "required"))

@@ -10,6 +10,7 @@ export interface ContractManifest {
     module: string;
     permission?: string;
     rpc?: string;
+    branchesFallback?: "reject" | "command";
     branches?: Array<{
       when: string;
       adapter: string;
@@ -137,6 +138,7 @@ export function buildContractManifest(
         module: module.name,
         ...(command.permission === undefined ? {} : { permission: command.permission }),
         ...(command.rpc === undefined ? {} : { rpc: command.rpc }),
+        ...(command.branchesFallback === undefined ? {} : { branchesFallback: command.branchesFallback }),
         ...(command.branches === undefined ? {} : {
           branches: command.branches.map((branch) => ({
             when: branch.when,

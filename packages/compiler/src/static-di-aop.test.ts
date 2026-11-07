@@ -96,15 +96,17 @@ export async function run(mode: string) {
     module.createRequestScope(services, { id: "a" }),
     module.createRequestScope(services, { id: "b" }),
   ]);
-  let calls = 0, error: string | undefined;
+  let calls = 0, error: string | undefined, nativeResponse = false;
   try {
-    await module.aspectPipeline({ kind: "command", name: "orders.run", input: mode }, () => ++calls);
+    const result = await module.aspectPipeline({ kind: "command", name: "orders.run", input: mode }, () =>
+      mode === "response" ? new Response("ok") : ++calls);
+    nativeResponse = result instanceof Response;
   } catch (cause) { error = cause instanceof Error ? cause.message : "unknown"; }
   finally {
     await module.destroyRequestScope(a); await module.destroyRequestScope(b);
     await module.destroyRequestScope(a);
   }
-  return { calls, error, events: [...events], distinct: a.worker !== b.worker };
+  return { calls, error, nativeResponse, events: [...events], distinct: a.worker !== b.worker };
 }`,
     });
     await using program = (await ts.createProgram([join(root, "runner.ts")], {
@@ -115,10 +117,11 @@ export async function run(mode: string) {
     const loaded: unknown = await import(pathToFileURL(join(root, "runner.ts")).href);
     if (!loaded || typeof loaded !== "object" || !("run" in loaded) || typeof loaded.run !== "function") throw new Error("Missing runner");
     expect(await loaded.run("ok")).toEqual({
-      calls: 1, error: undefined, distinct: true,
+      calls: 1, error: undefined, nativeResponse: false, distinct: true,
       events: ["outer:before", "inner:before", "inner:after", "outer:after", "destroy:a", "destroy:b"],
     });
     expect(await loaded.run("twice")).toMatchObject({ calls: 1, error: "Aspect continuation called multiple times" });
     expect(await loaded.run("deny")).toMatchObject({ calls: 0, error: "denied" });
+    expect(await loaded.run("response")).toMatchObject({ calls: 0, error: undefined, nativeResponse: true });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
