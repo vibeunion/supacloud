@@ -36,4 +36,44 @@ export const databaseWrapperRoutes = new Elysia({ prefix: "/v1/projects/:ref/dat
       }
       throw error;
     }
+  })
+  .post("/rotate", {
+    body: t.Object({
+      type: t.Union([t.Literal("stripe"), t.Literal("mongodb")]),
+      server_name: t.String({ maxLength: 63 }),
+      credential: t.String({ minLength: 1, maxLength: 64 * 1024 }),
+      api_version: t.Optional(t.String({ maxLength: 64 })),
+    }),
+    detail: { tags: ["projects", "database", "wrappers"], summary: "Rotate a Vault-backed wrapper credential" },
+  }, async ({ params, body, request, set }) => {
+    const authError = await requireProjectOrAdminAuth(request, params.ref);
+    if (authError) return authResponse(authError, set);
+    try {
+      return await databaseWrapperService.rotate(params.ref, body);
+    } catch (error) {
+      if (error instanceof DatabaseWrapperError) {
+        set.status = error.statusCode;
+        return { message: error.message, code: error.code, status: error.statusCode };
+      }
+      throw error;
+    }
+  })
+  .delete("/", {
+    body: t.Object({
+      type: t.Union([t.Literal("stripe"), t.Literal("mongodb")]),
+      server_name: t.String({ maxLength: 63 }),
+    }),
+    detail: { tags: ["projects", "database", "wrappers"], summary: "Remove a Vault-backed wrapper server and secret" },
+  }, async ({ params, body, request, set }) => {
+    const authError = await requireProjectOrAdminAuth(request, params.ref);
+    if (authError) return authResponse(authError, set);
+    try {
+      return await databaseWrapperService.remove(params.ref, body);
+    } catch (error) {
+      if (error instanceof DatabaseWrapperError) {
+        set.status = error.statusCode;
+        return { message: error.message, code: error.code, status: error.statusCode };
+      }
+      throw error;
+    }
   });

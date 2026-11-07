@@ -11,4 +11,9 @@ describe("database wrapper configuration", () => {
     expect(normalizeWrapperResourceName("stripe_server", "server_name")).toBe("stripe_server");
     expect(() => normalizeWrapperResourceName("server; drop schema public", "server_name")).toThrow("identifier");
   });
+
+  test("keeps wrapper names compatible with the rotate and remove routes", () => {
+    expect(normalizeWrapperResourceName("mongo_server", "server_name")).toBe("mongo_server");
+    expect(() => normalizeWrapperResourceName("mongo-server", "server_name")).toThrow("identifier");
+  });
 });
