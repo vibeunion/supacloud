@@ -64,6 +64,8 @@
 - [后台函数 API 参考](./background-functions-api-reference.md) - 请求头规范、任务状态机、控制面板端点与语义
 - [@supacloud/js](./supacloud-js.md) - 基于 `supabase-js` 的官方平台 SDK，增强后台任务、Webhook 与队列
 - [Queues PGMQ 迁移指南](./queues-pgmq-migration.md) - Supabase Queues 兼容性与 SupaCloud 队列扩展迁移
+- [Supabase 生态能力矩阵](./supabase-ecosystem-capability-matrix.zh-CN.md) - 已具备、部分具备和待补齐能力的边界
+- [pgvector 混合检索 Starter](./pgvector-hybrid-search.md) - 向量、全文检索、RRF 和 PGMQ Embedding 任务模板
 - [持久化工作流](./durable-workflows.md) - Service-role 专用的 PostgreSQL/PGMQ 工作流与 DBOS 架构决策
 - [业务状态机](./business-state-machines.md) - Maker-Checker 状态流转 RPC、审计留痕与 XState 投射
 - [PowerSync 离线优先同步](./powersync-local-first.md) - 私有化同步边界、复制就绪度、RLS 写入流与冲突处理

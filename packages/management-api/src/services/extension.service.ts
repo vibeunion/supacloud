@@ -6,6 +6,7 @@ import { notifyPostgrestSchemaReload } from "./database-schema-notify";
 import { reconcileGraphqlEntrypoint } from "./graphql-extension";
 import { assertExtensionMutation, extensionIdentifier, ExtensionOperationError } from "./extension-policy";
 import { readPgflowState, setPgflowEnabled } from "./pgflow.service";
+import { extensionCapability } from "./extension-capabilities";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 type SystemExtensionInfo = { name: string; version: string; status: string; description: string };
@@ -103,7 +104,8 @@ export class ExtensionService {
                 blocked = "Administrator preload/restart and the configured pg_durable database are required";
             }
             return { ...row, kind: "extension", available: true,
-                can_enable: !row.is_installed && !blocked, can_disable: row.is_installed && !blocked, blocked_reason: blocked };
+                can_enable: !row.is_installed && !blocked, can_disable: row.is_installed && !blocked, blocked_reason: blocked,
+                capability: extensionCapability(row.name) };
         });
         return [...rows, { name: "pgflow", default_version: "0.16.0", installed_version: state.version,
             is_installed: state.installed, is_enabled: state.enabled, kind: "workflow", schema: "pgflow",
@@ -112,6 +114,7 @@ export class ExtensionService {
             available: true, can_enable: !state.enabled && (!state.installed || state.managed && state.profile === "shared"),
             can_disable: state.enabled && state.managed && state.profile === "shared",
             comment: "Canonical SupaCloud worker runtime; pausing preserves workflow history.",
+            capability: extensionCapability("pgflow"),
             blocked_reason: state.installed && !state.managed ? "Unmanaged schema; reviewed adoption required"
                 : state.installed && state.profile !== "shared" ? "Dedicated profile requires a reviewed control upgrade" : null }];
     }
