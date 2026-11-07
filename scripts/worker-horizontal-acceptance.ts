@@ -179,6 +179,7 @@ async function main(): Promise<void> {
       cpuLimit: number("WORKER_ACCEPTANCE_CPU_LIMIT", 0.5, 0.01, 64),
       memoryLimitMiB: integer("WORKER_ACCEPTANCE_MEMORY_LIMIT_MIB", 256, 16, 1_048_576),
     };
+    const maxQueueAgeSeconds = number("WORKER_ACCEPTANCE_MAX_QUEUE_AGE_SECONDS", 120, 0, 86_400);
     const crash = parseJsonCommand(process.env.WORKER_ACCEPTANCE_CRASH_COMMAND, "CRASH");
     const restart = parseJsonCommand(process.env.WORKER_ACCEPTANCE_RESTART_COMMAND, "RESTART");
     const requestPath = process.env.WORKER_ACCEPTANCE_REQUEST_PATH?.trim() || "/acceptance/request";
@@ -217,6 +218,7 @@ async function main(): Promise<void> {
     });
     const effect = await jsonRequest(effectTemplate.replace("{id}", encodeURIComponent(mixed.batchOperationId)));
     if (effect.effectCount !== 1) throw new Error("WORKER_ACCEPTANCE_DUPLICATE_EFFECT");
+    if (peakOldestQueueAgeSeconds > maxQueueAgeSeconds) throw new Error("WORKER_ACCEPTANCE_QUEUE_AGE_FAILED");
     const cgroups = await readCgroups(units, expected);
     if (cgroups.some(readback => !readback.passed)) throw new Error("WORKER_ACCEPTANCE_CGROUP_FAILED");
     evidence.target = target;
@@ -229,6 +231,7 @@ async function main(): Promise<void> {
     evidence.spec = spec;
     evidence.mixedLoad = mixed;
     evidence.peakOldestQueueAgeSeconds = peakOldestQueueAgeSeconds;
+    evidence.maxQueueAgeSeconds = maxQueueAgeSeconds;
     evidence.idempotentEffect = effect;
     evidence.cgroups = cgroups;
     evidence.status = mixed.passed ? "PASS" : "FAIL";
