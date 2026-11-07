@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.38.2...supacloud-lite-v0.38.3) (2026-11-07)
+
+
+### Miscellaneous Chores
+
+* release main ([#2482](https://github.com/vibeunion/supacloud/issues/2482)) ([583c818](https://github.com/vibeunion/supacloud/commit/583c8182fc0f133c307bbe985b5a40a55fe3735d))
+
 ## [0.38.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.38.1...supacloud-lite-v0.38.2) (2026-11-07)
 
 
