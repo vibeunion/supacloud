@@ -133,7 +133,10 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM supacloud_worker.installation WHERE project_ref='${projectRef}') THEN
     RAISE EXCEPTION 'PGFLOW_PROJECT_BINDING_MISMATCH';
   END IF;
-  FOR name IN SELECT flow_slug FROM pgflow.flows WHERE flow_slug ~ '^scw_[a-z0-9_]{1,40}$' LOOP
+  -- Sharded execution groups use queue names derived from a logical flow
+  -- (for example scw_reports_v1_s03), so grants must follow provisioned PGMQ
+  -- queues rather than only pgflow flow slugs.
+  FOR name IN SELECT queue_name FROM pgmq.list_queues() WHERE queue_name ~ '^scw_[a-z0-9_]{1,40}$' LOOP
     EXECUTE format('GRANT SELECT,UPDATE ON pgmq.%I TO ${worker}', 'q_'||name);
     EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON pgmq.%I,pgmq.%I TO ${owner}', 'q_'||name,'a_'||name);
     EXECUTE format('GRANT USAGE,SELECT ON SEQUENCE pgmq.%I TO ${owner}', 'q_'||name||'_msg_id_seq');

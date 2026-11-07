@@ -66,16 +66,24 @@ export function applicationRuntimePlan(input: ApplicationRuntimeInput): Applicat
     activationId: input.activationId, environmentId: input.environmentId, bunVersion, directory,
     targets: [],
   };
-  plan.targets = release.targets.flatMap(target => Array.from({ length: target.execution?.replicas ?? 1 }, (_, replica) => {
-    const execution = target.execution;
-    const resources = execution?.resources ?? target.compute;
-    const name = execution ? `${target.name}-r${replica + 1}` : target.name;
-    const unit = `supacloud-application-${release.project_ref}-${input.activationId}-${name}.service`;
-    const objectDirectory = join(directory, "objects", target.object_id);
-    const environmentFile = join(directory, `${name}.env`);
-    const entrypoint = join(objectDirectory, target.entrypoint);
-    const port = target.kind === "http" ? input.ports[target.name]! : null;
-    const unitContent = `[Unit]
+  plan.targets = release.targets.flatMap(target => {
+    const replicaCount = target.execution?.replicas ?? 1;
+    const shardCount = target.execution?.shardCount ?? 1;
+    return Array.from({ length: replicaCount * shardCount }, (_, ordinal) => {
+      const replica = Math.floor(ordinal / shardCount);
+      const shard = ordinal % shardCount;
+      const execution = target.execution;
+      const resources = execution?.resources ?? target.compute;
+      const name = execution
+        ? shardCount === 1 ? `${target.name}-r${replica + 1}`
+          : `${target.name}-r${replica + 1}-s${shard.toString(36).padStart(2, "0")}`
+        : target.name;
+      const unit = `supacloud-application-${release.project_ref}-${input.activationId}-${name}.service`;
+      const objectDirectory = join(directory, "objects", target.object_id);
+      const environmentFile = join(directory, `${name}.env`);
+      const entrypoint = join(objectDirectory, target.entrypoint);
+      const port = target.kind === "http" ? input.ports[target.name]! : null;
+      const unitContent = `[Unit]
 Description=SupaCloud Application ${release.application_id}: ${target.name}
 After=network.target
 StartLimitIntervalSec=60
@@ -102,6 +110,7 @@ Environment="SUPACLOUD_OBJECT_ID=${target.object_id}"
 Environment="SHUTDOWN_TIMEOUT_MS=${execution ? execution.lifecycle.shutdownGraceSeconds * 1000 : 10000}"
 ${execution ? `Environment="SUPACLOUD_WORKER_EXECUTION=${Buffer.from(JSON.stringify(execution)).toString("base64")}"
 Environment="SUPACLOUD_WORKER_REPLICA=${replica + 1}"
+Environment="SUPACLOUD_WORKER_SHARD=${shard}"
 ` : ""}${resources ? `CPUAccounting=true
 MemoryAccounting=true
 CPUQuota=${Math.round(resources.cpuLimit * 100)}%
@@ -118,14 +127,15 @@ SyslogIdentifier=${unit.slice(0, -8)}
 [Install]
 WantedBy=multi-user.target
 `;
-    return {
-      name, kind: target.kind, objectId: target.object_id,
-      ...(execution ? { sourceTarget: target.name, execution } : {}),
-      ...(resources ? { resources } : {}),
-      unit, directory: objectDirectory, environmentFile, entrypoint, port, unitContent,
-    };
-  }));
-  if (plan.targets.length > 32 || new Set(plan.targets.map(target => target.name)).size !== plan.targets.length) {
+      return {
+        name, kind: target.kind, objectId: target.object_id,
+        ...(execution ? { sourceTarget: target.name, execution } : {}),
+        ...(resources ? { resources } : {}),
+        unit, directory: objectDirectory, environmentFile, entrypoint, port, unitContent,
+      };
+    });
+  });
+  if (plan.targets.length > 256 || new Set(plan.targets.map(target => target.name)).size !== plan.targets.length) {
     throw new Error("APPLICATION_RUNTIME_TARGET_CONFLICT");
   }
   return plan;

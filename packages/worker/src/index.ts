@@ -9,7 +9,7 @@ import {
 } from "./queue-handler.js";
 import { normalizeJobPolicy } from "./job-policy.js";
 export * from "./scriptc.js";
-export { workerExecutionFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
+export { workerExecutionFromEnvironment, workerShardFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
 export { createExecutionGroupWorker } from "./group-worker.js";
 export type { ExecutionGroupDomain, WorkerHealth } from "./group-worker.js";
 export { admitWorkerOperation, releaseWorkerOperation, requireDrainedWorkerGroup } from "./admission.js";

@@ -1504,9 +1504,6 @@ async function bootstrap() {
     const { startPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
     startPgflowTaskWorker();
 
-    const { startQueueWorker } = await import("./workers/queue.worker");
-    startQueueWorker();
-
     const { backgroundFunctionWorker } = await import("./services/background-function-worker");
     backgroundFunctionWorker.start();
 
@@ -1608,8 +1605,6 @@ export function startManagementApi(): void {
           await import("./plugins/edge-runtime-manager");
         edgeRuntimeManager.stop();
       }
-      const { stopQueueWorker } = await import("./workers/queue.worker");
-      stopQueueWorker();
       const { stopStorageReconcileWorker } =
         await import("./workers/storage-reconcile.worker");
       stopStorageReconcileWorker();

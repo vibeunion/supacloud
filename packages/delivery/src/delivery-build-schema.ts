@@ -2,7 +2,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { DeliveryDiagnosticSchema, DeliveryFilePathSchema, DeliveryPlanSchema } from "./delivery-schema";
 import { canonical, digest as hash } from "./delivery-files";
-import { validateWorkerExecution } from "./worker-execution";
+import { validateWorkerExecution, workerShardCount } from "./worker-execution";
 
 const closed = { additionalProperties: false } as const;
 const digest = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -71,7 +71,8 @@ export function deliveryObjectDigest(object: Pick<DeliveryObject, "inputDigest" 
 export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest {
   if (!Value.Check(DeliveryBuildManifestSchema, value)) throw new Error("Invalid delivery build manifest.");
   validateWorkerExecution(value.plan.targets.flatMap(target => target.execution ? [target.execution] : []));
-  if (value.plan.targets.reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
+  if (value.plan.targets.reduce((count, target) => count + (target.execution
+    ? (target.execution.replicas ?? 1) * workerShardCount(target.execution) : 1), 0) > 256) {
     throw new Error("Invalid delivery replica count.");
   }
   for (const target of value.plan.targets) {

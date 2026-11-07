@@ -104,6 +104,11 @@ await worker.start();
 // On an application-owned shutdown: await worker.stop().
 ```
 
+Execution groups may set `shardCount` to create deterministic physical queues.
+Use the same `orderingKey` for messages that must remain ordered; unrelated
+keys are routed independently. `workerShardQueue()` and `workerShardForKey()`
+resolve the queue without exposing physical names to application code.
+
 See `examples/report-worker.ts` for a typed domain integration factory. The
 decoder and authorization policy are mandatory. The handler context exposes
 project, queue, task, message ID, idempotency key, attempt and shutdown signal,
@@ -130,6 +135,10 @@ An idempotency key in the envelope alone does not deduplicate effects.
 Only `scw_` queues are accepted to avoid taking over existing platform,
 approval or `supacloud_internal_*` queues. Do not run the old queue worker and
 pgflow worker against the same queue.
+
+RabbitMQ is an optional adapter exposed by `@supacloud/elysia`; it is not a
+package or deployment dependency of this worker. It uses manual acknowledgements
+and the same at-least-once/idempotency contract as PGMQ.
 
 ## Native Flow Worker
 

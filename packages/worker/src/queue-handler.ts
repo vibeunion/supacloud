@@ -1,6 +1,7 @@
 import type { EdgeWorker, Json } from "@pgflow/edge-worker";
 import type { JobPolicyInput } from "./job-policy.js";
 import { normalizeJobPolicy, validateJobKey } from "./job-policy.js";
+import { workerShardForKey, type WorkerExecutionGroup } from "@supacloud/delivery/worker-execution";
 
 type UpstreamHandler = Parameters<typeof EdgeWorker.startQueueWorker>[0];
 export interface TaskContext {
@@ -10,6 +11,8 @@ export interface TaskContext {
   readonly idempotencyKey: string;
   readonly jobKey?: string;
   readonly priority?: number;
+  readonly orderingKey?: string;
+  readonly shard?: number;
   readonly messageId: string;
   readonly attempt: number;
   readonly definitionVersion?: string;
@@ -27,6 +30,8 @@ export interface QueueBinding {
   readonly taskKey: string;
   readonly definitionVersion?: string;
   readonly policy?: JobPolicyInput;
+  readonly shard?: number;
+  readonly shardGroup?: Pick<WorkerExecutionGroup, "shardCount">;
 }
 type Failure =
   | "WORKER_TASK_INVALID"
@@ -70,14 +75,17 @@ export function createQueueHandler<T>(
     if (
       !object(payload) ||
       (definitionVersion !== undefined && Buffer.byteLength(JSON.stringify(payload)) > 65536) ||
-      payload["schemaVersion"] !== (definitionVersion === undefined ? 1 : 2) ||
-      (definitionVersion !== undefined && payload["definitionVersion"] !== definitionVersion) ||
-      payload["projectRef"] !== projectRef ||
-      payload["taskKey"] !== taskKey ||
-      typeof payload["idempotencyKey"] !== "string" ||
-      !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload["idempotencyKey"]) ||
+      payload.schemaVersion !== (definitionVersion === undefined ? 1 : 2) ||
+      (definitionVersion !== undefined && payload.definitionVersion !== definitionVersion) ||
+      payload.projectRef !== projectRef ||
+      payload.taskKey !== taskKey ||
+      (Object.hasOwn(payload, "shard") && (!Number.isSafeInteger(payload.shard) || payload.shard !== (binding.shard ?? 0))) ||
+      typeof payload.idempotencyKey !== "string" ||
+      !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload.idempotencyKey) ||
+      (Object.hasOwn(payload, "orderingKey") && (typeof payload.orderingKey !== "string"
+        || !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload.orderingKey))) ||
       (Object.hasOwn(payload, "jobKey") && (() => {
-        try { validateJobKey(payload["jobKey"]); return false; } catch { return true; }
+        try { validateJobKey(payload.jobKey); return false; } catch { return true; }
       })()) ||
       !Object.hasOwn(payload, "input") ||
       Object.keys(payload).some(
@@ -88,7 +96,7 @@ export function createQueueHandler<T>(
             "taskKey",
             "idempotencyKey",
             "jobKey",
-            "input", ...(definitionVersion === undefined ? [] : ["definitionVersion"]),
+            "input", "orderingKey", "shard", ...(definitionVersion === undefined ? [] : ["definitionVersion"]),
           ].includes(key),
       )
     ) {
@@ -98,13 +106,19 @@ export function createQueueHandler<T>(
     const messageId = messageIdentity(rawId);
     if (!Number.isSafeInteger(attempt) || attempt < 1)
       throw new WorkerTaskError("WORKER_TASK_INVALID");
+    const orderingKey = Object.hasOwn(payload, "orderingKey") ? payload.orderingKey as string : payload.idempotencyKey;
+    const shard = binding.shard ?? 0;
+    if (binding.shardGroup !== undefined && workerShardForKey(binding.shardGroup, orderingKey) !== shard)
+      throw new WorkerTaskError("WORKER_TASK_INVALID");
     const context: TaskContext = Object.freeze({
       projectRef,
       queueName,
       taskKey,
-      idempotencyKey: payload["idempotencyKey"],
-      ...(Object.hasOwn(payload, "jobKey") ? { jobKey: validateJobKey(payload["jobKey"]) } : {}),
+      idempotencyKey: payload.idempotencyKey,
+      ...(Object.hasOwn(payload, "jobKey") ? { jobKey: validateJobKey(payload.jobKey) } : {}),
       priority: policy.priority,
+      orderingKey,
+      shard,
       messageId,
       attempt,
       ...(definitionVersion === undefined ? {} : { definitionVersion }),
@@ -112,7 +126,7 @@ export function createQueueHandler<T>(
     });
     let input: T;
     try {
-      input = decode(payload["input"]);
+      input = decode(payload.input);
     } catch {
       throw new WorkerTaskError("WORKER_TASK_INVALID");
     }

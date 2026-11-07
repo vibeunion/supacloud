@@ -1,6 +1,6 @@
 import { parseWorkerExecutionGroup, type WorkerExecutionGroup } from "@supacloud/delivery/worker-execution";
 import { createPgflowQueueWorker } from "./index.js";
-import { executionQueueOptions, workerExecutionFromEnvironment } from "./execution-group.js";
+import { executionQueueOptions, workerExecutionFromEnvironment, workerShardFromEnvironment } from "./execution-group.js";
 import type { TaskHandler } from "./queue-handler.js";
 
 export interface WorkerHealth {
@@ -28,6 +28,8 @@ export function createExecutionGroupWorker<T>(options: {
   group?: WorkerExecutionGroup;
 }, domain: ExecutionGroupDomain<T>) {
   const execution = parseWorkerExecutionGroup(options.group ?? workerExecutionFromEnvironment());
+  const shard = workerShardFromEnvironment();
+  if (shard >= (execution.shardCount ?? 1)) throw new Error("WORKER_SHARD_INVALID");
   const bounds = [10, 50, 100, 500, 1000, 5000, 30000, Infinity];
   const metrics: WorkerHealth = {
     ready: false, active: 0, completed: 0, failed: 0, timedOut: 0,
@@ -40,7 +42,7 @@ export function createExecutionGroupWorker<T>(options: {
   // Observe immediately; the delivery host also consumes the fatal channel.
   void failure.catch(() => {});
   const worker = createPgflowQueueWorker({
-    projectRef: options.projectRef, connectionString: options.connectionString, ...executionQueueOptions(execution),
+    projectRef: options.projectRef, connectionString: options.connectionString, ...executionQueueOptions(execution, shard),
     async supervise(run, upstreamSignal, enqueuedAt) {
       metrics.active++;
       const began = performance.now();

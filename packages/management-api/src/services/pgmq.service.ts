@@ -4,6 +4,7 @@ import { PgmqProjectContextError, pgmqProjectRef, readPgmqProjectDatabase } from
 import { withRetry } from "../utils/retry";
 import { pgmqCreateOptions, pgmqInteger, pgmqListOptions, pgmqSeconds } from "../utils/pgmq-input";
 import { capturePgmqBatch } from "../utils/pgmq-batch";
+import { workerShardQueue } from "@supacloud/delivery";
 import { serializePgmqPayload } from "../utils/pgmq-payload";
 import { PgmqMutationError } from "../utils/pgmq-mutation";
 import {
@@ -130,6 +131,18 @@ async function createQueue(projectRef: string, queueName: string, options: { unl
   } catch {
     throw new PgmqMutationError();
   }
+}
+
+/** Provision a logical execution queue and all of its physical shard queues. */
+async function createQueueShards(
+  projectRef: string, queueName: string, shardCount: number, options: { unlogged?: boolean } = {},
+): Promise<string[]> {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > 64) {
+    throw new PgmqInventoryError(false);
+  }
+  const queues = Array.from({ length: shardCount }, (_, shard) => workerShardQueue({ queue: queueName, shardCount }, shard));
+  for (const queue of queues) await createQueue(projectRef, queue, options);
+  return queues;
 }
 
 async function dropQueue(projectRef: string, queueName: string): Promise<boolean> {
@@ -304,6 +317,8 @@ async function metricsAll(projectRef: string): Promise<PgmqQueueMetrics[]> {
 export const pgmqService = {
   createQueue: (projectRef: string, queueName: string, options?: { unlogged?: boolean }) =>
     createQueue(projectRef, queueName, options),
+  createQueueShards: (projectRef: string, queueName: string, shardCount: number, options?: { unlogged?: boolean }) =>
+    createQueueShards(projectRef, queueName, shardCount, options),
   dropQueue: (projectRef: string, queueName: string) =>
     dropQueue(projectRef, queueName),
   listQueues: (projectRef: string) =>

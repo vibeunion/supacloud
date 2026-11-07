@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createQueueWorkerTransport,
+  createRabbitMqQueuePort,
   createWorker,
   WorkerRegistrationError,
   WorkerReceiptUnconfirmedError,
@@ -42,6 +43,35 @@ function mapClaim(claim: Claim): WorkerClaim {
 }
 
 describe("SupaCloud worker", () => {
+  test("adapts RabbitMQ manual ack/nack without making AMQP a dependency", async () => {
+    const messages: Array<{ content: Uint8Array; fields: { deliveryTag: number } }> = [
+      { content: new TextEncoder().encode(JSON.stringify({ operationId: "op-1" })), fields: { deliveryTag: 7 } },
+    ];
+    const acked: number[] = [], nacked: Array<[number, boolean]> = [];
+    let callback: ((message: typeof messages[number] | null) => void) | undefined;
+    const channel = {
+      prefetch: async () => {},
+      consume: async (_queue: string, onMessage: typeof callback) => { callback = onMessage; return { consumerTag: "consumer-1" }; },
+      ack: (message: typeof messages[number]) => { acked.push(message.fields.deliveryTag); },
+      nack: (message: typeof messages[number], _allUpTo?: boolean, requeue?: boolean) => { nacked.push([message.fields.deliveryTag, requeue === true]); },
+      cancel: async () => {},
+    };
+    const queue = createRabbitMqQueuePort({ queue: "reports", channel, receiveTimeoutMs: 10 });
+    const received = queue.receive();
+    await Bun.sleep(0);
+    callback?.(messages[0]!);
+    const message = await received;
+    expect(message).toEqual({ id: "7", payload: { operationId: "op-1" } });
+    queue.ack("7");
+    expect(acked).toEqual([7]);
+    const second = queue.receive();
+    await Bun.sleep(0);
+    callback?.(messages[0]!);
+    expect(await second).toEqual({ id: "7", payload: { operationId: "op-1" } });
+    queue.fail("7", { deadLetter: true });
+    expect(nacked).toEqual([[7, false]]);
+    await queue.close();
+  });
   test("registers jobs atomically and rejects duplicate modules or jobs", () => {
     const worker = createWorker({ transport: transport() });
     const first = moduleWithJobs("first", ["reports.run"]);

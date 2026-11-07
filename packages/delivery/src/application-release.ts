@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { canonical, digest } from "./delivery-files";
-import { WorkerExecutionGroupSchema, ComputeResourcesSchema, validateWorkerExecution } from "./worker-execution";
+import { WorkerExecutionGroupSchema, ComputeResourcesSchema, validateWorkerExecution, workerShardCount } from "./worker-execution";
 
 export const ApplicationIdSchema = Type.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" });
 export const ApplicationReleaseIdSchema = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -46,7 +46,8 @@ export function parseApplicationReleaseRecord(candidate: unknown): ApplicationRe
     throw new Error("Invalid application release record.");
   }
   validateWorkerExecution(candidate.targets.flatMap(target => target.execution ? [target.execution] : []));
-  if (candidate.targets.reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
+  if (candidate.targets.reduce((count, target) => count + (target.execution
+    ? (target.execution.replicas ?? 1) * workerShardCount(target.execution) : 1), 0) > 256) {
     throw new Error("Invalid application replica count.");
   }
   if (candidate.targets.some(target => target.execution

@@ -4,7 +4,8 @@ import { mkdtemp, rm, readdir, realpath, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  parseWorkerExecutionGroup, resolveWorkerRoute, workerResourceUsage, assertWorkerBudget, type WorkerExecutionGroup,
+  parseWorkerExecutionGroup, resolveWorkerRoute, workerResourceUsage, assertWorkerBudget,
+  workerShardCount, workerShardForKey, workerShardQueue, type WorkerExecutionGroup,
 } from "../packages/delivery/src/worker-execution";
 import { parseDeliveryOptions } from "../packages/delivery/src/delivery-schema";
 import { createDeliveryPlan } from "../packages/compiler/src/delivery-plan";
@@ -173,6 +174,31 @@ describe("worker execution groups", () => {
     expect(() => parseDeliveryOptions({ ...delivery, execution: { groups: [group, group] } })).toThrow();
     expect(() => resolveWorkerRoute([group], "unknown", "1")).toThrow();
     expect(resolveWorkerRoute([group], "report.generate", "1").queue).toBe("scw_reports_v1");
+  });
+
+  test("queue shards route deterministically and expand each replica", () => {
+    const sharded = { ...group, shardCount: 4 };
+    expect(workerShardCount(group)).toBe(1);
+    expect(workerShardCount(sharded)).toBe(4);
+    expect(workerShardQueue(sharded, 0)).toBe("scw_reports_v1_s00");
+    expect(workerShardQueue(sharded, 3)).toBe("scw_reports_v1_s03");
+    expect(workerShardForKey(sharded, "tenant-a:report-1")).toBe(workerShardForKey(sharded, "tenant-a:report-1"));
+    expect(() => workerShardQueue(sharded, 4)).toThrow("WORKER_SHARD_INVALID");
+    expect(() => parseWorkerExecutionGroup({ ...sharded, queue: "scw_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_v1" })).toThrow();
+    const shardedInput = input();
+    shardedInput.release.targets[1]!.execution = sharded;
+    const plan = applicationRuntimePlan(shardedInput);
+    expect(plan.targets.filter(target => target.sourceTarget === "jobs")).toHaveLength(8);
+    expect(plan.targets.some(target => target.name === "jobs-r1-s03")).toBe(true);
+    const encoded = Buffer.from(JSON.stringify(sharded)).toString("base64");
+    expect(workerExecutionFromEnvironment({
+      SUPACLOUD_WORKER_EXECUTION: encoded, SUPACLOUD_WORKER_REPLICA: "2",
+      SUPACLOUD_WORKER_SHARD: "3", SUPACLOUD_TARGET: "jobs-r2-s03",
+    })).toEqual(sharded);
+    expect(() => workerExecutionFromEnvironment({
+      SUPACLOUD_WORKER_EXECUTION: encoded, SUPACLOUD_WORKER_REPLICA: "2",
+      SUPACLOUD_WORKER_SHARD: "4", SUPACLOUD_TARGET: "jobs-r2-s04",
+    })).toThrow("WORKER_EXECUTION_BINDING_INVALID");
   });
 
   test("fixed offered-rate measurements count errors and saturation instead of hiding them", async () => {

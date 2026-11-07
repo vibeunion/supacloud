@@ -12,9 +12,12 @@ separate dimension. Version 1 supports Bun and the pinned pgflow queue adapter.
 Unsupported runtimes, hard-timeout claims and arbitrary scheduling tags fail
 configuration validation.
 
-An execution group binds exactly one compiled Job name, one versioned queue,
-one Worker target and one project. Multiple replicas consume that queue through
-the same existing engine. No new scheduler or task-result ledger is created.
+An execution group binds exactly one compiled Job name, one versioned queue
+family, one Worker target and one project. `shardCount` expands the family
+into deterministic queues such as `scw_reports_v1_s00` and `scw_reports_v1_s01`.
+Every replica consumes every shard; an `orderingKey` maps to one shard so
+unrelated keys can run concurrently while one key remains ordered. No new
+scheduler or task-result ledger is created.
 PGMQ/archive state is not a business completion receipt.
 
 ## Configuration
@@ -41,6 +44,7 @@ never wrap another polling Worker around pgflow.
       "executor": "pgflow-queue",
       "runtime": "bun",
       "queue": "scw_reports_v1",
+      "shardCount": 4,
       "taskKey": "report.generate",
       "definitionVersion": "1",
       "replicas": 1,
@@ -69,7 +73,10 @@ unclean exit while the engine is finishing its database poll.
 The group is included in the compilation plan, object input digest, immutable
 release inventory and runtime activation. Existing CLI build/import/configure/
 activate operations remain the delivery path; new generic endpoints are not
-required. Old schema readers reject unknown fields instead of ignoring policy.
+required. `shardCount` defaults to `1` for existing releases. The deployment
+operator must provision every derived PGMQ queue before starting workers and
+reapply queue grants after provisioning. Old schema readers reject unknown
+fields instead of ignoring policy.
 
 ## Systemd backend
 
@@ -114,9 +121,9 @@ This is the residual host budget after API, database, maintenance and existing
 non-grouped services. It is not an application-controlled environment variable.
 Missing/invalid budgets block grouped allocations.
 
-The existing host-wide allocation transaction reserves maximum replicas,
-including engine AND domain connections. Concurrent allocations cannot both
-spend the last capacity. All unretired activation reservations count, even
+The existing host-wide allocation transaction reserves maximum replicas times
+shards, including engine AND domain connections. Concurrent allocations cannot
+both spend the last capacity. All unretired activation reservations count, even
 after a failed activation or process shutdown. This deliberately requires
 headroom for a replacement release until the prior activation is explicitly
 observed stopped/unrouted and retired through the existing retirement path.
@@ -125,8 +132,9 @@ Never delete metadata to recover capacity.
 ## Database preparation and admission
 
 Run the existing explicit pgflow installer for the target project's approved
-database/profile. Migration `supacloud_002` adds admission accounting after the
-existing pinned engine migrations. Startup performs no DDL.
+database/profile. Migrations `supacloud_002` and `supacloud_004` add admission
+accounting and the shard-aware bounded enqueue path after the existing pinned
+engine migrations. Startup performs no DDL.
 
 An operator provisions `supacloud_worker.admission_limits` with the exact
 approved group name and maximum outstanding count. Application roles get
@@ -210,12 +218,22 @@ in-flight task or database migration is deleted or rewritten automatically.
 
 ## Metrics and acceptance
 
+## Optional external broker
+
+The default backend remains PGMQ. Applications that need an independent broker
+can use the AMQP queue port exported by `@supacloud/elysia`; RabbitMQ is not a
+runtime dependency of SupaCloud. Use manual acknowledgements, publisher
+confirms in the outbox dispatcher, a bounded prefetch and a dead-letter policy.
+The same message envelope and idempotency contract apply. Do not dual-publish
+the same operation during migration without a durable operation key and
+reconciliation.
+
 Health includes active/completed/failed/timed-out attempt counters, RSS and
 bounded execution/queue-wait histograms with bucket ceilings
 10/50/100/500/1000/5000/30000/+Inf milliseconds. Queue-wait is message age and
 therefore includes previous attempts for retries. Health reflects the domain
 probe and adapter lifecycle, not a guarantee of successful processing of every
-future message. Collect engine queue/oldest-age and database lock/pool metrics
+future message. Collect each shard's engine queue/oldest-age and database lock/pool metrics
 from the existing monitoring stack; keep operation IDs out of metric labels.
 
 `acceptWorkerMixedLoad` provides paired, fixed-offered-rate API measurements
