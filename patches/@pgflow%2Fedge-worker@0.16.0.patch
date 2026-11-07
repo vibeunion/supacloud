@@ -1,0 +1,105 @@
+--- a/dist/core/workerConfigTypes.d.ts
++++ b/dist/core/workerConfigTypes.d.ts
+@@ -75,7 +75,7 @@
+      * In-database polling interval in milliseconds
+      * @default 200
+      */
+-    pollIntervalMs?: number;
++    pollIntervalMs?: number | ((messageCount?: number) => number);
+     /**
+      * Retry configuration for failed messages
+      */
+@@ -159,7 +159,7 @@
+      * In-database polling interval in milliseconds
+      * @default 100
+      */
+-    pollIntervalMs?: number;
++    pollIntervalMs?: number | ((messageCount?: number) => number);
+     /**
+      * Environment variables for context
+      * @internal
+--- a/dist/queue/ReadWithPollPoller.d.ts
++++ b/dist/queue/ReadWithPollPoller.d.ts
+@@ -5,7 +5,7 @@
+ export interface PollerConfig {
+     batchSize: number;
+     maxPollSeconds: number;
+-    pollIntervalMs: number;
++    pollIntervalMs: number | ((messageCount?: number) => number);
+     visibilityTimeout: number;
+ }
+ export declare class ReadWithPollPoller<TPayload extends Json> {
+--- a/dist/queue/ReadWithPollPoller.js
++++ b/dist/queue/ReadWithPollPoller.js
+@@ -18,7 +18,13 @@
+             ? this.config.batchSize
+             : Math.min(this.config.batchSize, limit);
+         this.logger.debug(`Polling queue '${this.queue.queueName}' with batch size ${batchSize}`);
+-        const messages = await this.queue.readWithPoll(batchSize, this.config.visibilityTimeout, this.config.maxPollSeconds, this.config.pollIntervalMs);
++        const pollIntervalMs = typeof this.config.pollIntervalMs === 'function'
++            ? this.config.pollIntervalMs(undefined)
++            : this.config.pollIntervalMs;
++        const messages = await this.queue.readWithPoll(batchSize, this.config.visibilityTimeout, this.config.maxPollSeconds, pollIntervalMs);
++        if (typeof this.config.pollIntervalMs === 'function') {
++            this.config.pollIntervalMs(messages.length);
++        }
+         this.logger.debug(`Received ${messages.length} messages from queue '${this.queue.queueName}'`);
+         return messages;
+     }
+--- a/dist/queue/createQueueWorker.js
++++ b/dist/queue/createQueueWorker.js
+@@ -113,7 +113,11 @@
+     const queries = new Queries(sql);
+     const lifecycle = new WorkerLifecycle(queries, queue, createLogger('WorkerLifecycle'));
+     // Create frozen worker config ONCE for reuse across all message executions
+-    const frozenWorkerConfig = createContextSafeConfig(resolvedConfig);
++    const frozenWorkerConfig = createContextSafeConfig({
++        ...resolvedConfig,
++        // Keep the public handler context numeric while the internal poller may use a provider.
++        pollIntervalMs: typeof resolvedConfig.pollIntervalMs === 'function' ? 200 : resolvedConfig.pollIntervalMs,
++    });
+     const executorFactory = (record, signal) => {
+         // Build context directly using platform resources
+         const context = {
+--- a/dist/flow/StepTaskPoller.d.ts
++++ b/dist/flow/StepTaskPoller.d.ts
+@@ -8,7 +8,7 @@
+     queueName: string;
+     visibilityTimeout?: number;
+     maxPollSeconds?: number;
+-    pollIntervalMs?: number;
++    pollIntervalMs?: number | ((messageCount?: number) => number);
+ }
+ /**
+  * A two-phase poller that first reads messages, then explicitly starts tasks
+--- a/dist/flow/StepTaskPoller.js
++++ b/dist/flow/StepTaskPoller.js
+@@ -29,7 +29,12 @@
+         this.logger.debug(`Two-phase polling for flow tasks with batch size ${batchSize}, maxPollSeconds: ${this.config.maxPollSeconds}, pollIntervalMs: ${this.config.pollIntervalMs}`);
+         try {
+             // Phase 1: Read messages from queue
+-            const messages = await this.adapter.readMessages(this.config.queueName, this.config.visibilityTimeout ?? 2, batchSize, this.config.maxPollSeconds, this.config.pollIntervalMs);
++            const pollIntervalMs = typeof this.config.pollIntervalMs === 'function'
++                ? this.config.pollIntervalMs(undefined)
++                : this.config.pollIntervalMs;
++            const messages = await this.adapter.readMessages(this.config.queueName, this.config.visibilityTimeout ?? 2, batchSize, this.config.maxPollSeconds, pollIntervalMs);
++            if (typeof this.config.pollIntervalMs === 'function')
++                this.config.pollIntervalMs(messages.length);
+             if (messages.length === 0) {
+                 this.logger.debug('No messages found in queue');
+                 return [];
+--- a/dist/flow/createFlowWorker.js
++++ b/dist/flow/createFlowWorker.js
+@@ -64,7 +64,11 @@
+     const queries = new Queries(sql);
+     const lifecycle = new FlowWorkerLifecycle(queries, flow, createLogger('FlowWorkerLifecycle'));
+     // Create frozen worker config ONCE for reuse across all task executions
+-    const frozenWorkerConfig = createContextSafeConfig(resolvedConfig);
++    const frozenWorkerConfig = createContextSafeConfig({
++        ...resolvedConfig,
++        // Keep the public handler context numeric while the internal poller may use a provider.
++        pollIntervalMs: typeof resolvedConfig.pollIntervalMs === 'function' ? 100 : resolvedConfig.pollIntervalMs,
++    });
+     // Create FlowInputProvider for lazy loading and caching flow input
+     const flowInputProvider = new FlowInputProvider(sql);
+     // Create StepTaskPoller with two-phase approach

@@ -154,6 +154,7 @@ const flow = new Flow<{ fileId: string }>({ slug: 'scw_report_v1' })
 const worker = createPgflowWorker(flow, {
   projectRef: 'project-a',
   connectionString: process.env.EDGE_WORKER_DB_URL!,
+  polling: { minIntervalMs: 25, maxIntervalMs: 1000, idleBackoffFactor: 1.5 },
 });
 await worker.start();
 ```
@@ -167,6 +168,13 @@ method still targets SupaCloud's linear workflow RPC.
 
 Version flow slugs when execution semantics change. Do not rewrite an active
 slug and assume existing runs are isolated from handler changes.
+
+Queue and native Flow workers use the same runtime adaptive polling policy:
+empty reads back off to `maxIntervalMs`, while a non-empty read immediately
+returns to `minIntervalMs`. The patched upstream poller keeps the handler
+context's `pollIntervalMs` numeric; only the internal read loop sees the
+provider. This avoids a fixed polling interval under horizontal load without
+changing the pgflow queue or retry contract.
 
 ## Process And Database Prerequisites
 

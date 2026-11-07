@@ -266,3 +266,45 @@ broker/platform rollout, least-privilege credentials, real cgroup readback,
 approved customer mixed-load targets, long-soak and operator recovery signoff.
 Implementation, local verification, merge, deployment and customer acceptance
 must remain separate states.
+
+## Target-host horizontal acceptance
+
+Run the executable acceptance from an approved Linux host after the release is
+deployed. It fails closed on macOS, missing target configuration, missing
+systemd units, a failed fixed-rate load gate, duplicate business effects, or a
+missing cgroup controller. The target service must expose these JSON endpoints:
+
+* `POST /acceptance/batch` returns `{ "operationId": "..." }` and starts a
+  bounded batch with an idempotency key derived from that operation ID.
+* `GET /acceptance/batch/{operationId}` returns `{ "completed": true }` only
+  after the durable batch is complete.
+* `GET /acceptance/effect/{operationId}` returns `{ "effectCount": 1 }` after
+  recovery. Any other count fails the run.
+* `GET /acceptance/request` returns `{ "ok": true }` for a normal API request.
+
+The crash and restart commands are explicit JSON argv arrays. The crash command
+must terminate the selected worker while the batch is in flight; the restart
+command must start the same immutable release. The script then waits for the
+batch, checks the single durable effect, and reads every derived unit's
+`systemctl show` properties plus `cpu.max`, `memory.max`, and
+`memory.swap.max`.
+
+Example for a 30-minute soak with two replicas and four shards:
+
+```sh
+WORKER_ACCEPTANCE_TARGET_URL=https://worker.example.test \
+WORKER_ACCEPTANCE_TOKEN="$TOKEN" \
+WORKER_ACCEPTANCE_UNITS_JSON='["supacloud-application-demo-a1-r1-s00.service","supacloud-application-demo-a1-r1-s01.service","supacloud-application-demo-a1-r1-s02.service","supacloud-application-demo-a1-r1-s03.service","supacloud-application-demo-a1-r2-s00.service","supacloud-application-demo-a1-r2-s01.service","supacloud-application-demo-a1-r2-s02.service","supacloud-application-demo-a1-r2-s03.service"]' \
+WORKER_ACCEPTANCE_REPLICAS=2 WORKER_ACCEPTANCE_SHARDS=4 \
+WORKER_ACCEPTANCE_DURATION_SECONDS=1800 WORKER_ACCEPTANCE_LONG_SOAK=true \
+WORKER_ACCEPTANCE_CRASH_COMMAND='["systemctl","kill","--kill-who=main","--signal=SIGKILL","supacloud-application-demo-a1-r1-s00.service"]' \
+WORKER_ACCEPTANCE_RESTART_COMMAND='["systemctl","restart","supacloud-application-demo-a1-r1-s00.service"]' \
+WORKER_ACCEPTANCE_CPU_LIMIT=0.5 WORKER_ACCEPTANCE_MEMORY_LIMIT_MIB=256 \
+bun run scripts/worker-horizontal-acceptance.ts
+```
+
+The command writes a versioned JSON receipt. A successful receipt is target
+capacity and recovery evidence for the exact candidate, hardware, offered
+rate, replica/shard topology and cgroup state recorded in that file. A local
+unit test of the helpers or a skipped PostgreSQL test is not a substitute for
+this target-host result.
