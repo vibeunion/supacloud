@@ -31,7 +31,7 @@ function validate(spec: WorkerLoadSpec) {
   const positive = [spec.durationMs, spec.requestsPerSecond, spec.maxInFlight, spec.requestTimeoutMs,
     spec.p95Ms, spec.p99Ms, spec.drainTimeoutMs];
   if (positive.some(value => !Number.isFinite(value) || value <= 0)
-    || !Number.isSafeInteger(spec.maxInFlight) || spec.maxInFlight > 10000 || spec.durationMs > 3600000
+    || !Number.isSafeInteger(spec.maxInFlight) || spec.maxInFlight > 10000 || spec.durationMs > 86_400_000
     || spec.requestsPerSecond > 100000 || Math.ceil(spec.durationMs * spec.requestsPerSecond / 1000) > 1_000_000
     || !Number.isFinite(spec.maxErrorRate) || spec.maxErrorRate < 0 || spec.maxErrorRate > 1
     || !Number.isFinite(spec.maxLatencyRegression) || spec.maxLatencyRegression < 0 || spec.p99Ms < spec.p95Ms) {

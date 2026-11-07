@@ -323,6 +323,10 @@ WORKER_ACCEPTANCE_CPU_LIMIT=0.5 WORKER_ACCEPTANCE_MEMORY_LIMIT_MIB=256 \
 bun run scripts/worker-horizontal-acceptance.ts
 ```
 
+`WORKER_ACCEPTANCE_DURATION_SECONDS` accepts up to 86,400 seconds. The load
+gate still caps total offered requests at one million, so a longer soak must
+use an arrival rate that stays within that bound.
+
 The command writes a versioned JSON receipt. A successful receipt is target
 capacity and recovery evidence for the exact candidate, hardware, offered
 rate, replica/shard topology and cgroup state recorded in that file. A local

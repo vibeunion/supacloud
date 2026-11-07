@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     const shards = integer("WORKER_ACCEPTANCE_SHARDS", 1, 1, 256);
     if (units.length !== replicas * shards) throw new Error("WORKER_ACCEPTANCE_UNIT_COUNT_INVALID");
     const spec: WorkerLoadSpec = {
-      durationMs: integer("WORKER_ACCEPTANCE_DURATION_SECONDS", 10, 1, 3600) * 1000,
+      durationMs: integer("WORKER_ACCEPTANCE_DURATION_SECONDS", 10, 1, 86_400) * 1000,
       requestsPerSecond: number("WORKER_ACCEPTANCE_REQUESTS_PER_SECOND", 10, 0.1, 100_000),
       maxInFlight: integer("WORKER_ACCEPTANCE_MAX_IN_FLIGHT", 32, 1, 10_000),
       requestTimeoutMs: integer("WORKER_ACCEPTANCE_REQUEST_TIMEOUT_MS", 5000, 100, 120_000),
