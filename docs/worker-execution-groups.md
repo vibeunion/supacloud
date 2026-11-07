@@ -142,7 +142,8 @@ Never delete metadata to recover capacity.
 ## Database preparation and admission
 
 Run the existing explicit pgflow installer for the target project's approved
-database/profile. Migrations `supacloud_002` and `supacloud_004` add admission
+database/profile. Migrations `supacloud_002`, `supacloud_004` and `supacloud_005`
+add admission
 accounting and the shard-aware bounded enqueue path after the existing pinned
 engine migrations. Startup performs no DDL.
 

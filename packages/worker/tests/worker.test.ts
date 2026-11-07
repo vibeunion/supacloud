@@ -88,11 +88,11 @@ describe("pgflow process adapter", () => {
   );
   test("installer is version locked, target bound and checksum protected", async () => {
     const migrations = await loadMigrations();
-    expect(migrations).toHaveLength(27);
-    expect(migrations.at(-3)?.version).toBe("supacloud_002");
-    expect(migrations.at(-2)?.version).toBe("supacloud_003");
-    expect(migrations.at(-2)?.version).toBe("supacloud_003");
-    expect(migrations.at(-1)?.version).toBe("supacloud_004");
+    expect(migrations).toHaveLength(28);
+    expect(migrations.at(-4)?.version).toBe("supacloud_002");
+    expect(migrations.at(-3)?.version).toBe("supacloud_003");
+    expect(migrations.at(-2)?.version).toBe("supacloud_004");
+    expect(migrations.at(-1)?.version).toBe("supacloud_005");
     const script = renderInstall(migrations, "fixture", "postgres");
     expect(script).toContain("pg_advisory_xact_lock");
     expect(script).toContain("PGFLOW_MIGRATION_CHECKSUM_MISMATCH");
@@ -119,7 +119,7 @@ describe("pgflow process adapter", () => {
     expect(bounded?.sql).toContain("WORKER_QUEUE_OWNERSHIP");
     expect(bounded?.sql).not.toContain("DROP TABLE");
     expect(bounded?.sql).not.toContain("admission_installation");
-    const sharded = migrations.find((migration) => migration.version === "supacloud_004");
+    const sharded = migrations.find((migration) => migration.version === "supacloud_005");
     expect(sharded?.sql).toContain("pgmq.metrics_all");
     expect(sharded?.sql).toContain("WORKER_QUEUE_FULL");
   });
