@@ -94,6 +94,27 @@ services:
     ports:
       - "${FERRETDB_PORT:-27017}:27017"
 
+  rabbitmq:
+    build:
+      context: ./rabbitmq
+    restart: unless-stopped
+    profiles:
+      - mqtt
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-supacloud}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "${RABBITMQ_MQTT_PORT:-1883}:1883"
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   management-api:
     build:
       context: ../..
@@ -150,6 +171,13 @@ services:
       VICTORIALOGS_URL: http://victorialogs:9428
       SUPACLOUD_PIPELINE_RUNTIME_MODE: unavailable
       SUPACLOUD_REALTIME_CONTAINER_ENV_FILE: /run/secrets/supacloud-realtime-container.env
+      MQTT_ENABLED: ${MQTT_ENABLED:-false}
+      MQTT_PROVIDER: ${MQTT_PROVIDER:-rabbitmq}
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-mqtt://rabbitmq:1883}
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-rabbitmq}
+      MQTT_BROKER_PORT: ${RABBITMQ_MQTT_PORT:-1883}
+      MQTT_BROKER_USERNAME: ${RABBITMQ_DEFAULT_USER:-supacloud}
+      MQTT_BROKER_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-}
     volumes:
       - tenant-config:/etc/supabase/tenants
       - pgredis-tenant-config:/etc/supabase/pgredis-tenants
@@ -298,6 +326,7 @@ volumes:
   caddy-config:
   victorialogs-data:
   log-collector-state:
+  rabbitmq-data:
 
 networks:
   pgredis-database:
