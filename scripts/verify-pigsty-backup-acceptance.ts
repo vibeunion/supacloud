@@ -10,7 +10,7 @@ function option(name: string): string | undefined {
 async function readinessDocument(): Promise<unknown> {
   const input = option("--input");
   if (input) return JSON.parse(await readFile(input, "utf8"));
-  const manager = process.env.SUPACLOUD_BACKUP_MANAGER
+  const manager = process.env["SUPACLOUD_BACKUP_MANAGER"]
     || join(import.meta.dir, "lib/backup_manager.sh");
   const child = Bun.spawn([manager, "verify"], { stdout: "pipe", stderr: "pipe" });
   const [exitCode, stdout, stderr] = await Promise.all([
@@ -24,11 +24,10 @@ async function readinessDocument(): Promise<unknown> {
 
 try {
   const readiness = parseBackupReadiness(await readinessDocument());
-  const maxAgeSeconds = Number(option("--max-age-seconds") || process.env.SUPACLOUD_BACKUP_MAX_AGE_SECONDS || 86400);
+  const maxAgeSeconds = Number(option("--max-age-seconds") || process.env["SUPACLOUD_BACKUP_MAX_AGE_SECONDS"] || 86400);
   const result = evaluateBackupReadiness(readiness, Date.now(), maxAgeSeconds);
   console.log(JSON.stringify({
     schema: "supacloud.pigsty-backup-acceptance.v1",
-    status: result.status,
     stanza: readiness.stanza,
     provider: readiness.provider,
     checks: {

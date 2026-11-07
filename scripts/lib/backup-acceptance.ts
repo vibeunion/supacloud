@@ -23,15 +23,15 @@ export function parseBackupReadiness(value: unknown): BackupReadiness {
     throw new Error("Invalid backup readiness document");
   }
   const row = value as Record<string, unknown>;
-  if (row.schema !== "supacloud.backup-readiness.v1" || row.provider !== "pigsty.pgbackrest"
-    || row.status !== "ready" || typeof row.stanza !== "string" || !row.stanza) {
+  if (row["schema"] !== "supacloud.backup-readiness.v1" || row["provider"] !== "pigsty.pgbackrest"
+    || row["status"] !== "ready" || typeof row["stanza"] !== "string" || !row["stanza"]) {
     throw new Error("Invalid backup readiness document");
   }
-  if (!Number.isInteger(row.repository_count) || Number(row.repository_count) < 1
-    || !Number.isInteger(row.completed_backup_count) || Number(row.completed_backup_count) < 0) {
+  if (!Number.isInteger(row["repository_count"]) || Number(row["repository_count"]) < 1
+    || !Number.isInteger(row["completed_backup_count"]) || Number(row["completed_backup_count"]) < 0) {
     throw new Error("Invalid backup readiness document");
   }
-  const latest = row.latest_completed_backup;
+  const latest = row["latest_completed_backup"];
   if (latest !== null && (typeof latest !== "object" || Array.isArray(latest))) {
     throw new Error("Invalid backup readiness document");
   }
