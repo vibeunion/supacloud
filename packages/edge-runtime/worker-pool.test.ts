@@ -2423,7 +2423,7 @@ describe("WorkerPool cooperative retirement", () => {
     }
   });
 
-  test("triggers the age budget once for a worker that cannot drain promptly", async () => {
+  test("force terminates a retired worker that cannot drain promptly", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-age-"));
     const startedPath = join(projectRoot, "started.txt");
     const functionPath = join(projectRoot, "slow.ts");
@@ -2473,11 +2473,10 @@ describe("WorkerPool cooperative retirement", () => {
       const [worker] = (pool as unknown as { activeWorkers: Set<{ emit: (name: string, error: Error) => void }> }).activeWorkers;
       worker.emit("error", new Error("simulated worker failure"));
       expect(await discardedResponseStatus(responsePromise)).toBe(500);
-      await waitForMetric(pool, "retirement_budget_exceeded", 1);
-      expect(exceeded).toEqual(["age"]);
-      await Bun.sleep(50);
-      expect(exceeded).toEqual(["age"]);
-      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      await waitForMetric(pool, "total_forced_retirement_terminations", 1);
+      expect(exceeded).toEqual([]);
+      expect(pool.snapshotMetrics("retirement")["retirement_retired_workers"]).toBe(0);
+      expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

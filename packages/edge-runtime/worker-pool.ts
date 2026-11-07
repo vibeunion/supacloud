@@ -486,6 +486,7 @@ export class WorkerPool {
   private totalPreheatSucceeded = 0;
   private totalPreheatMs = 0;
   private totalWorkerRetirements = 0;
+  private totalForcedRetirementTerminations = 0;
   private totalNaturalWorkerExits = 0;
   private workerGeneration = 0;
   private totalGenerationRotations = 0;
@@ -1357,12 +1358,31 @@ export class WorkerPool {
     const retiredAt = Date.now();
     const ageTimer = setTimeout(() => {
       if (!this.retiredWorkers.has(worker)) return;
-      this.triggerRetirementFailSafe("age");
+      // A tenant worker can keep the event loop alive after it has cooperated
+      // with retirement (for example, a leaked timer or native handle). Do
+      // not take down the whole runtime because one retired worker missed the
+      // grace period; terminate that worker and keep serving other tenants.
+      console.warn("[Pool] Retired worker exceeded its grace period; terminating worker", {
+        retiredWorkers: this.retiredWorkers.size,
+        oldestRetirementAgeMs: this.oldestRetirementAgeMs(),
+      });
+      this.forceTerminateRetiredWorker(worker);
     }, this.retirementBudget.maxRetirementAgeMs);
     this.retiredWorkers.set(worker, { retiredAt, ageTimer });
     if (this.retiredWorkers.size > this.retirementBudget.maxRetiredWorkers) {
       this.triggerRetirementFailSafe("count");
     }
+  }
+
+  private forceTerminateRetiredWorker(worker: Worker): void {
+    const retired = this.retiredWorkers.get(worker);
+    if (!retired) return;
+    clearTimeout(retired.ageTimer);
+    this.retiredWorkers.delete(worker);
+    this.totalForcedRetirementTerminations++;
+    void worker.terminate().catch((error) => {
+      console.warn("[Pool] Failed to terminate retired worker", error);
+    });
   }
 
   private onWorkerExit(worker: Worker) {
@@ -2074,6 +2094,7 @@ export class WorkerPool {
       [`${prefix}_worker_recycle_required`]: this.workerRecycleRequired ? 1 : 0,
       [`${prefix}_retired_workers`]: this.retiredWorkers.size,
       [`${prefix}_total_worker_retirements`]: this.totalWorkerRetirements,
+      [`${prefix}_total_forced_retirement_terminations`]: this.totalForcedRetirementTerminations,
       [`${prefix}_total_natural_worker_exits`]: this.totalNaturalWorkerExits,
       [`${prefix}_worker_generation`]: this.workerGeneration,
       [`${prefix}_total_generation_rotations`]: this.totalGenerationRotations,
