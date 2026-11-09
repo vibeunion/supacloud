@@ -3,7 +3,7 @@ import { dirname, join, relative, sep } from "node:path";
 import type { ApplicationGraph, AspectRefNode, Diagnostic, ModuleNode, ProviderNode } from "./types";
 import { inspectRouteContracts } from "./route-contracts";
 import { featureTransitionForRoute } from "./feature";
-import { createSemanticSnapshot, createSemanticLens, type SemanticLens } from "./semantic";
+import { createSemanticSnapshot, type SemanticSnapshot } from "./semantic";
 
 export interface ExecutionPlan {
   module: string;
@@ -47,10 +47,6 @@ export interface ContextPack {
     nodes: Array<{ id: string; kind: string; hash: string }>;
   };
   graphql?: ApplicationGraph["graphql"];
-}
-
-export interface SemanticContextLens extends SemanticLens {
-  context?: ContextPack;
 }
 
 export interface DoctorResult {
@@ -100,7 +96,7 @@ export function explainGraph(graph: ApplicationGraph, subject: string): string {
  * Extracts the smallest graph neighborhood that is useful for an agent
  * editing one feature: the subject module, its imports, and its dependents.
  */
-export function createContextPack(graph: ApplicationGraph, subject: string): ContextPack {
+export function createContextPack(graph: ApplicationGraph, subject: string, snapshot?: SemanticSnapshot): ContextPack {
   const subjectModule = resolveContextModule(graph, subject);
 
   const byName = new Map(graph.modules.map((module) => [module.name, module]));
@@ -168,7 +164,7 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     }
   }
 
-  const semantic = createSemanticSnapshot(graph);
+  const semantic = snapshot ?? createSemanticSnapshot(graph);
   const selectedModuleNames = new Set(modules.map(module => module.name));
   return {
     version: 1,
@@ -207,12 +203,6 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
         .map(item => ({ id: item.id, kind: item.kind, hash: item.hash })),
     },
   };
-}
-
-/** Compose the semantic lens with the existing bounded ContextPack projection. */
-export function createSemanticContextLens(graph: ApplicationGraph, subject?: string): SemanticContextLens {
-  const lens = createSemanticLens(graph, subject);
-  return subject === undefined ? lens : { ...lens, context: createContextPack(graph, subject) };
 }
 
 /** Context packs describe structure only; never expose source expressions or provider values. */

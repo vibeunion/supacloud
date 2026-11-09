@@ -170,6 +170,7 @@ export interface AppToolArguments {
     strict?: boolean;
     format?: "text" | "json";
     target?: string;
+    detail?: boolean;
     fix?: string;
     from_doctor?: string;
     fix_index?: number;
@@ -727,9 +728,9 @@ async function runLens(args: AppToolArguments): Promise<ToolResult> {
     const { root, sourceDir, outDir, result } = await projectCompileConfig(args);
     const graph = { ...result.graph, diagnostics: result.diagnostics };
     const target = args.target?.trim();
-    const context = target ? createContextPack(graph, target) : undefined;
-    const inventory = await createProjectSemanticSnapshot(result.graph, root, outDir);
-    const lens = createSemanticLens(graph, context?.subject, { sourceHashes: inventory.sourceHashes });
+    const snapshot = await createProjectSemanticSnapshot(result.graph, root, outDir);
+    const lens = createSemanticLens(graph, target, { snapshot, detail: args.detail === true });
+    const context = target ? createContextPack(graph, lens.subject ?? target, snapshot) : undefined;
     const output = {
         version: 1,
         root,
@@ -1957,6 +1958,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),
             database_url: optional(Type.String(), "[dev] Explicit loopback integration URL; watch/once only inspect its shape"),
             target: optional(Type.String(), "[explain/context/lens/verify-plan] Provider class name / token name / command name / job name / module name"),
+            detail: optional(Type.Boolean(), "[lens] Include the per-node value payload (larger output)"),
             events: optional(Type.String(), "[context] Project-relative execution metadata JSON or generated JSON-lines file"),
             request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),

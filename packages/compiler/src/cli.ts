@@ -78,7 +78,7 @@ Usage:
   supacloud-compiler graph   [rootDir] [options]
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <name> [rootDir] [options]
-  supacloud-compiler lens [rootDir] [--target <name>] [options]
+  supacloud-compiler lens [rootDir] [--target <name>] [--detail] [options]
   supacloud-compiler semantic-diff <base.json> <current.json> [--json]
   supacloud-compiler preview-fix --production <dir> --preview <dir> --preview-id <uuid> --project-ref <ref> --application-id <id> --environment-id <id> --property transaction|idempotency --value required|none [--json]
   supacloud-compiler dev-context [rootDir] [options]
@@ -139,6 +139,7 @@ Options:
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
   --json              Print machine-readable output for compile/check/graph/explain/context/lens/semantic-diff/doctor/migration-assess/plan/build-delivery/openapi-export/openapi-diff
+  --detail            lens: include the per-node value payload (larger output)
   --events <file>     Read a metadata JSON envelope or starter execution JSON lines (requires --request-id and --json)
   --request-id <id>   Select one opaque request ID from --events; context remains read-only
   --delivery-manifest <file>  Correlate context using an immutable build, not current source
@@ -276,6 +277,7 @@ async function run(): Promise<void> {
   let bindingsFile: string | undefined;
   let bindingProfile: RuntimeBindingProfile | undefined;
   let json: boolean = false;
+  let detail = false;
   let dryRun = true;
   let fromVersion: string | undefined;
   let toVersion: string | undefined;
@@ -388,6 +390,9 @@ async function run(): Promise<void> {
       bindingProfile = value;
     } else if (arg === "--json") {
       json = true;
+    } else if (arg === "--detail") {
+      if (command !== "lens") throw new Error("--detail is only supported by lens");
+      detail = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
@@ -829,8 +834,8 @@ async function run(): Promise<void> {
   } else if (command === "lens") {
     try {
       const result = await checkProject(compileDefaults);
-      const inventory = await createProjectSemanticSnapshot(result.graph, compileDefaults.rootDir, compileDefaults.outDir);
-      const lens = createSemanticLens({ ...result.graph, diagnostics: result.diagnostics }, query, { sourceHashes: inventory.sourceHashes });
+      const snapshot = await createProjectSemanticSnapshot(result.graph, compileDefaults.rootDir, compileDefaults.outDir);
+      const lens = createSemanticLens({ ...result.graph, diagnostics: result.diagnostics }, query, { snapshot, detail });
       const output = { ...lens, diagnostics: result.diagnostics };
       if (json) console.log(JSON.stringify(output, null, 2));
       else {

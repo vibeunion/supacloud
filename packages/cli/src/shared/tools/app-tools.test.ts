@@ -487,8 +487,11 @@ describe("app tools", () => {
         expect(lens.snapshot.semanticHash).toMatch(/^[a-f0-9]{64}$/);
         expect(lens.snapshot.sourceHash).toMatch(/^[a-f0-9]{64}$/);
         expect(lens.nodes.some((node: { kind: string }) => node.kind === "command")).toBe(true);
+        expect(lens.nodes.every((node: { value?: unknown }) => node.value === undefined)).toBe(true);
         const scoped = await app({ action: "lens", root, target: "case", format: "json" });
         expect(JSON.parse(scoped.content[0].text).subject).toBe("case");
+        const detailed = await app({ action: "lens", root, format: "json", detail: true });
+        expect(JSON.parse(detailed.content[0].text).nodes.some((node: { value?: unknown }) => node.value !== undefined)).toBe(true);
     }, 30_000);
 
     test("doctor reports actionable checks and passes after a clean compile", async () => {

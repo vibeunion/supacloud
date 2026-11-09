@@ -226,7 +226,7 @@
     {
       "name": "createContextPack",
       "kind": "value",
-      "signature": "export declare function createContextPack(graph: ApplicationGraph, subject: string): ContextPack;"
+      "signature": "export declare function createContextPack(graph: ApplicationGraph, subject: string, snapshot?: SemanticSnapshot): ContextPack;"
     },
     {
       "name": "createDeliveryPlan",
@@ -266,7 +266,7 @@
     {
       "name": "createProjectSemanticSnapshot",
       "kind": "value",
-      "signature": "export declare function createProjectSemanticSnapshot(graph: ApplicationGraph, rootDir: string, outDir?: string, delivery?: unknown): Promise<SemanticSnapshot>;"
+      "signature": "export declare function createProjectSemanticSnapshot(graph: ApplicationGraph, rootDir: string, outDir?: string, delivery?: SemanticDeliveryInput): Promise<SemanticSnapshot>;"
     },
     {
       "name": "createReleaseEvidence",
@@ -279,14 +279,9 @@
       "signature": "export declare function createRoleSnapshotReport(roles: readonly {\n    role: string;\n    path: string;\n    source: string;\n}[]): GraphqlRoleSnapshotReport;"
     },
     {
-      "name": "createSemanticContextLens",
-      "kind": "value",
-      "signature": "export declare function createSemanticContextLens(graph: ApplicationGraph, subject?: string): SemanticContextLens;"
-    },
-    {
       "name": "createSemanticLens",
       "kind": "value",
-      "signature": "export declare function createSemanticLens(graph: ApplicationGraph, subject?: string, options?: SemanticSnapshotOptions): SemanticLens;"
+      "signature": "export declare function createSemanticLens(graph: ApplicationGraph, subject?: string, options?: SemanticLensOptions): SemanticLens;"
     },
     {
       "name": "createSemanticSnapshot",
@@ -1196,17 +1191,17 @@
     {
       "name": "SemanticChange",
       "kind": "type",
-      "signature": "export interface SemanticChange {\n    type: \"added\" | \"removed\" | \"changed\";\n    category: SemanticNodeKind | \"generation\";\n    id: string;\n    name: string;\n    beforeHash?: string;\n    afterHash?: string;\n    risk: \"breaking\" | \"behavioral\" | \"informational\";\n    reasons: string[];\n}"
+      "signature": "export interface SemanticChange {\n    type: \"added\" | \"removed\" | \"changed\";\n    category: SemanticNodeKind;\n    id: string;\n    name: string;\n    beforeHash?: string;\n    afterHash?: string;\n    risk: \"breaking\" | \"behavioral\" | \"informational\";\n    reasons: string[];\n}"
     },
     {
       "name": "SemanticConflict",
       "kind": "type",
-      "signature": "export interface SemanticConflict {\n    code: \"command-policy-conflict\" | \"route-contract-conflict\" | \"effect-policy-conflict\" | \"migration-fingerprint-conflict\" | \"generated-artifacts-stale\";\n    severity: \"error\" | \"warn\";\n    category: \"permission\" | \"route-contract\" | \"effect\" | \"migration\" | \"generation\";\n    message: string;\n    nodes: string[];\n    suggestion: string;\n}"
+      "signature": "export interface SemanticConflict {\n    code: \"command-policy-conflict\" | \"route-contract-conflict\" | \"effect-policy-conflict\" | \"migration-fingerprint-conflict\";\n    severity: \"error\";\n    category: \"permission\" | \"route-contract\" | \"effect\" | \"migration\";\n    message: string;\n    nodes: string[];\n    suggestion: string;\n}"
     },
     {
-      "name": "SemanticContextLens",
+      "name": "SemanticDeliveryInput",
       "kind": "type",
-      "signature": "export interface SemanticContextLens extends SemanticLens {\n    context?: ContextPack;\n}"
+      "signature": "export interface SemanticDeliveryInput {\n    migrations?: readonly unknown[];\n    bundle?: {\n        migrations?: readonly unknown[];\n    };\n}"
     },
     {
       "name": "SemanticDiff",
@@ -1219,9 +1214,14 @@
       "signature": "export interface SemanticLens {\n    schema: \"supacloud.semantic-lens.v1\";\n    subject?: string;\n    snapshot: SemanticSnapshot;\n    nodes: SemanticNode[];\n    conflicts: SemanticConflict[];\n    readOnly: true;\n}"
     },
     {
+      "name": "SemanticLensOptions",
+      "kind": "type",
+      "signature": "export interface SemanticLensOptions extends SemanticSnapshotOptions {\n    snapshot?: SemanticSnapshot;\n    detail?: boolean;\n}"
+    },
+    {
       "name": "SemanticNode",
       "kind": "type",
-      "signature": "export interface SemanticNode {\n    id: string;\n    kind: SemanticNodeKind;\n    module?: string;\n    name: string;\n    hash: string;\n    sourceHash?: string;\n    dependencies: string[];\n    value: unknown;\n}"
+      "signature": "export interface SemanticNode {\n    id: string;\n    kind: SemanticNodeKind;\n    module?: string;\n    name: string;\n    hash: string;\n    sourceHash?: string;\n    dependencies: string[];\n    value?: unknown;\n}"
     },
     {
       "name": "SemanticNodeKind",
@@ -1236,7 +1236,7 @@
     {
       "name": "SemanticSnapshotOptions",
       "kind": "type",
-      "signature": "export interface SemanticSnapshotOptions {\n    sourceHashes?: Record<string, string>;\n    delivery?: unknown;\n}"
+      "signature": "export interface SemanticSnapshotOptions {\n    sourceHashes?: Record<string, string>;\n    delivery?: SemanticDeliveryInput;\n}"
     },
     {
       "name": "serializeOpenApiJson",

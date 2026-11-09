@@ -94,11 +94,11 @@ export {
   formatGraph,
   exportGraphDot,
   exportGraphMermaid,
-  createSemanticContextLens,
 } from "./inspect";
 export { createSemanticSnapshot, createProjectSemanticSnapshot, diffSemanticSnapshots, diagnoseSemanticConflicts, createSemanticLens, parseSemanticSnapshot } from "./semantic";
 export type {
-  SemanticChange, SemanticConflict, SemanticDiff, SemanticLens, SemanticNode, SemanticNodeKind,
+  SemanticChange, SemanticConflict, SemanticDeliveryInput, SemanticDiff, SemanticLens, SemanticLensOptions,
+  SemanticNode, SemanticNodeKind,
   SemanticSnapshot, SemanticSnapshotOptions,
 } from "./semantic";
 export { createIncrementalCompiler } from "./incremental";
@@ -134,7 +134,6 @@ export type {
   OpenApiObject,
 } from "./openapi-tools";
 export type { ContextPack, DoctorResult, ExecutionPlan } from "./inspect";
-export type { SemanticContextLens } from "./inspect";
 export type {
   MigrateFileResult,
   MigrateProjectOptions,
