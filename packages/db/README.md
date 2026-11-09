@@ -64,7 +64,10 @@ approval never overrides history errors. The tool does not execute migrations.
 ## Durable Commands
 
 `createPostgresCommandStore(database)` implements the protocol's storage ports.
-Use `createBunCommandDatabase` from `@supacloud/db/bun` for a native Bun SQL pool.
+Use `createBunCommandHost` from `@supacloud/db/bun` for the default Bun SQL host.
+It exposes the transaction database to the application while keeping pool
+ownership and shutdown in the host. Use `createBunCommandDatabase` when a host
+already owns the pool and only needs the transaction adapter.
 This package contains transaction/receipt SQL, Workflow binding, row validation
 and input redaction. It does not own a recovery polling queue.
 

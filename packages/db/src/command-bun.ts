@@ -1,6 +1,11 @@
 import type { SQL } from "bun";
 import type { CommandDatabase } from "./command-adapter";
 
+export interface BunCommandHost {
+  readonly database: CommandDatabase;
+  readonly close: () => Promise<void>;
+}
+
 /** The SQL pool owns one connection from BEGIN through COMMIT/ROLLBACK. */
 export function createBunCommandDatabase(sql: SQL): CommandDatabase {
   return {
@@ -16,6 +21,19 @@ export function createBunCommandDatabase(sql: SQL): CommandDatabase {
       return result.value;
     },
   };
+}
+
+/**
+ * Compose the default Bun SQL host boundary for an application runtime.
+ *
+ * The host owns the pool and its shutdown; application modules receive only
+ * `database`, so connection details never cross the application boundary.
+ */
+export function createBunCommandHost(sql: SQL): BunCommandHost {
+  return Object.freeze({
+    database: createBunCommandDatabase(sql),
+    close: () => sql.close(),
+  });
 }
 
 /** The driver owns a read-only transaction and enforces its statement timeout. */
