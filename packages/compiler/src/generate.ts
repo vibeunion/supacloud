@@ -632,26 +632,32 @@ export function renderApplication(
           },
         };
       }));
-      const commands = module.commands.map((command) => ({
-        name: command.name,
-        className: command.className,
-        executor: "commandExecutor" as const,
-        adapter: command.rpc ?? null,
-        permission: command.permission ?? null,
-        audit: command.audit ?? null,
-        transaction: command.transaction,
-        idempotency: command.idempotency,
-        branches: command.branches ?? [],
-        branchesFallback: command.branchesFallback ?? "reject",
-        ...(command.tenantScope === undefined ? {} : { tenantScope: command.tenantScope }),
-        requiredCapabilities: {
-          permission: true,
-          audit: command.branches?.length ? command.branches.some((branch) => Boolean(branch.audit)) : Boolean(command.audit),
-          idempotency: command.branches?.length ? command.branches.some((branch) => branch.idempotency === "required") : command.idempotency === "required",
-          transaction: command.branches?.length ? command.branches.some((branch) => branch.transaction === "required") : command.transaction === "required",
-        },
-        aspects: (command.aspects ?? []).map((aspect) => aspect.name),
-      })).sort((left, right) => left.name.localeCompare(right.name));
+      const commands = module.commands.map((command) => {
+        const fallbackCommand = command.branchesFallback === "command";
+        return {
+          name: command.name,
+          className: command.className,
+          executor: "commandExecutor" as const,
+          adapter: command.rpc ?? null,
+          permission: command.permission ?? null,
+          audit: command.audit ?? null,
+          transaction: command.transaction,
+          idempotency: command.idempotency,
+          branches: command.branches ?? [],
+          branchesFallback: command.branchesFallback ?? "reject",
+          ...(command.tenantScope === undefined ? {} : { tenantScope: command.tenantScope }),
+          requiredCapabilities: {
+            permission: true,
+            audit: (Boolean(command.audit) && fallbackCommand)
+              || (command.branches?.length ? command.branches.some((branch) => Boolean(branch.audit)) : Boolean(command.audit)),
+            idempotency: (command.idempotency === "required" && fallbackCommand)
+              || (command.branches?.length ? command.branches.some((branch) => branch.idempotency === "required") : command.idempotency === "required"),
+            transaction: (command.transaction === "required" && fallbackCommand)
+              || (command.branches?.length ? command.branches.some((branch) => branch.transaction === "required") : command.transaction === "required"),
+          },
+          aspects: (command.aspects ?? []).map((aspect) => aspect.name),
+        };
+      }).sort((left, right) => left.name.localeCompare(right.name));
       const jobs = (module.jobs ?? []).map((job) => ({
         name: job.name,
         className: job.className,

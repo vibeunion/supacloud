@@ -106,6 +106,35 @@ test("executor failures before authorization remain visible in the command plan"
   expect(pack.executionPlans[0]?.stages).toContain("commandExecutor");
 });
 
+test("fallback command governance stages correlate as a complete alternative path", () => {
+  const source = graph();
+  source.modules[0]!.commands = [{
+    name: "review.approve", className: "ApproveReview", transaction: "required", idempotency: "required",
+    audit: "review.approved", branchesFallback: "command",
+    branches: [{ when: 'kind === "external"', rpc: "approve_external", transaction: "none", idempotency: "required", audit: "review.external.approved", boundary: "external" }],
+  }];
+  const snapshot = parseExecutionSnapshot(JSON.parse(serializedExecutionSnapshot(source)));
+  expect(snapshot.plans.find(plan => plan.kind === "command")?.stagePaths).toEqual([
+    ["commandExecutor", "authorize", "rpc:approve_external", "handler"],
+    ["commandExecutor", "authorize", "idempotency", "transaction", "handler", "audit"],
+  ]);
+  const stages = ["commandExecutor", "authorize", "idempotency", "transaction", "handler", "audit"];
+  const pack = createExecutionContextPack(source, "review", envelope(stages.map(stage => ({
+    ...event, stage, phase: "succeeded" as const,
+  }))), "trace-one");
+  const attempt = pack.timeline.find(entry => entry.kind === "command")?.attempts[0];
+  expect(pack.omitted.unmatchedEvents).toBe(0);
+  expect(attempt).toMatchObject({ complete: true, failed: false, missingStages: [] });
+
+  const failedAudit = createExecutionContextPack(source, "review", envelope([
+    ...stages.slice(0, -1).map(stage => ({ ...event, stage, phase: "succeeded" as const })),
+    { ...event, stage: "audit", phase: "failed" as const },
+  ]), "trace-one");
+  const failedAttempt = failedAudit.timeline.find(entry => entry.kind === "command")?.attempts[0];
+  expect(failedAudit.omitted.unmatchedEvents).toBe(0);
+  expect(failedAttempt).toMatchObject({ complete: false, failed: true, missingStages: [] });
+});
+
 test("unsupported fields, malformed metadata and absent traces fail without echoing their contents", () => {
   for (const observations of [
     { ...envelope(), credentials: "PRIVATE_INPUT" },
