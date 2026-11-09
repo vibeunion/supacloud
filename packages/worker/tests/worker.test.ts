@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { EdgeWorker, Json } from "@pgflow/edge-worker";
 import { Flow } from "@pgflow/dsl";
 import { createPgflowQueueWorker, createPgflowWorker } from "../src/index.js";
+import { requireDrainedWorkerGroup } from "../src/admission.js";
 import { createQueueHandler, type TaskContext } from "../src/queue-handler.js";
 import { createLifecycle } from "../src/lifecycle.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -485,6 +486,19 @@ describe("pgflow process adapter", () => {
       (input) => ({ reportId: input.reportId }),
     );
     expect(createPgflowWorker(flow, options).state).toBe("idle");
+  });
+
+  test("shard drain checks fail closed when a queue metric is missing", async () => {
+    let queryText = "";
+    const transaction = {
+      query: async (text: string) => {
+        queryText = text;
+        return [{ accepting: false, outstanding: 0, held: 0, queued: null }];
+      },
+    };
+    await expect(requireDrainedWorkerGroup(transaction, "fixture", "reports", "scw_reports_v1", 2))
+      .rejects.toThrow("WORKER_GROUP_NOT_DRAINED");
+    expect(queryText).not.toContain("COALESCE");
   });
 
   test("aborted I/O preserves upstream abort semantics during policy and execution", async () => {

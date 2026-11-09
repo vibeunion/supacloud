@@ -56,7 +56,7 @@ export async function requireDrainedWorkerGroup(
   const result = await transaction.query(`SELECT l.accepting,l.outstanding,
     (SELECT count(*)::integer FROM supacloud_worker.admission_tokens t
       WHERE t.group_name=l.group_name AND NOT t.released) AS held,
-    COALESCE(${queueClauses},0)::bigint AS queued
+    (${queueClauses})::bigint AS queued
     FROM supacloud_worker.admission_limits l
     WHERE l.group_name=$2 AND EXISTS(SELECT FROM supacloud_worker.installation WHERE singleton AND project_ref=$1)
     FOR UPDATE OF l`, [projectRef, group, ...queues]);
