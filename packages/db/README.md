@@ -23,6 +23,12 @@ with `supacloud-model generate`, and fail stale builds with `supacloud-model che
 explicit `SUPACLOUD_MODEL_DATABASE_URL` and never apply migrations. Use the
 existing SupaCloud deployment ledger after reviewing candidates.
 
+`pull` also adopts a database that has no maintained model yet: it introspects
+through a temporary datasource-only model, so a migrated project does not need a
+hand-written `zenstack/schema.zmodel` first. The result is still only a review
+candidate; `diff` and `generate` remain unavailable until the reviewed file
+(with the policy plugin and `@@allow` rules) is in place.
+
 Construct `createZenStackDatabase(schema, pool, {})` from `@supacloud/db/zenstack`
 inside `src/host`. Bind a verified identity using `forIdentity(identity)`; inject
 its read-only `models` facade into queries and its `commandStore` into the command

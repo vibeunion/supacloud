@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileModel, modelProcess } from "./model";
+import { BOOTSTRAP_MODEL_SCHEMA, compileModel, modelProcess } from "./model";
 
 export async function modelMain(argv: string[]): Promise<void> {
   const [command, ...flags] = argv;
@@ -31,21 +31,38 @@ export async function modelMain(argv: string[]): Promise<void> {
   if (candidate === output || candidate.startsWith(output + sep)
     || !candidate.endsWith(command === "diff" ? ".sql" : ".zmodel")) throw new Error("Select a candidate file outside generated contracts with the correct extension");
   // Validate the datasource even for pull so an embedded URL cannot override explicit selection.
-  if (command === "diff") await compileModel(schema, output, true);
-  else {
-    const { mkdtemp, rm } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const validation = await mkdtemp(resolve(tmpdir(), "supacloud-model-pull-"));
-    try { await compileModel(schema, validation); } finally { await rm(validation, { recursive: true, force: true }); }
-  }
-  const operation = modelProcess(command, schema, output, candidate);
-  const binary = resolve("node_modules/.bin", operation.binary);
-  if (!existsSync(binary)) throw new Error(`Install the pinned ${operation.binary} tooling in the application`);
-  await mkdir(dirname(candidate), { recursive: true });
-  const child = Bun.spawn([binary, ...operation.args], {
-    env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (await child.exited !== 0) throw new Error("Model candidate generation failed; nothing was applied");
+  const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const validation = await mkdtemp(resolve(tmpdir(), "supacloud-model-pull-"));
+  try {
+    // A project that owns a database but no maintained model can still adopt it:
+    // introspect through a temporary datasource-only model and never write it down.
+    let source = schema;
+    let bootstrap = false;
+    if (command === "diff") {
+      if (!existsSync(schema)) throw new Error("Maintain zenstack/schema.zmodel before diff; adopt an existing database with supacloud-model pull first");
+      await compileModel(schema, output, true);
+    } else if (existsSync(schema)) await compileModel(schema, join(validation, "generated"));
+    else {
+      bootstrap = true;
+      source = join(validation, "schema.zmodel");
+      await writeFile(source, BOOTSTRAP_MODEL_SCHEMA);
+      await compileModel(source, join(validation, "generated"));
+    }
+    const operation = modelProcess(command, source, output, candidate);
+    const binary = resolve("node_modules/.bin", operation.binary);
+    if (!existsSync(binary)) throw new Error(`Install the pinned ${operation.binary} tooling in the application`);
+    await mkdir(dirname(candidate), { recursive: true });
+    const child = Bun.spawn([binary, ...operation.args], {
+      env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (await child.exited !== 0) throw new Error("Model candidate generation failed; nothing was applied");
+    if (!bootstrap) return;
+    // Prove the introspected candidate is a compilable model before recommending it.
+    await compileModel(candidate, join(validation, "candidate"));
+    console.log(`Wrote a review candidate to ${candidate} because ${schema} does not exist yet.`);
+    console.log(`Review it, add the policy plugin and @@allow rules, move it to ${schema}, then run supacloud-model generate.`);
+  } finally { await rm(validation, { recursive: true, force: true }); }
 }
 
 if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {

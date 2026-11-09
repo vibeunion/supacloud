@@ -4,6 +4,13 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+/**
+ * Datasource-only ZModel used to introspect a live database before this project
+ * maintains a model. It is never written into the project: `pull` keeps it in a
+ * temporary directory so introspection cannot replace authored files.
+ */
+export const BOOTSTRAP_MODEL_SCHEMA = `datasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}\n`;
+
 /** Offline model compilation: no plugin execution, no database or migration ledger writes. */
 export async function compileModel(schemaFile: string, output: string, check = false): Promise<string[]> {
   const document = await loadDocument(resolve(schemaFile));

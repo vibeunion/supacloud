@@ -2,6 +2,12 @@
 > The SQL-first procedure below is only for explicitly selected legacy SQL projects.
 > Never run both structure generators against one migration history.
 
+A project that owns a database but no model yet starts with the ZModel path, not
+this one: `supacloud-model pull --candidate <file>` introspects through a
+temporary datasource-only model, and the reviewed candidate is promoted to
+`zenstack/schema.zmodel` before `generate`/`diff` are allowed. Use the SQL-first
+commands here only when declarative SQL already owns the structure.
+
 # Database Adoption Workflow
 
 ## Scope

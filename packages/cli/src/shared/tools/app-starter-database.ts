@@ -183,6 +183,15 @@ zen migrate deploy or db push against a managed production database.
 \`bun run db:pull -- --candidate output/database-audit/schema.zmodel\` writes a
 review candidate only; it never overwrites the maintained model. Add policies
 before adopting introspection output. Keep one migration history and preserve RLS.
+
+Adopting a database that has no model yet starts with the same command: pull
+introspects through a temporary datasource-only model, so no hand-written ZModel
+is required. Review the candidate, add the policy plugin and @@allow rules, move
+it to zenstack/schema.zmodel, then run \`bun run db:generate\`. Until that file
+exists, \`db:diff\` and \`db:generate\` fail closed instead of building from an
+unreviewed introspection result. Keep the host wiring unchanged: one
+createZenStackDatabase composition root supplies read-only models and the
+transactional command store.
 `;
 
 export function starterDatabaseFiles(): Record<string, string> {

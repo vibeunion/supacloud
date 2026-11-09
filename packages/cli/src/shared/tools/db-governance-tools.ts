@@ -215,6 +215,7 @@ export function buildDatabaseAiContext(
                 "Edit the selected maintained source, not a generated snapshot.",
                 ...(sqlFirst ? ["Author structure in supabase/schemas SQL; derive query models, never run a second migration generator."] : []),
                 "Keep RPC, RLS, trigger and grant behavior in explicit SQL sources.",
+                "Adopt an existing database from a generated candidate: pull a model candidate, review policies, then promote it to the maintained source; never build from unreviewed introspection.",
                 "Create a new forward migration; never rewrite an applied migration.",
                 "Run lint, focused behavior tests and catalog reconciliation after edits.",
             ],
