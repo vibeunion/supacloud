@@ -4,6 +4,15 @@ import type { SchemaDef, GetModels } from "@zenstackhq/schema";
 import { CommandError, type CommandStore, type CommandRetentionStore } from "@supacloud/contracts";
 import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
 import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding } from "./command-adapter";
+import {
+  type CallFunctionOptions,
+  type CallFunctionPolicy,
+  type CallFunctionVolatility,
+  type JsonArgument,
+  type ModelCommandTransaction as ModelCommandTransactionPort,
+  type ReadFunctionArg,
+  type ReadFunctionRow,
+} from "./model-contract";
 import { isSafeDefinerSearchPath } from "./search-path";
 
 const reads = ["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"] as const;
@@ -12,91 +21,10 @@ const typing = { typing: { exactQueryArgs: true } } as const;
 type Delegate<S extends SchemaDef, M extends GetModels<S>, K extends string> = Pick<ModelOperations<S, M, typeof typing>, Extract<K, keyof ModelOperations<S, M, typeof typing>>>;
 export type ModelClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof operations[number]> };
 export type ModelReadClient<S extends SchemaDef> = { readonly [M in GetModels<S> as Uncapitalize<M>]: Delegate<S, M, typeof reads[number]> };
+/** Backend compatibility alias. New consumers should import the neutral port. */
+export type ModelCommandTransaction<S extends SchemaDef> = ModelCommandTransactionPort<ModelClient<S>>;
 export type ReadFunctionScalar = string | number | boolean | null;
-export type ReadFunctionArg = ReadFunctionScalar | readonly ReadFunctionScalar[];
-export type JsonArgument = string | number | boolean | null | readonly JsonArgument[] | { readonly [key: string]: JsonArgument };
-export type CallFunctionVolatility = "stable" | "immutable" | "volatile";
-export interface CallFunctionOptions {
-  /** Assert the catalog volatility instead of accepting any reviewed function. */
-  readonly volatility?: CallFunctionVolatility;
-}
-export interface ReadFunctionRow {
-  /** Schema-qualified ordinary or partitioned table name. */
-  readonly table: string;
-  /** Single-column primary key name. */
-  readonly key: string;
-  /** Scalar primary-key value. */
-  readonly value: ReadFunctionScalar;
-}
-export interface CallFunctionPolicy {
-  /** Schemas whose SECURITY DEFINER functions may be called. Defaults to `public`. */
-  readonly schemas?: readonly string[];
-  /** Trusted function owners. Defaults to the current database role. */
-  readonly owners?: readonly string[];
-}
-export interface ModelCommandTransaction<S extends SchemaDef> {
-  readonly db: ModelClient<S>;
-  /**
-   * Serialize competing writes inside the command transaction.
-   *
-   * Keys are folded into 64-bit advisory locks (`pg_advisory_xact_lock`) on the
-   * command connection, so they are released when the transaction commits or
-   * rolls back and never leak to another command. Keys are deduplicated and
-   * acquired in sorted order, therefore two commands that take the same key set
-   * in a different order cannot deadlock each other.
-   *
-   * Use it when a decision depends on an aggregate that another transaction may
-   * insert into concurrently (write skew): read-then-check-then-write is only
-   * safe when every writer of the same key set holds the lock.
-   */
-  readonly lock: (keys: readonly string[]) => Promise<void>;
-  /**
-   * Call an existing schema-qualified read-only database function inside the
-   * command transaction.
-   *
-   * Models cover data. Some decisions also need a definition that already lives
-   * in SQL and must not be duplicated in TypeScript — an authorization
-   * predicate, a DTO projection, a status derivation with joins the model layer
-   * would have to re-derive. Reimplementing those in application code creates a
-   * second source of truth that silently drifts, so the platform offers a
-   * narrow bridge instead of raw SQL.
-   *
-   * The name must be schema-qualified and `pg_proc`-verified on every call:
-   * the function exists, is not an aggregate/window/procedure, and is
-   * `STABLE` or `IMMUTABLE`. A `VOLATILE` function may write or run DDL and is
-   * rejected. System schemas (`pg_*`, `information_schema`) are rejected too.
-   * Arguments are only positional scalars, bound as parameters.
-   *
-   * The call runs on the command connection, so it observes uncommitted writes
-   * of the same transaction and participates in its snapshot.
-   */
-  readonly readFunction: (name: string, args?: readonly ReadFunctionArg[]) => Promise<unknown>;
-  /**
-   * Read a composite row through a STABLE/IMMUTABLE function that takes the
-   * table row type, addressed by that table's single-column primary key.
-   *
-   * The table, key and function are catalog-verified on every call. The row is
-   * selected inside the command transaction, so the caller's identity and RLS
-   * context apply. Zero rows and multiple rows fail closed; the first row is
-   * never selected implicitly.
-   */
-  readonly readFunctionByRow: (name: string, row: ReadFunctionRow) => Promise<unknown>;
-  /**
-   * Call a reviewed schema-qualified database function inside the command
-   * transaction, including VOLATILE functions that write domain state.
-   *
-   * The catalog is checked on every call: ordinary function, exact arity,
-   * `SECURITY DEFINER`, fixed `search_path`, executable by the current role,
-   * trusted owner and an allowed schema. Arguments are scalars or JSON values;
-   * they are always bound as parameters. The function result must be exactly
-   * one row. A single-column result returns that value, otherwise the row is
-   * returned as an object. SQLSTATE and transaction scope are preserved.
-   *
-   * This is not raw SQL: there is no statement text, identifier interpolation or
-   * dynamic command surface.
-   */
-  readonly callFunction: (name: string, args?: readonly JsonArgument[], options?: CallFunctionOptions) => Promise<unknown>;
-}
+export type { CallFunctionOptions, CallFunctionPolicy, CallFunctionVolatility, JsonArgument, ReadFunctionArg, ReadFunctionRow } from "./model-contract";
 
 const functionName = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/;
 const qualifiedObject = /^[A-Za-z_][A-Za-z0-9_]{0,62}\.[A-Za-z_][A-Za-z0-9_]{0,62}$/;

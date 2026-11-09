@@ -46,6 +46,10 @@
     "./model": {
       "types": "./dist/model.d.ts",
       "import": "./dist/model.js"
+    },
+    "./model-contract": {
+      "types": "./dist/model-contract.d.ts",
+      "import": "./dist/model-contract.js"
     }
   },
   "files": [
@@ -59,7 +63,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/typescript.ts src/command-bun.ts src/model.ts src/model-cli.ts src/zenstack.ts src/bun-dialect.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --root src --outdir dist --target node --external bun --external @supacloud/contracts --external @zenstackhq/orm --external @zenstackhq/schema --external @zenstackhq/plugin-policy --external kysely --external libpg-query --external typescript --external 'typescript/*' --external @zenstackhq/language --external @zenstackhq/sdk",
+    "build:js": "bun build src/index.ts src/typescript.ts src/command-bun.ts src/model.ts src/model-cli.ts src/model-contract.ts src/zenstack.ts src/bun-dialect.ts src/sql-analysis.ts src/sql-impact-cli.ts src/source-contracts.ts src/source-contracts-cli.ts --root src --outdir dist --target node --external bun --external @supacloud/contracts --external @zenstackhq/orm --external @zenstackhq/schema --external @zenstackhq/plugin-policy --external kysely --external libpg-query --external typescript --external 'typescript/*' --external @zenstackhq/language --external @zenstackhq/sdk",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",

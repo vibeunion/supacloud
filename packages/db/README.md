@@ -38,6 +38,10 @@ raw SQL, plugin controls, identity replacement or nested transactions. The calle
 owns `pool.close()`. The internal dialect uses upstream Kysely's PostgreSQL
 compiler; cursor streaming is explicitly unsupported.
 
+`@supacloud/db/model-contract` contains the backend-neutral model and command ports.
+The ZenStack export is the current trusted-host adapter; it is not the application
+architecture or a requirement for every SupaCloud project.
+
 `defineReadQuery` and `createBunReadDatabase` remain available for reviewed native
 platform reads, with result decoders, read-only transactions and timeouts. Keep
 least-privilege roles and RLS for all direct PostgREST/RPC access. Model policies
