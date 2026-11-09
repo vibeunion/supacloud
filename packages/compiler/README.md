@@ -24,7 +24,6 @@ export default {
     mode: "check",
     projectRoot: ".",
     moduleFile: "db/modules.ts",
-    databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
     schemas: ["public"],
   },
 };
@@ -32,8 +31,11 @@ export default {
 
 Keep `check` in committed project configuration so local builds and CI remain
 hermetic. Run `enforce` only in an explicit release/deployment gate where the
-platform injects a read-only PostgreSQL connection, or run the separate
-`supacloud db module_check` command through the same controlled environment.
+platform provides the Management API project context, or run the separate
+`supacloud db module_check` command through the same controlled environment. In
+`enforce` mode the compiler prefers the platform-owned Management API context and
+does not require an application-specific database URL; an explicit URL remains
+available only for local integration tests.
 Application code and committed configuration must not contain a production
 connection URL.
 

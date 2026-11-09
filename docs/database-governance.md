@@ -38,7 +38,6 @@ databaseGovernance: {
   mode: "check",
   projectRoot: ".",
   moduleFile: "db/modules.ts",
-  databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
   schemas: ["public"],
   rpcBoundary: {
     registry: "db/rpc-registry.json",
@@ -48,10 +47,11 @@ databaseGovernance: {
 }
 ```
 
-发布环境由平台或 CI 注入只读连接，并执行 `enforce`；也可以使用
-`supacloud db module_check` 做同一套 Catalog 对账。业务仓库不应提交生产连接
-URL，也不应要求每个开发者手工准备生产数据库凭据。`enforce` 失败即阻止生成，
-不会自动生成契约、迁移或修复数据库。
+`enforce` 默认由 SupaCloud Management API 使用当前项目 context 执行 Catalog 对账，
+数据库连接凭据只留在 Management API 内部，不进入应用进程。业务仓库不应提交
+数据库连接 URL，也不应要求每个开发者手工准备数据库凭据。平台内部集成测试仍可
+通过编程方式传入 loopback `databaseUrl`；这不是项目配置项。`enforce` 失败即阻止
+生成，不会自动生成契约、迁移或修复数据库。
 配置 `rpcBoundary` 后，`check` 还会把 `commandCapabilities.rpc` 的每个 capability
 与 registry/catalog 对账；只有明确登记的历史 RPC 才能作为 `legacy-rpc` 通过。
 
@@ -122,8 +122,8 @@ const catalog = await readCatalog(executor, ["public"]);   // executor: 注入�
 const report = reconcileModule(caseDb, catalog);
 ```
 
-托管项目不需要把 tenant 数据库 URL 交给开发者：Management API 可以用内部
-凭据执行同一套对账，只返回诊断结果：
+托管项目不需要把 tenant 数据库 URL 交给开发者：Management API 使用平台内部
+凭据执行同一套对账，只返回诊断结果。需要显式调用时仍可使用：
 
 ```bash
 supacloud db module_check --module_file db/modules.ts --remote --ref <project-ref>
