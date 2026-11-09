@@ -58,6 +58,12 @@ function messageIdentity(value: unknown): string {
     return value;
   throw new WorkerTaskError("WORKER_TASK_INVALID");
 }
+
+function validOrderingKey(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 200
+    && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
 function object(value: Json): value is Record<string, Json> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -82,8 +88,7 @@ export function createQueueHandler<T>(
       (Object.hasOwn(payload, "shard") && (!Number.isSafeInteger(payload["shard"]) || payload["shard"] !== (binding.shard ?? 0))) ||
       typeof payload["idempotencyKey"] !== "string" ||
       !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload["idempotencyKey"]) ||
-      (Object.hasOwn(payload, "orderingKey") && (typeof payload["orderingKey"] !== "string"
-        || !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload["orderingKey"]))) ||
+      (Object.hasOwn(payload, "orderingKey") && !validOrderingKey(payload["orderingKey"])) ||
       (Object.hasOwn(payload, "jobKey") && (() => {
         try { validateJobKey(payload["jobKey"]); return false; } catch { return true; }
       })()) ||
