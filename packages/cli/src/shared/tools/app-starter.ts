@@ -718,6 +718,8 @@ queue; configure delivery.runtime only after that target is selected. Then run
 \`bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js build\`.
 Inject DATABASE_URL, APP_TENANT_ID, SUPACLOUD_PROJECT_ID, SUPAUTH_ISSUER,
 SUPAUTH_AUDIENCE, SUPAUTH_CLIENT_ID and SUPAUTH_JWKS_URL at runtime.
+The generated host calls \`createBunSqlHost\`, so application modules receive the
+platform-owned Bun SQL pool and never read or parse DATABASE_URL.
 Identity uses the configured remote JWKS verifier, never a synthetic local key.
 PORT/HOST and shutdown are owned by the delivery runtime; the host closes its pool.
 Do not include runtime secrets in the source tree or build inputs.
@@ -838,6 +840,8 @@ delivery.build.workerApplications: [{ target: "jobs", source: "delivery-worker.t
 It uses the existing Workflow SDK and the compiled attachment Job, not a second
 retry engine. Inject SUPACLOUD_URL, SUPACLOUD_SERVICE_ROLE_KEY,
 SUPACLOUD_PROJECT_ID, APP_TENANT_ID, REVIEW_WORKER_ID and DATABASE_URL.
+The generated worker also uses \`createBunSqlHost\`; connection parsing remains
+inside the trusted host package.
 Alternatively use DATABASE_SOCKET_PATH with DATABASE_NAME and DATABASE_USER,
 but never alongside DATABASE_URL. Secrets belong only in runtime configuration.
 REVIEW_QUEUE_OWNERSHIP must be exclusive-review-attachments: the Workflow claim

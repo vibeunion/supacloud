@@ -222,9 +222,9 @@ test("PostgreSQL host never falls back to demo identity or unbound business stor
 });
 `;
 
-export const STARTER_REVIEW_DELIVERY_HOST = `import { SQL } from "bun";
+export const STARTER_REVIEW_DELIVERY_HOST = `
 import { createClient } from "@supabase/supabase-js";
-import { createBunCommandDatabase } from "@supacloud/db/bun";
+import { createBunCommandDatabase, createBunSqlHost } from "@supacloud/db/bun";
 import { createApplication, type CompiledModule } from "@supacloud/elysia";
 import { createReviewPostgresAdapters } from "./host/review-postgres";
 import { createReviewAttachmentAdapters } from "./host/review-attachments";
@@ -238,24 +238,8 @@ function required(name: string): string {
   return value;
 }
 
-function databaseConnection(): SQL.Options {
-  const socket = process.env["DATABASE_SOCKET_PATH"];
-  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
-  if (socket) {
-    return { adapter: "postgres", path: socket, database: required("DATABASE_NAME"), username: required("DATABASE_USER") };
-  }
-  const url = new URL(required("DATABASE_URL"));
-  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("Invalid database URL");
-  return {
-    adapter: "postgres", url: url.href, hostname: url.hostname.replace(/^\\[|\\]$/g, ""), port: Number(url.port || 5432),
-    username: decodeURIComponent(url.username), password: decodeURIComponent(url.password),
-    database: decodeURIComponent(url.pathname.slice(1)),
-  };
-}
-
 export async function createDeliveryApplication(modules: CompiledModule[], lifecycle: { signal: AbortSignal }) {
   lifecycle.signal.throwIfAborted();
-  const connection = databaseConnection();
   const attachments = process.env["REVIEW_ATTACHMENTS"];
   if (attachments !== undefined && attachments !== "enabled") throw new Error("Invalid attachment configuration");
   const settings = {
@@ -266,9 +250,10 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
       jwksUrl: required("SUPAUTH_JWKS_URL"),
     },
   };
-  const pool = new SQL({ ...connection, max: 12, connectionTimeout: 5 });
+  const host = createBunSqlHost({ max: 12, connectionTimeout: 5 });
+  const pool = host.pool;
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= pool.close({ timeout: 5 });
+  const close = () => closing ??= host.close();
   let stage: "attachments" | "uploads" | "postgres" | "application" = "attachments";
   try {
     const database = createBunCommandDatabase(pool);
