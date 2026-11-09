@@ -94,6 +94,12 @@ export type {
 } from './model-contract.js';
 
 export {
+  checkRpcBoundary,
+  type RpcBoundaryCheckOptions,
+  type RpcBoundaryReport,
+} from './rpc-boundary.js';
+
+export {
   createRpcClient,
   defineRpcContract,
   RpcContractError,

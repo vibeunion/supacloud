@@ -19,6 +19,10 @@ export interface DatabaseContractsOptions {
   role: string;
   /** Role-scoped pg_graphql snapshot exported by graphql-schema. Omit when GraphQL is unused. */
   graphql?: GraphqlOptions;
+  /** Registry emitted by application or database code generation. Tracked for contract freshness. */
+  rpcRegistry?: string;
+  /** Generated or exported RPC catalog. Tracked for contract freshness. */
+  rpcCatalog?: string;
   /** Ordered complete migration history. */
   migrations: readonly string[];
 }
@@ -33,7 +37,7 @@ function importPath(out: string, path: string): string {
 
 export function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Expected database contracts configuration");
-  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "role", "graphql", "migrations"];
+  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "role", "graphql", "rpcRegistry", "rpcCatalog", "migrations"];
   if (Object.keys(value).some((name) => !allowed.includes(name))) throw new TypeError("Unknown database contracts option");
   const field = (name: string) => {
     const result: unknown = Reflect.get(value, name);
@@ -46,6 +50,8 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
   };
   const postgrestTypes = optionalPath("postgrestTypes");
   const modelSchema = optionalPath("modelSchema");
+  const rpcRegistry = optionalPath("rpcRegistry");
+  const rpcCatalog = optionalPath("rpcCatalog");
   const graphqlPresent = Object.hasOwn(value, "graphql");
   if (!postgrestTypes && !modelSchema && !graphqlPresent) {
     throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
@@ -66,6 +72,8 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
     ...(modelSchema ? { modelSchema: resolve(directory, modelSchema) } : {}),
     role: field("role"),
     ...(graphql ? { graphql } : {}),
+    ...(rpcRegistry ? { rpcRegistry: resolve(directory, rpcRegistry) } : {}),
+    ...(rpcCatalog ? { rpcCatalog: resolve(directory, rpcCatalog) } : {}),
     migrations: migrations.map((file) => resolve(directory, file)),
   };
 }
@@ -115,6 +123,8 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
     }
   }
   if (options.graphql) await addInput(resolve(rootDir, options.graphql.schema));
+  if (options.rpcRegistry) await addInput(options.rpcRegistry);
+  if (options.rpcCatalog) await addInput(options.rpcCatalog);
   if (new Set(options.migrations.map((path) => resolve(rootDir, path))).size !== options.migrations.length) {
     throw new Error("Duplicate migration in database contracts configuration");
   }

@@ -48,7 +48,9 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...validateEffectPolicies(graph, options.effect),
     ...validateJobPolicies(graph),
   ];
-  const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
+  const databaseDiagnostics = await checkDatabaseGovernance(
+    options.rootDir, options.databaseGovernance, Object.keys(options.commandCapabilities?.rpc ?? {}),
+  );
   diagnostics.push(...databaseDiagnostics);
   if (databaseDiagnostics.length) return { diagnostics, graph, written: [] };
   if (options.strict) {
@@ -123,7 +125,9 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     ...validateEffectPolicies(graph, options.effect),
     ...validateJobPolicies(graph),
   ];
-  const databaseDiagnostics = await checkDatabaseGovernance(options.rootDir, options.databaseGovernance);
+  const databaseDiagnostics = await checkDatabaseGovernance(
+    options.rootDir, options.databaseGovernance, Object.keys(options.commandCapabilities?.rpc ?? {}),
+  );
   diagnostics.push(...databaseDiagnostics);
   if (databaseDiagnostics.length) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };

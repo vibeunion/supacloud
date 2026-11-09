@@ -8,7 +8,7 @@
 
 SupaCloud 对应用公开的稳定边界是 **Database Contract**，不是某个 ORM 或模型编译器。
 Database Contract 包含模型关系、行策略、受治理的 SQL/RLS/grants/views、PostgREST
-契约，以及供 Command 使用的身份绑定读端口和事务模型端口。
+契约、RPC registry/catalog，以及供 Command 使用的身份绑定读端口和事务模型端口。
 
 当前实现后端仍是 ZModel + ZenStack。它负责模型推导、策略查询约束和生成类型；
 `@supacloud/db/zenstack` 是可信 host 内部的 adapter。应用业务代码不得依赖 Prisma
@@ -40,6 +40,10 @@ Command 决定“能否执行业务动作”，模型 policy 决定“能访问�
    并通过唯一的正向 migration 交付。
 5. 应用只依赖 `@supacloud/db/model-contract` 的 port；具体 adapter 可以继续使用
    `@supacloud/db/zenstack`，直到替换后端真正可用。
+
+`@supacloud/compiler` 的 `database-contracts` 可以同时记录 `modelSchema`、PostgREST
+snapshot、RPC registry、RPC catalog 和 migration order。`--check` 是离线新鲜度门禁；
+发布门禁再执行模块 Catalog 对账、RLS/grants 检查和实际行为测试。
 
 ## 验收
 

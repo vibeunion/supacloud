@@ -6,20 +6,29 @@ import type { DatabaseGovernanceOptions, Diagnostic } from "./types";
 export function assertDatabaseGovernance(value: unknown): asserts value is DatabaseGovernanceOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid databaseGovernance configuration.");
   const entry = value as Record<string, unknown>;
+  const rpcBoundary = entry["rpcBoundary"];
+  const validRpcBoundary = rpcBoundary === undefined || (
+    rpcBoundary !== null && typeof rpcBoundary === "object" && !Array.isArray(rpcBoundary)
+    && Object.keys(rpcBoundary).every(key => ["registry", "catalog", "legacy"].includes(key))
+    && Object.values(rpcBoundary as Record<string, unknown>).length > 0
+    && Object.values(rpcBoundary as Record<string, unknown>).every(path =>
+      typeof path === "string" && path.trim() !== "" && !path.includes("\\") && !path.startsWith("/"))
+  );
   if ((entry["mode"] !== "off" && entry["mode"] !== "check" && entry["mode"] !== "enforce")
-    || Object.keys(entry).some(key => !["mode", "projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv", "schemas"].includes(key))
+    || Object.keys(entry).some(key => !["mode", "projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv", "schemas", "rpcBoundary"].includes(key))
     || ["projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv"].some(key =>
       entry[key] !== undefined && (typeof entry[key] !== "string" || !entry[key].trim()))
     || (entry["databaseUrlEnv"] !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(entry["databaseUrlEnv"])))
     || (entry["schemas"] !== undefined && (!Array.isArray(entry["schemas"]) || !entry["schemas"].length
-      || !entry["schemas"].every(schema => typeof schema === "string" && schema.trim())))) {
+      || !entry["schemas"].every(schema => typeof schema === "string" && schema.trim())))
+    || !validRpcBoundary) {
     throw new Error("Invalid databaseGovernance mode, paths, connection or schemas.");
   }
 }
 
 /** A fresh, bounded process avoids stale module imports during incremental compilation. */
 export async function checkDatabaseGovernance(
-  rootDir: string, value: DatabaseGovernanceOptions | undefined,
+  rootDir: string, value: DatabaseGovernanceOptions | undefined, rpcCapabilities: readonly string[] = [],
 ): Promise<Diagnostic[]> {
   if (value === undefined) return [];
   const failure = (): Diagnostic[] => [{
@@ -39,7 +48,7 @@ export async function checkDatabaseGovernance(
         ["--no-env-file", worker], { timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 },
         (error, stdout) => error ? reject(error) : accept(stdout));
       child.stdin?.on("error", reject);
-      child.stdin?.end(JSON.stringify(options));
+      child.stdin?.end(JSON.stringify({ options, rpcCapabilities }));
     });
     const report: unknown = JSON.parse(output);
     if (!report || typeof report !== "object" || !("diagnostics" in report) || !Array.isArray(report.diagnostics)) return failure();

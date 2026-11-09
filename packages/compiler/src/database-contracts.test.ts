@@ -15,17 +15,22 @@ test("single entry generates native read types, decoders and source/migration dr
       "db/schema.ts": `import { id } from "./columns"; export const orders = { id }; throw new Error("must not execute");`,
       "graphql/schema.graphql": `type Order { id: ID! } type Query { orders: [Order!]! }`,
       "src/orders.graphql": `query Orders { orders { id } }`,
+      "db/rpc-registry.json": `[{"name":"create_order"}]`,
+      "db/rpc-catalog.json": `{"definitions":[{"name":"public.create_order"}]}`,
       "migrations/001.sql": `CREATE TABLE public.orders(id uuid PRIMARY KEY);`,
     });
     const options = parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated",
       postgrestTypes: "database.types.ts", modelSchema: "db/schema.ts",
       graphql: { schema: "graphql/schema.graphql", documents: ["src/*.graphql"] },
+      rpcRegistry: "db/rpc-registry.json", rpcCatalog: "db/rpc-catalog.json",
       migrations: ["migrations/001.sql"],
     }, root);
     const result = await generateDatabaseContracts(options);
     expect(result.written).toContain("database.ts");
     expect(result.manifest.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(Object.hasOwn(result.manifest.inputs, "db/rpc-registry.json")).toBe(true);
+    expect(Object.hasOwn(result.manifest.inputs, "db/rpc-catalog.json")).toBe(true);
     const barrel = await readFile(join(root, "generated/database.ts"), "utf8");
     expect(barrel).toContain('export type { Database } from "../database.types"');
     expect(barrel).toContain('QueryData, QueryResult, QueryError');

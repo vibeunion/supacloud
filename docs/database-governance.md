@@ -40,6 +40,11 @@ databaseGovernance: {
   moduleFile: "db/modules.ts",
   databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
   schemas: ["public"],
+  rpcBoundary: {
+    registry: "db/rpc-registry.json",
+    catalog: "db/contracts/rpc-catalog.json",
+    legacy: "db/legacy-rpc.json",
+  },
 }
 ```
 
@@ -47,6 +52,8 @@ databaseGovernance: {
 `supacloud db module_check` 做同一套 Catalog 对账。业务仓库不应提交生产连接
 URL，也不应要求每个开发者手工准备生产数据库凭据。`enforce` 失败即阻止生成，
 不会自动生成契约、迁移或修复数据库。
+配置 `rpcBoundary` 后，`check` 还会把 `commandCapabilities.rpc` 的每个 capability
+与 registry/catalog 对账；只有明确登记的历史 RPC 才能作为 `legacy-rpc` 通过。
 
 ## 目录约定
 
