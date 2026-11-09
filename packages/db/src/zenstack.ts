@@ -4,6 +4,7 @@ import type { SchemaDef, GetModels } from "@zenstackhq/schema";
 import { CommandError, type CommandStore, type CommandRetentionStore } from "@supacloud/contracts";
 import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
 import { createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding } from "./command-adapter";
+import { isSafeDefinerSearchPath } from "./search-path";
 
 const reads = ["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"] as const;
 const operations = [...reads, "create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert", "delete", "deleteMany"] as const;
@@ -339,15 +340,7 @@ export function createZenStackDatabase<S extends SchemaDef>(schema: S, pool: Bun
                     }
                   }
                   const config = signature["config"];
-                  const searchPaths = Array.isArray(config)
-                    ? config.filter((item): item is string => typeof item === "string" && item.startsWith("search_path="))
-                    : [];
-                  if (searchPaths.length !== 1) throw new CommandError("COMMAND_INPUT_INVALID");
-                  const searchPath = searchPaths[0]!.slice("search_path=".length).trim();
-                  const searchSchemas = searchPath.split(",").map((item) => item.trim()).filter(Boolean);
-                  if (searchSchemas.length === 0 || searchSchemas.some((item) => item === "$user" || item === "\"$user\"")) {
-                    throw new CommandError("COMMAND_INPUT_INVALID");
-                  }
+                  if (!isSafeDefinerSearchPath(config)) throw new CommandError("COMMAND_INPUT_INVALID");
                   const placeholders = args.map((arg, index) => {
                     const type = argTypes[index];
                     if (typeof type !== "string" || !sqlType.test(type) || argArrays[index] === true) {
