@@ -14,6 +14,20 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.119.0](https://github.com/vibeunion/supacloud/compare/cli-v0.118.3...cli-v0.119.0) (2026-11-09)
+
+
+### Features
+
+* **db:** bootstrap model adoption without a maintained ZModel ([#2501](https://github.com/vibeunion/supacloud/issues/2501)) ([1f60c94](https://github.com/vibeunion/supacloud/commit/1f60c94852fb38a64d2b732860682504aeb1c920))
+* **db:** introduce backend-neutral database contract ([#2506](https://github.com/vibeunion/supacloud/issues/2506)) ([a48247b](https://github.com/vibeunion/supacloud/commit/a48247b2f2424ec0da1e3094d25cb5d299be3435))
+* **db:** provide platform-owned Bun SQL host ([#2505](https://github.com/vibeunion/supacloud/issues/2505)) ([f1edbfc](https://github.com/vibeunion/supacloud/commit/f1edbfc07338e408d8c1ed9e5146c6236603dd27))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2493](https://github.com/vibeunion/supacloud/issues/2493)) ([1f8c201](https://github.com/vibeunion/supacloud/commit/1f8c2015ab7e7cf91833b847fa40f74015d1efbd))
+
 ## [0.118.3](https://github.com/vibeunion/supacloud/compare/cli-v0.118.2...cli-v0.118.3) (2026-11-07)
 
 

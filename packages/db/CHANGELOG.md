@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/db-v0.23.1...db-v0.24.0) (2026-11-09)
+
+
+### Features
+
+* **db:** bootstrap model adoption without a maintained ZModel ([#2501](https://github.com/vibeunion/supacloud/issues/2501)) ([1f60c94](https://github.com/vibeunion/supacloud/commit/1f60c94852fb38a64d2b732860682504aeb1c920))
+* **db:** introduce backend-neutral database contract ([#2506](https://github.com/vibeunion/supacloud/issues/2506)) ([a48247b](https://github.com/vibeunion/supacloud/commit/a48247b2f2424ec0da1e3094d25cb5d299be3435))
+* **db:** provide platform-owned Bun SQL host ([#2505](https://github.com/vibeunion/supacloud/issues/2505)) ([f1edbfc](https://github.com/vibeunion/supacloud/commit/f1edbfc07338e408d8c1ed9e5146c6236603dd27))
+
+
+### Bug Fixes
+
+* **db:** make missing model adoption errors explicit ([#2507](https://github.com/vibeunion/supacloud/issues/2507)) ([b67f99e](https://github.com/vibeunion/supacloud/commit/b67f99ed2db5e95e7503195ffa87b3cbca873a16))
+* **db:** preserve JSON contracts and add governed function calls ([#2497](https://github.com/vibeunion/supacloud/issues/2497)) ([5800626](https://github.com/vibeunion/supacloud/commit/580062627732b81ab1f35d1faaefbc24eabda057))
+
 ## [0.23.1](https://github.com/vibeunion/supacloud/compare/db-v0.23.0...db-v0.23.1) (2026-11-07)
 
 

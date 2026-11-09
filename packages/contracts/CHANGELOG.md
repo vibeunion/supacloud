@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.16.0...contracts-v0.16.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **db:** preserve JSON contracts and add governed function calls ([#2497](https://github.com/vibeunion/supacloud/issues/2497)) ([5800626](https://github.com/vibeunion/supacloud/commit/580062627732b81ab1f35d1faaefbc24eabda057))
+
 ## [0.16.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.15.2...contracts-v0.16.0) (2026-11-05)
 
 
