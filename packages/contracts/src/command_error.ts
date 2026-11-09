@@ -50,8 +50,8 @@ export class CommandError extends Error {
 
   get metadata(): ErrorMetadata { return commandFailureMetadata(this.code); }
 
-  constructor(readonly code: CommandErrorCode) {
-    super(code);
+  constructor(readonly code: CommandErrorCode, options?: { readonly cause?: unknown }) {
+    super(code, options);
     this.name = "CommandError";
     Object.defineProperty(this, commandErrorBrand, { value: true });
   }

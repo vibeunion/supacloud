@@ -16,4 +16,5 @@ model Note {
     id String @id()
     owner String
     value Int
+    steps Json @default("[]")
 }

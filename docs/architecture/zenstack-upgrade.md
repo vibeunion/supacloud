@@ -101,8 +101,9 @@ capabilities fail after the transaction ends. Exact model query argument typing
 is enabled; validation and capability switches cannot be overridden. The host
 owns `pool.close()`.
 
-`session.transaction` exposes exactly three capabilities: `db` (model
-operations), `lock(keys)` and `readFunction(name, args)`. `lock` takes transaction-scoped PostgreSQL advisory locks
+`session.transaction` exposes exactly five capabilities: `db` (model
+operations), `lock(keys)`, `readFunction(name, args)`, `readFunctionByRow(name, row)`
+and `callFunction(name, args, options)`. `lock` takes transaction-scoped PostgreSQL advisory locks
 (`pg_advisory_xact_lock`) on the command connection, deduplicates the keys and
 acquires them in sorted order, so it is released by commit or rollback, never
 survives into another command, and cannot deadlock against a command that takes
@@ -132,6 +133,40 @@ This is not raw SQL: there is no statement text, no `SELECT` list and no
 definition may this command consult", and the answer is auditable in the
 database. The function authors remain trusted code, exactly as they were under
 the RPC-first boundary.
+
+`readFunctionByRow` is the separate composite-row bridge. It takes a
+schema-qualified table, its single-column primary key and a scalar key value,
+verifies in `pg_proc`/`pg_class`/`pg_index` that the STABLE/IMMUTABLE function
+accepts exactly that table row type and that the key really is the primary key,
+then calls `function(row)` from one `WHERE key = $1` row read inside the command
+transaction. Zero rows, multiple rows, non-primary keys, mismatched row types
+and volatile functions fail closed; the first row is never selected implicitly.
+RLS and the captured identity therefore apply to the row read.
+
+`callFunction` is the write-chain bridge. It accepts scalar and JSON arguments,
+verifies the schema-qualified ordinary function on every call, requires
+`SECURITY DEFINER`, an explicit `search_path` without `$user`, `EXECUTE` for the
+current role, a trusted owner and an allowed schema (`public` by default, or an
+explicit composition-root policy). The function runs on the command connection,
+so model writes, function writes, triggers and audit records commit or roll back
+together. The result must be exactly one row; a single-column result returns
+that value and a wider `RETURNS TABLE` row is returned as an object. PostgreSQL
+errors roll the transaction back with `COMMAND_OUTCOME_UNKNOWN`, while the
+original database error (including SQLSTATE) is retained as the failure cause.
+Neither helper accepts SQL text or caller-chosen session settings.
+
+`readFunction` and `callFunction` reject system schemas; `callFunction` also
+requires an explicit schema policy. Overloads are resolved by exact arity plus
+argument-shape checks, never by guessing a caller-provided type. `readFunction`
+still accepts only STABLE/IMMUTABLE functions. `callFunction` is the only entry
+point that may call a reviewed VOLATILE function.
+
+The pinned ZenStack 3.10.0 packages carry two local patches in `patches/`:
+top-level `Json` arrays are passed through as structured JSON parameters instead
+of being stringified by the ORM dialect, and the policy preflight binds them as
+one `jsonb` value rather than generating `jsonb[]`. Both are exercised by the
+real-PostgreSQL database tests and can be removed when upstream ships the same
+fix.
 
 Framework receipt SQL is enabled on the **private** client, because ZenStack's
 policy plugin blocks raw SQL by default. Raw SQL and policy/plugin controls are

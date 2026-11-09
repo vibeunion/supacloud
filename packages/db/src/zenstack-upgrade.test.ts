@@ -93,7 +93,7 @@ const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 test.skipIf(!postgresBin)("real Bun SQL policy, receipt and audit atomicity; capabilities expire", async () => {
   const server = await startStarterPostgres(postgresBin!);
   try {
-    await server.exec('CREATE TABLE "Note" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL);');
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
     // Actual persistence table definitions; PGMQ dispatch is outside this adapter regression.
     await server.exec(COMMAND_PERSISTENCE_SQL.slice(COMMAND_PERSISTENCE_SQL.indexOf("CREATE SCHEMA"), COMMAND_PERSISTENCE_SQL.indexOf("CREATE OR REPLACE FUNCTION")));
     await server.withConnection(async url => {
@@ -160,7 +160,7 @@ import { SQL } from "bun";
 import { createZenStackDatabase } from "${resolve(import.meta.dir, "zenstack").replaceAll("\\", "/")}";
 import { schema } from "./schema";
 const host = createZenStackDatabase(schema, new SQL("postgres://unused"), {});
-const row: ModelResult<ModelSchema["schema"], "Note"> = { id: "1", owner: "alice", value: 1 };
+const row: ModelResult<ModelSchema["schema"], "Note"> = { id: "1", owner: "alice", value: 1, steps: [] };
 void [host, row];`);
   await using program = await ts.createProgram([consumer], { strict: true, skipLibCheck: true, noEmit: true,
     types: ["bun"], typeRoots: [join(root, "node_modules/@types")], target: ts.ScriptTarget.ES2022,
@@ -185,7 +185,7 @@ test("removed dev migration action and config fail before remote execution", asy
 test.skipIf(!postgresBin)("model command lock serializes writers, is transaction-scoped and deadlock-free", async () => {
   const server = await startStarterPostgres(postgresBin!);
   try {
-    await server.exec('CREATE TABLE "Note" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL);');
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
     await server.exec(COMMAND_PERSISTENCE_SQL.slice(COMMAND_PERSISTENCE_SQL.indexOf("CREATE SCHEMA"), COMMAND_PERSISTENCE_SQL.indexOf("CREATE OR REPLACE FUNCTION")));
     await server.withConnection(async url => {
       const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
@@ -239,7 +239,7 @@ test.skipIf(!postgresBin)("model command lock serializes writers, is transaction
 test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejects write-capable ones", async () => {
   const server = await startStarterPostgres(postgresBin!);
   try {
-    await server.exec('CREATE TABLE "Note" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL);');
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
     await server.exec(COMMAND_PERSISTENCE_SQL.slice(COMMAND_PERSISTENCE_SQL.indexOf("CREATE SCHEMA"), COMMAND_PERSISTENCE_SQL.indexOf("CREATE OR REPLACE FUNCTION")));
     await server.exec(`
       CREATE SCHEMA helpers;
@@ -298,6 +298,154 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
           expect(Reflect.has(session.transaction, "readFunction")).toBe(true);
         });
         expect(await alice.models.note.count()).toBe(1);
+      } finally { await db.dispose(); await pool.close(); }
+    });
+  } finally { await server.close(); }
+}, 30_000);
+
+test.skipIf(!postgresBin)("ZenStack Json fields keep top-level arrays as jsonb values", async () => {
+  const server = await startStarterPostgres(postgresBin!);
+  try {
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
+    await server.withConnection(async url => {
+      const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
+      try {
+        const alice = db.forIdentity({ id: "alice" });
+        const steps = [{ code: "S1", detail: { approved: true } }] as never;
+        await alice.commandStore.transaction(async session => {
+          await session.transaction.db.note.create({ data: { id: "json-one", owner: "alice", value: 1, steps } });
+          await session.transaction.db.note.createMany({ data: [
+            { id: "json-many", owner: "alice", value: 2, steps },
+            { id: "json-object", owner: "alice", value: 3, steps: { code: "object" } as never },
+          ] });
+          await session.transaction.db.note.update({ where: { id: "json-one" }, data: { steps } });
+          await session.transaction.db.note.updateMany({ where: { id: "json-many" }, data: { steps } });
+        });
+        const rows = await pool`SELECT id, jsonb_typeof(steps) AS kind, steps FROM "Note" ORDER BY id`;
+        expect(rows.map((row: { id: string; kind: string }) => [row.id, row.kind])).toEqual([
+          ["json-many", "array"], ["json-object", "object"], ["json-one", "array"],
+        ]);
+        expect(rows[0].steps).toEqual(steps);
+        expect(rows[1].steps).toEqual({ code: "object" });
+        expect(rows[2].steps).toEqual(steps);
+      } finally { await db.dispose(); await pool.close(); }
+    });
+  } finally { await server.close(); }
+}, 30_000);
+
+test.skipIf(!postgresBin)("readFunctionByRow resolves reviewed composite functions by primary key", async () => {
+  const server = await startStarterPostgres(postgresBin!);
+  try {
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
+    await server.exec(`
+      CREATE SCHEMA helpers;
+      CREATE FUNCTION helpers.note_dto(public."Note") RETURNS jsonb LANGUAGE sql STABLE AS 'SELECT to_jsonb($1)';
+      CREATE FUNCTION helpers.note_label(public."Note") RETURNS text LANGUAGE sql STABLE AS 'SELECT $1.owner';
+      CREATE FUNCTION helpers.note_write(public."Note") RETURNS integer LANGUAGE plpgsql VOLATILE AS
+        'BEGIN UPDATE public."Note" SET value = value + 1 WHERE id = $1.id; RETURN 1; END';
+    `);
+    await server.withConnection(async url => {
+      const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
+      try {
+        const alice = db.forIdentity({ id: "alice" });
+        await alice.commandStore.transaction(async session => {
+          await session.transaction.db.note.create({ data: { id: "row-1", owner: "alice", value: 7, steps: [{ code: "S1" }] as never } });
+        });
+        await alice.commandStore.transaction(async session => {
+          expect(await session.transaction.readFunctionByRow("helpers.note_dto", { table: "public.Note", key: "id", value: "row-1" }))
+            .toEqual({ id: "row-1", owner: "alice", value: 7, steps: [{ code: "S1" }] });
+          expect(await session.transaction.readFunctionByRow("helpers.note_label", { table: "public.Note", key: "id", value: "row-1" })).toBe("alice");
+          for (const call of [
+            () => session.transaction.readFunctionByRow("helpers.note_dto", { table: 'public."Note"', key: "id", value: "row-1" }),
+            () => session.transaction.readFunctionByRow("helpers.note_dto", { table: "public.Note", key: "id", value: "missing" }),
+            () => session.transaction.readFunctionByRow("helpers.note_dto", { table: "public.Note", key: "owner", value: "alice" }),
+            () => session.transaction.readFunctionByRow("helpers.note_dto", { table: "helpers.Note", key: "id", value: "row-1" }),
+            () => session.transaction.readFunctionByRow("helpers.note_count", { table: "public.Note", key: "id", value: "row-1" }),
+            () => session.transaction.readFunctionByRow("helpers.note_write", { table: "public.Note", key: "id", value: "row-1" }),
+            () => session.transaction.readFunctionByRow("helpers.note_dto", { table: "public.Note", key: "id; DROP TABLE \"Note\"", value: "row-1" }),
+          ]) {
+            await expect(call()).rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+          }
+        });
+        expect(await alice.models.note.count()).toBe(1);
+      } finally { await db.dispose(); await pool.close(); }
+    });
+  } finally { await server.close(); }
+}, 30_000);
+
+test.skipIf(!postgresBin)("callFunction preserves transaction scope and enforces security boundaries", async () => {
+  const server = await startStarterPostgres(postgresBin!);
+  try {
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
+    await server.exec(`
+      CREATE ROLE other_owner NOLOGIN;
+      CREATE FUNCTION public.test_note_upsert(p_id text, p_steps jsonb) RETURNS jsonb LANGUAGE plpgsql
+        SECURITY DEFINER SET search_path = public AS $$
+        BEGIN
+          INSERT INTO public."Note"(id, owner, value, steps) VALUES (p_id, 'alice', 1, p_steps)
+          ON CONFLICT (id) DO UPDATE SET steps = EXCLUDED.steps;
+          RETURN jsonb_build_object('id', p_id, 'steps', p_steps);
+        END $$;
+      CREATE FUNCTION public.test_invoker(p_id text) RETURNS text LANGUAGE sql SET search_path = public AS 'SELECT p_id';
+      CREATE FUNCTION public.test_no_search_path(p_id text) RETURNS text LANGUAGE sql SECURITY DEFINER AS 'SELECT p_id';
+      CREATE FUNCTION public.test_user_search_path(p_id text) RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public, "$user" AS 'SELECT p_id';
+      CREATE FUNCTION public.test_other_owner(p_id text) RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public AS 'SELECT p_id';
+      ALTER FUNCTION public.test_other_owner(text) OWNER TO other_owner;
+      GRANT EXECUTE ON FUNCTION public.test_other_owner(text) TO current_user;
+      CREATE FUNCTION public.test_no_rows() RETURNS TABLE(value integer) LANGUAGE sql SECURITY DEFINER SET search_path = public AS 'SELECT value FROM public."Note" WHERE false';
+      CREATE FUNCTION public.test_many_rows() RETURNS TABLE(value integer) LANGUAGE sql SECURITY DEFINER SET search_path = public AS 'SELECT 1 UNION ALL SELECT 2';
+      CREATE FUNCTION public.test_sqlstate() RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS
+        'BEGIN RAISE EXCEPTION USING ERRCODE = ''23514'', MESSAGE = ''domain check failed''; END';
+    `);
+    await server.withConnection(async url => {
+      const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
+      try {
+        const alice = db.forIdentity({ id: "alice" });
+        // Same transaction: model write, function write and function result are visible together.
+        await alice.commandStore.transaction(async session => {
+          await session.transaction.db.note.create({ data: { id: "call-1", owner: "alice", value: 2 } });
+          expect(await session.transaction.callFunction("public.test_note_upsert", ["call-1", [{ code: "S1" }]], { volatility: "volatile" }))
+            .toEqual({ id: "call-1", steps: [{ code: "S1" }] });
+          expect(await session.transaction.db.note.findUnique({ where: { id: "call-1" } })).toMatchObject({ steps: [{ code: "S1" }] });
+        });
+        expect(await alice.models.note.findUnique({ where: { id: "call-1" } })).toMatchObject({ steps: [{ code: "S1" }] });
+        // A later failure rolls the function write back with the model write.
+        await expect(alice.commandStore.transaction(async session => {
+          await session.transaction.callFunction("public.test_note_upsert", ["rollback-1", [{ code: "S2" }]]);
+          throw new Error("rollback");
+        })).rejects.toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
+        expect(await alice.models.note.findUnique({ where: { id: "rollback-1" } })).toBeNull();
+        // Catalog and configuration boundaries fail before or instead of executing.
+        await expect(alice.commandStore.transaction(async session => {
+          for (const call of [
+            () => session.transaction.callFunction("public.test_invoker", ["x"]),
+            () => session.transaction.callFunction("public.test_no_search_path", ["x"]),
+            () => session.transaction.callFunction("public.test_user_search_path", ["x"]),
+            () => session.transaction.callFunction("public.test_other_owner", ["x"]),
+            () => session.transaction.callFunction("public.test_no_rows"),
+            () => session.transaction.callFunction("public.test_many_rows"),
+            () => session.transaction.callFunction("public.test_note_upsert", ["x", [{ code: "S1" }]], { volatility: "stable" as never }),
+            () => session.transaction.callFunction("public.test_note_upsert", ["x", undefined as never]),
+            () => session.transaction.callFunction("helpers.missing", []),
+          ]) {
+            await expect(call()).rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
+          }
+        }));
+        // PostgreSQL SQLSTATE remains on the transaction failure cause; the
+        // protocol outcome stays unknown because the transaction rolled back.
+        const sqlstateFailure = await alice.commandStore.transaction(
+          session => session.transaction.callFunction("public.test_sqlstate"),
+        ).catch((error: unknown) => error);
+        expect(sqlstateFailure).toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
+        expect(sqlstateFailure).toMatchObject({ cause: { errno: "23514" } });
+        // Configured trusted owners are explicit rather than implicit.
+        const configured = createZenStackDatabase(schema, pool, { callFunction: { owners: ["other_owner"] } });
+        try {
+          const ownerScoped = configured.forIdentity({ id: "alice" });
+          await ownerScoped.commandStore.transaction(async session => {
+            expect(await session.transaction.callFunction("public.test_other_owner", ["ok"])).toBe("ok");
+          });
+        } finally { await configured.dispose(); }
       } finally { await db.dispose(); await pool.close(); }
     });
   } finally { await server.close(); }

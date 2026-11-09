@@ -5,7 +5,7 @@
 
 /* eslint-disable */
 
-import { type SchemaDef, type AttributeApplication, ExpressionUtils } from "@zenstackhq/schema";
+import { type SchemaDef, type AttributeApplication, type FieldDefault, ExpressionUtils } from "@zenstackhq/schema";
 export class SchemaType implements SchemaDef {
     provider = {
         type: "postgresql"
@@ -27,6 +27,12 @@ export class SchemaType implements SchemaDef {
                 value: {
                     name: "value",
                     type: "Int"
+                },
+                steps: {
+                    name: "steps",
+                    type: "Json",
+                    attributes: [{ name: "@default", args: [{ name: "value", value: ExpressionUtils.literal("[]") }] }] as readonly AttributeApplication[],
+                    default: "[]" as FieldDefault
                 }
             },
             attributes: [

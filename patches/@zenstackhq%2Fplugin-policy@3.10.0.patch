@@ -1,0 +1,17 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 0bda09c25558c451c7fbbf95184e6d3525bb8edd..3cb95f64d9b9e8ee5812912dbe541271229e98d3 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1351,7 +1351,11 @@ var PolicyHandler = class extends OperationNodeTransformer {
+ 				}
+ 				if (Array.isArray(value)) {
+ 					const fieldDef = QueryUtils.requireField(this.client.$schema, model, fields[i]);
+-					result.push({
++					if (fieldDef.type === "Json" && !fieldDef.array) result.push({
++						node: ValueNode.create(JSON.stringify(value)),
++						raw: value
++					});
++					else result.push({
+ 						node: this.dialect.buildArrayValue(value, fieldDef.type).toOperationNode(),
+ 						raw: value
+ 					});
