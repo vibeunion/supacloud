@@ -244,7 +244,7 @@ function buildTimeline(
   }
   const operationKey = (kind: string, operation: string, module: string) => JSON.stringify([kind, operation, module]);
   const byOperation = new Map([...matchedPlans].map(plan => [operationKey(plan.kind, plan.name, plan.module), plan]));
-  interface TimelineGroup { entry: ExecutionTimelineEntry; attempts: Map<number, AttemptAccumulator> }
+  interface TimelineGroup { entry: ExecutionTimelineEntry; attempts: Map<number, AttemptAccumulator>; plan?: ExecutionPlan }
   const groups = new Map<string, TimelineGroup>();
   for (const event of events) {
     const key = operationKey(event.kind, event.operation, event.module);
@@ -261,6 +261,7 @@ function buildTimeline(
           omittedAttempts: 0,
         },
         attempts: new Map(),
+        ...(plan === undefined ? {} : { plan }),
       };
       groups.set(key, group);
     }
@@ -300,14 +301,19 @@ function buildTimeline(
           .sort((left, right) => Number(right.phase === "failed") - Number(left.phase === "failed") || left.index - right.index)
           .slice(0, EXECUTION_CONTEXT_LIMITS.timelineStages)
           .sort((left, right) => left.index - right.index);
-        const terminal = declared[declared.length - 1];
+        const paths = group.plan?.stagePaths && group.plan.stagePaths.length > 0 ? group.plan.stagePaths : [declared];
+        const bestPath = [...paths].sort((left, right) =>
+          right.filter(stage => attempt.observed.has(stage)).length
+          - left.filter(stage => attempt.observed.has(stage)).length)[0] ?? declared;
+        const terminal = bestPath[bestPath.length - 1];
+        const complete = terminal !== undefined
+          && attempt.stages.some(stage => stage.stage === terminal && stage.phase === "succeeded");
         return {
           attempt: attempt.attempt,
           stages,
           failed: hasFailure(attempt),
-          complete: terminal !== undefined
-            && attempt.stages.some((stage) => stage.stage === terminal && stage.phase === "succeeded"),
-          missingStages: declared.filter((stage) => !attempt.observed.has(stage)),
+          complete,
+          missingStages: bestPath.filter(stage => !attempt.observed.has(stage)),
           // Unknown stages were counted, not echoed, at the correlation boundary.
           unexpectedStages: [],
           traceIds: [...attempt.traceIds].sort(),

@@ -546,7 +546,7 @@
     {
       "name": "ExecutionPlan",
       "kind": "type",
-      "signature": "export interface ExecutionPlan {\n    module: string;\n    kind: \"route\" | \"command\" | \"job\";\n    name: string;\n    command?: string;\n    stages: string[];\n}"
+      "signature": "export interface ExecutionPlan {\n    module: string;\n    kind: \"route\" | \"command\" | \"job\";\n    name: string;\n    command?: string;\n    stages: string[];\n    stagePaths?: string[][];\n}"
     },
     {
       "name": "ExecutionPlanCommand",
