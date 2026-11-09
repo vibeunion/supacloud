@@ -6,6 +6,8 @@ import {
   WorkerRegistrationError,
   WorkerReceiptUnconfirmedError,
   type CompiledModule,
+  type RabbitMqChannel,
+  type RabbitMqMessage,
   type WorkerClaim,
   type WorkerQueuePort,
   type WorkerTransport,
@@ -71,6 +73,30 @@ describe("SupaCloud worker", () => {
     queue.fail("7", { deadLetter: true });
     expect(nacked).toEqual([[7, false]]);
     await queue.close();
+  });
+  test("close waits for an in-flight consumer start and cancels the late consumer", async () => {
+    let started!: () => void;
+    let resolveConsume!: (value: { consumerTag: string }) => void;
+    const startedPromise = new Promise<void>(resolve => { started = resolve; });
+    const cancelled: string[] = [];
+    const channel: RabbitMqChannel = {
+      prefetch: async () => {},
+      consume: async (_queue: string, _onMessage: (message: RabbitMqMessage | null) => void) => {
+        started();
+        return new Promise<{ consumerTag: string }>(resolve => { resolveConsume = resolve; });
+      },
+      ack: () => {},
+      nack: () => {},
+      cancel: async consumerTag => { cancelled.push(consumerTag); },
+    };
+    const queue = createRabbitMqQueuePort({ queue: "reports", channel });
+    const receiving = queue.receive();
+    await startedPromise;
+    const closing = queue.close();
+    resolveConsume({ consumerTag: "late-consumer" });
+    await closing;
+    await expect(receiving).rejects.toThrow("RABBITMQ_QUEUE_CLOSED");
+    expect(cancelled).toEqual(["late-consumer"]);
   });
   test("registers jobs atomically and rejects duplicate modules or jobs", () => {
     const worker = createWorker({ transport: transport() });

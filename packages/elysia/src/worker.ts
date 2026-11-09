@@ -99,9 +99,14 @@ export function createRabbitMqQueuePort(options: RabbitMqQueuePortOptions): Work
   const deliveries = new Map<string, RabbitMqMessage>();
   let consumer: { consumerTag: string } | undefined;
   let starting: Promise<void> | undefined;
+  let closing: Promise<void> | undefined;
   let closed = false;
   const deliver = (message: RabbitMqMessage | null) => {
     if (message === null) return;
+    if (closed) {
+      options.channel.nack(message, false, true);
+      return;
+    }
     const id = String(message.fields.deliveryTag);
     let payload: unknown;
     try { payload = JSON.parse(new TextDecoder().decode(message.content)); }
@@ -117,9 +122,15 @@ export function createRabbitMqQueuePort(options: RabbitMqQueuePortOptions): Work
     if (!starting) {
       starting = Promise.resolve(options.channel.prefetch(prefetch))
         .then(() => options.channel.consume(options.queue, deliver, { noAck: false }))
-        .then(value => { consumer = value; });
+        .then(value => {
+          if (closed) {
+            return Promise.resolve(options.channel.cancel(value.consumerTag)).then(() => undefined);
+          }
+          consumer = value;
+        });
     }
     await starting;
+    if (closed) throw new Error("RABBITMQ_QUEUE_CLOSED");
   };
   const receive = async (): Promise<WorkerQueueMessage | null> => {
     await start();
@@ -149,11 +160,17 @@ export function createRabbitMqQueuePort(options: RabbitMqQueuePortOptions): Work
       options.channel.nack(message, false, failure?.deadLetter !== true);
     },
     async close() {
+      if (closing) return closing;
       closed = true;
       for (const resolve of pending.splice(0)) resolve(null);
-      if (consumer) await options.channel.cancel(consumer.consumerTag);
-      consumer = undefined;
-      starting = undefined;
+      const inFlight = starting;
+      closing = (async () => {
+        try { await inFlight; } catch { /* startup failure leaves no consumer to cancel */ }
+        if (consumer) await options.channel.cancel(consumer.consumerTag);
+        consumer = undefined;
+        starting = undefined;
+      })();
+      return closing;
     },
   };
 }
