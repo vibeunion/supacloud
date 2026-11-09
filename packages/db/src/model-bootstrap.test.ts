@@ -24,14 +24,20 @@ test("the bootstrap datasource compiles without a maintained model", async () =>
 
 test("adoption requires an explicit database and never writes maintained files", async () => {
   const root = await temporary();
+  const schema = join(root, "zenstack/schema.zmodel");
+  const candidate = join(root, "output/database-audit/adopted.zmodel");
   const previous = process.env["SUPACLOUD_MODEL_DATABASE_URL"];
   try {
     delete process.env["SUPACLOUD_MODEL_DATABASE_URL"];
-    await expect(modelMain(["pull", "--candidate", "output/database-audit/adopted.zmodel"])).rejects.toThrow("SUPACLOUD_MODEL_DATABASE_URL");
+    await expect(modelMain(["pull", "--schema", schema, "--candidate", candidate])).rejects.toThrow("SUPACLOUD_MODEL_DATABASE_URL");
     process.env["SUPACLOUD_MODEL_DATABASE_URL"] = "postgresql://readonly@127.0.0.1:1/unreachable";
-    await expect(modelMain(["diff", "--candidate", "output/database-audit/change.sql"]))
-      .rejects.toThrow("Maintain zenstack/schema.zmodel before diff");
-    await expect(modelMain(["pull", "--schema", "zenstack/schema.zmodel", "--candidate", "zenstack/schema.zmodel"]))
+    await expect(modelMain(["generate", "--schema", schema]))
+      .rejects.toThrow(`Maintain ${schema} before generate`);
+    await expect(modelMain(["check", "--schema", schema]))
+      .rejects.toThrow(`Maintain ${schema} before check`);
+    await expect(modelMain(["diff", "--schema", schema, "--candidate", join(root, "output/database-audit/change.sql")]))
+      .rejects.toThrow(`Maintain ${schema} before diff`);
+    await expect(modelMain(["pull", "--schema", schema, "--candidate", schema]))
       .rejects.toThrow("refusing to overwrite maintained files");
   } finally {
     if (previous === undefined) delete process.env["SUPACLOUD_MODEL_DATABASE_URL"];
