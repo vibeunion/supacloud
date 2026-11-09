@@ -1,0 +1,13 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index abece4d2024fb0823adc83ae8dbf96d57a0ad0ee..5bb91928674519e5a7c21c77b156f87177158710 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1819,7 +1819,7 @@ var PostgresCrudDialect = class PostgresCrudDialect extends LateralJoinDialectBa
+ 		if (isTypeDef(this.schema, type)) if (isPrimitiveTypeDef(this.schema, type)) type = this.schema["typeDefs"][type]["base"];
+ 		else if (typeof value !== "string") return JSON.stringify(value);
+ 		else return value;
+-		if (Array.isArray(value)) if (type === "Json" && !forArrayField) return JSON.stringify(value);
++		if (Array.isArray(value)) if (type === "Json" && !forArrayField) return value;
+ 		else return value.map((v) => this.transformInput(v, type, false, fieldDef));
+ 		else switch (type) {
+ 			case "DateTime": {

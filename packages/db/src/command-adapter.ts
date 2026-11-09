@@ -75,7 +75,15 @@ export function createPostgresCommandStore<Transaction extends CommandTransactio
       return await database.transaction((tx) => { started = true; return run(tx); });
     } catch (error) {
       if (error instanceof CommandError) throw error;
-      throw new CommandError(started ? "COMMAND_OUTCOME_UNKNOWN" : "COMMAND_UNAVAILABLE");
+      // Keep adapter/database causes for diagnostics while the protocol error
+      // remains outcome-unknown. Database SQLSTATE is never rewritten.
+      let cause: unknown = error;
+      const seen = new Set<unknown>();
+      while (cause instanceof Error && cause.cause !== undefined && !seen.has(cause)) {
+        seen.add(cause);
+        cause = cause.cause;
+      }
+      throw new CommandError(started ? "COMMAND_OUTCOME_UNKNOWN" : "COMMAND_UNAVAILABLE", { cause });
     }
   };
   const session = (tx: Transaction): CommandStoreSession<Transaction> => ({

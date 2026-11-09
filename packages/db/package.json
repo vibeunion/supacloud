@@ -103,5 +103,9 @@
     "@supacloud/contracts": "file:../contracts",
     "deepmerge-ts": "8.0.2",
     "prisma": "6.19.3"
+  },
+  "patchedDependencies": {
+    "@zenstackhq/orm@3.10.0": "../../patches/@zenstackhq%2Form@3.10.0.patch",
+    "@zenstackhq/plugin-policy@3.10.0": "../../patches/@zenstackhq%2Fplugin-policy@3.10.0.patch"
   }
 }
