@@ -14,10 +14,12 @@ export async function modelMain(argv: string[]): Promise<void> {
     if (!key || !["--schema", "--output", "--candidate"].includes(key) || !value || value.startsWith("--") || options.has(key)) throw new Error("Invalid model command option");
     options.set(key, value);
   }
-  const schema = resolve(options.get("--schema") ?? "zenstack/schema.zmodel");
+  const schemaLabel = options.get("--schema") ?? "zenstack/schema.zmodel";
+  const schema = resolve(schemaLabel);
   const output = resolve(options.get("--output") ?? "zenstack/generated");
   if (command === "generate" || command === "check") {
     if (options.has("--candidate")) throw new Error("--candidate is only supported by diff and pull");
+    if (!existsSync(schema)) throw new Error(`Maintain ${schemaLabel} before ${command}; adopt an existing database with supacloud-model pull first`);
     await compileModel(schema, output, command === "check");
     return;
   }
@@ -40,7 +42,7 @@ export async function modelMain(argv: string[]): Promise<void> {
     let source = schema;
     let bootstrap = false;
     if (command === "diff") {
-      if (!existsSync(schema)) throw new Error("Maintain zenstack/schema.zmodel before diff; adopt an existing database with supacloud-model pull first");
+      if (!existsSync(schema)) throw new Error(`Maintain ${schemaLabel} before diff; adopt an existing database with supacloud-model pull first`);
       await compileModel(schema, output, true);
     } else if (existsSync(schema)) await compileModel(schema, join(validation, "generated"));
     else {
@@ -60,8 +62,8 @@ export async function modelMain(argv: string[]): Promise<void> {
     if (!bootstrap) return;
     // Prove the introspected candidate is a compilable model before recommending it.
     await compileModel(candidate, join(validation, "candidate"));
-    console.log(`Wrote a review candidate to ${candidate} because ${schema} does not exist yet.`);
-    console.log(`Review it, add the policy plugin and @@allow rules, move it to ${schema}, then run supacloud-model generate.`);
+    console.log(`Wrote a review candidate to ${candidate} because ${schemaLabel} does not exist yet.`);
+    console.log(`Review it, add the policy plugin and @@allow rules, move it to ${schemaLabel}, then run supacloud-model generate.`);
   } finally { await rm(validation, { recursive: true, force: true }); }
 }
 
