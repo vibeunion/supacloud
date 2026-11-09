@@ -192,11 +192,12 @@ function node(
   sourceHashes: Record<string, string> = {},
 ): SemanticNode {
   const normalized = safeValue(value);
+  const sourceHash = sourceHashFor(file, sourceHashes);
   return {
     id, kind, name,
     ...(module === undefined ? {} : { module }),
     hash: digest(canonical({ kind, id, value: normalized, dependencies: sorted(dependencies) })),
-    ...(sourceHashFor(file, sourceHashes) === undefined ? {} : { sourceHash: sourceHashFor(file, sourceHashes) }),
+    ...(sourceHash === undefined ? {} : { sourceHash }),
     dependencies: sorted(dependencies),
     value: normalized,
   };
@@ -263,7 +264,7 @@ function migrationEntries(delivery: SemanticDeliveryInput | undefined): Array<{ 
     const value = safeValue(item);
     const record = item as Record<string, unknown>;
     // The ledger identity is the migration's declared identity, not its position in the input.
-    const identity = [record.executor, record.version, record.name, record.path]
+    const identity = [record["executor"], record["version"], record["name"], record["path"]]
       .filter((part): part is string => typeof part === "string" && part.length > 0)
       .join(":");
     return [{ id: `migration:${identity || `entry-${index}`}`, hash: digest(canonical(value)), value }];
@@ -395,7 +396,7 @@ export async function createProjectSemanticSnapshot(
   const sourceHashes = Object.fromEntries([...inventory.entries()].map(([path, hash]) => [
     relative(resolve(rootDir), path).split(sep).join("/"), hash,
   ]));
-  return createSemanticSnapshot(graph, { sourceHashes, delivery });
+  return createSemanticSnapshot(graph, { sourceHashes, ...(delivery === undefined ? {} : { delivery }) });
 }
 
 function changedKeys(before: unknown, after: unknown, prefix = ""): string[] {
@@ -496,27 +497,27 @@ function factsFromSnapshot(snapshot: SemanticSnapshot): SemanticFacts {
     const value = node.value;
     if (value === null || typeof value !== "object") continue;
     const record = value as Record<string, unknown>;
-    const module = typeof record.module === "string" ? record.module : node.module ?? "";
+    const module = typeof record["module"] === "string" ? record["module"] : node.module ?? "";
     if (node.kind === "route") {
       routes.push({
         module,
         id: node.id,
-        method: String(record.method ?? ""),
-        path: String(record.path ?? ""),
-        handler: String(record.handler ?? ""),
-        ...(typeof record.command === "string" ? { command: record.command } : {}),
-        ...(typeof record.permission === "string" ? { permission: record.permission } : {}),
-        ...(record.effect === null || typeof record.effect !== "object" ? {} : { effect: record.effect as EffectRouteNode }),
-        ...(record.effectMode === "simple" ? { effectMode: "simple" as const } : {}),
+        method: String(record["method"] ?? ""),
+        path: String(record["path"] ?? ""),
+        handler: String(record["handler"] ?? ""),
+        ...(typeof record["command"] === "string" ? { command: record["command"] } : {}),
+        ...(typeof record["permission"] === "string" ? { permission: record["permission"] } : {}),
+        ...(record["effect"] === null || typeof record["effect"] !== "object" ? {} : { effect: record["effect"] as EffectRouteNode }),
+        ...(record["effectMode"] === "simple" ? { effectMode: "simple" as const } : {}),
       });
     } else if (node.kind === "command") {
       commands.push({
         module,
-        name: typeof record.name === "string" ? record.name : node.name,
-        className: typeof record.className === "string" ? record.className : node.name,
-        ...(typeof record.permission === "string" ? { permission: record.permission } : {}),
-        transaction: record.transaction === "none" ? "none" : "required",
-        idempotency: record.idempotency === "none" ? "none" : "required",
+        name: typeof record["name"] === "string" ? record["name"] : node.name,
+        className: typeof record["className"] === "string" ? record["className"] : node.name,
+        ...(typeof record["permission"] === "string" ? { permission: record["permission"] } : {}),
+        transaction: record["transaction"] === "none" ? "none" : "required",
+        idempotency: record["idempotency"] === "none" ? "none" : "required",
         value: record,
       });
     }
