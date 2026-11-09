@@ -172,6 +172,56 @@ test("missing connection, stale sources and cached module declarations cannot si
   expect((await checkDatabaseGovernance(root, options.databaseGovernance))[0]?.code).toBe("database-source-contract");
 });
 
+test("enforce reconciles through the platform Management API when no database URL is configured", async () => {
+  const { root, options } = await fixture();
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      expect(request.method).toBe("POST");
+      expect(new URL(request.url).pathname).toBe("/v1/projects/project-ref/database/module-check");
+      expect(request.headers.get("authorization")).toBe("Bearer platform-token");
+      const body = await request.json() as { modules?: unknown; schemas?: unknown };
+      expect(Array.isArray(body.modules)).toBe(true);
+      expect(body.schemas).toEqual(["public"]);
+      return Response.json({
+        ok: true,
+        schemas: ["public"],
+        total_modules: 1,
+        reports: [{ module: "items", ok: true, issues: [] }],
+      });
+    },
+  });
+  try {
+    const databaseGovernance = {
+      ...options.databaseGovernance!,
+      databaseUrl: undefined,
+      databaseUrlEnv: "SUPACLOUD_TEST_ABSENT_DATABASE_URL",
+    };
+    const original = {
+      apiUrl: process.env.SUPACLOUD_API_URL,
+      apiToken: process.env.SUPACLOUD_API_TOKEN,
+      projectRef: process.env.SUPACLOUD_PROJECT_REF,
+    };
+    process.env.SUPACLOUD_API_URL = `http://127.0.0.1:${server.port}`;
+    process.env.SUPACLOUD_API_TOKEN = "platform-token";
+    process.env.SUPACLOUD_PROJECT_REF = "project-ref";
+    try {
+      expect(await checkDatabaseGovernance(root, databaseGovernance)).toEqual([]);
+    } finally {
+      for (const [key, value] of Object.entries({
+        SUPACLOUD_API_URL: original.apiUrl,
+        SUPACLOUD_API_TOKEN: original.apiToken,
+        SUPACLOUD_PROJECT_REF: original.projectRef,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  } finally {
+    server.stop(true);
+  }
+});
+
 test("malformed manifests, unreadable SQL and module/connection exceptions fail without secrets", async () => {
   const { root, options } = await fixture();
   for (const body of [

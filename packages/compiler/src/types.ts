@@ -792,9 +792,9 @@ export interface DatabaseGovernanceOptions {
   projectRoot?: string;
   /** Project-relative module file exporting defineDatabaseModule(...) results. */
   moduleFile?: string;
-  /** Explicit URL for programmatic callers; configuration files should use databaseUrlEnv. */
+  /** Explicit URL for platform-internal/local integration callers. */
   databaseUrl?: string;
-  /** Environment variable containing a read-only PostgreSQL connection URL. */
+  /** @deprecated Use the platform Management API context; retained for local compatibility. */
   databaseUrlEnv?: string;
   /** Schemas included in the live Catalog query. */
   schemas?: string[];

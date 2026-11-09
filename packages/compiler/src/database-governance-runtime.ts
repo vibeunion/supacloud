@@ -11,6 +11,7 @@ import {
 } from "@supacloud/db";
 import { databaseSources } from "@supacloud/db/source-contracts";
 import type { DatabaseGovernanceOptions, Diagnostic } from "./types";
+import { reconcileDatabaseModulesRemotely } from "./database-governance-remote";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -116,14 +117,32 @@ export async function enforceDatabaseGovernance(
   }
   if (diagnostics.length) return { diagnostics };
 
-  const databaseUrlEnv = options.databaseUrlEnv ?? "DATABASE_URL";
-  const databaseUrl = options.databaseUrl ?? process.env[databaseUrlEnv];
+  // The application contract never reads DATABASE_URL implicitly. A platform-owned
+  // Management API context is the default; databaseUrl/databaseUrlEnv are retained
+  // only for explicit local integration callers.
+  const databaseUrl = options.databaseUrl
+    ?? (options.databaseUrlEnv === undefined ? undefined : process.env[options.databaseUrlEnv]);
   if (!databaseUrl) {
-    diagnostics.push(governanceDiagnostic(
-      `Database governance mode "enforce" requires ${databaseUrlEnv} for live Catalog reconciliation.`,
-      "database-catalog-unavailable",
-    ));
-    return { diagnostics };
+    try {
+      const reports = await reconcileDatabaseModulesRemotely(modules, options.schemas ?? ["public"]);
+      for (const report of reports) {
+        for (const issue of report.issues) {
+          diagnostics.push(governanceDiagnostic(
+            `${report.module}:${issue.object}: ${issue.message}`,
+            `database-catalog-${issue.code}`,
+          ));
+        }
+      }
+      return { diagnostics };
+    } catch (error) {
+      diagnostics.push(governanceDiagnostic(
+        error instanceof Error
+          ? error.message
+          : "SupaCloud platform database governance could not reconcile the tenant Catalog.",
+        "database-catalog-unavailable",
+      ));
+      return { diagnostics };
+    }
   }
   if (typeof Bun === "undefined" || typeof Bun.SQL !== "function") {
     diagnostics.push(governanceDiagnostic(
