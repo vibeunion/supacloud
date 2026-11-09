@@ -249,6 +249,13 @@ may be archived as historical evidence; do not rewrite the applied SQL.
    Candidate files must be new, outside generated contracts, and use `.zmodel`
    or `.sql` respectively. Review introspection output; it cannot infer business
    policy. Diff compares the selected database with the generated Prisma model.
+
+   A project that already owns a database but no maintained model starts at
+   `db:pull`: introspection runs through a temporary datasource-only model and
+   writes only the candidate. Review it, add the policy plugin and `@@allow`
+   rules, move it to `zenstack/schema.zmodel`, then run `db:generate`. `db:diff`
+   and `db:generate` still require the maintained model, so an unreviewed
+   introspection result can never become the build input by accident.
 6. Replay the existing migrations in a shadow database. Review the baseline diff
    and remove unintended table/column drops or constraint changes by correcting
    the model first. Prisma cannot express every PostgreSQL object: preserve
