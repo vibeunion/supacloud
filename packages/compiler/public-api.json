@@ -281,12 +281,12 @@
     {
       "name": "DatabaseContractsOptions",
       "kind": "type",
-      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    migrations: readonly string[];\n}"
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    rpcRegistry?: string;\n    rpcCatalog?: string;\n    migrations: readonly string[];\n}"
     },
     {
       "name": "DatabaseGovernanceOptions",
       "kind": "type",
-      "signature": "export interface DatabaseGovernanceOptions {\n    mode: \"off\" | \"check\" | \"enforce\";\n    projectRoot?: string;\n    moduleFile?: string;\n    databaseUrl?: string;\n    databaseUrlEnv?: string;\n    schemas?: string[];\n}"
+      "signature": "export interface DatabaseGovernanceOptions {\n    mode: \"off\" | \"check\" | \"enforce\";\n    projectRoot?: string;\n    moduleFile?: string;\n    databaseUrl?: string;\n    databaseUrlEnv?: string;\n    schemas?: string[];\n    rpcBoundary?: {\n        registry?: string;\n        catalog?: string;\n        legacy?: string;\n    };\n}"
     },
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
