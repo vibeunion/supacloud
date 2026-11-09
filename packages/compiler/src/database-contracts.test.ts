@@ -75,7 +75,7 @@ const extra: Rows = [{ id: "1", title: "hidden" }];
 // @ts-expect-error Selected types come from Database.
 const wrong: Rows = [{ id: 1 }];
 type Row = import("@zenstackhq/orm").ModelResult<ModelSchema["schema"], "Note">;
-const row: Row = { id: "1", owner: "alice", value: 1 };
+const row: Row = { id: "1", owner: "alice", value: 1, steps: [] };
 // @ts-expect-error ZenStack row shape remains independent from GraphQL envelope.
 const invalidRow: Row = { orders: [] };
 const result: OrdersQuery = { orders: [{ id: "1", title: null }] };
