@@ -3,6 +3,7 @@ import { dirname, join, relative, sep } from "node:path";
 import type { ApplicationGraph, AspectRefNode, Diagnostic, ModuleNode, ProviderNode } from "./types";
 import { inspectRouteContracts } from "./route-contracts";
 import { featureTransitionForRoute } from "./feature";
+import { createSemanticSnapshot, createSemanticLens, type SemanticLens } from "./semantic";
 
 export interface ExecutionPlan {
   module: string;
@@ -39,7 +40,17 @@ export interface ContextPack {
     importedBy: string[];
     imports: string[];
   };
+  /** Read-only semantic identity for the full graph and selected neighborhood nodes. */
+  semantic: {
+    version: 1;
+    hash: string;
+    nodes: Array<{ id: string; kind: string; hash: string }>;
+  };
   graphql?: ApplicationGraph["graphql"];
+}
+
+export interface SemanticContextLens extends SemanticLens {
+  context?: ContextPack;
 }
 
 export interface DoctorResult {
@@ -157,6 +168,8 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     }
   }
 
+  const semantic = createSemanticSnapshot(graph);
+  const selectedModuleNames = new Set(modules.map(module => module.name));
   return {
     version: 1,
     subject: subjectModule.name,
@@ -186,7 +199,20 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
         .map((module) => module.name)
         .sort(),
     },
+    semantic: {
+      version: 1,
+      hash: semantic.semanticHash,
+      nodes: semantic.nodes
+        .filter(item => item.module === undefined || selectedModuleNames.has(item.module))
+        .map(item => ({ id: item.id, kind: item.kind, hash: item.hash })),
+    },
   };
+}
+
+/** Compose the semantic lens with the existing bounded ContextPack projection. */
+export function createSemanticContextLens(graph: ApplicationGraph, subject?: string): SemanticContextLens {
+  const lens = createSemanticLens(graph, subject);
+  return subject === undefined ? lens : { ...lens, context: createContextPack(graph, subject) };
 }
 
 /** Context packs describe structure only; never expose source expressions or provider values. */

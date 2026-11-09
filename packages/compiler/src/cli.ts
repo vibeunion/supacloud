@@ -39,6 +39,7 @@ import {
   OpenApiDocumentError,
   readOpenApiJson,
 } from "./openapi-tools";
+import { createProjectSemanticSnapshot, diffSemanticSnapshots, createSemanticLens, parseSemanticSnapshot } from "./semantic";
 import {
   checkGraphqlCompatibility,
   createRoleSnapshotReport,
@@ -77,6 +78,8 @@ Usage:
   supacloud-compiler graph   [rootDir] [options]
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <name> [rootDir] [options]
+  supacloud-compiler lens [rootDir] [--target <name>] [options]
+  supacloud-compiler semantic-diff <base.json> <current.json> [--json]
   supacloud-compiler preview-fix --production <dir> --preview <dir> --preview-id <uuid> --project-ref <ref> --application-id <id> --environment-id <id> --property transaction|idempotency --value required|none [--json]
   supacloud-compiler dev-context [rootDir] [options]
   supacloud-compiler environment-bindings [rootDir] [options]
@@ -103,6 +106,8 @@ Commands:
   graph               Print the discovered application graph
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
+  lens                Print a read-only semantic lens over the compiler graph
+  semantic-diff       Compare two persisted semantic snapshots
   preview-fix         Edit, compile, invoke, and record a timeline inside one isolated preview. Does not deploy or write production.
   dev-context         Print the read-only application development context for tooling/console/MCP consumers
   environment-bindings Resolve static per-environment resource bindings without credentials
@@ -133,7 +138,7 @@ Options:
   --token-env <name>  Environment variable holding the intended user's access token
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
-  --json              Print machine-readable output for compile/check/graph/explain/context/doctor/migration-assess/plan/build-delivery/openapi-export/openapi-diff
+  --json              Print machine-readable output for compile/check/graph/explain/context/lens/semantic-diff/doctor/migration-assess/plan/build-delivery/openapi-export/openapi-diff
   --events <file>     Read a metadata JSON envelope or starter execution JSON lines (requires --request-id and --json)
   --request-id <id>   Select one opaque request ID from --events; context remains read-only
   --delivery-manifest <file>  Correlate context using an immutable build, not current source
@@ -247,7 +252,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "diagnostics", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "diagnostics", "dev", "graph", "explain", "context", "lens", "semantic-diff", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -262,6 +267,7 @@ async function run(): Promise<void> {
   let preset: ModuleBoundaryPresetName | undefined;
   let debounceMs: number = 100;
   let query: string | undefined;
+  const semanticDiffPaths: string[] = [];
   let executionEventsPath: string | undefined;
   let executionRequestId: string | undefined;
   let contextManifest: string | undefined;
@@ -418,9 +424,15 @@ async function run(): Promise<void> {
       openApiDiffPaths.push(arg);
     } else if (openApiExportCommand && !arg.startsWith("-")) {
       openApiExportPaths.push(arg);
+    } else if (command === "semantic-diff" && !arg.startsWith("-")) {
+      semanticDiffPaths.push(arg);
     } else if (!arg.startsWith("-") && !rootDir) {
       if ((command === "explain" || command === "context" || command === "fix") && !query) query = arg;
       else rootDir = arg;
+    } else if (arg === "--target") {
+      if (command !== "lens") throw new Error("--target is only supported by lens");
+      query = args[++i];
+      if (!query || query.startsWith("-")) throw new Error("--target requires a value");
     } else if (!arg.startsWith("-") && (command === "explain" || command === "context" || command === "fix") && !query) {
       query = arg;
     } else if (deliveryCommand) {
@@ -483,6 +495,25 @@ async function run(): Promise<void> {
     });
     console.log(json ? JSON.stringify({ ok: true, ...result }, null, 2)
       : result.written ? `OpenAPI JSON written: ${result.path}` : `OpenAPI JSON matches: ${result.path}`);
+    return;
+  }
+
+  if (command === "semantic-diff") {
+    if (semanticDiffPaths.length !== 2) throw new Error("semantic-diff requires exactly two JSON files: <base.json> <current.json>");
+    const basePath = semanticDiffPaths[0];
+    const currentPath = semanticDiffPaths[1];
+    if (!basePath || !currentPath) throw new Error("semantic-diff requires two JSON files");
+    const base = parseSemanticSnapshot(JSON.parse(await readFile(resolve(process.cwd(), basePath), "utf8")));
+    const current = parseSemanticSnapshot(JSON.parse(await readFile(resolve(process.cwd(), currentPath), "utf8")));
+    const result = diffSemanticSnapshots(base, current);
+    if (json) console.log(JSON.stringify(result, null, 2));
+    else {
+      console.log(`SEMANTIC DIFF ${result.baseHash} -> ${result.currentHash}`);
+      for (const change of result.changes) console.log(`${change.type.toUpperCase()} ${change.category} ${change.id}: ${change.reasons.join(", ")}`);
+      for (const conflict of result.conflicts) console.log(`${conflict.severity.toUpperCase()} ${conflict.code}: ${conflict.message}`);
+      console.log(`summary: ${result.summary.added} added, ${result.summary.removed} removed, ${result.summary.changed} changed, ${result.summary.conflicts} conflicts`);
+    }
+    if (!result.ok) process.exitCode = 1;
     return;
   }
 
@@ -773,6 +804,7 @@ async function run(): Promise<void> {
           `  external tokens: ${pack.externalTokens.join(", ") || "-"}`,
           `  imports: ${pack.relatedModules.imports.join(", ") || "-"}`,
           `  imported by: ${pack.relatedModules.importedBy.join(", ") || "-"}`,
+          `  semantic hash: ${pack.semantic.hash}`,
           ...(pack.graphql ? [
             `  graphql schema: ${pack.graphql.schema}`,
             `  graphql queries: ${pack.graphql.operations.map((operation) => operation.name).join(", ") || "-"}`,
@@ -792,6 +824,22 @@ async function run(): Promise<void> {
       } else {
         console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       }
+      process.exit(1);
+    }
+  } else if (command === "lens") {
+    try {
+      const result = await checkProject(compileDefaults);
+      const inventory = await createProjectSemanticSnapshot(result.graph, compileDefaults.rootDir, compileDefaults.outDir);
+      const lens = createSemanticLens({ ...result.graph, diagnostics: result.diagnostics }, query, { sourceHashes: inventory.sourceHashes });
+      const output = { ...lens, diagnostics: result.diagnostics };
+      if (json) console.log(JSON.stringify(output, null, 2));
+      else {
+        console.log(`LENS ${query ?? "application"} ${lens.snapshot.semanticHash}`);
+        for (const item of lens.nodes) console.log(`  ${item.kind} ${item.id} ${item.hash}`);
+        for (const conflict of lens.conflicts) console.log(`  ${conflict.severity.toUpperCase()} ${conflict.code}: ${conflict.message}`);
+      }
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   } else {

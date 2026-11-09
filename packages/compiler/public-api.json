@@ -166,7 +166,7 @@
     {
       "name": "CompiledExecutionManifest",
       "kind": "type",
-      "signature": "export interface CompiledExecutionManifest {\n    version: 1;\n    compiler: \"@supacloud/compiler\";\n    host: {\n        adapter: \"elysia\";\n        api: \"2.x\";\n        reflection: false;\n        proxy: false;\n    };\n    di: {\n        runtime: \"angular-compatible\";\n        generation: \"static\";\n        scopes: Scope[];\n    };\n    boundaries: ModuleBoundaryRule[];\n    modules: ExecutionPlanModule[];\n}"
+      "signature": "export interface CompiledExecutionManifest {\n    version: 1;\n    compiler: \"@supacloud/compiler\";\n    semantic?: {\n        version: 1;\n        policyVersion: \"semantic-governance-v1\";\n        hash: string;\n        nodeCount: number;\n    };\n    host: {\n        adapter: \"elysia\";\n        api: \"2.x\";\n        reflection: false;\n        proxy: false;\n    };\n    di: {\n        runtime: \"angular-compatible\";\n        generation: \"static\";\n        scopes: Scope[];\n    };\n    boundaries: ModuleBoundaryRule[];\n    modules: ExecutionPlanModule[];\n}"
     },
     {
       "name": "CompileOptions",
@@ -206,7 +206,7 @@
     {
       "name": "ContextPack",
       "kind": "type",
-      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"zmodel-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n        readTransport: \"postgrest-supabase-js\";\n        writeTransport: \"command-rpc\";\n        writeRetry: \"disabled\";\n        externalOutcome: \"receipt-reconcile\";\n        databaseSource: \"zmodel-append-only\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    semantic: {\n        version: 1;\n        hash: string;\n        nodes: Array<{\n            id: string;\n            kind: string;\n            hash: string;\n        }>;\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
     },
     {
       "name": "ContractManifest",
@@ -264,6 +264,11 @@
       "signature": "export declare function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession;"
     },
     {
+      "name": "createProjectSemanticSnapshot",
+      "kind": "value",
+      "signature": "export declare function createProjectSemanticSnapshot(graph: ApplicationGraph, rootDir: string, outDir?: string, delivery?: unknown): Promise<SemanticSnapshot>;"
+    },
+    {
       "name": "createReleaseEvidence",
       "kind": "value",
       "signature": "export declare function createReleaseEvidence(manifestPath: string, target: string): Promise<ReleaseEvidence>;"
@@ -272,6 +277,21 @@
       "name": "createRoleSnapshotReport",
       "kind": "value",
       "signature": "export declare function createRoleSnapshotReport(roles: readonly {\n    role: string;\n    path: string;\n    source: string;\n}[]): GraphqlRoleSnapshotReport;"
+    },
+    {
+      "name": "createSemanticContextLens",
+      "kind": "value",
+      "signature": "export declare function createSemanticContextLens(graph: ApplicationGraph, subject?: string): SemanticContextLens;"
+    },
+    {
+      "name": "createSemanticLens",
+      "kind": "value",
+      "signature": "export declare function createSemanticLens(graph: ApplicationGraph, subject?: string, options?: SemanticSnapshotOptions): SemanticLens;"
+    },
+    {
+      "name": "createSemanticSnapshot",
+      "kind": "value",
+      "signature": "export declare function createSemanticSnapshot(graph: ApplicationGraph, options?: SemanticSnapshotOptions): SemanticSnapshot;"
     },
     {
       "name": "DatabaseContractManifest",
@@ -414,6 +434,11 @@
       "signature": "export type DevelopmentSchemaKind = \"opaque\" | \"declared\";"
     },
     {
+      "name": "diagnoseSemanticConflicts",
+      "kind": "value",
+      "signature": "export declare function diagnoseSemanticConflicts(input: ApplicationGraph | SemanticSnapshot): SemanticConflict[];"
+    },
+    {
       "name": "Diagnostic",
       "kind": "type",
       "signature": "export interface Diagnostic {\n    severity: \"error\" | \"warn\";\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    column?: number;\n    endLine?: number;\n    endColumn?: number;\n    suggestion?: string;\n    errorCode?: string;\n    docsUrl?: string;\n    fix?: DiagnosticFix;\n}"
@@ -437,6 +462,11 @@
       "name": "diffOpenApiDocuments",
       "kind": "value",
       "signature": "export declare function diffOpenApiDocuments(baseValue: unknown, currentValue: unknown): OpenApiDiffResult;"
+    },
+    {
+      "name": "diffSemanticSnapshots",
+      "kind": "value",
+      "signature": "export declare function diffSemanticSnapshots(base: SemanticSnapshot, current: SemanticSnapshot): SemanticDiff;"
     },
     {
       "name": "doctorProject",
@@ -974,6 +1004,11 @@
       "signature": "export declare function parseOpenApiDocument(value: unknown): OpenApiDocument;"
     },
     {
+      "name": "parseSemanticSnapshot",
+      "kind": "value",
+      "signature": "export declare function parseSemanticSnapshot(input: unknown): SemanticSnapshot;"
+    },
+    {
       "name": "planDeliveryProject",
       "kind": "value",
       "signature": "export declare function planDeliveryProject(options: CompileOptions, delivery?: unknown): Promise<DeliveryPlanResult>;"
@@ -1157,6 +1192,51 @@
       "name": "Scope",
       "kind": "type",
       "signature": "export type Scope = \"application\" | \"request\" | \"job\";"
+    },
+    {
+      "name": "SemanticChange",
+      "kind": "type",
+      "signature": "export interface SemanticChange {\n    type: \"added\" | \"removed\" | \"changed\";\n    category: SemanticNodeKind | \"generation\";\n    id: string;\n    name: string;\n    beforeHash?: string;\n    afterHash?: string;\n    risk: \"breaking\" | \"behavioral\" | \"informational\";\n    reasons: string[];\n}"
+    },
+    {
+      "name": "SemanticConflict",
+      "kind": "type",
+      "signature": "export interface SemanticConflict {\n    code: \"command-policy-conflict\" | \"route-contract-conflict\" | \"effect-policy-conflict\" | \"migration-fingerprint-conflict\" | \"generated-artifacts-stale\";\n    severity: \"error\" | \"warn\";\n    category: \"permission\" | \"route-contract\" | \"effect\" | \"migration\" | \"generation\";\n    message: string;\n    nodes: string[];\n    suggestion: string;\n}"
+    },
+    {
+      "name": "SemanticContextLens",
+      "kind": "type",
+      "signature": "export interface SemanticContextLens extends SemanticLens {\n    context?: ContextPack;\n}"
+    },
+    {
+      "name": "SemanticDiff",
+      "kind": "type",
+      "signature": "export interface SemanticDiff {\n    version: typeof SEMANTIC_IDENTITY_VERSION;\n    schema: \"supacloud.semantic-diff.v1\";\n    baseHash: string;\n    currentHash: string;\n    changes: SemanticChange[];\n    conflicts: SemanticConflict[];\n    requiresRegeneration: boolean;\n    summary: {\n        added: number;\n        removed: number;\n        changed: number;\n        breaking: number;\n        conflicts: number;\n    };\n    ok: boolean;\n}"
+    },
+    {
+      "name": "SemanticLens",
+      "kind": "type",
+      "signature": "export interface SemanticLens {\n    schema: \"supacloud.semantic-lens.v1\";\n    subject?: string;\n    snapshot: SemanticSnapshot;\n    nodes: SemanticNode[];\n    conflicts: SemanticConflict[];\n    readOnly: true;\n}"
+    },
+    {
+      "name": "SemanticNode",
+      "kind": "type",
+      "signature": "export interface SemanticNode {\n    id: string;\n    kind: SemanticNodeKind;\n    module?: string;\n    name: string;\n    hash: string;\n    sourceHash?: string;\n    dependencies: string[];\n    value: unknown;\n}"
+    },
+    {
+      "name": "SemanticNodeKind",
+      "kind": "type",
+      "signature": "export type SemanticNodeKind = \"module\" | \"provider\" | \"route\" | \"command\" | \"job\" | \"query\" | \"permission\" | \"effect\" | \"contract\" | \"migration\";"
+    },
+    {
+      "name": "SemanticSnapshot",
+      "kind": "type",
+      "signature": "export interface SemanticSnapshot {\n    version: typeof SEMANTIC_IDENTITY_VERSION;\n    schema: typeof SEMANTIC_SCHEMA;\n    compiler: \"@supacloud/compiler\";\n    policyVersion: typeof SEMANTIC_POLICY_VERSION;\n    sourceHashes: Record<string, string>;\n    sourceHash: string;\n    semanticHash: string;\n    nodes: SemanticNode[];\n    migrations?: Array<{\n        id: string;\n        hash: string;\n        value: unknown;\n    }>;\n}"
+    },
+    {
+      "name": "SemanticSnapshotOptions",
+      "kind": "type",
+      "signature": "export interface SemanticSnapshotOptions {\n    sourceHashes?: Record<string, string>;\n    delivery?: unknown;\n}"
     },
     {
       "name": "serializeOpenApiJson",
