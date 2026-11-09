@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { EdgeWorker, Json } from "@pgflow/edge-worker";
 import { Flow } from "@pgflow/dsl";
 import { createPgflowQueueWorker, createPgflowWorker } from "../src/index.js";
+import { requireDrainedWorkerGroup } from "../src/admission.js";
 import { createQueueHandler, type TaskContext } from "../src/queue-handler.js";
 import { createLifecycle } from "../src/lifecycle.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -316,10 +317,12 @@ describe("pgflow process adapter", () => {
     });
     mutable.projectRef = "project-b";
     await handler(payload, context());
-    expect(seen).toHaveLength(1);
+    await handler({ ...payload, orderingKey: "租户-甲" }, context());
+    expect(seen).toHaveLength(2);
     expect(seen[0]?.projectRef).toBe("project-a");
     expect(seen[0]?.messageId).toBe("42");
     expect(seen[0]?.idempotencyKey).toBe(payload.idempotencyKey);
+    expect(seen[1]?.orderingKey).toBe("租户-甲");
     expect(Object.isFrozen(seen[0])).toBe(true);
     expect(JSON.stringify(seen)).not.toContain("password");
     expect(seen[0]).not.toHaveProperty("env");
@@ -485,6 +488,19 @@ describe("pgflow process adapter", () => {
       (input) => ({ reportId: input.reportId }),
     );
     expect(createPgflowWorker(flow, options).state).toBe("idle");
+  });
+
+  test("shard drain checks fail closed when a queue metric is missing", async () => {
+    let queryText = "";
+    const transaction = {
+      query: async (text: string) => {
+        queryText = text;
+        return [{ accepting: false, outstanding: 0, held: 0, queued: null }];
+      },
+    };
+    await expect(requireDrainedWorkerGroup(transaction, "fixture", "reports", "scw_reports_v1", 2))
+      .rejects.toThrow("WORKER_GROUP_NOT_DRAINED");
+    expect(queryText).not.toContain("COALESCE");
   });
 
   test("aborted I/O preserves upstream abort semantics during policy and execution", async () => {
