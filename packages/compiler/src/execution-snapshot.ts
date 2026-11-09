@@ -12,6 +12,7 @@ const SnapshotSchema = Type.Object({
   version: Type.Literal(1),
   plans: Type.Array(Type.Object({
     module: text, kind, name: text, command: Type.Optional(text), stages: Type.Array(text),
+    stagePaths: Type.Optional(Type.Array(Type.Array(text))),
   }, closed)),
   commandAliases: Type.Array(Type.Object({ module: text, name: text, alias: text }, closed)),
   contexts: Type.Array(Type.Object({

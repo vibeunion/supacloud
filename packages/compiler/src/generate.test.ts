@@ -12,7 +12,7 @@ import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { scanGeneratedArtifacts } from "./type-safety";
-import type { ApplicationGraph, CompileResult, CompiledExecutionManifest } from "./types";
+import type { ApplicationGraph, CommandNode, CompileResult, CompiledExecutionManifest } from "./types";
 import * as ts from "./typescript";
 
 
@@ -80,6 +80,35 @@ describe("compileProject：总体结果", () => {
       executor: "command",
       command: "case.accept",
       stages: ["commandExecutor", "authorize", "idempotency", "transaction", "handler", "audit"],
+    });
+  });
+
+  test("fallback commands retain command-level required capabilities", () => {
+    const fallbackCommand: CommandNode = {
+      className: "SaveCase",
+      name: "case.save",
+      permission: "case.save",
+      transaction: "required",
+      idempotency: "required",
+      audit: "case.saved",
+      branchesFallback: "command",
+      branches: [{
+        when: 'kind === "external"',
+        rpc: "save_external",
+        transaction: "none",
+        idempotency: "required",
+        audit: "case.external.saved",
+        boundary: "external",
+      }],
+    };
+    const module = result.graph.modules[0]!;
+    const rendered = renderApplication({
+      ...result.graph,
+      modules: [{ ...module, commands: [fallbackCommand] }],
+    }, { rootDir, outDir: join(rootDir, "fallback-generated") });
+    const command = rendered.executionPlan.modules[0]?.commands[0];
+    expect(command?.requiredCapabilities).toEqual({
+      permission: true, audit: true, idempotency: true, transaction: true,
     });
   });
 

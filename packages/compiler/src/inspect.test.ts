@@ -171,6 +171,38 @@ export class FeatureModule {}`);
     expect(createContextPack(fixture, "case").files).toContain("src/audit.ts");
     expect(explainGraph(fixture, "case")).toContain(plan.stages.join(" -> "));
   });
+
+  test("conditional commands expose concrete RPC and fallback stage paths", () => {
+    const module = graph.modules.find((item) => item.name === "case")!;
+    const changed = {
+      ...module,
+      commands: [{
+        className: "SaveCase",
+        name: "case.save",
+        permission: "case.save",
+        transaction: "required" as const,
+        idempotency: "required" as const,
+        audit: "case.saved",
+        branchesFallback: "command" as const,
+        branches: [{
+          when: 'kind === "external"', rpc: "save_external", transaction: "none" as const,
+          idempotency: "required" as const, audit: "case.external.saved", boundary: "external" as const,
+        }],
+      }],
+    };
+    const plan = createExecutionPlans({ ...graph, modules: [changed] })
+      .find((item) => item.kind === "command" && item.name === "case.save");
+    expect(plan).toEqual(expect.objectContaining({
+      stages: expect.arrayContaining([
+        "rpc:selected-branch", "rpc:save_external", "idempotency", "transaction", "handler", "audit",
+      ]),
+      stagePaths: [
+        ["commandExecutor", "authorize", "rpc:save_external", "handler"],
+        ["commandExecutor", "authorize", "idempotency", "transaction", "handler", "audit"],
+      ],
+    }));
+  });
+
   test("formatGraph 输出模块、依赖和平台 token", () => {
     const output = formatGraph(graph);
     expect(output).toContain("MODULE case");
