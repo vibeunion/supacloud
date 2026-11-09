@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.42.0...elysia-v0.42.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **elysia:** close RabbitMQ ports during startup ([#2503](https://github.com/vibeunion/supacloud/issues/2503)) ([417ebd7](https://github.com/vibeunion/supacloud/commit/417ebd71fde07e75d443f2f8c72c3ed6c1907870))
+
 ## [0.42.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.41.0...elysia-v0.42.0) (2026-11-07)
 
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.60.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.59.0...compiler-v0.60.0) (2026-11-09)
+
+
+### Features
+
+* **db:** introduce backend-neutral database contract ([#2506](https://github.com/vibeunion/supacloud/issues/2506)) ([a48247b](https://github.com/vibeunion/supacloud/commit/a48247b2f2424ec0da1e3094d25cb5d299be3435))
+
+
+### Bug Fixes
+
+* **compiler:** preserve fallback command execution paths ([#2498](https://github.com/vibeunion/supacloud/issues/2498)) ([157223e](https://github.com/vibeunion/supacloud/commit/157223edb2490efe804f811ccd1f5585f201ed43))
+* **db:** preserve JSON contracts and add governed function calls ([#2497](https://github.com/vibeunion/supacloud/issues/2497)) ([5800626](https://github.com/vibeunion/supacloud/commit/580062627732b81ab1f35d1faaefbc24eabda057))
+
 ## [0.59.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.58.0...compiler-v0.59.0) (2026-11-07)
 
 
