@@ -316,10 +316,12 @@ describe("pgflow process adapter", () => {
     });
     mutable.projectRef = "project-b";
     await handler(payload, context());
-    expect(seen).toHaveLength(1);
+    await handler({ ...payload, orderingKey: "租户-甲" }, context());
+    expect(seen).toHaveLength(2);
     expect(seen[0]?.projectRef).toBe("project-a");
     expect(seen[0]?.messageId).toBe("42");
     expect(seen[0]?.idempotencyKey).toBe(payload.idempotencyKey);
+    expect(seen[1]?.orderingKey).toBe("租户-甲");
     expect(Object.isFrozen(seen[0])).toBe(true);
     expect(JSON.stringify(seen)).not.toContain("password");
     expect(seen[0]).not.toHaveProperty("env");
