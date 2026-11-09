@@ -104,10 +104,10 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
 }
 `;
 
-export const STARTER_ATTACHMENT_DELIVERY_WORKER = `import { SQL } from "bun";
+export const STARTER_ATTACHMENT_DELIVERY_WORKER = `
 import { createClient } from "@supabase/supabase-js";
 import { SupaCloudWorkflowsClient } from "@supacloud/js";
-import { createBunCommandDatabase } from "@supacloud/db/bun";
+import { createBunCommandDatabase, createBunSqlHost } from "@supacloud/db/bun";
 import type { CompiledModule } from "@supacloud/elysia";
 import { createReviewAttachmentWorker } from "./host/review-attachment-worker";
 import { createReviewWorkerObserver } from "./host/review-worker-observability";
@@ -118,27 +118,11 @@ function required(name: string): string {
   return value;
 }
 
-function databaseConnection(): SQL.Options {
-  const socket = process.env["DATABASE_SOCKET_PATH"];
-  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
-  if (socket) {
-    return { adapter: "postgres", path: socket, database: required("DATABASE_NAME"), username: required("DATABASE_USER") };
-  }
-  const url = new URL(required("DATABASE_URL"));
-  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("Invalid database URL");
-  return {
-    adapter: "postgres", url: url.href, hostname: url.hostname.replace(/^\\[|\\]$/g, ""), port: Number(url.port || 5432),
-    username: decodeURIComponent(url.username), password: decodeURIComponent(url.password),
-    database: decodeURIComponent(url.pathname.slice(1)),
-  };
-}
-
 export async function createDeliveryWorker(modules: CompiledModule[], lifecycle: { signal: AbortSignal }) {
   lifecycle.signal.throwIfAborted();
   if (required("REVIEW_QUEUE_OWNERSHIP") !== "exclusive-review-attachments") {
     throw new Error("Attachment worker requires an exclusively owned Workflow queue");
   }
-  const connection = databaseConnection();
   const settings = {
     projectId: required("SUPACLOUD_PROJECT_ID"), tenantId: required("APP_TENANT_ID"),
     workerId: required("REVIEW_WORKER_ID"), url: required("SUPACLOUD_URL"), key: required("SUPACLOUD_SERVICE_ROLE_KEY"),
@@ -146,9 +130,10 @@ export async function createDeliveryWorker(modules: CompiledModule[], lifecycle:
   const service = createClient(settings.url, settings.key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  const pool = new SQL({ ...connection, max: 4, connectionTimeout: 5 });
+  const host = createBunSqlHost({ max: 4, connectionTimeout: 5 });
+  const pool = host.pool;
   let closing: Promise<void> | undefined;
-  const closePool = () => closing ??= pool.close({ timeout: 5 });
+  const closePool = () => closing ??= host.close();
   try {
     const worker = await createReviewAttachmentWorker({
       database: createBunCommandDatabase(pool), service, projectId: settings.projectId,

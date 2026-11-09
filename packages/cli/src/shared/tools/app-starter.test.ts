@@ -155,6 +155,8 @@ test("the reference PostgreSQL host is shipped separately from synthetic test id
     const adapter = requireValue(files["src/host/review-postgres.ts"]);
     const schema = requireValue(files["migrations/001-review.sql"]);
     expect(host).toContain("createBunCommandDatabase(pool)");
+    expect(host).toContain("createBunSqlHost");
+    expect(host).not.toContain("new URL(required(\"DATABASE_URL\"))");
     expect(host).toContain('required("SUPAUTH_JWKS_URL")');
     expect(host).not.toContain("keyResolver");
     expect(host).not.toContain("CREATE TABLE");
@@ -243,6 +245,8 @@ test("attachment worker uses explicit queue ownership and a fatal delivery signa
     expect(worker).not.toContain("workflows.retry(");
     expect(worker).not.toContain("workflows.complete(");
     expect(host).toContain("failure: worker.failure");
+    expect(host).toContain("createBunSqlHost");
+    expect(host).not.toContain("new URL(required(\"DATABASE_URL\"))");
     expect(host).toContain('required("REVIEW_QUEUE_OWNERSHIP")');
     for (const source of [worker, host]) {
         expect(source).not.toContain("Synthetic");
