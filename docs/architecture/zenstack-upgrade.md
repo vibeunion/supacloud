@@ -1,17 +1,26 @@
-# ZenStack / Bun SQL breaking upgrade
+# ZenStack / Bun SQL adapter upgrade
 
-Status: implemented; focused local validation is recorded below. This document is not deployment evidence.
+Status: implemented adapter path; focused local validation is recorded below. This document is not deployment evidence.
 
 For day-to-day feature work, start with the [feature development guide](../feature-development.md).
 The [static AOP decision](static-aop.md) explains framework references and current enforcement limits.
 
 ## Decision
 
-New model authoring uses ZModel. ZenStack owns model inference and data policies;
-SupaCloud owns application compilation, static execution boundaries, durable
-commands and migration delivery. Bun SQL is the PostgreSQL driver through a
-small Kysely dialect maintained in `@supacloud/db`. Pure domain functions remain
-ordinary TypeScript; Effect programs execute inside the command lifetime.
+For model-backed applications, the maintained source is currently ZModel. ZenStack
+is the current model/policy backend behind the SupaCloud Database Contract; it is
+not a product-wide requirement and it does not own application execution or
+migration delivery. SupaCloud owns the contract, application compilation, static
+execution boundaries, durable commands and migration delivery. Bun SQL is the
+PostgreSQL driver through a small Kysely dialect maintained in `@supacloud/db`.
+Pure domain functions remain ordinary TypeScript; Effect programs execute inside
+the command lifetime.
+
+ZenStack policy constraints apply to the model adapter only. Direct PostgREST/RPC
+paths still require their own SQL/RLS/grant protection. Policy parity is an
+explicit review and test obligation until SupaCloud can compile and verify both
+projections itself. See [Database Contract](database-contract.md) for the stable
+boundary and migration rules.
 
 Reylo and Drizzle are removed, including their dependencies, public adapters,
 commands, starter configuration, query loaders and build caches. There is no
@@ -91,7 +100,10 @@ regression test; upstream fixes can later replace it without changing business
 interfaces. Cursor streaming is deliberately unsupported. This adapter does not
 claim per-query AbortSignal cancellation.
 
-`createZenStackDatabase(schema, pool, {})` belongs in the trusted composition root.
+`createZenStackDatabase(schema, pool, {})` is the current adapter in the trusted
+composition root. New application code should type against
+`@supacloud/db/model-contract`; the `@supacloud/db/zenstack` export remains a
+compatibility adapter boundary.
 After identity verification, `forIdentity(identity)` returns read-only `models`
 and `commandStore`. The command runtime receives the store; business commands
 receive only `session.transaction.db`. Model delegates are copied as operation
@@ -245,6 +257,13 @@ may be archived as historical evidence; do not rewrite the applied SQL.
    bun run db:pull -- --candidate output/database-audit/baseline.zmodel
    bun run db:diff -- --candidate output/database-audit/change.sql
    ```
+
+   A project that already owns a database but no maintained model starts at
+   `db:pull`: introspection runs through a temporary datasource-only model and
+   writes only the candidate. Review it, add the policy plugin and `@@allow`
+   rules, move it to `zenstack/schema.zmodel`, then run `db:generate`. `db:diff`
+   and `db:generate` still require the maintained model, so an unreviewed
+   introspection result can never become the build input by accident.
 
    Candidate files must be new, outside generated contracts, and use `.zmodel`
    or `.sql` respectively. Review introspection output; it cannot infer business

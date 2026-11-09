@@ -798,6 +798,15 @@ export interface DatabaseGovernanceOptions {
   databaseUrlEnv?: string;
   /** Schemas included in the live Catalog query. */
   schemas?: string[];
+  /** Optional offline gate connecting named RPC capabilities to maintained artifacts. */
+  rpcBoundary?: {
+    /** JSON registry produced by application or database code generation. */
+    registry?: string;
+    /** Generated or exported RPC catalog JSON. */
+    catalog?: string;
+    /** JSON list/object containing explicitly historical RPC capability names. */
+    legacy?: string;
+  };
 }
 
 export interface ModuleBoundaryRule {

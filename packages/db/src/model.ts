@@ -9,7 +9,11 @@ import { dirname, join, resolve } from "node:path";
  * maintains a model. It is never written into the project: `pull` keeps it in a
  * temporary directory so introspection cannot replace authored files.
  */
-export const BOOTSTRAP_MODEL_SCHEMA = `datasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}\n`;
+export const BOOTSTRAP_MODEL_SCHEMA = `datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+`;
 
 /** Offline model compilation: no plugin execution, no database or migration ledger writes. */
 export async function compileModel(schemaFile: string, output: string, check = false): Promise<string[]> {

@@ -172,8 +172,8 @@ bun run db:diff -- --candidate db/migration-candidates/change.sql
 ```
 
 Set `SUPACLOUD_MODEL_DATABASE_URL` explicitly to a local/shadow database. Candidate
-generation never applies SQL. An existing database can be adopted before any model
-exists: `bun run db:pull -- --candidate output/database-audit/schema.zmodel`
+generation never applies SQL. An existing database can be adopted before any
+model exists: `bun run db:pull -- --candidate output/database-audit/schema.zmodel`
 introspects through a temporary datasource-only model and writes only that
 candidate. Review it, add the policy plugin and `@@allow` rules, move it to
 `zenstack/schema.zmodel`, then run `bun run db:generate`; `db:diff` and

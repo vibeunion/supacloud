@@ -79,6 +79,26 @@ export {
   type DatabaseAccessErrorCode,
 } from './access.js';
 
+export type {
+  CallFunctionOptions,
+  CallFunctionPolicy,
+  CallFunctionVolatility,
+  JsonArgument,
+  ModelCommandStore,
+  ModelCommandTransaction,
+  ModelDatabase,
+  ModelIdentityScope,
+  ModelScalar,
+  ReadFunctionArg,
+  ReadFunctionRow,
+} from './model-contract.js';
+
+export {
+  checkRpcBoundary,
+  type RpcBoundaryCheckOptions,
+  type RpcBoundaryReport,
+} from './rpc-boundary.js';
+
 export {
   createRpcClient,
   defineRpcContract,

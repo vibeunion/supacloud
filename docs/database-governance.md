@@ -2,17 +2,17 @@
 
 `@supacloud/db` 把 RLS 策略、RPC 函数、触发器与授权提升为**一等资源**：SQL 文件仍是实现来源，Manifest 是治理来源，PostgreSQL Catalog 是事实来源。三者通过对账（reconcile）保持一致。
 
-This is also SupaCloud's single schema authority chain:
+This is also SupaCloud's single database contract chain:
 
 PostgREST and compiler-generated business clients consume this chain. Do not add
-Prisma/ZModel or another production schema source; improve CRUD ergonomics by
-generating derived APIs within the existing Compiler, Drizzle and RPC governance
-boundaries.
+another ORM or a second production schema source. ZModel is the current maintained
+model source for model-backed applications; improve CRUD ergonomics by generating
+derived APIs within the existing Compiler and RPC governance boundaries.
 
 ```
-SQL 源文件（实现）
+维护的模型 contract（当前为 ZModel） + SQL/RLS/RPC 源文件
   -> defineDatabaseModule（声明/所有权）
-    -> ZModel migration / 部署执行
+    -> 现有 migration ledger / 部署执行
       -> PostgreSQL Catalog（事实）
         -> reconcileModule（对账）+ lintSql（静态检查）
 ```
@@ -40,6 +40,11 @@ databaseGovernance: {
   moduleFile: "db/modules.ts",
   databaseUrlEnv: "SUPACLOUD_CHECK_DATABASE_URL",
   schemas: ["public"],
+  rpcBoundary: {
+    registry: "db/rpc-registry.json",
+    catalog: "db/contracts/rpc-catalog.json",
+    legacy: "db/legacy-rpc.json",
+  },
 }
 ```
 
@@ -47,11 +52,17 @@ databaseGovernance: {
 `supacloud db module_check` 做同一套 Catalog 对账。业务仓库不应提交生产连接
 URL，也不应要求每个开发者手工准备生产数据库凭据。`enforce` 失败即阻止生成，
 不会自动生成契约、迁移或修复数据库。
+配置 `rpcBoundary` 后，`check` 还会把 `commandCapabilities.rpc` 的每个 capability
+与 registry/catalog 对账；只有明确登记的历史 RPC 才能作为 `legacy-rpc` 通过。
 
 ## 目录约定
 
-数据库 starter 默认使用 ZModel 维护结构，并通过 `supacloud-db check`
+数据库 starter 默认使用 ZModel 维护模型结构，并通过 `supacloud-db check`
 检查源码边界与 RPC 契约新鲜度。完整 SQL 导出只用于审计，不作为日常类型或测试输入。
+RPC 可以由代码生成器、SQL 生成器或其他受治理工具产生；生成结果必须落在维护的
+function source、registry 或 catalog contract 中，记录签名、权限、返回契约和来源。
+没有这些追溯信息的 capability 不能进入 `governed-sql`，只能继续作为已登记的
+`legacy-rpc` 迁移桥。
 存量项目先运行只读评估；参见 [Database Source Contracts](./database-source-contracts.md)。
 离线检查不替代下文的 Catalog、权限与行为验证。
 

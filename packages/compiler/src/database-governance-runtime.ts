@@ -2,6 +2,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  checkRpcBoundary,
   lintModule,
   readCatalog,
   reconcileModule,
@@ -56,6 +57,7 @@ function governanceDiagnostic(message: string, code = "database-governance"): Di
 
 export async function enforceDatabaseGovernance(
   options: DatabaseGovernanceOptions,
+  rpcCapabilities: readonly string[] = [],
 ): Promise<{ diagnostics: Diagnostic[] }> {
   const projectRoot = await realpath(options.projectRoot ?? ".");
   const sourceReport = await databaseSources(projectRoot, "check");
@@ -65,6 +67,30 @@ export async function enforceDatabaseGovernance(
   ));
   if (!sourceReport.ok && diagnostics.length === 0) {
     diagnostics.push(governanceDiagnostic("Database source contract check failed without findings."));
+  }
+  if (diagnostics.length > 0) return { diagnostics };
+  if (options.rpcBoundary) {
+    try {
+      const readJson = async (path: string | undefined): Promise<unknown> =>
+        path === undefined ? undefined : JSON.parse(await readFile(await withinRoot(projectRoot, path), "utf8"));
+      const report = checkRpcBoundary({
+        capabilities: rpcCapabilities,
+        registry: await readJson(options.rpcBoundary.registry),
+        catalog: await readJson(options.rpcBoundary.catalog),
+        legacy: await readJson(options.rpcBoundary.legacy),
+      });
+      if (!report.ok) {
+        diagnostics.push(governanceDiagnostic(
+          `RPC capabilities have no registry/catalog source or historical entry: ${report.missing.join(", ")}`,
+          "database-rpc-boundary",
+        ));
+      }
+    } catch {
+      diagnostics.push(governanceDiagnostic(
+        "RPC boundary artifacts could not be read or parsed.",
+        "database-rpc-boundary",
+      ));
+    }
   }
   if (diagnostics.length > 0) return { diagnostics };
   // Offline checks never import executable modules or access the database.

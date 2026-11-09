@@ -86,7 +86,8 @@ attempts. The default policy requires `requireRouteEffects`,
 ## Unified Database Contracts
 
 Database contracts are protocol-aware: configure only the database sources the
-application uses (`postgrestTypes`, `modelSchema`, or `graphql`). The generated
+application uses (`postgrestTypes`, `modelSchema`, `graphql`, `rpcRegistry` or
+`rpcCatalog`). The generated
 `database.manifest.json` is a TypeBox-validated, fingerprinted build boundary;
 consumers must reject it when its schema or migration fingerprint is stale.
 
@@ -99,6 +100,8 @@ type entry point while preserving PostgREST, ZModel and GraphQL native types:
   "outDir": "generated",
   "postgrestTypes": "database.types.ts",
   "modelSchema": "zenstack/generated/schema.ts",
+  "rpcRegistry": "db/rpc-registry.json",
+  "rpcCatalog": "db/contracts/rpc-catalog.json",
   "role": "authenticated",
   "graphql": {
     "schema": "graphql/schema.graphql",
@@ -114,11 +117,14 @@ snapshot and a role-scoped `pg_graphql` schema snapshot. The generated barrel
 exports `Database`, `QueryData`, ZModel schema types and GraphQL contracts.
 Consumers need `@supabase/supabase-js` and their ZenStack dependencies.
 
-`--check` detects drift in supplied snapshots, local ZModel imports, migration
-content/order and generated artifacts without writing. This is an offline check,
-not proof of live database parity or authorization. Refresh snapshots from the
-intended database and role before running it. Keep runtime decoders at untrusted
-boundaries; protocol result shapes are not interchangeable.
+`--check` detects drift in supplied snapshots, local ZModel imports, RPC
+registry/catalog inputs, migration content/order and generated artifacts without
+writing. This is an offline check, not proof of live database parity or
+authorization. Refresh snapshots from the intended database and role before
+running it. Keep runtime decoders at untrusted boundaries; protocol result shapes
+are not interchangeable. When `databaseGovernance.rpcBoundary` is configured,
+the compiler also fails if a named Command RPC capability has no registry/catalog
+source or explicit historical entry.
 
 Architecture references: Micronaut for compile-time AOP, NestJS for feature modules,
 and Angular for DI semantics. Compiled DI requires constructor injection and generated scope factories.

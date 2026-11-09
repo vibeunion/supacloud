@@ -37,7 +37,7 @@ export async function modelMain(argv: string[]): Promise<void> {
   const { tmpdir } = await import("node:os");
   const validation = await mkdtemp(resolve(tmpdir(), "supacloud-model-pull-"));
   try {
-    // A project that owns a database but no maintained model can still adopt it:
+    // A project that has a database but no maintained model can still adopt it:
     // introspect through a temporary datasource-only model and never write it down.
     let source = schema;
     let bootstrap = false;

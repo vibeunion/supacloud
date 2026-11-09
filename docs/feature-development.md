@@ -10,7 +10,7 @@ lockfile 和已发布的匹配版本为准；升级分支中的实现不代表 n
 | 变更 | 维护位置 | 必须保留的边界 |
 | --- | --- | --- |
 | 请求、响应和公开错误 | 功能内 TypeBox 契约与路由 Effect 声明 | 不直接把数据库行类型作为公开 API |
-| 表、字段、关系和数据访问策略 | `zenstack/schema.zmodel` | 生成模型类型，禁止手改生成物 |
+| 表、字段、关系和数据访问策略 | 维护的模型 contract（当前为 `zenstack/schema.zmodel`） | 生成模型类型，禁止手改生成物；后端可替换 |
 | 状态转换、金额计算和业务判断 | 功能内领域函数 / Command | 纯计算保持普通 TypeScript |
 | 服务端模型查询 | 可信身份绑定的只读 `models` | 不取得写权限、原始 SQL 或身份切换能力 |
 | 业务写入 | 持久化 Command 的 `transaction.db` | 业务变化、receipt、audit 同一事务 |
@@ -23,6 +23,10 @@ lockfile 和已发布的匹配版本为准；升级分支中的实现不代表 n
 Command 权限决定“能否执行此业务动作”，ZenStack policy 决定“能访问哪些记录”。
 数据库约束保证数据不变量。PostgREST/RPC 继续由数据库角色与 RLS 保护，不能
 因为新增了 ZenStack policy 就移除这些保护。
+
+每个数据入口还必须标记为 `model-command`、`postgrest-read`、`governed-sql` 或
+`legacy-rpc`。新功能默认使用前两类；生成 RPC 应归入 `governed-sql`，并可追溯到
+维护源、registry 或 catalog，具体退出条件见 [Database Contract](architecture/database-contract.md)。
 
 ## 按功能组织代码
 

@@ -93,6 +93,18 @@ test("offline checks never import modules or use database credentials and still 
   expect(await checkDatabaseGovernance(root, { mode: "off" })).toEqual([]);
 });
 
+test("offline governance binds Command RPC capabilities to registry or catalog artifacts", async () => {
+  const { root, options } = await fixture();
+  await writeFile(join(root, "rpc-registry.json"), JSON.stringify([{ name: "approveCase" }]));
+  const governance = {
+    ...options.databaseGovernance!, mode: "check" as const,
+    rpcBoundary: { registry: "rpc-registry.json" },
+  };
+  expect(await checkDatabaseGovernance(root, governance, ["approveCase"])).toEqual([]);
+  const missing = await checkDatabaseGovernance(root, governance, ["unownedCase"]);
+  expect(missing).toEqual([expect.objectContaining({ code: "database-rpc-boundary", severity: "error" })]);
+});
+
 test("offline compile and incremental checks fail closed on stale contracts without repairing artifacts", async () => {
   const { root, options } = await fixture();
   const offline: CompileOptions = {
