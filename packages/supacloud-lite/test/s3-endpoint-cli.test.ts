@@ -149,7 +149,7 @@ describe('inbound S3-compatible endpoint CLI surface', () => {
 
     const doctor = await runCli(directory, ['doctor', '--json', '--s3-endpoint'], { env: { SUPACLOUD_LITE_S3_ENDPOINT_REGION: 'eu-central-1' } })
     expect(doctor.exitCode).toBe(0)
-    expect((JSON.parse(doctor.stdout) as { s3_endpoint: { status: string; region: string } }).s3_endpoint)
+    expect((JSON.parse(doctor.stdout) as { s3_endpoint: { status: string; region: string; buckets: string[] } }).s3_endpoint)
       .toEqual({ status: 'enabled', region: 'eu-central-1', buckets: [] })
     expect(doctor.stdout).not.toContain('secret')
   }, testTimeout(60_000))
