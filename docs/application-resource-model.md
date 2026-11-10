@@ -161,6 +161,7 @@ and full-application preview.
 
 1. Deployment preflight that checks the actual binding, permissions and health.
 2. Local `app dev` consuming the graph and
-   [environment bindings](./environment-bindings.md) to connect declared
-   resources in the `fast`/`integration` profiles.
+   [environment bindings](./environment-bindings.md). `integration` is where
+   declared resources meet real PostgreSQL. `fast` stays the in-memory demo;
+   it is not Lite/PGlite and does not take on Command semantics.
 3. Delivery/receipt evidence referencing the bound resource version.

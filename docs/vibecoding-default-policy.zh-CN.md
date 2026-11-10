@@ -24,10 +24,10 @@
 | 数据库结构 | ZModel schema + append-only migration | 不建立第二套 ORM 或手工结构来源 |
 | 数据库治理 | `defineDatabaseModule`、SQL lint、Catalog reconcile | 关闭治理只能是有记录的迁移例外 |
 | 普通读取 | PostgREST / `supabase-js` | GraphQL 仅用于明确的 Query Contract |
-| 跨表写入 | Command / RPC + 权限、事务、幂等、审计 | 单表简单写入可使用受控 CRUD |
+| 编译器应用车道的跨表写入 | Command / RPC + 权限、事务、幂等、审计 | PostgREST 与 `@supabase/supabase-js` 仍是普通读取和低风险 CRUD 的一等数据面 |
 | durable 执行 | Workflow/Command | pgflow、pg_durable 需要场景证明 |
 | 新应用模板 | `minimal` | `command`、`http`、`edge` 显式选择 |
-| 本地开发 | `fast`，不连接外部数据库 | `integration` 要求显式 loopback URL |
+| 本地开发 | `fast` 是内存演示；不是 Lite/PGlite，也不承载 Command 语义 | `integration` 使用真实 loopback PostgreSQL |
 | 生成产物 | 编译器生成并检查漂移 | 不手改生成目录绕过检查 |
 | 失败处理 | fail closed，保留上一次有效产物 | 不自动修复、迁移或静默降级 |
 | 写操作重试 | 默认不自动重试 | 服务端具备幂等协议时显式启用 |
