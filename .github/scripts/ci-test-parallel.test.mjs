@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const workflowPath = fileURLToPath(new URL('../workflows/management-api.yml', import.meta.url));
 const fullWorkflowPath = fileURLToPath(new URL('../workflows/supacloud-lite-full.yml', import.meta.url));
+const appWorkflowPath = fileURLToPath(new URL('../workflows/app-generation.yml', import.meta.url));
 const parsed = spawnSync('bun', ['--no-env-file', '-e',
   'console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(process.argv[1]).text())))',
   workflowPath,
@@ -15,6 +16,7 @@ const parsed = spawnSync('bun', ['--no-env-file', '-e',
 assert.equal(parsed.status, 0, parsed.stderr);
 const workflow = JSON.parse(parsed.stdout);
 const fullWorkflow = readFileSync(fullWorkflowPath, 'utf8');
+const appWorkflow = readFileSync(appWorkflowPath, 'utf8');
 const job = workflow.jobs['package-checks'];
 const candidates = job.strategy.matrix.include.filter(entry =>
   ['Project CLI', 'App Compiler'].includes(entry.name));
@@ -26,6 +28,9 @@ test('Lite full validation stays out of the PR package matrix', () => {
   assert.match(fullWorkflow, /schedule:/);
   assert.match(fullWorkflow, /run: bun run check\s*$/m);
   assert.match(fullWorkflow, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
+  assert.match(appWorkflow, /uses: actions\/cache@v6/);
+  assert.match(appWorkflow, /path: ~\/\.bun\/install\/cache/);
+  assert.match(appWorkflow, /hashFiles\('packages\/\*\/bun\.lock'\)/);
   assert.notEqual(job['continue-on-error'], true);
 });
 
