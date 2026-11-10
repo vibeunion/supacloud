@@ -101,3 +101,22 @@ test('metadata rejects credential-bearing sources and invalid prerelease identif
   assert.throws(() => starterMetadata(root), /identity\/version/);
   assert.equal(existsSync(resolve(root, STARTER_FILE)), false);
 });
+
+test('adapter peer unions remain publishable and reject malformed alternatives', (t) => {
+  const { root, put } = fixture(t);
+  const manifest = JSON.parse(readFileSync(resolve(root, 'packages/db/package.json'), 'utf8'));
+  const peer = '@supacloud/db-zenstack';
+  const range = '^0.1.0 || ^0.2.0';
+  manifest.peerDependencies[peer] = range;
+  put('packages/db/package.json', manifest);
+  const plan = planStarterSync(root);
+  applyStarterSync(plan.planHash, root);
+  assert.equal(JSON.parse(readFileSync(resolve(root, STARTER_FILE))).packages.db.peerDependencies[peer], range);
+  assert.equal(planStarterSync(root).changed, false);
+  for (const invalid of ['^0.1.0 ||', '^0.1.0 || https://example.invalid/private.tgz', '^0.1.0 || ^0.2.0-01']) {
+    manifest.peerDependencies[peer] = invalid;
+    put('packages/db/package.json', manifest);
+    assert.throws(() => starterMetadata(root), /Missing publishable/);
+    assert.equal(JSON.parse(readFileSync(resolve(root, STARTER_FILE))).packages.db.peerDependencies[peer], range);
+  }
+});
