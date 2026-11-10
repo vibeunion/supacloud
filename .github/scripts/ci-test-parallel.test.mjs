@@ -7,21 +7,30 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const workflowPath = fileURLToPath(new URL('../workflows/management-api.yml', import.meta.url));
+const fullWorkflowPath = fileURLToPath(new URL('../workflows/supacloud-lite-full.yml', import.meta.url));
+const appWorkflowPath = fileURLToPath(new URL('../workflows/app-generation.yml', import.meta.url));
 const parsed = spawnSync('bun', ['--no-env-file', '-e',
   'console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(process.argv[1]).text())))',
   workflowPath,
 ], { encoding: 'utf8', timeout: 5000 });
 assert.equal(parsed.status, 0, parsed.stderr);
 const workflow = JSON.parse(parsed.stdout);
+const fullWorkflow = readFileSync(fullWorkflowPath, 'utf8');
+const appWorkflow = readFileSync(appWorkflowPath, 'utf8');
 const job = workflow.jobs['package-checks'];
 const candidates = job.strategy.matrix.include.filter(entry =>
   ['Project CLI', 'App Compiler'].includes(entry.name));
 
-test('Lite has time for its complete serial suite and smoke gates', () => {
-  assert.equal(job['timeout-minutes'], "${{ matrix.name == 'SupaCloud Lite' && 35 || 20 }}");
-  const lite = job.strategy.matrix.include.find(entry => entry.name === 'SupaCloud Lite');
-  assert.match(lite.script, /bun run check/);
-  assert.match(lite.script, /audit_dependencies\.ts/);
+test('Lite full validation stays out of the PR package matrix', () => {
+  assert.equal(job.strategy.matrix.include.some(entry => entry.name === 'SupaCloud Lite'), false);
+  assert.match(workflow.jobs['supacloud-lite-fast'].steps.find(step => step.name === 'Run Lite fast checks').run,
+    /bun run check:fast/);
+  assert.match(fullWorkflow, /schedule:/);
+  assert.match(fullWorkflow, /run: bun run check\s*$/m);
+  assert.match(fullWorkflow, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
+  assert.match(appWorkflow, /uses: actions\/cache@v6/);
+  assert.match(appWorkflow, /path: ~\/\.bun\/install\/cache/);
+  assert.match(appWorkflow, /hashFiles\('packages\/\*\/bun\.lock'\)/);
   assert.notEqual(job['continue-on-error'], true);
 });
 

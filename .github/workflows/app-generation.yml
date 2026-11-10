@@ -28,6 +28,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.4"
+      - name: Restore Bun package cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-generation-${{ hashFiles('packages/*/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-generation-
+            bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-
       - name: Build, pack, install and exercise the consumer path
         run: bun run scripts/check_app_generation.ts
       - name: Generator safety and existing CLI regressions
