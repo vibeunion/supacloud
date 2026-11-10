@@ -134,8 +134,8 @@ export function clearedProjectSecretWrite(row: Record<string, unknown>): Cleared
   const ciphertextChanged = SECRET_FIELDS.some(([, encrypted]) => (
     presentSecret(row[encrypted]) !== next[encrypted]
   ));
-  const hashChanged = presentSecret(row.anon_key_hash) !== next.anon_key_hash
-    || presentSecret(row.service_role_key_hash) !== next.service_role_key_hash;
+  const hashChanged = presentSecret(row["anon_key_hash"]) !== next.anon_key_hash
+    || presentSecret(row["service_role_key_hash"]) !== next.service_role_key_hash;
   if (!plaintextRemains && !ciphertextChanged && !hashChanged) return null;
   return next;
 }
@@ -175,7 +175,7 @@ export async function migratePlaintextProjectSecrets(db: SQL): Promise<number> {
           anon_key_hash = ${next.anon_key_hash},
           service_role_key_hash = ${next.service_role_key_hash},
           updated_at = NOW()
-      WHERE ref = ${String(row.ref)}
+      WHERE ref = ${String(row["ref"])}
     `;
     updated += 1;
   }
