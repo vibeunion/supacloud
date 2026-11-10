@@ -25,8 +25,11 @@ boundary and migration rules.
 Reylo and Drizzle are removed, including their dependencies, public adapters,
 commands, starter configuration, query loaders and build caches. There is no
 compatibility alias or dual query path. Existing database contents and applied
-migration history are preserved. Framework replacement does not authorize a
-production deployment or migration-history rewrite.
+migration history are preserved. Replacing the adapter replaces the model/policy adapter (today ZenStack) on the
+same PostgreSQL Database Contract. There is one migration ledger. That replacement
+does not authorize a second write database, query language, migration ledger, or
+auth store, and it does not authorize a production deployment or a migration-history
+rewrite.
 
 ## Acceptance
 

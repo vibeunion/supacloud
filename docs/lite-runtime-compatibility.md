@@ -1,8 +1,11 @@
 # Lite Runtime Compatibility
 
 The goal is to run the same application contracts on a single-project backend,
-not to duplicate the Management API. Local Auth remains the default. External
-identity and stricter runtime behavior are explicit opt-ins.
+not to duplicate the Management API. Lite, including its PGlite engine, is a
+separate single-project engine and may drift from PostgreSQL. It is not the
+`fast` in-memory demo and does not share Command semantics with that demo.
+Integration acceptance stays on real PostgreSQL. Local Auth remains the default.
+External identity and stricter runtime behavior are explicit opt-ins.
 
 ## Acceptance
 
