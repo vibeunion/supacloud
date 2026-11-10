@@ -177,6 +177,8 @@ test("catalog drift warnings stay warnings instead of blocking compilation", asy
   expect(compiled.diagnostics).toEqual(expect.arrayContaining([
     expect.objectContaining({ severity: "warn", code: "database-catalog-undeclared-trigger" }),
   ]));
+  // Drift warnings must not stop artifact generation either.
+  expect(compiled.written.length).toBeGreaterThan(0);
 }, 30_000);
 
 test("missing connection, stale sources and cached module declarations cannot silently pass", async () => {
