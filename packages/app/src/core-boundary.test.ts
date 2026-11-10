@@ -20,7 +20,6 @@ test("core bundle never traverses UI, reactive, transport or runtime implementat
   const result = await Bun.build({
     entrypoints: [join(import.meta.dir, "core.ts")],
     target: "browser",
-    external: ["@angular/core"],
     metafile: true,
   });
   expect(result.success).toBe(true);
@@ -30,4 +29,7 @@ test("core bundle never traverses UI, reactive, transport or runtime implementat
     "route_provider.ts", "inject.ts", "bun.ts", "testing.ts"]) {
     expect(inputs.some(path => path.endsWith(`/${name}`))).toBe(false);
   }
+  const output = (await Promise.all(result.outputs.map((item) => item.text()))).join("\n");
+  expect(output).not.toContain("@angular/core");
+  expect(output).not.toContain("node:async_hooks");
 });

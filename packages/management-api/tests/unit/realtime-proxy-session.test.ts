@@ -4,7 +4,7 @@ import {
   RealtimeProxySession, realtimeProjectConnections, MAX_CONNECTIONS_PER_PROJECT,
   REALTIME_DEADLINES,
   type RealtimeProxyDependencies, type RealtimeUpstreamCallbacks,
-} from "../../src/services/realtime-proxy-session";
+} from "../../src/internal/realtime-listen/proxy-session";
 import { parsePhoenixMessage, isPhoenixBroadcastFrame, type PhoenixMessage } from "../../src/utils/phoenix-message";
 import type { ChangeEvent, PostgresChangeConfig } from "../../src/utils/realtime-change";
 

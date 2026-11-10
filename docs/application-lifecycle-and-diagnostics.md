@@ -8,7 +8,7 @@ Updated: 2026-10-02
 
 相关文档：
 [应用生成与候选包验收](./application-generation.md)、
-[Encore 对齐路线](./encore-alignment-roadmap.md)、
+[Encore 对齐路线](./encore-alignment-roadmap.md)（PROPOSAL，不驱动项目开通或默认脚手架）、
 [应用开发框架](./application-framework.md)、
 [应用架构指南](./application-architecture.md)、
 [应用平台原语](./application-platform-primitives.md)、

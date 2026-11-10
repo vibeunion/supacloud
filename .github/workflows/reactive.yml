@@ -64,6 +64,7 @@ jobs:
       - name: SDK build, consumer types and tests
         run: |
           bun run scripts/build-command-dependencies.ts supacloud-js
+          (cd packages/db-zenstack && bun install --force --frozen-lockfile)
           cd packages/supacloud-js
           bun install --frozen-lockfile
           bun run build

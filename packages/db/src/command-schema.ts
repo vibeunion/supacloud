@@ -1,4 +1,13 @@
-/** Transactional commands share these receipt/audit tables with the full workflow runtime. */
+/**
+ * Application durable command ledger: `supacloud_commands.execution_receipts`
+ * and `supacloud_commands.execution_audit`.
+ *
+ * This is not the tenant bootstrap table `supacloud_commands.receipts`
+ * (FK to `supacloud_workflows.runs`) installed by
+ * `packages/management-api/src/db/sql-modules/commands-public.sql`.
+ * Do not merge the tables or the pipelines.
+ */
+
 export const COMMAND_RECEIPT_SQL = `CREATE SCHEMA IF NOT EXISTS supacloud_commands;
 REVOKE ALL ON SCHEMA supacloud_commands FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS supacloud_commands.execution_receipts (

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { initializeAppProject } from "../../cli/src/shared/tools/app-starter";
@@ -19,7 +19,7 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   await compileModel(join(project, "zenstack/schema.zmodel"), join(project, "zenstack/generated"));
   await mkdir(packed);
   const built = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts")],
+    entrypoints: [resolve(import.meta.dir, "../../db/src/source-contracts-cli.ts")],
     outdir: packed, target: "node", external: ["libpg-query", "typescript", "typescript/*", "@zenstackhq/language", "@zenstackhq/sdk"],
   });
   expect(built.success).toBe(true);
@@ -27,7 +27,16 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
     name: "@supacloud/db", type: "module",
     exports: { "./source-contracts-cli": "./source-contracts-cli.js" },
   }));
-  await symlink(resolve(import.meta.dir, "../node_modules"), join(packed, "node_modules"), "dir");
+  await mkdir(join(packed, "node_modules/@supacloud"), { recursive: true });
+  for (const entry of await readdir(resolve(import.meta.dir, "../node_modules"))) {
+    if (entry === ".bin" || entry === ".cache" || entry === "@supacloud") continue;
+    await symlink(resolve(import.meta.dir, "../node_modules", entry), join(packed, "node_modules", entry), "dir");
+  }
+  for (const entry of await readdir(resolve(import.meta.dir, "../node_modules/@supacloud"))) {
+    if (entry === "db-zenstack") continue;
+    await symlink(resolve(import.meta.dir, "../node_modules/@supacloud", entry), join(packed, "node_modules/@supacloud", entry), "dir");
+  }
+  await symlink(resolve(import.meta.dir, ".."), join(packed, "node_modules/@supacloud/db-zenstack"), "dir");
   await mkdir(join(project, "node_modules/@supacloud"), { recursive: true });
   await symlink(packed, join(project, "node_modules/@supacloud/db"), "dir");
   const run = (args: string[]) => Bun.spawnSync([

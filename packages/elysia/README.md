@@ -144,7 +144,7 @@ network listener. It is included in the normal `bun test` discovery.
   A configured `errorMapper` retains precedence. Capacity errors thrown later
   by application code are not automatically treated as admission failures.
   The transport-neutral registry exports `PendingWorkCapacityError` from
-  `@supacloud/app/runtime`; it remains a `RangeError` subclass.
+  `@supacloud/app/pending-work`; it remains a `RangeError` subclass.
 
 ### Not Yet Proven by This Suite
 
