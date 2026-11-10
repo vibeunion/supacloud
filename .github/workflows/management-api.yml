@@ -35,6 +35,7 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
+      - ".github/workflows/supacloud-lite-full.yml"
       - ".github/workflows/release-please.yml"
       - "release-please-config.json"
       - ".release-please-manifest.json"
@@ -173,8 +174,7 @@ jobs:
   package-checks:
     name: Package Checks (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    # Lite includes the full PGlite suite, package/standalone smoke, and audit.
-    timeout-minutes: ${{ matrix.name == 'SupaCloud Lite' && 35 || 20 }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       max-parallel: 12
@@ -223,13 +223,6 @@ jobs:
               bun install --frozen-lockfile
               bun run typecheck
               bun test
-              bun run ../../scripts/audit_dependencies.ts
-          - name: SupaCloud Lite
-            working-directory: packages/supacloud-lite
-            script: |
-              bun run ../../scripts/build-command-dependencies.ts supacloud-lite
-              bun install --frozen-lockfile
-              bun run check
               bun run ../../scripts/audit_dependencies.ts
           - name: Project CLI
             working-directory: packages/cli
@@ -455,6 +448,48 @@ jobs:
           retention-days: 3
           compression-level: 0
 
+  supacloud-lite-fast:
+    name: SupaCloud Lite (Fast)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore Lite Bun package cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-lite-fast-${{ hashFiles('packages/*/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-lite-fast-
+            bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-lite-
+
+      - name: Prepare Lite dependencies
+        working-directory: packages/supacloud-lite
+        run: |
+          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+          bun install --frozen-lockfile
+
+      - name: Run Lite fast checks
+        working-directory: packages/supacloud-lite
+        run: bun run check:fast
+
+      - name: Audit Lite dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/audit_dependencies.ts
+
   generate-sbom:
     name: Generate CycloneDX SBOM
     runs-on: ubuntu-24.04
@@ -527,7 +562,7 @@ jobs:
   supacloud-lite-windows:
     name: SupaCloud Lite (Windows)
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -565,11 +600,11 @@ jobs:
           bun install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Check SupaCloud Lite on Windows
+      - name: Check SupaCloud Lite fast path on Windows
         shell: pwsh
         working-directory: packages/supacloud-lite
         run: |
-          bun run check
+          bun run check:fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Audit Windows Lite dependencies
@@ -1338,6 +1373,7 @@ jobs:
       - lint-and-typecheck
       - architecture-governance
       - package-checks
+      - supacloud-lite-fast
       - command-workflow-integration
       - supacloud-lite-windows
       - supacloud-lite-standalone-native
@@ -1360,6 +1396,7 @@ jobs:
           LINT_AND_TYPECHECK: ${{ needs.lint-and-typecheck.result }}
           ARCHITECTURE_GOVERNANCE: ${{ needs.architecture-governance.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
+          SUPACLOUD_LITE_FAST: ${{ needs.supacloud-lite-fast.result }}
           COMMAND_WORKFLOW: ${{ needs.command-workflow-integration.result }}
           SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
           SUPACLOUD_LITE_STANDALONE: ${{ needs.supacloud-lite-standalone-native.result }}
@@ -1378,6 +1415,7 @@ jobs:
             "$LINT_AND_TYPECHECK" \
             "$ARCHITECTURE_GOVERNANCE" \
             "$PACKAGE_CHECKS" \
+            "$SUPACLOUD_LITE_FAST" \
             "$COMMAND_WORKFLOW" \
             "$SUPACLOUD_LITE_WINDOWS" \
             "$SUPACLOUD_LITE_STANDALONE" \

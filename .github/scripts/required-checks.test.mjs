@@ -74,14 +74,14 @@ test('package checks use bounded high concurrency', () => {
   assert.match(job('package-checks'), /^ {6}max-parallel: 12$/m);
 });
 
-test('Windows Lite checks restore Bun cache before installation', () => {
+test('Windows Lite fast checks restore Bun cache before installation', () => {
   const windows = job('supacloud-lite-windows');
   assert.match(windows, /^ {6}- name: Restore Windows Bun package cache$/m);
   assert.match(windows, /^ {8}uses: actions\/cache@v6$/m);
   assert.match(windows, /^ {10}path: ~\/\.bun\/install\/cache$/m);
   assert.ok(windows.indexOf('Restore Windows Bun package cache') < windows.indexOf('Prepare Windows Lite dependencies'));
   assert.match(windows, /bun install --frozen-lockfile/);
-  assert.match(windows, /bun run check/);
+  assert.match(windows, /bun run check:fast/);
   assert.match(windows, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
   assert.doesNotMatch(windows, /cache-hit|continue-on-error/);
 });
