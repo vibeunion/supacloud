@@ -176,9 +176,11 @@ point that may call a reviewed VOLATILE function.
 The pinned ZenStack 3.10.0 packages carry two local patches in `patches/`:
 top-level `Json` arrays are passed through as structured JSON parameters instead
 of being stringified by the ORM dialect, and the policy preflight binds them as
-one `jsonb` value rather than generating `jsonb[]`. Both are exercised by the
-real-PostgreSQL database tests and can be removed when upstream ships the same
-fix.
+one `jsonb` value rather than generating `jsonb[]`. The focused PostgreSQL
+regression keeps these contracts distinct: `model updates preserve top-level
+Json arrays as one jsonb value` covers ORM `transformInput`, while `policy
+pre-create checks bind top-level Json arrays as jsonb` covers the Policy values
+table. Both can be removed when upstream ships the same fixes.
 
 Framework receipt SQL is enabled on the **private** client, because ZenStack's
 policy plugin blocks raw SQL by default. Raw SQL and policy/plugin controls are
