@@ -91,6 +91,9 @@ describe("DatabaseService", () => {
         .map((call: unknown[]) => String(call[0]))
         .join("\n");
       expect(granted).not.toContain('GRANT CONNECT ON DATABASE "supa_testref123" TO supabase_realtime_admin');
+      expect(granted).toContain('GRANT "supa_testref123" TO "authenticator_testref123" WITH INHERIT FALSE, SET FALSE');
+      expect(granted).toContain('GRANT "supa_testref123" TO "role_testref123" WITH INHERIT FALSE, SET FALSE');
+      expect(granted).toContain("supacloud_cluster_login");
     });
 
     test("reconciles tenant login passwords when the database already exists", async () => {

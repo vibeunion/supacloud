@@ -2,7 +2,8 @@ import { expect, spyOn, test } from "bun:test";
 import { branchService } from "../../src/services/branch.service";
 import { tenantRuntimeService } from "../../src/services/tenant-runtime.service";
 import { projectRepository } from "../../src/repositories/project.repository";
-import { sql } from "../../src/db";
+import { renderTenantHbaPairingDropSql } from "../../src/services/tenant-hba-pairing";
+import { resolveAuthenticatorName, resolveRoleName, sql } from "../../src/db";
 
 test.each(["stop", "drop", "readback", "retained"] as const)(
   "deleteBranch preserves project identity when %s cannot confirm deletion",
@@ -49,9 +50,16 @@ test("deleteBranch verifies database absence before soft deleting and propagates
   });
   try {
     await branchService.deleteBranch("pv0123456789ab4def81");
+    // The database drop is followed by the HBA role-pairing teardown, then the receipt.
     expect(calls).toEqual([
       "stop:pv0123456789ab4def81", 'DROP DATABASE IF EXISTS "supa_pv0123456789ab4def81"',
-      "verify:supa_pv0123456789ab4def81", "deleted:pv0123456789ab4def81",
+      "verify:supa_pv0123456789ab4def81",
+      renderTenantHbaPairingDropSql(
+        "supa_pv0123456789ab4def81",
+        resolveRoleName("pv0123456789ab4def81"),
+        resolveAuthenticatorName("pv0123456789ab4def81"),
+      ),
+      "deleted:pv0123456789ab4def81",
     ]);
     softDelete.mockRejectedValueOnce(new Error("receipt unavailable"));
     await expect(branchService.deleteBranch("pv0123456789ab4def81")).rejects.toThrow("receipt unavailable");

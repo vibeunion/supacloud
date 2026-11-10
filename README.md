@@ -132,7 +132,7 @@ Binding is an administrator operation. Existing platform objects require the doc
 
 | Surface | What to verify |
 | --- | --- |
-| Repository vs releases | A merged change on `main` is not proof that the corresponding package or binary has been published. |
+| Repository vs releases | A merged change on `main` is not proof that the corresponding package or binary has been published. Merging is not a production deploy. `docker/self-host` (one GoTrue, one PostgREST) is not multi-project Pigsty evidence. Gates 2–4 and HA need a dated pass on a real host. See the [operator checklist](docs/self-hosted-stable-baseline.md). |
 | Pigsty installation baseline | Installation defaults pin `v4.5.0`. Follow the [current pin and upgrade checks](docs/upgrade-to-pigsty-4.5.md); historical migration identifiers are not the current version. |
 | Elysia and schemas | The exact RC/version tuple lives in [compatibility.json](packages/elysia/compatibility.json). Actual results are dated in the [acceptance record](docs/framework-acceptance.md); the tuple alone is not an execution result. |
 | Generated contracts | Upgrade compiler, TypeBox schemas, generated clients and runtime adapters together. Regenerate and run [contract migration checks](docs/route-contract-migration.md). |

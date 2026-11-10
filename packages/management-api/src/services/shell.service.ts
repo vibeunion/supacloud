@@ -4,6 +4,20 @@ import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
+const CLUSTER_PASSWORD_ENV = new Set(["PGPASSWORD", "PG_PASSWORD", "POSTGRES_PASSWORD"]);
+
+/** Scripts launched here do not connect as the cluster database role. */
+export function environmentWithoutClusterPassword(
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined || CLUSTER_PASSWORD_ENV.has(key)) continue;
+    env[key] = value;
+  }
+  return env;
+}
+
 export class ShellService {
   private scriptsPath: string;
 
@@ -16,13 +30,12 @@ export class ShellService {
     const scriptPath = `${this.scriptsPath}/${script}`;
 
     // Build environment variables
-    const env: Record<string, string> = {
+    const env = environmentWithoutClusterPassword({
       ...process.env,
       PG_HOST: config.pgHost,
       PG_PORT: String(config.pgPort),
       PG_USER: config.pgUser,
-      PGPASSWORD: config.pgPassword,
-    };
+    });
 
     let timedOut = false;
     const proc = Bun.spawn(["bash", scriptPath, ...args], {
