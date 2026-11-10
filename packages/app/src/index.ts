@@ -56,13 +56,6 @@ export type {
 export { ConfigValidationError, decodeConfig } from "./config";
 export type { ConfigIssue } from "./config";
 export {
-  bootstrapBun,
-  runInRequestContext,
-  runInScope,
-  runInTransactionContext,
-} from "./bun";
-export type { BunApplication, BunBootstrapOptions, BunServerLike } from "./bun";
-export {
   Body,
   CanDeactivate,
   Cookie,
@@ -208,23 +201,6 @@ export {
   createDestroyRef,
 } from "./context";
 export type { DestroyRef, LifecycleHooks, OnDestroy, OnInit } from "./context";
-export {
-  INJECTOR,
-  assertInInjectionContext,
-  createChildInjector,
-  createEnvironmentInjector,
-  getActiveInjector,
-  inject,
-  injectAll,
-  injectDestroySignal,
-  runInInjectionContext,
-} from "./inject";
-export type {
-  EnvironmentInjector,
-  EnvironmentInjectorOptions,
-  InjectFlags,
-  InjectorLike,
-} from "./inject";
 export { forwardRef, isForwardRef, resolveForwardRef } from "./forward_ref";
 export type { ForwardRefFn } from "./forward_ref";
 export { matchRoute } from "./route_match";
@@ -280,8 +256,6 @@ export type {
   RouterEvent,
   RouterEventType,
 } from "./route_pipeline";
-export { TestBed } from "./testing";
-export type { TestModuleMetadata } from "./testing";
 export {
   APP_BASE_HREF,
   ROUTER_CONFIGURATION,
@@ -324,21 +298,6 @@ export { HttpParams } from "./http_params";
 export type { HttpParamsOptions } from "./http_params";
 export { HttpHeaders } from "./http_headers";
 export { HttpContext, HttpContextToken } from "./http_context";
-export {
-  HTTP_CLIENT_CONFIG,
-  HTTP_INTERCEPTORS,
-  HttpClient,
-  HttpErrorResponse,
-  provideHttpClient,
-  withFetch,
-  withRequestsMadeViaParent,
-} from "./http_client";
-export type {
-  HttpClientConfig,
-  HttpClientFeature,
-  HttpClientFeatureKind,
-  HttpRequestOptions,
-} from "./http_client";
 export {
   DefaultUrlSerializer,
   UrlSegmentGroup,

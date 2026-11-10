@@ -34,10 +34,11 @@ provider feature. To configure through public root exports without changing that
 legacy API, register the array with `HTTP_INTERCEPTORS`:
 
 ```ts
+import { withInterceptors } from "@supacloud/app";
 import {
   createEnvironmentInjector, HttpClient, HTTP_INTERCEPTORS,
-  provideHttpClient, withFetch, withRequestsMadeViaParent, withInterceptors,
-} from "@supacloud/app";
+  provideHttpClient, withFetch, withRequestsMadeViaParent,
+} from "@supacloud/app/runtime";
 
 const parent = createEnvironmentInjector([
   provideHttpClient(withFetch()),

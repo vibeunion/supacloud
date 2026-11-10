@@ -1,4 +1,4 @@
-import { PendingWorkRegistry } from "@supacloud/app/runtime";
+import { PendingWorkRegistry } from "@supacloud/app/pending-work";
 import {
   executeJob,
   type CompiledJob,
