@@ -21,6 +21,7 @@ import {
   relativeImportPath,
 } from "./util";
 import { buildContractManifest, type ContractManifest } from "./contract-manifest";
+import { createSemanticSnapshot } from "./semantic";
 import { featureTransitionForRoute } from "./feature";
 import { resolveModuleBoundaries } from "./profiles";
 import { createExecutionPlans } from "./inspect";
@@ -563,9 +564,16 @@ export function renderApplication(
     idempotency: command.idempotency ?? null,
   }))).sort((left, right) => `${left.module}:${left.name}`.localeCompare(`${right.module}:${right.name}`));
   const operationPlans = createExecutionPlans({ ...graph, modules });
+  const semantic = createSemanticSnapshot(graph);
   const executionPlan: CompiledExecutionManifest = {
     version: 1,
     compiler: "@supacloud/compiler",
+    semantic: {
+      version: 1,
+      policyVersion: "semantic-governance-v1",
+      hash: semantic.semanticHash,
+      nodeCount: semantic.nodes.length,
+    },
     host: { adapter: "elysia", api: "2.x", reflection: false, proxy: false },
     di: { runtime: "angular-compatible", generation: "static", scopes: ["application", "request", "job"] },
     boundaries: resolveModuleBoundaries({ ...(options.moduleBoundaryPreset ? { preset: options.moduleBoundaryPreset } : {}), ...(options.moduleBoundaries ? { rules: options.moduleBoundaries } : {}) }) ?? [],
@@ -698,6 +706,7 @@ export function renderApplication(
   };
   const manifest: {
     version: number;
+    semantic: NonNullable<CompiledExecutionManifest["semantic"]>;
     modules: ModuleNode[];
     externalTokens: string[];
     executionPlan: CompiledExecutionManifest;
@@ -709,6 +718,7 @@ export function renderApplication(
     };
   } = {
     version: 1,
+    semantic: executionPlan.semantic!,
     modules: graph.modules,
     externalTokens: graph.externalTokens,
     executionPlan,

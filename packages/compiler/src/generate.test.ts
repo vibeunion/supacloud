@@ -48,6 +48,9 @@ describe("compileProject：总体结果", () => {
       await readFile(join(outDir, "app.manifest.json"), "utf8"),
     );
     expect(manifest.version).toBe(1);
+    expect(manifest.semantic).toMatchObject({ version: 1, policyVersion: "semantic-governance-v1" });
+    expect(manifest.semantic.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.executionPlan.semantic).toEqual(manifest.semantic);
     expect(manifest.externalTokens).toEqual(["DB_CLIENT", "REQUEST_CONTEXT"]);
     expect(manifest.modules.map((m: { name: string }) => m.name).sort()).toEqual([
       "audit",

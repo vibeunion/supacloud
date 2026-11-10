@@ -3,6 +3,7 @@ import { dirname, join, relative, sep } from "node:path";
 import type { ApplicationGraph, AspectRefNode, Diagnostic, ModuleNode, ProviderNode } from "./types";
 import { inspectRouteContracts } from "./route-contracts";
 import { featureTransitionForRoute } from "./feature";
+import { createSemanticSnapshot, type SemanticSnapshot } from "./semantic";
 
 export interface ExecutionPlan {
   module: string;
@@ -38,6 +39,12 @@ export interface ContextPack {
   relatedModules: {
     importedBy: string[];
     imports: string[];
+  };
+  /** Read-only semantic identity for the full graph and selected neighborhood nodes. */
+  semantic: {
+    version: 1;
+    hash: string;
+    nodes: Array<{ id: string; kind: string; hash: string }>;
   };
   graphql?: ApplicationGraph["graphql"];
 }
@@ -89,7 +96,7 @@ export function explainGraph(graph: ApplicationGraph, subject: string): string {
  * Extracts the smallest graph neighborhood that is useful for an agent
  * editing one feature: the subject module, its imports, and its dependents.
  */
-export function createContextPack(graph: ApplicationGraph, subject: string): ContextPack {
+export function createContextPack(graph: ApplicationGraph, subject: string, snapshot?: SemanticSnapshot): ContextPack {
   const subjectModule = resolveContextModule(graph, subject);
 
   const byName = new Map(graph.modules.map((module) => [module.name, module]));
@@ -157,6 +164,8 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     }
   }
 
+  const semantic = snapshot ?? createSemanticSnapshot(graph);
+  const selectedModuleNames = new Set(modules.map(module => module.name));
   return {
     version: 1,
     subject: subjectModule.name,
@@ -185,6 +194,13 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
         .filter((module) => module.imports.includes(subjectModule.name))
         .map((module) => module.name)
         .sort(),
+    },
+    semantic: {
+      version: 1,
+      hash: semantic.semanticHash,
+      nodes: semantic.nodes
+        .filter(item => item.module === undefined || selectedModuleNames.has(item.module))
+        .map(item => ({ id: item.id, kind: item.kind, hash: item.hash })),
     },
   };
 }

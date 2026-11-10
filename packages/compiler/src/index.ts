@@ -95,6 +95,12 @@ export {
   exportGraphDot,
   exportGraphMermaid,
 } from "./inspect";
+export { createSemanticSnapshot, createProjectSemanticSnapshot, diffSemanticSnapshots, diagnoseSemanticConflicts, createSemanticLens, parseSemanticSnapshot } from "./semantic";
+export type {
+  SemanticChange, SemanticConflict, SemanticDeliveryInput, SemanticDiff, SemanticLens, SemanticLensOptions,
+  SemanticNode, SemanticNodeKind,
+  SemanticSnapshot, SemanticSnapshotOptions,
+} from "./semantic";
 export { createIncrementalCompiler } from "./incremental";
 export { createDependencyGraphCache } from "./incremental";
 export { ModuleDependencyGraph } from "./incremental";
