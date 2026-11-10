@@ -79,7 +79,7 @@ test("default minimal health feature compiles and executes with the new core ent
   const { compileProject } = await import("@supacloud/compiler");
   const root = await fixture();
   const host = await readFile(join(root, "src/application.ts"), "utf8");
-  expect(host).toContain("readCreatedApplication");
+  expect(host).toContain("export function readCreatedApplication");
   expect(host).toContain("isApplicationHost");
   expect(host).toContain("signal?: AbortSignal");
   expect(host).toContain("handle: (request: Request) => Promise<Response>");

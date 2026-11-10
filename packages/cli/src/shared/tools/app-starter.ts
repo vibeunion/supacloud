@@ -296,7 +296,7 @@ function isRequestContextFactory(value: unknown): value is AppAdapters["requestC
   return typeof value === "function";
 }
 
-function readCreatedApplication(value: unknown): CreatedApplication {
+export function readCreatedApplication(value: unknown): CreatedApplication {
   if (!isApplicationHost(value)) {
     throw new Error("createApplication returned an invalid application host");
   }
