@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { registerRemoteDevTools } from "./remote-dev-tools";
+import type { ToolInvocation } from "../tool-server";
 
 describe("remote dev tools", () => {
     test("syncs through mkdir, rsync, and reload without shell execution", async () => {
@@ -44,6 +45,20 @@ describe("remote dev tools", () => {
             execute: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
         });
         await expect(tool!({ action: "status" })).rejects.toThrow("forbidden for production");
+    });
+
+    test("removed dev migration action and config fail before remote execution", async () => {
+        const root = await mkdtemp(join(tmpdir(), "supacloud-dev-removed-"));
+        let invoke: ToolInvocation | undefined;
+        let calls = 0;
+        registerRemoteDevTools({ tool(_name, _description, _schema, handler) { invoke = handler; } }, {
+            cwd: root, environment: "test", execute: async () => { calls++; return { exitCode: 0, stdout: "", stderr: "" }; },
+        });
+        if (!invoke) throw new Error("Missing dev tool");
+        await expect(invoke({ action: "migrate" })).rejects.toThrow();
+        await writeFile(join(root, "supacloud.json"), JSON.stringify({ dev: { database: {} } }));
+        await expect(invoke({ action: "status" })).rejects.toThrow("dev.database was removed");
+        expect(calls).toBe(0);
     });
 
 });

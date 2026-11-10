@@ -450,7 +450,7 @@ describe("Angular-style functional inject() & injection context", () => {
   });
 
   test("createChildInjector resolves child tokens and falls back to parent", () => {
-    const { createChildInjector, runInInjectionContext, inject } = require("./index");
+    const { createChildInjector, runInInjectionContext, inject } = require("./runtime");
     const PARENT_TOKEN = new InjectionToken<string>("parent");
     const CHILD_TOKEN = new InjectionToken<string>("child");
 
@@ -507,7 +507,8 @@ describe("Angular-style functional inject() & injection context", () => {
   });
 
   test("inject(DESTROY_REF) resolves default factory when not in injector", () => {
-    const { DESTROY_REF, inject, runInInjectionContext } = require("./index");
+    const { DESTROY_REF } = require("./index");
+    const { inject, runInInjectionContext } = require("./runtime");
     const injector = { get: () => undefined };
     runInInjectionContext(injector, () => {
       const ref = inject(DESTROY_REF);
@@ -526,7 +527,8 @@ describe("Angular-style functional inject() & injection context", () => {
   });
 
   test("DestroyRef.signal aborts when destroyed and injectDestroySignal returns signal", async () => {
-    const { createDestroyRef, injectDestroySignal, runInInjectionContext, DESTROY_REF } = require("./index");
+    const { createDestroyRef, DESTROY_REF } = require("./index");
+    const { injectDestroySignal, runInInjectionContext } = require("./runtime");
     const destroyRef = createDestroyRef();
     expect(destroyRef.signal.aborted).toBe(false);
 
@@ -605,7 +607,7 @@ describe("Angular-style functional inject() & injection context", () => {
   });
 
   test("createChildInjector and inject enforce self and skipSelf resolution modifiers at runtime", () => {
-    const { createChildInjector, inject, runInInjectionContext } = require("./index");
+    const { createChildInjector, inject, runInInjectionContext } = require("./runtime");
 
     const parent = {
       get: (token: any) => token === "PARENT_ONLY" ? "parent-val" : token === "SHARED" ? "parent-shared" : undefined,

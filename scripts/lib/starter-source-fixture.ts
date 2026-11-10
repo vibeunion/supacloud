@@ -1,4 +1,4 @@
-import { compileModel } from "../../packages/db/src/model";
+import { compileModel } from "../../packages/db-zenstack/src/model";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { appStarterFiles } from "../../packages/cli/src/shared/tools/app-starter";
@@ -27,6 +27,7 @@ export async function prepareStarterSourceFixture(root: string): Promise<void> {
     "@supacloud/app/core": [join(repo, "packages/app/src/core.ts")],
     "@supacloud/app/execution": [join(repo, "packages/app/src/execution.ts")],
     "@supacloud/app/runtime": [join(repo, "packages/app/src/runtime.ts")],
+    "@supacloud/app/pending-work": [join(repo, "packages/app/src/pending-work.ts")],
     "@supacloud/db/bun": [join(repo, "packages/db/src/command-bun.ts")],
     "@supacloud/contracts/client": [join(repo, "packages/contracts/src/client.ts")],
     "@supacloud/contracts/browser": [join(repo, "packages/contracts/src/browser.ts")],
