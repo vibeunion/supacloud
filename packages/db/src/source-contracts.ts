@@ -1,3 +1,4 @@
+/// <reference path="./optional-db-zenstack.d.ts" />
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";

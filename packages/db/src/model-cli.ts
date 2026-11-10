@@ -1,3 +1,4 @@
+/// <reference path="./optional-db-zenstack.d.ts" />
 import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { modelMain } from "@supacloud/db-zenstack/cli";

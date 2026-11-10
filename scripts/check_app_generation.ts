@@ -60,7 +60,7 @@ try {
     }, null, 2));
     await installStarterConsumer(runner, run);
     const cli = join(runner, "node_modules/@supacloud/cli/dist/index.js");
-    await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "minimal"], runner);
+    await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "app"], runner);
     const generatedManifest = JSON.parse(await readFile(join(project, "package.json"), "utf8"));
     assert.equal(generatedManifest.dependencies.elysia, "2.0.0-rc.1");
     // Candidate tarballs replace only project-owned packages; third-party versions
