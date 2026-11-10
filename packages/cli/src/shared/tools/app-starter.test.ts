@@ -346,7 +346,12 @@ test("starter documents external unified identity without adding an identity run
     expect(readme).toContain("exports createSupAuthApp(identity, adapters)");
     expect(files["src/application.ts"]).toContain("createSupAuthRequestContext(identity)");
     expect(files["src/application.ts"]).toContain("const resolved: unknown = createSupAuthRequestContext(identity)");
+    expect(files["src/application.ts"]).toContain("isRequestContextFactory");
+    expect(files["src/application.ts"]).toContain("isCreatedApplication");
     expect(files["src/application.ts"]).toContain("readCreatedApplication");
+    expect(files["src/application.ts"]).toContain("signal?: AbortSignal");
+    expect(files["src/application.ts"]).not.toContain("Reflect.apply");
+    expect(files["src/application.ts"]).not.toContain("Reflect.get");
     expect(readme).toContain("configured issuer and audience");
     expect(readme).toContain("application-local membership");
     expect(readme).toContain("never fall back to the demo identity");

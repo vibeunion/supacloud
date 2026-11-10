@@ -261,7 +261,7 @@ export interface AppAdapters {
   requestContext: (
     request: Request,
     context: unknown,
-    signal: AbortSignal,
+    signal?: AbortSignal,
   ) => unknown | Promise<unknown>;
   commandGovernance: CommandGovernance;
   onExecution?: (event: Readonly<Record<string, unknown>>) => void | Promise<void>;
@@ -273,47 +273,41 @@ export interface CreatedApplication {
   destroy: () => Promise<void>;
 }
 
-async function awaitUnknown(value: unknown): Promise<void> {
-  if (value !== undefined) await value;
+function isRecord(value: unknown): value is { readonly [key: string]: unknown } {
+  return typeof value === "object" && value !== null;
+}
+
+function isCreatedApplication(value: unknown): value is CreatedApplication {
+  return isRecord(value)
+    && typeof value["fetch"] === "function"
+    && typeof value["initialize"] === "function"
+    && typeof value["destroy"] === "function";
+}
+
+function isRequestContextFactory(value: unknown): value is AppAdapters["requestContext"] {
+  return typeof value === "function";
 }
 
 function readCreatedApplication(value: unknown): CreatedApplication {
-  if (value === null || typeof value !== "object") {
-    throw new Error("createApplication returned an invalid application host");
-  }
-  const fetch = Reflect.get(value, "fetch");
-  const initialize = Reflect.get(value, "initialize");
-  const destroy = Reflect.get(value, "destroy");
-  if (typeof fetch !== "function" || typeof initialize !== "function" || typeof destroy !== "function") {
+  if (!isCreatedApplication(value)) {
     throw new Error("createApplication returned an invalid application host");
   }
   return {
-    fetch: (request) => {
-      const result: unknown = Reflect.apply(fetch, value, [request]);
-      if (result instanceof Response) return result;
-      if (result !== null && typeof result === "object" && typeof Reflect.get(result, "then") === "function") {
-        return Promise.resolve(result).then((settled: unknown) => {
-          if (!(settled instanceof Response)) throw new Error("Application fetch must return Response");
-          return settled;
-        });
-      }
-      throw new Error("Application fetch must return Response");
-    },
-    initialize: async () => {
-      await awaitUnknown(Reflect.apply(initialize, value, []));
-    },
-    destroy: async () => {
-      await awaitUnknown(Reflect.apply(destroy, value, []));
-    },
+    fetch: (request) => value.fetch(request),
+    initialize: () => value.initialize(),
+    destroy: () => value.destroy(),
   };
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
 export function createApp(adapters: AppAdapters): CreatedApplication {
   const application: unknown = createApplication({
-    ...adapters,
+    deps: adapters.deps,
+    requestContext: adapters.requestContext,
+    commandGovernance: adapters.commandGovernance,
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
+    ...(adapters.onExecution === undefined ? {} : { onExecution: adapters.onExecution }),
   });
   return readCreatedApplication(application);
 }
@@ -323,12 +317,10 @@ export function createSupAuthApp(
   adapters: Omit<AppAdapters, "requestContext">,
 ): CreatedApplication {
   const resolved: unknown = createSupAuthRequestContext(identity);
-  if (typeof resolved !== "function") {
+  if (!isRequestContextFactory(resolved)) {
     throw new Error("createSupAuthRequestContext must return a requestContext function");
   }
-  const requestContext: AppAdapters["requestContext"] = (request, context, signal) =>
-    Reflect.apply(resolved, undefined, [request, context, signal]);
-  return createApp({ ...adapters, requestContext });
+  return createApp({ ...adapters, requestContext: resolved });
 }
 `,
         "generated/application.ts": `// BOOTSTRAP ARTIFACT: bun run compile replaces this file.
