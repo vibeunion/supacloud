@@ -80,9 +80,9 @@ test("default minimal health feature compiles and executes with the new core ent
   const root = await fixture();
   const host = await readFile(join(root, "src/application.ts"), "utf8");
   expect(host).toContain("readCreatedApplication");
-  expect(host).toContain("isCreatedApplication");
+  expect(host).toContain("isApplicationHost");
   expect(host).toContain("signal?: AbortSignal");
-  expect(host).toContain("handle: (request: Request)");
+  expect(host).toContain("handle: (request: Request) => Promise<Response>");
   expect(host).toContain("onExecution?: ExecutionObserver");
   expect(host).toContain("deps: Record<string, unknown>");
   expect(host).not.toContain("Reflect.apply");

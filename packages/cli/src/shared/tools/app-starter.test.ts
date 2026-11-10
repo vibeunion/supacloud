@@ -347,10 +347,10 @@ test("starter documents external unified identity without adding an identity run
     expect(files["src/application.ts"]).toContain("createSupAuthRequestContext(identity)");
     expect(files["src/application.ts"]).toContain("const resolved: unknown = createSupAuthRequestContext(identity)");
     expect(files["src/application.ts"]).toContain("isRequestContextFactory");
-    expect(files["src/application.ts"]).toContain("isCreatedApplication");
+    expect(files["src/application.ts"]).toContain("isApplicationHost");
     expect(files["src/application.ts"]).toContain("readCreatedApplication");
     expect(files["src/application.ts"]).toContain("signal?: AbortSignal");
-    expect(files["src/application.ts"]).toContain("handle: (request: Request)");
+    expect(files["src/application.ts"]).toContain("handle: (request: Request) => Promise<Response>");
     expect(files["src/application.ts"]).toContain("type ExecutionObserver");
     expect(files["src/application.ts"]).toContain("onExecution?: ExecutionObserver");
     expect(files["src/application.ts"]).not.toContain("Reflect.apply");

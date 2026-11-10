@@ -119,8 +119,8 @@ export interface AppAdapters {
 }
 
 export interface CreatedApplication {
-  fetch: (request: Request) => Response | Promise<Response>;
-  handle: (request: Request) => Response | Promise<Response>;
+  fetch: (request: Request) => Promise<Response>;
+  handle: (request: Request) => Promise<Response>;
   initialize: () => Promise<void>;
   destroy: () => Promise<void>;
 }
@@ -129,7 +129,12 @@ function isRecord(value: unknown): value is { readonly [key: string]: unknown } 
   return typeof value === "object" && value !== null;
 }
 
-function isCreatedApplication(value: unknown): value is CreatedApplication {
+function isApplicationHost(value: unknown): value is {
+  fetch: (request: Request) => Response | Promise<Response>;
+  handle: (request: Request) => Response | Promise<Response>;
+  initialize: () => void | Promise<void>;
+  destroy: () => void | Promise<void>;
+} {
   return isRecord(value)
     && typeof value["fetch"] === "function"
     && typeof value["handle"] === "function"
@@ -142,10 +147,15 @@ function isRequestContextFactory(value: unknown): value is AppAdapters["requestC
 }
 
 function readCreatedApplication(value: unknown): CreatedApplication {
-  if (!isCreatedApplication(value)) {
+  if (!isApplicationHost(value)) {
     throw new Error("createApplication returned an invalid application host");
   }
-  return value;
+  return {
+    fetch: async (request) => await value.fetch(request),
+    handle: async (request) => await value.handle(request),
+    initialize: async () => { await value.initialize(); },
+    destroy: async () => { await value.destroy(); },
+  };
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
