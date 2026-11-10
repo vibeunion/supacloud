@@ -9,6 +9,11 @@ The `contracts` job validates the deployment-evidence contract, Management API
 routes, CLI readback, Developer MCP, Web Console, package type safety, delivery
 build, SLO alert rules and the clean-diff boundary.
 
+The delivery package also validates the single-node deployment state contract:
+the supported host profile is explicit, observed component state must match the
+desired release before confirmation, and an unknown mutation outcome requires
+read-back of the same mutation identity.
+
 ## Synthetic restore gate
 
 Run the workflow manually with `run_restore_drill=true` to build the pinned
