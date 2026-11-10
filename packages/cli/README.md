@@ -52,13 +52,13 @@ bun run check
 ```
 
 The initializer needs no platform credentials and never overwrites existing
-projects. The default minimal template is a `@supabase/supabase-js` client. It
-does not install `@supacloud/app`, the compiler, Elysia, or Effect. Select
-`--template app` for the health feature, compiler, and Elysia host. Select
+projects. The default minimal template is the compiler/Effect stack with a
+health feature, Elysia host, and `@supabase/supabase-js` data-plane client.
+Select `--template client` for a supabase-js-only directory. Select
 `--template command` for the persistent governed-command reference. Add HTTP
-routes and background jobs with `app generate` inside those opt-in projects;
-there are no separate `http` or `edge` starter templates. The compiler is a
-development dependency of `--template app` only.
+routes and background jobs with `app generate` inside those projects; there are
+no separate `http` or `edge` starter templates. The compiler is a development
+dependency of `minimal`, `command`, and `model-command` only.
 The app-template demo binds to loopback and cannot run in staging/production.
 Production identity, persistence and durable governance must be supplied by the
 application. See [Application Starter](../../docs/application-starter.md) for the

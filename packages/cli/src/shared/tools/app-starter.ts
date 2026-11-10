@@ -3,7 +3,12 @@ import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS 
 import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
-import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates";
+import {
+    appTemplateFiles,
+    resolveStarterTemplate,
+    type StarterTemplate,
+    type StarterTemplateInput,
+} from "./app-starter-templates";
 import { modelCommandTemplateFiles } from "./app-model-command-starter";
 import { STARTER_REVIEW_JOB, STARTER_REVIEW_JOB_TEST } from "./app-starter-review-job";
 import { STARTER_ATTACHMENT_POSTGRES, STARTER_ATTACHMENT_SCHEMA } from "./app-starter-attachments";
@@ -243,27 +248,88 @@ export function createDemo() {
 }
 `,
         "src/application.ts": `import { createApplication } from "@supacloud/elysia";
-import { createSupAuthRequestContext, type SupAuthContextOptions, type ApplicationOptions, type CommandGovernance } from "@supacloud/elysia";
+import {
+  createSupAuthRequestContext,
+  type SupAuthContextOptions,
+  type CommandGovernance,
+  type ExecutionObserver,
+} from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
 
+/** Trusted-host adapters. Keep these explicit so indexed ApplicationOptions access cannot widen to any. */
 export interface AppAdapters {
-  deps: NonNullable<ApplicationOptions["deps"]>;
-  requestContext: NonNullable<ApplicationOptions["requestContext"]>;
+  deps: Record<string, unknown>;
+  requestContext: (
+    request: Request,
+    context: unknown,
+    signal?: AbortSignal,
+  ) => unknown | Promise<unknown>;
   commandGovernance: CommandGovernance;
-  onExecution?: NonNullable<ApplicationOptions["onExecution"]>;
+  onExecution?: ExecutionObserver;
+}
+
+export interface CreatedApplication {
+  fetch: (request: Request) => Promise<Response>;
+  handle: (request: Request) => Promise<Response>;
+  initialize: () => Promise<void>;
+  destroy: () => Promise<void>;
+}
+
+function isRecord(value: unknown): value is { readonly [key: string]: unknown } {
+  return typeof value === "object" && value !== null;
+}
+
+function isApplicationHost(value: unknown): value is {
+  fetch: (request: Request) => Response | Promise<Response>;
+  handle: (request: Request) => Response | Promise<Response>;
+  initialize: () => void | Promise<void>;
+  destroy: () => void | Promise<void>;
+} {
+  return isRecord(value)
+    && typeof value["fetch"] === "function"
+    && typeof value["handle"] === "function"
+    && typeof value["initialize"] === "function"
+    && typeof value["destroy"] === "function";
+}
+
+function isRequestContextFactory(value: unknown): value is AppAdapters["requestContext"] {
+  return typeof value === "function";
+}
+
+export function readCreatedApplication(value: unknown): CreatedApplication {
+  if (!isApplicationHost(value)) {
+    throw new Error("createApplication returned an invalid application host");
+  }
+  return {
+    fetch: async (request) => await value.fetch(request),
+    handle: async (request) => await value.handle(request),
+    initialize: async () => { await value.initialize(); },
+    destroy: async () => { await value.destroy(); },
+  };
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
-export function createApp(adapters: AppAdapters) {
-  return createApplication({
-    ...adapters,
+export function createApp(adapters: AppAdapters): CreatedApplication {
+  const application: unknown = createApplication({
+    deps: adapters.deps,
+    requestContext: adapters.requestContext,
+    commandGovernance: adapters.commandGovernance,
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
+    ...(adapters.onExecution === undefined ? {} : { onExecution: adapters.onExecution }),
   });
+  return readCreatedApplication(application);
 }
 
-export function createSupAuthApp(identity: SupAuthContextOptions, adapters: Omit<AppAdapters, "requestContext">) {
-  return createApp({ ...adapters, requestContext: createSupAuthRequestContext(identity) });
+export function createSupAuthApp(
+  identity: SupAuthContextOptions,
+  adapters: Omit<AppAdapters, "requestContext">,
+): CreatedApplication {
+  const resolved: unknown = createSupAuthRequestContext(identity);
+  if (!isRequestContextFactory(resolved)) {
+    throw new Error("createSupAuthRequestContext must return a requestContext function");
+  }
+  return createApp({ ...adapters, requestContext: resolved });
 }
 `,
         "generated/application.ts": `// BOOTSTRAP ARTIFACT: bun run compile replaces this file.
@@ -934,8 +1000,12 @@ and governance; TypeScript checks both application and generated source.
     };
 }
 
-export async function initializeAppProject(options: { root?: string; name?: string; template?: StarterTemplate }): Promise<{
-    root: string; name: string; files: string[];
+export async function initializeAppProject(options: {
+    root?: string;
+    name?: string;
+    template?: StarterTemplateInput;
+}): Promise<{
+    root: string; name: string; files: string[]; template: StarterTemplate;
 }> {
     const root = resolve(options.root ?? process.cwd());
     const name = options.name ?? basename(root);
@@ -948,19 +1018,30 @@ export async function initializeAppProject(options: { root?: string; name?: stri
     if ((await readdir(root)).some((entry) => entry !== ".git")) {
         throw new Error("app init requires an empty directory (an existing .git directory is allowed)");
     }
-    const template = options.template ?? "minimal";
+    const template = resolveStarterTemplate(options.template);
     const sdk = {
         "@supacloud/js": `^${sdkMetadata.version}`,
         "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
     };
-    const files = template === "command" ? appStarterFiles(name)
-        : template === "model-command" ? modelCommandTemplateFiles(name, sdk)
-        : template === "minimal" || template === "app" ? appTemplateFiles(name, template, sdk)
-        : (() => { throw new Error(`Unknown app init template: ${template}`); })();
+    const files = (() => {
+        switch (template) {
+            case "command":
+                return appStarterFiles(name);
+            case "model-command":
+                return modelCommandTemplateFiles(name, sdk);
+            case "minimal":
+            case "client":
+                return appTemplateFiles(name, template, sdk);
+            default: {
+                const exhausted: never = template;
+                throw new Error(`Unknown app init template: ${String(exhausted)}`);
+            }
+        }
+    })();
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });
         await writeFile(path, content, { encoding: "utf8", flag: "wx" });
     }
-    return { root, name, files: Object.keys(files) };
+    return { root, name, files: Object.keys(files), template };
 }

@@ -147,7 +147,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--postgres-password",
-        default=secrets.token_urlsafe(18),
+        default=os.environ.get("POSTGRES_PASSWORD") or secrets.token_urlsafe(18),
         help="Postgres superuser password",
     )
     parser.add_argument(
@@ -157,9 +157,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--jwt-secret",
-        default=secrets.token_urlsafe(32),
+        default=os.environ.get("JWT_SECRET") or secrets.token_urlsafe(32),
         help="JWT signing secret",
     )
+    parser.add_argument("--anon-key", default=os.environ.get("ANON_KEY"), help="Configured anon JWT")
+    parser.add_argument("--service-role-key", default=os.environ.get("SERVICE_ROLE_KEY"), help="Configured service-role JWT")
+    parser.add_argument("--dashboard-username", default=os.environ.get("DASHBOARD_USERNAME") or "supabase")
     parser.add_argument(
         "--master-token",
         default=secrets.token_urlsafe(32),
@@ -172,7 +175,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--dashboard-password",
-        default="",
+        default=os.environ.get("DASHBOARD_PASSWORD") or "",
         help="Management dashboard password; generated and preserved when omitted",
     )
     parser.add_argument(
@@ -200,7 +203,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--timezone",
-        default="Asia/Shanghai",
+        default=os.environ.get("TIMEZONE") or "Asia/Shanghai",
         help="Container timezone",
     )
     args = parser.parse_args()
@@ -262,7 +265,7 @@ def main() -> None:
     issued_at = int(now.timestamp())
     expires_at = int((now + timedelta(days=3650)).timestamp())
 
-    anon_key = jwt_encode(
+    anon_key = args.anon_key or jwt_encode(
         args.jwt_secret,
         {
             "role": "anon",
@@ -271,7 +274,7 @@ def main() -> None:
             "exp": expires_at,
         },
     )
-    service_role_key = jwt_encode(
+    service_role_key = args.service_role_key or jwt_encode(
         args.jwt_secret,
         {
             "role": "service_role",
@@ -317,7 +320,7 @@ def main() -> None:
         f"ANON_KEY={anon_key}",
         f"SERVICE_ROLE_KEY={service_role_key}",
         f"MASTER_TOKEN={args.master_token}",
-        "DASHBOARD_USERNAME=supabase",
+        f"DASHBOARD_USERNAME={args.dashboard_username}",
         f"DASHBOARD_PASSWORD={dashboard_password}",
         f"PGREDIS_RUNTIME_INTERNAL_TOKEN={pgredis_runtime_token}",
         f"SECRETS_ENCRYPTION_KEY={args.secrets_encryption_key}",
