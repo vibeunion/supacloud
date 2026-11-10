@@ -11,7 +11,6 @@
     "rootDir": "src",
     "declaration": true,
     "allowImportingTsExtensions": true,
-    "baseUrl": ".",
     "paths": {
       "@supacloud/db": ["../db/src/index.ts"],
       "@supacloud/db/model-contract": ["../db/src/model-contract.ts"]
