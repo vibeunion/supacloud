@@ -25,6 +25,14 @@ platform=${6:-linux-amd64}
     echo "Realtime OTP release must contain executable bin/server and bin/migrate" >&2
     exit 1
 }
+[[ -f "$release_dir/releases/$version/realtime.rel" ]] || {
+    echo "Realtime OTP release version does not match $version" >&2
+    exit 1
+}
+[[ -f "$source_dir/LICENSE" && ! -L "$source_dir/LICENSE" ]] || {
+    echo "Upstream Realtime LICENSE is required" >&2
+    exit 1
+}
 command -v tar >/dev/null 2>&1 || { echo "tar is required" >&2; exit 1; }
 command -v zstd >/dev/null 2>&1 || { echo "zstd is required" >&2; exit 1; }
 command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit 1; }
@@ -49,7 +57,7 @@ exec "$root/release/bin/migrate" "$@"
 EOF
 chmod 0755 "$staging/supacloud-realtime" "$staging/supacloud-realtime-migrate"
 
-if [[ -f "$source_dir/LICENSE" ]]; then cp "$source_dir/LICENSE" "$staging/LICENSE"; fi
+cp "$source_dir/LICENSE" "$staging/LICENSE"
 if [[ -f "$source_dir/NOTICE" ]]; then cp "$source_dir/NOTICE" "$staging/NOTICE"; fi
 
 manifest_path="$staging/SUPACLOUD-REALTIME.json"
