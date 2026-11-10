@@ -100,7 +100,7 @@ The published CLI also exposes the same local loop through an application-level
 entry, without reaching for a remote test server:
 
 ```sh
-supacloud app dev --profile fast          # local/ephemeral, safe defaults
+supacloud app dev --profile fast          # in-memory demo; not Lite/PGlite or Command semantics
 # In the explicit command recipe, after database setup:
 supacloud app dev --profile integration   # requires an explicit loopback database URL
 ```
@@ -170,8 +170,8 @@ review them, then use the existing `supacloud db plan` / `db apply` workflow.
 
 | Profile | Intended use | Requirement |
 | --- | --- | --- |
-| `fast` (default) | Run the project's actual development server | A `dev` script; no external database is required |
-| `integration` | Verify a local database, then run the project's durable host | Explicit loopback PostgreSQL URL and `dev:integration` script |
+| `fast` (default) | Run the in-memory demo | A `dev` script; no external database. Not Lite/PGlite, and not Command durability |
+| `integration` | Verify a local database, then run the project's durable host | Explicit loopback PostgreSQL URL and `dev:integration` script. This is the acceptance path; Lite/PGlite does not replace it |
 
 The compile-only watch command reports the selected profile, project root, output directory,
 database mode and current compilation result. `--once` (or `--watch=false`)

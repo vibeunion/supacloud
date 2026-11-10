@@ -25,10 +25,10 @@ The goal is to reduce architectural entropy, not to remove advanced capabilities
 | Database structure | ZModel schema + append-only migration | No second ORM or hand-maintained structure source |
 | Database governance | `defineDatabaseModule`, SQL lint and Catalog reconciliation | Disabling governance is a recorded migration exception |
 | Ordinary reads | PostgREST / `supabase-js` | GraphQL for an explicit Query Contract |
-| Cross-table writes | Command / RPC with permission, transaction, idempotency and audit | Controlled CRUD for simple single-table operations |
+| Compiler-lane cross-table writes | Command / RPC with permission, transaction, idempotency and audit | PostgREST and `@supabase/supabase-js` stay first-class for ordinary reads and low-risk CRUD |
 | Durable execution | Workflow/Command | pgflow or pg_durable after a proven scenario |
 | New application template | `minimal` (compiler/Effect; `app` alias) | Explicit `client` (supabase-js only), `command`, or `model-command` |
-| Local development | `fast`, without an external database | `integration` with an explicit loopback URL |
+| Local development | `fast`, the in-memory demo; not Lite/PGlite and not Command semantics | `integration` on real loopback PostgreSQL |
 | Generated output | Compiler-generated and drift-checked | Never hand-edit generated directories to bypass checks |
 | Failure handling | Fail closed and preserve the last valid output | No implicit repair, migration or silent downgrade |
 | Write retry | No automatic retry by default | Explicitly enabled only with a server idempotency contract |

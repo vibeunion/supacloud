@@ -44,7 +44,10 @@ or serving fails. Instances that never listened can still be closed. A `serve`
 callback that acquires a resource then throws before returning its handle owns
 cleanup of that unreturned resource. Bootstrap cannot discover it.
 
-`server.stop(true)` is unchanged. This change does not implement graceful HTTP or
+`server.stop(true)` is unchanged. This injector path does not drain HTTP.
+Closing an injector that never listened is separate from the Elysia `fetch()`
+close story, which is still open. Neither hole is P0, and neither outranks
+cluster-admin isolation residuals. This change also does not implement
 WebSocket draining, worker shutdown, startup cancellation or shutdown timeouts.
 Concurrent manual initialization and destruction is not newly guaranteed: await
 startup before initiating teardown.

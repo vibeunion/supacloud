@@ -15,9 +15,11 @@ should not assemble a second authentication system to call a business endpoint.
 | Routing, forms, query cache and UI state | Selected frontend framework or svadmin |
 | Domain authorization, transactions, idempotency and audit | Trusted application server and database |
 
-Existing Supabase and svadmin providers remain valid. There is no requirement to
-replace CRUD with Commands, introduce frontend DI, or migrate existing reads to
-GraphQL. The starter's query choice does not change the SDK's ownership boundary.
+Existing Supabase and svadmin providers remain valid. Command is the write
+boundary of the compiler application lane only. There is no requirement to
+replace ordinary reads or low-risk CRUD on PostgREST and `@supabase/supabase-js`
+with Commands, introduce frontend DI, or migrate existing reads to GraphQL.
+The starter's query choice does not change the SDK's ownership boundary.
 
 ## API surface contract
 
