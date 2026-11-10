@@ -765,10 +765,17 @@ function describeS3Endpoint(
   resolved: ResolvedCliS3Endpoint,
 ): { status: 'enabled' | 'disabled'; region: string; buckets: string[] } {
   if (!resolved.requested) return { status: 'disabled', region: 'us-east-1', buckets: [] }
+  // 环境变量方式不携带密钥时 s3Endpoint 可能为空，region/buckets 仍要反映环境配置。
+  const envBuckets = process.env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS
+    ? commaSeparated(process.env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS)
+    : []
   return {
     status: 'enabled',
-    region: resolved.s3Endpoint?.region ?? options.s3EndpointRegion ?? 'us-east-1',
-    buckets: resolved.s3Endpoint?.bucketScope ?? options.s3EndpointBuckets ?? [],
+    region: resolved.s3Endpoint?.region
+      ?? options.s3EndpointRegion
+      ?? process.env.SUPACLOUD_LITE_S3_ENDPOINT_REGION
+      ?? 'us-east-1',
+    buckets: resolved.s3Endpoint?.bucketScope ?? options.s3EndpointBuckets ?? envBuckets,
   }
 }
 
