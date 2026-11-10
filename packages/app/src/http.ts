@@ -1,13 +1,20 @@
-/** Provider-oriented HTTP entry. Reuse root identities rather than bundle another injector/client. */
+/** Provider-oriented HTTP entry. Does not load the package root. */
 export {
-  HttpClient, HttpErrorResponse, HttpContext, HttpContextToken, HttpHeaders, HttpParams,
-  provideHttpClient, withFetch, withRequestsMadeViaParent,
+  HttpClient, HttpErrorResponse, provideHttpClient, withFetch, withRequestsMadeViaParent,
+} from "./http_client";
+export { HttpContext, HttpContextToken } from "./http_context";
+export { HttpHeaders } from "./http_headers";
+export { HttpParams } from "./http_params";
+export {
   createBearerAuthInterceptor, createHeaderInterceptor, createRetryInterceptor, createTimeoutInterceptor,
-} from "@supacloud/app";
-export type { HttpClientConfig, HttpClientFeature, HttpRequestOptions, HttpInterceptorFn } from "@supacloud/app";
-import { HTTP_INTERCEPTORS, type HttpClientFeature, type HttpInterceptorFn } from "@supacloud/app";
+} from "./interceptor";
+export type { HttpClientConfig, HttpClientFeature, HttpRequestOptions } from "./http_client";
+export type { HttpInterceptorFn } from "./interceptor";
+import { HTTP_INTERCEPTORS } from "./http_client";
+import type { HttpClientFeature } from "./http_client";
+import type { HttpInterceptorFn } from "./interceptor";
 
-/** Compose an HTTP provider feature; root withInterceptors remains the legacy array helper. */
+/** Compose an HTTP provider feature; the interceptor module's withInterceptors remains the array helper. */
 export function withInterceptors(...interceptors: (HttpInterceptorFn | HttpInterceptorFn[])[]): HttpClientFeature {
   return { kind: "Interceptors", providers: [{ provide: HTTP_INTERCEPTORS, useValue: interceptors.flat(), multi: true }] };
 }

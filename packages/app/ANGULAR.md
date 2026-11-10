@@ -8,8 +8,10 @@ lifetime interoperability without replacing the framework-neutral entries.
 
 | Entry | Purpose |
 | --- | --- |
-| `@supacloud/app/angular` | Public Angular Signals, effect, Resource, DI and RxJS interop |
+| `@supacloud/app/runtime` | Server injector adapter (`inject`, `createEnvironmentInjector`, `bootstrapBun`). Loads `@angular/core` and `node:async_hooks`. Not for browsers. |
+| `@supacloud/app/angular` | Public Angular Signals, effect, Resource, DI and RxJS interop. Browser-safe; does not load the server injector. |
 | `@supacloud/app/rxjs` | Native Signals and subscriptions owned by an explicit SupaCloud cleanup scope |
+| `@supacloud/app/pending-work` | Angular-free pending-work registry |
 | `@supacloud/app/reactive` | Framework-neutral owner-signal cancellation and bounded transport bridge |
 | `@supacloud/js/reactive` | Existing SDK query/task observation; no second SDK implementation |
 | `@supacloud/app/browser`, `/contracts`, `/execution` | Existing isolated interfaces; no new reactive re-exports |

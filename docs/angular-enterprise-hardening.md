@@ -65,11 +65,12 @@ reported as an executable fix. Normal TypeScript/runtime validation remains.
 ## Work registry
 
 `PendingWorkRegistry` and `createPendingWorkRegistry(owner)` are available from
-`@supacloud/app/runtime`, a transport-neutral entry with no Angular/SDK import.
+`@supacloud/app/pending-work`, a transport-neutral entry with no Angular/SDK import.
+`@supacloud/app/runtime` is the Angular injector adapter and does load `@angular/core`.
 The owner is explicit; create a separate registry for each isolation boundary.
 
 ```ts
-import { createPendingWorkRegistry } from '@supacloud/app/runtime';
+import { createPendingWorkRegistry } from '@supacloud/app/pending-work';
 
 // owner is the actual application/request/job lifetime, not a global fallback.
 const work = createPendingWorkRegistry(owner, { capacity: 1024 });

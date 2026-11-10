@@ -4,8 +4,9 @@
 
 Learn from Aponia's instance-based lifecycle and ordered shutdown without adding
 Aponia dependencies or another application model. This change hardens the existing
-`bootstrapBun`, `EnvironmentInjector` and `runInScope` APIs. Their public signatures
-and provider ownership model stay unchanged. Await readiness and cleanup completion.
+`bootstrapBun`, `EnvironmentInjector` and `runInScope` APIs. Import them from
+`@supacloud/app/runtime`, not the package root. Their public signatures and
+provider ownership model stay unchanged. Await readiness and cleanup completion.
 
 This is **not** a lifecycle implementation for compiler-generated modules. Static
 factories, the Elysia HTTP/Job adapters, Worker transport, application execution and
