@@ -49,6 +49,8 @@ export function readWorkspace(root) {
           if (field === 'overrides') throw new Error(`Nested overrides need an explicit graph adapter: ${project.root}`);
           throw new Error(`Invalid dependency ${name} at ${project.root}`);
         }
+        // Optional peers are install-time capabilities, not build prerequisites.
+        if (field === 'peerDependencies' && project.manifest.peerDependenciesMeta?.[name]?.optional === true) continue;
         let target = byPackage.get(name);
         const local = /^(file:|link:)/.test(version);
         if (local) {

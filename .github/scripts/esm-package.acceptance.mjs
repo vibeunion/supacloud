@@ -86,7 +86,7 @@ try {
   }));
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund',
     '--prefer-offline', '--fetch-retries=5', '--fetch-retry-mintimeout=20000', '--fetch-retry-maxtimeout=120000',
-    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.118.0'] : []), ...tarballs], consumer);
+    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.118.0'] : ['@angular/core@22.2.4']), ...tarballs], consumer);
   if (sdkOnly) {
     for (const name of ['@angular/core', '@supacloud/app', '@supacloud/compiler', '@supacloud/delivery']) {
       await assert.rejects(lstat(join(consumer, 'node_modules', name)), { code: 'ENOENT' },

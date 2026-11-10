@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { startProjectServer } from '../src/project-runtime.js'
 import { compileProject } from '@supacloud/compiler'
 import { initializeAppProject } from '../../cli/src/shared/tools/app-starter.js'
-import { compileModel } from '../../db/src/model.js'
+import { compileModel } from '../../db-zenstack/src/model.js'
 import { readJson } from './support/contracts.js'
 
 test('current generated starter runs through Lite bundling, routes, contracts and command governance', async () => {

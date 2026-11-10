@@ -4,6 +4,18 @@
 - 日期：2026-11-09
 - 范围：SupaCloud 数据访问、模型策略、Command 与存量项目迁移
 
+## 两套命令表
+
+不要把下面两套账本当成一张表，也不要合并它们的写入管线：
+
+| 账本 | 位置 | 用途 |
+| --- | --- | --- |
+| `supacloud_commands.receipts` | `packages/management-api/src/db/sql-modules/commands-public.sql` | 租户引导命令。`workflow_run_id` 外键指向 `supacloud_workflows.runs` |
+| `supacloud_commands.execution_receipts` 与 `execution_audit` | `packages/db/src/command-schema.ts` | 应用 durable Command。业务写入、回执和审计在应用事务里 |
+
+Management API 的 bootstrap 函数 `supacloud_commands.submit` 写入第一张表。
+应用 `createPostgresCommandStore` 写入第二组表。
+
 ## 决策
 
 SupaCloud 对应用公开的稳定边界是 **Database Contract**，不是某个 ORM 或模型编译器。
@@ -11,7 +23,7 @@ Database Contract 包含模型关系、行策略、受治理的 SQL/RLS/grants/v
 契约、RPC registry/catalog，以及供 Command 使用的身份绑定读端口和事务模型端口。
 
 当前实现后端仍是 ZModel + ZenStack。它负责模型推导、策略查询约束和生成类型；
-`@supacloud/db/zenstack` 是可信 host 内部的 adapter。应用业务代码不得依赖 Prisma
+`@supacloud/db-zenstack` 是可信 host 内部的 adapter；`@supacloud/db/zenstack` 只做兼容再导出。应用业务代码不得依赖 Prisma
 client、ZenStack 通用 CRUD 或 ZenStack 生成的业务 RPC。未来 SupaCloud 自有
 Model/Policy Compiler 达到同等 contract 后，可以替换该 adapter。
 

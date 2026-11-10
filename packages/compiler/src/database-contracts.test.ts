@@ -65,7 +65,7 @@ test("generated barrel retains real PostgREST projections, ZenStack row types an
           Insert: { id?: string; title?: string | null }; Update: { title?: string | null }; Relationships: [] } };
         Views: {}; Functions: {}; Enums: {}; CompositeTypes: {};
       } };`,
-      "schema.ts": await readFile(join(import.meta.dir, "../../db/tests/fixtures/model/generated/schema.ts"), "utf8"),
+      "schema.ts": await readFile(join(import.meta.dir, "../../db-zenstack/tests/fixtures/model/generated/schema.ts"), "utf8"),
       "schema.graphql": `type Order { id: ID! title: String } type Query { orders: [Order!]! }`,
       "orders.graphql": `query Orders { orders { id title } }`,
       "consumer.ts": `

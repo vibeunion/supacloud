@@ -71,10 +71,9 @@ supacloud app init --root ./my-app --name my-app
 cd my-app
 bun install
 bun run check
-bun run dev
 ```
 
-This starts a local development workflow, not a production deployment. Replace demo identity and in-memory adapters before integration; run business and database acceptance separately.
+This writes a `@supabase/supabase-js` client for a provisioned project's API URL and anon key. It does not install `@supacloud/app`, the compiler, or Effect, and it is not a production deployment. For the optional application stack, use `supacloud app init --template app` and follow that project's README. Replace demo adapters before integration; run business and database acceptance separately.
 
 <a id="supacloud-lite"></a>
 ### Run SupaCloud Lite
@@ -114,7 +113,9 @@ at `/usr/local/bin/supacloud` is a separate managed-host installation. See the
 
 ![Compile-time declarations become factories, client contracts and OpenAPI. The runtime Elysia host consumes compiled modules and invokes application-owned services.](docs/assets/readme/build-runtime.en.svg)
 
-`@supacloud/app` declares the application model; `@supacloud/compiler` analyzes it and emits wiring and contracts; `@supacloud/elysia` hosts compiled modules. **The HTTP host still installs Elysia.** Application metadata and business modules need not import native Elysia types, but shared schema dependencies still require coordinated upgrades. This does not establish portability to arbitrary frameworks or complete native Elysia feature parity.
+Project data access uses `@supabase/supabase-js`. The packages below are the optional application-engineering stack from `app init --template app`. Management API provision does not compile that stack or import it.
+
+`@supacloud/app` declares the application model; `@supacloud/compiler` analyzes it and emits wiring and contracts; `@supacloud/elysia` hosts compiled modules. **The HTTP host still installs Elysia.** Application metadata and business modules need not import native Elysia types, but shared schema dependencies still require coordinated upgrades. This does not establish portability to arbitrary frameworks or complete native Elysia feature parity. Static AOP and the existing Angular-style DI contracts are frozen; do not add runtime pointcuts or new Angular APIs.
 
 Read the [framework guide](docs/application-framework.md), [dependency policy](docs/elysia-compatibility.md) and [adapter acceptance boundaries](packages/elysia/README.md).
 

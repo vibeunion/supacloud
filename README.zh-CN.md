@@ -65,10 +65,9 @@ supacloud app init --root ./my-app --name my-app
 cd my-app
 bun install
 bun run check
-bun run dev
 ```
 
-这会建立本地开发流程，并非生产部署。集成前需替换演示身份和内存适配器，另行执行真实业务与数据库验收。
+这会生成面向已开通项目的 `@supabase/supabase-js` 客户端，使用项目 API URL 和 anon key。它不安装 `@supacloud/app`、编译器或 Effect，也不是生产部署。可选应用栈使用 `supacloud app init --template app`，并按该项目 README 继续。集成前需替换演示适配器，另行执行真实业务与数据库验收。
 
 <a id="supacloud-lite"></a>
 ### 运行 SupaCloud Lite
@@ -106,7 +105,9 @@ bunx supacloud-lite keys
 
 ![编译时，应用声明生成工厂、客户端契约与 OpenAPI；运行时，Elysia 宿主消费编译后的模块，调用应用拥有的业务服务。](docs/assets/readme/build-runtime.zh-CN.svg)
 
-`@supacloud/app` 声明应用模型，`@supacloud/compiler` 分析并生成装配与契约，`@supacloud/elysia` 托管编译后的模块。**HTTP 宿主仍需安装 Elysia。** 应用元数据和业务模块不必导入原生 Elysia 类型，但共享 Schema 依赖仍需协同升级。这不代表已支持任意框架，也不代表与全部原生 Elysia 能力完全等价。
+项目数据访问使用 `@supabase/supabase-js`。下面这些包是 `app init --template app` 的可选应用工程栈。Management API 开通项目时不编译、也不导入这套栈。
+
+`@supacloud/app` 声明应用模型，`@supacloud/compiler` 分析并生成装配与契约，`@supacloud/elysia` 托管编译后的模块。**HTTP 宿主仍需安装 Elysia。** 应用元数据和业务模块不必导入原生 Elysia 类型，但共享 Schema 依赖仍需协同升级。这不代表已支持任意框架，也不代表与全部原生 Elysia 能力完全等价。静态 AOP 与现有 Angular 风格 DI 契约已冻结，不要新增运行时切点或新的 Angular API。
 
 详见[应用框架](docs/application-framework.md)、[依赖策略](docs/elysia-compatibility.md)与[适配器验收边界](packages/elysia/README.md)。
 

@@ -4,8 +4,9 @@ Status: **IMPLEMENTED (static slice)**. The compiler declares, validates and
 serializes logical infrastructure resources and their uses. Per-environment
 binding is now a separate static resolver
 ([Environment Bindings](./environment-bindings.md)); runtime credential
-resolution is **not** implemented here; see
-[Encore Alignment Roadmap](./encore-alignment-roadmap.md).
+resolution is **not** implemented here. The
+[Encore alignment roadmap](./encore-alignment-roadmap.md) is a proposal and must
+not be treated as the current provision path.
 
 ## Why
 

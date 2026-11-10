@@ -178,6 +178,19 @@
         }
       ]
     },
+    "packages/db-zenstack": {
+      "release-type": "node",
+      "component": "db-zenstack",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.dbZenstack.version"
+        }
+      ]
+    },
     "packages/testing": {
       "release-type": "node",
       "component": "testing",

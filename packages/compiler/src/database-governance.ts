@@ -56,8 +56,8 @@ export async function checkDatabaseGovernance(
     for (const item of report.diagnostics as unknown[]) {
       if (!item || typeof item !== "object" || !("code" in item) || typeof item.code !== "string"
         || !item.code.startsWith("database-") || !("message" in item) || typeof item.message !== "string"
-        || !("severity" in item) || item.severity !== "error") return failure();
-      diagnostics.push({ severity: "error", code: item.code, message: item.message });
+        || !("severity" in item) || (item.severity !== "error" && item.severity !== "warn")) return failure();
+      diagnostics.push({ severity: item.severity, code: item.code, message: item.message });
     }
     return diagnostics;
   } catch {
