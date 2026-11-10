@@ -31,7 +31,7 @@ await run(root, ["scripts/prepare-command-test-database.ts"]);
 await run(resolve(root, "packages/delivery"), ["install", "--frozen-lockfile"]);
 await run(resolve(root, "packages/query"), ["install", "--frozen-lockfile"]);
 await run(resolve(root, "packages/query"), ["run", "build"]);
-for (const name of ["contracts", "commands", "compiler", "db", "app", "app-svelte", "supacloud-js", "elysia"]) {
+for (const name of ["contracts", "commands", "compiler", "db", "db-zenstack", "app", "app-svelte", "supacloud-js", "elysia"]) {
   const cwd = resolve(root, "packages", name);
   // db tests import the CLI source; install it after the compiler build so its
   // file dependency carries the generated declarations and typebox resolution.
@@ -44,9 +44,9 @@ for (const name of ["contracts", "commands", "compiler", "db", "app", "app-svelt
   await run(cwd, ["run", "typecheck"]);
   await run(cwd, ["run", "typecheck:test"]);
   if (name === "db" || name === "supacloud-js") await run(cwd, ["-p", "tsconfig.commands.json"], resolve(cwd, "node_modules/.bin/tsc"));
-  // supacloud-js asserts the built export map and browser bundle, so its dist
-  // must exist before tests; other packages keep the source-first test order.
-  if (name === "supacloud-js") await run(cwd, ["run", "build"]);
+  // supacloud-js asserts its built export map; the adapter test packs the built
+  // package CLI. Both need dist before tests; other packages stay source-first.
+  if (name === "supacloud-js" || name === "db-zenstack") await run(cwd, ["run", "build"]);
   await run(cwd, ["test"]);
   if (name !== "supacloud-js") await run(cwd, ["run", "build"]);
   if (name === "supacloud-js") await run(cwd, ["run", "typecheck:consumer"]);

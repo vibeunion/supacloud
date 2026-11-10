@@ -231,6 +231,9 @@ jobs:
             prepare_script: |
               bun run ../../scripts/build-command-dependencies.ts cli
               bun install --frozen-lockfile
+              (cd ../db-zenstack && bun install --frozen-lockfile && bun run build)
+              mkdir -p node_modules/@supacloud
+              ln -sfn ../../../db-zenstack node_modules/@supacloud/db-zenstack
             typecheck_script: |
               bun run typecheck
             test_script: |
