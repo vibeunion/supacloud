@@ -4,6 +4,10 @@
 安装器不会调用 `podman-compose`，也不会自动回退到 Docker。Compose 文件只能作为开发和
 迁移阶段的兼容输入，不能作为生产安装依赖。
 
+当前交付是源码构建的单机候选路径，已验证配置生成、配置重放和单元契约；尚无
+干净 Linux 主机上的镜像构建、完整启动、升级或恢复验收。它不等同于已经验证的
+Release 镜像。现有 Pigsty 安装继续使用自己的安装与恢复流程。
+
 ## 快速开始
 
 在已经安装 Podman、systemd 和 `podman` Quadlet generator 的 Linux 主机上，以 root 执行：
@@ -17,11 +21,15 @@ sudo ./podman/self-host/install.sh \
 安装器会：
 
 - 创建 `/etc/supacloud/supacloud.env` 和 root-only Secret 文件；
+- 从安装输入生成每个组件自己的私有环境文件，Edge/pgredis/Caddy 不接收平台数据库密码；
 - 创建 `/var/lib/supacloud` 下的数据库、函数、Storage、Caddy 和日志目录；
 - 构建本地 Management API、Edge Runtime、pgredis、Caddy 和 PostgreSQL 镜像；
 - 安装 Quadlet unit 与 `supacloud.target`；
 - 启动 PostgreSQL、GoTrue、PostgREST、Realtime、Management API、Edge Runtime、
   pgredis、VictoriaLogs 和 Caddy。
+
+`PartOf=supacloud.target` 使整套服务随 target 停止/重启。数据库、网关和 Bun 服务
+在健康检查通过后才完成启动排序，异常退出由 systemd 重启；健康检查超时使安装返回失败。
 
 检查单机安装计划而不写入系统：
 
@@ -50,10 +58,10 @@ sudo systemctl start supacloud.target
 PgBouncer 或外部 S3。单机 Storage 数据位于 `/var/lib/supacloud/storage`，必须与数据库
 一起备份；本地文件系统不提供跨节点复制或自动故障转移。
 
-如果客户已有 PostgreSQL、Pigsty 或 S3，应继续使用 Full Platform 的外部 provider/原生
-安装路径。不要把任意监听在本机的 PostgreSQL 自动绑定到 SupaCloud；绑定必须使用显式的
-数据库 URL 和经过检查的迁移/权限契约。外部数据库的 Quadlet profile 尚未与本单机 unit
-合并时，可先使用 Full Platform 的 provider 路径，避免复制第二套数据库初始化逻辑。
+如果客户已有 Pigsty，继续使用 `--profile pigsty` 的原生安装路径。本轮 `external`
+只完成输入识别与校验，实际绑定外部数据库的 Quadlet 变体尚未实现，安装器会明确拒绝。
+不要把任意监听在本机的 PostgreSQL 自动绑定到 SupaCloud。后续外部绑定需要同时验证
+扩展、权限、租户运行时和迁移契约。
 
 ## 组件难点和替代方案
 

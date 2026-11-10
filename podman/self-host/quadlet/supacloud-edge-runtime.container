@@ -1,4 +1,5 @@
 [Unit]
+PartOf=supacloud.target
 Description=SupaCloud Edge Runtime
 Requires=supacloud-management-api.service supacloud-pgredis-runtime.service
 After=supacloud-management-api.service supacloud-pgredis-runtime.service
@@ -8,10 +9,24 @@ Image=localhost/supacloud-edge-runtime:local
 ContainerName=supacloud-edge-runtime
 Network=supacloud.network
 NetworkAlias=edge-runtime
-EnvironmentFile=/etc/supacloud/supacloud.env
-Volume=/var/lib/supacloud/tenants:/etc/supabase/tenants:ro,Z
-Volume=/var/lib/supacloud/functions:/data/functions:Z
+EnvironmentFile=/etc/supacloud/edge-runtime.env
+Volume=/var/lib/supacloud/tenants:/etc/supabase/tenants:ro,z
+Volume=/var/lib/supacloud/functions:/data/functions:z
 PublishPort=127.0.0.1:9005:9005
 
+HealthCmd=bun -e "fetch('http://127.0.0.1:9005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HealthInterval=5s
+HealthTimeout=3s
+HealthRetries=12
+
+HealthOnFailure=kill
+HealthStartPeriod=120s
+
+[Service]
+ExecStartPost=/etc/supacloud/podman/wait-health.sh supacloud-edge-runtime
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
 [Install]
-WantedBy=multi-user.target
+WantedBy=supacloud.target

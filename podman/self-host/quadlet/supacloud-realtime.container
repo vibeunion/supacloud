@@ -1,4 +1,5 @@
 [Unit]
+PartOf=supacloud.target
 Description=SupaCloud Realtime
 Requires=supacloud-postgres.service
 After=supacloud-postgres.service
@@ -15,5 +16,10 @@ HealthInterval=15s
 HealthTimeout=5s
 HealthRetries=10
 
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
 [Install]
-WantedBy=multi-user.target
+WantedBy=supacloud.target

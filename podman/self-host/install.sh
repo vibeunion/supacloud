@@ -59,6 +59,15 @@ while (($# > 0)); do
   esac
 done
 
+if [[ -n "$ROOT_PREFIX" ]]; then
+  [[ "$ROOT_PREFIX" == /* && "$ROOT_PREFIX" != "/" ]] || {
+    echo "--root-dir must be an absolute staging directory" >&2; exit 2;
+  }
+  [[ "$START" != "true" || "$DRY_RUN" == "true" ]] || {
+    echo "--root-dir requires --no-start or --dry-run; staging cannot start host services" >&2; exit 2;
+  }
+fi
+
 # A dry-run must be usable by an unprivileged developer on a clean host. Stage
 # its generated configuration under a temporary prefix instead of writing
 # /etc or /var/lib.
@@ -126,6 +135,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
   [[ "$(id -u)" -eq 0 ]] || { echo "Run the installer as root." >&2; exit 1; }
   install_podman_runtime
   require_command systemctl
+  require_command python3
   ensure_quadlet_generator
 else
   require_command python3
@@ -151,6 +161,11 @@ chmod 600 "$ENV_FILE"
 read_env() {
   awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); value=$0 } END { print value }' "$ENV_FILE"
 }
+
+# Existing installation origins are authoritative; rerunning with the CLI's
+# localhost defaults must not rewrite Auth redirects or issuer values.
+PUBLIC_URL="$(read_env PUBLIC_URL)"
+STUDIO_URL="$(read_env STUDIO_URL)"
 
 ensure_env() {
   local key="$1"
@@ -284,6 +299,8 @@ fi
 }
 chmod 600 "$REALTIME_ENV_FILE"
 
+python3 "$SCRIPT_DIR/render-env.py" "$CONFIG_DIR"
+
 for directory in \
   "$STATE_DIR/postgres" "$STATE_DIR/tenants" "$STATE_DIR/pgredis-tenants" \
   "$STATE_DIR/functions" "$STATE_DIR/storage" "$STATE_DIR/frontends" \
@@ -291,11 +308,10 @@ for directory in \
   mkdir -p "$directory"
 done
 
-if [[ "$DRY_RUN" != "true" ]]; then
-  # The Quadlet template uses a stable path inside /etc/supacloud.
-  mkdir -p "$(prefix_path /etc/supacloud/podman/caddy)"
-  install -m 0644 "$SCRIPT_DIR/caddy/Caddyfile" "$(prefix_path /etc/supacloud/podman/caddy/Caddyfile)"
-fi
+# Render the same supporting files for dry-runs and real installs.
+mkdir -p "$(prefix_path /etc/supacloud/podman/caddy)"
+install -m 0644 "$SCRIPT_DIR/caddy/Caddyfile" "$(prefix_path /etc/supacloud/podman/caddy/Caddyfile)"
+install -m 0755 "$SCRIPT_DIR/wait-health.sh" "$(prefix_path /etc/supacloud/podman/wait-health.sh)"
 
 if [[ "$SKIP_BUILD" != "true" && "$DRY_RUN" != "true" ]]; then
   podman build --pull=missing -f "$SCRIPT_DIR/postgres/Containerfile" -t localhost/supacloud-postgres:local "$SCRIPT_DIR/postgres"

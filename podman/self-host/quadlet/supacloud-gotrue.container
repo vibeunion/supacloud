@@ -1,14 +1,20 @@
 [Unit]
+PartOf=supacloud.target
 Description=SupaCloud GoTrue
 Requires=supacloud-postgres.service
 After=supacloud-postgres.service
 
 [Container]
-Image=supabase/gotrue:v2.197.0
+Image=docker.io/supabase/gotrue:v2.197.0
 ContainerName=supacloud-gotrue
 Network=supacloud.network
 NetworkAlias=gotrue
-EnvironmentFile=/etc/supacloud/supacloud.env
+EnvironmentFile=/etc/supacloud/gotrue.env
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=supacloud.target
