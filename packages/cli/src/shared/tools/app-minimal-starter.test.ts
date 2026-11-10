@@ -82,6 +82,8 @@ test("default minimal health feature compiles and executes with the new core ent
   expect(host).toContain("readCreatedApplication");
   expect(host).toContain("isCreatedApplication");
   expect(host).toContain("signal?: AbortSignal");
+  expect(host).toContain("handle: (request: Request)");
+  expect(host).toContain("onExecution?: ExecutionObserver");
   expect(host).toContain("deps: Record<string, unknown>");
   expect(host).not.toContain("Reflect.apply");
   expect(host).not.toContain('ApplicationOptions["deps"]');

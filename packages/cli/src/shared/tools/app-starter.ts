@@ -252,6 +252,7 @@ import {
   createSupAuthRequestContext,
   type SupAuthContextOptions,
   type CommandGovernance,
+  type ExecutionObserver,
 } from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
 
@@ -264,11 +265,12 @@ export interface AppAdapters {
     signal?: AbortSignal,
   ) => unknown | Promise<unknown>;
   commandGovernance: CommandGovernance;
-  onExecution?: (event: Readonly<Record<string, unknown>>) => void | Promise<void>;
+  onExecution?: ExecutionObserver;
 }
 
 export interface CreatedApplication {
   fetch: (request: Request) => Response | Promise<Response>;
+  handle: (request: Request) => Response | Promise<Response>;
   initialize: () => Promise<void>;
   destroy: () => Promise<void>;
 }
@@ -280,6 +282,7 @@ function isRecord(value: unknown): value is { readonly [key: string]: unknown } 
 function isCreatedApplication(value: unknown): value is CreatedApplication {
   return isRecord(value)
     && typeof value["fetch"] === "function"
+    && typeof value["handle"] === "function"
     && typeof value["initialize"] === "function"
     && typeof value["destroy"] === "function";
 }
@@ -292,11 +295,7 @@ function readCreatedApplication(value: unknown): CreatedApplication {
   if (!isCreatedApplication(value)) {
     throw new Error("createApplication returned an invalid application host");
   }
-  return {
-    fetch: (request) => value.fetch(request),
-    initialize: () => value.initialize(),
-    destroy: () => value.destroy(),
-  };
+  return value;
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
