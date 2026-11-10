@@ -59,7 +59,7 @@ Caddy 与 GoTrue 仍是独立的升级面。
 | --- | --- | --- |
 | 原生单机 Full Platform | 稳定基线目标 | Ubuntu 24.04 LTS、`amd64`、systemd、Pigsty `v4.5.0` / PostgreSQL 18、SupaCloud 管理的 Caddy 和已发布且经过验证的制品；在声明生产验收前仍需完成第二至第四道验收门 |
 | Lite | 独立有边界产品 | 单项目本地优先运行时，有自己的兼容性与恢复证据；不能证明 Full Platform 已就绪 |
-| Compose 与其他安装路径 | 特定部署方式支持／需单独验收 | 遵循各自文档边界，不能作为原生基线的等价证明 |
+| Compose 与其他安装路径 | 特定部署方式支持／需单独验收 | `docker/self-host` 是一个 GoTrue 和一个 PostgREST，不能证明多项目 Pigsty 行为。遵循各自文档边界，不能作为原生基线的等价证明 |
 | `arm64` 与其他操作系统 | 特定部署方式支持／需单独验收 | 必须针对选定组合提供明确的安装、升级和恢复证据 |
 | 项目级外部 S3 存储 | 特定部署方式支持／需单独验收 | 需要显式项目绑定，以及针对提供方的可达性、持久性和恢复证据 |
 | 有状态协同升级中的嵌入式 Edge Runtime | 实验性／需单独验收 | 首要协同升级证据使用持久化的 `EDGE_RUNTIME_MODE=external` |
@@ -68,7 +68,9 @@ Caddy 与 GoTrue 仍是独立的升级面。
 | 应用框架、编译器、SDK 与 AI 工具 | 可选开发层 | 用于增强应用交付与契约，但不是运行平台项目的前置条件 |
 
 “稳定基线目标”表示计划支持的发布组合，不表示生产证据已经完成。
-只有相关验收门产出带日期的证据后，发布才能标记为已验收。
+只有相关验收门在真实主机上产出带日期的证据后，发布才能标记为已验收。
+第二至第四道验收门和高可用在那份记录出现之前都不是已经通过的生产验收。
+合并代码不是那份记录。
 
 ## 平台边界
 
@@ -199,6 +201,50 @@ PostgreSQL 分开升级，但发布说明必须明确写出边界。
 | 未完成 | 证据缺失、结果未知或流程被中断 |
 
 不要把这些状态压成单一成熟度百分比。单元测试、合并 PR、部署和恢复演练证明的是不同事情。
+
+## 密钥加密与包边界重排之后的运维验收
+
+合并 pull request 不是生产上线（合码≠上线）。第二至第四道验收门和高可用，只有在真实主机上留下带日期的通过记录之后才能声称。在那之前不要写成已经通过生产验收。
+
+`docker/self-host` 只启动一个 GoTrue 和一个 PostgREST，旁边是一个 PostgreSQL 容器。这次启动不能证明多项目 Pigsty 行为。多项目隔离属于 systemd 加 Pigsty：每个项目一个数据库，以及每个项目自己的 PostgREST 和 GoTrue。
+
+下面的 `app init`、ZenStack 和 Angular 行是该重排合并之后的预期验收门。在包含那次重排的版本上验收。本清单不发布包，也不部署主机。
+
+| 验收项 | 通过条件 |
+| --- | --- |
+| 租户密钥 | `db_password`、`jwt_secret`、`anon_key`、`service_role_key` 和 `s3_secret_key` 只写入 `*_encrypted` 列。查找使用 `anon_key_hash` 和 `service_role_key_hash`（不透明密钥已使用 `secret_key_hash`）。启动时把残留明文复制进密文，核对解密往返，然后清空明文列。创建响应仍可以在进程内存中把密钥返回一次。 |
+| CONNECT | 新建项目库和分支库对 `PUBLIC` 和 `supabase_realtime_admin` 执行 `REVOKE CONNECT`。`role_<ref>` 和 `authenticator_<ref>` 只在自己的数据库上获得 `CONNECT`。 |
+| HBA 配对 | Pigsty 清单只在 `authenticator_<ref>` / `role_<ref>` 是“与数据库同名的 NOLOGIN 角色”的成员时，才从 `127.0.0.1/32` 放行（`samerole`），然后拒绝这两个名字模式的其他本机登录。重新套用的步骤见下文。 |
+| 集群 LOGIN 审计 | 不改名 `supabase_auth_admin` 和 `supabase_admin`。管理员调用 `GET /v1/system/cluster-login-audit` 查看当前会话的角色、数据库、客户端地址、应用名和状态。响应不含集群密码，也不含 SQL 文本。历史记录是这两个角色打开 `log_connections` 之后的 PostgreSQL `connection authorized` 行，以及租户库日志里的 `supacloud_cluster_login`。集群密码一旦泄漏，仍可以用这两个角色打开每一个租户库。审计不是隔离。 |
+| 默认 app init | `supacloud app init` 只生成 `@supabase/supabase-js`。编译器、Effect 和 `@supacloud/app` 使用 `app init --template app`。 |
+| ZenStack | ZenStack 位于 `@supacloud/db-zenstack`。Management API 的生产闭包不安装、不导入 ZenStack。`@supacloud/db` 不依赖它。 |
+| Angular 边界 | 调用 `inject()` 的注入器和 `HttpClient` 位于 `@supacloud/app/runtime`。`@supacloud/app`、`@supacloud/app/core`、`@supacloud/app/http` 和 `@supacloud/app/pending-work` 保持不依赖 Angular。 |
+| Compose 与 Pigsty | 不得把一次 `docker/self-host` 启动记成第二道验收门的双项目 Pigsty 通过。 |
+| Realtime 占比 | Elixir Realtime `:4000` 的生产流量占比在下面的测量表填上之前保持“未计数”。 |
+| 第 2–4 道门与高可用 | 只根据具名真实主机上的带日期记录来声称，不根据本文或一次合并来声称。 |
+
+### 重新套用 HBA 配对
+
+Pigsty 拥有 `/pg/data/pg_hba.conf`，并从 `pg_hba_rules` 重新生成它。SupaCloud 只插入或替换带标题的 SupaCloud 行。之后的 Pigsty 升级、被覆盖的清单，或一条更早的“本机所有用户都放行”规则，都会把未配对的模式带回来。PostgreSQL 分别匹配用户和数据库字段，因此 `authenticator_A` 仍可能满足 `supa_B` 的 HBA。`CONNECT` 授权还在，但它比配对后的 HBA 弱。
+
+先授予 samerole 成员身份，再套用拒绝规则。Management API 启动和 `scripts/upgrade_pigsty_4_4_compat.sh --apply` 会把与数据库同名的 NOLOGIN 角色，以 `WITH INHERIT FALSE, SET FALSE` 授给 `authenticator_<ref>` 和 `role_<ref>`。这个角色不能再被授予其他权限。若先套用拒绝规则，租户登录会在授权完成前被拒绝。
+
+```bash
+cd /path/to/supacloud
+PIGSTY_PATH="${PIGSTY_PATH:-$HOME/pigsty}" bash -c 'source ./install.sh && ensure_pigsty_tenant_hba_rule'
+```
+
+`source ./install.sh` 只加载函数，不运行安装器。完成后，authenticator 与 role 的放行行是 `db: samerole`，未配对该模式的规则是 `auth: reject`，并且不再有 `/^supa_` 数据库正则。`::1` 仍然不在这条环回规则里。
+
+不重命名 `supabase_auth_admin` 和 `supabase_admin`。GoTrue 仍以 `supabase_auth_admin` 连接。Realtime CDC 仍以 `supabase_admin` 连接。PostgreSQL 角色在整个集群只有一个密码，所以这两个名字不能按项目分密码。不作为集群角色连接的 shell 助手不再收到 `PGPASSWORD`、`PG_PASSWORD` 或 `POSTGRES_PASSWORD`。Realtime 错误日志会抹掉 `db_password` 字段和 URI 中的密码。这两处收紧都不是隔离。
+
+### Elixir Realtime :4000 流量占比
+
+仓库里没有现成指标统计生产 WebSocket 流量里仍进入 Elixir Realtime 监听器（上游默认端口 4000）的比例。在真实主机给出数字之前保持 `uncounted`。任何关于该比例的说法都取决于填好的这一行。不要编造百分比。
+
+| 测量项 | 取值 | 主机 | 日期 | 方法 |
+| --- | --- | --- | --- | --- |
+| Elixir Realtime `:4000` 占生产 WebSocket 流量的比例 | uncounted | | | |
 
 ## 本基线不承诺
 

@@ -119,7 +119,7 @@ El binding es una operación de administrador. Los objetos existentes de la plat
 
 | Superficie | Qué verificar |
 | --- | --- |
-| Repositorio frente a versiones publicadas | Un cambio combinado en `main` no demuestra que el paquete o binario correspondiente se haya publicado. |
+| Repositorio frente a versiones publicadas | Un cambio combinado en `main` no demuestra que el paquete o binario correspondiente se haya publicado. Fusionar no es un despliegue de producción. `docker/self-host` (un GoTrue y un PostgREST) no demuestra el comportamiento multi-proyecto de Pigsty. Las puertas 2–4 y la alta disponibilidad exigen una pasada fechada en un host real. Consulta la [lista de aceptación](docs/self-hosted-stable-baseline.md). |
 | Baseline de instalación Pigsty | Los valores de instalación fijan `v4.5.0`. Sigue las [comprobaciones actuales de versión y actualización](docs/upgrade-to-pigsty-4.5.md); los identificadores históricos de migración no son la versión actual. |
 | Elysia y schemas | La tupla exacta de beta/versión está en [compatibility.json](packages/elysia/compatibility.json). Los resultados reales están fechados en el [registro de aceptación](docs/framework-acceptance.md); la tupla por sí sola no es un resultado de ejecución. |
 | Contratos generados | Actualiza juntos el compilador, los esquemas TypeBox, los clientes generados y los adaptadores de runtime. Regenera y ejecuta las [comprobaciones de migración de contratos](docs/route-contract-migration.md). |

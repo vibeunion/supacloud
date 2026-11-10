@@ -297,19 +297,21 @@ apply_tenant_authenticator_compat() {
       return 1
     fi
 
-    local database_password authenticator_role
+    local database_password authenticator_role database_role
     if ! database_password="$(printf '%s' "$password_base64" | decode_base64)"; then
       printf '[FAIL] Active tenant database password is not valid base64: %s\n' "$ref" >&2
       return 1
     fi
     authenticator_role="authenticator_${ref}"
-    [[ "$authenticator_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && ${#authenticator_role} -le 63 ]] || {
+    database_role="role_${ref}"
+    [[ "$authenticator_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && ${#authenticator_role} -le 63 \
+      && "$database_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && ${#database_role} -le 63 ]] || {
       printf '[FAIL] Unsafe tenant authenticator role: %s\n' "$authenticator_role" >&2
       return 1
     }
 
     ROLE_PASSWORD="$database_password" run_psql_with_role_password postgres \
-      -v authenticator_role="$authenticator_role" -v tenant_database="$database" <<'SQL'
+      -v authenticator_role="$authenticator_role" -v database_role="$database_role" -v tenant_database="$database" <<'SQL'
 \getenv role_password ROLE_PASSWORD
 SELECT format('CREATE ROLE %I NOINHERIT LOGIN PASSWORD %L', :'authenticator_role', :'role_password')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'authenticator_role')
@@ -330,6 +332,14 @@ SELECT format('GRANT anon, authenticated, service_role TO %I', :'authenticator_r
 \gexec
 SELECT format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', :'tenant_database', :'authenticator_role')
 \gexec
+SELECT format('CREATE ROLE %I NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS', :'tenant_database')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'tenant_database')
+\gexec
+SELECT format('GRANT %I TO %I WITH INHERIT FALSE, SET FALSE', :'tenant_database', :'authenticator_role')
+\gexec
+SELECT format('GRANT %I TO %I WITH INHERIT FALSE, SET FALSE', :'tenant_database', :'database_role')
+WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'database_role')
+\gexec
 SQL
     unset database_password ROLE_PASSWORD
   done <<< "$records"
@@ -340,16 +350,18 @@ check_tenant_authenticator_compat() {
   local database="$2"
   local password_base64="$3"
   local authenticator_role="authenticator_${ref}"
+  local database_role="role_${ref}"
   local role_result database_password
 
   if [[ ! "$ref" =~ ^[A-Za-z0-9_]+$ || ! "$database" =~ ^[A-Za-z_][A-Za-z0-9_]*$ \
-    || ! "$authenticator_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || ${#authenticator_role} -gt 63 ]]; then
+    || ! "$authenticator_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || ${#authenticator_role} -gt 63 \
+    || ! "$database_role" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || ${#database_role} -gt 63 ]]; then
     printf 'unsafe-identifier'
     return 0
   fi
 
   role_result="$(run_psql postgres -Atq \
-    -v authenticator_role="$authenticator_role" -v tenant_database="$database" <<'SQL'
+    -v authenticator_role="$authenticator_role" -v database_role="$database_role" -v tenant_database="$database" <<'SQL'
     SELECT CASE
       WHEN NOT EXISTS (
         SELECT 1 FROM pg_roles
@@ -373,6 +385,25 @@ check_tenant_authenticator_compat() {
         OR NOT pg_has_role(:'authenticator_role', 'service_role', 'MEMBER')
         OR NOT has_database_privilege(:'authenticator_role', :'tenant_database', 'CONNECT')
         OR NOT has_database_privilege(:'authenticator_role', :'tenant_database', 'TEMPORARY')
+        OR NOT EXISTS (
+          SELECT 1
+          FROM pg_auth_members membership
+          JOIN pg_roles granted ON granted.oid = membership.roleid
+          JOIN pg_roles member ON member.oid = membership.member
+          WHERE granted.rolname = :'tenant_database'
+            AND member.rolname = :'authenticator_role'
+        )
+        OR (
+          EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'database_role')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_auth_members membership
+            JOIN pg_roles granted ON granted.oid = membership.roleid
+            JOIN pg_roles member ON member.oid = membership.member
+            WHERE granted.rolname = :'tenant_database'
+              AND member.rolname = :'database_role'
+          )
+        )
         THEN 'missing-grants'
       ELSE 'metadata-compatible'
     END

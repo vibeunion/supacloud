@@ -44,7 +44,7 @@ Each project has its own logical database and user in the Pigsty cluster.
 |----------|-------------------|---------|
 | Project Database | `supa_<project_ref>` | `supa_abc123` |
 | Project Role | `role_<project_ref>` | `role_abc123` |
-| Permissions | `role_<ref>` and `authenticator_<ref>` can connect only to `supa_<ref>` | `REVOKE CONNECT FROM PUBLIC`, then `GRANT CONNECT` to those two roles. Pigsty HBA only allows loopback logins whose names match `authenticator_*` or `role_*` against any `supa_*` database. It does not pair a role with its own database. |
+| Permissions | `role_<ref>` and `authenticator_<ref>` can connect only to `supa_<ref>` | `REVOKE CONNECT` from `PUBLIC` and `supabase_realtime_admin`, then `GRANT CONNECT` to those two roles. Pigsty HBA uses `samerole` so those logins are admitted only to the database whose name they are members of, then rejects other loopback matches. A Pigsty regenerate can restore an unpaired pattern; re-apply as documented in the [operator checklist](self-hosted-stable-baseline.md). |
 
 ### 2.2 Metadata Storage
 

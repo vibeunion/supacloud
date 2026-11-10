@@ -15,9 +15,12 @@ Pigsty `v4.5.0` / PostgreSQL 18 path, SupaCloud-managed Caddy, and published
 verified artifacts. The primary acceptance target is Ubuntu 24.04 LTS on
 `amd64`; other installer paths and `arm64` require separate evidence.
 
-This single-host profile does not claim high availability. Compose, Lite, and
-other operating systems remain bounded compatibility paths, not equivalent
-proof of the primary platform release.
+This single-host profile does not claim high availability. Gates 2–4 and HA
+are not production-passed until a dated pass on a real host is recorded.
+Merging a pull request is not that pass (合码≠上线). Compose, Lite, and other
+operating systems remain bounded compatibility paths, not equivalent proof of
+the primary platform release. `docker/self-host` runs one GoTrue and one
+PostgREST; that boot is not evidence of multi-project Pigsty behavior.
 
 ## Before installation
 
