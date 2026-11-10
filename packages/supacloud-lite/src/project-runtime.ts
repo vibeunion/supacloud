@@ -485,20 +485,31 @@ export function resolveStorageBackend(value?: ConfiguredStorageBackend): Configu
   throw new Error(`unsupported SUPACLOUD_LITE_STORAGE_BACKEND: ${configured}`)
 }
 
-export function resolveS3EndpointOptions(env: { [name: string]: string | undefined } = process.env): S3EndpointOptions | undefined {
-  const accessKeyId = env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID
-  const secretAccessKey = env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY
+/** Explicit overrides for the inbound S3-compatible endpoint (CLI flags beat environment). */
+export interface S3EndpointOptionOverrides {
+  accessKeyId?: string
+  secretAccessKey?: string
+  region?: string
+  bucketScope?: string[]
+}
+
+export function resolveS3EndpointOptions(
+  env: { [name: string]: string | undefined } = process.env,
+  overrides: S3EndpointOptionOverrides = {},
+): S3EndpointOptions | undefined {
+  const accessKeyId = overrides.accessKeyId ?? env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID
+  const secretAccessKey = overrides.secretAccessKey ?? env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY
   if (!accessKeyId && !secretAccessKey) return undefined
   if (!accessKeyId || !secretAccessKey) {
     throw new Error('SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID and SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY must be set together')
   }
-  const bucketScope = env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS
+  const bucketScope = overrides.bucketScope ?? (env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS
     ? env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS.split(',').map((bucket) => bucket.trim()).filter(Boolean)
-    : undefined
+    : undefined)
   return {
     accessKeyId,
     secretAccessKey,
-    region: env.SUPACLOUD_LITE_S3_ENDPOINT_REGION || 'us-east-1',
+    region: overrides.region ?? (env.SUPACLOUD_LITE_S3_ENDPOINT_REGION || 'us-east-1'),
     ...(bucketScope && bucketScope.length > 0 ? { bucketScope } : {}),
   }
 }
