@@ -61,6 +61,16 @@ Scenario: Edge Functions receive the same project routing environment
   And function .env values cannot redirect the host-owned base client
 
 
+Scenario: S3-compatible clients reach Lite Storage without hand-provisioned secrets
+  Given a Lite project started with --s3-endpoint
+  Then the startup banner shows the /storage/v1/s3 endpoint and one-process credentials
+  And SigV4 ListBuckets, PutObject, GetObject, ListObjectsV2, CopyObject and DeleteObject succeed
+  And the same endpoint is reachable when credentials come from
+      --s3-endpoint-access-key-id plus --s3-endpoint-secret-access-key-stdin
+      or SUPACLOUD_LITE_S3_ENDPOINT_*
+  And doctor --json reports s3_endpoint status, region and bucket scope without the secret key
+
+
 Scenario: Server-side Realtime broadcast is bounded and authorized
   Given a subscriber joined to a public or private Realtime topic
   When an authenticated server sends POST /realtime/v1/api/broadcast
