@@ -53,6 +53,13 @@ Scenario: Storage status and metrics expose only owned metadata
   Then it receives bounded Prometheus metadata counts
   And non-service callers are denied
 
+Scenario: Edge Functions receive the same project routing environment
+  Given a project with a function that uses Supabase-compatible internal routing
+  When Lite invokes that function
+  Then it receives the local project ref and X-Project-Ref values
+  And it receives internal Auth, REST and Supabase URLs for the running Lite port
+  And function .env values cannot redirect the host-owned base client
+
 
 Scenario: S3-compatible clients reach Lite Storage without hand-provisioned secrets
   Given a Lite project started with --s3-endpoint
@@ -266,6 +273,25 @@ roles; service-role credentials remain server-only. A public function explicitly
 configured with `verify_jwt = false` still owns its own authentication. An
 application using `createSupAuthApp` can verify its bearer itself, but that does
 not grant direct Data API access without the Lite bridge.
+
+### Function environment parity
+
+Lite injects the host-owned routing values that full SupaCloud exposes to Edge
+Functions:
+
+| Variable | Lite value |
+| --- | --- |
+| `SUPACLOUD_PROJECT_REF` / `X_PROJECT_REF` | `local` |
+| `SUPACLOUD_INTERNAL_SUPABASE_URL` | `http://127.0.0.1:<port>` |
+| `SUPACLOUD_INTERNAL_AUTH_URL` | `<internal-supabase-url>/auth/v1` |
+| `SUPACLOUD_INTERNAL_REST_URL` | `<internal-supabase-url>/rest/v1` |
+
+These values are owned by the Lite host. A function's `.env` can add declared
+secrets, but cannot redirect `SUPABASE_URL`, `SUPABASE_ANON_KEY`, or
+`SUPABASE_SERVICE_ROLE_KEY`. `SUPABASE_URL` remains the public API URL; the
+internal variables are for server-side adapters that must avoid leaving the
+local process or test tenant. Treat `SUPACLOUD_INTERNAL_REST_URL` as a complete
+URL and do not append `/rest/v1` a second time.
 
 ### Strict Functions
 

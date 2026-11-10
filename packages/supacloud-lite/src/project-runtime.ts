@@ -108,6 +108,23 @@ export type ReplicationProfile = 'powersync'
 export type StorageBackend = 'fs' | 'memory' | 's3' | 'custom'
 export type ConfiguredStorageBackend = Exclude<StorageBackend, 'custom'>
 
+const LITE_PROJECT_REF = 'local'
+
+function liteFunctionRuntimeEnv(port: number, functionEnv: Record<string, string>): Record<string, string> {
+  const internalBaseUrl = `http://127.0.0.1:${port}`
+  return {
+    ...functionEnv,
+    // Keep the function environment aligned with the full Edge Runtime's
+    // project-scoped routing variables. Project .env values cannot replace
+    // these host-owned bindings.
+    SUPACLOUD_PROJECT_REF: LITE_PROJECT_REF,
+    X_PROJECT_REF: LITE_PROJECT_REF,
+    SUPACLOUD_INTERNAL_SUPABASE_URL: internalBaseUrl,
+    SUPACLOUD_INTERNAL_AUTH_URL: `${internalBaseUrl}/auth/v1`,
+    SUPACLOUD_INTERNAL_REST_URL: `${internalBaseUrl}/rest/v1`,
+  }
+}
+
 export interface RunningProjectServer extends ProjectBackend {
   server: RunningServer
   close: () => Promise<void>
@@ -294,7 +311,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     ? await loadProjectIdentity(paths.projectDir, options.identityModule ?? config.lite.identityModule)
     : undefined)
   const functions = options.includeFunctions === false ? new Map() : await loadFunctions(paths.projectDir, config.functions, config.lite.runtimeMode)
-  const functionEnv = options.includeFunctions === false ? {} : await loadFunctionEnv(paths.projectDir)
+  const functionEnv = options.includeFunctions === false ? {} : liteFunctionRuntimeEnv(port, await loadFunctionEnv(paths.projectDir))
   const secrets = await ensureProjectSecrets(paths)
   const webhooks = options.includeWebhooks === false ? [] : await loadWebhooks(paths.projectDir)
   const configuredStorageBackend = options.storageDriver ? 'fs' : resolveStorageBackend(options.storageBackend)
