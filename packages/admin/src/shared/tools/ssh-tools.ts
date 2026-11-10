@@ -714,7 +714,7 @@ function assertSafeExecCommand(command: string): string {
         reject();
     }
 
-    if (commandName === "docker" || commandName === "podman") {
+    if (commandName === "podman") {
         const action = tokens[1];
         if (action === "ps") {
             const flags = tokens.slice(2);
@@ -1186,11 +1186,13 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
             timeout_seconds: optional(Type.Number(), "[exec] Timeout in seconds (default: 60)"),
             public_domain: optional(hostnameSchema("public_domain"), "[install] API domain, e.g. api.example.com"),
             studio_domain: optional(hostnameSchema("studio_domain"), "[install] Studio domain"),
+            deployment_profile: optional(stringEnum(["pigsty", "solo", "podman", "external", "cluster"]), "[install] Deployment profile (default: pigsty)"),
+            database_url: optional(secretSchema("database_url"), "[install] Explicit external PostgreSQL URL"),
             postgres_password: optional(secretSchema("postgres_password"), "[install] DB password (auto-generated if empty)"),
             dashboard_password: optional(secretSchema("dashboard_password"), "[install] Console password"),
             edge_runtime: optional(stringEnum(["bun"]), "[install] Runtime (default: bun)"),
             edge_max_body_size_mb: optional(Type.Integer({ minimum: 1, maximum: 10240 }), "[install] Max Edge Runtime upload / request body size in MB (default: 30)"),
-            storage_type: optional(stringEnum(["juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
+            storage_type: optional(stringEnum(["local", "juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
             transaction_id: optional(Type.String(), "[upgrade_status] UUID v4 transaction ID of a retained local-artifact upgrade"),
             version: optional(Type.String(), "[upgrade] Specific version"),
             edge_runtime_version: optional(Type.String(), "[upgrade] Exact independent Edge Runtime version"),
@@ -1301,6 +1303,8 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                     const envLines = [
                         `SUPABASE_PUBLIC_DOMAIN=${quoteEnvValue(args.public_domain)}`,
                         args.studio_domain ? `SUPABASE_STUDIO_DOMAIN=${quoteEnvValue(args.studio_domain)}` : "",
+                        args.deployment_profile ? `SUPACLOUD_DEPLOYMENT_PROFILE=${quoteEnvValue(args.deployment_profile)}` : "",
+                        args.database_url ? `SUPACLOUD_DATABASE_URL=${quoteEnvValue(args.database_url)}` : "",
                         args.edge_runtime ? `EDGE_RUNTIME=${quoteEnvValue(args.edge_runtime)}` : "",
                         args.edge_max_body_size_mb ? `EDGE_MAX_BODY_SIZE_MB=${quoteEnvValue(String(args.edge_max_body_size_mb))}` : "",
                         args.storage_type ? `S3_STORAGE_TYPE=${quoteEnvValue(args.storage_type)}` : "",
@@ -1437,7 +1441,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                         "echo '=== OS ===' && uname -a",
                         "echo '=== Memory ===' && free -h",
                         "echo '=== Disk ===' && df -h /",
-                        "echo '=== Docker ===' && (docker ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || echo 'Not found')",
+                        "echo '=== Podman ===' && (podman ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || echo 'Not found')",
                         "echo '=== Management API /health ==='",
                         "(curl --fail --silent --show-error --max-time 5 --max-filesize 4096 http://127.0.0.1:9090/health 2>&1 | head -c 4096) || echo 'Probe failed'",
                         "printf '\\n'",
@@ -1467,7 +1471,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                     ];
                     if (f === "all" || f === "containers") checks.push(
                         "echo '══════ Containers ══════'",
-                        "(docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo 'Not found')",
+                        "(podman ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo 'Not found')",
                     );
                     if (f === "all" || f === "database") checks.push(
                         "echo '══════ PostgreSQL ══════'",
@@ -1483,7 +1487,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                     );
                     if (f === "all" || f === "disk") checks.push(
                         "echo '══════ Large Dirs ══════'",
-                        "du -sh /var/lib/postgresql /var/lib/docker 2>/dev/null | sort -rh | head -10",
+                        "du -sh /var/lib/postgresql /var/lib/containers/storage 2>/dev/null | sort -rh | head -10",
                     );
                     const r = await ssh.exec(checks.join("\n"), 60_000);
                     text = r.stdout.slice(-3000);
@@ -1494,7 +1498,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                     const n = args.lines || 100;
                     if (!Number.isFinite(n) || n <= 0 || n > 1000) throw new Error("'lines' must be between 1 and 1000");
                     const container = assertSafeContainerName(args.container);
-                    const r = await ssh.exec(`docker logs --tail ${n} ${container} 2>&1 || echo 'Container not found'`, 30_000);
+                    const r = await ssh.exec(`podman logs --tail ${n} ${container} 2>&1 || echo 'Container not found'`, 30_000);
                     text = `📋 ${container} last ${n} lines:\n\n${r.stdout || r.stderr}`;
                     break;
                 }

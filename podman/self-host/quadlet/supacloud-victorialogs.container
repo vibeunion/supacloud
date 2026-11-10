@@ -1,0 +1,22 @@
+[Unit]
+PartOf=supacloud.target
+Description=SupaCloud VictoriaLogs
+Wants=supacloud-network.service
+After=supacloud-network.service
+
+[Container]
+Image=docker.io/victoriametrics/victoria-logs:v1.53.0
+ContainerName=supacloud-victorialogs
+Network=supacloud.network
+NetworkAlias=victorialogs
+EnvironmentFile=/etc/supacloud/victorialogs.env
+Volume=/var/lib/supacloud/victorialogs:/victoria-logs-data:z
+Exec=-storageDataPath=/victoria-logs-data -retentionPeriod=7d -httpListenAddr=:9428
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
+[Install]
+WantedBy=supacloud.target

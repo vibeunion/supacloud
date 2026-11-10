@@ -747,6 +747,12 @@ jobs:
       - name: Validate self-host docker durability and env tests
         run: python3 -m unittest docker/self-host/test_init_env.py docker/self-host/test_caddy_durability.py
 
+      - name: Validate Podman single-node installation
+        run: |
+          bash -n podman/self-host/install.sh podman/self-host/wait-health.sh
+          bash scripts/lib/deployment_profile.test.sh
+          python3 -m unittest podman/self-host/test_install.py
+
       - name: Validate CI scripts
         run: |
           node --check .github/scripts/ai-review-merge.mjs
@@ -1314,6 +1320,9 @@ jobs:
 
           echo "=== Checking Realtime shell scripts ==="
           shellcheck -s bash -e "$ignored_rules" infrastructure/realtime/*.sh
+
+          echo "=== Checking Podman single-node installer ==="
+          shellcheck podman/self-host/install.sh podman/self-host/wait-health.sh
 
   caddy-edge-proxy-smoke:
     name: Caddy Edge Proxy Smoke

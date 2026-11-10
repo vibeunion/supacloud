@@ -1,0 +1,25 @@
+[Unit]
+PartOf=supacloud.target supacloud-postgres.service
+Description=SupaCloud Realtime
+Requires=supacloud-postgres.service
+After=supacloud-postgres.service
+
+[Container]
+Image=public.ecr.aws/supabase/realtime:v2.150.0
+ContainerName=supacloud-realtime
+Network=supacloud.network
+NetworkAlias=realtime
+EnvironmentFile=/etc/supacloud/realtime.env
+PublishPort=127.0.0.1:4000:4000
+HealthCmd=wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:4000/healthcheck
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=10
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
+[Install]
+WantedBy=supacloud.target

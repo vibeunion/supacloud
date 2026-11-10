@@ -52,9 +52,9 @@ The first stable release should publish one primary deployment profile:
 
 The installer also contains compatibility paths for other operating systems
 and `arm64`. Those paths must be documented and tested separately; they are not
-implicitly equal to the primary baseline. Compose and Lite remain supported
-within their own documented boundaries and are not alternative proofs of this
-release's full-platform acceptance.
+implicitly equal to the primary baseline. Podman single-node and Lite remain
+supported within their own documented boundaries and are not alternative proofs
+of this release's Pigsty baseline.
 
 The primary acceptance run must record the selected Edge Runtime mode. The
 coordinated Management/Web Console/Edge Runtime upgrade path requires
@@ -67,7 +67,7 @@ equivalent upgrade evidence. Caddy and GoTrue remain separate upgrade surfaces.
 | --- | --- | --- |
 | Native single-host Full Platform | Stable baseline target | Ubuntu 24.04 LTS, `amd64`, systemd, Pigsty `v4.5.0` / PostgreSQL 18, SupaCloud-managed Caddy, and published verified artifacts; Gates 2-4 are still required before claiming production acceptance |
 | Lite | Separate bounded product | Single-project local-first runtime with its own compatibility and recovery evidence; not evidence for Full Platform readiness |
-| Compose and other installer paths | Deployment-specific / separate acceptance | `docker/self-host` is one GoTrue and one PostgREST. It is not evidence of multi-project Pigsty behavior. Follow the documented boundary; do not treat it as equivalent proof of the native baseline |
+| Podman single-node and other installer paths | Deployment-specific / separate acceptance | Follow their documented boundaries; do not treat them as equivalent proof of the Pigsty baseline |
 | `arm64` and other operating systems | Deployment-specific / separate acceptance | Require explicit installation, upgrade, and recovery evidence for the selected combination |
 | External S3 project storage | Deployment-specific / separate acceptance | Requires an explicit project binding and provider-specific reachability, durability, and recovery evidence |
 | Embedded Edge Runtime in a coordinated upgrade | Experimental / separate acceptance | The primary coordinated upgrade evidence uses persisted `EDGE_RUNTIME_MODE=external` |
