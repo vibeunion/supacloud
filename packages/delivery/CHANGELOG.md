@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.26.0...delivery-v0.27.0) (2026-11-10)
+
+
+### Features
+
+* **delivery:** add single-node deployment state contract ([#2536](https://github.com/vibeunion/supacloud/issues/2536)) ([e56656a](https://github.com/vibeunion/supacloud/commit/e56656a1e02b12c8b096966f6ff4342e46a56d90))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.25.0...delivery-v0.26.0) (2026-11-07)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/admin-v0.31.0...admin-v0.32.0) (2026-11-10)
+
+
+### Features
+
+* add Podman single-node deployment ([#2539](https://github.com/vibeunion/supacloud/issues/2539)) ([c826ab3](https://github.com/vibeunion/supacloud/commit/c826ab37411217086be1ddc463699869902a6c48))
+
 ## [0.31.0](https://github.com/vibeunion/supacloud/compare/admin-v0.30.5...admin-v0.31.0) (2026-11-05)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.132.0...management-api-v0.133.0) (2026-11-10)
+
+
+### Features
+
+* add Podman single-node deployment ([#2539](https://github.com/vibeunion/supacloud/issues/2539)) ([c826ab3](https://github.com/vibeunion/supacloud/commit/c826ab37411217086be1ddc463699869902a6c48))
+
 ## [0.132.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.131.0...management-api-v0.132.0) (2026-11-07)
 
 
