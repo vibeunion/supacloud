@@ -64,7 +64,9 @@ function source、registry 或 catalog contract 中，记录签名、权限、�
 没有这些追溯信息的 capability 不能进入 `governed-sql`，只能继续作为已登记的
 `legacy-rpc` 迁移桥。
 存量项目先运行只读评估；参见 [Database Source Contracts](./database-source-contracts.md)。
-离线检查不替代下文的 Catalog、权限与行为验证。
+离线检查不替代下文的 Catalog、权限与行为验证。模型行级 policy 与已提交 RLS
+的一致性走现有 source contract（`policy-rls-mismatch` / `policy-rls-unsupported`），
+doctor 层仍是 `source` 或 checker 无法运行时的 `runtime`。不要为此再加一套 Catalog 码。
 
 ```
 features/case/db/

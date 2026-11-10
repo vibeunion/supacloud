@@ -6,6 +6,8 @@ import * as ts from "typescript/ast";
 import { API } from "typescript/async";
 import { forEachChild, withSourceFile } from "./typescript-source";
 import { migrationFunctionIdentities, rpcSourceContract, renderRpcSourceTypes, type RpcSourceContract } from "./rpc-source-contracts";
+import { combinePolicyRls, emitPolicyRls, PolicyRlsError, policyRlsDivergence, type EmittedPolicyRls } from "./policy-rls";
+export { combinePolicyRls, emitPolicyRls, PolicyRlsError, policyRlsDivergence, type EmittedPolicyRls } from "./policy-rls";
 
 export interface DatabaseSourcesConfig {
   version: 1;
@@ -18,6 +20,12 @@ export interface DatabaseSourcesConfig {
   auditConsumers: string[];
   trustedHosts: string[];
   role: string;
+  /**
+   * `deferred` is an explicit exception: relation predicates or reviewed SQL
+   * are not claimed to be the model row-policy projection. Omitted means the
+   * projection is required and must match the migration ledger.
+   */
+  policyRls?: "deferred";
 }
 export interface SourceFinding { file: string; code: string; message: string; line?: number }
 export interface DatabaseSourcesReport {
@@ -38,6 +46,7 @@ const steps = [
   "Add database.sources.json; replace ordinary audit dump consumers.",
   "Run supacloud-db generate, review contracts, then add supacloud-db check to default checks.",
   "Verify PostgreSQL definitions, ACL, RLS and behavior separately before deployment.",
+  "Keep emitted authenticated row-policy RLS in the migration ledger, or set policyRls to deferred when the model is not that projection.",
 ];
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const slash = (value: string) => value.replaceAll("\\", "/");
@@ -60,14 +69,16 @@ function paths(value: unknown): string[] {
 }
 export function parseDatabaseSourcesConfig(value: unknown): DatabaseSourcesConfig {
   if (!record(value) || value.version !== 1 || Object.keys(value).some(key =>
-    !["version", "schema", "functions", "migrations", "contracts", "audit", "consumers", "auditConsumers", "trustedHosts", "role"].includes(key))) {
+    !["version", "schema", "functions", "migrations", "contracts", "audit", "consumers", "auditConsumers", "trustedHosts", "role", "policyRls"].includes(key))) {
     throw new Error("Invalid database.sources.json");
   }
   const schema = paths(value.schema), consumers = paths(value.consumers), auditConsumers = paths(value.auditConsumers);
   if (!schema.length || !consumers.length || schema.some(file => !file.endsWith(".ts") && !file.endsWith(".zmodel"))) throw new Error("Select ZModel or generated TypeScript schemas and consumer roots");
   if (typeof value.role !== "string" || !/^[a-z_][a-z0-9_]*$/.test(value.role)) throw new Error("Select an explicit database role");
+  if (value.policyRls !== undefined && value.policyRls !== "deferred") throw new Error("policyRls must be deferred when set");
   const config: DatabaseSourcesConfig = {
     version: 1, schema, consumers, auditConsumers, role: value.role,
+    ...(value.policyRls === "deferred" ? { policyRls: "deferred" as const } : {}),
     trustedHosts: paths(value.trustedHosts ?? ["src/host"]),
     functions: pathValue(value.functions), migrations: pathValue(value.migrations),
     contracts: pathValue(value.contracts), audit: pathValue(value.audit),
@@ -280,8 +291,16 @@ export async function databaseSources(
       if (!(await exists(await safePath(root, directory)))) throw new Error(`Missing source directory: ${directory}`);
     }
     for (const model of config.schema.filter(file => file.endsWith(".zmodel"))) {
-      const { compileModel } = await import("@supacloud/db-zenstack/model");
-      await compileModel(await safePath(root, model), await safePath(root, slash(join(dirname(model), "generated"))), true);
+      try {
+        const { compileModel } = await import("@supacloud/db-zenstack/model");
+        await compileModel(await safePath(root, model), await safePath(root, slash(join(dirname(model), "generated"))), true);
+      } catch (error) {
+        // Keep going so a stale model artifact cannot hide a row-policy/RLS mismatch.
+        report.findings.push({
+          file: model, code: "invalid-source-project",
+          message: error instanceof Error ? error.message : "Model contracts are stale",
+        });
+      }
     }
     const inputs = new Map<string, string>();
     const input = async (file: string) => {
@@ -343,9 +362,34 @@ export async function databaseSources(
       });
     }
     contracts.sort((a, b) => a.identity.localeCompare(b.identity));
+    let policyRls: EmittedPolicyRls | undefined;
+    if (config.policyRls !== "deferred") {
+      const emitted: EmittedPolicyRls[] = [];
+      for (const file of config.schema.filter(item => item.endsWith(".zmodel"))) {
+        try { emitted.push(emitPolicyRls(await readFile(await safePath(root, file), "utf8"))); }
+        catch (error) {
+          if (!(error instanceof PolicyRlsError)) throw error;
+          report.findings.push({ file, code: error.code, message: error.message });
+        }
+      }
+      if (emitted.length && !report.findings.some(item => item.code === "policy-rls-unsupported")) {
+        policyRls = combinePolicyRls(emitted);
+        const missing = policyRlsDivergence(policyRls, migrationSql);
+        if (missing.length) {
+          const sample = missing[0] ?? "";
+          report.findings.push({
+            file: config.schema.find(item => item.endsWith(".zmodel")) ?? config.migrations,
+            code: "policy-rls-mismatch",
+            message: `Model row policy RLS is missing from the migration ledger (${missing.length}): ${sample.slice(0, 180)}`,
+          });
+          policyRls = undefined;
+        }
+      }
+    }
     const catalog = JSON.stringify({ version: 1, scope: report.scope, role: config.role, functions: contracts }, null, 2) + "\n";
     const types = renderRpcSourceTypes(contracts);
     const generated = new Map([["rpc-catalog.json", catalog], ["rpc-types.ts", types]]);
+    if (policyRls?.statements.length) generated.set("policy-rls.sql", policyRls.sql);
     const manifest = JSON.stringify({
       generator: GENERATOR, inputs: Object.fromEntries([...inputs].sort(([a], [b]) => a.localeCompare(b))),
       migrations, outputs: Object.fromEntries([...generated].map(([name, content]) => [name, hash(content)])),

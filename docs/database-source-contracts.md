@@ -87,6 +87,15 @@ inferred: exported functions require an explicit PUBLIC decision and a declared
 grant to PUBLIC or the configured role. Real effective authorization still needs
 PostgreSQL catalog reconciliation and role/RLS integration tests.
 
+When a configured ZModel contains row-level `@@allow` or `@@deny`, check emits
+`db/contracts/policy-rls.sql` for the `authenticated` role and requires every
+statement to appear in the migration ledger. `policy-rls-mismatch` means the
+ledger diverged. `policy-rls-unsupported` means a predicate cannot be emitted;
+nothing is dropped. Set `"policyRls": "deferred"` only when that model is
+explicitly not the row projection. The finding stays on the existing
+`database-source-contracts` check: `source` when the checker reports, `runtime`
+when the checker cannot run. This is not a live Catalog proof.
+
 The generated catalog contains signatures, types and input hashes, not function
 bodies. Function names are schema-qualified. JSON, records and custom SQL types
 remain `unknown`; bigint/numeric preserve `number | string`. No driver validation

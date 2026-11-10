@@ -15,6 +15,8 @@ export interface DatabaseContractsOptions {
   postgrestTypes?: string;
   /** ZenStack query-builder module. Omit when the project does not use ZenStack. */
   modelSchema?: string;
+  /** ZModel whose row policies are emitted as RLS. Omit when the project does not project policies. */
+  modelPolicy?: string;
   /** Explicit identity/role label for reviewing snapshot provenance. Not an authorization proof. */
   role: string;
   /** Role-scoped pg_graphql snapshot exported by graphql-schema. Omit when GraphQL is unused. */
@@ -37,7 +39,7 @@ function importPath(out: string, path: string): string {
 
 export function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Expected database contracts configuration");
-  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "role", "graphql", "rpcRegistry", "rpcCatalog", "migrations"];
+  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "modelPolicy", "role", "graphql", "rpcRegistry", "rpcCatalog", "migrations"];
   if (Object.keys(value).some((name) => !allowed.includes(name))) throw new TypeError("Unknown database contracts option");
   const field = (name: string) => {
     const result: unknown = Reflect.get(value, name);
@@ -50,10 +52,11 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
   };
   const postgrestTypes = optionalPath("postgrestTypes");
   const modelSchema = optionalPath("modelSchema");
+  const modelPolicy = optionalPath("modelPolicy");
   const rpcRegistry = optionalPath("rpcRegistry");
   const rpcCatalog = optionalPath("rpcCatalog");
   const graphqlPresent = Object.hasOwn(value, "graphql");
-  if (!postgrestTypes && !modelSchema && !graphqlPresent) {
+  if (!postgrestTypes && !modelSchema && !modelPolicy && !graphqlPresent) {
     throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
   }
   let graphql: GraphqlOptions | undefined;
@@ -70,6 +73,7 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
     rootDir: resolve(directory, field("rootDir")), outDir: resolve(directory, field("outDir")),
     ...(postgrestTypes ? { postgrestTypes: resolve(directory, postgrestTypes) } : {}),
     ...(modelSchema ? { modelSchema: resolve(directory, modelSchema) } : {}),
+    ...(modelPolicy ? { modelPolicy: resolve(directory, modelPolicy) } : {}),
     role: field("role"),
     ...(graphql ? { graphql } : {}),
     ...(rpcRegistry ? { rpcRegistry: resolve(directory, rpcRegistry) } : {}),
@@ -97,7 +101,8 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   const rootDir = resolve(options.rootDir), outDir = resolve(options.outDir);
   const postgrestTypes = options.postgrestTypes ? resolve(rootDir, options.postgrestTypes) : undefined;
   const modelSchema = options.modelSchema ? resolve(rootDir, options.modelSchema) : undefined;
-  if (!postgrestTypes && !modelSchema && !options.graphql) {
+  const modelPolicy = options.modelPolicy ? resolve(rootDir, options.modelPolicy) : undefined;
+  if (!postgrestTypes && !modelSchema && !modelPolicy && !options.graphql) {
     throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
   }
   if (postgrestTypes) await assertPostgrestSnapshot(postgrestTypes);
@@ -125,6 +130,23 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   if (options.graphql) await addInput(resolve(rootDir, options.graphql.schema));
   if (options.rpcRegistry) await addInput(options.rpcRegistry);
   if (options.rpcCatalog) await addInput(options.rpcCatalog);
+  let policyRls: string | undefined;
+  if (modelPolicy) {
+    const { emitPolicyRls, policyRlsDivergence, PolicyRlsError } = await import("@supacloud/db/source-contracts");
+    await addInput(modelPolicy);
+    let emitted;
+    try { emitted = emitPolicyRls(await readFile(modelPolicy, "utf8")); }
+    catch (error) {
+      if (error instanceof PolicyRlsError) throw new Error(`policy-rls-unsupported: ${error.message}`);
+      throw error;
+    }
+    const migrationSql = await Promise.all(options.migrations.map(path => readFile(resolve(rootDir, path), "utf8")));
+    const missing = policyRlsDivergence(emitted, migrationSql);
+    if (missing.length) {
+      throw new Error(`policy-rls-mismatch: model row policy RLS is missing from the database contract migrations: ${(missing[0] ?? "").slice(0, 180)}`);
+    }
+    policyRls = emitted.sql;
+  }
   if (new Set(options.migrations.map((path) => resolve(rootDir, path))).size !== options.migrations.length) {
     throw new Error("Duplicate migration in database contracts configuration");
   }
@@ -138,6 +160,7 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   if (options.graphql) barrel.push('export * from "./graphql";');
   barrel.push("");
   const files: Record<string, string> = { ...artifacts.files, "database.ts": barrel.join("\n") };
+  if (policyRls !== undefined) files["rls.sql"] = policyRls;
   const manifest = {
     version: 1, role: options.role,
     inputs: Object.fromEntries(Object.entries(inputs).sort(([a], [b]) => a.localeCompare(b))),

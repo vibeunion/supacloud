@@ -17,10 +17,12 @@ Pure domain functions remain ordinary TypeScript; Effect programs execute inside
 the command lifetime.
 
 ZenStack policy constraints apply to the model adapter only. Direct PostgREST/RPC
-paths still require their own SQL/RLS/grant protection. Policy parity is an
-explicit review and test obligation until SupaCloud can compile and verify both
-projections itself. See [Database Contract](database-contract.md) for the stable
-boundary and migration rules.
+paths still require SQL/RLS/grant protection. Row-level `@@allow` / `@@deny`
+now emit `authenticated` RLS, and the existing source-contract check fails closed
+when the migration ledger does not contain that SQL. Field-level `@deny`, relation
+predicates, grants and the command host role stay outside that projection.
+`policyRls: "deferred"` is the explicit exception for a model that is not the
+row projection; omitting it requires a match. See [Database Contract](database-contract.md).
 
 Reylo and Drizzle are removed, including their dependencies, public adapters,
 commands, starter configuration, query loaders and build caches. There is no
@@ -241,7 +243,9 @@ may be archived as historical evidence; do not rewrite the applied SQL.
    types, nullability, defaults, relation actions, keys and indexes. Use PostgreSQL
    with `url = env("DATABASE_URL")`, without alternate direct/shadow URL fields.
    Add explicit model policies before enabling
-   model writes. ORM policies do not create database RLS policies.
+   model writes. Row-level policies emit authenticated RLS into the source contract;
+   the migration ledger must contain those statements. The emitter does not apply
+   SQL, grant privileges, or replace the command host policy.
 4. Compile the model, then source contracts:
 
    ```sh

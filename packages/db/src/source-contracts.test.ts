@@ -194,7 +194,7 @@ type UnknownResult = Assert<unknown extends RpcResult<"public.lookup"> ? true : 
 });
 
 test("new source modules pass scoped strict TypeScript diagnostics", async () => {
-  const files = ["source-contracts.ts", "rpc-source-contracts.ts", "source-contracts-cli.ts", "source-contracts.test.ts"]
+  const files = ["source-contracts.ts", "rpc-source-contracts.ts", "source-contracts-cli.ts", "policy-rls.ts", "policy-rls.test.ts", "source-contracts.test.ts"]
     .map(name => resolve(import.meta.dir, name));
   await using program = (await ts.createProgram(files, {
     strict: true, noEmit: true, skipLibCheck: true, types: ["bun"], target: ts.ScriptTarget.ES2022,

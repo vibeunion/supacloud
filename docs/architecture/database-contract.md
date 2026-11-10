@@ -29,8 +29,16 @@ client、ZenStack 通用 CRUD 或 ZenStack 生成的业务 RPC。替换该 adapt
 迁移账本仍然只有一份。这不是新增第二套写入数据库、查询语言、迁移账本或身份存储的许可。
 
 ZenStack policy 只约束经过 model adapter 的访问，不能代替 PostgreSQL 的 RLS、grants
-或 PostgREST/RPC 的数据库权限。模型策略与 SQL/RLS 必须通过显式 parity 检查保持一致；
-在 compiler 能够生成并验证 RLS 之前，不得宣称它们来自同一份自动生成结果。
+或 PostgREST/RPC 的数据库权限。模型上的行级 `@@allow` / `@@deny` 会投影成
+`authenticated` 的 PostgreSQL RLS。`supacloud-db check` 和编译器
+`database-contracts --check` 要求迁移账本逐条包含这些语句；缺一条或改一句都失败，
+并且 check 不写文件。这是同一条离线 source contract 检查，不是新的 doctor 目录：
+checker 能跑时层是 `source`，checker 起不来时层仍是 `runtime`。它不读取在线 Catalog。
+
+投影不覆盖字段级 `@deny`、关系谓词、grants、storage policy，也不覆盖命令宿主角色。
+宿主连接不设置 `request.jwt.claims`，所以宿主上的 `USING (true)` 不是这份行级投影。
+关系谓词或必须保留的手写 SQL 只有显式 `policyRls: "deferred"` 才跳过投影；省略该字段
+就是要求投影与账本一致。deferred 不表示两边已经一致。
 
 ## 四类入口
 
@@ -76,6 +84,14 @@ Feature: Backend-neutral database contract
     Given a model policy allows a tenant-scoped read
     When the same table is queried through PostgREST or RPC
     Then database role grants and RLS still enforce the tenant boundary
+
+  Scenario: Row policy and Postgres RLS stay one projection
+    Given a ZModel row policy the compiler can emit
+    When the migration ledger omits or changes that RLS statement
+    Then the existing database source contract check fails closed
+    And the checker reports it at the source layer
+    And ordinary reads still use PostgREST and @supabase/supabase-js
+    And Command remains the compiler-lane write boundary
 
   Scenario: Generated RPC remains traceable
     Given a new RPC capability is produced by code or a SQL generator
