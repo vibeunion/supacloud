@@ -52,11 +52,15 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     options.rootDir, options.databaseGovernance, Object.keys(options.commandCapabilities?.rpc ?? {}),
   );
   diagnostics.push(...databaseDiagnostics);
-  if (databaseDiagnostics.length) return { diagnostics, graph, written: [] };
   if (options.strict) {
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
+  }
+  // Catalog drift warnings must not block artifact generation; only error-severity
+  // database governance findings do.
+  if (databaseDiagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return { diagnostics, graph, written: [] };
   }
   if (diagnostics.some(blocksStaticCompilation)) return { diagnostics, graph, written: [] };
   const typeSafety = resolveTypeSafety(options);
@@ -129,13 +133,13 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     options.rootDir, options.databaseGovernance, Object.keys(options.commandCapabilities?.rpc ?? {}),
   );
   diagnostics.push(...databaseDiagnostics);
-  if (databaseDiagnostics.length) {
-    return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };
-  }
   if (options.strict) {
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
+  }
+  if (databaseDiagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return { diagnostics, graph, upToDate: false, mismatches: ["Database governance verification failed."] };
   }
 
   if (diagnostics.some(blocksStaticCompilation)) {
