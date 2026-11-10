@@ -90,13 +90,41 @@ const COMMANDS = `import { Command, defineOperationAspect, type Aspect } from "@
 import { createTypeBoxTransactionalCommand } from "@supacloud/commands/typebox";
 import { plaintextCommandInput } from "@supacloud/commands";
 import { CommandError, type CommandIdentity, type CommandStore } from "@supacloud/contracts";
-import type { ModelCommandTransaction } from "@supacloud/db/zenstack";
-import type { schema } from "../../../zenstack/generated/schema";
+import type { CallFunctionOptions, JsonArgument, ReadFunctionArg, ReadFunctionRow } from "@supacloud/db/model-contract";
 import { Type } from "typebox";
 import { CreateInput, ApproveInput, Decision, decodeApprove, decodeDecision, decodeOrder, decoder, type Principal } from "./contracts";
 
-type Tx = ModelCommandTransaction<typeof schema>;
-type Store = CommandStore<Tx>;
+type OrderRow = { readonly id: string; readonly title: string; readonly state: string; readonly version: number };
+type OrderDb = {
+  readonly order: {
+    createMany(args: { readonly data: readonly Record<string, unknown>[]; readonly skipDuplicates?: boolean }): Promise<{ readonly count: number }>;
+    findUniqueOrThrow(args: { readonly where: { readonly tenantId_id: { readonly tenantId: string; readonly id: string } }; readonly select: Record<keyof OrderRow, true> }): Promise<OrderRow>;
+    updateMany(args: { readonly where: Record<string, unknown>; readonly data: Record<string, unknown> }): Promise<{ readonly count: number }>;
+  };
+};
+type Tx = {
+  readonly db: OrderDb;
+  readonly lock: (keys: readonly string[]) => Promise<void>;
+  readonly readFunction: (name: string, args?: readonly ReadFunctionArg[]) => Promise<unknown>;
+  readonly readFunctionByRow: (name: string, row: ReadFunctionRow) => Promise<unknown>;
+  readonly callFunction: (name: string, args?: readonly JsonArgument[], options?: CallFunctionOptions) => Promise<unknown>;
+};
+type Store = CommandStore<unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+function isTx(value: unknown): value is Tx {
+  const root = isRecord(value) ? value : undefined;
+  const db = root && isRecord(root["db"]) ? root["db"] : undefined;
+  const order = db && isRecord(db["order"]) ? db["order"] : undefined;
+  const methods = ["lock", "readFunction", "readFunctionByRow", "callFunction"];
+  return !!root && !!db && !!order && methods.every(name => typeof root[name] === "function")
+    && ["createMany", "findUniqueOrThrow", "updateMany"].every(name => typeof order[name] === "function");
+}
+function decodeTx(value: unknown): Tx {
+  if (!isTx(value)) throw new TypeError("Invalid model command transaction");
+  return value;
+}
 const decodeCapabilities = decoder(Type.Object({ canApprove: Type.Boolean() }, { additionalProperties: false }));
 export const approvalAspect = defineOperationAspect({
   kind: "command", name: "orders.approve", input: decodeApprove, result: decodeDecision,
@@ -120,7 +148,8 @@ export class CreateOrder {
       inputCodec: plaintextCommandInput,
       authorize: identity => sameActor(identity, principal) && principal.canCreate ? "allow" : "deny",
       audit: { event: "orders.create.decided", details: (input, result) => ({ id: input.id, outcome: result.outcome }) },
-      execute: async (tx, input): Promise<Decision> => {
+      execute: async (rawTx, input): Promise<Decision> => {
+        const tx = decodeTx(rawTx);
         const created: { count: number } = await tx.db.order.createMany({ data: [{ ...input, tenantId: principal.tenantId, ownerId: principal.id, state: "draft", version: 1 }], skipDuplicates: true });
         if (created.count !== 1) return { outcome: "conflict", order: null };
         const row: { id: string; title: string; state: string; version: number } = await tx.db.order.findUniqueOrThrow({ where: { tenantId_id: { tenantId: principal.tenantId, id: input.id } }, select: { id: true, title: true, state: true, version: true } });
@@ -141,7 +170,9 @@ export class ApproveOrder {
       name: "orders.approve", store, schemas: { input: ApproveInput, result: Decision }, inputCodec: plaintextCommandInput,
       authorize: identity => sameActor(identity, principal) && principal.canApprove ? "allow" : "deny",
       audit: { event: "orders.approval.decided", details: (input, result) => ({ id: input.id, outcome: result.outcome }) },
-      execute: async (tx, input) => decodeDecision(await pipeline({
+      execute: async (rawTx, input) => {
+        const tx = decodeTx(rawTx);
+        return decodeDecision(await pipeline({
         kind: "command", name: "orders.approve", input,
         services: { approval: { canApprove: principal.canApprove } },
       }, async (): Promise<Decision> => {
@@ -152,7 +183,8 @@ export class ApproveOrder {
         if (changed.count !== 1) return { outcome: "conflict", order: null };
         const row: { id: string; title: string; state: string; version: number } = await tx.db.order.findUniqueOrThrow({ where: { tenantId_id: { tenantId: principal.tenantId, id: input.id } }, select: { id: true, title: true, state: true, version: true } });
         return { outcome: "applied", order: decodeOrder(row) };
-      })),
+      }));
+      },
     });
   }
   execute(identity: CommandIdentity, key: string, input: ApproveInput, signal?: AbortSignal) {
@@ -199,7 +231,7 @@ export class OrdersModule {}
 const HOST = `import type { SQL } from "bun";
 import { createApplication, ApplicationError, type CompiledModule } from "@supacloud/elysia";
 import { createZenStackDatabase } from "@supacloud/db/zenstack";
-import { CommandError } from "@supacloud/contracts";
+import { CommandError, type CommandStore } from "@supacloud/contracts";
 import { schema } from "../../zenstack/generated/schema";
 import { createCompiledModules } from "../../generated/application";
 import { CreateOrder, ApproveOrder } from "../features/orders/commands";
@@ -213,6 +245,17 @@ export interface IdentityAuthority {
   verifyWorker(claim: unknown): Promise<VerifiedClaim>;
   // Resolve current access for every HTTP or worker invocation, including receipt replay.
   resolve(actor: ActorBinding): Promise<Principal | null>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+function isCommandStore(value: unknown): value is CommandStore<unknown> {
+  return isRecord(value) && typeof value["transaction"] === "function";
+}
+function requireCommandStore(value: unknown): CommandStore<unknown> {
+  if (!isCommandStore(value)) throw new CommandError("COMMAND_UNAVAILABLE");
+  return value;
 }
 
 export async function createModelOrderHost(pool: SQL, authority: IdentityAuthority) {
@@ -252,11 +295,11 @@ export async function createModelOrderHost(pool: SQL, authority: IdentityAuthori
   const port: OrderPort = {
     create: async (context, key, input) => {
       const bound = await bind(context);
-      return decodeReceipt(await new CreateOrder(bound.scoped.commandStore, bound.principal).execute(bound.identity, key, decodeCreate(input), bound.signal));
+      return decodeReceipt(await new CreateOrder(requireCommandStore(bound.scoped.commandStore), bound.principal).execute(bound.identity, key, decodeCreate(input), bound.signal));
     },
     approve: async (context, key, input) => {
       const bound = await bind(context);
-      return decodeReceipt(await new ApproveOrder(bound.scoped.commandStore, bound.principal, approval).execute(bound.identity, key, decodeApprove(input), bound.signal));
+      return decodeReceipt(await new ApproveOrder(requireCommandStore(bound.scoped.commandStore), bound.principal, approval).execute(bound.identity, key, decodeApprove(input), bound.signal));
     },
     read: async (context, id) => {
       const bound = await bind(context);
