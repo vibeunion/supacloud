@@ -47,9 +47,13 @@ async function loadModules(projectRoot: string, moduleFile: string): Promise<Dat
   return (Array.isArray(exported) ? exported : [exported]).map((value) => normalizeModule(value, moduleFile));
 }
 
-function governanceDiagnostic(message: string, code = "database-governance"): Diagnostic {
+function governanceDiagnostic(
+  message: string,
+  code = "database-governance",
+  severity: Diagnostic["severity"] = "error",
+): Diagnostic {
   return {
-    severity: "error",
+    severity,
     code,
     message,
     suggestion: "Fix the database source contract, module manifest or live catalog before compiling.",
@@ -130,6 +134,9 @@ export async function enforceDatabaseGovernance(
           diagnostics.push(governanceDiagnostic(
             `${report.module}:${issue.object}: ${issue.message}`,
             `database-catalog-${issue.code}`,
+            // Drift warnings (for example platform-managed realtime triggers) are
+            // not blockers: keep the reconcile severity instead of forcing an error.
+            issue.severity,
           ));
         }
       }
@@ -165,6 +172,7 @@ export async function enforceDatabaseGovernance(
         diagnostics.push(governanceDiagnostic(
           `${module.name}:${issue.object}: ${issue.message}`,
           `database-catalog-${issue.code}`,
+          issue.severity,
         ));
       }
     }
