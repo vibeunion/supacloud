@@ -1,20 +1,27 @@
-/** Provider-oriented HTTP entry. Does not load the package root. */
+/**
+ * Angular-free HTTP helpers: headers, params, context, interceptor functions,
+ * and provider feature objects. This entry does not import `@angular/core`.
+ *
+ * The inject-based `HttpClient` and `provideHttpClient` are
+ * `@supacloud/app/runtime` only.
+ */
+export { HttpErrorResponse } from "./http_client_core";
+export type { HttpClientConfig, HttpRequestOptions } from "./http_client_core";
 export {
-  HttpClient, HttpErrorResponse, provideHttpClient, withFetch, withRequestsMadeViaParent,
-} from "./http_client";
+  HTTP_CLIENT_CONFIG,
+  HTTP_INTERCEPTORS,
+  withFetch,
+  withInterceptors,
+  withRequestsMadeViaParent,
+} from "./http_features";
+export type { HttpClientFeature, HttpClientFeatureKind } from "./http_features";
 export { HttpContext, HttpContextToken } from "./http_context";
 export { HttpHeaders } from "./http_headers";
 export { HttpParams } from "./http_params";
 export {
-  createBearerAuthInterceptor, createHeaderInterceptor, createRetryInterceptor, createTimeoutInterceptor,
+  createBearerAuthInterceptor,
+  createHeaderInterceptor,
+  createRetryInterceptor,
+  createTimeoutInterceptor,
 } from "./interceptor";
-export type { HttpClientConfig, HttpClientFeature, HttpRequestOptions } from "./http_client";
 export type { HttpInterceptorFn } from "./interceptor";
-import { HTTP_INTERCEPTORS } from "./http_client";
-import type { HttpClientFeature } from "./http_client";
-import type { HttpInterceptorFn } from "./interceptor";
-
-/** Compose an HTTP provider feature; the interceptor module's withInterceptors remains the array helper. */
-export function withInterceptors(...interceptors: (HttpInterceptorFn | HttpInterceptorFn[])[]): HttpClientFeature {
-  return { kind: "Interceptors", providers: [{ provide: HTTP_INTERCEPTORS, useValue: interceptors.flat(), multi: true }] };
-}

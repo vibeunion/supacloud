@@ -5,6 +5,8 @@
  * Browser signal/RxJS adapters stay on `@supacloud/app/angular` and
  * `@supacloud/app/rxjs` so they do not load `node:async_hooks`.
  * Pending work stays on `@supacloud/app/pending-work`.
+ * The inject-based `HttpClient` and `provideHttpClient` are exported here.
+ * `@supacloud/app/http` is the Angular-free helper entry and does not export them.
  */
 export {
   INJECTOR,
@@ -39,6 +41,7 @@ export {
   HttpErrorResponse,
   provideHttpClient,
   withFetch,
+  withInterceptors,
   withRequestsMadeViaParent,
 } from "./http_client";
 export type {
