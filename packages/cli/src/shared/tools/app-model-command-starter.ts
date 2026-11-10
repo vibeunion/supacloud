@@ -257,6 +257,23 @@ function requireCommandStore(value: unknown): CommandStore<unknown> {
   if (!isCommandStore(value)) throw new CommandError("COMMAND_UNAVAILABLE");
   return value;
 }
+interface ScopedDatabase {
+  readonly commandStore: unknown;
+  readonly models: { readonly order: { findUnique(args: unknown): Promise<unknown> } };
+}
+interface DatabaseFacade {
+  forIdentity(identity: Principal): ScopedDatabase;
+  dispose(): Promise<void>;
+}
+function isDatabaseFacade(value: unknown): value is DatabaseFacade {
+  if (!isRecord(value) || typeof value["forIdentity"] !== "function" || typeof value["dispose"] !== "function") return false;
+  const scoped = value["forIdentity"];
+  return typeof scoped === "function";
+}
+function requireDatabase(value: unknown): DatabaseFacade {
+  if (!isDatabaseFacade(value)) throw new CommandError("COMMAND_UNAVAILABLE");
+  return value;
+}
 
 export async function createModelOrderHost(pool: SQL, authority: IdentityAuthority) {
   const roles = await pool<unknown[]>\`SELECT rolsuper, rolbypassrls, pg_has_role(current_user, 'model_orders_app', 'USAGE') AS allowed,
@@ -269,7 +286,7 @@ export async function createModelOrderHost(pool: SQL, authority: IdentityAuthori
     || !("owns_data" in role) || role.owns_data !== false) {
     throw new Error("Use a non-owner application login with model_orders_app membership");
   }
-  const database = createZenStackDatabase(schema, pool, {});
+  const database = requireDatabase(createZenStackDatabase(schema, pool, {}));
   const modules: CompiledModule[] = createCompiledModules();
   const ordersModule = modules.find(module => module.name === "orders");
   const approval = ordersModule?.commands?.find(command => command.name === "orders.approve")?.aspectPipeline;
