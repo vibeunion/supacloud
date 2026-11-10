@@ -61,6 +61,11 @@
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js",
       "default": "./dist/runtime.js"
+    },
+    "./pending-work": {
+      "types": "./dist/pending-work.d.ts",
+      "import": "./dist/pending-work.js",
+      "default": "./dist/pending-work.js"
     }
   },
   "files": [
@@ -74,7 +79,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/core.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs --format esm && bun build src/contract_client.ts src/browser.ts src/browser_compat.ts --outdir dist --target browser --external @supacloud/contracts --format esm && bun build src/reactive.ts --outdir dist --target browser --external rxjs --format esm && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs --format esm && bun build src/http.ts --outdir dist --target node --external @supacloud/app --format esm && bun build src/runtime.ts --outdir dist --target browser --format esm",
+    "build:js": "bun build src/index.ts src/core.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs --format esm && bun build src/contract_client.ts src/browser.ts src/browser_compat.ts --outdir dist --target browser --external @supacloud/contracts --format esm && bun build src/reactive.ts --outdir dist --target browser --external rxjs --format esm && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs --format esm && bun build src/http.ts src/runtime.ts --outdir dist --target node --external '@angular/*' --external rxjs --external node:async_hooks --format esm --splitting && bun build src/pending-work.ts --outdir dist --target browser --format esm",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack .",
@@ -103,6 +108,11 @@
   },
   "peerDependencies": {
     "@angular/core": "^22.2.2"
+  },
+  "peerDependenciesMeta": {
+    "@angular/core": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@angular/core": "22.2.4",

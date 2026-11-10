@@ -25,9 +25,10 @@ boundaries and static AOP.
    recovery on the supported self-hosted profile.
 2. Admin, Web Console, and project CLI: the standard interfaces for operating
    that platform without repository access.
-3. Business feature-slice framework, compiler, SDK, and AI tooling: a first-class
-   development and governance path for new business work. It must not become a
-   platform prerequisite, but it should be the default path for new features.
+3. Business feature-slice framework, compiler, SDK, and AI tooling: an explicit
+   opt-in (`app init --template app` or `--template model-command`). It must not
+   become a platform prerequisite, and it is not the default `app init` scaffold.
+   The default data-plane client is `@supabase/supabase-js`.
 4. Lite: a separate bounded single-project and local-first runtime.
 
 ## Ownership
@@ -108,8 +109,9 @@ durable receipt instead of blindly retrying.
    one supported profile, clean installation, two-project operation, a
    stateful upgrade, and an independent recovery drill.
 2. Adopt this ownership contract in root documentation and the generated
-   starter; make Feature Slice the default entry point for new business work
-   while keeping platform use independent from the framework.
+   starter. The default scaffold is the `@supabase/supabase-js` client. Feature
+   Slice is the entry point only after `app init --template app` or
+   `--template model-command`. Platform use stays independent from the framework.
 3. Complete a supported SupAuth host-adapter recipe with verified identity,
    project-local access resolution, and authenticated multi-application tests.
 4. For one real business command, verify durable authorization, concurrency,
@@ -122,16 +124,26 @@ durable receipt instead of blindly retrying.
 
 ## Default Business-Slice Path
 
-New business work should start with `app generate --kind feature`. The generator
+`app init` without a template writes a `@supabase/supabase-js` client. That
+scaffold does not install `@supacloud/app`, `@supacloud/compiler`, Elysia, or
+Effect. Management API project provision does not compile an application or
+interpret Effect.
+
+Governed TypeScript features opt in with `app init --template app` or
+`--template model-command`, then `app generate --kind feature`. The generator
 keeps the database-derived model, Query, Command, contracts, permission
 declarations, version and idempotency boundaries, receipt recovery, job status,
 client, tests, and delivery checks in one inspectable slice. The database,
 migrations, RLS, RPCs, and domain state tables remain the sole source of truth.
 
 Applications may remain independent of the framework, and the platform must not
-reject an application that does not use it. “First-class” describes the default
-product path and its evidence gates; it does not force every project to install
-the framework or duplicate its business database in SupaCloud.
+reject an application that does not use it. The framework is an opt-in
+engineering path, not the default client and not a provision-time compiler.
+
+Static AOP and the existing Angular-style DI contracts are frozen. Do not add
+runtime pointcuts or new Angular surface. Encore alignment is a proposal in
+[Encore Alignment Roadmap](encore-alignment-roadmap.md) and must not drive
+provision or the default starter.
 
 ## Local Implementation
 

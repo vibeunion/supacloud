@@ -32,6 +32,7 @@ import {
   migrateLegacyVersionArtifacts,
 } from "./services/edge-function.service";
 import { resolveProjectApiKey } from "./utils/project-auth";
+import { publicRealtimeUpstream } from "./services/realtime-public-contract";
 import { translateRealtimeProxyCredentials } from "./utils/realtime-proxy-auth";
 import { recordRequestPeerAddress } from "./utils/client-ip";
 import { resolveWebConsoleDir } from "./utils/web-console-path";
@@ -1414,7 +1415,8 @@ async function bootstrap() {
         const url = new URL(request.url);
 
         // ── Realtime WebSocket proxy ──────────────────────────────
-        // Intercept WebSocket upgrade requests for /realtime/v1 before Elysia
+        // Published supabase-js upgrades for /realtime/v1 are an Elixir proxy.
+        // Do not import src/internal/realtime-listen. LISTEN/NOTIFY is not failover.
         if (
           url.pathname === "/ws/tasks" &&
           request.headers.get("upgrade")?.toLowerCase() === "websocket"
@@ -1451,19 +1453,18 @@ async function bootstrap() {
             return new Response("Project reference does not match apikey", { status: 403 });
           }
 
-          // Convert the configured HTTP Realtime URL to a WS URL
-          const wsBase = config.realtimeAdminUrl
-            .replace(/^http:/, "ws:")
-            .replace(/^https:/, "wss:");
-          // Supabase Realtime container expects /websocket, not /realtime/v1/websocket
-          const wsPath = url.pathname.replace(/^\/realtime\/v1/, "/socket");
           const translatedCredentials = translateRealtimeProxyCredentials({
             url,
             requestHeaders: request.headers,
             candidateKey: apikey,
             resolved: resolvedApiKey,
           });
-          const upstreamUrl = `${wsBase}${wsPath}${translatedCredentials.search}`;
+          // Elixir Realtime expects /socket/websocket, not /realtime/v1/websocket.
+          const upstreamUrl = publicRealtimeUpstream(
+            config.realtimeAdminUrl,
+            url.pathname,
+            translatedCredentials.search,
+          );
           // Forward relevant request headers and align websocket proxy headers with HTTP sdk-proxy.
           const requestHeaders = translatedCredentials.forwardHeaders;
           // Supabase Realtime identifies tenants by extracting the first subdomain

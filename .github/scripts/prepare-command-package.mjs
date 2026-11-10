@@ -10,7 +10,7 @@ export { isNpmNotFoundError } from './npm-registry-visibility.mjs';
 
 const root = fileURLToPath(new URL('../../packages/', import.meta.url));
 const run = promisify(execFile);
-const directories = ['cli', 'admin', 'contracts', 'commands', 'db', 'app', 'app-svelte', 'delivery', 'compiler', 'elysia', 'query', 'supacloud-js', 'supacloud-lite'];
+const directories = ['cli', 'admin', 'contracts', 'commands', 'db', 'db-zenstack', 'app', 'app-svelte', 'delivery', 'compiler', 'elysia', 'query', 'supacloud-js', 'supacloud-lite'];
 /** @param {string} directory */
 const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js' : directory === 'supacloud-lite' ? '@supacloud/lite' : `@supacloud/${directory}`;
 

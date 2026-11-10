@@ -8,6 +8,7 @@ export const STARTER_PACKAGES = Object.freeze({
   compiler: ['compiler', '@supacloud/compiler'], app: ['app', '@supacloud/app'],
   elysia: ['elysia', '@supacloud/elysia'], commands: ['commands', '@supacloud/commands'],
   contracts: ['contracts', '@supacloud/contracts'], db: ['db', '@supacloud/db'],
+  dbZenstack: ['db-zenstack', '@supacloud/db-zenstack'],
   sdk: ['supacloud-js', '@supacloud/js'],
 });
 const generator = 'supacloud/starter-metadata-v1';
@@ -48,7 +49,13 @@ export function starterMetadata(cwd = root) {
     const entry = { version: manifest.version };
     if (alias === 'app') entry.dependencies = { rxjs: dependency(manifest, 'dependencies', 'rxjs') };
     if (alias === 'db') {
-      entry.dependencies = Object.fromEntries(['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy'].map(name => [name, dependency(manifest, 'dependencies', name)]));
+      entry.dependencies = {};
+      entry.devDependencies = {};
+      entry.peerDependencies = { '@supacloud/db-zenstack': dependency(manifest, 'peerDependencies', '@supacloud/db-zenstack') };
+    }
+    if (alias === 'dbZenstack') {
+      const modelPackages = ['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy', '@zenstackhq/language', '@zenstackhq/sdk', 'kysely'];
+      entry.dependencies = Object.fromEntries(modelPackages.map(name => [name, dependency(manifest, 'dependencies', name)]));
       entry.devDependencies = Object.fromEntries(['@zenstackhq/cli', 'prisma', 'pg'].map(name => [name, dependency(manifest, 'devDependencies', name)]));
     }
     if (alias === 'sdk') entry.peerDependencies = { '@supabase/supabase-js': dependency(manifest, 'peerDependencies', '@supabase/supabase-js') };

@@ -31,7 +31,8 @@
     "src/angular.ts",
     "src/rxjs.ts",
     "src/http.ts",
-    "src/runtime.ts"
+    "src/runtime.ts",
+    "src/pending-work.ts"
   ],
   "exclude": [
     "node_modules",

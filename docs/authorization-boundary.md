@@ -24,6 +24,14 @@ Unified identity does not imply shared business permissions across applications.
 | Workflow authorization | Application RPCs and RLS | Preserve state-machine, maker-checker, ownership, and concurrency rules |
 | Identity and tokens | GoTrue | Keep authentication, sessions, MFA, JWT signing, and standard claims |
 
+## Residual cluster roles
+
+`supabase_auth_admin` and `supabase_admin` stay cluster-wide LOGIN roles with
+those names. GoTrue and Realtime require them. Do not rename or scope-reduce
+them in application code. Pigsty owns `pg_hba.conf`. PostgreSQL matches user
+and database patterns separately; CONNECT grants remain the binding. Do not
+rewrite `pg_hba.conf` to change tenant isolation.
+
 ## Runtime Rules
 
 - Management API and runtime command adapters may enforce coarse permission
