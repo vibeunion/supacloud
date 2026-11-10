@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.38.3...supacloud-lite-v0.39.0) (2026-11-10)
+
+
+### Features
+
+* **lite:** expose the inbound S3-compatible endpoint in the CLI ([#2535](https://github.com/vibeunion/supacloud/issues/2535)) ([143de0c](https://github.com/vibeunion/supacloud/commit/143de0ce052c3d655288591347a7bcb194580a34))
+
+
+### Bug Fixes
+
+* **lite:** align edge function routing environment ([#2529](https://github.com/vibeunion/supacloud/issues/2529)) ([d70e074](https://github.com/vibeunion/supacloud/commit/d70e07456716eff64cc3414472cdf87042da5b85))
+
 ## [0.38.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.38.2...supacloud-lite-v0.38.3) (2026-11-07)
 
 

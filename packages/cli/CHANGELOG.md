@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.121.0](https://github.com/vibeunion/supacloud/compare/cli-v0.120.1...cli-v0.121.0) (2026-11-10)
+
+
+### Features
+
+* **lite:** expose the inbound S3-compatible endpoint in the CLI ([#2535](https://github.com/vibeunion/supacloud/issues/2535)) ([143de0c](https://github.com/vibeunion/supacloud/commit/143de0ce052c3d655288591347a7bcb194580a34))
+
 ## [0.120.1](https://github.com/vibeunion/supacloud/compare/cli-v0.120.0...cli-v0.120.1) (2026-11-10)
 
 
