@@ -91,6 +91,7 @@ export {
   createExecutionPlans,
   doctorProject,
   explainGraph,
+  formatDoctorCheck,
   formatGraph,
   exportGraphDot,
   exportGraphMermaid,
@@ -133,7 +134,7 @@ export type {
   OpenApiJsonWriteResult,
   OpenApiObject,
 } from "./openapi-tools";
-export type { ContextPack, DoctorResult, ExecutionPlan } from "./inspect";
+export type { ContextPack, DoctorCheck, DoctorLayer, DoctorResult, ExecutionPlan } from "./inspect";
 export type {
   MigrateFileResult,
   MigrateProjectOptions,
