@@ -154,6 +154,9 @@ async function main(): Promise<void> {
   if (options.sourceDir && options.command !== 'import') throw new Error('--from is only valid with import')
   if (options.reportPath && options.command !== 'import') throw new Error('--report is only valid with import')
   const paths = resolveProjectPaths(options)
+  if (s3EndpointRequested(options) && options.command !== 'start' && options.command !== 'doctor') {
+    throw new Error('--s3-endpoint options only apply to "start" and "doctor"')
+  }
   const resolvedS3Endpoint = await resolveCliS3Endpoint(options)
   if (resolvedS3Endpoint.s3Endpoint) options.s3Endpoint = resolvedS3Endpoint.s3Endpoint
 
@@ -299,7 +302,7 @@ async function main(): Promise<void> {
     } else if (replication) {
       throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
     }
-    report.s3_endpoint = describeS3Endpoint(options)
+    report.s3_endpoint = describeS3Endpoint(options, resolvedS3Endpoint)
     if (config.lite.graphql.enabled === false) report.graphql = { status: 'disabled', extension: 'pg_graphql' }
     if (options.production) {
       report.production_readiness = productionReadiness({
@@ -686,15 +689,49 @@ async function readSecretLine(option: string): Promise<string> {
  * one-process key pair so `aws s3`, rclone, boto3 and S3 SDKs can connect
  * without provisioning secrets by hand; the secret is printed once at startup.
  */
-async function resolveCliS3Endpoint(
-  options: CliOptions,
-): Promise<{ s3Endpoint?: S3EndpointOptions; generatedSecret?: string }> {
-  const requested = options.s3EndpointRequested === true
+interface ResolvedCliS3Endpoint {
+  s3Endpoint?: S3EndpointOptions
+  generatedSecret?: string
+  /** 是否显式请求启用（CLI 开关或环境变量），doctor 只用它判断状态，不生成凭据。 */
+  requested: boolean
+}
+
+function s3EndpointRequested(options: CliOptions): boolean {
+  return options.s3EndpointRequested === true
     || options.s3EndpointAccessKeyId !== undefined
     || options.s3EndpointSecretAccessKeyStdin === true
     || options.s3EndpointRegion !== undefined
     || (options.s3EndpointBuckets?.length ?? 0) > 0
-  if (!requested) return { s3Endpoint: resolveS3EndpointOptions() }
+    || Boolean(
+      process.env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID || process.env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY,
+    )
+}
+
+/**
+ * Resolve the inbound S3-compatible endpoint from flags, falling back to
+ * SUPACLOUD_LITE_S3_ENDPOINT_*. `--s3-endpoint` without credentials generates a
+ * one-process key pair so `aws s3`, rclone, boto3 and S3 SDKs can connect
+ * without provisioning secrets by hand; the secret is printed once at startup.
+ *
+ * Only `start` may read stdin or mint credentials: `doctor` must stay read-only
+ * and never generate a secret that nobody would ever see.
+ */
+async function resolveCliS3Endpoint(options: CliOptions): Promise<ResolvedCliS3Endpoint> {
+  const requested = s3EndpointRequested(options)
+  if (!requested) return { s3Endpoint: resolveS3EndpointOptions(), requested }
+  const mayProvision = options.command === 'start'
+  if (!mayProvision) {
+    if (options.s3EndpointSecretAccessKeyStdin) {
+      throw new Error('--s3-endpoint-secret-access-key-stdin is only supported by "start"')
+    }
+    return {
+      s3Endpoint: resolveS3EndpointOptions(process.env, {
+        accessKeyId: options.s3EndpointAccessKeyId,
+        ...endpointOverrides(options),
+      }),
+      requested,
+    }
+  }
   let secretAccessKey = options.s3EndpointSecretAccessKeyStdin
     ? await readSecretLine('--s3-endpoint-secret-access-key-stdin')
     : undefined
@@ -708,21 +745,30 @@ async function resolveCliS3Endpoint(
     secretAccessKey = randomHex(24)
     generatedSecret = secretAccessKey
   }
-  const s3Endpoint = resolveS3EndpointOptions(process.env, {
-    accessKeyId,
-    secretAccessKey,
-    region: options.s3EndpointRegion,
-    bucketScope: options.s3EndpointBuckets,
-  })
-  return { s3Endpoint, generatedSecret }
+  return {
+    s3Endpoint: resolveS3EndpointOptions(process.env, {
+      ...endpointOverrides(options),
+      accessKeyId,
+      secretAccessKey,
+    }),
+    generatedSecret,
+    requested,
+  }
 }
 
-function describeS3Endpoint(options: CliOptions): { status: 'enabled' | 'disabled'; region: string; buckets: string[] } {
-  if (!options.s3Endpoint) return { status: 'disabled', region: 'us-east-1', buckets: [] }
+function endpointOverrides(options: CliOptions) {
+  return { region: options.s3EndpointRegion, bucketScope: options.s3EndpointBuckets }
+}
+
+function describeS3Endpoint(
+  options: CliOptions,
+  resolved: ResolvedCliS3Endpoint,
+): { status: 'enabled' | 'disabled'; region: string; buckets: string[] } {
+  if (!resolved.requested) return { status: 'disabled', region: 'us-east-1', buckets: [] }
   return {
     status: 'enabled',
-    region: options.s3Endpoint.region ?? 'us-east-1',
-    buckets: options.s3Endpoint.bucketScope ?? [],
+    region: resolved.s3Endpoint?.region ?? options.s3EndpointRegion ?? 'us-east-1',
+    buckets: resolved.s3Endpoint?.bucketScope ?? options.s3EndpointBuckets ?? [],
   }
 }
 
