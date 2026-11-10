@@ -8,7 +8,8 @@ lifetime interoperability without replacing the framework-neutral entries.
 
 | Entry | Purpose |
 | --- | --- |
-| `@supacloud/app/runtime` | Server injector adapter (`inject`, `createEnvironmentInjector`, `bootstrapBun`). Loads `@angular/core` and `node:async_hooks`. Not for browsers. |
+| `@supacloud/app/runtime` | Server injector adapter (`inject`, `createEnvironmentInjector`, `bootstrapBun`, inject-based `HttpClient`, `provideHttpClient`). Loads `@angular/core` and `node:async_hooks`. Not for browsers. |
+| `@supacloud/app/http` | Angular-free HTTP helpers and feature objects. Does not export the inject-based client. |
 | `@supacloud/app/angular` | Public Angular Signals, effect, Resource, DI and RxJS interop. Browser-safe; does not load the server injector. |
 | `@supacloud/app/rxjs` | Native Signals and subscriptions owned by an explicit SupaCloud cleanup scope |
 | `@supacloud/app/pending-work` | Angular-free pending-work registry |

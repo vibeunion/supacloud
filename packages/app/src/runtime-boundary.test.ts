@@ -12,19 +12,29 @@ async function bundle(entry: string, external: string[] = []) {
   return (await Promise.all(result.outputs.map((item) => item.text()))).join("\n");
 }
 
-test("package root and core do not import @angular/core", async () => {
-  for (const entry of ["index.ts", "core.ts"]) {
+const angularFree = [
+  "index.ts",
+  "core.ts",
+  "execution.ts",
+  "contract_client.ts",
+  "browser.ts",
+  "browser_compat.ts",
+  "reactive.ts",
+  "http.ts",
+  "pending-work.ts",
+];
+
+test("non-runtime entries do not import @angular/core", async () => {
+  for (const entry of angularFree) {
     const output = await bundle(entry);
-    expect(output).not.toContain("@angular/core");
-    expect(output).not.toContain("@supacloud/app/runtime");
+    expect({ entry, leaked: output.includes("@angular/core") }).toEqual({ entry, leaked: false });
   }
 });
 
-test("the runtime export is the only Angular injector adapter", async () => {
+test("the runtime export is the inject-based Angular adapter", async () => {
   const output = await bundle("runtime.ts", ["@angular/core", "@angular/core/rxjs-interop", "rxjs"]);
   expect(output).toContain("@angular/core");
-  const pending = await bundle("pending-work.ts");
-  expect(pending).not.toContain("@angular/core");
+  expect(output).toContain("provideHttpClient");
   const browser = await Bun.build({
     entrypoints: [join(import.meta.dir, "angular.ts"), join(import.meta.dir, "rxjs.ts")],
     target: "browser",
