@@ -204,4 +204,4 @@ jobs:
           RELEASE_TAG: ${{ inputs.upload_release_tag }}
         run: |
           test "$RELEASE_TAG" = "realtime-native-v$REALTIME_VERSION"
-          gh release upload "$RELEASE_TAG" release-assets/*
+          gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY"
