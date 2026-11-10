@@ -113,17 +113,18 @@ supacloud app dev --profile integration
 
 > **第一切片已实现（2026-09-29）**：`supacloud app dev` 已提供 profile 感知的
 > 统一入口：编译、诊断、watch，并明确报告当前 profile、数据库模式（凭据脱敏）与
-> “未验证项”；`fast` 无需外部数据库，`integration` 必须显式提供数据库 URL，否则拒绝。
+> “未验证项”。`fast` 是内存演示，不连接外部数据库，也不是 Lite/PGlite，不承载 Command 语义。`integration` 必须显式提供真实 PostgreSQL URL，否则拒绝。Lite/PGlite 是另一套单项目引擎，可能相对 PostgreSQL 漂移，不能代替 integration 验收。
 > “解析资源绑定 → 连接依赖 → 迁移/seed → 启动应用与任务”仍待后续切片。
 > 详见 [Application Starter](./application-starter.md#local-development-entry)。
 
 | 模式 | 目标 | 约束 |
 | --- | --- | --- |
-| fast | 快速写业务、看接口、验证契约 | 可用 Lite/PGlite 或明确标识的轻量适配器 |
-| integration | 验证生产依赖语义 | 使用受支持的原生 PostgreSQL、真实队列能力及目标存储适配器 |
+| fast | 内存演示里看接口和契约 | 不使用 Lite/PGlite，也不把演示运行当成 Command 语义 |
+| integration | 验证生产依赖语义 | 使用真实 PostgreSQL；Lite/PGlite 不能代替这次验收 |
 
-统一入口应完成：检查应用图 → 解析资源绑定 → 启动或连接依赖 → 应用迁移与 seed →
-启动应用和任务 → watch 重编译 → 展示诊断。
+统一入口若继续做后续切片，连接真实数据库、迁移和 Command 持久化只属于 `integration`。
+`fast` 保持内存演示，不并入 Lite/PGlite，也不进入连接、迁移或 seed。建议中的其余链路仍是：
+检查应用图 → 解析资源绑定 → watch 重编译 → 展示诊断。
 
 **不要**把"零配置"理解为隐藏配置。开发者应能随时看清：当前连接哪个数据库、哪些资源
 是模拟的、哪些验证还没有发生。

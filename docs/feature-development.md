@@ -10,22 +10,25 @@ lockfile 和已发布的匹配版本为准；升级分支中的实现不代表 n
 | 变更 | 维护位置 | 必须保留的边界 |
 | --- | --- | --- |
 | 请求、响应和公开错误 | 功能内 TypeBox 契约与路由 Effect 声明 | 不直接把数据库行类型作为公开 API |
-| 表、字段、关系和数据访问策略 | 维护的模型 contract（当前为 `zenstack/schema.zmodel`） | 生成模型类型，禁止手改生成物；后端可替换 |
+| 表、字段、关系和数据访问策略 | 维护的模型 contract（当前为 `zenstack/schema.zmodel`） | 生成模型类型，禁止手改生成物；可替换的是同一 PostgreSQL 契约上的模型/策略适配器，迁移账本仍只有一份 |
 | 状态转换、金额计算和业务判断 | 功能内领域函数 / Command | 纯计算保持普通 TypeScript |
 | 服务端模型查询 | 可信身份绑定的只读 `models` | 不取得写权限、原始 SQL 或身份切换能力 |
-| 业务写入 | 持久化 Command 的 `transaction.db` | 业务变化、receipt、audit 同一事务 |
+| 业务写入 | 编译器应用车道上，持久化 Command 的 `transaction.db` | 该车道内业务变化、receipt、audit 同一事务；不是全平台唯一写入路径 |
 | 跨入口权限、幂等和恢复 | 现有 Command executor / durable adapter | HTTP、Worker、CLI 复用业务操作 |
 | 通用执行包装 | 显式静态 AOP | 不另开事务、不另记业务审计、不自动重试写入 |
 | 类型化错误、依赖和取消 | Effect 程序及声明 | 生产解释器归框架适配器，取消不等于回滚 |
 | 连接池、身份验证、特殊 SQL | 可信 host / adapter | 不向普通业务模块导出底层客户端 |
 | RLS、函数、触发器、特殊约束 | 受治理的 SQL 源和正向迁移 | 与模型协调，继续使用唯一迁移账本 |
 
+Command 只是编译器应用车道的写入边界，不是全平台唯一业务写入路径。在该车道内，
 Command 权限决定“能否执行此业务动作”，ZenStack policy 决定“能访问哪些记录”。
-数据库约束保证数据不变量。PostgREST/RPC 继续由数据库角色与 RLS 保护，不能
-因为新增了 ZenStack policy 就移除这些保护。
+数据库约束保证数据不变量。PostgREST 与 `@supabase/supabase-js` 仍是普通读取和低风险
+CRUD 的一等数据面。PostgREST/RPC 继续由数据库角色与 RLS 保护，不能因为新增了
+ZenStack policy 就移除这些保护。替换模型/策略适配器仍使用同一套 PostgreSQL
+Database Contract 和唯一迁移账本，不新增第二套写入数据库、查询语言或身份存储。
 
 每个数据入口还必须标记为 `model-command`、`postgrest-read`、`governed-sql` 或
-`legacy-rpc`。新功能默认使用前两类；生成 RPC 应归入 `governed-sql`，并可追溯到
+`legacy-rpc`。编译器应用车道上的新功能默认使用前两类；生成 RPC 应归入 `governed-sql`，并可追溯到
 维护源、registry 或 catalog，具体退出条件见 [Database Contract](architecture/database-contract.md)。
 
 ## 按功能组织代码
