@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.2.0...db-zenstack-v0.2.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **db:** accept the released ZenStack adapter minor series ([#2542](https://github.com/vibeunion/supacloud/issues/2542)) ([3eb5b81](https://github.com/vibeunion/supacloud/commit/3eb5b813a5a2a328c2776832b7fb5f85b214a2cd))
+
 ## [0.2.0](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.1.0...db-zenstack-v0.2.0) (2026-11-10)
 
 

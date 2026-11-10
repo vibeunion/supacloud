@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.121.1](https://github.com/vibeunion/supacloud/compare/cli-v0.121.0...cli-v0.121.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **db:** accept the released ZenStack adapter minor series ([#2542](https://github.com/vibeunion/supacloud/issues/2542)) ([3eb5b81](https://github.com/vibeunion/supacloud/commit/3eb5b813a5a2a328c2776832b7fb5f85b214a2cd))
+
 ## [0.121.0](https://github.com/vibeunion/supacloud/compare/cli-v0.120.1...cli-v0.121.0) (2026-11-10)
 
 
