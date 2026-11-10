@@ -299,10 +299,12 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
       ? config.functions
       : new Map(Object.entries(config.functions ?? {}))
   const fnEnv = {
+    ...(config.functionEnv ?? {}),
+    // These are host-owned connection credentials. Project function secrets
+    // may add values, but cannot redirect the Supabase-compatible base client.
     SUPABASE_URL: apiUrl,
     SUPABASE_ANON_KEY: anonKey,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
-    ...(config.functionEnv ?? {}),
   }
 
   // install the Deno global once per process; the shim's Deno.env is bound to

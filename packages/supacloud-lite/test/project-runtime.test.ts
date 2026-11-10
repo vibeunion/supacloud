@@ -44,6 +44,57 @@ describe('project runtime', () => {
     expect(decodeJwt(keys.serviceRoleKey)).toMatchObject({ ref: 'local', role: 'service_role' })
   })
 
+  test('injects full-platform-compatible function routing env without allowing redirects', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-function-env-'))
+    temporaryDirectories.push(projectDir)
+    await mkdir(join(projectDir, 'supabase', 'functions', 'env'), { recursive: true })
+    await writeFile(
+      join(projectDir, 'supabase', 'functions', 'env', 'index.ts'),
+      `export default () => Response.json({
+        projectRef: Deno.env.get('SUPACLOUD_PROJECT_REF'),
+        headerProjectRef: Deno.env.get('X_PROJECT_REF'),
+        internalSupabase: Deno.env.get('SUPACLOUD_INTERNAL_SUPABASE_URL'),
+        internalAuth: Deno.env.get('SUPACLOUD_INTERNAL_AUTH_URL'),
+        internalRest: Deno.env.get('SUPACLOUD_INTERNAL_REST_URL'),
+        supabaseUrl: Deno.env.get('SUPABASE_URL'),
+        customSecret: Deno.env.get('CUSTOM_SECRET'),
+      })`
+    )
+    await writeFile(
+      join(projectDir, 'supabase', 'functions', '.env'),
+      [
+        'SUPACLOUD_PROJECT_REF=wrong-project',
+        'SUPABASE_URL=https://wrong.example.com',
+        'CUSTOM_SECRET=kept',
+      ].join('\n')
+    )
+
+    const project = await createProjectBackend({
+      projectDir,
+      memory: true,
+      port: 54567,
+      includeWebhooks: false,
+      startRuntimeServices: false,
+    })
+    try {
+      const response = await project.backend.fetch(new Request('http://local/functions/v1/env', {
+        headers: { apikey: project.backend.anonKey, authorization: `Bearer ${project.backend.anonKey}` },
+      }))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        projectRef: 'local',
+        headerProjectRef: 'local',
+        internalSupabase: 'http://127.0.0.1:54567',
+        internalAuth: 'http://127.0.0.1:54567/auth/v1',
+        internalRest: 'http://127.0.0.1:54567/rest/v1',
+        supabaseUrl: 'http://127.0.0.1:54567',
+        customSecret: 'kept',
+      })
+    } finally {
+      await project.backend.close()
+    }
+  })
+
   test('resolves all default state paths under the project', async () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-paths-'))
     temporaryDirectories.push(projectDir)
