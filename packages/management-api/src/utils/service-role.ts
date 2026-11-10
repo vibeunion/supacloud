@@ -1,6 +1,7 @@
 import { normalizeProjectJwtKeys, signOidcServiceRoleJwt } from "./project-jwt";
 import { normalizeProjectConfig } from "./project-config";
 import { decryptSecretIfNeeded } from "./secret-crypto";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 
 type StoredServiceRoleCredential = {
@@ -162,10 +163,10 @@ async function loadProjectSecrets(ref: string): Promise<{
 } | null> {
   const { sql } = await import("../db");
   const rows = await sql`
-    SELECT ref, service_role_key, jwt_secret, config
+    SELECT ref, service_role_key, service_role_key_encrypted, jwt_secret, jwt_secret_encrypted, config
     FROM projects
     WHERE ref = ${ref} AND deleted_at IS NULL
     LIMIT 1
   `;
-  return rows[0] ?? null;
+  return rows[0] ? revealProjectSecrets(rows[0]) : null;
 }

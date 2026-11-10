@@ -151,6 +151,77 @@ describe("ProjectRepository", () => {
       expect(parameters).toContainEqual({ custom: "value" });
       expect(parameters).not.toContain(JSON.stringify(input.config));
     });
+
+    test("does not bind plaintext tenant secrets", async () => {
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+      await projectRepository.create({
+        ref: "newproj",
+        name: "New Project",
+        db_name: "supa_newproj",
+        db_user: "role_newproj",
+        db_password: "pass123",
+        jwt_secret: "jwt123",
+        anon_key: "anon.new",
+        service_role_key: "service.new",
+        s3_bucket: "supa-newproj",
+        s3_secret_key: "s3-secret",
+      });
+
+      const [strings, ...parameters] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      const query = (strings as TemplateStringsArray).join("?");
+      expect(query).toContain("NULL");
+      for (const secret of ["pass123", "jwt123", "anon.new", "service.new", "s3-secret"]) {
+        expect(parameters).not.toContain(secret);
+      }
+      expect(parameters.some((value) => typeof value === "string" && value.startsWith("enc:v1:"))).toBe(true);
+    });
+  });
+
+  describe("updateApiKeys", () => {
+    test("clears plaintext key columns and returns the decrypted keys", async () => {
+      const { encryptSecretIfNeeded } = await import("../../src/utils/secret-crypto");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([{
+        ...mockProject,
+        jwt_secret: null,
+        anon_key: null,
+        service_role_key: null,
+        jwt_secret_encrypted: encryptSecretIfNeeded("next-jwt"),
+        anon_key_encrypted: encryptSecretIfNeeded("next-anon"),
+        service_role_key_encrypted: encryptSecretIfNeeded("next-service"),
+      }]);
+
+      const project = await projectRepository.updateApiKeys("test123", {
+        jwt_secret: "next-jwt",
+        anon_key: "next-anon",
+        service_role_key: "next-service",
+      });
+
+      const [strings, ...parameters] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      const query = (strings as TemplateStringsArray).join("?");
+      expect(query).toContain("jwt_secret = NULL");
+      expect(query).toContain("anon_key = NULL");
+      expect(query).toContain("service_role_key = NULL");
+      expect(parameters).not.toContain("next-jwt");
+      expect(parameters).not.toContain("next-anon");
+      expect(parameters).not.toContain("next-service");
+      expect(project?.jwt_secret).toBe("next-jwt");
+      expect(project?.anon_key).toBe("next-anon");
+      expect(project?.service_role_key).toBe("next-service");
+    });
+  });
+
+  describe("findByRef", () => {
+    test("prefers the encrypted database password over a stale plaintext column", async () => {
+      const { encryptSecretIfNeeded } = await import("../../src/utils/secret-crypto");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([{
+        ...mockProject,
+        db_password: "stale-plaintext",
+        db_password_encrypted: encryptSecretIfNeeded("sealed-password"),
+      }]);
+
+      const project = await projectRepository.findByRef("test123");
+      expect(project?.db_password).toBe("sealed-password");
+    });
   });
 
   describe("updateStatus", () => {

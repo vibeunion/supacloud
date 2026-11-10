@@ -81,6 +81,16 @@ describe("DatabaseService", () => {
       expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
         'GRANT CONNECT, TEMPORARY, CREATE ON DATABASE "supa_testref123" TO supabase_admin',
       ));
+      expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
+        'REVOKE CONNECT ON DATABASE "supa_testref123" FROM PUBLIC',
+      ));
+      expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
+        'REVOKE CONNECT ON DATABASE "supa_testref123" FROM supabase_realtime_admin',
+      ));
+      const granted = (mockSql.unsafe as ReturnType<typeof mock>).mock.calls
+        .map((call: unknown[]) => String(call[0]))
+        .join("\n");
+      expect(granted).not.toContain('GRANT CONNECT ON DATABASE "supa_testref123" TO supabase_realtime_admin');
     });
 
     test("reconciles tenant login passwords when the database already exists", async () => {

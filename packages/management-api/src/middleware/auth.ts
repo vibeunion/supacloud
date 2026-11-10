@@ -7,7 +7,7 @@ import {
   extractProjectRefFromPath,
   resolveProjectApiKey,
 } from "../utils/project-auth";
-import { isOpaqueApiKey } from "../utils/api-keys";
+import { hashSecretApiKey, isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import {
   studioSessionService,
@@ -307,17 +307,24 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
   }
 
   if (!mcpPayload && token.split(".").length === 3) {
+    const serviceRoleHash = hashSecretApiKey(token);
     const [project] = scopedRef
       ? await metaSql`
           SELECT ref FROM projects
           WHERE ref = ${scopedRef}
-            AND service_role_key = ${token}
+            AND (
+              service_role_key_hash = ${serviceRoleHash}
+              OR (service_role_key_hash IS NULL AND service_role_key = ${token})
+            )
             AND lower(status) = 'active'
           LIMIT 1
         `
       : await metaSql`
           SELECT ref FROM projects
-          WHERE service_role_key = ${token}
+          WHERE (
+            service_role_key_hash = ${serviceRoleHash}
+            OR (service_role_key_hash IS NULL AND service_role_key = ${token})
+          )
             AND lower(status) = 'active'
           LIMIT 1
         `;

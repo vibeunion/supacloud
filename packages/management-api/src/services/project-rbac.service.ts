@@ -1,6 +1,7 @@
 import type { Project } from "../db";
 import type { SQL } from "bun";
 import { projectRepository } from "../repositories/project.repository";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import { config } from "../config";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
@@ -358,7 +359,7 @@ async function saveRbacConfig(
     SET config = ${mergeProjectConfig(currentProjectConfig, { rbac: next })}::jsonb,
         updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
-    RETURNING id, ref, organization_id, name, db_name, db_user, db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, anon_key, service_role_key, service_role_key_encrypted, publishable_key, secret_key_hash, secret_key_encrypted, s3_bucket, s3_access_key, s3_secret_key, s3_secret_key_encrypted, region, status, postgrest_desired, postgrest_actual, postgrest_health, postgrest_port, postgrest_last_error, postgrest_updated_at, postgrest_last_reconciled_at, config, created_at, updated_at, deleted_at
+    RETURNING id, ref, organization_id, name, db_name, db_user, db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, anon_key, service_role_key, service_role_key_encrypted, publishable_key, secret_key_hash, secret_key_encrypted, s3_bucket, s3_access_key, s3_secret_key, s3_secret_key_encrypted, anon_key_encrypted, anon_key_hash, service_role_key_hash, region, status, postgrest_desired, postgrest_actual, postgrest_health, postgrest_port, postgrest_last_error, postgrest_updated_at, postgrest_last_reconciled_at, config, created_at, updated_at, deleted_at
   ` as Project[];
   if (!updated) throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   return readRbacConfig(updated.config);
@@ -378,12 +379,13 @@ async function withProjectRbacConfigLock<T>(
     const lockKey = `rbac-project-config:${ref}`;
     await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
     const [project] = await transaction`
-      SELECT id, ref, organization_id, name, db_name, db_user, db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, anon_key, service_role_key, service_role_key_encrypted, publishable_key, secret_key_hash, secret_key_encrypted, s3_bucket, s3_access_key, s3_secret_key, s3_secret_key_encrypted, region, status, postgrest_desired, postgrest_actual, postgrest_health, postgrest_port, postgrest_last_error, postgrest_updated_at, postgrest_last_reconciled_at, config, created_at, updated_at, deleted_at FROM projects
+      SELECT id, ref, organization_id, name, db_name, db_user, db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, anon_key, service_role_key, service_role_key_encrypted, publishable_key, secret_key_hash, secret_key_encrypted, s3_bucket, s3_access_key, s3_secret_key, s3_secret_key_encrypted, anon_key_encrypted, anon_key_hash, service_role_key_hash, region, status, postgrest_desired, postgrest_actual, postgrest_health, postgrest_port, postgrest_last_error, postgrest_updated_at, postgrest_last_reconciled_at, config, created_at, updated_at, deleted_at FROM projects
       WHERE ref = ${ref} AND deleted_at IS NULL
       FOR UPDATE
     ` as Project[];
     if (!project) throw Object.assign(new Error("Project not found"), { statusCode: 404 });
-    return mutation(project, readRbacConfig(project.config), transaction);
+    const revealed = revealProjectSecrets(project);
+    return mutation(revealed, readRbacConfig(revealed.config), transaction);
   });
 }
 

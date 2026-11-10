@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { config } from "../config";
 import { getProjectDb, sql } from "../db";
 import { decryptSecretIfNeeded, encryptSecretIfNeeded } from "../utils/secret-crypto";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,99}$/;
@@ -146,11 +147,12 @@ async function ensureSchema() {
 
 async function projectCredentials(ref: string) {
   const [project] = await sql`
-    SELECT db_name, db_user, db_password FROM projects
+    SELECT db_name, db_user, db_password, db_password_encrypted FROM projects
     WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
   `;
   if (!project) throw new PipelineError("Project not found", 404, "project_not_found");
-  return { database: String(project.db_name), username: String(project.db_user), password: String(project.db_password) };
+  const revealed = revealProjectSecrets(project);
+  return { database: String(revealed.db_name), username: String(revealed.db_user), password: String(revealed.db_password) };
 }
 
 async function assertPublicationReady(database: string, publicationName: string) {

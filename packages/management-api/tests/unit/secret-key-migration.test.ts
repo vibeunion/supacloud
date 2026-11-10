@@ -58,14 +58,15 @@ function migrationDatabase(state: MigrationState) {
         return [{ checkpoint_table_exists: true }];
       }
       if (query.startsWith("UPDATE projects SET")) {
-        const row = state.projects.find(({ ref }) => ref === values[5]);
+        const row = state.projects.find(({ ref }) => ref === values[6]);
         if (row) [
           row.db_password_encrypted,
           row.jwt_secret_encrypted,
           row.service_role_key_encrypted,
           row.secret_key_encrypted,
           row.s3_secret_key_encrypted,
-        ] = values.slice(0, 5);
+          row.anon_key_encrypted,
+        ] = values.slice(0, 6);
       } else if (query.startsWith("UPDATE project_secrets")) {
         const row = state.projectSecrets.find(({ id }) => id === values[1]);
         if (row) row.value = values[0];
@@ -123,6 +124,7 @@ function migrationState(): MigrationState {
       service_role_key_encrypted: "plaintext-service-role",
       secret_key_encrypted: null,
       s3_secret_key_encrypted: legacyCiphertext("s3-secret"),
+      anon_key_encrypted: null,
     }],
     projectSecrets: [{ id: "project-secret", value: legacyCiphertext("") }],
     controlSecrets: [{

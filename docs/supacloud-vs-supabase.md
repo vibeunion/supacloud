@@ -67,14 +67,14 @@ Legend:
 | Stripe and MongoDB Wrappers | **Built-in** in the generated self-host profile (Vault-backed; explicit 501 when Vault is unavailable) | **Built-in** | Extension/manual SQL |
 | AWS PrivateLink project connectivity | **Partial** (local plan and unavailable provider; AWS APIs are not called) | **Built-in** (AWS projects) | External / manual |
 | Automated PostgreSQL major version upgrades | **Workflow built-in** (cluster-scoped preflight, full-backup gate, approval, provider executor, validation and rollback journal; executor must be configured per deployment) | **Built-in** | Operator responsibility |
-| Shared-infra multi-tenancy to improve self-host density | **Built-in** | N/A to end users | External / manual |
+| Shared-infra multi-tenancy | **Built-in** shared Pigsty cluster; projects-per-host density is unmeasured | N/A to end users | External / manual |
 | Official Docker self-host quickstart | **Built-in** (`docker/self-host`) | N/A | **Built-in** |
 
 ## Where SupaCloud is stronger
 
 ### 1. Self-hosted multi-tenancy is a product, not an ops afterthought
 
-SupaCloud is opinionated about running **many projects per server or cluster**. The repository includes:
+SupaCloud is built to run more than one project on a shared Pigsty cluster. How many projects fit on a host is unmeasured, and Gates 2–4 are not a claimed production pass. The repository includes:
 
 - a management API for project lifecycle and settings
 - a self-hosted web console

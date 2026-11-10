@@ -30,6 +30,7 @@ const PROJECT_SECRET_COLUMNS = [
   "service_role_key_encrypted",
   "secret_key_encrypted",
   "s3_secret_key_encrypted",
+  "anon_key_encrypted",
 ] as const;
 
 const ENCRYPTION_SCHEME = "enc:v1";
@@ -110,6 +111,7 @@ async function updateProjectSecretColumns(
       service_role_key_encrypted = ${rotations.service_role_key_encrypted.storedValue},
       secret_key_encrypted = ${rotations.secret_key_encrypted.storedValue},
       s3_secret_key_encrypted = ${rotations.s3_secret_key_encrypted.storedValue},
+      anon_key_encrypted = ${rotations.anon_key_encrypted.storedValue},
       updated_at = NOW()
     WHERE ref = ${ref}
   `;
@@ -118,7 +120,8 @@ async function updateProjectSecretColumns(
 async function rotateProjectColumns(db: SQL, keys: SecretMigrationKeys): Promise<SecretKeyMigrationSummary> {
   const rows = await db`
     SELECT ref, db_password_encrypted, jwt_secret_encrypted,
-           service_role_key_encrypted, secret_key_encrypted, s3_secret_key_encrypted
+           service_role_key_encrypted, secret_key_encrypted, s3_secret_key_encrypted,
+           anon_key_encrypted
     FROM projects
   ` as Array<Record<string, unknown>>;
   const summaries: SecretKeyMigrationSummary[] = [];

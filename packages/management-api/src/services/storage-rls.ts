@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import { isOpaqueApiKey } from "../utils/api-keys";
 import { resolveProjectApiKey } from "../utils/project-auth";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import { isRecord } from "../utils/record";
 import {
   STORAGE_VERSION_BUCKET,
@@ -525,8 +526,9 @@ export class StorageRLS {
   }
 
   static async getTenantJwtSecret(ref: string): Promise<string | null> {
-    const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref=${ref}`;
-    return rows[0]?.jwt_secret || null;
+    const rows = await metaSql`SELECT jwt_secret, jwt_secret_encrypted FROM projects WHERE ref=${ref}`;
+    const project = rows[0] ? revealProjectSecrets(rows[0]) : null;
+    return project?.jwt_secret || null;
   }
 
   static async verifyToken(ref: string, token: string) {

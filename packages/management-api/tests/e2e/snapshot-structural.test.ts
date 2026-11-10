@@ -91,12 +91,14 @@ describe("API Structural Snapshot Compliance", () => {
 
       if (process.env.TEST_FIXED_JWT_SECRET) {
         const { sql } = await import("../../src/db");
+        const { encryptSecretIfNeeded } = await import("../../src/utils/secret-crypto");
         await sql`
                     UPDATE projects
                     SET
                       db_name = 'postgres',
                       db_user = 'supabase_admin',
-                      db_password = 'postgres',
+                      db_password = NULL,
+                      db_password_encrypted = ${encryptSecretIfNeeded("postgres")},
                       status = 'active',
                       config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
                         'postgrest_port', 3000,

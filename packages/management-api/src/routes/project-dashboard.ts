@@ -10,6 +10,7 @@ import {
   type AuthExecutionPolicy,
 } from "../services/auth-execution-policy";
 import { readTaskStatistics, statisticsCount } from "../utils/task-statistics";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import {
   dashboardFunctionCount,
   dashboardProject,
@@ -29,12 +30,12 @@ const UNAVAILABLE = { message: "Project dashboard unavailable", code: "DASHBOARD
 export const projectDashboardReads = {
   async project(ref: string) {
     const [row] = await metaSql`
-      SELECT ref, db_name, db_user, db_password, config
+      SELECT ref, db_name, db_user, db_password, db_password_encrypted, config
       FROM projects
       WHERE ref = ${ref} AND deleted_at IS NULL
       LIMIT 1
     `;
-    return row;
+    return row ? revealProjectSecrets(row) : row;
   },
   database(project: { db_name?: unknown; db_user?: unknown; db_password?: unknown }) {
     return getProjectRoleDb(String(project.db_name), String(project.db_user), String(project.db_password));

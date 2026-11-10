@@ -2,6 +2,7 @@ import { $ } from "bun";
 import { ProjectService } from "../../src/services/project.service";
 import { randomUUID } from "crypto";
 import { sql, getProjectDb, resolveDbName, invalidateDbNameCache } from "../../src/db";
+import { sealProjectSecrets } from "../../src/repositories/project-secret-at-rest";
 import { join } from "path";
 import {
   existsSync,
@@ -33,11 +34,24 @@ async function bootstrap() {
     region: "local",
   });
 
+  const sealed = sealProjectSecrets({
+    db_password: "postgres",
+    jwt_secret: OFFICIAL_JWT_SECRET,
+    anon_key: OFFICIAL_ANON_KEY,
+    service_role_key: OFFICIAL_SERVICE_ROLE_KEY,
+  });
   await sql`
         UPDATE projects
-        SET anon_key = ${OFFICIAL_ANON_KEY},
-            service_role_key = ${OFFICIAL_SERVICE_ROLE_KEY},
-            jwt_secret = ${OFFICIAL_JWT_SECRET}
+        SET anon_key = NULL,
+            service_role_key = NULL,
+            jwt_secret = NULL,
+            db_password = NULL,
+            anon_key_encrypted = ${sealed.anon_key_encrypted},
+            service_role_key_encrypted = ${sealed.service_role_key_encrypted},
+            jwt_secret_encrypted = ${sealed.jwt_secret_encrypted},
+            db_password_encrypted = ${sealed.db_password_encrypted},
+            anon_key_hash = ${sealed.anon_key_hash},
+            service_role_key_hash = ${sealed.service_role_key_hash}
         WHERE ref = ${project.ref}
     `;
 
@@ -57,7 +71,8 @@ async function bootstrap() {
             UPDATE projects
             SET db_name = 'postgres',
                 db_user = 'supabase_admin',
-                db_password = 'postgres',
+                db_password = NULL,
+                db_password_encrypted = ${sealed.db_password_encrypted},
                 status = 'active',
                 config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
                   'postgrest_port', 3000,
