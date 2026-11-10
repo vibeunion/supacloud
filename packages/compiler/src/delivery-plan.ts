@@ -5,7 +5,7 @@ import {
   type DeliveryDiagnostic, type DeliveryOptions, type DeliveryPlanResult, type DeliveryTarget,
 } from "./delivery-schema";
 import type { ApplicationGraph, CompileOptions, Diagnostic, ModuleNode, ValidateOptions } from "./types";
-import { joinRoutePaths } from "./util";
+import { joinRoutePaths, publicRouteKey } from "./util";
 import { featureTransitionForRoute } from "./feature";
 import { validateGraph } from "./validate";
 
@@ -120,7 +120,7 @@ export function createDeliveryPlan(
         const target = getTarget(owner ?? "api", "api");
         const path = joinRoutePaths(controller.path, route.path);
         // Parameter names must not hide a routing collision across deployment targets.
-        const key = `${route.method} ${path.replace(/:[^/]+/g, ":param")}`;
+        const key = publicRouteKey(route.method, path);
         const existing = publicRoutes.get(key);
         if (existing !== undefined) {
           fail("delivery-route-conflict", `Public route "${key}" is owned by both "${existing}" and "${target.name}".`,

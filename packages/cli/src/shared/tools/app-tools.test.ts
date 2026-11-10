@@ -462,6 +462,8 @@ describe("app tools", () => {
         expect(pack.allowedDependencies.peerDependencies).toEqual(["react"]);
         expect(pack.commands.doctor).toContain("app doctor");
         expect(pack.commands.fix).toBe("supacloud app fix --fix <fix.json>");
+        expect(pack.semantic.hash).toMatch(/^[a-f0-9]{64}$/);
+        expect(pack.semantic.sourceHash).toMatch(/^[a-f0-9]{64}$/);
 
         const module = await app({ action: "context", root, target: "case", format: "json" });
         const modulePack = JSON.parse(module.content[0].text);
@@ -474,6 +476,22 @@ describe("app tools", () => {
             expect(result.isError).toBe(false);
             expect(JSON.parse(result.content[0].text)).toEqual(modulePack);
         }
+    }, 30_000);
+
+    test("lens returns separate source and semantic identities without writing", async () => {
+        const result = await app({ action: "lens", root, format: "json" });
+        expect(result.isError).toBe(false);
+        const lens = JSON.parse(result.content[0].text);
+        expect(lens.readOnly).toBe(true);
+        expect(lens.snapshot.schema).toBe("supacloud.semantic.v1");
+        expect(lens.snapshot.semanticHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(lens.snapshot.sourceHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(lens.nodes.some((node: { kind: string }) => node.kind === "command")).toBe(true);
+        expect(lens.nodes.every((node: { value?: unknown }) => node.value === undefined)).toBe(true);
+        const scoped = await app({ action: "lens", root, target: "case", format: "json" });
+        expect(JSON.parse(scoped.content[0].text).subject).toBe("case");
+        const detailed = await app({ action: "lens", root, format: "json", detail: true });
+        expect(JSON.parse(detailed.content[0].text).nodes.some((node: { value?: unknown }) => node.value !== undefined)).toBe(true);
     }, 30_000);
 
     test("doctor reports actionable checks and passes after a clean compile", async () => {
@@ -746,7 +764,7 @@ describe("app tools", () => {
     });
 
     test("all app actions are classified as local in the execution policy", () => {
-        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]) {
+        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools", "context", "lens", "doctor", "fix"]) {
             expect(executionMode("app", action, {})).toBe("local");
         }
     });
