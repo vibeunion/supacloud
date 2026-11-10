@@ -50,3 +50,6 @@ git diff --check
   database and project operations still require the selected project context.
 - Do not weaken compiler governance to make a diagnostic disappear. Fix the
   source or report the required explicit input.
+- `app doctor` keeps the existing checks and adds `layer` on each one: `source`
+  (源码), `artifact` (产物), or `runtime` (运行时). A failure names which of those
+  the check observed. There is no second catalog of checks.

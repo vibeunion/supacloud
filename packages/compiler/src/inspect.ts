@@ -49,10 +49,29 @@ export interface ContextPack {
   graphql?: ApplicationGraph["graphql"];
 }
 
+/**
+ * Which application fact a doctor check observed.
+ * `source` is 源码, `artifact` is 产物, and `runtime` is 运行时.
+ * A check keeps its existing identity; the layer says which fact failed.
+ */
+export type DoctorLayer = "source" | "artifact" | "runtime";
+
+export interface DoctorCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+  layer: DoctorLayer;
+}
+
 export interface DoctorResult {
-  checks: Array<{ name: string; ok: boolean; detail: string }>;
+  checks: DoctorCheck[];
   diagnostics: ApplicationGraph["diagnostics"];
   errors: number;
+}
+
+/** Shared text line for `supacloud-compiler doctor` and `supacloud app doctor`. */
+export function formatDoctorCheck(check: DoctorCheck): string {
+  return `${check.ok ? "OK" : "FAIL"} ${check.layer} ${check.name}: ${check.detail}`;
 }
 
 export function formatGraph(graph: ApplicationGraph): string {
@@ -374,26 +393,30 @@ export function doctorProject(
   upToDate: boolean,
   diagnostics: Diagnostic[] = [],
 ): DoctorResult {
-  const checks = [
+  const checks: DoctorCheck[] = [
     {
       name: "project-root",
       ok: existsSync(rootDir),
       detail: existsSync(rootDir) ? rootDir : `missing: ${rootDir}`,
+      layer: "source",
     },
     {
       name: "tsconfig",
       ok: existsSync(join(rootDir, "tsconfig.json")),
       detail: existsSync(join(rootDir, "tsconfig.json")) ? "tsconfig.json found" : "tsconfig.json missing",
+      layer: "source",
     },
     {
       name: "modules",
       ok: graph.modules.length > 0,
       detail: `${graph.modules.length} module(s) discovered`,
+      layer: "source",
     },
     {
       name: "generated-artifacts",
       ok: upToDate,
       detail: upToDate ? "application.ts and app.manifest.json are up to date" : "generated artifacts are missing or stale",
+      layer: "artifact",
     },
   ];
   const allDiagnostics = [...(graph.diagnostics ?? []), ...diagnostics];

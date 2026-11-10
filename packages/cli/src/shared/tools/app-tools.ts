@@ -18,6 +18,7 @@ import {
     createExecutionContextPack,
     createDiagnosticRepairPlan,
     doctorProject,
+    formatDoctorCheck,
     loadSupacloudConfig,
     formatDeliveryPlan,
     planDeliveryProject,
@@ -844,7 +845,7 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
             doctor.errors > 0,
         );
     }
-    const lines = doctor.checks.map((check) => `${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
+    const lines = doctor.checks.map((check) => formatDoctorCheck(check));
     if (scope) lines.unshift(`TARGET ${scope.target}; omitted project diagnostics=${scope.omittedProjectDiagnostics}; generated drift remains project-wide`);
     for (const diagnostic of doctor.diagnostics ?? []) {
         lines.push(formatDiagnostic(diagnostic));
@@ -1146,7 +1147,7 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     return textResult([
         formatDiagnostics(result.diagnostics),
         ...result.mismatches.map((path) => `generated artifact mismatch: ${path}`),
-        ...(database ? [`${database.ok ? "OK" : "FAIL"} ${database.name}: ${database.detail}`] : []),
+        ...(database ? [formatDoctorCheck(database)] : []),
         "", summary,
     ].join("\n"), hasError);
 }
