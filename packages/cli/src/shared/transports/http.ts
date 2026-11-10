@@ -40,6 +40,8 @@ export interface HttpPostOptions {
 
 export interface HttpReleaseMutationOptions {
     timeoutMs?: number;
+    /** Retry rate-limited requests only when the mutation is idempotent by contract. */
+    retryOnRateLimit?: boolean;
 }
 
 export interface HttpBinaryPostOptions {
@@ -63,6 +65,7 @@ const RELEASE_MUTATION_RESPONSE_TIMEOUT = 5_000;
 const RELEASE_MUTATION_RESPONSE_MAX_BYTES = 64 * 1024;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY = 500;
+const MAX_RETRY_AFTER_MS = 5 * 60_000;
 
 function validatedGetResponseLimit(options: HttpGetOptions): number | undefined {
     const maxBytes = options.maxResponseBytes;
@@ -118,6 +121,21 @@ function isRetryableError(error: unknown): boolean {
         || networkError.code === "ECONNRESET";
 }
 
+function retryAfterDelayMs(value: string | null): number {
+    const normalized = value?.trim() ?? "";
+    if (/^\d+$/.test(normalized)) {
+        const seconds = Number(normalized);
+        if (Number.isSafeInteger(seconds)) return Math.min(MAX_RETRY_AFTER_MS, seconds * 1_000);
+    }
+    const retryAt = Date.parse(normalized);
+    if (!Number.isNaN(retryAt)) return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, retryAt - Date.now()));
+    return RETRY_BASE_DELAY;
+}
+
+function waitForRetry(delayMs: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
 function transportFailure<T>(error: unknown): HttpResult<T> {
     const networkError = error instanceof Error ? error as Error & { code?: string } : null;
     const code = networkError?.name === "AbortError"
@@ -165,22 +183,31 @@ async function fetchWithRetry(
     options: RequestInit,
     timeoutMs = DEFAULT_TIMEOUT,
     insecureTls = false,
+    retryOptions: { retryOnRateLimit?: boolean } = {},
 ): Promise<Response> {
-    const retries = isRetryableMethod(options.method) ? MAX_RETRIES : 0;
+    const retryOnRateLimit = retryOptions.retryOnRateLimit === true;
+    const retryableMethod = isRetryableMethod(options.method);
+    const retries = retryableMethod || retryOnRateLimit ? MAX_RETRIES : 0;
     for (let attempt: number = 0; attempt <= retries; attempt++) {
         try {
             const res = await fetchWithTimeout(url, options, timeoutMs, insecureTls);
 
-            if (res.status >= 500 && res.status < 600 && attempt < retries) {
+            if (res.status === 429 && retryOnRateLimit && attempt < retries) {
+                const delay = retryAfterDelayMs(res.headers.get("retry-after"));
+                void res.body?.cancel().catch(() => undefined);
+                await waitForRetry(delay);
+                continue;
+            }
+            if (retryableMethod && res.status >= 500 && res.status < 600 && attempt < retries) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
-                await new Promise(r => setTimeout(r, delay));
+                await waitForRetry(delay);
                 continue;
             }
             return res;
         } catch (error: unknown) {
-            if (attempt < retries && isRetryableError(error)) {
+            if (retryableMethod && attempt < retries && isRetryableError(error)) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
-                await new Promise(r => setTimeout(r, delay));
+                await waitForRetry(delay);
                 continue;
             }
             throw error;
@@ -368,6 +395,7 @@ export class HttpTransport {
         serializedBody: string | undefined,
         responseReader: (response: Response) => Promise<ResponseJsonRead<T>>,
         timeoutMs = DEFAULT_TIMEOUT,
+        retryOnRateLimit = false,
     ): Promise<HttpResult<T>> {
         try {
             const request: RequestInit = {
@@ -375,7 +403,9 @@ export class HttpTransport {
                 headers: this.headers(),
                 ...(serializedBody === undefined ? {} : { body: serializedBody }),
             };
-            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
+            const response = await fetchWithRetry(
+                `${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls, { retryOnRateLimit },
+            );
             const responseBody = await responseReader(response);
             return responseBody.ok
                 ? { ok: response.ok, status: response.status, data: responseBody.parsedJson }
@@ -468,6 +498,7 @@ export class HttpTransport {
             serializedRequestBody(body),
             releaseMutationResponseJson<T>,
             timeoutMs,
+            options?.retryOnRateLimit === true,
         );
     }
 

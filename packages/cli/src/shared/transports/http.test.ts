@@ -9,15 +9,18 @@ const MAX_TEST_RESPONSE_BYTES = 1024 * 1024;
 const RELEASE_MUTATION_RESPONSE_MAX_BYTES = 64 * 1024;
 
 let clearedTimerIds: Array<ReturnType<typeof setTimeout> | undefined> = [];
+let scheduledDelayMs: number[] = [];
 let nextTimerId = 0;
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 
 beforeEach(() => {
     clearedTimerIds = [];
+    scheduledDelayMs = [];
     nextTimerId = 0;
     globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
         const timerId = ++nextTimerId as unknown as ReturnType<typeof setTimeout>;
-        if (delay === 500 || delay === 1_000) queueMicrotask(() => callback(...args));
+        scheduledDelayMs.push(delay ?? 0);
+        if (delay === 0 || delay === 500 || delay === 1_000) queueMicrotask(() => callback(...args));
         return timerId;
     }) as typeof setTimeout;
     globalThis.clearTimeout = ((timerId?: ReturnType<typeof setTimeout>) => {
@@ -202,6 +205,39 @@ describe("HttpTransport retry policy", () => {
             expect(clearedTimerIds).toHaveLength(2);
         },
     );
+
+    test("retries an explicitly idempotent release mutation after 429 and honors Retry-After", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls++;
+            return fetchCalls === 1
+                ? Response.json({ error: "rate limited" }, { status: 429, headers: { "Retry-After": "1" } })
+                : Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation(
+            "/resource", { operation: "migration" }, { retryOnRateLimit: true },
+        );
+
+        expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
+        expect(fetchCalls).toBe(2);
+        expect(scheduledDelayMs).toContain(1_000);
+        expect(clearedTimerIds).toHaveLength(3);
+    });
+
+    test("does not retry a release mutation after 429 unless explicitly enabled", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls++;
+            return Response.json({ error: "rate limited" }, { status: 429, headers: { "Retry-After": "0" } });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { operation: "migration" });
+
+        expect(response.status).toBe(429);
+        expect(fetchCalls).toBe(1);
+        expect(clearedTimerIds).toHaveLength(2);
+    });
 
     const unsafeRequests = [
         ["POST", (transport: HttpTransport) => transport.post("/resource", { name: "test" }), 1],
