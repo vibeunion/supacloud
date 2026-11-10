@@ -1,7 +1,7 @@
 // @supacloud-test-isolate
 import { expect, test } from "bun:test";
 import { jwtVerify, SignJWT } from "jose";
-import { RealtimeBunService } from "../../src/services/realtime-bun.service";
+import { RealtimeBunService } from "../../src/internal/realtime-listen/service";
 import type { ChangeEvent } from "../../src/utils/realtime-change";
 import { withNativePostgres, waitForPostgresFixture as until } from "../helpers/native-postgres";
 

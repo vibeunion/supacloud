@@ -111,6 +111,7 @@ export {
   type RpcTransport,
 } from './rpc.js';
 
+export { isSafeDefinerSearchPath } from "./search-path";
 export { COMMAND_RECEIPT_SQL, COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "./command-schema";
 export { defineReadQuery, decodePostgrestQuery, QueryBoundaryError, type QueryEvent, type QueryObserver, type ReadQueryDefinition } from "./query";
 export {

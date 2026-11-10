@@ -1,6 +1,7 @@
 import {
   assertInInjectionContext as angularAssertInInjectionContext,
   createEnvironmentInjector as angularCreateEnvironmentInjector,
+  DestroyRef as AngularDestroyRef,
   inject as angularInject,
   Injector as AngularInjector,
   runInInjectionContext as angularRunInInjectionContext,
@@ -14,11 +15,21 @@ import { flattenProviders, isClassProvider, isFactoryProvider } from "./provider
 import {
   APP_INITIALIZER,
   APP_LIFECYCLE,
+  bindAngularDestroyRef,
   createDestroyRef,
   DESTROY_REF,
   ENVIRONMENT_INITIALIZER,
   type LifecycleHooks,
 } from "./context";
+
+bindAngularDestroyRef(() => {
+  try {
+    const destroyRef = angularInject(AngularDestroyRef);
+    return destroyRef && typeof destroyRef.onDestroy === "function" ? destroyRef : undefined;
+  } catch {
+    return undefined;
+  }
+});
 import {
   getInjectableMeta,
   getInjectParams,

@@ -3,7 +3,7 @@ import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-env
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata } = starterMetadata.packages;
 
-export type StarterTemplate = "minimal" | "command" | "model-command";
+export type StarterTemplate = "minimal" | "app" | "command" | "model-command";
 export interface StarterSdkDependencies {
   "@supacloud/js": string;
   "@supabase/supabase-js": string;
@@ -152,7 +152,118 @@ export default defineSupacloudConfig();
   };
 }
 
-function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
+const DATA_CLIENT = `import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+/** Official data-plane client. Provisioned projects are reached with this client. */
+export function createDataClient(input: { url: string; anonKey: string }): SupabaseClient {
+  const url = new URL(input.url);
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error("Use the project HTTPS API URL, or loopback HTTP for local development");
+  }
+  if (input.anonKey.trim().length < 8 || input.anonKey !== input.anonKey.trim()) {
+    throw new Error("Use the anon or publishable key");
+  }
+  return createClient(url.toString(), input.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+`;
+
+const DATA_CLIENT_TEST = `import { expect, test } from "bun:test";
+import { createDataClient } from "../src/client";
+
+test("the data client is the official supabase-js client", () => {
+  const client = createDataClient({ url: "http://127.0.0.1:54321", anonKey: "public-anon-key" });
+  expect(typeof client.from).toBe("function");
+  expect(typeof client.channel).toBe("function");
+});
+
+test("non-local http URLs are rejected", () => {
+  expect(() => createDataClient({ url: "http://example.com", anonKey: "public-anon-key" })).toThrow("HTTPS");
+});
+`;
+
+/** Default scaffold: official supabase-js, without the optional app/compiler/Effect stack. */
+function supabaseClientTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
+  return {
+    "package.json": json({
+      name, version: "0.0.0", private: true, type: "module",
+      engines: { bun: ">=1.4.4" },
+      scripts: {
+        typecheck: "tsc --noEmit",
+        test: "bun test",
+        check: "bun run typecheck && bun run test",
+      },
+      dependencies: {
+        "@supabase/supabase-js": sdkDependencies["@supabase/supabase-js"],
+      },
+      devDependencies: {
+        "@types/bun": "^1.4.4",
+        typescript: "7.1.0-beta",
+      },
+    }),
+    "tsconfig.json": json({
+      compilerOptions: {
+        target: "ES2022", module: "ESNext", moduleResolution: "bundler",
+        strict: true, skipLibCheck: true,
+        noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+        noImplicitOverride: true, noPropertyAccessFromIndexSignature: true,
+        noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
+        useUnknownInCatchVariables: true,
+        noEmit: true, types: ["bun"],
+      },
+      include: ["src/**/*.ts", "tests/**/*.ts"],
+    }),
+    "bunfig.toml": "env = false\n",
+    ".gitignore": ["node_modules/", ".env", ".env.*", "!.env.example", ""].join("\n"),
+    ".env.example": "SUPABASE_URL=http://127.0.0.1:54321\nSUPABASE_ANON_KEY=replace-with-anon-or-publishable-key\n",
+    "src/client.ts": DATA_CLIENT,
+    "tests/client.test.ts": DATA_CLIENT_TEST,
+    "AGENTS.md": `# ${name}
+
+This project talks to a provisioned Supabase-compatible API with
+\`@supabase/supabase-js\`. That client is the data-plane default.
+
+- Do not add \`@supacloud/app\`, \`@supacloud/compiler\`, \`@supacloud/elysia\`, or \`effect\` here.
+- The optional application stack is a separate project: \`supacloud app init --template app\`.
+- Durable SQL and model recipes are \`--template command\` and \`--template model-command\`.
+- Use the anon or publishable key. Never put a service-role or Management token in this client.
+- Management API provision does not compile this project and does not interpret Effect.
+`,
+    "README.md": `# ${name}
+
+Official data-plane client for a provisioned project. This scaffold depends on
+\`@supabase/supabase-js\` only. It does not install \`@supacloud/app\`, the compiler,
+Elysia, or Effect.
+
+## Local check
+
+\`\`\`sh
+bun install
+bun test tests/client.test.ts
+bun run check
+\`\`\`
+
+Copy \`.env.example\` and set \`SUPABASE_URL\` to the project API URL and
+\`SUPABASE_ANON_KEY\` to the anon or publishable key. Do not commit the filled
+file, and do not put the service-role key in this client.
+
+\`createDataClient\` accepts HTTPS, or HTTP only for \`127.0.0.1\` and \`localhost\`.
+Realtime uses the same client's \`channel()\` against the project's
+\`/realtime/v1/websocket\` endpoint. See the platform Realtime contract for which
+process owns that socket.
+
+## Optional application stack
+
+\`supacloud app init --template app\` is the explicit \`@supacloud/app\` + compiler +
+Effect project. \`--template command\` and \`--template model-command\` are the
+durable reference recipes. Do not add those dependencies to this client project.
+`,
+  };
+}
+
+function appFrameworkTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
     ...baseTemplateFiles(name, sdkDependencies),
     "src/features/health/contracts.ts": `import { t } from "elysia";
@@ -216,6 +327,10 @@ export function createDemo() {
 `,
     "README.md": `# ${name}
 
+Opt-in application stack from \`supacloud app init --template app\`.
+The default \`app init\` scaffold is a \`@supabase/supabase-js\` client and does not
+include this compiler, Effect, or Elysia project.
+
 ## Local development
 
 \`\`\`sh
@@ -263,8 +378,9 @@ regeneration, then validate types, database permissions and authenticated behavi
   };
 }
 
-/** New projects use the minimal layout; the command recipe is emitted separately. */
-export function appTemplateFiles(name: string, template: "minimal", sdkDependencies: StarterSdkDependencies): Record<string, string> {
-  if (template !== "minimal") throw new Error("Use appStarterFiles for the command recipe");
-  return minimalTemplate(name, sdkDependencies);
+/** `minimal` is the supabase-js client. `app` is the optional compiler/Effect stack. */
+export function appTemplateFiles(name: string, template: "minimal" | "app", sdkDependencies: StarterSdkDependencies): Record<string, string> {
+  if (template === "minimal") return supabaseClientTemplate(name, sdkDependencies);
+  if (template === "app") return appFrameworkTemplate(name, sdkDependencies);
+  throw new Error("Use appStarterFiles for the command recipe");
 }

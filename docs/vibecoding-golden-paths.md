@@ -27,9 +27,10 @@ and verification obligations.
 ## Quick start
 
 ```bash
-supacloud app init --root ./orders-api --name orders-api   # minimal; explicit recipes
+supacloud app init --root ./orders-api --name orders-api   # default: @supabase/supabase-js
 cd orders-api && bun install && bun run check
 
+supacloud app init --template app --root ./orders-api --name orders-api  # optional compiler stack
 supacloud app context --format json > context.json   # AI reads the compiled project graph
 supacloud app doctor --format json > doctor.json     # actionable diagnostics + fix plan
 supacloud app fix --from-doctor doctor.json --fix-index 0  # preview one fix from the report
@@ -41,7 +42,8 @@ Developers and AI use one CLI surface and do not need to remember the underlying
 packages:
 
 ```bash
-supacloud app init        # minimal project; src/features/<feature>
+supacloud app init        # default supabase-js client; no compiler
+supacloud app init --template app  # optional compiler project; src/features/<feature>
 supacloud app dev         # run the project's existing local dev script
 supacloud app watch       # compiler-only watch
 supacloud app verify-plan --target health  # focused tests, never a full-suite fallback
@@ -75,7 +77,8 @@ generated/    # compiler output (do not hand-edit; checked for drift)
 supacloud.config.ts
 ```
 
-The minimal starter and generators use `src/features/`. Explicit reference
+`--template app` and the generators use `src/features/`. The default minimal
+client has `src/client.ts` only. Explicit reference
 recipes retain `src/review/`, `src/orders/` and `src/sync/` for compatibility.
 Do not move existing application files only to adopt this default.
 Ordinary reads use the existing RLS-protected PostgREST client; GraphQL remains

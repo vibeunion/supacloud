@@ -12,12 +12,13 @@ Use the published candidate entrypoints only after their CI/consumer checks pass
 | Reactive guardrails and shared runtime | unconditional public Angular context assertion; structurally typed owner; external Angular/RxJS; HTTP facade references the package root | negative nesting tests, dev/prod packed identity and strict declaration tests |
 | Shared diagnostics | existing `scanRuntimeDi` feeds compile/check/Context Pack; named/namespace/const alias lexical provenance; `/diagnostics` produces one report and LSP-shaped adapter | diagnostics, false-positive, aliases, shadowing and shared repair-payload tests |
 | Real scopes and request errors | execute actual generated request/job factories; add a bounded fetch backend to existing `@supacloud/testing` | generated scope integration, expected/duplicate/unsettled/aborted requests, original failure tests |
-| Work accounting and migration | explicit owner-bound `/runtime` registry; original `migrateProject` applies `http-provider-entrypoint` | bounded idle waits and cancellation, project preview/write/conflict/idempotence tests |
+| Work accounting and migration | explicit owner-bound `/pending-work` registry; original `migrateProject` applies `http-provider-entrypoint` | bounded idle waits and cancellation, project preview/write/conflict/idempotence tests |
 
 ## Public HTTP configuration
 
 ```ts
-import { provideHttpClient, withFetch, withInterceptors } from '@supacloud/app/http';
+import { provideHttpClient } from '@supacloud/app/runtime';
+import { withFetch, withInterceptors } from '@supacloud/app/http';
 
 const providers = provideHttpClient(
   withFetch(fetch),
@@ -25,12 +26,10 @@ const providers = provideHttpClient(
 );
 ```
 
-The root `withInterceptors` remains the legacy array helper, for compatibility
-with direct `new HttpClient(config, interceptorArray)` use. The new `/http`
-entry returns an `HttpClientFeature` and shares the root HttpClient class and
-provider tokens. It is not a second HTTP/DI implementation. The self-package
-TypeScript path is build-time only; the published facade leaves the root import
-external so the installed consumer resolves one owner.
+`provideHttpClient` and the inject-based `HttpClient` are `@supacloud/app/runtime`.
+`/http` exports feature objects, tokens, headers, params, and interceptor
+functions, and does not import `@angular/core`. The root `withInterceptors`
+remains the legacy array helper. `/http` is not a second HTTP implementation.
 
 `withRequestsMadeViaParent()` runs child then nearest-parent interceptors and
 retains one logical-request replay budget. An ancestor changing GET into POST
@@ -65,11 +64,12 @@ reported as an executable fix. Normal TypeScript/runtime validation remains.
 ## Work registry
 
 `PendingWorkRegistry` and `createPendingWorkRegistry(owner)` are available from
-`@supacloud/app/runtime`, a transport-neutral entry with no Angular/SDK import.
+`@supacloud/app/pending-work`, a transport-neutral entry with no Angular/SDK import.
+`@supacloud/app/runtime` is the Angular injector adapter and does load `@angular/core`.
 The owner is explicit; create a separate registry for each isolation boundary.
 
 ```ts
-import { createPendingWorkRegistry } from '@supacloud/app/runtime';
+import { createPendingWorkRegistry } from '@supacloud/app/pending-work';
 
 // owner is the actual application/request/job lifetime, not a global fallback.
 const work = createPendingWorkRegistry(owner, { capacity: 1024 });
@@ -115,9 +115,12 @@ Its 0.12.0 -> 0.13.0 checkpoints describe source formats, not npm package versio
 
 Only root `withInterceptors` bindings whose references are exclusively direct
 `provideHttpClient` feature arguments move to `/http`. Import aliases are kept.
-Legacy array consumers stay untouched. Mixed uses and namespace calls become
-explicit issues; any issue prevents every project write. Existing conflict
-checks, concurrent-edit checks and controlled restoration remain the writer.
+Named `provideHttpClient` and `HttpClient` imports from `@supacloud/app` move to
+`@supacloud/app/runtime` in the same pass, because `/http` does not re-export
+the inject-based client. Legacy array consumers stay untouched. Mixed uses and
+namespace calls become explicit issues; any issue prevents every project write.
+Existing conflict checks, concurrent-edit checks and controlled restoration
+remain the writer.
 A second successful migration changes nothing. Signals/effect scheduling and
 resource ownership are not guessed or silently migrated.
 

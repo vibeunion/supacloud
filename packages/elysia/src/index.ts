@@ -9,7 +9,7 @@ import type {
 } from "@supacloud/app";
 import { requireFeatureRequestContext } from "@supacloud/app";
 import { composeAspects as composeApplicationAspects, invokeAspect, freezeAspectData } from "@supacloud/app/execution";
-import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
+import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/pending-work";
 import { commandFailureMetadata, decodeCommandPreview, type CommandPreview, type ErrorMetadata } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { compileHttpPolicies, type HttpPolicyRegistry } from "./http-policy";

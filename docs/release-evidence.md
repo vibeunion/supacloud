@@ -3,7 +3,9 @@
 Status: **IMPLEMENTED (compiler read-only slice)**. The compiler summarizes one
 immutable delivery target into a single queryable document. Preview environment
 provisioning, runtime health and activation identity are **not** part of the
-compiler slice; see [Encore Alignment Roadmap](./encore-alignment-roadmap.md).
+compiler slice. The [Encore alignment roadmap](./encore-alignment-roadmap.md)
+is a proposal and does not add preview provisioning to this compiler or to
+Management API project provision.
 
 The platform-side companion contract is
 `supacloud.deployment-evidence.v1`, exported by `@supacloud/delivery`. It

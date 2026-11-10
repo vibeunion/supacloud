@@ -1,14 +1,19 @@
+/**
+ * Internal PostgreSQL LISTEN/NOTIFY subscriber.
+ * This is not the published `/realtime/v1` socket. That route proxies to
+ * Elixir and must not import this module.
+ */
 import { EventEmitter } from 'events';
 import type { SQL } from 'bun';
 import type { JWTPayload } from 'jose';
-import { logger } from '../utils/logger';
-import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
-import { SQL_MODULES } from '../db/sql-modules';
-import type { ProjectJwtVerification } from '../utils/project-jwt';
-import { verifyProjectJwtPayload } from '../utils/project-jwt';
-import { isRealtimeIdentifier } from '../utils/realtime-change';
-import { canEvaluateRealtimeFilterNatively } from '../utils/realtime-filter-contract';
-import { matchesRealtimeFilter, parseRealtimeChange, parseWalChanges, type RealtimeChange } from "../utils/realtime-change";
+import { logger } from '../../utils/logger';
+import { resolveDbName, getProjectDb, resolveSlotName } from '../../db';
+import { SQL_MODULES } from '../../db/sql-modules';
+import type { ProjectJwtVerification } from '../../utils/project-jwt';
+import { verifyProjectJwtPayload } from '../../utils/project-jwt';
+import { isRealtimeIdentifier } from '../../utils/realtime-change';
+import { canEvaluateRealtimeFilterNatively } from '../../utils/realtime-filter-contract';
+import { matchesRealtimeFilter, parseRealtimeChange, parseWalChanges, type RealtimeChange } from "../../utils/realtime-change";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 

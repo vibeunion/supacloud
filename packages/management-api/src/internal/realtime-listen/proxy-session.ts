@@ -1,15 +1,17 @@
-import type { RealtimeBunService } from "./realtime-bun.service";
-import type { ResolvedProjectApiKey } from "../utils/project-auth";
-import { isRecord } from "../utils/project-config";
+// Internal helper. Not mounted on /realtime/v1. Do not import this from
+// src/index.ts, src/routes, or src/services.
+import type { RealtimeBunService } from "./service";
+import type { ResolvedProjectApiKey } from "../../utils/project-auth";
+import { isRecord } from "../../utils/project-config";
 import {
   parsePostgresChangeSubscriptions, parseRealtimeChange, canUseNativeRealtimeSubscriptions,
   bindRealtimeSubscriptionIds, projectRealtimeChangeEvents, type ChangeEvent, type PostgresChangeConfig,
-} from "../utils/realtime-change";
+} from "../../utils/realtime-change";
 import {
   encodePhoenixMessage, parsePhoenixMessage, realtimeBinary, isPhoenixBroadcastFrame, MAX_REALTIME_FRAME_BYTES,
   type PhoenixMessage, type PhoenixVersion,
-} from "../utils/phoenix-message";
-import { logger } from "../utils/logger";
+} from "../../utils/phoenix-message";
+import { logger } from "../../utils/logger";
 
 type Frame = string | Uint8Array<ArrayBuffer>;
 export interface RealtimeClientTransport {

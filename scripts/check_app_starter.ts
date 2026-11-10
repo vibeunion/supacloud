@@ -121,7 +121,7 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   // Test the release artifacts together before they exist on the public registry.
   manifest.overrides = { ...manifest.overrides };
-  for (const name of ["contracts", "commands", "db", "app", "delivery", "compiler", "elysia", "query", "js"]) {
+  for (const name of ["contracts", "commands", "db", "db-zenstack", "app", "delivery", "compiler", "elysia", "query", "js"]) {
     const directory = join(repo, "packages", name === "js" ? "supacloud-js" : name);
     await run(starterInstallArgs("workspace"), directory);
     await run(["run", "build"], directory);
@@ -367,7 +367,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
   // in one packing pass, so every supported path stays smoke-covered.
   // Each template owns a separate project directory and only reads the shared
   // packed tarballs, so their acceptance checks can use the runner in parallel.
-  const templateResults = await Promise.allSettled((["minimal"] as const).map(async template => {
+  const templateResults = await Promise.allSettled((["app"] as const).map(async template => {
     const templateProject = join(root, `${template}-project`);
     await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
     const templateManifestPath = join(templateProject, "package.json");

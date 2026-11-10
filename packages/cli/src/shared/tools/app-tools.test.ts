@@ -270,10 +270,12 @@ describe("app tools", () => {
         try {
             const result = await app({ action: "init", root: initRoot, name: "orders" });
             expect(result.isError).toBe(false);
-            expect(readFileSync(join(initRoot, "package.json"), "utf8")).toContain('"@supacloud/app"');
-            expect(readFileSync(join(initRoot, ".env.test"), "utf8")).toContain("APP_ENV=test");
-            expect(readFileSync(join(initRoot, ".env.production.example"), "utf8")).toContain("APP_ENV=production");
-            expect(readFileSync(join(initRoot, "src/application.ts"), "utf8")).toContain("createCompiledModules");
+            const manifest = readFileSync(join(initRoot, "package.json"), "utf8");
+            expect(manifest).toContain('"@supabase/supabase-js"');
+            expect(manifest).not.toContain('"@supacloud/app"');
+            expect(manifest).not.toContain('"effect"');
+            expect(readFileSync(join(initRoot, "src/client.ts"), "utf8")).toContain('from "@supabase/supabase-js"');
+            expect(readFileSync(join(initRoot, ".env.example"), "utf8")).toContain("SUPABASE_URL=");
         } finally {
             rmSync(initRoot, { recursive: true, force: true });
         }
@@ -290,8 +292,8 @@ describe("app tools", () => {
                 root,
                 name: "orders",
                 template: "minimal",
-                files: expect.arrayContaining(["src/app.module.ts", "supacloud.config.ts", "AGENTS.md"]),
-                next: ["bun install", "bun run check", "bun run dev"],
+                files: expect.arrayContaining(["src/client.ts", "tests/client.test.ts", "AGENTS.md"]),
+                next: ["bun install", "bun run check"],
             });
         } finally {
             rmSync(root, { recursive: true, force: true });

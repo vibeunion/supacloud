@@ -75,13 +75,13 @@ async function temporary() {
 async function dependencies(root: string) {
   const modules = join(root, "node_modules");
   await mkdir(join(modules, "@supacloud"), { recursive: true });
-  for (const name of ["app", "commands", "contracts", "db", "compiler", "elysia"]) {
+  for (const name of ["app", "commands", "contracts", "db", "db-zenstack", "compiler", "elysia"]) {
     await symlink(join(repo, "packages", name), join(modules, "@supacloud", name));
   }
   for (const name of ["typebox", "effect", "elysia", "typescript", "@types"]) {
     await symlink(join(repo, "packages/cli/node_modules", name), join(modules, name));
   }
-  await symlink(join(repo, "packages/db/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
+  await symlink(join(repo, "packages/db-zenstack/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
 }
 
 async function typecheck(root: string, extra: string[] = []) {
