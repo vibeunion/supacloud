@@ -25,7 +25,7 @@
       "dependencies": {},
       "devDependencies": {},
       "peerDependencies": {
-        "@supacloud/db-zenstack": "^0.1.0"
+        "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0"
       }
     },
     "dbZenstack": {

@@ -34,7 +34,9 @@ function safePath(cwd, file) {
 }
 function dependency(manifest, section, name) {
   const value = manifest[section]?.[name];
-  if (typeof value !== 'string' || !semver.test(value.replace(/^[~^]/, ''))) throw new Error(`Missing publishable ${section}.${name} in ${manifest.name}`);
+  if (typeof value !== 'string' || !value.split(/\s*\|\|\s*/).every(range => semver.test(range.replace(/^[~^]/, '')))) {
+    throw new Error(`Missing publishable ${section}.${name} in ${manifest.name}`);
+  }
   return value;
 }
 
