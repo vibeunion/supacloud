@@ -981,6 +981,7 @@ describe("database migration helpers", () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         let ordinaryPostCount = 0;
         let releaseMutationCount = 0;
+        let releaseMutationOptions: unknown;
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
             const callback = captureDatabaseTool({
@@ -989,8 +990,9 @@ describe("database migration helpers", () => {
                     ordinaryPostCount += 1;
                     return { ok: true, status: 200, data: {} };
                 },
-                postReleaseMutation: async () => {
+                postReleaseMutation: async (_path: string, _body: unknown, options: unknown) => {
                     releaseMutationCount += 1;
+                    releaseMutationOptions = options;
                     return {
                         ok: true,
                         status: 200,
@@ -1007,6 +1009,7 @@ describe("database migration helpers", () => {
             expect(response.isError).not.toBe(true);
             expect(ordinaryPostCount).toBe(0);
             expect(releaseMutationCount).toBe(1);
+            expect(releaseMutationOptions).toEqual({ retryOnRateLimit: true });
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
