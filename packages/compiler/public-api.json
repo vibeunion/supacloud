@@ -464,11 +464,6 @@
       "signature": "export declare function diffSemanticSnapshots(base: SemanticSnapshot, current: SemanticSnapshot): SemanticDiff;"
     },
     {
-      "name": "doctorProject",
-      "kind": "value",
-      "signature": "export declare function doctorProject(rootDir: string, outDir: string, graph: ApplicationGraph, upToDate: boolean, diagnostics?: Diagnostic[]): DoctorResult;"
-    },
-    {
       "name": "DoctorCheck",
       "kind": "type",
       "signature": "export interface DoctorCheck {\n    name: string;\n    ok: boolean;\n    detail: string;\n    layer: DoctorLayer;\n}"
@@ -477,6 +472,11 @@
       "name": "DoctorLayer",
       "kind": "type",
       "signature": "export type DoctorLayer = \"source\" | \"artifact\" | \"runtime\";"
+    },
+    {
+      "name": "doctorProject",
+      "kind": "value",
+      "signature": "export declare function doctorProject(rootDir: string, outDir: string, graph: ApplicationGraph, upToDate: boolean, diagnostics?: Diagnostic[]): DoctorResult;"
     },
     {
       "name": "DoctorResult",
@@ -679,14 +679,14 @@
       "signature": "export declare function formatDeliveryPlan(result: DeliveryPlanResult): string;"
     },
     {
-      "name": "formatEnvironmentBindings",
-      "kind": "value",
-      "signature": "export declare function formatEnvironmentBindings(result: EnvironmentBindingsResult): string;"
-    },
-    {
       "name": "formatDoctorCheck",
       "kind": "value",
       "signature": "export declare function formatDoctorCheck(check: DoctorCheck): string;"
+    },
+    {
+      "name": "formatEnvironmentBindings",
+      "kind": "value",
+      "signature": "export declare function formatEnvironmentBindings(result: EnvironmentBindingsResult): string;"
     },
     {
       "name": "formatGraph",
