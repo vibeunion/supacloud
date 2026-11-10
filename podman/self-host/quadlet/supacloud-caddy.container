@@ -1,0 +1,24 @@
+[Unit]
+Description=SupaCloud Caddy gateway
+Wants=supacloud-network.service
+After=supacloud-network.service
+
+[Container]
+Image=localhost/supacloud-caddy:local
+ContainerName=supacloud-caddy
+Network=supacloud.network
+NetworkAlias=caddy
+EnvironmentFile=/etc/supacloud/supacloud.env
+Volume=/etc/supacloud/podman/caddy/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+Volume=/var/lib/supacloud/caddy:/etc/supacloud/caddy:ro,Z
+Volume=/var/lib/supacloud/caddy-state:/var/lib/supacloud/caddy:Z
+Volume=/var/lib/supacloud/frontends:/var/supacloud/frontends:ro,Z
+PublishPort=80:80
+PublishPort=443:443
+HealthCmd=wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:2019/config/
+HealthInterval=5s
+HealthTimeout=3s
+HealthRetries=12
+
+[Install]
+WantedBy=multi-user.target

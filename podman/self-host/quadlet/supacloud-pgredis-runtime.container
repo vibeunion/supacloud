@@ -1,0 +1,16 @@
+[Unit]
+Description=SupaCloud pgredis runtime
+Requires=supacloud-postgres.service
+After=supacloud-postgres.service
+
+[Container]
+Image=localhost/supacloud-pgredis-runtime:local
+ContainerName=supacloud-pgredis-runtime
+Network=supacloud.network
+NetworkAlias=pgredis-runtime
+EnvironmentFile=/etc/supacloud/supacloud.env
+Volume=/var/lib/supacloud/pgredis-tenants:/etc/supabase/pgredis-tenants:ro,Z
+PublishPort=127.0.0.1:9010:9010
+
+[Install]
+WantedBy=multi-user.target

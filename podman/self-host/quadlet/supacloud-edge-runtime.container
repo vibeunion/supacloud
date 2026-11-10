@@ -1,0 +1,17 @@
+[Unit]
+Description=SupaCloud Edge Runtime
+Requires=supacloud-management-api.service supacloud-pgredis-runtime.service
+After=supacloud-management-api.service supacloud-pgredis-runtime.service
+
+[Container]
+Image=localhost/supacloud-edge-runtime:local
+ContainerName=supacloud-edge-runtime
+Network=supacloud.network
+NetworkAlias=edge-runtime
+EnvironmentFile=/etc/supacloud/supacloud.env
+Volume=/var/lib/supacloud/tenants:/etc/supabase/tenants:ro,Z
+Volume=/var/lib/supacloud/functions:/data/functions:Z
+PublishPort=127.0.0.1:9005:9005
+
+[Install]
+WantedBy=multi-user.target

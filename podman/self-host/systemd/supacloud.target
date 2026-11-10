@@ -1,0 +1,7 @@
+[Unit]
+Description=SupaCloud single-node Podman services
+Wants=supacloud-postgres.service supacloud-gotrue.service supacloud-postgrest.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service supacloud-management-api.service supacloud-edge-runtime.service supacloud-caddy.service
+After=supacloud-postgres.service supacloud-gotrue.service supacloud-postgrest.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service supacloud-management-api.service supacloud-edge-runtime.service supacloud-caddy.service
+
+[Install]
+WantedBy=multi-user.target

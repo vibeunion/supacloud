@@ -1,0 +1,19 @@
+[Unit]
+Description=SupaCloud PostgreSQL
+Wants=supacloud-network.service
+After=supacloud-network.service
+
+[Container]
+Image=localhost/supacloud-postgres:local
+ContainerName=supacloud-postgres
+Network=supacloud.network
+NetworkAlias=postgres
+EnvironmentFile=/etc/supacloud/supacloud.env
+Volume=/var/lib/supacloud/postgres:/var/lib/postgresql:Z
+HealthCmd=pg_isready -U postgres -d postgres
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=10
+
+[Install]
+WantedBy=multi-user.target

@@ -33,9 +33,10 @@
 
 | 你的任务 | 从这里开始 | 边界 |
 | --- | --- | --- |
+| 不使用 Pigsty 在单机运行 | [部署档次](docs/deployment-profiles.zh-CN.md) | `solo` 或 `podman` 档次、本地 provider、显式外部数据库绑定和恢复边界。 |
 | 在自有服务器上管理多个项目 | [完整平台运维](docs/platform-operations.zh-CN.md) | 包括 Pigsty 基础设施、Management API、Web Console、项目生命周期与运维职责。 |
 | 开发类型明确、模块化的业务应用 | [应用模板](docs/application-starter.md) | 可选开发层；演示不提供生产身份、持久化或自动部署。 |
-| 无 Docker 运行本地优先或小型单项目后端 | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite；每个进程一个项目；不提供多项目控制面或 Supabase Studio。 |
+| 运行本地优先或小型单项目后端 | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite；每个进程一个项目；不提供多项目控制面或 Supabase Studio。 |
 
 在把完整平台作为生产依赖前，先阅读[自托管稳定基线](docs/self-hosted-stable-baseline.zh-CN.md)。
 完整平台是面向 Supabase 风格项目的自托管控制平面，不是 Supabase Cloud 的镜像复刻。
@@ -54,6 +55,9 @@ curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh |
 ```
 
 引导脚本直接来自官方仓库。显式配置的代理只用于后续 Release/API 下载的回退。网络 Release 产物必须完成校验和与来源证明验证。
+
+新安装在没有明确选择 Pigsty 或外部数据库时默认使用 Podman 单机档次。请阅读[部署档次](docs/deployment-profiles.zh-CN.md)
+和 [Podman 单机指南](podman/self-host/README.md)，了解 Quadlet/systemd 边界。
 
 ### 开发应用
 
@@ -137,7 +141,7 @@ bunx supacloud-lite keys
 
 | 主题 | 文档 |
 | --- | --- |
-| 快速入门 | [稳定基线](docs/self-hosted-stable-baseline.zh-CN.md) · [安装与升级](docs/platform-operations.zh-CN.md) · [应用模板](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) |
+| 快速入门 | [稳定基线](docs/self-hosted-stable-baseline.zh-CN.md) · [部署档次](docs/deployment-profiles.zh-CN.md) · [安装与升级](docs/platform-operations.zh-CN.md) · [应用模板](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) |
 | 应用工程 | [推荐开发路径](docs/vibecoding-golden-paths.zh-CN.md) · [应用框架](docs/application-framework.md) · [工程目标](docs/engineering-goals.zh-CN.md) |
 | 平台与存储 | [多租户架构](docs/architecture-multi-tenant.md) · [项目级 S3](docs/project-scoped-s3.md) · [网关](docs/gateway-customization.md) |
 | 交付与执行 | [CLI](docs/cli-guide.md) · [前端托管](docs/frontend-hosting.md) · [后台函数](docs/background-functions.md) · [Edge Runtime](docs/edge-runtime-guide.md) |

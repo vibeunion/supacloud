@@ -1,0 +1,16 @@
+[Unit]
+Description=SupaCloud VictoriaLogs
+Wants=supacloud-network.service
+After=supacloud-network.service
+
+[Container]
+Image=victoriametrics/victoria-logs:v1.53.0
+ContainerName=supacloud-victorialogs
+Network=supacloud.network
+NetworkAlias=victorialogs
+EnvironmentFile=/etc/supacloud/supacloud.env
+Volume=/var/lib/supacloud/victorialogs:/victoria-logs-data:Z
+Exec=-storageDataPath=/victoria-logs-data -retentionPeriod=7d -httpListenAddr=:9428
+
+[Install]
+WantedBy=multi-user.target

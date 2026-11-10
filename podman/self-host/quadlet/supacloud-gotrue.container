@@ -1,0 +1,14 @@
+[Unit]
+Description=SupaCloud GoTrue
+Requires=supacloud-postgres.service
+After=supacloud-postgres.service
+
+[Container]
+Image=supabase/gotrue:v2.197.0
+ContainerName=supacloud-gotrue
+Network=supacloud.network
+NetworkAlias=gotrue
+EnvironmentFile=/etc/supacloud/supacloud.env
+
+[Install]
+WantedBy=multi-user.target

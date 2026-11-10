@@ -409,6 +409,37 @@ main() {
     # shellcheck source=scripts/lib/release_assets.sh
     source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"
     consume_setup_install_input || return 1
+    # Podman single-node installs build and run the supported Quadlet stack
+    # locally. They do not need the native Pigsty release binaries or the
+    # attestation verifier used by the legacy native path.
+    generate_config
+    local deployment_profile="${SUPACLOUD_DEPLOYMENT_PROFILE:-}"
+    if [[ -z "$deployment_profile" && -f "${CONFIG_FILE:-${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}}" ]]; then
+        deployment_profile=$(awk -F= '$1 == "SUPACLOUD_DEPLOYMENT_PROFILE" { print $2 }' \
+            "${CONFIG_FILE:-${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}}" | tail -1)
+        deployment_profile="${deployment_profile#\"}"
+        deployment_profile="${deployment_profile%\"}"
+        deployment_profile="${deployment_profile#\'}"
+        deployment_profile="${deployment_profile%\'}"
+    fi
+    if [[ -z "$deployment_profile" ]]; then
+        persisted_config="${CONFIG_FILE:-${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}}"
+        use_pigsty=$(awk -F= '$1 == "SUPACLOUD_USE_PIGSTY" { print $2 }' "$persisted_config" 2>/dev/null | tail -1)
+        use_pigsty="${use_pigsty#\"}"
+        use_pigsty="${use_pigsty%\"}"
+        use_pigsty="${use_pigsty#\'}"
+        use_pigsty="${use_pigsty%\'}"
+        if [[ "$use_pigsty" == "true" || -f "${PIGSTY_PATH:-${HOME:-/root}/pigsty}/bootstrap" ]]; then
+            deployment_profile="pigsty"
+        else
+            deployment_profile="podman"
+        fi
+    fi
+    if [[ "$deployment_profile" == "podman" || "$deployment_profile" == "solo" ]]; then
+        log_info "Using the Podman single-node provider; skipping native release binaries and Pigsty bootstrap."
+        run_install
+        return
+    fi
     case "${SUPACLOUD_SETUP_ARTIFACT_MODE:-release}" in
         release) ensure_release_attestation_verifier ;;
         local) log_warn "Using explicitly selected local artifact mode" ;;
@@ -416,7 +447,6 @@ main() {
     esac
     download_binaries
     check_openssl_compat
-    generate_config
     run_install
 }
 

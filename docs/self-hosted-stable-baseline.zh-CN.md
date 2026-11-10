@@ -47,7 +47,7 @@ Supabase 风格项目。
 | 高可用声明 | 单机基线不声明高可用 |
 
 安装器中的其他操作系统和 `arm64` 路径必须单独记录和测试，不能自动视为与首要
-基线等价。Compose 与 Lite 按各自文档支持，不作为完整平台验收的替代证据。
+基线等价。Podman 单机与 Lite 按各自文档支持，不作为 Pigsty 基线验收的替代证据。
 
 首轮验收必须记录选用的 Edge Runtime 模式。Management/Web Console/Edge Runtime
 协同升级要求持久化 `EDGE_RUNTIME_MODE=external`；嵌入模式不能被默认为同等升级证据。
@@ -59,7 +59,7 @@ Caddy 与 GoTrue 仍是独立的升级面。
 | --- | --- | --- |
 | 原生单机 Full Platform | 稳定基线目标 | Ubuntu 24.04 LTS、`amd64`、systemd、Pigsty `v4.5.0` / PostgreSQL 18、SupaCloud 管理的 Caddy 和已发布且经过验证的制品；在声明生产验收前仍需完成第二至第四道验收门 |
 | Lite | 独立有边界产品 | 单项目本地优先运行时，有自己的兼容性与恢复证据；不能证明 Full Platform 已就绪 |
-| Compose 与其他安装路径 | 特定部署方式支持／需单独验收 | `docker/self-host` 是一个 GoTrue 和一个 PostgREST，不能证明多项目 Pigsty 行为。遵循各自文档边界，不能作为原生基线的等价证明 |
+| Podman 单机与其他安装路径 | 特定部署方式支持／需单独验收 | 遵循各自文档边界，不能作为 Pigsty 原生基线的等价证明 |
 | `arm64` 与其他操作系统 | 特定部署方式支持／需单独验收 | 必须针对选定组合提供明确的安装、升级和恢复证据 |
 | 项目级外部 S3 存储 | 特定部署方式支持／需单独验收 | 需要显式项目绑定，以及针对提供方的可达性、持久性和恢复证据 |
 | 有状态协同升级中的嵌入式 Edge Runtime | 实验性／需单独验收 | 首要协同升级证据使用持久化的 `EDGE_RUNTIME_MODE=external` |

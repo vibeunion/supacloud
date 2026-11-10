@@ -1,0 +1,24 @@
+[Unit]
+Description=SupaCloud Management API
+Requires=supacloud-postgres.service supacloud-caddy.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service
+After=supacloud-postgres.service supacloud-caddy.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service
+
+[Container]
+Image=localhost/supacloud-management-api:local
+ContainerName=supacloud-management-api
+Network=supacloud.network
+NetworkAlias=management-api
+EnvironmentFile=/etc/supacloud/supacloud.env
+Volume=/var/lib/supacloud/tenants:/etc/supabase/tenants:Z
+Volume=/var/lib/supacloud/pgredis-tenants:/etc/supabase/pgredis-tenants:Z
+Volume=/var/lib/supacloud/functions:/data/functions:Z
+Volume=/var/lib/supacloud/storage:/data/storage:Z
+Volume=/var/lib/supacloud/frontends:/var/supacloud/frontends:Z
+Volume=/var/lib/supacloud/caddy:/etc/supacloud/caddy:Z
+Volume=/var/lib/supacloud/caddy-state:/var/lib/supacloud/caddy:Z
+Volume=/etc/supacloud/.legacy-secrets-migration.env:/run/secrets/supacloud-legacy-secrets-migration:ro,Z
+Volume=/etc/supacloud/realtime.env:/etc/supacloud/realtime.env:ro,Z
+PublishPort=127.0.0.1:9090:9090
+
+[Install]
+WantedBy=multi-user.target

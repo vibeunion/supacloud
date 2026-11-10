@@ -68,6 +68,8 @@ XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 
 # shellcheck source=scripts/lib/install_config.sh
 source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
+# shellcheck source=scripts/lib/deployment_profile.sh
+source "${SCRIPT_DIR}/scripts/lib/deployment_profile.sh"
 # shellcheck source=scripts/lib/application_bun_runtime.sh
 source "${SCRIPT_DIR}/scripts/lib/application_bun_runtime.sh"
 # shellcheck source=scripts/lib/edge_runtime_source.sh
@@ -85,6 +87,7 @@ source "${SCRIPT_DIR}/scripts/lib/postgrest_upgrade.sh"
 # explicit environment/CLI > persisted root-only input > legacy root state >
 # tracked template. Indexed arrays keep this compatible with Bash 3.2.
 SUPACLOUD_INSTALL_KEYS=(
+    SUPACLOUD_DEPLOYMENT_PROFILE SUPACLOUD_DATABASE_URL SUPACLOUD_USE_PIGSTY
     INTERNAL_IP SUPABASE_PUBLIC_DOMAIN SUPABASE_STUDIO_DOMAIN SUPABASE_DOMAIN
     DASHBOARD_USERNAME DASHBOARD_PASSWORD POSTGRES_PASSWORD GRAFANA_PASSWORD
     JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY
@@ -112,6 +115,8 @@ SUPACLOUD_EXPLICIT_INSTALL_VALUES=()
 # Parse arguments first so they can override configuration file values
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --profile) SUPACLOUD_DEPLOYMENT_PROFILE="$2"; shift 2 ;;
+        --database-url) SUPACLOUD_DATABASE_URL="$2"; shift 2 ;;
         --ip)     INTERNAL_IP="$2"; shift 2 ;;
         --domain) SUPABASE_PUBLIC_DOMAIN="$2"; shift 2 ;;
         --studio) SUPABASE_STUDIO_DOMAIN="$2"; shift 2 ;;
@@ -130,6 +135,10 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: sudo bash install.sh [options]"
             echo "Options:"
+            echo "  --profile <pigsty|solo|podman|external|cluster>"
+            echo "                     Select the deployment/database provider profile"
+            echo "  --database-url <url>"
+            echo "                     Explicit PostgreSQL URL for the external profile"
             echo "  --ip <ip>          Specify internal IP"
             echo "  --domain <domain>  Specify Supabase API domain"
             echo "  --studio <domain>  Specify Supabase Studio domain"
@@ -561,6 +570,11 @@ sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(), validate=True)
 check_config() {
     log_step "Checking configuration..."
     load_install_config_layers
+    supacloud_resolve_deployment_profile || return 1
+    log_info "Deployment profile: ${SUPACLOUD_DEPLOYMENT_PROFILE} (database provider: ${SUPACLOUD_DATABASE_PROVIDER})"
+    if [[ "${SUPACLOUD_DATABASE_PROVIDER:-}" != "podman-single-node" ]]; then
+        supacloud_require_pigsty_install_path || return 1
+    fi
     validate_install_network_inputs
     validate_victorialogs_data_dir
     if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
@@ -1045,20 +1059,9 @@ enable_ksm_optimization() {
 install_container_runtime() {
     log_step "Checking container runtime..."
     
-    # Check for Podman first, then Docker. The podman-docker package installs a
-    # /usr/bin/docker shim that forwards to podman, so on hosts that use podman
-    # (with the podman-docker alias for docker-CLI compatibility) `command -v docker`
-    # succeeds even though podman is the real runtime. Detecting docker first
-    # misclassifies such hosts as docker, skips setup_podman_socket, and then runs
-    # Pigsty's docker.yml which tries to install docker-ce and conflicts with the
-    # already-installed podman-docker package. Podman is the authoritative runtime
-    # whenever it is present, so check it first.
     if command -v podman &> /dev/null; then
         log_info "Podman installed: $(podman --version)"
         CONTAINER_RUNTIME="podman"
-    elif command -v docker &> /dev/null; then
-        log_info "Docker installed: $(docker --version)"
-        CONTAINER_RUNTIME="docker"
     else
         log_warn "Container runtime not detected, installing Podman"
         install_podman
@@ -1066,10 +1069,7 @@ install_container_runtime() {
         log_info "Podman installation complete"
     fi
     
-    # Ensure Docker socket available (for podman)
-    if [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
-        setup_podman_socket
-    fi
+    configure_podman_mirrors
 }
 
 # ========== Install Podman (Multi-distribution support) ==========
@@ -1094,16 +1094,16 @@ install_podman() {
         rocky|almalinux|centos|rhel|opencloudos|tencentos|anolis)
             log_info "Installing Podman using dnf/yum..."
             if command -v dnf &> /dev/null; then
-                dnf install -y podman podman-docker
+                dnf install -y podman
             else
-                yum install -y podman podman-docker
+                yum install -y podman
             fi
             ;;
         
         # Fedora
         fedora)
             log_info "Installing Podman using dnf..."
-            dnf install -y podman podman-docker
+            dnf install -y podman
             ;;
         
         # Debian
@@ -1156,10 +1156,6 @@ install_podman() {
             ;;
     esac
     
-    # Create podman-docker symlink (if podman-docker package is missing)
-    if ! command -v docker &> /dev/null && command -v podman &> /dev/null; then
-        ln -sf /usr/bin/podman /usr/local/bin/docker 2>/dev/null || true
-    fi
 }
 
 # ========== Configure Podman Mirror Acceleration ==========
@@ -1212,34 +1208,7 @@ setup_podman_socket() {
         systemctl start  podman 2>/dev/null || true
     fi
     
-    # Create Docker socket symlink (compatibility with docker-compose default lookup path)
-    if [[ -S /run/podman/podman.sock ]] && [[ ! -e /var/run/docker.sock ]]; then
-        ln -sf /run/podman/podman.sock /var/run/docker.sock
-    elif [[ -S /run/podman/podman.sock ]] && [[ -L /var/run/docker.sock ]]; then
-        # Already a symlink, skip
-        true
-    fi
-    
-    # Write DOCKER_HOST to /etc/profile.d/supacloud.sh so docker-compose can find podman socket
-    mkdir -p /etc/supabase
-    PROFILE_FILE="/etc/profile.d/supacloud.sh"
-    if [[ -f "$PROFILE_FILE" ]]; then
-        # Exists (created by install_management_api), append DOCKER_HOST
-        if ! grep -q 'DOCKER_HOST' "$PROFILE_FILE"; then
-            echo 'export DOCKER_HOST=unix:///var/run/podman/podman.sock' >> "$PROFILE_FILE"
-        fi
-    else
-        # Not created yet, write early (install_management_api will append MASTER_TOKEN)
-        cat > "$PROFILE_FILE" <<'EOF'
-# SupaCloud CLI Environment Variables - Generated automatically by install.sh
-export DOCKER_HOST=unix:///var/run/podman/podman.sock
-EOF
-    fi
-    chmod 644 "$PROFILE_FILE"
-    # Enable in current shell immediately
-    export DOCKER_HOST=unix:///var/run/podman/podman.sock
-    log_info "DOCKER_HOST set: $DOCKER_HOST"
-    
+    # Quadlet and direct Podman commands do not require a Docker-compatible socket.
     # Configure mirror acceleration
     configure_podman_mirrors
 }
@@ -1421,56 +1390,8 @@ configure_pgbackrest_juicefs() {
 
 
 install_docker_compose() {
-    log_step "Checking Docker Compose..."
-    
-    COMPOSE_VERSION="v5.5.1"
-    
-    # The standalone binary is preferred on both Docker and Podman hosts. Skip
-    # re-downloading it when the target version is already present. Previously the
-    # presence-check was gated on CONTAINER_RUNTIME != podman, so every Podman install
-    # re-fetched the ~31MB binary from GitHub even when it was already installed -- and
-    # behind flaky GitHub connectivity the download (curl SSL_ERROR_SYSCALL) aborted
-    # the whole install despite docker-compose being perfectly functional.
-    if command -v docker-compose &>/dev/null && docker-compose version 2>/dev/null | grep -q "${COMPOSE_VERSION}"; then
-        log_info "Docker Compose already installed: $(docker-compose --version)"
-        return
-    fi
-    
-    # If using Podman, always install standalone docker-compose binary
-    # (instead of relying on 'podman compose' which might have different behavior).
-    # Compose v5 delegates BuildKit builds to Docker Buildx/Bake; this installer
-    # only uses the Podman-compatible binary for pull/up and does not pretend it
-    # provides a Podman image builder.
-    if [[ "${CONTAINER_RUNTIME:-}" != "podman" ]] && command -v docker-compose &> /dev/null; then
-        log_info "Docker Compose already installed: $(docker-compose --version)"
-        return
-    fi
-    
-    # For Podman environment or if not installed, check for plugin (docker compose)
-    # Note: 'docker compose' under podman calls podman-compose, skip it
-    if [[ "${CONTAINER_RUNTIME:-}" != "podman" ]] && docker compose version &> /dev/null 2>&1; then
-        log_info "Docker Compose (plugin) already installed"
-        if ! command -v docker-compose &> /dev/null; then
-            mkdir -p /usr/local/bin
-            cat > /usr/local/bin/docker-compose << 'EOF'
-#!/bin/sh
-exec docker compose "$@"
-EOF
-            chmod +x /usr/local/bin/docker-compose
-        fi
-        return
-    fi
-    
-    log_info "Installing standalone docker-compose ${COMPOSE_VERSION}..."
-    COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
-    
-    supacloud_download_url "$COMPOSE_URL" /usr/local/bin/docker-compose
-    
-    chmod +x /usr/local/bin/docker-compose
-    log_info "Docker Compose installation complete: $(/usr/local/bin/docker-compose --version)"
-    if [[ "${CONTAINER_RUNTIME:-}" == "podman" ]]; then
-        log_warn "Docker Compose ${COMPOSE_VERSION} requires Docker Buildx >= 0.17 for 'compose build'; use podman build or pre-built images on Podman hosts."
-    fi
+    log_error "Docker Compose support has been removed; use the Podman Quadlet single-node provider."
+    return 1
 }
 
 supacloud_atomic_install_binary() (
@@ -2171,8 +2092,6 @@ cleanup_legacy_supabase_compose_stack() {
     if [[ -z "$runtime" ]]; then
         if command -v podman >/dev/null 2>&1; then
             runtime="podman"
-        elif command -v docker >/dev/null 2>&1; then
-            runtime="docker"
         else
             log_warn "No container runtime found, skipping legacy compose cleanup"
             return
@@ -2419,38 +2338,11 @@ install_pigsty() {
         exit 1
     fi
 
-    # Run docker.yml only when using Docker runtime
-    # If using Podman, skip to avoid conflict with system's podman-docker package (e.g. Rocky Linux 9)
-    if [[ "${CONTAINER_RUNTIME:-}" == "podman" ]]; then
-        log_info "Detected Podman runtime, skipping docker.yml (avoiding conflict with podman-docker)"
-    else
-        log_info "Configuring Docker..."
-        if [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
-            ansible-playbook docker.yml $EXTRA_ARGS || true
-        elif [[ -x "./docker.yml" ]]; then
-            ./docker.yml || true
-        else
-            log_warn "docker.yml not found, skipping Docker configuration"
-        fi
-    fi
+    log_info "Skipping legacy container runtime playbook; Podman Quadlet owns SupaCloud services."
  
     if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
-        log_warn "Starting Pigsty's legacy Supabase compose stack because SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=true"
-        install_docker_compose
-        if [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
-            ansible-playbook app.yml $EXTRA_ARGS || {
-                log_warn "app.yml failed, trying manual start..."
-                manual_start_supabase
-            }
-        elif [[ -x "./app.yml" ]]; then
-            ./app.yml || {
-                log_warn "app.yml failed, trying manual start..."
-                manual_start_supabase
-            }
-        else
-            log_warn "app.yml not found, trying manual start..."
-            manual_start_supabase
-        fi
+        log_error "The legacy Supabase container stack has been removed; use the Podman single-node provider."
+        return 1
     else
         log_info "Skipping Pigsty legacy Supabase compose stack; SupaCloud uses multi-project runtime services."
         run_legacy_supabase_compose_migration_if_requested
@@ -2846,58 +2738,8 @@ install_supabase_pipelines() {
  
 # ========== Manually Start Supabase ==========
 manual_start_supabase() {
-    log_step "Manually starting Supabase..."
-    
-    cd ~/pigsty/app/supabase
-    
-    # Fix IP in .env
-    sed -i "s|POSTGRES_HOST=10.10.10.10|POSTGRES_HOST=${INTERNAL_IP}|g" .env
-    
-    # Start services
-    if docker compose version &> /dev/null 2>&1; then
-        docker compose up -d
-    elif command -v docker-compose &> /dev/null; then
-        docker-compose up -d
-    elif [[ -x /usr/local/bin/docker-compose ]]; then
-        /usr/local/bin/docker-compose up -d
-    else
-        install_docker_compose
-        /usr/local/bin/docker-compose up -d
-    fi
-    
-    # Fix container healthchecks
-    fix_container_healthchecks
-    
-    # Restart Studio after its healthcheck has been updated.
-    log_info "Restarting legacy Studio container to apply healthcheck fixes..."
-    docker restart supabase-studio 2>/dev/null || true
-}
- 
-# ========== Fix Container Healthchecks ==========
-fix_container_healthchecks() {
-    log_step "Fixing container healthchecks..."
-    
-    local COMPOSE_FILE=~/pigsty/app/supabase/docker-compose.yml
-    
-    if [[ ! -f "$COMPOSE_FILE" ]]; then
-        log_warn "docker-compose.yml not found, skipping healthcheck fix"
-        return
-    fi
-    
-    # Backup original file
-    cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak"
-    
-    # 1. Fix Studio healthcheck
-    # Issue: `=>` in YAML is interpreted as folding symbol, splitting the command
-    # Solution: Use simple port check or Node.js synchronous code
-    log_info "Fixing Studio healthcheck..."
-    if grep -q "fetch('http://studio:3000" "$COMPOSE_FILE" 2>/dev/null; then
-        # Replace with healthcheck not using arrow functions
-        sed -i "s|http://studio:3000|http://localhost:3000|g" "$COMPOSE_FILE"
-        log_info "  Studio healthcheck URL fixed"
-    fi
-    
-    log_info "Healthcheck fixes complete"
+    log_error "The legacy Supabase container stack has been removed; use podman/self-host/install.sh."
+    return 1
 }
  
 # ========== Configure PG HBA Whitelist ==========
@@ -5671,7 +5513,7 @@ show_completion() {
     echo "  2. Configure customer domains in the console; SupaCloud uses Caddy Automatic HTTPS by default"
     echo ""
     echo "Common Commands:"
-    echo "  Check container status: podman ps or docker ps"
+    echo "  Check container status: podman ps"
     echo "  Check logs: podman logs <container_name>"
     echo "  Restart services: systemctl restart supacloud supacloud-caddy"
     echo ""
@@ -5850,13 +5692,28 @@ main() {
     check_os_compatibility
     check_system
     install_base_dependencies
+
+    # Resolve the provider before touching Pigsty/Ansible state. New or
+    # explicitly Podman-selected single-node installs use the Quadlet path.
+    load_install_config_layers
+    supacloud_resolve_deployment_profile || return 1
+    if [[ "${SUPACLOUD_DATABASE_PROVIDER:-}" == "podman-single-node" ]]; then
+        local podman_public_url="http://${SUPABASE_PUBLIC_DOMAIN:-localhost}"
+        local podman_studio_url="http://${SUPABASE_STUDIO_DOMAIN:-localhost:9090}"
+        [[ "${SUPABASE_PUBLIC_DOMAIN:-}" =~ ^https?:// ]] && podman_public_url="$SUPABASE_PUBLIC_DOMAIN"
+        [[ "${SUPABASE_STUDIO_DOMAIN:-}" =~ ^https?:// ]] && podman_studio_url="$SUPABASE_STUDIO_DOMAIN"
+        exec bash "${SCRIPT_DIR}/podman/self-host/install.sh" \
+            --public-url "$podman_public_url" \
+            --studio-url "$podman_studio_url"
+    fi
+    supacloud_require_pigsty_install_path || return 1
+
     configure_local_ansible
     check_config
     setup_swap
     enable_ksm_optimization     # Kernel stack memory deduplication
     
     install_container_runtime
-    install_docker_compose
     install_s3_storage
     install_edge_runtime
     install_pigsty      # Pigsty nginx suppressed via nginx_enabled: false

@@ -1,0 +1,14 @@
+[Unit]
+Description=SupaCloud PostgREST
+Requires=supacloud-postgres.service
+After=supacloud-postgres.service
+
+[Container]
+Image=postgrest/postgrest:v16.5
+ContainerName=supacloud-postgrest
+Network=supacloud.network
+NetworkAlias=postgrest
+EnvironmentFile=/etc/supacloud/supacloud.env
+
+[Install]
+WantedBy=multi-user.target

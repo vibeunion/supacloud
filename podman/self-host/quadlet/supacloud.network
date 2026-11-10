@@ -1,0 +1,9 @@
+[Unit]
+Description=SupaCloud single-node Podman network
+
+[Network]
+NetworkName=supacloud
+Driver=bridge
+
+[Install]
+WantedBy=multi-user.target
