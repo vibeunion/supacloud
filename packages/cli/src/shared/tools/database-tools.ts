@@ -1050,6 +1050,8 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         const r = await managementHttp().postReleaseMutation(
                             `/v1/projects/${ref}/database/migrations`,
                             { name, sql, version },
+                            // Version, name, and SQL checksum make this migration request idempotent.
+                            { retryOnRateLimit: true },
                         );
                         if (r.ok && r.status === 200 && confirmedMigrationReceipt(r.data, { name, version, sql })) {
                             applied.push(file);

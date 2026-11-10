@@ -303,7 +303,7 @@ test.skipIf(!postgresBin)("readFunction bridges STABLE SQL definitions and rejec
   } finally { await server.close(); }
 }, 30_000);
 
-test.skipIf(!postgresBin)("ZenStack Json fields keep top-level arrays as jsonb values", async () => {
+test.skipIf(!postgresBin)("model updates preserve top-level Json arrays as one jsonb value", async () => {
   const server = await startStarterPostgres(postgresBin!);
   try {
     await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
@@ -312,14 +312,43 @@ test.skipIf(!postgresBin)("ZenStack Json fields keep top-level arrays as jsonb v
       try {
         const alice = db.forIdentity({ id: "alice" });
         const steps = [{ code: "S1", detail: { approved: true } }] as never;
+        // Seed rows outside the model create path so this case exercises the
+        // ORM transformInput path without depending on policy pre-create values.
+        await pool.unsafe("INSERT INTO \"Note\" (id, owner, value, steps) VALUES ($1, $2, $3, $4::jsonb), ($5, $2, $6, $4::jsonb)", [
+          "json-one", "alice", 1, JSON.stringify({ code: "seed" }), "json-many", 2,
+        ]);
+        await alice.commandStore.transaction(async session => {
+          await session.transaction.db.note.update({ where: { id: "json-one" }, data: { steps } });
+          await session.transaction.db.note.updateMany({ where: { id: "json-many" }, data: { steps } });
+        });
+        const rows = await pool`SELECT id, jsonb_typeof(steps) AS kind, steps FROM "Note" ORDER BY id`;
+        expect(rows.map((row: { id: string; kind: string }) => [row.id, row.kind])).toEqual([
+          ["json-many", "array"], ["json-one", "array"],
+        ]);
+        expect(rows[0].steps).toEqual(steps);
+        expect(rows[1].steps).toEqual(steps);
+      } finally { await db.dispose(); await pool.close(); }
+    });
+  } finally { await server.close(); }
+}, 30_000);
+
+test.skipIf(!postgresBin)("policy pre-create checks bind top-level Json arrays as jsonb", async () => {
+  const server = await startStarterPostgres(postgresBin!);
+  try {
+    await server.exec("CREATE TABLE \"Note\" (id text PRIMARY KEY, owner text NOT NULL, value integer NOT NULL, steps jsonb NOT NULL DEFAULT '[]'::jsonb);");
+    await server.withConnection(async url => {
+      const pool = new SQL(url, { max: 4 }); const db = createZenStackDatabase(schema, pool, {});
+      try {
+        const alice = db.forIdentity({ id: "alice" });
+        const steps = [{ code: "S1", detail: { approved: true } }] as never;
+        // The fixture's owner policy is non-constant, so create/createMany run
+        // the policy values-table preflight that must treat steps as one jsonb.
         await alice.commandStore.transaction(async session => {
           await session.transaction.db.note.create({ data: { id: "json-one", owner: "alice", value: 1, steps } });
           await session.transaction.db.note.createMany({ data: [
             { id: "json-many", owner: "alice", value: 2, steps },
             { id: "json-object", owner: "alice", value: 3, steps: { code: "object" } as never },
           ] });
-          await session.transaction.db.note.update({ where: { id: "json-one" }, data: { steps } });
-          await session.transaction.db.note.updateMany({ where: { id: "json-many" }, data: { steps } });
         });
         const rows = await pool`SELECT id, jsonb_typeof(steps) AS kind, steps FROM "Note" ORDER BY id`;
         expect(rows.map((row: { id: string; kind: string }) => [row.id, row.kind])).toEqual([
