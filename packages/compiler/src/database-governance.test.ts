@@ -32,6 +32,7 @@ Reflect.set(Bun, "SQL", class {
   async unsafe(sql) {
     const state = JSON.parse(readFileSync(new URL("./state.json", import.meta.url), "utf8"));
     if (state.error) throw new Error("postgres://private-secret@example.invalid/private");
+    if (sql.includes("FROM pg_trigger")) return state.triggers ?? [];
     return sql.includes("FROM pg_class")
       ? [{ schema: "public", name: "items", rls_enabled: state.rls, rls_forced: false }] : [];
   }
@@ -155,6 +156,27 @@ test("successful compilation checks live drift again on incremental cache hits a
   expect(await readFile(join(options.outDir, "app.manifest.json"), "utf8")).toBe(before);
   await writeFile(join(root, "db/state.json"), JSON.stringify({ rls: true }));
   expect((await compiler.compile(options, [])).diagnostics.filter(item => item.severity === "error")).toEqual([]);
+}, 30_000);
+
+test("catalog drift warnings stay warnings instead of blocking compilation", async () => {
+  const { root, options } = await fixture();
+  // Platform bootstrap creates realtime triggers outside the app module manifest.
+  // That drift must surface as a warning instead of failing the whole compilation.
+  await writeFile(join(root, "db/state.json"), JSON.stringify({
+    rls: true,
+    triggers: [{ schema: "public", table: "items", name: "realtime_notify_trigger", enabled: true }],
+  }));
+  expect(await checkDatabaseGovernance(root, options.databaseGovernance)).toEqual([
+    expect.objectContaining({
+      severity: "warn",
+      code: "database-catalog-undeclared-trigger",
+    }),
+  ]);
+  const compiled = await compileProject(options);
+  expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+  expect(compiled.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({ severity: "warn", code: "database-catalog-undeclared-trigger" }),
+  ]));
 }, 30_000);
 
 test("missing connection, stale sources and cached module declarations cannot silently pass", async () => {
