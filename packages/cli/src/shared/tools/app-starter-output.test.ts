@@ -21,11 +21,11 @@ async function build(root: string): Promise<void> {
     expect({ code, errors: code === 0 ? "" : stdout + stderr }).toEqual({ code: 0, errors: "" });
 }
 
-test.each(["app", "command"] satisfies StarterTemplate[])(
+test.each(["minimal", "command"] satisfies StarterTemplate[])(
     "%s starter keeps backend bundles separate from frontend cleanup and publication",
     async (template) => {
         const files = template === "command" ? appStarterFiles("isolated-build")
-            : appTemplateFiles("isolated-build", template, {
+            : appTemplateFiles("isolated-build", "minimal", {
                 "@supacloud/js": "^0.0.0", "@supabase/supabase-js": "^0.0.0",
             });
         const manifest = JSON.parse(requireValue(files["package.json"])) as {

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { generateKeyPair, SignJWT } from "jose";
 import { COMMAND_PERSISTENCE_SQL, type CommandDatabase, type CommandTransaction } from "@supacloud/db";
 import { ApplicationError, createApplication, type ExecutionEvent } from "@supacloud/elysia";
-import { createApp } from "../src/application";
+import { createApp, readCreatedApplication } from "../src/application";
 import { createReviewPostgresAdapters } from "../src/host/review-postgres";
 import { createCompiledModules } from "../generated/application";
 import { setupStarterAttachments, type AttachmentDatabase } from "./attachments";
@@ -212,13 +212,13 @@ export async function verifyPersistentStarter(
     assert.equal(await count("execution_audit", rollbackKey), 1);
   }
   const executorReview = await seed(), executorKey = crypto.randomUUID();
-  app = createApplication({
+  app = readCreatedApplication(createApplication({
     name: "starter-executor-check", modules: createCompiledModules(), deps: adapters.deps,
     requestContext: adapters.requestContext, onExecution: observe,
     async commandExecutor() {
       throw new ApplicationError("Executor unavailable", { status: 503, code: "EXECUTOR_UNAVAILABLE" });
     },
-  });
+  }));
   try {
     assert.equal((await request(executorReview, executorKey, { requestId: "starter-executor-failure" })).status, 503);
     assert.deepEqual(await state(executorReview), { state: "draft", version: 1 });

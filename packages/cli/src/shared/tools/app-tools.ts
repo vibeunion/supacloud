@@ -152,7 +152,7 @@ export interface AppToolArguments {
     wait?: boolean;
     timeout_seconds?: number;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource" | "feature";
-    template?: "minimal" | "app" | "command" | "model-command";
+    template?: "minimal" | "client" | "command" | "model-command" | "app";
     name?: string;
     module?: string;
     permission?: string;
@@ -197,9 +197,12 @@ export interface AppToolArguments {
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
     if (args.force) throw new Error("app init never overwrites files; choose an empty directory");
-    const template = args.template ?? "minimal";
-    const { root, name, files } = await initializeAppProject({ root: args.root, name: args.name, template });
-    const next = template === "minimal"
+    const { root, name, files, template } = await initializeAppProject({
+        root: args.root,
+        name: args.name,
+        template: args.template,
+    });
+    const next = template === "client"
         ? ["bun install", "bun run check"]
         : [
             "bun install",
@@ -209,8 +212,8 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
             ...(template === "model-command" ? ["# Follow README.md: apply reviewed local migrations, provision the application role and configure IdentityAuthority before dev."] : []),
             "bun run dev",
         ];
-    const note = template === "minimal"
-        ? "Data-plane client only (@supabase/supabase-js). The app/compiler/Effect stack is app init --template app."
+    const note = template === "client"
+        ? "Data-plane client only (@supabase/supabase-js). The forced default is app init (minimal compiler/Effect stack)."
         : template === "model-command"
         ? "Requires an explicitly selected database, reviewed migrations and trusted HTTP/worker identity authority; see README.md."
         : "Local demo only. Production requires persistent governance and identity adapters; see README.md.";
@@ -1940,7 +1943,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
-            template: optional(stringEnum(["minimal", "app", "command", "model-command"]), "[init] minimal (default) is a @supabase/supabase-js client; app opts into @supacloud/app, the compiler and Effect; command is the native-SQL reference; model-command adds ZenStack HTTP/worker commands"),
+            template: optional(stringEnum(["minimal", "client", "command", "model-command", "app"]), "[init] minimal (default) is the compiler/Effect stack; client is @supabase/supabase-js only; command is the native-SQL reference; model-command adds ZenStack HTTP/worker commands; app is an alias of minimal"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),

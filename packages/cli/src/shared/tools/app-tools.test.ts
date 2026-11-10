@@ -272,6 +272,23 @@ describe("app tools", () => {
             expect(result.isError).toBe(false);
             const manifest = readFileSync(join(initRoot, "package.json"), "utf8");
             expect(manifest).toContain('"@supabase/supabase-js"');
+            expect(manifest).toContain('"@supacloud/app"');
+            expect(manifest).toContain('"effect"');
+            expect(manifest).toContain('"@supacloud/compiler"');
+            expect(readFileSync(join(initRoot, "src/app.module.ts"), "utf8")).toContain("HealthModule");
+            expect(readFileSync(join(initRoot, "src/features/health/health.ts"), "utf8")).toContain("Effect");
+        } finally {
+            rmSync(initRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("init --template client creates a supabase-js-only directory", async () => {
+        const initRoot = mkdtempSync(join(tmpdir(), "supacloud-init-client-"));
+        try {
+            const result = await app({ action: "init", root: initRoot, name: "orders-client", template: "client" });
+            expect(result.isError).toBe(false);
+            const manifest = readFileSync(join(initRoot, "package.json"), "utf8");
+            expect(manifest).toContain('"@supabase/supabase-js"');
             expect(manifest).not.toContain('"@supacloud/app"');
             expect(manifest).not.toContain('"effect"');
             expect(readFileSync(join(initRoot, "src/client.ts"), "utf8")).toContain('from "@supabase/supabase-js"');
@@ -292,8 +309,13 @@ describe("app tools", () => {
                 root,
                 name: "orders",
                 template: "minimal",
-                files: expect.arrayContaining(["src/client.ts", "tests/client.test.ts", "AGENTS.md"]),
-                next: ["bun install", "bun run check"],
+                files: expect.arrayContaining([
+                    "src/app.module.ts",
+                    "src/features/health/health.ts",
+                    "src/features/health/health.test.ts",
+                    "AGENTS.md",
+                ]),
+                next: ["bun install", "bun run check", "bun run dev"],
             });
         } finally {
             rmSync(root, { recursive: true, force: true });

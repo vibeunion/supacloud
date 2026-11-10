@@ -21,7 +21,7 @@ FA 消费者验证后的 API、迁移补丁与验收入口见
 
 1. Full Platform：在受支持的自托管组合上提供项目隔离、交付、运维、升级和恢复。
 2. Admin、Web Console 与项目 CLI：让用户无需访问仓库即可操作平台的标准入口。
-3. 业务切片框架、编译器、SDK 与 AI 工具：显式可选路径（`app init --template app` 或 `--template model-command`）。不能成为使用平台的前置条件，也不是默认 `app init` 脚手架。默认数据面客户端是 `@supabase/supabase-js`。
+3. 业务切片框架、编译器、SDK 与 AI 工具：强制 vibecoding 默认来自 `app init`（`minimal`，别名 `app`）。显式 `--template client` 仍是仅 supabase-js；`--template model-command` 仍是 ZenStack 配方。该栈不能成为 Management API 开通前置条件。默认数据面客户端仍是 `@supabase/supabase-js`。
 4. Lite：独立的单项目与本地优先运行时，有自己的支持边界。
 
 ## 职责边界
@@ -83,7 +83,7 @@ SupAuth 是企业统一身份场景的外部依赖，不是编译和本地测试
 
 1. 完成[自托管稳定基线](self-hosted-stable-baseline.zh-CN.md)：一个受支持的部署组合、
    干净安装、双项目运行、一次有状态升级和一次独立恢复演练。
-2. 在项目入口文档和生成模板中落实上述职责契约。默认 `app init` 是 `@supabase/supabase-js` 客户端；Feature Slice 只在 `--template app` 或 `--template model-command` 中作为入口。平台使用不依赖应用框架。
+2. 在项目入口文档和生成模板中落实上述职责契约。默认脚手架是编译器/Effect 栈（`minimal`），并以 `@supabase/supabase-js` 作为数据面客户端。Feature Slice 从该默认开始；`--template client` 仅 supabase-js；`--template model-command` 仍是 ZenStack 配方。平台开通不依赖编译该栈。
 3. 补齐受支持的 SupAuth 宿主适配示例、可信身份验证、项目本地访问解析和真实认证的多应用测试。
 4. 选择一个真实业务命令，联合验证持久化授权、并发、幂等、事务与审计。
 5. 仅为静态可证明的错误添加编译检查、可操作诊断和反例；外部事实保留运行时校验。
@@ -91,13 +91,13 @@ SupAuth 是企业统一身份场景的外部依赖，不是编译和本地测试
 
 ## 业务切片默认路径
 
-不带模板的 `app init` 只写 `@supabase/supabase-js` 客户端，不安装 `@supacloud/app`、编译器、Elysia 或 Effect。Management API 开通项目时不编译应用，也不解释 Effect。
+不带模板的 `app init` 写入强制的编译器/Effect 栈（`minimal`：`@supacloud/app`、编译器、Elysia、Effect），并以 `@supabase/supabase-js` 作为数据面客户端。显式 `--template client` 仅 supabase-js，不安装该栈。Management API 开通项目时不编译应用，也不解释 Effect。
 
-受治理的 TypeScript 功能使用 `app init --template app` 或 `--template model-command`，然后再用 `app generate --kind feature`。生成器负责把数据库来源、
+受治理的 TypeScript 功能从该默认继续，使用 `app generate --kind feature`；需要 ZenStack HTTP/Worker 命令时再用 `--template model-command`。生成器负责把数据库来源、
 Query、Command、契约、权限声明、版本与幂等边界、回执恢复、任务状态、客户端、测试和交付
 检查放在同一份可检查的骨架中；数据库、迁移、RLS、RPC 和业务状态表仍是唯一事实源。
 
-应用可以不使用该框架，平台也不能因为应用没有使用框架而拒绝运行。框架是显式可选的工程路径，不是默认客户端，也不是开通时的编译器。静态 AOP 与现有 Angular 风格 DI 已冻结。Encore 对齐是提案，不驱动开通或默认脚手架。
+应用仍可使用 `--template client` 或完全不使用该框架，平台也不能因为应用没有使用框架而拒绝运行。框架是强制 vibecoding 默认，不是开通时的编译器。静态 AOP 与现有 Angular 风格 DI 已冻结。Encore 对齐是提案，不驱动开通或默认脚手架。
 
 ## 本地实现
 

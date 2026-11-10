@@ -13,9 +13,10 @@ and supplies a loopback database URL explicitly.
 `enforce` adds live Catalog reconciliation on top of `check`, including on
 incremental cache hits. Missing adoption files, stale contracts, SQL findings or
 Catalog drift block generation even with `writeOnError`; checks never generate
-contracts or migrations. The default `app init` scaffold is a supabase-js client
-and does not run this compiler. `--template app` remains database-free. There is
-no `http` or `edge` starter template.
+contracts or migrations. The default `app init` scaffold (`minimal`) runs this
+compiler and stays database-free until an explicit `command` or `model-command`
+recipe. `--template client` is the supabase-js-only directory and does not run
+this compiler. There is no `http` or `edge` starter template.
 
 For an existing database project, adopt the governed path by declaring the real
 database modules and setting the following in `supacloud.config.ts`:

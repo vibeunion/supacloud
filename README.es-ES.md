@@ -63,7 +63,7 @@ bun install
 bun run check
 ```
 
-Esto genera un cliente `@supabase/supabase-js` para la URL de API y la clave anónima de un proyecto aprovisionado. No instala `@supacloud/app`, el compilador ni Effect, y no es un despliegue de producción. Para la pila de aplicaciones opcional, usa `supacloud app init --template app` y sigue el README de ese proyecto. Sustituye los adaptadores de demo antes de la integración; ejecuta por separado la aceptación de negocio y de base de datos.
+Esto genera la pila forzada de compilador/Effect (`@supacloud/app`, compilador, Elysia, Effect) con `@supabase/supabase-js` como cliente del plano de datos. No es un despliegue de producción. Para un directorio solo de cliente, usa `supacloud app init --template client`. Sustituye los adaptadores de demo antes de la integración; ejecuta por separado la aceptación de negocio y de base de datos. El aprovisionamiento de Management API no compila este proyecto.
 
 <a id="supacloud-lite"></a>
 ### Ejecutar SupaCloud Lite
@@ -101,7 +101,7 @@ Usa la clave anónima con `@supabase/supabase-js`; nunca pongas la clave service
 
 ![Las declaraciones en tiempo de compilación se convierten en fábricas, contratos de cliente y OpenAPI. El host Elysia en ejecución consume módulos compilados e invoca servicios propiedad de la aplicación.](docs/assets/readme/build-runtime.es-ES.svg)
 
-El acceso a datos del proyecto usa `@supabase/supabase-js`. Los paquetes siguientes son la pila opcional de ingeniería de aplicaciones de `app init --template app`. El aprovisionamiento de Management API no compila ni importa esa pila.
+El acceso a datos del proyecto usa `@supabase/supabase-js`. Los paquetes siguientes son la pila forzada de ingeniería de aplicaciones del `app init` predeterminado (`minimal`). El aprovisionamiento de Management API no compila ni importa esa pila.
 
 `@supacloud/app` declara el modelo de la aplicación; `@supacloud/compiler` lo analiza y emite el cableado y los contratos; `@supacloud/elysia` aloja los módulos compilados. **El host HTTP sigue instalando Elysia.** Los metadatos de la aplicación y los módulos de negocio no necesitan importar tipos nativos de Elysia, pero las dependencias de esquemas compartidos siguen requiriendo actualizaciones coordinadas. Esto no establece portabilidad a frameworks arbitrarios ni paridad completa con las funciones nativas de Elysia. El AOP estático y los contratos DI de estilo Angular existentes están congelados; no añadas pointcuts en tiempo de ejecución ni nuevas API de Angular.
 
