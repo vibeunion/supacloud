@@ -13,7 +13,6 @@
     "rootDir": "src",
     "declaration": true,
     "allowImportingTsExtensions": true,
-    "baseUrl": ".",
     "paths": {
       "@supacloud/db-zenstack": ["../db-zenstack/src/index.ts"],
       "@supacloud/db-zenstack/model": ["../db-zenstack/src/model.ts"],
