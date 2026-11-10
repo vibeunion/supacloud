@@ -105,10 +105,11 @@ endpoints outside `states` at type-check time. `FeatureState<typeof spec>` and
 `FeatureEvent<typeof spec>` expose those unions to application code. Runtime
 assertions and authoritative database checks are still required for external input.
 
-Runtime DI delegates to Angular's public `@angular/core` APIs through a small
-compatibility adapter. SupaCloud decorators retain module/compiler metadata,
-while production application factories remain compiler-generated and
-reflection-free.
+`@supacloud/app/runtime` delegates to Angular's public `@angular/core` APIs
+through a small compatibility adapter. The package root, `@supacloud/app/core`,
+and `@supacloud/app/http` do not import `@angular/core`. SupaCloud decorators
+retain module/compiler metadata, while production application factories remain
+compiler-generated and reflection-free.
 
 ## Frontend Release Discovery
 
@@ -281,10 +282,15 @@ Do not add Forms, signals, HttpClient, or runtime pointcuts.
 
 ## Migration: Angular injector adapter
 
-`inject`, `createEnvironmentInjector`, `bootstrapBun`, `TestBed`, and the
-`HttpClient` that calls `inject()` moved off the package root. Import them
-from `@supacloud/app/runtime`. That module loads `@angular/core`.
+`inject`, `createEnvironmentInjector`, `bootstrapBun`, `TestBed`,
+`provideHttpClient`, and the `HttpClient` that calls `inject()` moved off the
+package root and off `@supacloud/app/http`. Import them from
+`@supacloud/app/runtime`. That module loads `@angular/core`.
 `@angular/core` is an optional peer: install it only when you import the runtime.
+
+`@supacloud/app/http` keeps headers, params, context, interceptor functions,
+and feature objects (`withFetch`, `withInterceptors`,
+`withRequestsMadeViaParent`). It does not import `@angular/core`.
 
 ```ts
 import {

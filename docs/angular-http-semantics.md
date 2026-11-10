@@ -34,17 +34,17 @@ provider feature. To configure through public root exports without changing that
 legacy API, register the array with `HTTP_INTERCEPTORS`:
 
 ```ts
-import { withInterceptors } from "@supacloud/app";
+import { withInterceptors as interceptorArray } from "@supacloud/app";
 import {
-  createEnvironmentInjector, HttpClient, HTTP_INTERCEPTORS,
-  provideHttpClient, withFetch, withRequestsMadeViaParent,
+  createEnvironmentInjector, HttpClient, HTTP_INTERCEPTORS, provideHttpClient,
 } from "@supacloud/app/runtime";
+import { withFetch, withRequestsMadeViaParent } from "@supacloud/app/http";
 
 const parent = createEnvironmentInjector([
   provideHttpClient(withFetch()),
   {
     provide: HTTP_INTERCEPTORS,
-    useValue: withInterceptors(async (request, next) => next(request)),
+    useValue: interceptorArray(async (request, next) => next(request)),
     multi: true,
   },
 ], undefined, { initialize: false });

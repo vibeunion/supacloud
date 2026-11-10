@@ -177,11 +177,10 @@ console.log("Packed Angular identity, state, ownership, misuse and teardown pass
 
 function httpConsumerSource(): string {
   return `import { strict as assert } from "node:assert";
-import { HttpClient as RuntimeClient, createEnvironmentInjector } from "@supacloud/app/runtime";
-import { HttpClient, provideHttpClient, withFetch, withInterceptors, withRequestsMadeViaParent } from "@supacloud/app/http";
+import { HttpClient, createEnvironmentInjector, provideHttpClient } from "@supacloud/app/runtime";
+import { withFetch, withInterceptors, withRequestsMadeViaParent } from "@supacloud/app/http";
 import { createHttpTestBackend } from "@supacloud/testing";
 import { createPendingWorkRegistry } from "@supacloud/app/pending-work";
-assert.equal(HttpClient, RuntimeClient, "HTTP entry must share the runtime client identity");
 const backend = createHttpTestBackend();
 const order: string[] = [];
 const parent = createEnvironmentInjector([provideHttpClient(withFetch(backend.fetch), withInterceptors(async (req, next) => {

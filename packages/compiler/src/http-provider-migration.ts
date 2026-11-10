@@ -12,7 +12,7 @@ async function providerArgument(node: ts.Node, checker: ts.TypeChecker): Promise
   const parent = current.parent;
   if (!ts.isCallExpression(parent) || !parent.arguments.some(argument => argument === current)) return false;
   const owner = (await apiOrigin(parent.expression, checker));
-  return owner?.name === "provideHttpClient" && ["@supacloud/app", "@supacloud/app/http"].includes(owner.module);
+  return owner?.name === "provideHttpClient" && ["@supacloud/app", "@supacloud/app/http", "@supacloud/app/runtime"].includes(owner.module);
 }
 
 /** Never replaces the root array helper in constructor/custom pipeline usages. */
@@ -77,7 +77,38 @@ export async function migrateHttpProviderImports(source: string, fileName: strin
   if (issues.length) return { changed: false, content: source, replacements: 0, issues };
   let content = source;
   for (const edit of edits.sort((a, b) => b.start - a.start)) content = content.slice(0, edit.start) + edit.text + content.slice(edit.end);
-  return { changed: edits.length > 0, content, replacements: edits.length, issues: [] };
+  const runtimeMove = await moveNamedImports(content, "@supacloud/app", "@supacloud/app/runtime", ["provideHttpClient", "HttpClient"]);
+  return { changed: edits.length > 0 || runtimeMove.changed, content: runtimeMove.content, replacements: edits.length + runtimeMove.replacements, issues: [] };
+}
+
+/** Move inject-based HTTP symbols off the package root. `/http` must not re-export them. */
+async function moveNamedImports(source: string, from: string, to: string, names: string[]): Promise<{ content: string; changed: boolean; replacements: number }> {
+  const parsed = await ts.createSourceFile("move.ts", source);
+  const edits: { start: number; end: number; text: string }[] = [];
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  for (const statement of parsed.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
+      || statement.moduleSpecifier.text !== from || !statement.importClause
+      || statement.importClause.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+    const named = statement.importClause.namedBindings;
+    if (!named || !ts.isNamedImports(named)) continue;
+    const moving = named.elements.filter(item => !item.isTypeOnly && names.includes((item.propertyName ?? item.name).text));
+    if (moving.length === 0) continue;
+    const remaining = named.elements.filter(item => !moving.includes(item));
+    const moved = `import { ${moving.map(item => item.getText(parsed)).join(", ")} } from "${to}";`;
+    if (remaining.length === 0 && !statement.importClause.name) {
+      edits.push({ start: statement.getStart(parsed), end: statement.end, text: moved });
+    } else {
+      const clause = ts.factory.updateImportClause(statement.importClause, statement.importClause.name,
+        remaining.length ? ts.factory.updateNamedImports(named, remaining) : undefined);
+      const updated = ts.factory.updateImportDeclaration(statement, statement.modifiers, clause, statement.moduleSpecifier, statement.attributes);
+      const kept = (await ts.printNode(updated)).trim();
+      edits.push({ start: statement.getStart(parsed), end: statement.end, text: `${kept}${newline}${moved}` });
+    }
+  }
+  let content = source;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) content = content.slice(0, edit.start) + edit.text + content.slice(edit.end);
+  return { content, changed: edits.length > 0, replacements: edits.length };
 }
 
 export async function scanHttpProviderImports(source: ts.SourceFile, file: string): Promise<Diagnostic[]> {
