@@ -152,6 +152,7 @@ jobs:
           (cd packages/supacloud-js && bun install --frozen-lockfile && bun run build)
           (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/db && bun install --frozen-lockfile && bun run build)
+          (cd packages/db-zenstack && bun install --force --frozen-lockfile)
           (cd packages/management-api && bun install --frozen-lockfile)
           (cd packages/worker && bun install --frozen-lockfile)
           (cd packages/supacloud-lite && bun install --frozen-lockfile)
@@ -195,6 +196,7 @@ jobs:
               bun install --ignore-scripts --frozen-lockfile --cwd ../..
               node ../../scripts/workspace/prepare.mjs supacloud-js
               bun install --frozen-lockfile
+              (cd ../db-zenstack && bun install --force --frozen-lockfile)
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
               bun run typecheck:test
@@ -230,6 +232,9 @@ jobs:
             prepare_script: |
               bun run ../../scripts/build-command-dependencies.ts cli
               bun install --frozen-lockfile
+              (cd ../db-zenstack && bun install --force --frozen-lockfile && bun run build)
+              mkdir -p node_modules/@supacloud
+              ln -sfn ../../../db-zenstack node_modules/@supacloud/db-zenstack
             typecheck_script: |
               bun run typecheck
             test_script: |
@@ -315,6 +320,7 @@ jobs:
             script: |
               bun run ../../scripts/build-command-dependencies.ts elysia
               bun install --frozen-lockfile
+              (cd ../db-zenstack && bun install --force --frozen-lockfile)
               bun run generate:example
               bun run typecheck
               bun run typecheck:test
@@ -331,6 +337,17 @@ jobs:
               bun run typecheck:test
               bun test
               bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Database ZenStack Adapter
+            working-directory: packages/db-zenstack
+            script: |
+              bun run ../../scripts/build-command-dependencies.ts db-zenstack
+              bun install --frozen-lockfile
+              (cd ../compiler && bun install --frozen-lockfile)
+              (cd ../cli && bun install --frozen-lockfile)
+              bun run typecheck
+              bun run build
+              bun test
               bun run ../../scripts/audit_dependencies.ts
           - name: Command Contracts
             working-directory: packages/contracts
@@ -481,6 +498,7 @@ jobs:
         run: |
           bun run ../../scripts/build-command-dependencies.ts supacloud-lite
           bun install --frozen-lockfile
+          (cd ../db-zenstack && bun install --force --frozen-lockfile)
 
       - name: Run Lite fast checks
         working-directory: packages/supacloud-lite
@@ -599,6 +617,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location ../db-zenstack
+          bun install --frozen-lockfile
+          $dbz = $LASTEXITCODE
+          Pop-Location
+          if ($dbz -ne 0) { exit $dbz }
 
       - name: Check SupaCloud Lite fast path on Windows
         shell: pwsh

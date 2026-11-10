@@ -128,7 +128,7 @@ Production servers do not need to `git pull` application source. Do not trust an
 
 Frontend releases use immutable archive hashes and activation compare-and-swap values. Function mutations require the observed active version; positive versions permit immutable source backup, while `0` is only the legacy active-version token. Reconcile stale mutations instead of blindly replaying them. Full commands, receipts and rollback constraints remain in the [CLI](cli-guide.md), [frontend](frontend-hosting.md) and [Edge Runtime](edge-runtime-guide.md) guides.
 
-Embedded Edge Runtime is managed by `supacloud.service`; external mode uses `supacloud-edge-runtime.service`. Do not run both at once. Public `/functions/v1/*` and `/realtime/v1/websocket` traffic enters Management API, not worker/Realtime internals directly. See [background functions](background-functions.md).
+Embedded Edge Runtime is managed by `supacloud.service`; external mode uses `supacloud-edge-runtime.service`. Do not run both at once. Public `/functions/v1/*` and `/realtime/v1/websocket` traffic enters Management API, not worker/Realtime internals directly. The Realtime socket is proxied to Elixir and does not fail over to Bun LISTEN/NOTIFY. See [background functions](background-functions.md) and the [Realtime public contract](edge-runtime-guide.md#realtime-gateway-model).
 
 Caddy routing is published as validated JSON through its Admin API, not by hand-editing a production Caddyfile. See [gateway ownership and recovery](gateway-customization.md). [pgredis-runtime](pgredis-runtime.md) is a private data plane: browsers do not call its internal port and workers do not receive PostgreSQL credentials. PGMQ remains the platform queue.
 

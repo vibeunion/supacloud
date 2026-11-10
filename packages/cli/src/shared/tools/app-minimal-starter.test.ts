@@ -10,29 +10,47 @@ const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-async function fixture() {
+async function fixture(template?: "app") {
   const root = await mkdtemp(join(tmpdir(), "minimal-starter-"));
   roots.push(root);
-  await initializeAppProject({ root, name: "sample" });
+  await initializeAppProject({ root, name: "sample", ...(template ? { template } : {}) });
   return root;
 }
 
-test("default initialization is a small feature-local application without optional engines", async () => {
+test("default initialization is a supabase-js client without the app/compiler/Effect stack", async () => {
   const root = await fixture();
   const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-  expect(manifest.dependencies["@supacloud/js"]).toBeDefined();
-  for (const name of ["rxjs", "@supacloud/commands", "@supacloud/db", "@supacloud/worker", "@supacloud/approval"]) {
+  expect(manifest.dependencies["@supabase/supabase-js"]).toBeDefined();
+  for (const name of [
+    "rxjs", "effect", "elysia", "@supacloud/js", "@supacloud/app", "@supacloud/elysia",
+    "@supacloud/commands", "@supacloud/db", "@supacloud/worker", "@supacloud/approval",
+  ]) {
     expect(manifest.dependencies[name]).toBeUndefined();
   }
-  const config = await readFile(join(root, "supacloud.config.ts"), "utf8");
-  expect(config).not.toContain("graphql:");
-  expect(await readFile(join(root, "src/app.module.ts"), "utf8")).toContain("./features/health/health");
+  expect(manifest.devDependencies["@supacloud/compiler"]).toBeUndefined();
+  expect(manifest.scripts.compile).toBeUndefined();
+  expect(await readFile(join(root, "src/client.ts"), "utf8")).toContain('from "@supabase/supabase-js"');
+  expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("--template app");
+  await expect(readFile(join(root, "src/app.module.ts"), "utf8")).rejects.toThrow();
   await expect(readFile(join(root, "graphql/schema.graphql"), "utf8")).rejects.toThrow();
   await expect(initializeAppProject({ root, name: "sample" })).rejects.toThrow("empty directory");
 });
 
-test("minimal source compiles and its colocated health test executes with the new core entry", async () => {
+test("default client test runs against the workspace supabase-js package", async () => {
   const root = await fixture();
+  const repo = resolve(import.meta.dir, "../../../../..");
+  await symlink(join(repo, "packages/cli/node_modules"), join(root, "node_modules"), "dir");
+  const child = Bun.spawn([process.execPath, "--no-env-file", "test", "tests/client.test.ts"], {
+    cwd: root, stdout: "pipe", stderr: "pipe",
+  });
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ]);
+  expect({ code, errors: code === 0 ? "" : stdout + stderr }).toEqual({ code: 0, errors: "" });
+});
+
+test("minimal source compiles and its colocated health test executes with the new core entry", async () => {
+  const root = await fixture("app");
   const repo = resolve(import.meta.dir, "../../../../..");
   const config = JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8"));
   config.compilerOptions.paths = {

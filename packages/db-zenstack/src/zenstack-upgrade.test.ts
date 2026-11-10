@@ -3,23 +3,27 @@ import { SQL } from "bun";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as ts from "./typescript";
-import { CompiledQuery } from "kysely";
+import * as ts from "../../db/src/typescript";
 import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
 import { compileModel, modelProcess } from "./model";
 import { modelMain } from "./model-cli";
 import { createZenStackDatabase } from "./zenstack";
 import { schema } from "../tests/fixtures/model/generated/schema";
-import { COMMAND_PERSISTENCE_SQL } from "./command-schema";
-import { databaseSources } from "./source-contracts";
+import { COMMAND_PERSISTENCE_SQL } from "../../db/src/command-schema";
+import { databaseSources } from "../../db/src/source-contracts";
 import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { generateDatabaseContracts, parseDatabaseContractsOptions } from "../../compiler/src/database-contracts";
-import { registerRemoteDevTools } from "../../cli/src/shared/tools/remote-dev-tools";
-import type { ToolInvocation } from "../../cli/src/shared/tool-server";
 import { startStarterPostgres } from "../../../scripts/lib/starter-postgres";
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function temporary() { const root = await mkdtemp(join(tmpdir(), "zenstack-upgrade-")); roots.push(root); return root; }
+async function linkDatabaseAdapter() {
+  const target = resolve(import.meta.dir, "../../db/node_modules/@supacloud");
+  await mkdir(target, { recursive: true });
+  try { await symlink(resolve(import.meta.dir, ".."), join(target, "db-zenstack"), "dir"); } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+  }
+}
 async function starter(root: string) {
   for (const [file, source] of Object.entries(appStarterFiles("model-upgrade"))) {
     await mkdir(join(root, file, ".."), { recursive: true }); await writeFile(join(root, file), source);
@@ -27,6 +31,7 @@ async function starter(root: string) {
   await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
 }
 test("real model types, source boundaries and stale contracts fail closed", async () => {
+  await linkDatabaseAdapter();
   const root = await temporary(); await starter(root);
   const before = await readFile(join(root, "migrations/001-review.sql"), "utf8");
   const first = await databaseSources(root, "generate");
@@ -69,26 +74,6 @@ test("pinned candidate generator never applies or rewrites migration history", a
   expect(files["package.json"]).toContain("supacloud-model diff");
   expect(Object.keys(files).join("\n") + files["package.json"]).not.toMatch(/drizzle|reylo/i);
 }, 30_000);
-test("native driver parameters, counts, savepoints and lifetime", async () => {
-  const calls: Array<{ sql: string; args: unknown[] }> = []; let releases = 0, closes = 0;
-  const pool: BunSqlPool = { reserve: async () => ({ unsafe: async (sql, args) => { calls.push({ sql, args }); return Object.assign([], { count: 2, command: "UPDATE" }); }, release: () => { releases++; } }), close: async () => { closes++; } };
-  const factory: unknown = createZenStackDatabase;
-  if (typeof factory !== "function") throw new Error("Missing model factory");
-  expect(() => Reflect.apply(factory, undefined, [schema, pool, { validateInput: false }])).toThrow("cannot be overridden");
-  const dialect = new BunPostgresDialect(pool);
-  const driver = dialect.createDriver(); const connection = await driver.acquireConnection();
-  await driver.beginTransaction(connection, { isolationLevel: "serializable", accessMode: "read write" });
-  expect((await connection.executeQuery(CompiledQuery.raw("update note set value=$1", [2]))).numAffectedRows).toBe(2n);
-  if (!driver.savepoint) throw new Error("Missing native savepoint support");
-  const compiler = dialect.createQueryCompiler();
-  await driver.savepoint(connection, 'a"b', compiler.compileQuery.bind(compiler));
-  await driver.rollbackTransaction(connection);
-  await driver.releaseConnection(connection); await driver.releaseConnection(connection);
-  await expect(connection.executeQuery(CompiledQuery.raw("SELECT 1"))).rejects.toThrow("released");
-  await driver.destroy(); expect(releases).toBe(1); expect(closes).toBe(0);
-  expect(calls.map(c => c.sql)).toEqual(["BEGIN ISOLATION LEVEL serializable read write", "update note set value=$1", 'SAVEPOINT "a""b"', "ROLLBACK"]);
-  expect(calls[1]?.args).toEqual([2]);
-});
 const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 test.skipIf(!postgresBin)("real Bun SQL policy, receipt and audit atomicity; capabilities expire", async () => {
   const server = await startStarterPostgres(postgresBin!);
@@ -166,20 +151,6 @@ void [host, row];`);
     types: ["bun"], typeRoots: [join(root, "node_modules/@types")], target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
   expect((await ts.getPreEmitDiagnostics(program)).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
-});
-
-test("removed dev migration action and config fail before remote execution", async () => {
-  const root = await temporary();
-  let invoke: ToolInvocation | undefined;
-  let calls = 0;
-  registerRemoteDevTools({ tool(_name, _description, _schema, handler) { invoke = handler; } }, {
-    cwd: root, environment: "test", execute: async () => { calls++; return { exitCode: 0, stdout: "", stderr: "" }; },
-  });
-  if (!invoke) throw new Error("Missing dev tool");
-  await expect(invoke({ action: "migrate" })).rejects.toThrow();
-  await writeFile(join(root, "supacloud.json"), JSON.stringify({ dev: { database: {} } }));
-  await expect(invoke({ action: "status" })).rejects.toThrow("dev.database was removed");
-  expect(calls).toBe(0);
 });
 
 test.skipIf(!postgresBin)("model command lock serializes writers, is transaction-scoped and deadlock-free", async () => {

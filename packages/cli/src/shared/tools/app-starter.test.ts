@@ -53,7 +53,7 @@ test("initialization permits an existing git directory and refuses subsequent ov
     const root = await directory();
     await mkdir(join(root, ".git"));
     const result = await initializeAppProject({ root, name: "example" });
-    expect(result.files).toContain("scripts/environment.ts");
+    expect(result.files).toContain("src/client.ts");
     await expect(initializeAppProject({ root, name: "example" })).rejects.toThrow("empty directory");
 });
 
@@ -97,7 +97,7 @@ test("the database starter registers live Catalog governance while default check
     expect(appStarterFiles("governed")["db/modules.ts"]).toContain('name: "starter"');
     expect(appStarterFiles("governed")["scripts/dev.ts"])
         .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');
-    const files = appTemplateFiles("plain", "minimal", {
+    const files = appTemplateFiles("plain", "app", {
         "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
     });
     expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
@@ -120,11 +120,11 @@ test("starter route schemas live in contract-only files", () => {
     expect(framework["src/review/contracts.ts"]).toContain("export const HealthResult");
     expect(framework["src/review/uploads.ts"]).toContain('from "./contracts"');
 
-    const minimal = appTemplateFiles("example", "minimal", {
+    const app = appTemplateFiles("example", "app", {
         "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
     });
-    expect(minimal["src/features/health/health.ts"]).toContain('from "./contracts"');
-    expect(minimal["src/features/health/contracts.ts"]).toContain("export const HealthResult");
+    expect(app["src/features/health/health.ts"]).toContain('from "./contracts"');
+    expect(app["src/features/health/contracts.ts"]).toContain("export const HealthResult");
 });
 
 test("the review handler awaits storage before reporting a successful transition", () => {

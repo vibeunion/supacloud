@@ -1,7 +1,7 @@
 /**
  * Default business-module authoring surface. UI, reactive state, HTTP clients
  * and runtime bootstrapping remain explicit integrations, not core exports.
- * Existing Angular-backed metadata/DI semantics are intentionally preserved.
+ * Metadata and tokens in this entry do not import `@angular/core`.
  */
 export {
   Body, Command, Controller, Cookie, Delete, Get, Head, Headers, Inject,
