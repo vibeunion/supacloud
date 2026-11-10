@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /// <reference path="./optional-db-zenstack.d.ts" />
 import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
