@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import { analyzeProject } from "./analyze";
 import { checkProject, compileProject } from "./compile";
-import { createContextPack, doctorProject, explainGraph, formatGraph } from "./inspect";
+import { createContextPack, doctorProject, explainGraph, formatDoctorCheck, formatGraph } from "./inspect";
 import { createExecutionContextPack, readExecutionMetadata, ExecutionContextError } from "./execution-context";
 import { createApplicationDevelopmentContext, formatApplicationDevelopmentContext } from "./application-development";
 import {
@@ -853,7 +853,7 @@ async function run(): Promise<void> {
     if (json) {
       console.log(JSON.stringify(doctor, null, 2));
     } else {
-      for (const check of doctor.checks) console.log(`${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
+      for (const check of doctor.checks) console.log(formatDoctorCheck(check));
       printDiagnostics(doctor.diagnostics ?? []);
     }
     if (doctor.errors > 0) process.exit(1);

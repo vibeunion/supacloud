@@ -776,7 +776,7 @@ supacloud-compiler explain CaseService ./app
 supacloud-compiler doctor ./app
 ```
 
-`graph` 输出模块拓扑和平台注入 token；`explain` 解释模块、provider 或 external token 的来源与依赖；`doctor` 检查项目结构、模块发现、生成物漂移和编译诊断。加 `--json` 可供 IDE、脚本和 CI 消费结构化结果。
+`graph` 输出模块拓扑和平台注入 token；`explain` 解释模块、provider 或 external token 的来源与依赖；`doctor` 检查项目结构、模块发现、生成物漂移和编译诊断。每项检查带 `layer`：`source`（源码）、`artifact`（产物）或 `runtime`（运行时）。失败时文本行和 `--json` 都标出问题落在哪一层，不另建检查目录。加 `--json` 可供 IDE、脚本和 CI 消费结构化结果。
 
 `lens` 在同一只读图上提供 `sourceHash` 与 `semanticHash`，并按模块、路由、Command、权限、Effect、契约和迁移节点输出稳定身份；默认输出只含身份与摘要（可用 `--detail` 附带用于解释变更的节点值），`semantic-diff` 比较两个 lens 快照并报告变更与治理冲突。Effect 冲突直接复用编译器的 `validateEffectPolicies`，因此 lens 不会与 `app check` 给出不同结论。完整边界见 [semantic codebase identity](../../docs/semantic-codebase-identity.md)。
 

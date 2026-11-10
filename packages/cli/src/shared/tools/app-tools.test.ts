@@ -529,15 +529,57 @@ describe("app tools", () => {
         expect(doctor.manualFixes).toBe(0);
         expect(doctor.fixPlan).toEqual([]);
         expect(doctor.next).toEqual(["supacloud app compile", "supacloud app verify-plan --target <module>"]);
-        expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
-        expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
+        expect(doctor.checks.find((check: { name: string }) => check.name === "modules")).toMatchObject({ ok: true, layer: "source" });
+        expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts")).toMatchObject({ ok: true, layer: "artifact" });
         expect(doctor.unwiredContracts.some((entry: { file: string }) => entry.file.includes("issue-invoice.contract.ts"))).toBe(true);
 
         const text = await app({ action: "doctor", root });
         expect(text.isError).toBe(false);
+        expect(text.content[0].text).toContain("OK source modules:");
+        expect(text.content[0].text).toContain("OK artifact generated-artifacts:");
         expect(text.content[0].text).toContain("No blocking issues");
         expect(text.content[0].text).toContain("unwired contract file(s)");
     });
+
+    test("doctor labels failed source, artifact and runtime checks", async () => {
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-doctor-layers-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                await writeFile(absolute, content, "utf8");
+            }
+            writeFileSync(join(isolatedRoot, "database.sources.json"), "{}");
+            await mkdir(join(isolatedRoot, "node_modules/@supacloud/db"), { recursive: true });
+            writeFileSync(join(isolatedRoot, "node_modules/@supacloud/db/package.json"), JSON.stringify({
+                name: "@supacloud/db", type: "module",
+            }));
+            const result = await app({ action: "doctor", root: isolatedRoot, format: "json" });
+            expect(result.isError).toBe(true);
+            const doctor = JSON.parse(result.content[0].text);
+            expect(doctor.checks).toEqual(expect.arrayContaining([
+                expect.objectContaining({ name: "project-root", ok: true, layer: "source" }),
+                expect.objectContaining({ name: "tsconfig", ok: true, layer: "source" }),
+                expect.objectContaining({ name: "modules", ok: true, layer: "source" }),
+                expect.objectContaining({
+                    name: "generated-artifacts",
+                    ok: false,
+                    layer: "artifact",
+                    detail: "generated artifacts are missing or stale",
+                }),
+                expect.objectContaining({ name: "database-source-contracts", ok: false, layer: "runtime" }),
+            ]));
+            const text = await app({ action: "doctor", root: isolatedRoot });
+            expect(text.isError).toBe(true);
+            expect(text.content[0].text).toContain("FAIL artifact generated-artifacts: generated artifacts are missing or stale");
+            expect(text.content[0].text).toContain("FAIL runtime database-source-contracts:");
+            expect(text.content[0].text).toContain("OK source modules:");
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
+    }, 30_000);
 
     test("context rejects unknown and ambiguous targets without losing module lookup", async () => {
         expect(await app({ action: "context", root, target: "not-a-symbol", format: "json" }).catch((error: unknown) => error))

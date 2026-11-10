@@ -9,6 +9,7 @@ import {
   createExecutionPlans,
   doctorProject,
   explainGraph,
+  formatDoctorCheck,
   exportGraphDot,
   exportGraphMermaid,
   formatGraph,
@@ -263,6 +264,44 @@ export class FeatureModule {}`);
     const doctor = doctorProject(rootDir, outDir, result.graph, result.upToDate, result.diagnostics);
     expect(doctor.errors).toBe(0);
     expect(doctor.checks.every((check) => check.ok)).toBe(true);
+    expect(doctor.checks.map((check) => [check.name, check.layer])).toEqual([
+      ["project-root", "source"],
+      ["tsconfig", "source"],
+      ["modules", "source"],
+      ["generated-artifacts", "artifact"],
+    ]);
+    const artifacts = doctor.checks.find((check) => check.name === "generated-artifacts");
+    expect(formatDoctorCheck(artifacts!)).toBe("OK artifact generated-artifacts: application.ts and app.manifest.json are up to date");
+  });
+
+  test("doctorProject 失败检查标出源码或产物层", () => {
+    const missingRoot = join(rootDir, "missing-project");
+    const missing = doctorProject(missingRoot, join(missingRoot, "generated"), { modules: [], externalTokens: [] }, false, [
+      { severity: "error", code: "missing-module", message: "module source is invalid" },
+    ]);
+    const failed = (name: string) => missing.checks.find((check) => check.name === name);
+    expect(failed("project-root")).toMatchObject({ ok: false, layer: "source", detail: `missing: ${missingRoot}` });
+    expect(failed("tsconfig")).toMatchObject({ ok: false, layer: "source", detail: "tsconfig.json missing" });
+    expect(failed("modules")).toMatchObject({ ok: false, layer: "source", detail: "0 module(s) discovered" });
+    expect(failed("generated-artifacts")).toMatchObject({
+      ok: false,
+      layer: "artifact",
+      detail: "generated artifacts are missing or stale",
+    });
+    expect(formatDoctorCheck(failed("project-root")!)).toBe(`FAIL source project-root: missing: ${missingRoot}`);
+    expect(formatDoctorCheck(failed("generated-artifacts")!)).toBe(
+      "FAIL artifact generated-artifacts: generated artifacts are missing or stale",
+    );
+    expect(missing.errors).toBe(5);
+
+    const stale = doctorProject(rootDir, join(rootDir, "not-generated"), graph, false);
+    expect(stale.checks.find((check) => check.name === "project-root")).toMatchObject({ ok: true, layer: "source" });
+    expect(stale.checks.find((check) => check.name === "tsconfig")).toMatchObject({ ok: true, layer: "source" });
+    expect(stale.checks.find((check) => check.name === "modules")).toMatchObject({ ok: true, layer: "source" });
+    expect(stale.checks.find((check) => check.name === "generated-artifacts")).toMatchObject({ ok: false, layer: "artifact" });
+    expect(formatDoctorCheck(stale.checks.find((check) => check.name === "generated-artifacts")!)).toBe(
+      "FAIL artifact generated-artifacts: generated artifacts are missing or stale",
+    );
   });
 
   test("exportGraphMermaid 和 exportGraphDot 生成模块依赖图可视化脚本", () => {

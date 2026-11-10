@@ -5,6 +5,8 @@ export interface AppDatabaseCheck {
   name: "database-source-contracts";
   ok: boolean;
   detail: string;
+  /** `source` when the checker reports; `runtime` when that checker cannot run. */
+  layer: "source" | "runtime";
 }
 
 const CHECK_ENTRY = `
@@ -42,9 +44,18 @@ export function checkAppDatabaseSources(projectRoot: string): AppDatabaseCheck |
         || !("message" in finding) || typeof finding.message !== "string") throw new Error("Invalid source finding");
       messages.push(`${finding.file}: ${finding.message}`);
     }
-    return { name, ok: (result.exitCode === 0 || result.success) && report.ok && !messages.length,
-      detail: messages.join("\n") || ((result.exitCode === 0 || result.success) && report.ok ? "Offline database contracts and boundaries are current" : "Database source check failed") };
+    return {
+      name,
+      layer: "source",
+      ok: (result.exitCode === 0 || result.success) && report.ok && !messages.length,
+      detail: messages.join("\n") || ((result.exitCode === 0 || result.success) && report.ok ? "Offline database contracts and boundaries are current" : "Database source check failed"),
+    };
   } catch {
-    return { name, ok: false, detail: "Cannot run the project database checker. Install the project runtime and @supacloud/db with source-contracts support, then run `supacloud-db check --root .` for diagnostics." };
+    return {
+      name,
+      layer: "runtime",
+      ok: false,
+      detail: "Cannot run the project database checker. Install the project runtime and @supacloud/db with source-contracts support, then run `supacloud-db check --root .` for diagnostics.",
+    };
   }
 }
