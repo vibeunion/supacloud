@@ -67,7 +67,7 @@ equivalent upgrade evidence. Caddy and GoTrue remain separate upgrade surfaces.
 | --- | --- | --- |
 | Native single-host Full Platform | Stable baseline target | Ubuntu 24.04 LTS, `amd64`, systemd, Pigsty `v4.5.0` / PostgreSQL 18, SupaCloud-managed Caddy, and published verified artifacts; Gates 2-4 are still required before claiming production acceptance |
 | Lite | Separate bounded product | Single-project local-first runtime with its own compatibility and recovery evidence; not evidence for Full Platform readiness |
-| Compose and other installer paths | Deployment-specific / separate acceptance | Follow their documented boundaries; do not treat them as equivalent proof of the native baseline |
+| Compose and other installer paths | Deployment-specific / separate acceptance | `docker/self-host` is one GoTrue and one PostgREST. It is not evidence of multi-project Pigsty behavior. Follow the documented boundary; do not treat it as equivalent proof of the native baseline |
 | `arm64` and other operating systems | Deployment-specific / separate acceptance | Require explicit installation, upgrade, and recovery evidence for the selected combination |
 | External S3 project storage | Deployment-specific / separate acceptance | Requires an explicit project binding and provider-specific reachability, durability, and recovery evidence |
 | Embedded Edge Runtime in a coordinated upgrade | Experimental / separate acceptance | The primary coordinated upgrade evidence uses persisted `EDGE_RUNTIME_MODE=external` |
@@ -77,7 +77,8 @@ equivalent upgrade evidence. Caddy and GoTrue remain separate upgrade surfaces.
 
 “Stable baseline target” describes the intended release profile, not completed
 production proof. A release is only accepted after the relevant gates produce
-dated evidence.
+dated evidence on a real host. Gates 2–4 and HA are not production-passed
+until that record exists. Merging the change is not that record.
 
 ## Platform boundaries
 
@@ -235,6 +236,79 @@ Every acceptance record must label its state explicitly:
 Do not collapse these states into a single maturity percentage. A green unit
 test, a merged pull request, a deployment, and a recovery drill prove different
 things.
+
+## Operator acceptance after secret encryption and the package reshape
+
+Merging a pull request is not a production deploy (合码≠上线). Gates 2–4 and
+high availability are claimed only after a dated pass on a real host. Do not
+describe them as production-passed before that record exists.
+
+`docker/self-host` runs one GoTrue and one PostgREST next to one PostgreSQL
+container. That boot is not evidence of multi-project Pigsty behavior.
+Multi-project isolation is the systemd and Pigsty profile: one database per
+project, with per-project PostgREST and GoTrue.
+
+The `app init`, ZenStack, and Angular rows are the intended post-merge gates
+for that reshape. Accept them on a revision that contains it. This checklist
+does not publish packages or deploy a host.
+
+| Gate | Pass condition |
+| --- | --- |
+| Tenant secrets | `db_password`, `jwt_secret`, `anon_key`, `service_role_key`, and `s3_secret_key` are stored only in `*_encrypted` columns. Lookup uses `anon_key_hash` and `service_role_key_hash` (the opaque key already uses `secret_key_hash`). Startup copies leftover plaintext into ciphertext, checks a decrypt round trip, then clears the plaintext columns. Create responses may still return a secret once from process memory. |
+| CONNECT | New and branch databases `REVOKE CONNECT` from `PUBLIC` and from `supabase_realtime_admin`. `role_<ref>` and `authenticator_<ref>` receive `CONNECT` only on their own database. |
+| HBA pairing | Pigsty inventory admits `authenticator_<ref>` and `role_<ref>` from `127.0.0.1/32` only when they are members of the NOLOGIN role whose name is the database (`samerole`), then rejects every other loopback login of those name patterns. See the re-apply steps below. |
+| Cluster LOGIN audit | `supabase_auth_admin` and `supabase_admin` keep their names. `GET /v1/system/cluster-login-audit` (admin) lists current sessions by role, database, client address, application name, and state. It does not return the cluster password or query text. History is the PostgreSQL `connection authorized` line after `log_connections=on` on those roles, plus `supacloud_cluster_login` in the tenant log. A leaked cluster password can still open every tenant database as these roles. Audit is not isolation. |
+| Default app init | `supacloud app init` scaffolds `@supabase/supabase-js` only. The compiler, Effect, and `@supacloud/app` stack is `app init --template app`. |
+| ZenStack | ZenStack lives in `@supacloud/db-zenstack`. The Management API production closure does not install or import ZenStack. `@supacloud/db` does not depend on it. |
+| Angular boundary | The injector and the `HttpClient` that calls `inject()` live at `@supacloud/app/runtime`. `@supacloud/app`, `@supacloud/app/core`, `@supacloud/app/http`, and `@supacloud/app/pending-work` stay Angular-free. |
+| Compose vs Pigsty | A `docker/self-host` boot is not recorded as a Gate 2 two-project Pigsty pass. |
+| Realtime share | The Elixir Realtime `:4000` production traffic share stays uncounted until the measurement table below is filled. |
+| Gates 2–4 and HA | Claimed only from a dated pass on a named real host, not from this document or a merged pull request. |
+
+### Re-applying HBA pairing
+
+Pigsty owns `/pg/data/pg_hba.conf` and regenerates it from `pg_hba_rules`.
+SupaCloud only inserts or replaces the titled SupaCloud lines. A later Pigsty
+upgrade, a copied inventory, or an earlier rule that already admits every
+loopback user restores an unpaired pattern: PostgreSQL matches the user and
+database fields separately, so `authenticator_A` can again satisfy HBA for
+`supa_B`. `CONNECT` grants remain, and they are a weaker control.
+
+Grant the samerole membership before re-applying the reject rules. Management
+API startup and `scripts/upgrade_pigsty_4_4_compat.sh --apply` grant membership
+of the NOLOGIN role named exactly as the database, `WITH INHERIT FALSE, SET
+FALSE`, to `authenticator_<ref>` and `role_<ref>`. That role must not receive
+privileges. Applying the reject rules first refuses tenant logins until the
+grant exists.
+
+```bash
+cd /path/to/supacloud
+PIGSTY_PATH="${PIGSTY_PATH:-$HOME/pigsty}" bash -c 'source ./install.sh && ensure_pigsty_tenant_hba_rule'
+```
+
+Sourcing `install.sh` loads the function and does not run the installer.
+Afterwards the inventory has `db: samerole` on the authenticator and role
+allows, `auth: reject` on the unpaired rules, and no `/^supa_` database
+regex. `::1` stays outside this loopback rule.
+
+`supabase_auth_admin` and `supabase_admin` are not renamed. GoTrue still
+connects as `supabase_auth_admin`. Realtime CDC still connects as
+`supabase_admin`. A PostgreSQL role has one cluster-wide password, so those
+names cannot have per-project passwords. Shell helpers that do not connect as
+the cluster role no longer receive `PGPASSWORD`, `PG_PASSWORD`, or
+`POSTGRES_PASSWORD`. Realtime error logs redact `db_password` fields and URI
+passwords. Neither change isolates the cluster roles.
+
+### Elixir Realtime :4000 traffic share
+
+No repository metric counts how much production websocket traffic still enters
+the Elixir Realtime listener (upstream default port 4000). Leave the value
+`uncounted` until a real host supplies it. Any claim about that share is
+conditional on a filled row. Do not invent a percentage.
+
+| Measurement | Value | Host | Date | Method |
+| --- | --- | --- | --- | --- |
+| Elixir Realtime `:4000` share of production websocket traffic | uncounted | | | |
 
 ## Non-goals for the baseline
 

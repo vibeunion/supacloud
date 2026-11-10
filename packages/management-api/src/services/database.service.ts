@@ -1,5 +1,10 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { renderTenantLoginAuditSql } from "./cluster-login-audit";
+import {
+  renderTenantHbaPairingDropSql,
+  renderTenantHbaPairingSql,
+} from "./tenant-hba-pairing";
 import { decryptSecretIfNeeded, encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { SQL } from "bun";
 import {
@@ -322,10 +327,10 @@ export class DatabaseService {
       await this.withAdminDb(async (adminDb) => {
         const authenticatorRole = resolveAuthenticatorName(projectRef);
         assertValidIdentifier("authenticatorRole", authenticatorRole);
-        // CONNECT, not the cluster HBA regex, binds authenticator_<ref> and role_<ref>
-        // to this database. supabase_auth_admin and supabase_admin remain cluster-global
-        // LOGIN roles because GoTrue and Realtime connect as those names.
-        // supabase_realtime_admin must not receive CONNECT on tenant databases.
+        // CONNECT grants and Pigsty samerole membership bind authenticator_<ref>
+        // and role_<ref> to this database. supabase_auth_admin and supabase_admin
+        // remain cluster-global LOGIN roles because GoTrue and Realtime connect
+        // as those names. supabase_realtime_admin must not receive CONNECT.
         await adminDb.unsafe(`
           REVOKE CONNECT ON DATABASE "${dbName}" FROM PUBLIC;
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO "${authenticatorRole}";
@@ -339,7 +344,19 @@ export class DatabaseService {
           END
           $$;
         `);
+        await adminDb.unsafe(renderTenantHbaPairingSql(dbName, dbUser, authenticatorRole));
       });
+
+      try {
+        await this.withTenantDb(dbName, async (tenantDb) => {
+          await tenantDb.unsafe(renderTenantLoginAuditSql());
+        });
+      } catch (error: unknown) {
+        logger.warn("[DatabaseService] cluster login audit trigger was not installed", {
+          database: dbName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
 
       return { success: true };
     } catch (error: unknown) {
@@ -690,6 +707,7 @@ export class DatabaseService {
         await adminDb.unsafe(`DROP ROLE IF EXISTS "${dbUser}"`);
         const authenticatorRole = resolveAuthenticatorName(projectRef);
         await adminDb.unsafe(`DROP ROLE IF EXISTS "${authenticatorRole}"`);
+        await adminDb.unsafe(renderTenantHbaPairingDropSql(dbName, dbUser, authenticatorRole));
       });
 
       return { success: true };

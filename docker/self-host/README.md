@@ -229,7 +229,7 @@ Resolution:
 
 ## Notes
 
-- This stack is for self-host bootstrap and small deployments. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty HA production deployment.
+- This stack is one GoTrue and one PostgREST beside one PostgreSQL service. It is a self-host bootstrap, not evidence of multi-project Pigsty behavior, and not a Gate 2–4 or HA pass. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty deployment. HA is not claimed here.
 - The generated quickstart creates `pgsodium` and `supabase_vault`; the manual `.env.example` template keeps both disabled until stable keys are supplied.
 - `supabase_vault` has its own preload-time key loader. If you enable it, either set `VAULT_KEY` / `VAULT_KEY_FILE` explicitly or let it reuse the pgsodium key sources by leaving those variables empty.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
