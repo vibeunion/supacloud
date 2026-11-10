@@ -3,6 +3,8 @@ import { logger } from "../utils/logger";
 import * as auth from "../middleware/auth";
 import * as systemInfoService from "../services/system-info";
 import { realtimeService } from "../services/realtime.service";
+import { readClusterLoginAudit } from "../services/cluster-login-audit";
+import { redactLoggedSecrets } from "../services/secret-log-redaction";
 
 /**
  * System Info Routes
@@ -25,6 +27,27 @@ export const systemRoutes = new Elysia({ name: "system" })
     } catch (error: unknown) {
       logger.error("[System] Failed to collect system info", { error });
       return status(503, { code: "SYSTEM_INFO_UNAVAILABLE", message: "System information unavailable" });
+    }
+  })
+
+  .get("/v1/system/cluster-login-audit", {
+    detail: { tags: ["monitor"], summary: "List cluster-role database sessions" },
+  }, async ({ request }) => {
+    const context = await auth.getAuthContext(request);
+    if ("status" in context) return status(context.status, context.body);
+    if (context.role !== "master" && context.role !== "admin") {
+      return status(403, { error: "Admin privileges required" });
+    }
+    try {
+      return await readClusterLoginAudit();
+    } catch (error: unknown) {
+      logger.error("[System] Failed to read cluster login audit", {
+        error: redactLoggedSecrets(error instanceof Error ? error.message : String(error)),
+      });
+      return status(503, {
+        code: "CLUSTER_LOGIN_AUDIT_UNAVAILABLE",
+        message: "Cluster login audit unavailable",
+      });
     }
   })
 

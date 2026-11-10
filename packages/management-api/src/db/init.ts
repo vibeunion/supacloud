@@ -1084,6 +1084,14 @@ export async function initDatabase() {
     await sql`SELECT 1`;
     logger.info("Connected to database");
     await withExpectedControlPlaneDatabaseTransaction(sqlConnection, initializeControlPlaneSchema);
+    try {
+      const { reconcileTenantHbaPairingAndLoginAudit } = await import("../services/cluster-login-audit");
+      await reconcileTenantHbaPairingAndLoginAudit();
+    } catch (error: unknown) {
+      logger.warn("Cluster login audit and HBA pairing reconcile did not finish", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", {
       error: error instanceof Error ? error.message : String(error),

@@ -74,7 +74,7 @@ Legend:
 
 ### 1. Self-hosted multi-tenancy is a product, not an ops afterthought
 
-SupaCloud is built to run more than one project on a shared Pigsty cluster. How many projects fit on a host is unmeasured, and Gates 2–4 are not a claimed production pass. The repository includes:
+SupaCloud is built to run more than one project on a shared Pigsty cluster. How many projects fit on a host is unmeasured, and Gates 2–4 are not a claimed production pass. `docker/self-host` (one GoTrue, one PostgREST) is not that multi-project Pigsty behavior. The Elixir Realtime `:4000` production traffic share is uncounted until the [stable baseline](self-hosted-stable-baseline.md) measurement row is filled. The repository includes:
 
 - a management API for project lifecycle and settings
 - a self-hosted web console

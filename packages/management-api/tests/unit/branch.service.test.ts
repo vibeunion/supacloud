@@ -873,6 +873,7 @@ describe("branchService", () => {
       expect(roleSql).not.toContain(encodeURIComponent(password));
       expect(roleSql?.match(/PASSWORD/g)).toHaveLength(4);
       expect(roleSql?.match(/SCRAM-SHA-256/g)).toHaveLength(4);
+      expect(statements.some((statement) => statement.includes("WITH INHERIT FALSE, SET FALSE"))).toBe(true);
 
       const verifierMatch = roleSql?.match(
         /SCRAM-SHA-256\$4096:([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)/,
