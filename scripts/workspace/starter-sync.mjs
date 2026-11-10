@@ -51,6 +51,7 @@ export function starterMetadata(cwd = root) {
     if (alias === 'db') {
       entry.dependencies = {};
       entry.devDependencies = {};
+      entry.peerDependencies = { '@supacloud/db-zenstack': dependency(manifest, 'peerDependencies', '@supacloud/db-zenstack') };
     }
     if (alias === 'dbZenstack') {
       const modelPackages = ['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy', '@zenstackhq/language', '@zenstackhq/sdk', 'kysely'];
