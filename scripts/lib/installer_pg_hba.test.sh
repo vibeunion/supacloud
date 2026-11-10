@@ -37,9 +37,16 @@ grep -Fq "SupaCloud tenant authenticator loopback" "$PIGSTY_PATH/pigsty.yml"
 grep -Fq "user: '\"/^authenticator_[a-z0-9-]+$\"'" "$PIGSTY_PATH/pigsty.yml"
 grep -Fq "SupaCloud tenant database role loopback" "$PIGSTY_PATH/pigsty.yml"
 grep -Fq "user: '\"/^role_[a-z0-9-]+$\"'" "$PIGSTY_PATH/pigsty.yml"
-grep -Fq "db: '\"/^supa_[a-z0-9-]+$\"'" "$PIGSTY_PATH/pigsty.yml"
-grep -Fq "addr: 127.0.0.1/32, auth: pwd, order: 40" "$PIGSTY_PATH/pigsty.yml"
-grep -Fq "addr: 127.0.0.1/32, auth: pwd, order: 41" "$PIGSTY_PATH/pigsty.yml"
+grep -Fq "db: samerole, addr: 127.0.0.1/32, auth: pwd, order: 40" "$PIGSTY_PATH/pigsty.yml"
+grep -Fq "db: samerole, addr: 127.0.0.1/32, auth: pwd, order: 41" "$PIGSTY_PATH/pigsty.yml"
+grep -Fq "db: all, addr: 127.0.0.1/32, auth: reject, order: 42" "$PIGSTY_PATH/pigsty.yml"
+grep -Fq "db: all, addr: 127.0.0.1/32, auth: reject, order: 43" "$PIGSTY_PATH/pigsty.yml"
+grep -Fq "SupaCloud reject unpaired authenticator loopback" "$PIGSTY_PATH/pigsty.yml"
+grep -Fq "SupaCloud reject unpaired database role loopback" "$PIGSTY_PATH/pigsty.yml"
+if grep -Fq '/^supa_' "$PIGSTY_PATH/pigsty.yml"; then
+    echo "unpaired supa_ database regex is still admitted" >&2
+    exit 1
+fi
 grep -Fq "unrelated_setting: keep-me" "$PIGSTY_PATH/pigsty.yml"
 grep -Fq "addr: 10.88.0.0/16" "$PIGSTY_PATH/pigsty.yml"
 [[ "$(grep -Fc "SupaCloud tenant authenticator loopback" "$PIGSTY_PATH/pigsty.yml")" == 1 ]]
@@ -50,6 +57,7 @@ grep -Fq -- "-i $PIGSTY_PATH/pigsty.yml $PIGSTY_PATH/pgsql.yml -l pg-meta --tags
 ensure_pigsty_tenant_hba_rule
 [[ "$(grep -Fc "SupaCloud tenant authenticator loopback" "$PIGSTY_PATH/pigsty.yml")" == 1 ]]
 [[ "$(grep -Fc "SupaCloud tenant database role loopback" "$PIGSTY_PATH/pigsty.yml")" == 1 ]]
+[[ "$(grep -Fc "db: samerole" "$PIGSTY_PATH/pigsty.yml")" == 2 ]]
 [[ "$(wc -l < "$ANSIBLE_LOG" | tr -d ' ')" == 2 ]]
 
 # Upgrades from releases that already installed only the authenticator rule
@@ -64,9 +72,14 @@ YAML
 PIGSTY_CONFIG="$legacy_config" ensure_pigsty_tenant_hba_rule
 [[ "$(grep -Fc "SupaCloud tenant authenticator loopback" "$legacy_config")" == 1 ]]
 [[ "$(grep -Fc "SupaCloud tenant database role loopback" "$legacy_config")" == 1 ]]
-grep -Fq "user: '\"/^authenticator_[a-z0-9-]+$\"'" "$legacy_config"
+grep -Fq "db: samerole, addr: 127.0.0.1/32, auth: pwd, order: 40" "$legacy_config"
+grep -Fq "auth: reject, order: 42" "$legacy_config"
 if grep -Fq "user: '/^authenticator_[a-z0-9-]+$/'" "$legacy_config"; then
     echo "Legacy PostgreSQL HBA regex syntax was not reconciled" >&2
+    exit 1
+fi
+if grep -Fq '/^supa_' "$legacy_config"; then
+    echo "Legacy unpaired supa_ database regex is still admitted" >&2
     exit 1
 fi
 

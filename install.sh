@@ -253,9 +253,12 @@ ensure_bun_version() {
     fi
 }
 
-# Persist the tenant HBA rule in Pigsty's inventory and render it through the
+# Persist tenant HBA pairing in Pigsty's inventory and render it through the
 # official pgsql role. /pg/data/pg_hba.conf is ANSIBLE MANAGED and must never be
 # edited directly: Patroni/Pigsty would overwrite a runtime-only change.
+# Re-run this after any Pigsty HBA regenerate. Grant samerole membership first
+# (Management API startup or upgrade_pigsty_4_4_compat.sh); the reject rules
+# deny authenticator_/role_ logins that are not members of supa_<ref>.
 apply_pigsty_tenant_hba_rules() (
     local pigsty_path="$1"
     local pigsty_config="$2"

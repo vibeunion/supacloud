@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../src/utils/logger";
 import { assertRealtimeSecretAlignment, RealtimeService, validateRealtimeSecretConfiguration } from "../../src/services/realtime.service";
 import { buildRealtimeTenantPayload } from "../../src/services/realtime-tenant-payload";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -303,5 +304,24 @@ describe("RealtimeService registration retry", () => {
 
     expect(ok).toBe(false);
     expect(attempts).toBe(1);
+  });
+
+  test("registerTenant does not log a cluster password echoed by Realtime", async () => {
+    const secret = "cluster-secret-value";
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      db_password: secret,
+      url: `postgres://supabase_admin:${secret}@127.0.0.1:5432/supa_aaa`,
+    }), { status: 400 })) as typeof fetch;
+    const error = spyOn(logger, "error");
+    const service = new RealtimeService();
+    const ok = await service.registerTenant({
+      projectRef: "badref",
+      dbName: "supa_aaa",
+      dbPassword: secret,
+      jwtSecret: "super-secret-jwt-token-with-at-least-32-characters-long",
+    });
+    expect(ok).toBe(false);
+    expect(JSON.stringify(error.mock.calls)).not.toContain(secret);
+    error.mockRestore();
   });
 });
