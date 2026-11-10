@@ -56,7 +56,7 @@ class BillingModule {}`,
   SC2010: `const COUNT = new InjectionToken<number>("COUNT");
 const provider = { provide: COUNT, useValue: "not a number" };`,
   SC2011: `const providers = makeEnvironmentProviders(loadProvidersAtRuntime());`,
-  SC2012: `import { inject } from "@supacloud/app";
+  SC2012: `import { inject } from "@supacloud/app/runtime";
 class Service { repository = inject(Repository); }`,
   SC2013: `@Module({ name: "a", providers: [{ provide: PORT, useValue: "a" }], exports: [PORT] }) class A {}
 @Module({ name: "b", providers: [{ provide: PORT, useValue: "b" }], exports: [PORT] }) class B {}

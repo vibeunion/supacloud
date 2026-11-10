@@ -2083,6 +2083,9 @@ GRANT EXECUTE ON FUNCTION public.supacloud_workflow_events(jsonb) TO service_rol
 -- supacloud:sql-module:workflows-public:end
 
 -- supacloud:sql-module:commands-public:start
+-- Tenant bootstrap ledger: supacloud_commands.receipts, FK to supacloud_workflows.runs.
+-- Not the application tables supacloud_commands.execution_receipts / execution_audit
+-- owned by packages/db/src/command-schema.ts. Do not merge the tables or the pipelines.
 CREATE SCHEMA IF NOT EXISTS supacloud_commands;
 REVOKE ALL ON SCHEMA supacloud_commands FROM PUBLIC, anon, authenticated;
 GRANT USAGE ON SCHEMA supacloud_commands TO service_role;

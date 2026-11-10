@@ -1,4 +1,4 @@
-import { compileModel } from "./model";
+/// <reference path="./optional-db-zenstack.d.ts" />
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -280,6 +280,7 @@ export async function databaseSources(
       if (!(await exists(await safePath(root, directory)))) throw new Error(`Missing source directory: ${directory}`);
     }
     for (const model of config.schema.filter(file => file.endsWith(".zmodel"))) {
+      const { compileModel } = await import("@supacloud/db-zenstack/model");
       await compileModel(await safePath(root, model), await safePath(root, slash(join(dirname(model), "generated"))), true);
     }
     const inputs = new Map<string, string>();

@@ -18,7 +18,7 @@ import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
 import { STARTER_REVIEW_QUERY } from "./app-starter-query";
 import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
-const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, dbZenstack: dbZenstackMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -59,7 +59,9 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/commands": `^${commandsMetadata.version}`,
                 "@supacloud/contracts": `^${contractsMetadata.version}`,
                 "@supacloud/db": `^${dbMetadata.version}`,
+                "@supacloud/db-zenstack": `^${dbZenstackMetadata.version}`,
                 ...dbMetadata.dependencies,
+                ...dbZenstackMetadata.dependencies,
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 effect: "4.0.5",
@@ -69,6 +71,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
                 ...dbMetadata.devDependencies,
+                ...dbZenstackMetadata.devDependencies,
                 "@types/bun": "^1.4.4",
                 typescript: "7.1.0-beta",
             },
@@ -949,7 +952,8 @@ export async function initializeAppProject(options: { root?: string; name?: stri
     };
     const files = template === "command" ? appStarterFiles(name)
         : template === "model-command" ? modelCommandTemplateFiles(name, sdk)
-        : appTemplateFiles(name, template, sdk);
+        : template === "minimal" || template === "app" ? appTemplateFiles(name, template, sdk)
+        : (() => { throw new Error(`Unknown app init template: ${template}`); })();
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });

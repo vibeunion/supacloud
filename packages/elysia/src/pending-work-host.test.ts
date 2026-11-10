@@ -2,7 +2,7 @@ import type { CompiledRouteRegistrar } from "./index";
 import { testInvoker } from "./testing";
 import { expect, test } from "bun:test";
 import { createApplication, createWorker, type CompiledModule } from "./index";
-import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
+import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/pending-work";
 
 function deferred() {
   let resolve!: () => void;

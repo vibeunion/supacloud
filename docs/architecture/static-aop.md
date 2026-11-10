@@ -1,6 +1,9 @@
 # 静态 AOP 的参考与边界
 
-状态：架构选择、已实现的静态切面约束及验证边界。
+状态：**FROZEN**。已实现的静态切面与 Angular 风格 DI 契约停在当前语义。
+不要新增运行时切点、方法代理、反射容器，也不要新增 Forms、signals、HttpClient
+或 injector 示例。`@angular/core` 仍是 `@supacloud/app` 的打包期 external，
+本冻结不删除它。`createApplication` 没有 `injector` 字段。
 日常功能开发从[功能迭代手册](../feature-development.md)进入。
 
 ## 决策

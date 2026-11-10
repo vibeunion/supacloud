@@ -1,4 +1,4 @@
-import { compileModel } from "../../db/src/model";
+import { compileModel } from "../../db-zenstack/src/model";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
