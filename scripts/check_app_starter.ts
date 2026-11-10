@@ -121,7 +121,7 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   // Test the release artifacts together before they exist on the public registry.
   manifest.overrides = { ...manifest.overrides };
-  for (const name of ["contracts", "commands", "db", "app", "delivery", "compiler", "elysia", "query", "js"]) {
+  for (const name of ["contracts", "commands", "db", "db-zenstack", "app", "delivery", "compiler", "elysia", "query", "js"]) {
     const directory = join(repo, "packages", name === "js" ? "supacloud-js" : name);
     await run(starterInstallArgs("workspace"), directory);
     await run(["run", "build"], directory);
