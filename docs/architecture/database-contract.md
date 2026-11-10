@@ -23,7 +23,7 @@ Database Contract 包含模型关系、行策略、受治理的 SQL/RLS/grants/v
 契约、RPC registry/catalog，以及供 Command 使用的身份绑定读端口和事务模型端口。
 
 当前实现后端仍是 ZModel + ZenStack。它负责模型推导、策略查询约束和生成类型；
-`@supacloud/db/zenstack` 是可信 host 内部的 adapter。应用业务代码不得依赖 Prisma
+`@supacloud/db-zenstack` 是可信 host 内部的 adapter；`@supacloud/db/zenstack` 只做兼容再导出。应用业务代码不得依赖 Prisma
 client、ZenStack 通用 CRUD 或 ZenStack 生成的业务 RPC。未来 SupaCloud 自有
 Model/Policy Compiler 达到同等 contract 后，可以替换该 adapter。
 

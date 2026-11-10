@@ -310,7 +310,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
   
   // Legacy path. supabase-js uses /realtime/v1/websocket, which the server
   // intercepts before Elysia. This route is the same Elixir proxy and does
-  // not subscribe to RealtimeBunService.
+  // not import the internal LISTEN/NOTIFY helper.
   .ws("/realtime/v1/websocket", {
     async open(ws) {
         const state = realtimeSocketState(ws);

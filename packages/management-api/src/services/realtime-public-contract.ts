@@ -9,12 +9,10 @@
  * broadcast, and presence.
  *
  * If the Elixir socket closes or errors, the client socket closes. This path
- * does not subscribe to `RealtimeBunService` and does not fail over to
- * PostgreSQL LISTEN/NOTIFY.
+ * does not fail over to PostgreSQL LISTEN/NOTIFY.
  *
- * `RealtimeBunService` is a separate in-process LISTEN/NOTIFY subscriber.
- * It is not mounted on `/realtime/v1`. Do not attach it to this proxy:
- * the client would observe two change streams for one join.
+ * The LISTEN/NOTIFY helper is `src/internal/realtime-listen`. Do not import it
+ * here. Attaching it to this proxy would emit two change streams for one join.
  */
 
 export const PUBLIC_REALTIME_CLIENT_PATH = "/realtime/v1/websocket";

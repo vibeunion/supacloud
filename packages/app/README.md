@@ -276,8 +276,9 @@ Compiled factories construct services directly. Do not add a new injector
 example or pass an Angular injector into `createApplication`.
 
 The static AOP and Angular-style DI contracts in this package are frozen.
-`@angular/core` remains a pack-time external. Do not add Forms, signals,
-HttpClient, or runtime pointcuts.
+`@supacloud/app/core` does not import `@angular/core`. The runtime injector in
+the full package still adapts Angular for existing hosts. Do not add Forms,
+signals, HttpClient, or runtime pointcuts.
 
 `runInTransactionContext` is an existing compatibility helper. The database
 adapter owns commit, rollback, and connection closure.

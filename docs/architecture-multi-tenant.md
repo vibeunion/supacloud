@@ -98,7 +98,7 @@ The Web Console project dashboard uses `GET /v1/projects/:ref/dashboard/summary`
 Storage object listing is paginated and sorted in SQL rather than loading full object sets into application memory.
 
 ### 6. Realtime API & Admin Console
-- **Realtime (Elixir)**: The published `/realtime/v1` socket is proxied by Management API to the Elixir process on port 4000. It listens to PostgreSQL logical replication and is a shared service, not a density or isolation proof. Bun `LISTEN/NOTIFY` (`RealtimeBunService`) is a separate implementation and is not the public client socket. See [Edge Runtime Guide](edge-runtime-guide.md#realtime-public-contract).
+- **Realtime (Elixir)**: The published `/realtime/v1` socket is proxied by Management API to the Elixir process on port 4000. It listens to PostgreSQL logical replication and is a shared service, not a density or isolation proof. Bun `LISTEN/NOTIFY` is an internal helper under `packages/management-api/src/internal/realtime-listen` and is not the public client socket. See [Edge Runtime Guide](edge-runtime-guide.md#realtime-public-contract).
 - **Web Console (SVAdmin Hybrid Mount)**: The central dashboard (`web-console`) is fully multi-tenant aware via URL routing parameter `[ref]`. It acts as the Host/SuperAdmin dashboard, but internally relies on the `@svadmin/core` `DataProvider`. When standard CRUD is requested (e.g. Auth Users or DB Tables), the root `+layout.svelte` dynamically bridges SvelteKit routing into SVAdmin's resources array. 
   - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Caddy gateway.
 

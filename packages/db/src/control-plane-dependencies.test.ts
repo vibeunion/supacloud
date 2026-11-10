@@ -17,6 +17,7 @@ const adapterPackages = [
   "@zenstackhq/language",
   "@zenstackhq/sdk",
   "kysely",
+  "@supacloud/db-zenstack",
 ];
 
 function localImports(source: string): string[] {
@@ -26,12 +27,11 @@ function localImports(source: string): string[] {
   });
 }
 
-test("the control-plane entry does not require ZenStack or Kysely", () => {
+test("the control-plane entry does not require ZenStack, Kysely, or the adapter package", () => {
   for (const name of adapterPackages) {
     expect(manifest.dependencies?.[name]).toBeUndefined();
-    expect(manifest.peerDependencies?.[name]).toBeDefined();
-    expect(manifest.peerDependenciesMeta?.[name]?.optional).toBe(true);
-    expect(manifest.devDependencies?.[name]).toBeDefined();
+    expect(manifest.peerDependencies?.[name]).toBeUndefined();
+    expect(manifest.devDependencies?.[name]).toBeUndefined();
   }
 });
 
@@ -45,7 +45,7 @@ test("the main export graph does not import the ZenStack adapter", () => {
     const source = readFileSync(file, "utf8");
     expect(source).not.toContain("@zenstackhq/");
     expect(source).not.toContain("kysely");
-    expect(file.endsWith("/zenstack.ts") || file.endsWith("/model.ts") || file.endsWith("/bun-dialect.ts")).toBe(false);
+    expect(source).not.toContain("@supacloud/db-zenstack");
     for (const specifier of localImports(source)) pending.push(resolve(file, "..", specifier));
   }
   expect(seen.size).toBeGreaterThan(3);

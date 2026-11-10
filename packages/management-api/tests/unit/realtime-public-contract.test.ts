@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   PUBLIC_REALTIME_CLIENT_PATH,
@@ -26,12 +26,28 @@ test("the published socket is an Elixir proxy with no LISTEN/NOTIFY failover", (
   expect(() => publicRealtimeUpstream("ws://127.0.0.1:4000", "/realtime/v1/websocket", "")).toThrow("http(s)");
 });
 
-test("published and legacy realtime sockets do not subscribe to the Bun listener", () => {
+function sourceFiles(directory: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) files.push(...sourceFiles(path));
+    else if (entry.endsWith(".ts")) files.push(path);
+  }
+  return files;
+}
+
+function importsListenHelper(source: string): boolean {
+  return /from\s+["'][^"']*(?:internal\/realtime-listen|realtime-bun|realtime-proxy-session)["']/.test(source);
+}
+
+test("published routes and services do not compose the internal LISTEN/NOTIFY helper", () => {
+  const offenders: string[] = [];
+  for (const file of [join(root, "src/index.ts"), ...sourceFiles(join(root, "src/routes")), ...sourceFiles(join(root, "src/services"))]) {
+    if (importsListenHelper(readFileSync(file, "utf8"))) offenders.push(file.slice(root.length + 1));
+  }
   const index = readFileSync(join(root, "src/index.ts"), "utf8");
   const ws = readFileSync(join(root, "src/routes/ws.ts"), "utf8");
   expect(index).toContain("publicRealtimeUpstream");
   expect(ws).toContain("publicRealtimeUpstream");
-  expect(index).not.toContain("realtime-bun");
-  expect(ws).not.toContain("realtime-bun");
-  expect(ws).not.toContain("subscribeTenant");
+  expect(offenders).toEqual([]);
 });

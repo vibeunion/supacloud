@@ -441,7 +441,7 @@ the other.
 | Socket owner | Management API accepts the upgrade and proxies bytes |
 | Upstream | Elixir Realtime at `REALTIME_ADMIN_URL` (default `http://127.0.0.1:4000`), path rewritten from `/realtime/v1` to `/socket` |
 | Failover | Elixir close or error closes the client socket. There is no automatic switch to Bun `LISTEN/NOTIFY` |
-| Bun listener | `RealtimeBunService` is a separate in-process `LISTEN/NOTIFY` subscriber. It is not mounted on `/realtime/v1` |
+| Bun listener | Internal only: `packages/management-api/src/internal/realtime-listen`. It is not imported by the published route and is not failover |
 
 HTTP `/realtime/v1/*` (broadcast and admin proxy calls) uses the same
 `REALTIME_ADMIN_URL` and is not handled by the Bun listener.

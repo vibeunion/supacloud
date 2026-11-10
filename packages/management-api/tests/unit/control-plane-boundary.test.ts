@@ -33,7 +33,7 @@ test("Management API production dependencies exclude ZenStack, Effect, and the a
   const names = productionDependencies(root);
   for (const name of names) {
     expect(name.startsWith("@zenstackhq/")).toBe(false);
-    expect(["kysely", "effect", "@supacloud/app", "@supacloud/compiler", "@supacloud/elysia"]).not.toContain(name);
+    expect(["kysely", "effect", "@supacloud/app", "@supacloud/compiler", "@supacloud/elysia", "@supacloud/db-zenstack"]).not.toContain(name);
   }
   expect(names).toContain("@supacloud/db");
 });

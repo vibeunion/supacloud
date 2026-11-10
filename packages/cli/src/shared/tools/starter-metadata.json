@@ -22,6 +22,11 @@
     },
     "db": {
       "version": "0.24.0",
+      "dependencies": {},
+      "devDependencies": {}
+    },
+    "dbZenstack": {
+      "version": "0.1.0",
       "dependencies": {
         "@zenstackhq/orm": "3.10.0",
         "@zenstackhq/schema": "3.10.0",

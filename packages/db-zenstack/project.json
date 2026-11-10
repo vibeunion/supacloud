@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/db-zenstack",
+  "tags": ["scope:core", "type:database"],
+  "projectType": "library",
+  "sourceRoot": "packages/db-zenstack/src"
+}
