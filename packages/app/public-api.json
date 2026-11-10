@@ -64,11 +64,6 @@
       "signature": "export type AspectNext<TResult = unknown> = () => TResult | Promise<TResult>;"
     },
     {
-      "name": "assertInInjectionContext",
-      "kind": "value",
-      "signature": "export declare function assertInInjectionContext(fnName: string): void;"
-    },
-    {
       "name": "AsyncValidatorFn",
       "kind": "type",
       "signature": "export type AsyncValidatorFn = (control: AbstractControl) => Promise<ValidationErrors | null>;"
@@ -82,26 +77,6 @@
       "name": "booleanAttribute",
       "kind": "value",
       "signature": "export declare function booleanAttribute(value: unknown): boolean;"
-    },
-    {
-      "name": "bootstrapBun",
-      "kind": "value",
-      "signature": "export declare function bootstrapBun(options: BunBootstrapOptions): Promise<BunApplication>;"
-    },
-    {
-      "name": "BunApplication",
-      "kind": "type",
-      "signature": "export interface BunApplication {\n    readonly injector: EnvironmentInjector;\n    readonly server?: BunServerLike;\n    stop(): Promise<void>;\n}"
-    },
-    {
-      "name": "BunBootstrapOptions",
-      "kind": "type",
-      "signature": "export interface BunBootstrapOptions {\n    providers: Array<Provider | EnvironmentProviders>;\n    parent?: InjectorLike;\n    name?: string;\n    serve?: (injector: EnvironmentInjector) => BunServerLike | Promise<BunServerLike>;\n    installSignalHandlers?: boolean;\n}"
-    },
-    {
-      "name": "BunServerLike",
-      "kind": "type",
-      "signature": "export interface BunServerLike {\n    stop(closeActiveConnections?: boolean): void | Promise<void>;\n}"
     },
     {
       "name": "CAN_DEACTIVATE_METADATA",
@@ -274,11 +249,6 @@
       "signature": "export declare function createBearerAuthInterceptor(tokenOrGetter: string | (() => string | Promise<string>)): HttpInterceptorFn;"
     },
     {
-      "name": "createChildInjector",
-      "kind": "value",
-      "signature": "export declare function createChildInjector(parent: InjectorLike, localProviders?: Map<Token<unknown> | string, unknown> | Record<string, unknown>): InjectorLike & {\n    readonly parent: InjectorLike;\n};"
-    },
-    {
       "name": "createContractCommandClient",
       "kind": "value",
       "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input, signal?: AbortSignal): Promise<unknown>;\n    lookup?(input: Input, signal?: AbortSignal): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    failureMetadata?(error: unknown): unknown;\n    isDefinitiveFailure?(error: unknown): boolean;\n}, options?: {\n    timeoutMs?: number;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
@@ -287,11 +257,6 @@
       "name": "createDestroyRef",
       "kind": "value",
       "signature": "export declare function createDestroyRef(): DestroyRef & {\n    readonly destroyed: boolean;\n    readonly signal: AbortSignal;\n    destroy(): Promise<void>;\n    _teardowns: Array<() => void | Promise<void>>;\n};"
-    },
-    {
-      "name": "createEnvironmentInjector",
-      "kind": "value",
-      "signature": "export declare function createEnvironmentInjector(providers: Array<Provider | EnvironmentProviders>, parent?: InjectorLike, options?: EnvironmentInjectorOptions): EnvironmentInjector;"
     },
     {
       "name": "createHeaderInterceptor",
@@ -442,16 +407,6 @@
       "name": "ENVIRONMENT_INITIALIZER",
       "kind": "value",
       "signature": "export declare const ENVIRONMENT_INITIALIZER: any;"
-    },
-    {
-      "name": "EnvironmentInjector",
-      "kind": "type",
-      "signature": "export interface EnvironmentInjector extends InjectorLike {\n    get<T>(token: Token<T>, options?: InjectFlags & {\n        optional?: false;\n    }): T;\n    get<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;\n    get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;\n    runInContext<R>(fn: () => R): R;\n    initialize(): Promise<void>;\n    destroy(): void;\n    destroyAsync(): Promise<void>;\n    readonly initialized: boolean;\n    readonly destroyed: boolean;\n    readonly parent?: InjectorLike;\n}"
-    },
-    {
-      "name": "EnvironmentInjectorOptions",
-      "kind": "type",
-      "signature": "export interface EnvironmentInjectorOptions {\n    initialize?: boolean;\n    name?: string;\n}"
     },
     {
       "name": "EnvironmentProviders",
@@ -644,11 +599,6 @@
       "signature": "export declare const Get: any;"
     },
     {
-      "name": "getActiveInjector",
-      "kind": "value",
-      "signature": "export declare function getActiveInjector(): InjectorLike | null;"
-    },
-    {
       "name": "getCommandMeta",
       "kind": "value",
       "signature": "export declare function getCommandMeta(target: object): CommandMeta | undefined;"
@@ -759,36 +709,6 @@
       "signature": "export declare const HOST_PARAMS_METADATA = \"supacloud:host-params\";"
     },
     {
-      "name": "HTTP_CLIENT_CONFIG",
-      "kind": "value",
-      "signature": "export declare const HTTP_CLIENT_CONFIG: any;"
-    },
-    {
-      "name": "HTTP_INTERCEPTORS",
-      "kind": "value",
-      "signature": "export declare const HTTP_INTERCEPTORS: any;"
-    },
-    {
-      "name": "HttpClient",
-      "kind": "both",
-      "signature": "export declare class HttpClient extends HttpClientCore {\n    constructor(config?: HttpClientConfig, interceptors?: HttpInterceptorFn[]);\n}"
-    },
-    {
-      "name": "HttpClientConfig",
-      "kind": "type",
-      "signature": "export interface HttpClientConfig {\n    baseUrl?: string;\n    fetch?: typeof fetch;\n}"
-    },
-    {
-      "name": "HttpClientFeature",
-      "kind": "type",
-      "signature": "export interface HttpClientFeature {\n    kind: HttpClientFeatureKind;\n    providers: Provider[];\n}"
-    },
-    {
-      "name": "HttpClientFeatureKind",
-      "kind": "type",
-      "signature": "export type HttpClientFeatureKind = \"Fetch\" | \"Interceptors\" | \"ParentRequests\";"
-    },
-    {
       "name": "HttpContext",
       "kind": "both",
       "signature": "export declare class HttpContext {\n    private readonly map;\n    set<T>(token: HttpContextToken<T>, value: T): this;\n    get<T>(token: HttpContextToken<T>): T;\n    delete(token: HttpContextToken<unknown>): this;\n    has(token: HttpContextToken<unknown>): boolean;\n    keys(): IterableIterator<HttpContextToken<unknown>>;\n}"
@@ -807,11 +727,6 @@
       "name": "HttpContractError",
       "kind": "both",
       "signature": "export declare class HttpContractError extends Error {\n    readonly boundary: \"request\" | \"response\";\n    readonly code = \"HTTP_CONTRACT_INVALID\";\n    constructor(boundary: \"request\" | \"response\");\n}"
-    },
-    {
-      "name": "HttpErrorResponse",
-      "kind": "both",
-      "signature": "export declare class HttpErrorResponse extends Error {\n    readonly status: number;\n    readonly statusText: string;\n    readonly url: string | null;\n    readonly error: unknown;\n    constructor(init: {\n        error?: unknown;\n        status?: number;\n        statusText?: string;\n        url?: string;\n    });\n}"
     },
     {
       "name": "HttpHeaders",
@@ -847,11 +762,6 @@
       "name": "HttpReplayPolicy",
       "kind": "type",
       "signature": "export type HttpReplayPolicy = {\n    mode: \"never\";\n} | {\n    mode: \"idempotent\";\n    idempotencyKey: string;\n};"
-    },
-    {
-      "name": "HttpRequestOptions",
-      "kind": "type",
-      "signature": "export interface HttpRequestOptions {\n    headers?: HttpHeaders | Record<string, string | string[]>;\n    params?: HttpParams | Record<string, string | number | boolean | ReadonlyArray<string | number | boolean>>;\n    body?: unknown;\n    context?: HttpContext;\n    observe?: \"body\" | \"response\";\n    responseType?: \"json\" | \"text\" | \"blob\";\n    signal?: AbortSignal;\n    replay?: HttpReplayPolicy;\n}"
     },
     {
       "name": "HttpRequestPayload",
@@ -894,11 +804,6 @@
       "signature": "export interface InfraResourceUse {\n    resource: Type<unknown>;\n    operations?: InfraResourceOperation[];\n}"
     },
     {
-      "name": "inject",
-      "kind": "value",
-      "signature": "export declare function inject<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;\nexport declare function inject<T>(token: Token<T>, options?: InjectFlags & {\n    optional?: false;\n}): T;\nexport declare function inject<T>(token: Token<T>, options?: InjectFlags): T | undefined;"
-    },
-    {
       "name": "Inject",
       "kind": "value",
       "signature": "export declare function Inject(token: Token): ParameterDecorator;"
@@ -929,39 +834,14 @@
       "signature": "export interface InjectableOptions {\n    scope?: Scope;\n    providedIn?: \"root\";\n    deps?: ProviderDep[];\n}"
     },
     {
-      "name": "injectAll",
-      "kind": "value",
-      "signature": "export declare function injectAll<T>(token: Token<T>): T[];"
-    },
-    {
-      "name": "injectDestroySignal",
-      "kind": "value",
-      "signature": "export declare function injectDestroySignal(): AbortSignal;"
-    },
-    {
-      "name": "InjectFlags",
-      "kind": "type",
-      "signature": "export type InjectFlags = InjectOptions;"
-    },
-    {
       "name": "InjectionToken",
       "kind": "both",
-      "signature": "export declare class InjectionToken<T> extends AngularInjectionToken<T> {\n    readonly name: string;\n    readonly factory?: () => T;\n    readonly providedIn?: \"root\";\n    readonly scope?: Scope;\n    constructor(name: string, options?: InjectionTokenOptions<T>);\n    toString(): string;\n}"
+      "signature": "export declare class InjectionToken<T> {\n    readonly name: string;\n    readonly factory?: () => T;\n    readonly providedIn?: \"root\";\n    readonly scope?: Scope;\n    constructor(name: string, options?: InjectionTokenOptions<T>);\n    toString(): string;\n}"
     },
     {
       "name": "InjectionTokenOptions",
       "kind": "type",
       "signature": "export interface InjectionTokenOptions<T> {\n    factory?: () => T;\n    providedIn?: \"root\";\n    scope?: Scope;\n}"
-    },
-    {
-      "name": "INJECTOR",
-      "kind": "value",
-      "signature": "export declare const INJECTOR: any;"
-    },
-    {
-      "name": "InjectorLike",
-      "kind": "type",
-      "signature": "export interface InjectorLike {\n    get<T>(token: Token<T>, options?: InjectFlags): T | undefined;\n    get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;\n    readonly parent?: InjectorLike;\n}"
     },
     {
       "name": "isClassProvider",
@@ -1264,11 +1144,6 @@
       "signature": "export declare function provideEnvironmentInitializer(initializerFn: () => void | Promise<void>): EnvironmentProviders;"
     },
     {
-      "name": "provideHttpClient",
-      "kind": "value",
-      "signature": "export declare function provideHttpClient(...features: HttpClientFeature[]): EnvironmentProviders;"
-    },
-    {
       "name": "provideLifecycle",
       "kind": "value",
       "signature": "export declare function provideLifecycle<T extends LifecycleHooks>(token: Token<T>): EnvironmentProviders;"
@@ -1529,26 +1404,6 @@
       "signature": "export declare const ROUTES_METADATA = \"supacloud:routes\";"
     },
     {
-      "name": "runInInjectionContext",
-      "kind": "value",
-      "signature": "export declare function runInInjectionContext<R>(injector: InjectorLike, fn: () => R): R;"
-    },
-    {
-      "name": "runInRequestContext",
-      "kind": "value",
-      "signature": "export declare function runInRequestContext<T>(parent: EnvironmentInjector, providers: Array<Provider | EnvironmentProviders>, work: (injector: EnvironmentInjector) => T | Promise<T>): Promise<T>;"
-    },
-    {
-      "name": "runInScope",
-      "kind": "value",
-      "signature": "export declare function runInScope<T>(parent: EnvironmentInjector, providers: Array<Provider | EnvironmentProviders>, work: (injector: EnvironmentInjector) => T | Promise<T>, name?: string): Promise<T>;"
-    },
-    {
-      "name": "runInTransactionContext",
-      "kind": "value",
-      "signature": "export declare function runInTransactionContext<T>(parent: EnvironmentInjector, providers: Array<Provider | EnvironmentProviders>, work: (injector: EnvironmentInjector) => T | Promise<T>): Promise<T>;"
-    },
-    {
       "name": "Scope",
       "kind": "type",
       "signature": "export type Scope = (typeof SCOPES)[number];"
@@ -1602,16 +1457,6 @@
       "name": "stripTrailingSlash",
       "kind": "value",
       "signature": "export declare function stripTrailingSlash(path: string): string;"
-    },
-    {
-      "name": "TestBed",
-      "kind": "both",
-      "signature": "export declare class TestBed {\n    private static declaredProviders;\n    private static overriddenProviders;\n    private static activeInjector;\n    static configureTestingModule(moduleDef: TestModuleMetadata): typeof TestBed;\n    static overrideProvider(token: Token<unknown>, provider: Provider): typeof TestBed;\n    static inject<T>(token: Token<T>): T;\n    static inject<T>(token: Token<T>, notFoundValue: T, flags?: InjectFlags): T;\n    static inject<T>(token: Token<T>, notFoundValue: undefined, flags: InjectFlags & {\n        optional: true;\n    }): T | undefined;\n    static injectAll<T>(token: Token<T>): T[];\n    static run<R>(fn: () => R): R;\n    static resetTestingModule(): typeof TestBed;\n    private static getOrCreateInjector;\n}"
-    },
-    {
-      "name": "TestModuleMetadata",
-      "kind": "type",
-      "signature": "export interface TestModuleMetadata {\n    providers?: Array<Provider | EnvironmentProviders>;\n    imports?: Array<{\n        providers?: Array<Provider | EnvironmentProviders>;\n    }>;\n}"
     },
     {
       "name": "Title",
@@ -1714,19 +1559,9 @@
       "signature": "export declare function withComponentInputBinding(): RouterFeature;"
     },
     {
-      "name": "withFetch",
-      "kind": "value",
-      "signature": "export declare function withFetch(customFetch?: typeof fetch): HttpClientFeature;"
-    },
-    {
       "name": "withInterceptors",
       "kind": "value",
       "signature": "export declare function withInterceptors(...interceptors: HttpInterceptorFn[]): HttpInterceptorFn[];"
-    },
-    {
-      "name": "withRequestsMadeViaParent",
-      "kind": "value",
-      "signature": "export declare function withRequestsMadeViaParent(): HttpClientFeature;"
     },
     {
       "name": "withRouterConfig",
