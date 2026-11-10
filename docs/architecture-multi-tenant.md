@@ -98,7 +98,7 @@ The Web Console project dashboard uses `GET /v1/projects/:ref/dashboard/summary`
 Storage object listing is paginated and sorted in SQL rather than loading full object sets into application memory.
 
 ### 6. Realtime API & Admin Console
-- **Realtime (Elixir)**: Very resource-intensive as it listens to PostgreSQL logical replication slots. Recommended to remain a shared premium feature or require dedicated high-tier clusters.
+- **Realtime (Elixir)**: The published `/realtime/v1` socket is proxied by Management API to the Elixir process on port 4000. It listens to PostgreSQL logical replication and is a shared service, not a density or isolation proof. Bun `LISTEN/NOTIFY` (`RealtimeBunService`) is a separate implementation and is not the public client socket. See [Edge Runtime Guide](edge-runtime-guide.md#realtime-public-contract).
 - **Web Console (SVAdmin Hybrid Mount)**: The central dashboard (`web-console`) is fully multi-tenant aware via URL routing parameter `[ref]`. It acts as the Host/SuperAdmin dashboard, but internally relies on the `@svadmin/core` `DataProvider`. When standard CRUD is requested (e.g. Auth Users or DB Tables), the root `+layout.svelte` dynamically bridges SvelteKit routing into SVAdmin's resources array. 
   - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Caddy gateway.
 
@@ -107,7 +107,7 @@ When a function is deployed via the Management API:
 1. `Bun.build()` bundles the source into a self-contained `.js`
 2. `invalidateCache()` evicts the old version from Worker thread caches
 3. `POST /preheat/:ref/:slug` → Worker imports the module ahead of time
-4. First real request hits warm LRU cache → **0ms cold-start**
+4. A later request can reuse the warm module. Preheat is not a measured 0ms latency guarantee.
 
 ### 8. Private Cache Data Plane ⭐ Implemented
 

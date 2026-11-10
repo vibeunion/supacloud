@@ -16,9 +16,8 @@ import {
   type AuthContext,
 } from "../middleware/auth";
 import { logger } from "../utils/logger";
+import { publicRealtimeUpstream } from "../services/realtime-public-contract";
 import { parsePhoenixMessage } from "../utils/phoenix-message";
-import { parsePostgresChangeSubscriptions } from "../utils/realtime-change";
-import { isRecord } from "../utils/record";
 
 // --- Subscriber registry ---
 interface WsClient {
@@ -75,15 +74,10 @@ type RealtimeSocketState = {
   query: Record<string, string | undefined>;
   projectRef?: string;
   apikey?: string;
-  token?: string;
   upstream?: WebSocket;
   buffer: Array<string | ArrayBuffer | ArrayBufferView<ArrayBuffer>>;
-  bunSubscriptions: Set<string>;
-  subscriptionStates: Map<string, { id: string }>;
-  handlers: Map<string, (payload: unknown) => void>;
   closed: boolean;
   counted: boolean;
-  pendingJoins: Map<string, AbortController>;
 };
 
 const realtimeSocketStates = new WeakMap<object, RealtimeSocketState>();
@@ -100,12 +94,8 @@ function realtimeSocketState(ws: {
       request: ws.request,
       query: ws.query ?? {},
       buffer: [],
-      bunSubscriptions: new Set(),
-      subscriptionStates: new Map(),
-      handlers: new Map(),
       closed: false,
       counted: false,
-      pendingJoins: new Map(),
     };
     realtimeSocketStates.set(key, state);
   } else {
@@ -318,6 +308,9 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
     },
   })
   
+  // Legacy path. supabase-js uses /realtime/v1/websocket, which the server
+  // intercepts before Elysia. This route is the same Elixir proxy and does
+  // not subscribe to RealtimeBunService.
   .ws("/realtime/v1/websocket", {
     async open(ws) {
         const state = realtimeSocketState(ws);
@@ -356,15 +349,15 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             const { config } = await import("../config");
             if (state.closed) return;
-            const hostIp = config.dockerHostIp || "127.0.0.1";
-            
-            // Elixir Realtime resolves tenants by extracting the first subdomain
-            // from the Host header. The registered external_id is the project ref,
-            // so the Host must always be "{ref}.api.{baseDomain}" — custom domains
-            // would extract the wrong subdomain and break tenant resolution.
+
+            // Same Elixir upstream as the published /realtime/v1 socket. This
+            // legacy /ws route does not attach LISTEN/NOTIFY.
             const tenantHost = `${ref}.api.${config.baseDomain}`;
-            
-            const targetUrl = `ws://${hostIp}:4000/socket/websocket?apikey=${encodeURIComponent(resolvedApiKey.upstreamKey)}&vsn=${encodeURIComponent(vsn)}`;
+            const targetUrl = publicRealtimeUpstream(
+                config.realtimeAdminUrl,
+                "/realtime/v1/websocket",
+                `?apikey=${encodeURIComponent(resolvedApiKey.upstreamKey)}&vsn=${encodeURIComponent(vsn)}`,
+            );
             
             const upstream = new BunWebSocket(targetUrl, {
                 headers: {
@@ -376,33 +369,9 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             state.upstream = upstream;
 
-            // Upstream proxying (Elixir -> Client)
+            // Elixir frames are forwarded unchanged. Do not also emit Bun
+            // LISTEN/NOTIFY events on this socket.
             upstream.onmessage = (event) => {
-                try {
-                    const data = typeof event.data === 'string' ? event.data : '';
-                    if (data) {
-                        const parsed = parsePhoenixMessage(data);
-                        const response = parsed?.payload["response"];
-                        if (parsed?.event === 'phx_reply' && isRecord(response)) {
-                            const mappings = response["postgres_changes"];
-                            if (Array.isArray(mappings) && ref) {
-                                const ids: Array<{ id: string | number }> = [];
-                                for (const mapping of mappings as unknown[]) {
-                                    if (!isRecord(mapping)) continue;
-                                    const id = mapping["id"];
-                                    if (typeof id === "string" || (typeof id === "number" && Number.isSafeInteger(id))) ids.push({ id });
-                                }
-                                import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                                    realtimeBunService.registerSubscriptionIds(
-                                        ref,
-                                        typeof parsed.join_ref === "string" ? parsed.join_ref : "upstream",
-                                        ids,
-                                    );
-                                }).catch(() => {});
-                            }
-                        }
-                    }
-                } catch {}
                 ws.send(event.data);
             };
             
@@ -432,7 +401,6 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         const state = realtimeSocketState(ws);
         if (state.closed) return;
         const upstream = state.upstream;
-        const ref = state.projectRef;
 
         // P0-2: Binary frames (broadcast ArrayBuffer) — forward directly, no interception needed
         if (rawMessage instanceof ArrayBuffer || ArrayBuffer.isView(rawMessage)) {
@@ -452,125 +420,22 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         const textMessage = typeof rawMessage === "string" ? rawMessage : JSON.stringify(rawMessage);
         if (textMessage === undefined || Buffer.byteLength(textMessage) > MAX_BROADCAST_SIZE) return;
 
-        // --- NATIVE BUN REALTIME INTERCEPTS ---
+        // Elixir owns channel state. Reply locally only while the upstream
+        // socket is not open, so a slow connect does not time the client out.
         try {
-            // P0-1: Handle Phoenix V2 array format [join_ref, ref, topic, event, payload]
-            // The Supabase Realtime SDK uses V2 serialization by default (DEFAULT_VSN = '2.0.0')
             const parsed = parsePhoenixMessage(rawMessage);
-            if (!parsed) return;
-            
-            // P0-12, P0-4: phx_leave intercept (graceful teardown locally + proxy)
-            if (parsed.event === 'phx_leave') {
-                 // Format based on vsn
-                 const vsn = state.query.vsn || "2.0.0";
-                 if (vsn === "1.0.0") {
-                     ws.send(JSON.stringify({ topic: parsed.topic, event: "phx_reply", payload: { status: "ok", response: {} }, ref: parsed.ref }));
-                 } else {
-                     ws.send(JSON.stringify([parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply', { status: 'ok', response: {} }]));
-                 }
-                 
-                 if (state.bunSubscriptions.has(parsed.topic)) {
-                     state.bunSubscriptions.delete(parsed.topic);
-                     
-                     // P0-4: Cleanup handler from events to prevent memory leak AND ghost events
-                     const handler = state.handlers.get(parsed.topic);
-                     const subscription = state.subscriptionStates.get(parsed.topic);
-                     if (handler) {
-                         import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                             if (subscription) realtimeBunService.events.off(`change:${subscription.id}`, handler);
-                             if (ref && subscription) realtimeBunService.unsubscribeSubscription(ref, subscription.id);
-                         });
-                         state.subscriptionStates.delete(parsed.topic);
-                         state.handlers.delete(parsed.topic);
-                     }
-                 }
-                 state.pendingJoins.get(parsed.topic)?.abort();
-                 state.pendingJoins.delete(parsed.topic);
-            }
-
-            // P0-5: heartbeat local reply ONLY if upstream is not connected to prevent client timeout.
-            // If upstream is open, we let upstream handle it to avoid duplicate replies.
-            if (parsed.event === 'heartbeat') {
-                if (!upstream || upstream.readyState !== WebSocket.OPEN) {
-                    const vsn = state.query.vsn || "2.0.0";
-                    if (vsn === "1.0.0") {
-                        ws.send(JSON.stringify({ topic: parsed.topic, event: "phx_reply", payload: { status: "ok", response: {} }, ref: parsed.ref }));
-                    } else {
-                        ws.send(JSON.stringify([parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply', { status: 'ok', response: {} }]));
-                    }
-                    return; // Block from queuing to upstream since we replied
+            if (parsed?.event === "heartbeat" && (!upstream || upstream.readyState !== WebSocket.OPEN)) {
+                const vsn = state.query.vsn || "2.0.0";
+                if (vsn === "1.0.0") {
+                    ws.send(JSON.stringify({ topic: parsed.topic, event: "phx_reply", payload: { status: "ok", response: {} }, ref: parsed.ref }));
+                } else {
+                    ws.send(JSON.stringify([parsed.join_ref, parsed.ref, parsed.topic, "phx_reply", { status: "ok", response: {} }]));
                 }
+                return;
             }
-
-            // P0-13: access_token intercept
-            if (parsed.event === 'access_token') {
-                const newToken = parsed.payload["access_token"];
-                if (typeof newToken === "string" && newToken.length > 0) {
-                    state.token = newToken;
-                    // Forward to Elixir for upstream tenant isolation
-                }
-            }
-
-            // P0-14: postgres_changes multiplexing
-            if (parsed.event === 'phx_join') {
-                const accessToken = parsed.payload["access_token"];
-                const joinToken = typeof accessToken === "string" && accessToken.length > 0 ? accessToken : state.token || state.apikey;
-                if (joinToken) {
-                    state.token = joinToken;
-                }
-
-                const config = parsed.payload["config"];
-                const changes = isRecord(config) ? parsePostgresChangeSubscriptions(config["postgres_changes"]) : null;
-                if (changes && ref) {
-                    const topic = parsed.topic;
-                    const subscriptions = changes;
-                    state.pendingJoins.get(topic)?.abort();
-                    const pending = new AbortController();
-                    state.pendingJoins.set(topic, pending);
-                    
-                    import("../services/realtime-bun.service").then(async ({ realtimeBunService }) => {
-                         const subscriptionStateId = await realtimeBunService.subscribeTenant(
-                             ref, subscriptions, joinToken, { signal: pending.signal },
-                         );
-                         if (!subscriptionStateId) return;
-                         if (state.closed || pending.signal.aborted) {
-                             realtimeBunService.unsubscribeSubscription(ref, subscriptionStateId);
-                             return;
-                         }
-                         state.pendingJoins.delete(topic);
-                         const subs = state.bunSubscriptions;
-                         const subscriptionStates = state.subscriptionStates;
-                         const previous = subscriptionStates.get(topic);
-                         const previousHandler = state.handlers.get(topic);
-                         if (previous) {
-                             if (previousHandler) realtimeBunService.events.off(`change:${previous.id}`, previousHandler);
-                             realtimeBunService.unsubscribeSubscription(ref, previous.id);
-                             subs.delete(topic);
-                         }
-                         subscriptionStates.set(topic, { id: subscriptionStateId });
-                         if (!subs.has(topic)) {
-                             subs.add(topic);
-                             const handler = (payload: unknown) => {
-                                 if (state.closed) return;
-                                 const vsn = state.query.vsn || "2.0.0";
-                                 if (vsn === "1.0.0") {
-                                     ws.send(JSON.stringify({ topic, event: "postgres_changes", payload, ref: null }));
-                                 } else {
-                                     ws.send(JSON.stringify([null, null, topic, 'postgres_changes', payload]));
-                                 }
-                             };
-                             state.handlers.set(topic, handler);
-                             realtimeBunService.events.on(`change:${subscriptionStateId}`, handler);
-                         }
-                    }).catch(console.error);
-                }
-            }
-
-        } catch (err) {
-            // Not JSON or parse error, just proxy raw
+        } catch {
+            // Unparsed frames are still forwarded to Elixir.
         }
-        
-        // --- END NATIVE INTERCEPTS ---
 
         if (!upstream) return;
         
@@ -584,8 +449,6 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         const state = realtimeSocketState(ws);
         if (state.closed) return;
         state.closed = true;
-        for (const pending of state.pendingJoins.values()) pending.abort();
-        state.pendingJoins.clear();
         state.buffer = [];
         const upstream = state.upstream;
         if (upstream && upstream.readyState !== WebSocket.CLOSED) {
@@ -603,17 +466,5 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             }
         }
 
-        const subs = state.bunSubscriptions;
-        const subscriptionStates = state.subscriptionStates;
-        if (ref) {
-            import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                for (const topic of subs) {
-                    const handler = state.handlers.get(topic);
-                    const subscription = subscriptionStates.get(topic);
-                    if (handler && subscription) realtimeBunService.events.off(`change:${subscription.id}`, handler);
-                    if (subscription) realtimeBunService.unsubscribeSubscription(ref, subscription.id);
-                }
-            }).catch(console.error);
-        }
     }
   });

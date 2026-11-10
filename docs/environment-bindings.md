@@ -3,8 +3,9 @@
 Status: **IMPLEMENTED (static resolution slice)**. The compiler resolves each
 explicit `@InfraResource` to an opaque reference for one selected environment.
 Missing, unknown and malformed bindings fail closed. Runtime credential
-resolution and deployment preflight are separate work; see the
-[Encore Alignment Roadmap](./encore-alignment-roadmap.md).
+resolution and deployment preflight are separate work. The
+[Encore alignment roadmap](./encore-alignment-roadmap.md) is a proposal and must
+not drive project provision.
 
 ## Document
 

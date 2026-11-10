@@ -25,7 +25,10 @@
       "dependencies": {
         "@zenstackhq/orm": "3.10.0",
         "@zenstackhq/schema": "3.10.0",
-        "@zenstackhq/plugin-policy": "3.10.0"
+        "@zenstackhq/plugin-policy": "3.10.0",
+        "@zenstackhq/language": "3.10.0",
+        "@zenstackhq/sdk": "3.10.0",
+        "kysely": "0.29.0"
       },
       "devDependencies": {
         "@zenstackhq/cli": "3.10.0",

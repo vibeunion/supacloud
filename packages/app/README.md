@@ -138,9 +138,11 @@ disable automatic reload entirely.
 
 ## Runtime Boundary
 
-Angular is the runtime DI engine: `InjectionToken`, hierarchical injectors,
-`inject()`, `DestroyRef`, provider caching and lifecycle execution are delegated
-to Angular public APIs. SupaCloud does not reimplement those mechanisms.
+Existing DI helpers delegate `InjectionToken`, `inject()`, and `DestroyRef` to
+Angular public APIs. That compatibility layer is frozen: do not extend it with
+Forms, signals, HttpClient, or new injector examples, and do not describe it as
+the way new server routes are wired. Compiled server factories call constructors
+directly. SupaCloud does not reimplement Angular's DI mechanisms.
 
 SupaCloud still owns the application model that Angular does not define:
 `Module`, `Scope`, provider descriptors, controllers, commands, jobs, route
@@ -253,37 +255,32 @@ export class CaseModule {}
 The compiler rejects scope violations (e.g. an `application` provider
 depending on a `request` provider) at build time.
 
-## Bun Runtime Contexts
+## Bun process lifetime
 
-Use `bootstrapBun` for the process lifetime and pass its root injector to
-`@supacloud/elysia` when route handlers use `inject()`:
+`bootstrapBun` owns the process injector. `createApplication` does not accept
+an `injector` field. Pass compiled modules and host adapters instead:
 
 ```ts
-import { bootstrapBun, provideToken } from "@supacloud/app";
 import { createApplication } from "@supacloud/elysia";
 
-const APP_NAME = Symbol("app-name");
-const runtime = await bootstrapBun({
-  providers: [provideToken(APP_NAME, "cases")],
-  serve: async (injector) => {
-    const app = createApplication({ modules, injector });
-    return Bun.serve({ fetch: app.fetch, port: 3000 });
-  },
+const app = createApplication({
+  modules,
+  deps,
+  requestContext,
 });
-
-// runtime.stop() stops the Bun server, awaits async teardown, and is idempotent.
+const server = Bun.serve({ fetch: app.fetch, port: 3000 });
 ```
 
-When a root injector is supplied, the Elysia adapter creates one child
-Injector per request, provides `REQUEST_CONTEXT`, preserves the context across
-`await`, and destroys the child after the handler completes. Request contexts
-are isolated with Node's `AsyncLocalStorage`; the compiler-generated request
-scope remains available for existing applications.
+Request identity is the `requestContext` factory on `ApplicationOptions`.
+Compiled factories construct services directly. Do not add a new injector
+example or pass an Angular injector into `createApplication`.
 
-Use `runInTransactionContext(root, providers, work)` at the database transaction
-boundary to shadow tokens such as `DB_CLIENT` with the transaction-bound client.
-The database adapter owns commit, rollback, and connection closure; the DI
-scope only exposes the already-open transaction to code running inside it.
+The static AOP and Angular-style DI contracts in this package are frozen.
+`@angular/core` remains a pack-time external. Do not add Forms, signals,
+HttpClient, or runtime pointcuts.
+
+`runInTransactionContext` is an existing compatibility helper. The database
+adapter owns commit, rollback, and connection closure.
 
 ## Built-in Tokens
 
@@ -601,8 +598,8 @@ platform SDK calls remain ordinary Promise-based JavaScript.
 ### Legacy framework-neutral signals and layered configuration
 
 New applications use async/await for one result and RxJS for event composition.
-In an Angular host, use native APIs from `@supacloud/app/angular` with the
-Angular host scheduler. Never combine the two signal dependency graphs.
+`@supacloud/app/angular` is frozen compatibility for an existing Angular host.
+Do not add Forms, signals, HttpClient, or new injector examples.
 The root APIs below are retained for compatibility with existing applications.
 
 `signal`, `computed`, `linkedSignal` and `effect` remain callable and
