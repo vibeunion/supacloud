@@ -38,8 +38,6 @@ export interface LiteDoctorReport {
   powersync_source: LiteCapabilityStatus
   replication_profile?: 'powersync'
   powersync_readiness?: PowerSyncReadiness
-  /** Inbound S3-compatible endpoint (/storage/v1/s3); secrets are never reported. */
-  s3_endpoint?: { status: 'enabled' | 'disabled'; region: string; buckets: string[] }
   production_readiness?: ProductionReadiness
 }
 
