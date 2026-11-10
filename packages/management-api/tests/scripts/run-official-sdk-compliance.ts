@@ -29,18 +29,33 @@ async function bootstrap() {
   const projectService = new ProjectService();
   const tenantName = `sdkhijack${randomUUID().replace(/-/g, '').substring(0, 8)}`;
 
-  const project = await projectService.createProject({
-    name: tenantName,
-    region: "local",
-  });
-
   const sealed = sealProjectSecrets({
     db_password: "postgres",
     jwt_secret: OFFICIAL_JWT_SECRET,
     anon_key: OFFICIAL_ANON_KEY,
     service_role_key: OFFICIAL_SERVICE_ROLE_KEY,
   });
-  await sql`
+
+  // `anon_key_hash` is unique: the CI tenant bridge already owns these official
+  // keys and points at the shared containers, so a second tenant must reuse it
+  // rather than clone the same key pair into a new row.
+  const [existing] = await sql<{ ref: string }[]>`
+    SELECT ref FROM projects
+    WHERE deleted_at IS NULL AND anon_key_hash = ${sealed.anon_key_hash}
+    LIMIT 1`;
+  const reusedRef = existing?.ref;
+  const ownedRef = reusedRef === undefined
+    ? (await projectService.createProject({ name: tenantName, region: "local" })).ref
+    : undefined;
+  const projectRef = reusedRef ?? ownedRef!;
+  const project = { ref: projectRef };
+
+  if (reusedRef !== undefined) {
+    console.log(
+      `♻️ Reusing tenant [${projectRef}] because it already owns the official CI keys.`,
+    );
+  } else {
+    await sql`
         UPDATE projects
         SET anon_key = NULL,
             service_role_key = NULL,
@@ -55,9 +70,10 @@ async function bootstrap() {
         WHERE ref = ${project.ref}
     `;
 
-  console.log(
-    `✅ Provisioned Test Tenant [${project.ref}] with hijacked keys.`,
-  );
+    console.log(
+      `✅ Provisioned Test Tenant [${project.ref}] with hijacked keys.`,
+    );
+  }
 
   await new Promise((r) => setTimeout(r, 2000));
 
@@ -291,10 +307,16 @@ async function bootstrap() {
     console.error("❌ Test suite encountered an error.", err);
     testExitCode = 1;
   } finally {
-    console.log(
-      `\n🧹 Tearing down tenant [${project.ref}] and wiping cache...`,
-    );
-    await projectService.deleteProject(project.ref);
+    if (ownedRef === undefined) {
+      console.log(
+        `\n🧹 Keeping the shared tenant [${project.ref}] that owns the official CI keys...`,
+      );
+    } else {
+      console.log(
+        `\n🧹 Tearing down tenant [${project.ref}] and wiping cache...`,
+      );
+      await projectService.deleteProject(project.ref);
+    }
     rmSync(targetDir, { recursive: true, force: true });
 
     // NOTE: Do NOT call sql.end() here — this script runs mid-pipeline.
