@@ -29,7 +29,7 @@ export type ModelReadClient<S extends SchemaDef> = { readonly [M in GetModels<S>
 /** Backend compatibility alias. New consumers should import the neutral port. */
 export type ModelCommandTransaction<S extends SchemaDef> = ModelCommandTransactionPort<ModelClient<S>>;
 export type ReadFunctionScalar = string | number | boolean | null;
-export type { CallFunctionOptions, CallFunctionPolicy, CallFunctionVolatility, JsonArgument, ReadFunctionArg, ReadFunctionRow } from "./model-contract";
+export type { CallFunctionOptions, CallFunctionPolicy, CallFunctionVolatility, JsonArgument, ReadFunctionArg, ReadFunctionRow } from "@supacloud/db/model-contract";
 
 const functionName = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/;
 const qualifiedObject = /^[A-Za-z_][A-Za-z0-9_]{0,62}\.[A-Za-z_][A-Za-z0-9_]{0,62}$/;

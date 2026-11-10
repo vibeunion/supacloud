@@ -18,5 +18,6 @@
   "packages/compiler": "0.62.0",
   "packages/elysia": "0.42.1",
   "packages/db": "0.24.0",
-  "packages/testing": "0.9.0"
+  "packages/testing": "0.9.0",
+  "packages/db-zenstack": "0.1.0"
 }
