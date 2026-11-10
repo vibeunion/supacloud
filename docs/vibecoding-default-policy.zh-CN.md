@@ -26,7 +26,7 @@
 | 普通读取 | PostgREST / `supabase-js` | GraphQL 仅用于明确的 Query Contract |
 | 跨表写入 | Command / RPC + 权限、事务、幂等、审计 | 单表简单写入可使用受控 CRUD |
 | durable 执行 | Workflow/Command | pgflow、pg_durable 需要场景证明 |
-| 新应用模板 | `minimal` | `command`、`http`、`edge` 显式选择 |
+| 新应用模板 | `minimal`（编译器/Effect；`app` 别名） | 显式 `client`（仅 supabase-js）、`command` 或 `model-command` |
 | 本地开发 | `fast`，不连接外部数据库 | `integration` 要求显式 loopback URL |
 | 生成产物 | 编译器生成并检查漂移 | 不手改生成目录绕过检查 |
 | 失败处理 | fail closed，保留上一次有效产物 | 不自动修复、迁移或静默降级 |

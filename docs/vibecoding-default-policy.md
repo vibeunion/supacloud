@@ -27,7 +27,7 @@ The goal is to reduce architectural entropy, not to remove advanced capabilities
 | Ordinary reads | PostgREST / `supabase-js` | GraphQL for an explicit Query Contract |
 | Cross-table writes | Command / RPC with permission, transaction, idempotency and audit | Controlled CRUD for simple single-table operations |
 | Durable execution | Workflow/Command | pgflow or pg_durable after a proven scenario |
-| New application template | `minimal` | Explicit `command`, `http` or `edge` recipe |
+| New application template | `minimal` (compiler/Effect; `app` alias) | Explicit `client` (supabase-js only), `command`, or `model-command` |
 | Local development | `fast`, without an external database | `integration` with an explicit loopback URL |
 | Generated output | Compiler-generated and drift-checked | Never hand-edit generated directories to bypass checks |
 | Failure handling | Fail closed and preserve the last valid output | No implicit repair, migration or silent downgrade |
