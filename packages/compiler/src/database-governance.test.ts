@@ -179,6 +179,15 @@ test("catalog drift warnings stay warnings instead of blocking compilation", asy
   ]));
   // Drift warnings must not stop artifact generation either.
   expect(compiled.written.length).toBeGreaterThan(0);
+  const checked = await checkProject(options);
+  expect(checked.upToDate).toBe(true);
+  expect(checked.mismatches).toEqual([]);
+  // Strict mode still escalates warnings to errors, so the same catalog blocks.
+  const strict = await compileProject({ ...options, strict: true });
+  expect(strict.written).toEqual([]);
+  expect(strict.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({ severity: "error", code: "database-catalog-undeclared-trigger" }),
+  ]));
 }, 30_000);
 
 test("missing connection, stale sources and cached module declarations cannot silently pass", async () => {
