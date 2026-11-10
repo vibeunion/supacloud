@@ -20,6 +20,11 @@ import {
   sql,
 } from "../db";
 import { databaseService } from "./database.service";
+import { renderTenantLoginAuditSql } from "./cluster-login-audit";
+import {
+  renderTenantHbaPairingDropSql,
+  renderTenantHbaPairingSql,
+} from "./tenant-hba-pairing";
 import { projectRepository } from "../repositories/project.repository";
 import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
@@ -419,6 +424,7 @@ class BranchService {
       END
       $$;
     `);
+    await this.executeUnsafeSql(renderTenantHbaPairingSql(dbName, dbUser, authenticatorRole));
   }
 
   private async databaseExists(dbName: string): Promise<boolean> {
@@ -868,6 +874,11 @@ class BranchService {
     await removeProjectDbCache(dbName);
     await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
     if (await this.databaseExists(dbName)) throw new Error("BRANCH_DATABASE_DELETION_UNCONFIRMED");
+    await sql.unsafe(renderTenantHbaPairingDropSql(
+      dbName,
+      resolveRoleName(branchRef),
+      resolveAuthenticatorName(branchRef),
+    ));
     if (!await projectRepository.softDelete(branchRef)) throw new Error("BRANCH_PROJECT_DELETION_UNCONFIRMED");
   }
 
@@ -884,6 +895,11 @@ class BranchService {
       await removeProjectDbCache(dbName);
       await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
       if (await this.databaseExists(dbName)) throw new Error("APPLICATION_PREVIEW_CLEANUP_BRANCH_UNCONFIRMED");
+      await sql.unsafe(renderTenantHbaPairingDropSql(
+        dbName,
+        resolveRoleName(branchRef),
+        resolveAuthenticatorName(branchRef),
+      ));
       await projectRepository.softDelete(branchRef);
     });
   }
@@ -1286,6 +1302,8 @@ class BranchService {
         END IF;
       END
       $$;
+      ${renderTenantHbaPairingSql(dbName, dbUser, authenticatorRole)}
+      ${renderTenantLoginAuditSql()}
     `;
 
     await this.runPsql(connection, grantSql, "apply runtime grants", [password]);
