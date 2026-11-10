@@ -2,12 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import * as ts from "./typescript";
+import * as ts from "../../db/src/typescript";
 import { initializeAppProject as initializeFiles, appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
-import { databaseSources } from "./source-contracts";
-import { lintModule } from "./lint";
-import type { DatabaseModule } from "./module";
+import { databaseSources } from "../../db/src/source-contracts";
+import { lintModule } from "../../db/src/lint";
+import type { DatabaseModule } from "../../db/src/module";
 import { pathToFileURL } from "node:url";
 
 import { compileModel } from "./model";
@@ -16,11 +16,22 @@ async function initializeAppProject(options: Parameters<typeof initializeFiles>[
   await compileModel(join(result.root, "zenstack/schema.zmodel"), join(result.root, "zenstack/generated"));
   return result;
 }
+async function linkDatabaseAdapter() {
+  const { mkdir, symlink } = await import("node:fs/promises");
+  for (const owner of ["db", "compiler"]) {
+    const target = resolve(import.meta.dir, `../../${owner}/node_modules/@supacloud`);
+    await mkdir(target, { recursive: true });
+    try { await symlink(resolve(import.meta.dir, ".."), join(target, "db-zenstack"), "dir"); } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+    }
+  }
+}
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 test("database starter ships a source contract and live module ownership without rewriting migration history", async () => {
+  await linkDatabaseAdapter();
   const root = await mkdtemp(join(tmpdir(), "db-starter-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -52,6 +63,7 @@ test("default checks run before regeneration and ZenStack candidate paths never 
   expect(plain["database.sources.json"]).toBeUndefined();
 });
 test("generated database module loads real ZenStack names and its SQL passes governance", async () => {
+  await linkDatabaseAdapter();
   const root = await mkdtemp(join(tmpdir(), "db-starter-module-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -68,6 +80,7 @@ test("generated database module loads real ZenStack names and its SQL passes gov
   }
 });
 test("generated ZenStack declarations and configuration typecheck; inferred row types reject invalid states", async () => {
+  await linkDatabaseAdapter();
   const root = await mkdtemp(join(tmpdir(), "db-starter-types-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -92,6 +105,7 @@ const insert: NewReview = row;`;
 }, 30_000);
 
 test("ZenStack generates real SQL drafts without changing deployment migrations", async () => {
+  await linkDatabaseAdapter();
   const root = await mkdtemp(join(tmpdir(), "db-starter-diff-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });
@@ -110,6 +124,7 @@ test("ZenStack generates real SQL drafts without changing deployment migrations"
 }, 30_000);
 
 test("temporary delivery upgrades regenerate contracts and restore the exact baseline on success or failure", async () => {
+  await linkDatabaseAdapter();
   const root = await mkdtemp(join(tmpdir(), "db-starter-upgrade-"));
   roots.push(root);
   await initializeAppProject({ root, name: "example", template: "command" });

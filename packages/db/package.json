@@ -98,6 +98,14 @@
     "@supacloud/contracts": "file:../contracts",
     "typescript": "7.1.0-beta"
   },
+  "peerDependencies": {
+    "@supacloud/db-zenstack": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@supacloud/db-zenstack": {
+      "optional": true
+    }
+  },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",
     "deepmerge-ts": "8.0.2"

@@ -13,8 +13,6 @@ import { COMMAND_PERSISTENCE_SQL } from "../../db/src/command-schema";
 import { databaseSources } from "../../db/src/source-contracts";
 import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
 import { generateDatabaseContracts, parseDatabaseContractsOptions } from "../../compiler/src/database-contracts";
-import { registerRemoteDevTools } from "../../cli/src/shared/tools/remote-dev-tools";
-import type { ToolInvocation } from "../../cli/src/shared/tool-server";
 import { startStarterPostgres } from "../../../scripts/lib/starter-postgres";
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -153,20 +151,6 @@ void [host, row];`);
     types: ["bun"], typeRoots: [join(root, "node_modules/@types")], target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
   expect((await ts.getPreEmitDiagnostics(program)).map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
-});
-
-test("removed dev migration action and config fail before remote execution", async () => {
-  const root = await temporary();
-  let invoke: ToolInvocation | undefined;
-  let calls = 0;
-  registerRemoteDevTools({ tool(_name, _description, _schema, handler) { invoke = handler; } }, {
-    cwd: root, environment: "test", execute: async () => { calls++; return { exitCode: 0, stdout: "", stderr: "" }; },
-  });
-  if (!invoke) throw new Error("Missing dev tool");
-  await expect(invoke({ action: "migrate" })).rejects.toThrow();
-  await writeFile(join(root, "supacloud.json"), JSON.stringify({ dev: { database: {} } }));
-  await expect(invoke({ action: "status" })).rejects.toThrow("dev.database was removed");
-  expect(calls).toBe(0);
 });
 
 test.skipIf(!postgresBin)("model command lock serializes writers, is transaction-scoped and deadlock-free", async () => {

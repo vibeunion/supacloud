@@ -195,6 +195,7 @@ jobs:
               bun install --ignore-scripts --frozen-lockfile --cwd ../..
               node ../../scripts/workspace/prepare.mjs supacloud-js
               bun install --frozen-lockfile
+              (cd ../db-zenstack && bun install --frozen-lockfile)
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
               bun run typecheck:test

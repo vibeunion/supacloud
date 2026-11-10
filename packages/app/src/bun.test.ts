@@ -1,14 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { InjectionToken, provideLifecycle, provideToken } from "./index";
 import {
   bootstrapBun,
   createEnvironmentInjector,
-  InjectionToken,
   inject,
-  provideLifecycle,
-  provideToken,
   runInRequestContext,
   runInTransactionContext,
-} from "./index";
+} from "./runtime";
 
 describe("Bun application scopes", () => {
   it("awaits application initialization and asynchronous destruction", async () => {
