@@ -30,8 +30,14 @@ function localImports(source: string): string[] {
 test("the control-plane entry does not require ZenStack, Kysely, or the adapter package", () => {
   for (const name of adapterPackages) {
     expect(manifest.dependencies?.[name]).toBeUndefined();
-    expect(manifest.peerDependencies?.[name]).toBeUndefined();
     expect(manifest.devDependencies?.[name]).toBeUndefined();
+    if (name === "@supacloud/db-zenstack") {
+      // Compatibility entry points may declare the adapter only as an optional peer.
+      expect(manifest.peerDependencies?.[name]).toBeDefined();
+      expect(manifest.peerDependenciesMeta?.[name]?.optional).toBe(true);
+    } else {
+      expect(manifest.peerDependencies?.[name]).toBeUndefined();
+    }
   }
 });
 

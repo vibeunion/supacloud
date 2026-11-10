@@ -86,6 +86,7 @@ export async function loadProjects(packagesDir: string): Promise<WorkspaceInvent
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
       peerDependencies?: Record<string, string>;
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>;
       optionalDependencies?: Record<string, string>;
     } = {};
     try {
@@ -125,12 +126,17 @@ export async function loadProjects(packagesDir: string): Promise<WorkspaceInvent
     }
 
     const name = pkgJson.name ?? entry.name;
-    const dependencies = Object.keys({
-      ...(pkgJson.dependencies ?? {}),
-      ...(pkgJson.devDependencies ?? {}),
-      ...(pkgJson.peerDependencies ?? {}),
-      ...(pkgJson.optionalDependencies ?? {}),
-    });
+    const optionalPeers = Object.entries(pkgJson.peerDependenciesMeta ?? {})
+      .filter(([, meta]) => meta.optional === true)
+      .map(([name]) => name);
+    const dependencies = [...new Set([
+      ...Object.keys({
+        ...(pkgJson.dependencies ?? {}),
+        ...(pkgJson.devDependencies ?? {}),
+        ...(pkgJson.peerDependencies ?? {}),
+        ...(pkgJson.optionalDependencies ?? {}),
+      }),
+    ])].filter((name) => !(name in (pkgJson.peerDependencies ?? {}) && optionalPeers.includes(name)));
     projects.set(name, {
       name,
       tags,

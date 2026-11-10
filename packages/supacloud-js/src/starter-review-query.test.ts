@@ -1,4 +1,4 @@
-import { compileModel } from "../../db/src/model";
+import { compileModel } from "../../db-zenstack/src/model";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -25,7 +25,7 @@ beforeAll(async () => {
   }
   await mkdir(join(root, "node_modules"));
   await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
-  await symlink(resolve(sdk, "../db/node_modules/@zenstackhq"), join(root, "node_modules/@zenstackhq"));
+  await symlink(resolve(sdk, "../db-zenstack/node_modules/@zenstackhq"), join(root, "node_modules/@zenstackhq"));
   const loaded: { listReviews: typeof listReviews } = await import(join(root, "src/review/list-reviews.ts"));
   listReviews = loaded.listReviews;
 });
