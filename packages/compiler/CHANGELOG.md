@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.62.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.0...compiler-v0.62.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **compiler:** keep reconcile warn diagnostics non-blocking ([#2527](https://github.com/vibeunion/supacloud/issues/2527)) ([c03a662](https://github.com/vibeunion/supacloud/commit/c03a66228b0370949e990e4577682adc97c7c1c9))
+* **compiler:** let database governance warnings keep compiling ([#2533](https://github.com/vibeunion/supacloud/issues/2533)) ([db0d37d](https://github.com/vibeunion/supacloud/commit/db0d37d900b2b19f1b6bde20f463127b55885308))
+
 ## [0.62.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.61.0...compiler-v0.62.0) (2026-11-10)
 
 

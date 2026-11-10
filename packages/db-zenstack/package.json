@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/db-zenstack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Optional ZenStack model adapter for SupaCloud. Not part of the control-plane database package.",
   "type": "module",
   "main": "./dist/index.js",
