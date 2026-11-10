@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.60.0...compiler-v0.61.0) (2026-11-09)
+
+
+### Features
+
+* **compiler:** use platform-owned database governance ([#2511](https://github.com/vibeunion/supacloud/issues/2511)) ([da02972](https://github.com/vibeunion/supacloud/commit/da02972781b6b63a9846390de1ea3b580cc6ce19))
+
 ## [0.60.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.59.0...compiler-v0.60.0) (2026-11-09)
 
 
