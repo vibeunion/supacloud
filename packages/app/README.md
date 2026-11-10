@@ -276,9 +276,31 @@ Compiled factories construct services directly. Do not add a new injector
 example or pass an Angular injector into `createApplication`.
 
 The static AOP and Angular-style DI contracts in this package are frozen.
-`@supacloud/app/core` does not import `@angular/core`. The runtime injector in
-the full package still adapts Angular for existing hosts. Do not add Forms,
-signals, HttpClient, or runtime pointcuts.
+`@supacloud/app` and `@supacloud/app/core` do not import `@angular/core`.
+Do not add Forms, signals, HttpClient, or runtime pointcuts.
+
+## Migration: Angular injector adapter
+
+`inject`, `createEnvironmentInjector`, `bootstrapBun`, `TestBed`, and the
+`HttpClient` that calls `inject()` moved off the package root. Import them
+from `@supacloud/app/runtime`. That module loads `@angular/core`.
+`@angular/core` is an optional peer: install it only when you import the runtime.
+
+```ts
+import {
+  bootstrapBun,
+  createEnvironmentInjector,
+  inject,
+} from "@supacloud/app/runtime";
+```
+
+There is no root re-export. A root re-export would load `@angular/core` into
+every `@supacloud/app` import.
+
+`@supacloud/app/angular` and `@supacloud/app/rxjs` stay separate browser
+entries so they do not load `node:async_hooks`.
+`@supacloud/app/pending-work` is the Angular-free work registry that used to
+ship from `@supacloud/app/runtime`.
 
 `runInTransactionContext` is an existing compatibility helper. The database
 adapter owns commit, rollback, and connection closure.

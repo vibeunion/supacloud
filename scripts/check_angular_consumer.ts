@@ -35,7 +35,7 @@ try {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     await readFile(join(root, metadata.module ?? metadata.main));
-    if (directory === "app") for (const entry of ["angular", "rxjs", "http", "runtime"]) {
+    if (directory === "app") for (const entry of ["angular", "rxjs", "http", "runtime", "pending-work"]) {
       assert.equal(metadata.exports[`./${entry}`]?.import, `./dist/${entry}.js`);
       assert.equal(metadata.exports[`./${entry}`]?.types, `./dist/${entry}.d.ts`);
       await readFile(join(root, `dist/${entry}.js`));
@@ -177,11 +177,11 @@ console.log("Packed Angular identity, state, ownership, misuse and teardown pass
 
 function httpConsumerSource(): string {
   return `import { strict as assert } from "node:assert";
-import { HttpClient as RootClient, createEnvironmentInjector } from "@supacloud/app";
+import { HttpClient as RuntimeClient, createEnvironmentInjector } from "@supacloud/app/runtime";
 import { HttpClient, provideHttpClient, withFetch, withInterceptors, withRequestsMadeViaParent } from "@supacloud/app/http";
 import { createHttpTestBackend } from "@supacloud/testing";
-import { createPendingWorkRegistry } from "@supacloud/app/runtime";
-assert.equal(HttpClient, RootClient, "HTTP entry must share the root client identity");
+import { createPendingWorkRegistry } from "@supacloud/app/pending-work";
+assert.equal(HttpClient, RuntimeClient, "HTTP entry must share the runtime client identity");
 const backend = createHttpTestBackend();
 const order: string[] = [];
 const parent = createEnvironmentInjector([provideHttpClient(withFetch(backend.fetch), withInterceptors(async (req, next) => {
@@ -214,7 +214,7 @@ console.log("Packed HTTP identity, actual injector hierarchy, request verificati
 function hostConsumerSource(): string {
   return `import { strict as assert } from "node:assert";
 import { createApplication, createWorker, type CompiledModule } from "@supacloud/elysia";
-import { PendingWorkTimeoutError } from "@supacloud/app/runtime";
+import { PendingWorkTimeoutError } from "@supacloud/app/pending-work";
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { resolve, promise }; }
 const entered = deferred(), release = deferred();
 let signal: AbortSignal | undefined, cleaned = 0;

@@ -13,8 +13,8 @@ import type { ApplicationGraph } from "./types";
 
 test("runtime DI is rejected through aliases and namespaces without confusing declarations", async () => {
   const diagnostics = (await scanRuntimeDi((await ts.createSourceFile("main.ts", `
-import { inject as resolve, Module } from "@supacloud/app";
-import * as app from "@supacloud/app";
+import { inject as resolve, Module } from "@supacloud/app/runtime";
+import * as app from "@supacloud/app/runtime";
 const a = app.createEnvironmentInjector([]);
 const b = app["inject"];
 `, ts.ScriptTarget.Latest, true)), "main.ts"));
