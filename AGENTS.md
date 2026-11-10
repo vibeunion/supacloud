@@ -3,6 +3,7 @@
 ## Start here
 
 - Feature iteration: [docs/feature-development.md](docs/feature-development.md).
+- Operator acceptance after secret encryption and the package reshape: [docs/self-hosted-stable-baseline.md](docs/self-hosted-stable-baseline.md). Merging is not a production deploy (合码≠上线). `docker/self-host` is not multi-project Pigsty evidence. Gates 2–4 and HA are claimed only after a dated pass on a real host.
 - AOP design and framework references: [docs/architecture/static-aop.md](docs/architecture/static-aop.md).
 - Breaking database adoption: [docs/architecture/zenstack-upgrade.md](docs/architecture/zenstack-upgrade.md).
 - Check the implementation and executable examples linked by these guides before extending a boundary. Distinguish implemented enforcement from proposed work.

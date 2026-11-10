@@ -1,5 +1,23 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { ShellService, shellService } from "../../src/services/shell.service";
+import { environmentWithoutClusterPassword, ShellService, shellService } from "../../src/services/shell.service";
+
+describe("environmentWithoutClusterPassword", () => {
+  test("does not copy the cluster database password into script environments", () => {
+    const env = environmentWithoutClusterPassword({
+      PATH: "/usr/bin",
+      HOME: "/tmp",
+      PGPASSWORD: "cluster-secret-value",
+      PG_PASSWORD: "cluster-secret-value",
+      POSTGRES_PASSWORD: "cluster-secret-value",
+    });
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HOME).toBe("/tmp");
+    expect(env.PGPASSWORD).toBeUndefined();
+    expect(env.PG_PASSWORD).toBeUndefined();
+    expect(env.POSTGRES_PASSWORD).toBeUndefined();
+    expect(JSON.stringify(env)).not.toContain("cluster-secret-value");
+  });
+});
 
 describe("ShellService", () => {
   let service: ShellService;

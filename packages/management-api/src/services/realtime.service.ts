@@ -14,6 +14,11 @@ import { resolveProjectJwtVerificationMaterial } from "../utils/project-jwt";
  *   - Health check
  */
 import { logger } from "../utils/logger";
+import { redactLoggedSecrets } from "./secret-log-redaction";
+
+function loggedRealtimeError(text: string, tenantPassword = ""): string {
+    return redactLoggedSecrets(text, [config.pgPassword, tenantPassword]);
+}
 
 // Determines whether error is a connection-level failure caused by container not ready (retryable), distinct from logic errors.
 function isConnectionError(msg: string): boolean {
@@ -196,7 +201,10 @@ export class RealtimeService {
                 }
 
                 const errText = await res.text();
-                logger.error(`[Realtime] Failed to register tenant ${config.projectRef}:`, { status: res.status, error: errText });
+                logger.error(`[Realtime] Failed to register tenant ${config.projectRef}:`, {
+                    status: res.status,
+                    error: loggedRealtimeError(errText, config.dbPassword),
+                });
                 return false;
             } catch (err: unknown) {
                 if (options.signal?.aborted) return false;
@@ -247,7 +255,10 @@ export class RealtimeService {
             }
 
             const errText = await res.text();
-            logger.error(`[Realtime] Failed to remove tenant ${projectRef}:`, { status: res.status, error: errText });
+            logger.error(`[Realtime] Failed to remove tenant ${projectRef}:`, {
+                status: res.status,
+                error: loggedRealtimeError(errText),
+            });
             return false;
         } catch (err: unknown) {
             logger.error(`[Realtime] Removal error for ${projectRef}:`, { error: err instanceof Error ? err.message : String(err) });
@@ -275,7 +286,10 @@ export class RealtimeService {
             }
 
             const errText = await res.text();
-            logger.error(`[Realtime] Failed to update tenant ${config.projectRef}:`, { status: res.status, error: errText });
+            logger.error(`[Realtime] Failed to update tenant ${config.projectRef}:`, {
+                status: res.status,
+                error: loggedRealtimeError(errText, config.dbPassword),
+            });
             return false;
         } catch (err: unknown) {
             logger.error(`[Realtime] Update error for ${config.projectRef}:`, { error: err instanceof Error ? err.message : String(err) });
@@ -393,7 +407,10 @@ export class RealtimeService {
             return {
                 success: false,
                 changed: false,
-                error: err instanceof Error ? err.message : String(err),
+                error: redactLoggedSecrets(
+                    err instanceof Error ? err.message : String(err),
+                    [config.pgPassword],
+                ),
             };
         }
     }
