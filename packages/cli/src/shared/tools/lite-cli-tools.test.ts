@@ -60,6 +60,23 @@ describe("SupaCloud Lite CLI adapter", () => {
         ]);
     });
 
+    test("forwards the inbound S3 endpoint flags", () => {
+        expect(buildLiteArgs({
+            action: "start",
+            s3_endpoint: true,
+            s3_endpoint_access_key_id: "lite-access",
+            s3_endpoint_region: "ap-east-1",
+            s3_endpoint_buckets: "fa-task-inputs,fa-artifacts",
+        })).toEqual([
+            "start",
+            "--s3-endpoint",
+            "--s3-endpoint-access-key-id", "lite-access",
+            "--s3-endpoint-region", "ap-east-1",
+            "--s3-endpoint-buckets", "fa-task-inputs,fa-artifacts",
+        ]);
+        expect(buildLiteArgs({ action: "doctor", format: "json" })).not.toContain("--s3-endpoint");
+    });
+
     test("resolves explicit binaries and rejects unsafe paths", () => {
         expect(resolveLiteCommand("/workspace/project", {
             SUPACLOUD_LITE_CLI_BIN: "/opt/bin/supacloud-lite",

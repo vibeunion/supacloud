@@ -37,9 +37,10 @@ operational boundary.
 
 | Your task | Entry point | Boundary |
 | --- | --- | --- |
+| Run a small single-node server without Pigsty | [Deployment profiles](docs/deployment-profiles.md) | `solo` or `podman` profiles, local providers, explicit external database binding and recovery boundaries. |
 | Operate multiple projects on your own servers | [Full platform operations](docs/platform-operations.md) | Pigsty infrastructure, Management API, Web Console, project lifecycle and operator responsibilities. |
 | Build a typed, modular business application | [Application starter](docs/application-starter.md) | Optional development layer; the demo does not supply production identity, persistence or deployment. |
-| Run a local-first or small single-project backend without Docker | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite; one project per process; no multi-project control plane or Supabase Studio. |
+| Run a local-first or small single-project backend | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite; one project per process; no multi-project control plane or Supabase Studio. |
 
 Read the [self-hosted stable baseline](docs/self-hosted-stable-baseline.md)
 before treating the full platform as a production dependency. The full platform
@@ -60,6 +61,10 @@ curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh |
 ```
 
 The bootstrap comes directly from the official repository. An explicitly configured proxy is only a fallback for subsequent Release/API downloads. Network release artifacts require checksum and provenance verification.
+
+Fresh installs default to the Podman single-node profile when Pigsty or an external
+database is not explicitly selected. See the [deployment profiles](docs/deployment-profiles.md)
+and [Podman single-node guide](podman/self-host/README.md) for Quadlet/systemd boundaries.
 
 ### Build an application
 
@@ -145,7 +150,7 @@ Binding is an administrator operation. Existing platform objects require the doc
 
 | Area | Guides |
 | --- | --- |
-| Getting started | [Stable baseline](docs/self-hosted-stable-baseline.md) · [Installation and upgrades](docs/platform-operations.md) · [Application starter](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) |
+| Getting started | [Stable baseline](docs/self-hosted-stable-baseline.md) · [Deployment profiles](docs/deployment-profiles.md) · [Installation and upgrades](docs/platform-operations.md) · [Application starter](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) |
 | Application engineering | [Golden paths](docs/vibecoding-golden-paths.md) · [Framework](docs/application-framework.md) · [Engineering goals](docs/engineering-goals.md) |
 | Platform and storage | [Multi-tenant architecture](docs/architecture-multi-tenant.md) · [Project-scoped S3](docs/project-scoped-s3.md) · [Gateway](docs/gateway-customization.md) |
 | Delivery and execution | [CLI](docs/cli-guide.md) · [Frontend hosting](docs/frontend-hosting.md) · [Background functions](docs/background-functions.md) · [Edge runtime](docs/edge-runtime-guide.md) |

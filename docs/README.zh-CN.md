@@ -10,6 +10,8 @@
 - [部署 API](./deploy-api.md) - 自动化部署 API 参考
 - [配置文件示例](./supacloud.yml.example) - 部署与运行配置文件示例
 - [自托管稳定基线](./self-hosted-stable-baseline.zh-CN.md) - 主产品边界、首要支持组合、验收门与证据状态
+- [部署档次](./deployment-profiles.zh-CN.md) - Solo、Podman 单机、Pigsty 与集群边界
+- [Podman 单机到集群迁移](./podman-cluster-migration.zh-CN.md) - Quadlet 单机边界与集群交接
 - [SupaCloud 与 Supabase 对比](./supacloud-vs-supabase.md) - 产品定位与核心特性差异对比
 - [数据库环境晋级](./database-environment-promotion.md) - 本地、预览、Staging 与生产环境迁移流
 
@@ -49,9 +51,10 @@
 - [PostgREST 运行时生命周期](./postgrest-runtime-lifecycle.md) - 组件级期望状态配置、暂停/恢复/状态对齐
 - [pgredis 运行时](./pgredis-runtime.md) - 私有缓存数据面、控制面 API、Web Console 运维与安全边界
 - [平台组件升级说明](./platform-component-upgrade-notes.md) - 破坏性变更、迁移步骤、可选特性与回滚说明
+- [原生 Realtime 发布](./realtime-native-release.md) - CI-only OTP release、签名 tar.zst 与 Solo/Full Platform 资产边界
 - [升级至 Pigsty 4.5](./upgrade-to-pigsty-4.5.md) - 当前 Pigsty 版本锁定与升级验证
 - [Pigsty 4.4 兼容性迁移历史](./upgrade-to-pigsty-4.4.md) - 分析组件与 Supabase 兼容迁移背景
-- [Docker PostgreSQL 4.4 升级](./upgrade-postgres-docker-4.4.md) - Docker 容器化兼容性、备份与大版本安全指南
+- [PostgreSQL 4.4 升级](./upgrade-postgres-docker-4.4.md) - 历史容器化 PostgreSQL 兼容性、备份与大版本安全指南
 - [Podman DNS 故障排查](./troubleshooting-podman-dns.md) - Podman 容器内 DNS 解析问题定位与修复
 - [AWS PrivateLink](./aws-privatelink.md) - 单区域接入计划。当前 provider 不调用 AWS。
 

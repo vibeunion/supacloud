@@ -4,6 +4,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
 import { generateTypes, inspectDb } from './runtime/index.js'
+import type { S3EndpointOptions } from './runtime/storage/s3.js'
 import { computeDbDiff, createTemporaryNativeEngine, pullSchema } from './runtime/node/db-diff.js'
 import { checkDatabaseModules, formatDatabaseModuleCheck } from './runtime/node/db-check.js'
 import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
@@ -25,6 +26,7 @@ import {
   resolveStorageBackend,
   resolveProjectPaths,
   resolveNativeReplicationOptions,
+  resolveS3EndpointOptions,
   startProjectServer,
   type ProjectRuntimeOptions,
 } from './project-runtime.js'
@@ -52,6 +54,12 @@ interface CliOptions extends ProjectRuntimeOptions {
   emailConfirm?: boolean
   sourceDir?: string
   reportPath?: string
+  /** --s3-endpoint：启用入站 S3 兼容端点；未给密钥时按进程生成一次性凭据。 */
+  s3EndpointRequested?: boolean
+  s3EndpointAccessKeyId?: string
+  s3EndpointSecretAccessKeyStdin?: boolean
+  s3EndpointRegion?: string
+  s3EndpointBuckets?: string[]
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -88,6 +96,11 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--storage-dir') options.storageDir = resolve(next())
     else if (argument === '--storage-backend') options.storageBackend = next() as ProjectRuntimeOptions['storageBackend']
     else if (argument === '--s3-prefix') options.s3 = { ...options.s3, prefix: next() }
+    else if (argument === '--s3-endpoint') options.s3EndpointRequested = true
+    else if (argument === '--s3-endpoint-access-key-id') options.s3EndpointAccessKeyId = next()
+    else if (argument === '--s3-endpoint-secret-access-key-stdin') options.s3EndpointSecretAccessKeyStdin = true
+    else if (argument === '--s3-endpoint-region') options.s3EndpointRegion = next()
+    else if (argument === '--s3-endpoint-buckets') options.s3EndpointBuckets = commaSeparated(next())
     else if (argument === '--engine') options.engine = next() as ProjectRuntimeOptions['engine']
     else if (argument === '--runtime-mode') options.runtimeMode = runtimeMode(next())
     else if (argument === '--postgres-dir') options.postgresDir = resolve(next())
@@ -141,6 +154,11 @@ async function main(): Promise<void> {
   if (options.sourceDir && options.command !== 'import') throw new Error('--from is only valid with import')
   if (options.reportPath && options.command !== 'import') throw new Error('--report is only valid with import')
   const paths = resolveProjectPaths(options)
+  if (s3EndpointRequested(options) && options.command !== 'start' && options.command !== 'doctor') {
+    throw new Error('--s3-endpoint options only apply to "start" and "doctor"')
+  }
+  const resolvedS3Endpoint = await resolveCliS3Endpoint(options)
+  if (resolvedS3Endpoint.s3Endpoint) options.s3Endpoint = resolvedS3Endpoint.s3Endpoint
 
   if (options.command === 'compat') {
     const matrix = await buildVersionMatrix({ supabaseJsExercised: false })
@@ -284,6 +302,7 @@ async function main(): Promise<void> {
     } else if (replication) {
       throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
     }
+    report.s3_endpoint = describeS3Endpoint(options, resolvedS3Endpoint)
     if (config.lite.graphql.enabled === false) report.graphql = { status: 'disabled', extension: 'pg_graphql' }
     if (options.production) {
       report.production_readiness = productionReadiness({
@@ -357,10 +376,21 @@ async function main(): Promise<void> {
         Functions: ${project.functionNames.length ? project.functionNames.join(', ') : 'none'}
           Webhooks: ${project.webhookCount}
        Email inbox: ${project.backend.inbox ? `${project.url}/inbox` : 'disabled on network-exposed host'}
+      S3 endpoint: ${options.s3Endpoint
+        ? `${project.url}/storage/v1/s3 (region ${options.s3Endpoint.region ?? 'us-east-1'}, ` +
+          `access key ${options.s3Endpoint.accessKeyId}, ` +
+          `${options.s3Endpoint.bucketScope?.length ? `buckets ${options.s3Endpoint.bucketScope.join(',')}` : 'all buckets'})`
+        : 'disabled (pass --s3-endpoint to expose S3-compatible clients)'}
 
   Run "supacloud-lite keys" for the anon key.
   Run "supacloud-lite keys --service-role" only when privileged access is required.
-\n`)
+${resolvedS3Endpoint.generatedSecret
+    ? `
+  Generated S3 secret access key (shown once, this process only):
+    ${resolvedS3Endpoint.generatedSecret}
+  Pass --s3-endpoint-access-key-id/--s3-endpoint-secret-access-key-stdin to pin credentials.
+`
+    : ''}\n`)
 
   await shutdown
   process.exitCode = 0
@@ -602,6 +632,11 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
   output.push(`identity: ${report.identity.mode} (${report.identity.verification})`)
   output.push(`local_auth: ${report.identity.local_auth.status} (${report.identity.local_auth.reason}, configuration-only)`)
   output.push(`migration_formats: ${report.migrations.formats.join(', ')}`)
+  const s3Endpoint = report.s3_endpoint ?? { status: 'disabled' as const, region: 'us-east-1', buckets: [] }
+  output.push(
+    `s3_endpoint: ${s3Endpoint.status} (${s3Endpoint.region}, ` +
+      `${s3Endpoint.buckets.length ? s3Endpoint.buckets.join(',') : 'all buckets'})`,
+  )
   if (report.powersync_readiness) {
     output.push(`powersync_ready: ${report.powersync_readiness.ready}`)
     for (const blocker of report.powersync_readiness.blockers) output.push(`blocker: ${blocker}`)
@@ -631,6 +666,117 @@ function quietLog(): void {}
 
 function commaSeparated(value: string): string[] {
   return value.split(',').map((entry) => entry.trim()).filter(Boolean)
+}
+
+function randomHex(bytes: number): string {
+  return [...crypto.getRandomValues(new Uint8Array(bytes))]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+async function readSecretLine(option: string): Promise<string> {
+  if (process.stdin.isTTY) {
+    throw new Error(`${option} requires piped or redirected input; terminal input is not accepted`)
+  }
+  const secret = (await Bun.stdin.text()).split(/\r?\n/)[0]?.trim() ?? ''
+  if (!secret) throw new Error(`${option} received an empty secret`)
+  return secret
+}
+
+/**
+ * Resolve the inbound S3-compatible endpoint from flags, falling back to
+ * SUPACLOUD_LITE_S3_ENDPOINT_*. `--s3-endpoint` without credentials generates a
+ * one-process key pair so `aws s3`, rclone, boto3 and S3 SDKs can connect
+ * without provisioning secrets by hand; the secret is printed once at startup.
+ */
+interface ResolvedCliS3Endpoint {
+  s3Endpoint?: S3EndpointOptions
+  generatedSecret?: string
+  /** 是否显式请求启用（CLI 开关或环境变量），doctor 只用它判断状态，不生成凭据。 */
+  requested: boolean
+}
+
+function s3EndpointRequested(options: CliOptions): boolean {
+  return options.s3EndpointRequested === true
+    || options.s3EndpointAccessKeyId !== undefined
+    || options.s3EndpointSecretAccessKeyStdin === true
+    || options.s3EndpointRegion !== undefined
+    || (options.s3EndpointBuckets?.length ?? 0) > 0
+    || Boolean(
+      process.env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID || process.env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY,
+    )
+}
+
+/**
+ * Resolve the inbound S3-compatible endpoint from flags, falling back to
+ * SUPACLOUD_LITE_S3_ENDPOINT_*. `--s3-endpoint` without credentials generates a
+ * one-process key pair so `aws s3`, rclone, boto3 and S3 SDKs can connect
+ * without provisioning secrets by hand; the secret is printed once at startup.
+ *
+ * Only `start` may read stdin or mint credentials: `doctor` must stay read-only
+ * and never generate a secret that nobody would ever see.
+ */
+async function resolveCliS3Endpoint(options: CliOptions): Promise<ResolvedCliS3Endpoint> {
+  const requested = s3EndpointRequested(options)
+  if (!requested) return { s3Endpoint: resolveS3EndpointOptions(), requested }
+  const mayProvision = options.command === 'start'
+  if (!mayProvision) {
+    if (options.s3EndpointSecretAccessKeyStdin) {
+      throw new Error('--s3-endpoint-secret-access-key-stdin is only supported by "start"')
+    }
+    return {
+      s3Endpoint: resolveS3EndpointOptions(process.env, {
+        accessKeyId: options.s3EndpointAccessKeyId,
+        ...endpointOverrides(options),
+      }),
+      requested,
+    }
+  }
+  let secretAccessKey = options.s3EndpointSecretAccessKeyStdin
+    ? await readSecretLine('--s3-endpoint-secret-access-key-stdin')
+    : undefined
+  let accessKeyId = options.s3EndpointAccessKeyId
+  let generatedSecret: string | undefined
+  const envConfigured = Boolean(
+    process.env.SUPACLOUD_LITE_S3_ENDPOINT_ACCESS_KEY_ID || process.env.SUPACLOUD_LITE_S3_ENDPOINT_SECRET_ACCESS_KEY,
+  )
+  if (!accessKeyId && !secretAccessKey && !envConfigured) {
+    accessKeyId = `lite-${randomHex(6)}`
+    secretAccessKey = randomHex(24)
+    generatedSecret = secretAccessKey
+  }
+  return {
+    s3Endpoint: resolveS3EndpointOptions(process.env, {
+      ...endpointOverrides(options),
+      accessKeyId,
+      secretAccessKey,
+    }),
+    generatedSecret,
+    requested,
+  }
+}
+
+function endpointOverrides(options: CliOptions) {
+  return { region: options.s3EndpointRegion, bucketScope: options.s3EndpointBuckets }
+}
+
+function describeS3Endpoint(
+  options: CliOptions,
+  resolved: ResolvedCliS3Endpoint,
+): { status: 'enabled' | 'disabled'; region: string; buckets: string[] } {
+  if (!resolved.requested) return { status: 'disabled', region: 'us-east-1', buckets: [] }
+  // 环境变量方式不携带密钥时 s3Endpoint 可能为空，region/buckets 仍要反映环境配置。
+  const envBuckets = process.env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS
+    ? commaSeparated(process.env.SUPACLOUD_LITE_S3_ENDPOINT_BUCKETS)
+    : []
+  return {
+    status: 'enabled',
+    region: resolved.s3Endpoint?.region
+      ?? options.s3EndpointRegion
+      ?? process.env.SUPACLOUD_LITE_S3_ENDPOINT_REGION
+      ?? 'us-east-1',
+    buckets: resolved.s3Endpoint?.bucketScope ?? options.s3EndpointBuckets ?? envBuckets,
+  }
 }
 
 function formatCompat(matrix: Awaited<ReturnType<typeof buildVersionMatrix>>): string {
@@ -681,6 +827,12 @@ Options:
       --storage-dir <p>   object storage directory
       --storage-backend <b> fs, memory, or s3 (default fs)
       --s3-prefix <p>      optional key prefix for the s3 backend
+      --s3-endpoint       expose the inbound S3-compatible endpoint at /storage/v1/s3
+                           (generates a one-process access key when no keys are given)
+      --s3-endpoint-access-key-id <id>          S3 access key id for the inbound endpoint
+      --s3-endpoint-secret-access-key-stdin      read the S3 secret access key from stdin
+      --s3-endpoint-region <r>                  SigV4 region (default us-east-1)
+      --s3-endpoint-buckets <list>              restrict the endpoint to these buckets
       --engine <e>         pglite (default) or native (macOS/glibc Linux x64/arm64)
       --replication-profile <p> optional powersync profile (native only)
       --replication-host <ip> database listener (default 127.0.0.1)

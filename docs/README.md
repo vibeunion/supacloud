@@ -10,6 +10,8 @@
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
 - [Self-Hosted Stable Baseline](./self-hosted-stable-baseline.md) - Primary product boundary, supported profile, acceptance gates, and evidence states
+- [Deployment Profiles](./deployment-profiles.md) - Solo, Podman single-node, Pigsty and cluster boundaries
+- [Podman Single-Node to Cluster Migration](./podman-cluster-migration.md) - Quadlet boundary and cluster handoff
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - Product positioning and feature comparison
 - [Database Environment Promotion](./database-environment-promotion.md) - Local, preview, staging, and production migration workflow
 
@@ -57,9 +59,10 @@
 - [pgredis Runtime](./pgredis-runtime.md) - Private cache data plane, control-plane APIs, Web Console operations, and safety boundaries
 - [Control-plane brief outage](./control-plane-outage.md) - Single-node SLO for authenticated REST, Auth, Storage, and Functions while the Management API listener is down
 - [Platform Component Upgrade Notes](./platform-component-upgrade-notes.md) - Breaking changes, migrations, optional features, and rollback notes for current runtime components
+- [Native Realtime Release](./realtime-native-release.md) - CI-only OTP releases, signed tar.zst bundles, and Solo/Full Platform asset boundaries
 - [Upgrade to Pigsty 4.5](./upgrade-to-pigsty-4.5.md) - Current Pigsty version pin and upgrade validation
 - [Historical Pigsty 4.4 compatibility migration](./upgrade-to-pigsty-4.4.md) - Analytics and Supabase compatibility migration background
-- [Docker PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Docker-specific compatibility, backup, and major-version safety guide
+- [PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Historical containerized PostgreSQL compatibility and major-version safety guide
 - [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting
 - [AWS PrivateLink](./aws-privatelink.md) - Local single-region attachment plan. The shipped provider does not call AWS.
 

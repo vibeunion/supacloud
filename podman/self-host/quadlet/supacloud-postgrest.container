@@ -1,0 +1,20 @@
+[Unit]
+PartOf=supacloud.target supacloud-postgres.service
+Description=SupaCloud PostgREST
+Requires=supacloud-postgres.service
+After=supacloud-postgres.service
+
+[Container]
+Image=docker.io/postgrest/postgrest:v16.5
+ContainerName=supacloud-postgrest
+Network=supacloud.network
+NetworkAlias=postgrest
+EnvironmentFile=/etc/supacloud/postgrest.env
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
+[Install]
+WantedBy=supacloud.target

@@ -1,0 +1,31 @@
+[Unit]
+PartOf=supacloud.target supacloud-postgres.service
+Description=SupaCloud pgredis runtime
+Requires=supacloud-postgres.service
+After=supacloud-postgres.service
+
+[Container]
+Image=localhost/supacloud-pgredis-runtime:local
+ContainerName=supacloud-pgredis-runtime
+Network=supacloud.network
+NetworkAlias=pgredis-runtime
+EnvironmentFile=/etc/supacloud/pgredis-runtime.env
+Volume=/var/lib/supacloud/pgredis-tenants:/etc/supabase/pgredis-tenants:ro,z
+PublishPort=127.0.0.1:9010:9010
+
+HealthCmd=bun -e "fetch('http://127.0.0.1:9010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HealthInterval=5s
+HealthTimeout=3s
+HealthRetries=12
+
+HealthOnFailure=kill
+HealthStartPeriod=120s
+
+[Service]
+ExecStartPost=/etc/supacloud/podman/wait-health.sh supacloud-pgredis-runtime
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
+[Install]
+WantedBy=supacloud.target

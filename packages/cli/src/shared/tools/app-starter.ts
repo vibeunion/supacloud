@@ -675,7 +675,10 @@ Management API tokens and service-role keys remain on trusted servers.
 Ordinary reads use PostgREST through the existing user-scoped
 @supabase/supabase-js client: client.from("starter_reviews").select("id,state,version").
 Use the caller's session, RLS and grants; never introduce a second session store.
-Business writes continue through the governed Command/RPC boundary.
+Command is the write boundary of this compiler application lane only.
+Cross-table change, idempotency, and audit stay on the governed Command/RPC
+boundary. Ordinary reads and low-risk CRUD stay on PostgREST and
+@supabase/supabase-js.
 
 Use listReviews from src/review/list-reviews.ts for the paginated review list.
 Type the existing client with ReviewReadDatabase (a read-only projection derived

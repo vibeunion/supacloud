@@ -12,6 +12,8 @@ export interface PigstyConfig {
     grafanaPass: string;
     jwtSecret: string;
     storageType: string;
+    deploymentProfile?: string;
+    databaseUrl?: string;
     force?: boolean;
     anonKey?: string;
     serviceRoleKey?: string;

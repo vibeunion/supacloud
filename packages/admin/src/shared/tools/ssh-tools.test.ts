@@ -653,7 +653,7 @@ describe("ssh admin tool", () => {
         for (const command of [
             "systemctl status supacloud.service --no-pager",
             "journalctl -u supacloud.service -n 100 --no-pager",
-            "docker ps -a",
+            "podman ps -a",
             "podman logs --tail 50 api-1",
             "ps -eo pid,user,comm",
             "ss -tlnp",

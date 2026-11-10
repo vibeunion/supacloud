@@ -19,6 +19,9 @@ import type { PigstyConfig } from "./infra/pigsty";
 const INSTALL_BASE_DIR = "/opt/supacloud";
 
 export const INSTALL_INPUT_KEYS = [
+    "SUPACLOUD_DEPLOYMENT_PROFILE",
+    "SUPACLOUD_DATABASE_URL",
+    "SUPACLOUD_USE_PIGSTY",
     "INTERNAL_IP",
     "SUPABASE_PUBLIC_DOMAIN",
     "SUPABASE_STUDIO_DOMAIN",
@@ -209,6 +212,8 @@ function collectExplicitInstallInput(args: string[]): InstallInputValues {
         return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
     };
     const cliMappings = [
+        ["--profile", "SUPACLOUD_DEPLOYMENT_PROFILE"],
+        ["--database-url", "SUPACLOUD_DATABASE_URL"],
         ["--ip", "INTERNAL_IP"],
         ["--domain", "SUPABASE_PUBLIC_DOMAIN"],
         ["--studio", "SUPABASE_STUDIO_DOMAIN"],
@@ -334,6 +339,9 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
                     DASHBOARD_PASSWORD: config.dashboardPass,
                     GRAFANA_PASSWORD: config.grafanaPass,
                     JWT_SECRET: config.jwtSecret,
+                    SUPACLOUD_DEPLOYMENT_PROFILE: config.deploymentProfile || process.env.SUPACLOUD_DEPLOYMENT_PROFILE || "",
+                    SUPACLOUD_DATABASE_URL: config.databaseUrl || process.env.SUPACLOUD_DATABASE_URL || "",
+                    SUPACLOUD_USE_PIGSTY: process.env.SUPACLOUD_USE_PIGSTY || "",
                 },
             });
             const exitCode = await proc.exited;
@@ -554,6 +562,10 @@ async function runInteractiveConfig(
     sEnv.start("Resolving installation input");
     const jwtSecret = configured.JWT_SECRET || generateSecurePassword(40);
     const interactiveValues: InstallInputValues = {
+        SUPACLOUD_DEPLOYMENT_PROFILE: configured.SUPACLOUD_DEPLOYMENT_PROFILE
+            || (configured.SUPACLOUD_USE_PIGSTY === "true" ? "pigsty" : "podman"),
+        SUPACLOUD_DATABASE_URL: configured.SUPACLOUD_DATABASE_URL,
+        SUPACLOUD_USE_PIGSTY: configured.SUPACLOUD_USE_PIGSTY,
         INTERNAL_IP: internalIp,
         SUPABASE_PUBLIC_DOMAIN: publicDomain,
         SUPABASE_STUDIO_DOMAIN: studioDomain,
@@ -604,5 +616,7 @@ async function runInteractiveConfig(
         grafanaPass: resolvedInput.GRAFANA_PASSWORD || dbPass,
         jwtSecret: jwtSecret,
         storageType: storageType,
+        deploymentProfile: resolvedInput.SUPACLOUD_DEPLOYMENT_PROFILE,
+        databaseUrl: resolvedInput.SUPACLOUD_DATABASE_URL,
     };
 }

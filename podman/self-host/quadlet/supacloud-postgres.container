@@ -1,0 +1,29 @@
+[Unit]
+PartOf=supacloud.target
+Description=SupaCloud PostgreSQL
+Wants=supacloud-network.service
+After=supacloud-network.service
+
+[Container]
+Image=localhost/supacloud-postgres:local
+ContainerName=supacloud-postgres
+Network=supacloud.network
+NetworkAlias=postgres
+EnvironmentFile=/etc/supacloud/postgres.env
+Volume=/var/lib/supacloud/postgres:/var/lib/postgresql:z
+HealthCmd=pg_isready -h 127.0.0.1 -U postgres -d postgres
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=10
+
+HealthOnFailure=kill
+HealthStartPeriod=120s
+
+[Service]
+ExecStartPost=/etc/supacloud/podman/wait-health.sh supacloud-postgres
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+
+[Install]
+WantedBy=supacloud.target

@@ -1,0 +1,207 @@
+name: Native Realtime Release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/realtime-native-release.yml
+      - scripts/package_realtime_native_release.sh
+      - scripts/package_realtime_native_release.test.sh
+  workflow_dispatch:
+    inputs:
+      upload_release_tag:
+        description: Existing realtime-native-v2.150.0 release; leave blank for artifact-only validation
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: realtime-native-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REALTIME_VERSION: "2.150.0"
+  REALTIME_SOURCE_COMMIT: af871a12160974525f2ff43613edf65a71f71742
+
+jobs:
+  build-native-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-realtime-only
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - name: Checkout SupaCloud packaging scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Checkout pinned Supabase Realtime source
+        uses: actions/checkout@v7
+        with:
+          repository: supabase/realtime
+          ref: ${{ env.REALTIME_SOURCE_COMMIT }}
+          path: third_party/realtime
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5.0.4"
+          elixir-version: "1.19.5-otp-28"
+          install-hex: true
+          install-rebar: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install archive tooling
+        run: sudo apt-get update && sudo apt-get install -y zstd
+
+      - name: Build upstream OTP release
+        working-directory: third_party/realtime
+        env:
+          MIX_ENV: prod
+        run: |
+          test "$(git rev-parse HEAD)" = "$REALTIME_SOURCE_COMMIT"
+          mix deps.get --only prod
+          npm ci --prefix assets --omit=dev
+          mix assets.deploy
+          mix compile
+          mix release
+
+      - name: Validate package script fixture
+        run: bash scripts/package_realtime_native_release.test.sh
+
+      - name: Package native Realtime bundle
+        run: |
+          mkdir -p release-assets
+          bash scripts/package_realtime_native_release.sh \
+            third_party/realtime \
+            third_party/realtime/_build/prod/rel/realtime \
+            "$REALTIME_VERSION" "$REALTIME_SOURCE_COMMIT" release-assets linux-amd64
+
+      - name: Verify extracted runtime without build tools
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_USER: postgres
+          DB_PASSWORD: ci-realtime-only
+          DB_NAME: postgres
+          DB_SSL: "false"
+          DB_ENC_KEY: ci-only-16-chars
+          API_JWT_SECRET: ci-only-realtime-admin-jwt-secret-32-characters
+          METRICS_JWT_SECRET: ci-only-realtime-metrics-jwt-secret-32-characters
+          SECRET_KEY_BASE: ci-only-secret-key-base-01234567890123456789012345678901234567890123456789
+          PORT: "4000"
+          APP_NAME: realtime
+          REGION: us-east-1
+          SEED_SELF_HOST: "false"
+          ERL_AFLAGS: -proto_dist inet_tcp
+        run: |
+          set -euo pipefail
+          (cd release-assets && sha256sum -c SHA256SUMS)
+          runtime_dir="$RUNNER_TEMP/realtime-native-smoke"
+          mkdir -p "$runtime_dir"
+          tar --zstd -xf "release-assets/supacloud-realtime-${REALTIME_VERSION}-linux-amd64.tar.zst" -C "$runtime_dir"
+          "$runtime_dir/release/bin/realtime" version
+          env PATH=/usr/bin:/bin "$runtime_dir/supacloud-realtime-migrate"
+          env PATH=/usr/bin:/bin "$runtime_dir/supacloud-realtime" > "$RUNNER_TEMP/realtime-native.log" 2>&1 &
+          runtime_pid=$!
+          trap 'kill "$runtime_pid" 2>/dev/null || true; wait "$runtime_pid" 2>/dev/null || true' EXIT
+          healthy=false
+          for _attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4000/healthcheck > /dev/null; then
+              healthy=true
+              break
+            fi
+            kill -0 "$runtime_pid" || break
+            sleep 1
+          done
+          if [[ "$healthy" != true ]]; then
+            cat "$RUNNER_TEMP/realtime-native.log"
+            exit 1
+          fi
+          token=$(python3 - <<'PY'
+          import base64, hashlib, hmac, json, os, time
+          def encode(value):
+              return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
+          header = encode(json.dumps({'alg': 'HS256', 'typ': 'JWT'}).encode())
+          now = int(time.time())
+          payload = encode(json.dumps({'iss': 'supabase', 'role': 'supabase_admin', 'iat': now, 'exp': now + 60}).encode())
+          unsigned = header + '.' + payload
+          signature = encode(hmac.new(os.environ['API_JWT_SECRET'].encode(), unsigned.encode(), hashlib.sha256).digest())
+          print(unsigned + '.' + signature)
+          PY
+          )
+          curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:4000/api/tenants > /dev/null
+          echo realtime-native-otp-smoke-ok
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supacloud-realtime-native
+          path: release-assets/
+          if-no-files-found: error
+
+  attest-native-release:
+    needs: build-native-release
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: supacloud-realtime-native
+          path: release-assets
+
+      - name: Attest native Realtime artifacts
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release-assets/*
+
+      - name: Retain and verify offline attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "$ATTESTATION_BUNDLE" release-assets/SUPACLOUD-RELEASE.attestation.jsonl
+          for asset in release-assets/*.tar.zst release-assets/SUPACLOUD-REALTIME-*.json release-assets/SHA256SUMS; do
+            gh attestation verify "$asset" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/realtime-native-release.yml" \
+              --bundle release-assets/SUPACLOUD-RELEASE.attestation.jsonl
+          done
+
+      - name: Upload attested CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supacloud-realtime-native-attested
+          path: release-assets/
+          if-no-files-found: error
+
+      - name: Upload to an existing GitHub Release
+        if: ${{ inputs.upload_release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.upload_release_tag }}
+        run: |
+          test "$RELEASE_TAG" = "realtime-native-v$REALTIME_VERSION"
+          gh release upload "$RELEASE_TAG" release-assets/*

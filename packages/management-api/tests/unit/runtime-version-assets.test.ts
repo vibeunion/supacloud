@@ -1360,19 +1360,25 @@ describe("runtime companion version assets", () => {
     expect(sources[2]).toContain('! systemd_unit_has_canonical_start_limits "$gotrue_unit"');
   });
 
-  test("platform component defaults stay aligned across installers, CI, and Compose", () => {
+  test("platform component defaults stay aligned across installers, CI, and Podman", () => {
     const installer = readRepoFile("install.sh");
     const caddyBuilder = readRepoFile("scripts/build_supacloud_caddy.sh");
     const runtime = readRepoFile("scripts/lib/tenant_runtime.sh");
     const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");
     const workflow = readRepoFile(".github/workflows/management-api.yml");
-    const devCompose = readRepoFile("docker/dev/docker-compose.yml");
-    const selfHostCompose = readRepoFile("docker/self-host/docker-compose.yml");
-    const postgresDockerfile = readRepoFile("docker/self-host/postgres/Dockerfile");
+    const podmanInstaller = readRepoFile("podman/self-host/install.sh");
+    const podmanPostgresContainerfile = readRepoFile("podman/self-host/postgres/Containerfile");
+    const podmanUnits = [
+      "supacloud-caddy.container",
+      "supacloud-gotrue.container",
+      "supacloud-postgrest.container",
+    ].map((name) => readRepoFile(`podman/self-host/quadlet/${name}`));
 
     expect(installer).toContain('local JFS_VER="1.4.1"');
-    expect(installer).toContain('COMPOSE_VERSION="v5.5.1"');
-    expect(installer).toContain("Docker Buildx >= 0.17 for 'compose build'");
+    expect(installer).not.toContain('COMPOSE_VERSION="v5.5.1"');
+    expect(installer).toContain("Podman Quadlet single-node provider");
+    expect(podmanInstaller).toContain("podman build");
+    expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
     expect(installer).toContain('CADDY_VERSION:-2.11.7');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"');
 
@@ -1405,16 +1411,15 @@ describe("runtime companion version assets", () => {
       .toContain('realtime_container_id="${{ job.services.realtime.id }}"');
     expect(integrationJob?.steps.find((step) => step.name === "Restart flaky services")?.run)
       .toContain('docker start "${{ job.services.realtime.id }}"');
-    for (const compose of [devCompose, selfHostCompose]) {
-      expect(compose).toContain("image: supacloud-caddy:2.11.7-ratelimit");
-      expect(compose).toContain("supabase/gotrue:v2.197.0");
-      expect(compose).toContain("postgrest/postgrest:v16.5");
+    for (const unit of podmanUnits) {
+      expect(unit).toContain("Image=");
     }
+    expect(podmanUnits[0]).toContain("localhost/supacloud-caddy:local");
+    expect(podmanUnits[1]).toContain("supabase/gotrue:v2.197.0");
+    expect(podmanUnits[2]).toContain("postgrest/postgrest:v16.5");
     expect(workflow).toContain("postgrest/postgrest:v16.5");
     expect(workflow).toContain("supabase/gotrue:v2.197.0");
-    expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
-    expect(devCompose).toContain("context: ../self-host/postgres");
-    expect(selfHostCompose).toContain("context: ./postgres");
+    expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
     expect(workflow).toContain("image: supabase/postgres:17.11.0.011");
 

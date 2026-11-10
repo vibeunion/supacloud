@@ -354,6 +354,7 @@ supacloud_consume_protected_install_input() (
     local target_file="$2"
     local owner mode numeric_mode
     local allowed_keys=(
+        SUPACLOUD_DEPLOYMENT_PROFILE SUPACLOUD_DATABASE_URL SUPACLOUD_USE_PIGSTY
         INTERNAL_IP SUPABASE_PUBLIC_DOMAIN SUPABASE_STUDIO_DOMAIN SUPABASE_DOMAIN
         DASHBOARD_USERNAME DASHBOARD_PASSWORD POSTGRES_PASSWORD GRAFANA_PASSWORD
         JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY
@@ -755,6 +756,9 @@ supacloud_write_install_input_config() (
     chmod 600 "$desired_file"
     trap 'rm -f "$desired_file"' EXIT HUP INT TERM
     {
+        printf '%s=%q\n' SUPACLOUD_DEPLOYMENT_PROFILE "${SUPACLOUD_DEPLOYMENT_PROFILE:-}"
+        printf '%s=%q\n' SUPACLOUD_DATABASE_URL "${SUPACLOUD_DATABASE_URL:-}"
+        printf '%s=%q\n' SUPACLOUD_USE_PIGSTY "${SUPACLOUD_USE_PIGSTY:-}"
         printf '%s=%q\n' INTERNAL_IP "${INTERNAL_IP:-}"
         printf '%s=%q\n' SUPABASE_PUBLIC_DOMAIN "${SUPABASE_PUBLIC_DOMAIN:-}"
         printf '%s=%q\n' SUPABASE_STUDIO_DOMAIN "${SUPABASE_STUDIO_DOMAIN:-}"

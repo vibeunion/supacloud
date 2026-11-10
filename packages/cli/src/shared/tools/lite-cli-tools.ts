@@ -21,6 +21,11 @@ export interface LiteCliArgs {
     storage_dir?: string;
     storage_backend?: "fs" | "memory" | "s3";
     s3_prefix?: string;
+    /** [start/doctor] expose the inbound S3-compatible endpoint at /storage/v1/s3 */
+    s3_endpoint?: boolean;
+    s3_endpoint_access_key_id?: string;
+    s3_endpoint_region?: string;
+    s3_endpoint_buckets?: string;
     engine?: "pglite" | "native";
     host?: string;
     port?: number;
@@ -110,6 +115,10 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     optionalFlag(args, "--storage-dir", request.storage_dir);
     optionalFlag(args, "--storage-backend", request.storage_backend);
     optionalFlag(args, "--s3-prefix", request.s3_prefix);
+    booleanFlag(args, "--s3-endpoint", request.s3_endpoint);
+    optionalFlag(args, "--s3-endpoint-access-key-id", request.s3_endpoint_access_key_id);
+    optionalFlag(args, "--s3-endpoint-region", request.s3_endpoint_region);
+    optionalFlag(args, "--s3-endpoint-buckets", request.s3_endpoint_buckets);
     optionalFlag(args, "--engine", request.engine);
     optionalFlag(args, "--host", request.host);
     optionalFlag(args, "--port", request.port);
@@ -235,6 +244,10 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             storage_dir: optional(Type.String(), "[*] Object storage directory"),
             storage_backend: optional(stringEnum(["fs", "memory", "s3"]), "[*] Storage backend"),
             s3_prefix: optional(Type.String(), "[*] S3 object key prefix"),
+            s3_endpoint: optional(Type.Boolean(), "[start/doctor] Expose the inbound S3-compatible endpoint at /storage/v1/s3"),
+            s3_endpoint_access_key_id: optional(Type.String(), "[start] Access key id for the inbound S3 endpoint"),
+            s3_endpoint_region: optional(Type.String(), "[start] SigV4 region for the inbound S3 endpoint"),
+            s3_endpoint_buckets: optional(Type.String(), "[start] Comma-separated bucket allowlist for the inbound S3 endpoint"),
             engine: optional(stringEnum(["pglite", "native"]), "[*] Database engine"),
             host: optional(Type.String(), "[start] Listen host"),
             port: optional(Type.Number(), "[start] Listen port"),
