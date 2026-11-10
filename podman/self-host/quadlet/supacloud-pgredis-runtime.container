@@ -1,5 +1,5 @@
 [Unit]
-PartOf=supacloud.target
+PartOf=supacloud.target supacloud-postgres.service
 Description=SupaCloud pgredis runtime
 Requires=supacloud-postgres.service
 After=supacloud-postgres.service

@@ -49,6 +49,10 @@ def render(config_dir: Path) -> None:
     }
     projections["edge-runtime"]["PORT"] = "9005"
     projections["management-api"]["PORT"] = "9090"
+    projections["management-api"]["LEGACY_SECRETS_MIGRATION_FILE"] = "/run/secrets/supacloud-legacy-secrets-migration"
+    for key, value in values.items():
+        if key in {"GOTRUE_DB_MAX_POOL_SIZE", "GOTRUE_BIN", "GOTRUE_PORT_BASE", "PGRST_PORT_BASE", "ENABLE_SSL"} or key.startswith("GOTRUE_SMTP_"):
+            projections["management-api"][key] = value
     for service, environment in projections.items():
         destination = config_dir / f"{service}.env"
         if destination.is_symlink():

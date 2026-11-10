@@ -89,6 +89,7 @@ STATE_DIR="$(prefix_path /var/lib/supacloud)"
 QUADLET_DIR="$(prefix_path /etc/containers/systemd)"
 ENV_FILE="${CONFIG_DIR}/supacloud.env"
 REALTIME_ENV_FILE="${CONFIG_DIR}/realtime.env"
+LEGACY_MIGRATION_FILE="${CONFIG_DIR}/.legacy-secrets-migration.env"
 SYSTEMD_DIR="$(prefix_path /etc/systemd/system)"
 
 require_command() {
@@ -299,6 +300,16 @@ fi
 }
 chmod 600 "$REALTIME_ENV_FILE"
 
+# A recovered environment may predate this file. Create only if absent; never
+# truncate an existing one-shot migration key before its database checkpoint.
+if [[ ! -e "$LEGACY_MIGRATION_FILE" && ! -L "$LEGACY_MIGRATION_FILE" ]]; then
+  (umask 077; : > "$LEGACY_MIGRATION_FILE")
+fi
+[[ -f "$LEGACY_MIGRATION_FILE" && ! -L "$LEGACY_MIGRATION_FILE" ]] || {
+  echo "Legacy migration input must be a regular non-symlink file" >&2; exit 1;
+}
+chmod 600 "$LEGACY_MIGRATION_FILE"
+
 python3 "$SCRIPT_DIR/render-env.py" "$CONFIG_DIR"
 
 for directory in \
@@ -314,7 +325,12 @@ install -m 0644 "$SCRIPT_DIR/caddy/Caddyfile" "$(prefix_path /etc/supacloud/podm
 install -m 0755 "$SCRIPT_DIR/wait-health.sh" "$(prefix_path /etc/supacloud/podman/wait-health.sh)"
 
 if [[ "$SKIP_BUILD" != "true" && "$DRY_RUN" != "true" ]]; then
-  podman build --pull=missing -f "$SCRIPT_DIR/postgres/Containerfile" -t localhost/supacloud-postgres:local "$SCRIPT_DIR/postgres"
+  case "$(uname -m)" in
+    x86_64) image_arch=amd64 ;;
+    aarch64|arm64) image_arch=arm64 ;;
+    *) echo "Unsupported Podman image architecture" >&2; exit 1 ;;
+  esac
+  podman build --pull=missing --build-arg "TARGETARCH=$image_arch" -f "$SCRIPT_DIR/postgres/Containerfile" -t localhost/supacloud-postgres:local "$SCRIPT_DIR/postgres"
   podman build --pull=missing -f "$SCRIPT_DIR/management-api.Containerfile" -t localhost/supacloud-management-api:local "$REPO_ROOT"
   podman build --pull=missing -f "$SCRIPT_DIR/edge-runtime.Containerfile" -t localhost/supacloud-edge-runtime:local "$REPO_ROOT"
   podman build --pull=missing -f "$SCRIPT_DIR/pgredis-runtime.Containerfile" -t localhost/supacloud-pgredis-runtime:local "$REPO_ROOT"

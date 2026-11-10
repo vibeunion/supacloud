@@ -1,5 +1,5 @@
 [Unit]
-PartOf=supacloud.target
+PartOf=supacloud.target supacloud-management-api.service supacloud-pgredis-runtime.service
 Description=SupaCloud Edge Runtime
 Requires=supacloud-management-api.service supacloud-pgredis-runtime.service
 After=supacloud-management-api.service supacloud-pgredis-runtime.service

@@ -30,5 +30,6 @@ EXPOSE 9090
 
 ENV PORT=9090
 ENV NODE_ENV=production
+ENV WEB_CONSOLE_DIR=/app/packages/web-console/build
 
 ENTRYPOINT ["/usr/local/bin/supacloud-management-entrypoint"]

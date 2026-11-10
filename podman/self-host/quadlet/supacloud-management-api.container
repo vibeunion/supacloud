@@ -1,5 +1,5 @@
 [Unit]
-PartOf=supacloud.target
+PartOf=supacloud.target supacloud-postgres.service supacloud-caddy.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service
 Description=SupaCloud Management API
 Requires=supacloud-postgres.service supacloud-caddy.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service
 After=supacloud-postgres.service supacloud-caddy.service supacloud-realtime.service supacloud-victorialogs.service supacloud-pgredis-runtime.service

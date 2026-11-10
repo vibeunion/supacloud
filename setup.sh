@@ -413,33 +413,26 @@ main() {
     # locally. They do not need the native Pigsty release binaries or the
     # attestation verifier used by the legacy native path.
     generate_config
-    local deployment_profile="${SUPACLOUD_DEPLOYMENT_PROFILE:-}"
-    if [[ -z "$deployment_profile" && -f "${CONFIG_FILE:-${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}}" ]]; then
-        deployment_profile=$(awk -F= '$1 == "SUPACLOUD_DEPLOYMENT_PROFILE" { print $2 }' \
-            "${CONFIG_FILE:-${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}}" | tail -1)
-        deployment_profile="${deployment_profile#\"}"
-        deployment_profile="${deployment_profile%\"}"
-        deployment_profile="${deployment_profile#\'}"
-        deployment_profile="${deployment_profile%\'}"
-    fi
-    if [[ -z "$deployment_profile" ]]; then
-        persisted_config="${CONFIG_FILE:-${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}}"
-        use_pigsty=$(awk -F= '$1 == "SUPACLOUD_USE_PIGSTY" { print $2 }' "$persisted_config" 2>/dev/null | tail -1)
-        use_pigsty="${use_pigsty#\"}"
-        use_pigsty="${use_pigsty%\"}"
-        use_pigsty="${use_pigsty#\'}"
-        use_pigsty="${use_pigsty%\'}"
-        if [[ "$use_pigsty" == "true" || -f "${PIGSTY_PATH:-${HOME:-/root}/pigsty}/bootstrap" ]]; then
-            deployment_profile="pigsty"
-        else
-            deployment_profile="podman"
+    # Use the same provider resolver as install.sh, and persist the resolved
+    # choice so a later Pigsty directory cannot silently change this install.
+    local profile_key persisted_value
+    for profile_key in SUPACLOUD_DEPLOYMENT_PROFILE SUPACLOUD_DATABASE_URL SUPACLOUD_USE_PIGSTY; do
+        if [[ -z "${!profile_key:-}" ]]; then
+            persisted_value=$(supacloud_env_value "$CONFIG_FILE" "$profile_key")
+            printf -v "$profile_key" '%s' "$persisted_value"
         fi
-    fi
-    if [[ "$deployment_profile" == "podman" || "$deployment_profile" == "solo" ]]; then
+    done
+    # shellcheck source=scripts/lib/deployment_profile.sh
+    source "${SCRIPT_DIR}/scripts/lib/deployment_profile.sh"
+    supacloud_resolve_deployment_profile || return 1
+    supacloud_write_shell_env_pairs "$CONFIG_FILE" \
+        SUPACLOUD_DEPLOYMENT_PROFILE "$SUPACLOUD_DEPLOYMENT_PROFILE"
+    if [[ "$SUPACLOUD_DATABASE_PROVIDER" == "podman-single-node" ]]; then
         log_info "Using the Podman single-node provider; skipping native release binaries and Pigsty bootstrap."
         run_install
         return
     fi
+    supacloud_require_pigsty_install_path || return 1
     case "${SUPACLOUD_SETUP_ARTIFACT_MODE:-release}" in
         release) ensure_release_attestation_verifier ;;
         local) log_warn "Using explicitly selected local artifact mode" ;;
