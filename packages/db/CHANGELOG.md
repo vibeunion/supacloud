@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/vibeunion/supacloud/compare/db-v0.24.0...db-v0.24.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* harden idempotent CLI retries and ZenStack Json regressions ([#2519](https://github.com/vibeunion/supacloud/issues/2519)) ([9b6220d](https://github.com/vibeunion/supacloud/commit/9b6220d50a501decf4d6d44d2d5d93a012c9dc61))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/db-v0.23.1...db-v0.24.0) (2026-11-09)
 
 
