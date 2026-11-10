@@ -41,6 +41,7 @@ import {
 } from "./tenant-runtime-config";
 import type { PostgresConnectionConfig } from "./tenant-runtime-config";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import {
     getAuthRuntimeDescriptor,
     isSharedAuthRuntime,
@@ -1143,12 +1144,14 @@ class TenantRuntimeService {
      * Uses the global connection pool from db/index.ts
      */
     private async getTenantCredentials(ref: string) {
-        const [project] = await metaSql`
-          SELECT db_password, jwt_secret, config, db_name, anon_key, service_role_key,
+        const [stored] = await metaSql`
+          SELECT db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, config, db_name,
+                 anon_key, anon_key_encrypted, service_role_key, service_role_key_encrypted,
                  publishable_key, secret_key_encrypted, status, postgrest_desired
           FROM projects
           WHERE ref=${ref}
         `;
+        const project = stored ? revealProjectSecrets(stored) : null;
 
         if (!project || !project.db_password || !project.jwt_secret) {
             throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);

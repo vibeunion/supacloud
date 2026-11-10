@@ -21,6 +21,7 @@ import {
 import { migrateAuditChainSequences } from "./audit-chain-migration";
 import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { migrateLegacyEncryptedSecretsInTransaction } from "./secret-key-migration";
+import { migratePlaintextProjectSecrets } from "../repositories/project-secret-at-rest";
 import { withExpectedControlPlaneDatabaseTransaction } from "./control-plane-database-identity";
 
 function sqlStringLiteral(value: string): string {
@@ -112,16 +113,19 @@ export async function initDatabase() {
       name VARCHAR(100) NOT NULL,
       db_name VARCHAR(63) NOT NULL,
       db_user VARCHAR(63) NOT NULL,
-      db_password VARCHAR(100) NOT NULL,
-      jwt_secret VARCHAR(100) NOT NULL,
-      anon_key TEXT NOT NULL,
-      service_role_key TEXT NOT NULL,
+      db_password VARCHAR(100),
+      jwt_secret VARCHAR(100),
+      anon_key TEXT,
+      service_role_key TEXT,
       publishable_key TEXT,
       secret_key_hash VARCHAR(64),
       secret_key_encrypted TEXT,
       s3_bucket VARCHAR(63) NOT NULL,
       s3_access_key VARCHAR(100),
       s3_secret_key VARCHAR(100),
+      anon_key_encrypted TEXT,
+      anon_key_hash TEXT,
+      service_role_key_hash TEXT,
       region VARCHAR(50) DEFAULT 'local',
       status VARCHAR(20) DEFAULT 'creating',
       postgrest_desired VARCHAR(20),
@@ -462,6 +466,15 @@ export async function initDatabase() {
       { statement: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_publishable_key ON projects(publishable_key) WHERE publishable_key IS NOT NULL', description: "idx_projects_publishable_key" },
       { statement: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_secret_key_hash ON projects(secret_key_hash) WHERE secret_key_hash IS NOT NULL', description: "idx_projects_secret_key_hash" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS s3_secret_key_encrypted TEXT', description: "projects.s3_secret_key_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS anon_key_encrypted TEXT', description: "projects.anon_key_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS anon_key_hash TEXT', description: "projects.anon_key_hash" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS service_role_key_hash TEXT', description: "projects.service_role_key_hash" },
+      { statement: 'ALTER TABLE projects ALTER COLUMN db_password DROP NOT NULL', description: "projects.db_password nullable" },
+      { statement: 'ALTER TABLE projects ALTER COLUMN jwt_secret DROP NOT NULL', description: "projects.jwt_secret nullable" },
+      { statement: 'ALTER TABLE projects ALTER COLUMN anon_key DROP NOT NULL', description: "projects.anon_key nullable" },
+      { statement: 'ALTER TABLE projects ALTER COLUMN service_role_key DROP NOT NULL', description: "projects.service_role_key nullable" },
+      { statement: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_anon_key_hash ON projects(anon_key_hash) WHERE anon_key_hash IS NOT NULL', description: "idx_projects_anon_key_hash" },
+      { statement: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_service_role_key_hash ON projects(service_role_key_hash) WHERE service_role_key_hash IS NOT NULL', description: "idx_projects_service_role_key_hash" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_desired VARCHAR(20)', description: "projects.postgrest_desired" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_actual VARCHAR(20)', description: "projects.postgrest_actual" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_health VARCHAR(20)', description: "projects.postgrest_health" },
@@ -747,6 +760,10 @@ export async function initDatabase() {
       const opaqueKeyBackfillCount = await backfillOpaqueApiKeys(transaction);
       if (opaqueKeyBackfillCount > 0) {
         logger.info(`Opaque API keys backfilled for ${opaqueKeyBackfillCount} project(s).`);
+      }
+      const clearedSecretCount = await migratePlaintextProjectSecrets(transaction);
+      if (clearedSecretCount > 0) {
+        logger.info(`Cleared plaintext project secrets for ${clearedSecretCount} project(s).`);
       }
 
       // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)

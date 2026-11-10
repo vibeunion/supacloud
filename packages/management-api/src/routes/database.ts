@@ -9,6 +9,7 @@ import { isDangerousSQL, normalizeSqlForPolicy, sqlContainsTransactionControl, W
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
 import { splitSqlStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import {
   calculateMigrationChecksum,
 } from "../services/migration-promotion";
@@ -427,16 +428,17 @@ async function executeRlsTest(input: RlsTesterInput) {
 
 async function getProjectDatabaseCredentials(ref: string) {
   const [project] = await metaSql`
-    SELECT db_name, db_user, db_password
+    SELECT db_name, db_user, db_password, db_password_encrypted
     FROM projects
     WHERE ref = ${ref} AND deleted_at IS NULL
     LIMIT 1
   `;
   if (!project) return null;
+  const revealed = revealProjectSecrets(project);
   return {
-    db_name: String(project.db_name),
-    db_user: String(project.db_user),
-    db_password: String(project.db_password),
+    db_name: String(revealed.db_name),
+    db_user: String(revealed.db_user),
+    db_password: String(revealed.db_password),
   };
 }
 

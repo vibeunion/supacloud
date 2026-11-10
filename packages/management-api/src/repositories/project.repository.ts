@@ -2,6 +2,7 @@ import { sql, type Project, type CreateProjectInput, type ProjectStatus } from "
 import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { hashSecretApiKey } from "../utils/api-keys";
+import { revealProjectSecrets, sealProjectSecrets, sealRotatedApiKeys } from "./project-secret-at-rest";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { projectDatabaseLockKey } from "../services/project-database-lock";
 import type { StoredApplicationPreview } from "../services/application-preview-contract";
@@ -12,11 +13,16 @@ const PROJECT_COLUMNS = [
   "db_password_encrypted", "jwt_secret", "jwt_secret_encrypted", "anon_key",
   "service_role_key", "service_role_key_encrypted", "publishable_key", "secret_key_hash",
   "secret_key_encrypted", "s3_bucket", "s3_access_key", "s3_secret_key", "s3_secret_key_encrypted",
+  "anon_key_encrypted", "anon_key_hash", "service_role_key_hash",
   "region", "status", "postgrest_desired", "postgrest_actual", "postgrest_health",
   "postgrest_port", "postgrest_last_error", "postgrest_updated_at", "postgrest_last_reconciled_at",
   "config", "created_at", "updated_at", "deleted_at",
 ] as const;
 export const projectColumns = PROJECT_COLUMNS.join(", ");
+
+function asProject(row: Project | undefined | null): Project | null {
+  return row ? revealProjectSecrets(row) : null;
+}
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -26,7 +32,7 @@ export async function findAll(): Promise<Project[]> {
     ORDER BY created_at DESC
   `;
   // Bugfix: ensure returning array
-  return results as unknown as Project[];
+  return (results as unknown as Project[]).map((row) => revealProjectSecrets(row));
   });
   }
 
@@ -37,7 +43,7 @@ export async function findByRef(ref: string): Promise<Project | null> {
     SELECT ${sql.unsafe(projectColumns)} FROM projects
     WHERE ref = ${ref} AND deleted_at IS NULL
   `;
-  return project || null;
+  return asProject(project);
   });
   }
 
@@ -48,13 +54,14 @@ export async function findById(id: string): Promise<Project | null> {
     SELECT ${sql.unsafe(projectColumns)} FROM projects
     WHERE id = ${id} AND deleted_at IS NULL
   `;
-  return project || null;
+  return asProject(project);
   });
   }
 
   // Create project
 export async function create(input: CreateProjectInput): Promise<Project> {
   const initialConfig = normalizeProjectConfig(input.config);
+  const sealed = sealProjectSecrets(input);
   return withRetry("ProjectRepository.create", async () => {
   const [project] = await sql`
     INSERT INTO projects (
@@ -62,32 +69,38 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       jwt_secret, anon_key, service_role_key, publishable_key, secret_key_hash, secret_key_encrypted,
       s3_bucket, s3_access_key, s3_secret_key,
       region, config,
-      db_password_encrypted, jwt_secret_encrypted, service_role_key_encrypted, s3_secret_key_encrypted
+      db_password_encrypted, jwt_secret_encrypted, service_role_key_encrypted, s3_secret_key_encrypted,
+      anon_key_encrypted, anon_key_hash, service_role_key_hash
     ) VALUES (
       ${input.ref},
       ${input.name},
       ${input.db_name},
       ${input.db_user},
-      ${input.db_password},
-      ${input.jwt_secret},
-      ${input.anon_key},
-      ${input.service_role_key},
+      NULL,
+      NULL,
+      NULL,
+      NULL,
       ${input.publishable_key || null},
       ${input.secret_key ? hashSecretApiKey(input.secret_key) : null},
       ${input.secret_key ? encryptSecretIfNeeded(input.secret_key) : null},
       ${input.s3_bucket},
       ${input.s3_access_key || null},
-      ${input.s3_secret_key || null},
+      NULL,
       ${input.region || "local"},
       ${initialConfig}::jsonb,
-      ${encryptSecretIfNeeded(input.db_password)},
-      ${encryptSecretIfNeeded(input.jwt_secret)},
-      ${encryptSecretIfNeeded(input.service_role_key)},
-      ${input.s3_secret_key ? encryptSecretIfNeeded(input.s3_secret_key) : null}
+      ${sealed.db_password_encrypted},
+      ${sealed.jwt_secret_encrypted},
+      ${sealed.service_role_key_encrypted},
+      ${sealed.s3_secret_key_encrypted},
+      ${sealed.anon_key_encrypted},
+      ${sealed.anon_key_hash},
+      ${sealed.service_role_key_hash}
     )
     RETURNING ${sql.unsafe(projectColumns)}
   `;
-  return project;
+  const created = asProject(project);
+  if (!created) throw new Error("Project insert did not return a row");
+  return created;
   });
   }
 
@@ -100,7 +113,7 @@ export async function updateStatus(ref: string, status: ProjectStatus): Promise<
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING ${sql.unsafe(projectColumns)}
   `;
-  return project || null;
+  return asProject(project);
   });
   }
 
@@ -117,7 +130,7 @@ export async function activateCreatingProject(ref: string): Promise<Project | nu
       WHERE ref = ${ref} AND status = 'creating' AND deleted_at IS NULL
       RETURNING ${sql.unsafe(projectColumns)}
     `;
-    return project || null;
+    return asProject(project);
   });
 }
 
@@ -140,20 +153,24 @@ export async function updateApiKeys(ref: string, keys: {
   anon_key: string;
   service_role_key: string;
 }): Promise<Project | null> {
+  const sealed = sealRotatedApiKeys(keys);
   return withRetry("ProjectRepository.updateApiKeys", async () => {
   const [project] = await sql`
     UPDATE projects
-    SET 
-      jwt_secret = ${keys.jwt_secret},
-      anon_key = ${keys.anon_key},
-      service_role_key = ${keys.service_role_key},
-      jwt_secret_encrypted = ${encryptSecretIfNeeded(keys.jwt_secret)},
-      service_role_key_encrypted = ${encryptSecretIfNeeded(keys.service_role_key)},
+    SET
+      jwt_secret = NULL,
+      anon_key = NULL,
+      service_role_key = NULL,
+      jwt_secret_encrypted = ${sealed.jwt_secret_encrypted},
+      anon_key_encrypted = ${sealed.anon_key_encrypted},
+      service_role_key_encrypted = ${sealed.service_role_key_encrypted},
+      anon_key_hash = ${sealed.anon_key_hash},
+      service_role_key_hash = ${sealed.service_role_key_hash},
       updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING ${sql.unsafe(projectColumns)}
   `;
-  return project || null;
+  return asProject(project);
   });
   }
 
@@ -189,7 +206,7 @@ export async function updateOpaqueApiKeys(ref: string, keys: {
       ON CONFLICT (project_ref, name)
       DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
     `;
-    return project;
+    return asProject(project);
   });
   });
   }
@@ -203,7 +220,7 @@ export async function softDelete(ref: string): Promise<Project | null> {
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING ${sql.unsafe(projectColumns)}
   `;
-  return project || null;
+  return asProject(project);
   });
   }
 

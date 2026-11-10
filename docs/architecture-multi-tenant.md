@@ -1,7 +1,7 @@
 # SupaCloud Multi-Tenant Architecture
 
 > **Status**: Implemented (Option C+ with Caddy Admin API-Driven Gateway)  
-> **Last Updated**: 2026-05-11
+> **Last Updated**: 2026-11-10
 
 ## Current Architecture
 
@@ -107,7 +107,7 @@ When a function is deployed via the Management API:
 1. `Bun.build()` bundles the source into a self-contained `.js`
 2. `invalidateCache()` evicts the old version from Worker thread caches
 3. `POST /preheat/:ref/:slug` → Worker imports the module ahead of time
-4. First real request hits warm LRU cache → **0ms cold-start**
+4. A later request can reuse that LRU entry and skip the import. This is not an unconditional 0ms cold start. A cache miss, worker retirement, or process restart still pays import and scheduling latency. Cold-start time is not a measured production SLO.
 
 ### 8. Private Cache Data Plane ⭐ Implemented
 
@@ -123,7 +123,15 @@ When a function is deployed via the Management API:
 
 ### authenticator Role CONNECT Privilege
 
-`DatabaseService` grants `CONNECT ON DATABASE` to the `authenticator` role and creates it if missing. This is required for PostgREST to connect to tenant databases.
+`DatabaseService` creates the project `authenticator_<ref>` role and grants `CONNECT` on that project's database. PostgREST needs this. The same provision revokes `CONNECT` from `PUBLIC` and from `supabase_realtime_admin`.
+
+### What is actually isolated
+
+- Each project has its own database (`supa_<ref>`), login role (`role_<ref>`), and PostgREST authenticator (`authenticator_<ref>`).
+- `anon`, `authenticated`, and `service_role` are cluster-global `NOLOGIN` roles. PostgREST switches into them with `SET ROLE` after connecting as that project's authenticator. Renaming them per project would be a breaking migration for official PostgREST, GoTrue, and RLS policies, and this release does not do it.
+- Pigsty HBA allows loopback connections from `authenticator_*` or `role_*` to any database named `supa_*`. PostgreSQL matches the user and database patterns separately, so HBA does not enforce "role A only on database A". The `CONNECT` grant does.
+- `supabase_auth_admin` and `supabase_admin` are still cluster-global `LOGIN` roles that use the cluster database password and are granted `CONNECT` on every tenant database. GoTrue connects as `supabase_auth_admin`. Realtime CDC connects as `supabase_admin`. A leaked cluster password can therefore open every tenant database as those roles. Per-project passwords for those role names are impossible: a PostgreSQL role has one password for the whole cluster.
+- The shared Edge Runtime is one process and one trust domain. A function heap budget is a soft completion-time limit, not a sandbox and not per-project process or cgroup isolation.
 
 ### Disk Space Pre-Check
 

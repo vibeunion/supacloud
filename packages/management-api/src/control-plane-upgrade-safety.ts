@@ -202,7 +202,8 @@ async function projectCandidateCounts(database: SQL) {
         + COUNT(*) FILTER (WHERE jwt_secret_encrypted IS NOT NULL)::int
         + COUNT(*) FILTER (WHERE service_role_key_encrypted IS NOT NULL)::int
         + COUNT(*) FILTER (WHERE secret_key_encrypted IS NOT NULL)::int
-        + COUNT(*) FILTER (WHERE s3_secret_key_encrypted IS NOT NULL)::int AS project_secrets
+        + COUNT(*) FILTER (WHERE s3_secret_key_encrypted IS NOT NULL)::int
+        + COUNT(*) FILTER (WHERE anon_key_encrypted IS NOT NULL)::int AS project_secrets
     FROM projects
   `;
   return {

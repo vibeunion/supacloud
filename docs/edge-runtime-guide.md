@@ -14,7 +14,7 @@ SupaCloud (:9090)             Edge Runtime (EDGE_RUNTIME_PORT, default :9005)
 └── Static Assets (ETag/304)  ├── Worker Thread Pool (4 threads, fixed ~80MB)
                               ├── Compatibility Shim (globalThis.Deno)
                               ├── URL Import Mapping (compat imports → npm/shims)
-                              └── /preheat endpoint (zero cold-start)
+                              └── /preheat endpoint (import ahead of the request)
 
 Caddy Gateway (Admin API-driven):
   Automatic HTTPS, security headers, route JSON publishing, CORS, rate limiting
@@ -31,6 +31,8 @@ SupaCloud supports two deployment modes for the Bun Edge Runtime:
 |------|-------|---------|-------|
 | `embedded` | `supacloud.service` | Yes | Management API starts the Edge Runtime child process itself. |
 | `external` | `supacloud-edge-runtime.service` | No | Use only when you explicitly want a separate systemd unit. |
+
+The shared Edge Runtime, whether embedded in `supacloud.service` or run as the external unit, is one process and one trust domain. Functions from every project share that process. `limits.max_heap_bytes` is a soft completion-time heap budget. It is not a sandbox, and it does not give each project its own process or cgroup. Hard multi-tenant isolation would require a separate runtime process and cgroup per project. This runtime does not do that.
 
 Set the mode through `EDGE_RUNTIME_MODE` in `/etc/supabase/management-api.env`.
 
@@ -70,21 +72,21 @@ It does not support cross-origin cookie credentials and removes
 
 | Metric | Value |
 |--------|-------|
-| Memory (200 functions) | ~140MB |
-| Cold start (no preheat) | 8-15ms |
-| Cold start (with preheat) | **0ms** |
+| Memory (200 functions) | About 140MB in an old local sample, not a capacity or density measurement |
+| Cold start (no preheat) | Milliseconds of import work on a warm host; not a production SLO |
+| Cold start (with preheat) | Skips the module import when the LRU entry is still resident. Not a guaranteed 0ms start |
 | Port | `EDGE_RUNTIME_PORT` (default: `9005`) |
 
 ### Function Preheating
 
-After deploying a function, SupaCloud automatically pre-imports the module into the Worker Thread Pool's LRU cache. This eliminates cold-start latency on the first real request.
+After deploying a function, SupaCloud pre-imports the module into the Worker Thread Pool's LRU cache so a later request can skip that import while the entry remains resident. A miss, worker retirement, or process restart still pays the import. Preheat is not an unconditional 0ms cold start.
 
 ```
 Deploy flow:
   1. Bun.build() bundles source → .js
   2. invalidateCache() clears old version
   3. POST /preheat/:ref/:slug → Worker imports module ahead of time
-  4. First request hits warm cache → 0ms cold-start
+  4. A later request reuses the warm LRU entry and skips the import. This is not a guaranteed 0ms start.
 ```
 
 ### Activation Artifact Integrity

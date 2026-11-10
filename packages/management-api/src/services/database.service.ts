@@ -322,10 +322,22 @@ export class DatabaseService {
       await this.withAdminDb(async (adminDb) => {
         const authenticatorRole = resolveAuthenticatorName(projectRef);
         assertValidIdentifier("authenticatorRole", authenticatorRole);
+        // CONNECT, not the cluster HBA regex, binds authenticator_<ref> and role_<ref>
+        // to this database. supabase_auth_admin and supabase_admin remain cluster-global
+        // LOGIN roles because GoTrue and Realtime connect as those names.
+        // supabase_realtime_admin must not receive CONNECT on tenant databases.
         await adminDb.unsafe(`
+          REVOKE CONNECT ON DATABASE "${dbName}" FROM PUBLIC;
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO "${authenticatorRole}";
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_auth_admin;
           GRANT CONNECT, TEMPORARY, CREATE ON DATABASE "${dbName}" TO supabase_admin;
+          DO $$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+              EXECUTE 'REVOKE CONNECT ON DATABASE "${dbName}" FROM supabase_realtime_admin';
+            END IF;
+          END
+          $$;
         `);
       });
 

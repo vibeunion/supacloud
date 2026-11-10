@@ -407,9 +407,17 @@ class BranchService {
 
     await this.executeUnsafeSql(`CREATE DATABASE ${this.identQuote(dbName)} OWNER ${this.identQuote(dbUser)}`);
     await this.executeUnsafeSql(`
+      REVOKE CONNECT ON DATABASE ${this.identQuote(dbName)} FROM PUBLIC;
       GRANT CONNECT, TEMPORARY ON DATABASE ${this.identQuote(dbName)} TO ${this.identQuote(dbUser)};
       GRANT CONNECT, TEMPORARY ON DATABASE ${this.identQuote(dbName)} TO ${this.identQuote(authenticatorRole)};
       GRANT anon, authenticated, service_role TO ${this.identQuote(authenticatorRole)};
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+          EXECUTE 'REVOKE CONNECT ON DATABASE ${this.identQuote(dbName)} FROM supabase_realtime_admin';
+        END IF;
+      END
+      $$;
     `);
   }
 

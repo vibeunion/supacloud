@@ -2,6 +2,7 @@ import type { SQL } from "bun";
 import type { Project } from "../db";
 import type { StoredApplicationPreview } from "../services/application-preview-contract";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { revealProjectSecrets } from "./project-secret-at-rest";
 
 export class ApplicationPreviewConflictError extends Error {
   readonly code = "APPLICATION_PREVIEW_CHANGED";
@@ -116,7 +117,7 @@ export async function replaceProjectConfig(
           END,
         updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
-    RETURNING id, ref, organization_id, name, db_name, db_user, db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, anon_key, service_role_key, service_role_key_encrypted, publishable_key, secret_key_hash, secret_key_encrypted, s3_bucket, s3_access_key, s3_secret_key, s3_secret_key_encrypted, region, status, postgrest_desired, postgrest_actual, postgrest_health, postgrest_port, postgrest_last_error, postgrest_updated_at, postgrest_last_reconciled_at, config, created_at, updated_at, deleted_at
+    RETURNING id, ref, organization_id, name, db_name, db_user, db_password, db_password_encrypted, jwt_secret, jwt_secret_encrypted, anon_key, service_role_key, service_role_key_encrypted, publishable_key, secret_key_hash, secret_key_encrypted, s3_bucket, s3_access_key, s3_secret_key, s3_secret_key_encrypted, anon_key_encrypted, anon_key_hash, service_role_key_hash, region, status, postgrest_desired, postgrest_actual, postgrest_health, postgrest_port, postgrest_last_error, postgrest_updated_at, postgrest_last_reconciled_at, config, created_at, updated_at, deleted_at
   `;
-  return project || null;
+  return project ? revealProjectSecrets(project) : null;
 }

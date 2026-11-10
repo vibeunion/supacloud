@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Atomically add the SupaCloud tenant HBA rule to a Pigsty inventory."""
+"""Atomically add the SupaCloud tenant HBA rules to a Pigsty inventory.
+
+These rules only admit loopback logins whose names match authenticator_* or
+role_* against databases named supa_*. PostgreSQL HBA matches the user and
+database fields independently, so the regex does not bind authenticator_A to
+supa_A. Per-database CONNECT grants are the binding control. One inventory line
+per project would be required to make HBA itself enforce that pair, and Pigsty
+owns pg_hba.conf, so this installer does not rewrite the inventory on every
+project create.
+"""
 
 from __future__ import annotations
 
