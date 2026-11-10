@@ -1,4 +1,4 @@
-import { compileModel } from "../../packages/db/src/model";
+import { compileModel } from "../../packages/db-zenstack/src/model";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { appStarterFiles } from "../../packages/cli/src/shared/tools/app-starter";

@@ -121,9 +121,9 @@ export class CreateOrder {
       authorize: identity => sameActor(identity, principal) && principal.canCreate ? "allow" : "deny",
       audit: { event: "orders.create.decided", details: (input, result) => ({ id: input.id, outcome: result.outcome }) },
       execute: async (tx, input): Promise<Decision> => {
-        const created = await tx.db.order.createMany({ data: [{ ...input, tenantId: principal.tenantId, ownerId: principal.id, state: "draft", version: 1 }], skipDuplicates: true });
+        const created: { count: number } = await tx.db.order.createMany({ data: [{ ...input, tenantId: principal.tenantId, ownerId: principal.id, state: "draft", version: 1 }], skipDuplicates: true });
         if (created.count !== 1) return { outcome: "conflict", order: null };
-        const row = await tx.db.order.findUniqueOrThrow({ where: { tenantId_id: { tenantId: principal.tenantId, id: input.id } }, select: { id: true, title: true, state: true, version: true } });
+        const row: { id: string; title: string; state: string; version: number } = await tx.db.order.findUniqueOrThrow({ where: { tenantId_id: { tenantId: principal.tenantId, id: input.id } }, select: { id: true, title: true, state: true, version: true } });
         return { outcome: "applied", order: decodeOrder(row) };
       },
     });
@@ -145,12 +145,12 @@ export class ApproveOrder {
         kind: "command", name: "orders.approve", input,
         services: { approval: { canApprove: principal.canApprove } },
       }, async (): Promise<Decision> => {
-        const changed = await tx.db.order.updateMany({
+        const changed: { count: number } = await tx.db.order.updateMany({
           where: { tenantId: principal.tenantId, id: input.id, state: "draft", version: input.expectedVersion },
           data: { state: "approved", version: { increment: 1 } },
         });
         if (changed.count !== 1) return { outcome: "conflict", order: null };
-        const row = await tx.db.order.findUniqueOrThrow({ where: { tenantId_id: { tenantId: principal.tenantId, id: input.id } }, select: { id: true, title: true, state: true, version: true } });
+        const row: { id: string; title: string; state: string; version: number } = await tx.db.order.findUniqueOrThrow({ where: { tenantId_id: { tenantId: principal.tenantId, id: input.id } }, select: { id: true, title: true, state: true, version: true } });
         return { outcome: "applied", order: decodeOrder(row) };
       })),
     });
