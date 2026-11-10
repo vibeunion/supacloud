@@ -1,6 +1,7 @@
 import { sql as metaSql } from "../db";
 import { hashSecretApiKey } from "./api-keys";
 import { isRecord } from "./project-config";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 
 export type ProjectApiKeyKind = "anon" | "service_role" | "publishable" | "secret";
 
@@ -23,15 +24,19 @@ function buildApiKeyLookup(key: string, options: ProjectApiKeyLookupOptions = {}
 
   return {
     query: `
-      SELECT ref, anon_key, service_role_key, publishable_key, secret_key_hash
+      SELECT ref, anon_key, anon_key_encrypted, anon_key_hash,
+             service_role_key, service_role_key_encrypted, service_role_key_hash,
+             publishable_key, secret_key_hash
       FROM projects
       WHERE deleted_at IS NULL
         AND ${statusSql}
         AND (
-          anon_key = $1
-          OR service_role_key = $1
+          anon_key_hash = $2
+          OR service_role_key_hash = $2
           OR publishable_key = $1
           OR secret_key_hash = $2
+          OR (anon_key_hash IS NULL AND anon_key = $1)
+          OR (service_role_key_hash IS NULL AND service_role_key = $1)
         )
       LIMIT 1
     `,
@@ -80,7 +85,12 @@ export async function resolveProjectApiKey(
 
   try {
     const rows: unknown = await metaSql.unsafe(lookup.query, lookup.params);
-    return Array.isArray(rows) ? resolveApiKeyRow(key, lookup.secretHash, rows[0]) : null;
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return resolveApiKeyRow(
+      key,
+      lookup.secretHash,
+      isRecord(row) ? revealProjectSecrets(row) : null,
+    );
   } catch {
     // Rolling upgrades may briefly run before the additive opaque-key columns
     // exist. Preserve legacy key lookup until initDatabase finishes.

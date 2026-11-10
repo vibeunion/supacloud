@@ -14,6 +14,7 @@
  */
 import { SQL } from "bun";
 import { config } from "../../src/config";
+import { sealProjectSecrets } from "../../src/repositories/project-secret-at-rest";
 
 // These are the official Supabase demo keys, signed with CI_JWT_SECRET.
 // The CI containers (PostgREST + GoTrue) are configured with the same secret.
@@ -52,11 +53,19 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
     ON CONFLICT (id) DO NOTHING
   `;
 
-  // 2. Upsert the CI test project
+  // 2. Upsert the CI test project. Secrets stay in the encrypted columns.
+  const sealed = sealProjectSecrets({
+    db_password: "postgres",
+    jwt_secret: CI_JWT_SECRET,
+    anon_key: CI_ANON_KEY,
+    service_role_key: CI_SERVICE_KEY,
+  });
   await sql`
     INSERT INTO projects (
       ref, name, db_name, db_user, db_password,
       jwt_secret, anon_key, service_role_key,
+      db_password_encrypted, jwt_secret_encrypted, anon_key_encrypted, service_role_key_encrypted,
+      anon_key_hash, service_role_key_hash,
       s3_bucket, region, status, config
     )
     VALUES (
@@ -64,23 +73,35 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
       'CI SDK Bridge',
       'postgres',
       'supabase_admin',
-      'postgres',
-      ${CI_JWT_SECRET},
-      ${CI_ANON_KEY},
-      ${CI_SERVICE_KEY},
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      ${sealed.db_password_encrypted},
+      ${sealed.jwt_secret_encrypted},
+      ${sealed.anon_key_encrypted},
+      ${sealed.service_role_key_encrypted},
+      ${sealed.anon_key_hash},
+      ${sealed.service_role_key_hash},
       'ci-sdk-test',
       'local',
       'active',
       '{}'::jsonb
     )
     ON CONFLICT (ref) DO UPDATE SET
-      anon_key        = EXCLUDED.anon_key,
-      service_role_key = EXCLUDED.service_role_key,
-      jwt_secret      = EXCLUDED.jwt_secret,
-      db_name         = 'postgres',
-      db_user         = 'supabase_admin',
-      db_password     = 'postgres',
-      status          = 'active'
+      anon_key = NULL,
+      service_role_key = NULL,
+      jwt_secret = NULL,
+      db_password = NULL,
+      anon_key_encrypted = EXCLUDED.anon_key_encrypted,
+      service_role_key_encrypted = EXCLUDED.service_role_key_encrypted,
+      jwt_secret_encrypted = EXCLUDED.jwt_secret_encrypted,
+      db_password_encrypted = EXCLUDED.db_password_encrypted,
+      anon_key_hash = EXCLUDED.anon_key_hash,
+      service_role_key_hash = EXCLUDED.service_role_key_hash,
+      db_name = 'postgres',
+      db_user = 'supabase_admin',
+      status = 'active'
   `;
 
   // 3. Wire to shared CI containers via projects.config
@@ -89,7 +110,8 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
     SET
       db_name = 'postgres',
       db_user = 'supabase_admin',
-      db_password = 'postgres',
+      db_password = NULL,
+      db_password_encrypted = ${sealed.db_password_encrypted},
       status = 'active',
       config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
         'postgrest_port', ${CI_PGRST_PORT},

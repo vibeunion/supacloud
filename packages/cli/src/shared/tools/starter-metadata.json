@@ -21,9 +21,12 @@
       "version": "0.16.1"
     },
     "db": {
-      "version": "0.24.0",
+      "version": "0.24.1",
       "dependencies": {},
-      "devDependencies": {}
+      "devDependencies": {},
+      "peerDependencies": {
+        "@supacloud/db-zenstack": ">=0.1.0"
+      }
     },
     "dbZenstack": {
       "version": "0.1.0",

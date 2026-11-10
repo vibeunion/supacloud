@@ -21,8 +21,9 @@ nativeTest("native PostgreSQL serializes preview writes, preserves config, and r
     await db.unsafe(`CREATE TABLE projects (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), ref text UNIQUE NOT NULL, organization_id uuid,
       name text, db_name text, db_user text, db_password text, db_password_encrypted text,
-      jwt_secret text, jwt_secret_encrypted text, anon_key text, service_role_key text,
-      service_role_key_encrypted text, publishable_key text, secret_key_hash text, secret_key_encrypted text,
+      jwt_secret text, jwt_secret_encrypted text, anon_key text, anon_key_encrypted text, anon_key_hash text,
+      service_role_key text, service_role_key_encrypted text, service_role_key_hash text,
+      publishable_key text, secret_key_hash text, secret_key_encrypted text,
       s3_bucket text, s3_access_key text, s3_secret_key text, s3_secret_key_encrypted text,
       region text, status text, postgrest_desired text, postgrest_actual text, postgrest_health text,
       postgrest_port integer, postgrest_last_error text, postgrest_updated_at timestamptz,

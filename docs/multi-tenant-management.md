@@ -44,11 +44,11 @@ Each project has its own logical database and user in the Pigsty cluster.
 |----------|-------------------|---------|
 | Project Database | `supa_<project_ref>` | `supa_abc123` |
 | Project Role | `role_<project_ref>` | `role_abc123` |
-| Permissions | Role can only access its own database | Enforced by HBA rules |
+| Permissions | `role_<ref>` and `authenticator_<ref>` can connect only to `supa_<ref>` | `REVOKE CONNECT FROM PUBLIC`, then `GRANT CONNECT` to those two roles. Pigsty HBA only allows loopback logins whose names match `authenticator_*` or `role_*` against any `supa_*` database. It does not pair a role with its own database. |
 
 ### 2.2 Metadata Storage
 
-Dedicated `supacloud_meta` database stores project lifecycle information.
+Dedicated `supacloud_meta` database stores project lifecycle information. Database passwords, JWT secrets, anon keys, service-role keys, and project S3 secret keys are stored only in `*_encrypted` columns. The matching plaintext columns are nullable leftovers and are cleared on startup after a successful encrypt. `anon_key_hash` and `service_role_key_hash` are lookup hashes. The opaque `secret_key` is already stored as `secret_key_hash` plus `secret_key_encrypted`. Create responses can still return a secret once from process memory.
 
 ```sql
 CREATE DATABASE supacloud_meta;
@@ -59,13 +59,20 @@ CREATE TABLE projects (
     name VARCHAR(100) NOT NULL,
     db_name VARCHAR(63) NOT NULL,
     db_user VARCHAR(63) NOT NULL,
-    db_password VARCHAR(100) NOT NULL,
-    jwt_secret VARCHAR(100) NOT NULL,
-    anon_key TEXT NOT NULL,
-    service_role_key TEXT NOT NULL,
+    db_password VARCHAR(100),
+    db_password_encrypted TEXT,
+    jwt_secret VARCHAR(100),
+    jwt_secret_encrypted TEXT,
+    anon_key TEXT,
+    anon_key_encrypted TEXT,
+    anon_key_hash TEXT,
+    service_role_key TEXT,
+    service_role_key_encrypted TEXT,
+    service_role_key_hash TEXT,
     s3_bucket VARCHAR(63) NOT NULL,
     s3_access_key VARCHAR(100),
     s3_secret_key VARCHAR(100),
+    s3_secret_key_encrypted TEXT,
     region VARCHAR(50) DEFAULT 'local',
     status VARCHAR(20) DEFAULT 'creating',
     config JSONB DEFAULT '{}',

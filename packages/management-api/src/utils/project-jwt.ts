@@ -11,6 +11,7 @@ import {
   type JWTPayload,
 } from "jose";
 import { sql as metaSql } from "../db";
+import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
 import {
   normalizeOAuthServerConfig,
   normalizeProjectConfig,
@@ -538,9 +539,10 @@ export async function verifyProjectJwtPayload(
   options: { includeProvisioning?: boolean } = {},
 ): Promise<ProjectJwtVerification | null> {
   const cleanToken = token.replace(/^Bearer\s+/i, "");
-  const [project] = options.includeProvisioning
+  const [stored] = options.includeProvisioning
     ? await metaSql`
-      SELECT jwt_secret, anon_key, service_role_key, config
+      SELECT jwt_secret, jwt_secret_encrypted, anon_key, anon_key_encrypted,
+             service_role_key, service_role_key_encrypted, config
       FROM projects
       WHERE ref = ${ref}
         AND deleted_at IS NULL
@@ -548,13 +550,15 @@ export async function verifyProjectJwtPayload(
       LIMIT 1
     `
     : await metaSql`
-      SELECT jwt_secret, anon_key, service_role_key, config
+      SELECT jwt_secret, jwt_secret_encrypted, anon_key, anon_key_encrypted,
+             service_role_key, service_role_key_encrypted, config
       FROM projects
       WHERE ref = ${ref}
         AND deleted_at IS NULL
         AND lower(status) = 'active'
       LIMIT 1
     `;
+  const project = stored ? revealProjectSecrets(stored) : null;
 
   if (!project?.jwt_secret) return null;
   const parts = cleanToken.split(".");
