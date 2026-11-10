@@ -1,0 +1,99 @@
+name: Native Realtime Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      realtime_ref:
+        description: Supabase Realtime tag to build
+        required: true
+        default: v2.150.0
+        type: string
+      upload_release_tag:
+        description: Existing GitHub Release tag to receive the native bundle; leave blank for artifact-only validation
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-native-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout SupaCloud packaging scripts
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Supabase Realtime source
+        uses: actions/checkout@v7
+        with:
+          repository: supabase/realtime
+          ref: ${{ inputs.realtime_ref }}
+          path: third_party/realtime
+          fetch-depth: 1
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5.0.4"
+          elixir-version: "1.19.5-otp-28"
+          install-hex: true
+          install-rebar: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install archive tooling
+        run: sudo apt-get update && sudo apt-get install -y zstd
+
+      - name: Build upstream OTP release
+        working-directory: third_party/realtime
+        env:
+          MIX_ENV: prod
+        run: |
+          mix deps.get --only prod
+          npm ci --prefix assets --omit=dev
+          mix assets.deploy
+          mix compile
+          mix release
+
+      - name: Package native Realtime bundle
+        env:
+          REALTIME_REF: ${{ inputs.realtime_ref }}
+        run: |
+          version="${REALTIME_REF#v}"
+          source_commit="$(git -C third_party/realtime rev-parse HEAD)"
+          mkdir -p release-assets
+          bash scripts/package_realtime_native_release.sh \
+            third_party/realtime \
+            third_party/realtime/_build/prod/rel/realtime \
+            "$version" \
+            "$source_commit" \
+            release-assets \
+            linux-amd64
+
+      - name: Validate package script fixture
+        run: bash scripts/package_realtime_native_release.test.sh
+
+      - name: Attest native Realtime artifacts
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release-assets/*
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supacloud-realtime-native-${{ inputs.realtime_ref }}
+          path: release-assets/
+          if-no-files-found: error
+
+      - name: Upload to an existing GitHub Release
+        if: ${{ inputs.upload_release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.upload_release_tag }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
