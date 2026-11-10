@@ -145,7 +145,7 @@ describe("supabase bootstrap schema", () => {
 
     expect(ALTER_TENANT_SQL).not.toContain(notifyPayloadSql);
 
-    const realtimeBunSource = readRepoFile("src/services/realtime-bun.service.ts");
+    const realtimeBunSource = readRepoFile("src/internal/realtime-listen/service.ts");
     expect(realtimeBunSource).toContain(sqlModuleInterpolation("realtime-notify-payload"));
     expect(realtimeBunSource).toContain("PERFORM realtime.notify_change_payload(payload)");
     const realtimeBunTriggerStart = realtimeBunSource.indexOf(

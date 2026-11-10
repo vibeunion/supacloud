@@ -1416,8 +1416,7 @@ async function bootstrap() {
 
         // ── Realtime WebSocket proxy ──────────────────────────────
         // Published supabase-js upgrades for /realtime/v1 are an Elixir proxy.
-        // Do not subscribe RealtimeBunService here; LISTEN/NOTIFY is a separate
-        // implementation and is not a failover for this socket.
+        // Do not import src/internal/realtime-listen. LISTEN/NOTIFY is not failover.
         if (
           url.pathname === "/ws/tasks" &&
           request.headers.get("upgrade")?.toLowerCase() === "websocket"

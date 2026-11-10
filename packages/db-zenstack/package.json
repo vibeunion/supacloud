@@ -1,0 +1,70 @@
+{
+  "name": "@supacloud/db-zenstack",
+  "version": "0.1.0",
+  "description": "Optional ZenStack model adapter for SupaCloud. Not part of the control-plane database package.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "import": "./dist/model.js"
+    },
+    "./cli": {
+      "types": "./dist/model-cli.d.ts",
+      "import": "./dist/model-cli.js"
+    }
+  },
+  "files": [
+    "NOTICE",
+    "LICENSE-APACHE-2.0.txt",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts src/model.ts src/model-cli.ts --root src --outdir dist --target node --external bun --external @supacloud/db --external @supacloud/db/model-contract --external @supacloud/contracts --external @zenstackhq/orm --external @zenstackhq/schema --external @zenstackhq/plugin-policy --external kysely --external @zenstackhq/language --external @zenstackhq/sdk",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "clean": "rm -rf dist",
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/db-zenstack"
+  },
+  "dependencies": {
+    "@supacloud/contracts": "file:../contracts",
+    "@supacloud/db": "file:../db",
+    "@zenstackhq/language": "3.10.0",
+    "@zenstackhq/orm": "3.10.0",
+    "@zenstackhq/plugin-policy": "3.10.0",
+    "@zenstackhq/schema": "3.10.0",
+    "@zenstackhq/sdk": "3.10.0",
+    "kysely": "0.29.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@zenstackhq/cli": "3.10.0",
+    "pg": "8.23.1",
+    "prisma": "6.19.3",
+    "typescript": "7.1.0-beta"
+  },
+  "overrides": {
+    "@supacloud/contracts": "file:../contracts",
+    "@supacloud/db": "file:../db",
+    "deepmerge-ts": "8.0.2",
+    "prisma": "6.19.3"
+  },
+  "patchedDependencies": {
+    "@zenstackhq/orm@3.10.0": "../../patches/@zenstackhq%2Form@3.10.0.patch",
+    "@zenstackhq/plugin-policy@3.10.0": "../../patches/@zenstackhq%2Fplugin-policy@3.10.0.patch"
+  }
+}

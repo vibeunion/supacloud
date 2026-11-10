@@ -84,7 +84,7 @@ test('generation relationships affect the CLI but never install producers as run
   put('packages/cli/package.json', { name: '@supacloud/cli', version: '1.0.0' });
   applyStarterSync(planStarterSync(root).planHash, root);
   const workspace = readWorkspace(root);
-  assert.equal(workspace.edges.filter((edge) => edge.kind === 'generation').length, 7);
+  assert.equal(workspace.edges.filter((edge) => edge.kind === 'generation').length, 8);
   assert.deepEqual(preparationTargets(workspace, '@supacloud/cli'), []);
   const affected = affectedReport(workspace, ['packages/app/package.json']);
   assert.ok(affected.projects.some((project) => project.name === '@supacloud/cli'));

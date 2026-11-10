@@ -8,6 +8,7 @@ export const STARTER_PACKAGES = Object.freeze({
   compiler: ['compiler', '@supacloud/compiler'], app: ['app', '@supacloud/app'],
   elysia: ['elysia', '@supacloud/elysia'], commands: ['commands', '@supacloud/commands'],
   contracts: ['contracts', '@supacloud/contracts'], db: ['db', '@supacloud/db'],
+  dbZenstack: ['db-zenstack', '@supacloud/db-zenstack'],
   sdk: ['supacloud-js', '@supacloud/js'],
 });
 const generator = 'supacloud/starter-metadata-v1';
@@ -48,12 +49,12 @@ export function starterMetadata(cwd = root) {
     const entry = { version: manifest.version };
     if (alias === 'app') entry.dependencies = { rxjs: dependency(manifest, 'dependencies', 'rxjs') };
     if (alias === 'db') {
-      // Model starters install the ZenStack adapter directly. The control-plane
-      // package keeps those packages as optional peers, not required dependencies.
+      entry.dependencies = {};
+      entry.devDependencies = {};
+    }
+    if (alias === 'dbZenstack') {
       const modelPackages = ['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy', '@zenstackhq/language', '@zenstackhq/sdk', 'kysely'];
-      const section = ['peerDependencies', 'dependencies'].find((name) => modelPackages.every((dep) => typeof manifest[name]?.[dep] === 'string'));
-      if (!section) throw new Error(`Missing publishable model adapter versions in ${manifest.name}`);
-      entry.dependencies = Object.fromEntries(modelPackages.map(name => [name, dependency(manifest, section, name)]));
+      entry.dependencies = Object.fromEntries(modelPackages.map(name => [name, dependency(manifest, 'dependencies', name)]));
       entry.devDependencies = Object.fromEntries(['@zenstackhq/cli', 'prisma', 'pg'].map(name => [name, dependency(manifest, 'devDependencies', name)]));
     }
     if (alias === 'sdk') entry.peerDependencies = { '@supabase/supabase-js': dependency(manifest, 'peerDependencies', '@supabase/supabase-js') };
