@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.61.0...compiler-v0.62.0) (2026-11-10)
+
+
+### Features
+
+* **compiler:** add semantic codebase identity lens ([#2512](https://github.com/vibeunion/supacloud/issues/2512)) ([c611783](https://github.com/vibeunion/supacloud/commit/c611783f9ffa060112a497e9daaea0e83857e2b2))
+
 ## [0.61.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.60.0...compiler-v0.61.0) (2026-11-09)
 
 
