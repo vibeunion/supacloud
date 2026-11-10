@@ -23,6 +23,8 @@ import {
     planDeliveryProject,
     resolveSupacloudConfig,
     readExecutionMetadata,
+    createProjectSemanticSnapshot,
+    createSemanticLens,
     watchProject,
     type Diagnostic,
     type ModuleNode,
@@ -120,7 +122,7 @@ for (const [name, schema] of Object.entries(REMOTE_APP_SCHEMA)) {
 }
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
+    action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "lens" | "doctor" | "fix"
         | "plan" | "build" | "release" | "promote" | keyof typeof REMOTE_APP_ACTIONS;
     ref?: string;
     id?: string;
@@ -168,6 +170,7 @@ export interface AppToolArguments {
     strict?: boolean;
     format?: "text" | "json";
     target?: string;
+    detail?: boolean;
     fix?: string;
     from_doctor?: string;
     fix_index?: number;
@@ -542,6 +545,12 @@ interface ProjectContextPack {
     modules: ModuleNode[];
     externalTokens: string[];
     diagnostics: Diagnostic[];
+    semantic: {
+        version: 1;
+        hash: string;
+        sourceHash: string;
+        nodeCount: number;
+    };
     allowedDependencies: {
         dependencies: string[];
         devDependencies: string[];
@@ -595,6 +604,7 @@ function formatModuleContextPack(pack: ReturnType<typeof createContextPack>): st
         `  external tokens: ${pack.externalTokens.join(", ") || "-"}`,
         `  imports: ${pack.relatedModules.imports.join(", ") || "-"}`,
         `  imported by: ${pack.relatedModules.importedBy.join(", ") || "-"}`,
+        `  semantic hash: ${pack.semantic.hash}`,
         ...(pack.graphql ? [
             `  graphql schema: ${pack.graphql.schema}`,
             `  graphql queries: ${pack.graphql.operations.map((operation) => operation.name).join(", ") || "-"}`,
@@ -659,6 +669,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             "  release: app check before regeneration; local tests do not prove deployment",
         ].join("\n"));
     }
+    const semantic = await createProjectSemanticSnapshot(result.graph, root, outDir);
     const project: ProjectContextPack = {
         version: 1,
         root,
@@ -667,6 +678,12 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         modules: result.graph.modules,
         externalTokens: result.graph.externalTokens,
         diagnostics: result.diagnostics,
+        semantic: {
+            version: 1,
+            hash: semantic.semanticHash,
+            sourceHash: semantic.sourceHash,
+            nodeCount: semantic.nodes.length,
+        },
         allowedDependencies: await readAllowedDependencies(root),
         commands: {
             check: "supacloud app check",
@@ -690,6 +707,8 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         `CONTEXT ${root}`,
         `  config: ${configFile ?? "(none)"}`,
         `  generated: ${outDir}`,
+        `  semantic hash: ${project.semantic.hash}`,
+        `  source hash: ${project.semantic.sourceHash}`,
         `  modules: ${project.modules.map((module) => module.name).join(", ") || "-"}`,
         `  external tokens: ${project.externalTokens.join(", ") || "-"}`,
         `  dependencies: ${project.allowedDependencies.dependencies.join(", ") || "-"}`,
@@ -698,6 +717,34 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         `  peer dependencies: ${project.allowedDependencies.peerDependencies.join(", ") || "-"}`,
         ...project.diagnostics.map(formatDiagnostic),
     ].join("\n"));
+}
+
+/**
+ * `app lens` exposes the compiler's immutable semantic projection. It is a
+ * compact, source-location-free view for agents and CI; it never writes or
+ * interprets the projection as a deployment authority.
+ */
+async function runLens(args: AppToolArguments): Promise<ToolResult> {
+    const { root, sourceDir, outDir, result } = await projectCompileConfig(args);
+    const graph = { ...result.graph, diagnostics: result.diagnostics };
+    const target = args.target?.trim();
+    const snapshot = await createProjectSemanticSnapshot(result.graph, root, outDir);
+    const lens = createSemanticLens(graph, target, { snapshot, detail: args.detail === true });
+    const context = target ? createContextPack(graph, lens.subject ?? target, snapshot) : undefined;
+    const output = {
+        version: 1,
+        root,
+        sourceRoot: sourceDir,
+        generatedDir: outDir,
+        ...lens,
+        ...(context ? { context } : {}),
+        diagnostics: result.diagnostics,
+    };
+    if (args.format === "json") return textResult(JSON.stringify(output, null, 2), lens.conflicts.some(conflict => conflict.severity === "error"));
+    const lines = [`LENS ${context?.subject ?? "application"}`, `  semantic hash: ${lens.snapshot.semanticHash}`, `  source hash: ${lens.snapshot.sourceHash}`];
+    for (const item of lens.nodes) lines.push(`  ${item.kind} ${item.id} ${item.hash}`);
+    for (const conflict of lens.conflicts) lines.push(`  ${conflict.severity.toUpperCase()} ${conflict.code}: ${conflict.message}`);
+    return textResult(lines.join("\n"), lens.conflicts.some(conflict => conflict.severity === "error"));
 }
 
 function doctorFixPlan(doctor: ReturnType<typeof doctorProject>) {
@@ -1869,6 +1916,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         case "explain": return runExplain(request);
         case "export-tools": return runExportTools(request);
         case "context": return runContext(request);
+        case "lens": return runLens(request);
         case "doctor": return runDoctor(request);
         case "fix": return runFix(request);
         default:
@@ -1882,7 +1930,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         "Application authoring and delivery. Plan is read-only; build, upload and configure never deploy. Deploy/rollback explicitly activate a release; rollback never downgrades schema.",
         {
             ...REMOTE_APP_SCHEMA,
-            action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
+            action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "lens", "doctor", "fix",
                 "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "evidence", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
@@ -1909,7 +1957,8 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),
             database_url: optional(Type.String(), "[dev] Explicit loopback integration URL; watch/once only inspect its shape"),
-            target: optional(Type.String(), "[explain/context/verify-plan] Provider class name / token name / command name / job name / module name"),
+            target: optional(Type.String(), "[explain/context/lens/verify-plan] Provider class name / token name / command name / job name / module name"),
+            detail: optional(Type.Boolean(), "[lens] Include the per-node value payload (larger output)"),
             events: optional(Type.String(), "[context] Project-relative execution metadata JSON or generated JSON-lines file"),
             request_id: optional(Type.String(), "[context] Opaque request ID or Workflow run ID selected from --events"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),

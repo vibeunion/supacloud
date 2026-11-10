@@ -70,6 +70,11 @@ export function joinRoutePaths(prefix: string, path: string): string {
   return normalized;
 }
 
+/** Route identity for collision checks: parameter names must not hide a routing collision. */
+export function publicRouteKey(method: string, path: string): string {
+  return `${method} ${path.replace(/:[^/]+/g, ":param")}`;
+}
+
 /** Finds the closest match from a list of candidate strings (case/delimiter-insensitive). */
 export function findClosestMatch(target: string, candidates: string[]): string | undefined {
   if (candidates.length === 0) return undefined;

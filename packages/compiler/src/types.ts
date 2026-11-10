@@ -517,6 +517,13 @@ export interface ExecutionPlanModule {
 export interface CompiledExecutionManifest {
   version: 1;
   compiler: "@supacloud/compiler";
+  /** Stable semantic identity; source hashes remain in the source inventory. */
+  semantic?: {
+    version: 1;
+    policyVersion: "semantic-governance-v1";
+    hash: string;
+    nodeCount: number;
+  };
   host: { adapter: "elysia"; api: "2.x"; reflection: false; proxy: false };
   di: { runtime: "angular-compatible"; generation: "static"; scopes: Scope[] };
   boundaries: ModuleBoundaryRule[];
