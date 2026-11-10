@@ -12,6 +12,75 @@ QUADLET = SELF_HOST / "quadlet"
 
 
 class PodmanInstallContractTests(unittest.TestCase):
+    def test_native_handoff_preserves_operator_credentials_and_retry_values(self) -> None:
+        credentials = {
+            "POSTGRES_PASSWORD": "fixture-db-password",
+            "DASHBOARD_USERNAME": "fixture-admin",
+            "DASHBOARD_PASSWORD": "fixture-dashboard-password",
+            "JWT_SECRET": "fixture-jwt-secret-012345678901234567890123",
+            "ANON_KEY": "fixture-configured-anon-jwt",
+            "SERVICE_ROLE_KEY": "fixture-configured-service-jwt",
+            "TIMEZONE": "UTC",
+        }
+        script = '''
+set --
+source ./install.sh
+recover_legacy_install_config() { :; }
+load_install_config_layers
+export_podman_install_input
+exec bash podman/self-host/install.sh --dry-run --root-dir "$PODMAN_FIXTURE_ROOT"
+'''
+        for source in ("persisted", "explicit"):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as root:
+                config = Path(root) / "input.env"
+                config.write_text("".join(f"{key}={value}\n" for key, value in credentials.items())
+                                  if source == "persisted" else "")
+                config.chmod(0o600)
+                environment = {key: value for key, value in os.environ.items() if key not in credentials}
+                environment.update(SUPACLOUD_INSTALL_CONFIG_FILE=str(config), PODMAN_FIXTURE_ROOT=root)
+                if source == "explicit":
+                    environment.update(credentials)
+                result = subprocess.run(["bash", "-c", script], cwd=SELF_HOST.parents[1],
+                                        env=environment, check=True, capture_output=True, text=True)
+                private_env = Path(root) / "etc/supacloud/supacloud.env"
+                values = dict(line.split("=", 1) for line in private_env.read_text().splitlines()
+                              if line and not line.startswith("#"))
+                for key, value in credentials.items():
+                    self.assertEqual(values["TZ" if key == "TIMEZONE" else key], value)
+                    if key != "TIMEZONE":
+                        self.assertNotIn(value, result.stdout + result.stderr)
+                original = private_env.read_bytes()
+                environment.update({key: value + "-changed" for key, value in credentials.items()})
+                subprocess.run(["bash", "-c", script], cwd=SELF_HOST.parents[1],
+                               env=environment, check=True, capture_output=True)
+                self.assertEqual(private_env.read_bytes(), original)
+
+    def test_native_handoff_does_not_export_template_example_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            config = Path(root) / "input.env"
+            config.touch(mode=0o600)
+            keys = {"POSTGRES_PASSWORD", "DASHBOARD_USERNAME", "DASHBOARD_PASSWORD",
+                    "JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY", "TIMEZONE"}
+            environment = {key: value for key, value in os.environ.items() if key not in keys}
+            environment.update(SUPACLOUD_INSTALL_CONFIG_FILE=str(config), PODMAN_FIXTURE_ROOT=root)
+            script = '''
+set --
+source ./install.sh
+recover_legacy_install_config() { :; }
+load_install_config_layers
+export_podman_install_input
+exec bash podman/self-host/install.sh --dry-run --root-dir "$PODMAN_FIXTURE_ROOT"
+'''
+            subprocess.run(["bash", "-c", script], cwd=SELF_HOST.parents[1],
+                           env=environment, check=True, capture_output=True)
+            values = dict(line.split("=", 1) for line in
+                          (Path(root) / "etc/supacloud/supacloud.env").read_text().splitlines()
+                          if line and not line.startswith("#"))
+            self.assertNotEqual(values["POSTGRES_PASSWORD"], "DBUser.Supa")
+            self.assertNotEqual(values["DASHBOARD_PASSWORD"], "supacloud")
+            self.assertGreaterEqual(len(values["POSTGRES_PASSWORD"]), 20)
+            self.assertGreaterEqual(len(values["JWT_SECRET"]), 32)
+
     def test_dry_run_renders_without_podman_or_root(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             result = subprocess.run(

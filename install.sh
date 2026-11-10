@@ -566,6 +566,28 @@ sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(), validate=True)
     done
 }
 
+# Pass resolved operator input to the Podman process without forwarding the
+# tracked template's example credentials. Existing Podman env files stay authoritative.
+export_podman_install_input() {
+    local key explicit_key encoded_value parsed_input
+    local podman_keys=(POSTGRES_PASSWORD DASHBOARD_USERNAME DASHBOARD_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY TIMEZONE)
+    if [[ -f "$INSTALL_INPUT_FILE" ]]; then
+        parsed_input=$(supacloud_parse_install_input "$INSTALL_INPUT_FILE" "${podman_keys[@]}") || return 1
+        while IFS=$'\t' read -r key encoded_value; do
+            [[ -n "$key" ]] || continue
+            export "${key?}"
+        done <<< "$parsed_input"
+    fi
+    for key in "${podman_keys[@]}"; do
+        for explicit_key in "${SUPACLOUD_EXPLICIT_INSTALL_KEYS[@]}"; do
+            if [[ "$explicit_key" == "$key" ]]; then
+                export "${key?}"
+                break
+            fi
+        done
+    done
+}
+
 # ========== Check Configuration ==========
 check_config() {
     log_step "Checking configuration..."
@@ -5702,6 +5724,7 @@ main() {
         local podman_studio_url="http://${SUPABASE_STUDIO_DOMAIN:-localhost:9090}"
         [[ "${SUPABASE_PUBLIC_DOMAIN:-}" =~ ^https?:// ]] && podman_public_url="$SUPABASE_PUBLIC_DOMAIN"
         [[ "${SUPABASE_STUDIO_DOMAIN:-}" =~ ^https?:// ]] && podman_studio_url="$SUPABASE_STUDIO_DOMAIN"
+        export_podman_install_input || return 1
         exec bash "${SCRIPT_DIR}/podman/self-host/install.sh" \
             --public-url "$podman_public_url" \
             --studio-url "$podman_studio_url"
