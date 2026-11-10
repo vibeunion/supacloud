@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 
 SELF_HOST = Path(__file__).resolve().parent
@@ -14,7 +16,7 @@ QUADLET = SELF_HOST / "quadlet"
 class PodmanInstallContractTests(unittest.TestCase):
     def test_native_handoff_preserves_operator_credentials_and_retry_values(self) -> None:
         credentials = {
-            "POSTGRES_PASSWORD": "fixture-db-password",
+            "POSTGRES_PASSWORD": "fixture-db:/?#@password",
             "DASHBOARD_USERNAME": "fixture-admin",
             "DASHBOARD_PASSWORD": "fixture-dashboard-password",
             "JWT_SECRET": "fixture-jwt-secret-012345678901234567890123",
@@ -33,7 +35,7 @@ exec bash podman/self-host/install.sh --dry-run --root-dir "$PODMAN_FIXTURE_ROOT
         for source in ("persisted", "explicit"):
             with self.subTest(source=source), tempfile.TemporaryDirectory() as root:
                 config = Path(root) / "input.env"
-                config.write_text("".join(f"{key}={value}\n" for key, value in credentials.items())
+                config.write_text("".join(f"{key}={shlex.quote(value)}\n" for key, value in credentials.items())
                                   if source == "persisted" else "")
                 config.chmod(0o600)
                 environment = {key: value for key, value in os.environ.items() if key not in credentials}
@@ -49,6 +51,10 @@ exec bash podman/self-host/install.sh --dry-run --root-dir "$PODMAN_FIXTURE_ROOT
                     self.assertEqual(values["TZ" if key == "TIMEZONE" else key], value)
                     if key != "TIMEZONE":
                         self.assertNotIn(value, result.stdout + result.stderr)
+                database = urlsplit(values["SUPACLOUD_DATABASE_URL"])
+                self.assertEqual(database.hostname, "postgres")
+                self.assertEqual(unquote(database.password or ""), credentials["POSTGRES_PASSWORD"])
+                self.assertEqual((database.path, database.query, database.fragment), ("/postgres", "", ""))
                 original = private_env.read_bytes()
                 environment.update({key: value + "-changed" for key, value in credentials.items()})
                 subprocess.run(["bash", "-c", script], cwd=SELF_HOST.parents[1],
