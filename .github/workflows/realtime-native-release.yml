@@ -105,6 +105,7 @@ jobs:
           DB_SSL: "false"
           DB_ENC_KEY: ci-only-16-chars
           API_JWT_SECRET: ci-only-realtime-admin-jwt-secret-32-characters
+          METRICS_JWT_SECRET: ci-only-realtime-metrics-jwt-secret-32-characters
           SECRET_KEY_BASE: ci-only-secret-key-base-01234567890123456789012345678901234567890123456789
           PORT: "4000"
           APP_NAME: realtime
