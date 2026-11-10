@@ -6,11 +6,15 @@ enforcement limits are recorded in the [static AOP decision](architecture/static
 
 ## Goal and Boundaries
 
-The developer's job is to create a typed, governed service and verify its behavior
-without assembling framework packages, compiler settings or test adapters by hand.
-`supacloud app init` supplies that local development loop, using the existing
-`@supacloud/app`, `@supacloud/compiler` and `@supacloud/elysia` ownership boundaries.
-There is no aggregate `framework` package.
+The default `supacloud app init` writes a `@supabase/supabase-js` client. That
+client is the data-plane entry for a provisioned project. It does not install
+`@supacloud/app`, `@supacloud/compiler`, `@supacloud/elysia`, or Effect, and
+Management API provision does not compile it.
+
+The optional governed service is `supacloud app init --template app`. That
+template uses the existing `@supacloud/app`, `@supacloud/compiler` and
+`@supacloud/elysia` ownership boundaries. There is no aggregate `framework`
+package.
 
 This is not an automatic deployment, production identity provider, database
 emulator, general-purpose workflow engine or complete Maker-Checker application.
@@ -18,12 +22,14 @@ Business persistence and authorization remain application-owned.
 
 ## Start
 
-The default is now `minimal`: a feature-local health endpoint, its test, compiler,
-Elysia host and frontend SDK dependencies. It does not generate approval,
-attachments, Worker or GraphQL examples. Use `--template command` for the complete
-durable reference described below. HTTP routes and background jobs are added
-through `app generate`; there are no separate `http` or `edge` starter templates.
-Existing applications are not reorganized.
+The default template is `minimal`: `@supabase/supabase-js`, a typed client
+factory, and a local test. It does not generate a compiler, health controller,
+approval flow, attachments, Worker, or GraphQL. Use `--template app` for the
+feature-local health endpoint, compiler, and Elysia host. Use `--template command`
+for the complete durable reference described below. HTTP routes and background
+jobs are added through `app generate` inside an `app` or `command` project;
+there are no separate `http` or `edge` starter templates. Existing applications
+are not reorganized.
 
 For a ZenStack-backed HTTP/Worker feature, use `--template model-command`:
 
@@ -63,6 +69,16 @@ After the CLI release containing this command is published:
 
 ```sh
 supacloud app init --root ./orders --name orders
+cd orders
+bun install
+bun run check
+```
+
+That default project checks the supabase-js client. It has no `bun run dev`
+server. To work on the compiler stack instead:
+
+```sh
+supacloud app init --root ./orders --name orders --template app
 cd orders
 bun install
 bun run check
@@ -117,8 +133,9 @@ New compiler and runtime fixes must be published with the CLI feature. Before
 publication, `bun run scripts/check_app_starter.ts` tests locally packed artifacts
 together; this is not evidence that those versions already exist on npm.
 
-The command and model-command templates include database tooling; the minimal template does not
-install ZenStack or require `db:generate`. For both database templates, `db:generate`
+The command and model-command templates include database tooling. The default
+minimal template and `--template app` do not install ZenStack or require
+`db:generate`. For both database templates, `db:generate`
 is an explicit first-use setup step after installation; commit `zenstack/generated/` and `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
 New command projects generate `db/modules.ts` at the compiler's default
@@ -296,7 +313,8 @@ remain projections; see [Business State Machines](./business-state-machines.md).
 
 ## Acceptance Scenarios
 
-For the minimal path, run its colocated health test. For other business changes,
+For the default minimal path, run `tests/client.test.ts`. For `--template app`,
+run its colocated health test. For other business changes,
 `supacloud app verify-plan --target <module>` reports individual nearby test
 commands and manual gaps without running them or scanning the repository.
 The scenarios below concern the explicit command reference, not features
@@ -306,7 +324,8 @@ implicitly installed into the minimal application.
 Scenario: Bootstrap without credentials
   Given an empty directory and no SupaCloud credentials
   When app init creates a project and its dependencies are installed
-  Then strict compilation, generated-source type checking and tests pass
+  Then the default project typechecks and tests the supabase-js client
+  And it does not install @supacloud/app, the compiler, or Effect
 
 Scenario: Repeat a governed transition
   Given a draft review and an authorized local identity

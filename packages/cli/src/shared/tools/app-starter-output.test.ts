@@ -21,7 +21,7 @@ async function build(root: string): Promise<void> {
     expect({ code, errors: code === 0 ? "" : stdout + stderr }).toEqual({ code: 0, errors: "" });
 }
 
-test.each(["minimal", "command"] satisfies StarterTemplate[])(
+test.each(["app", "command"] satisfies StarterTemplate[])(
     "%s starter keeps backend bundles separate from frontend cleanup and publication",
     async (template) => {
         const files = template === "command" ? appStarterFiles("isolated-build")

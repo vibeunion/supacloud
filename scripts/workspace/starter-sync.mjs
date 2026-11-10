@@ -48,7 +48,12 @@ export function starterMetadata(cwd = root) {
     const entry = { version: manifest.version };
     if (alias === 'app') entry.dependencies = { rxjs: dependency(manifest, 'dependencies', 'rxjs') };
     if (alias === 'db') {
-      entry.dependencies = Object.fromEntries(['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy'].map(name => [name, dependency(manifest, 'dependencies', name)]));
+      // Model starters install the ZenStack adapter directly. The control-plane
+      // package keeps those packages as optional peers, not required dependencies.
+      const modelPackages = ['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy', '@zenstackhq/language', '@zenstackhq/sdk', 'kysely'];
+      const section = ['peerDependencies', 'dependencies'].find((name) => modelPackages.every((dep) => typeof manifest[name]?.[dep] === 'string'));
+      if (!section) throw new Error(`Missing publishable model adapter versions in ${manifest.name}`);
+      entry.dependencies = Object.fromEntries(modelPackages.map(name => [name, dependency(manifest, section, name)]));
       entry.devDependencies = Object.fromEntries(['@zenstackhq/cli', 'prisma', 'pg'].map(name => [name, dependency(manifest, 'devDependencies', name)]));
     }
     if (alias === 'sdk') entry.peerDependencies = { '@supabase/supabase-js': dependency(manifest, 'peerDependencies', '@supabase/supabase-js') };

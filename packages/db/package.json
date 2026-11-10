@@ -93,19 +93,35 @@
     "@sinclair/typebox": "0.34.52",
     "@types/bun": "^1.4.4",
     "@zenstackhq/cli": "3.10.0",
+    "@zenstackhq/orm": "3.10.0",
+    "@zenstackhq/schema": "3.10.0",
+    "@zenstackhq/plugin-policy": "3.10.0",
+    "@zenstackhq/language": "3.10.0",
+    "@zenstackhq/sdk": "3.10.0",
+    "kysely": "0.29.0",
     "prisma": "6.19.3",
     "pg": "8.23.1"
+  },
+  "peerDependencies": {
+    "@zenstackhq/orm": "3.10.0",
+    "@zenstackhq/schema": "3.10.0",
+    "@zenstackhq/plugin-policy": "3.10.0",
+    "@zenstackhq/language": "3.10.0",
+    "@zenstackhq/sdk": "3.10.0",
+    "kysely": "0.29.0"
+  },
+  "peerDependenciesMeta": {
+    "@zenstackhq/orm": { "optional": true },
+    "@zenstackhq/schema": { "optional": true },
+    "@zenstackhq/plugin-policy": { "optional": true },
+    "@zenstackhq/language": { "optional": true },
+    "@zenstackhq/sdk": { "optional": true },
+    "kysely": { "optional": true }
   },
   "dependencies": {
     "libpg-query": "18.1.5",
     "@supacloud/contracts": "file:../contracts",
-    "typescript": "7.1.0-beta",
-    "@zenstackhq/orm": "3.10.0",
-    "@zenstackhq/schema": "3.10.0",
-    "@zenstackhq/plugin-policy": "3.10.0",
-    "kysely": "0.29.0",
-    "@zenstackhq/language": "3.10.0",
-    "@zenstackhq/sdk": "3.10.0"
+    "typescript": "7.1.0-beta"
   },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",

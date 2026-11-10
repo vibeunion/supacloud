@@ -6,11 +6,12 @@ The console and the Developer MCP read the **same** delivered-build document.
 
 ## Why
 
-Encore's value is that one application model feeds local run, inspection, tracing
-and delivery. SupaCloud already builds that model in `@supacloud/compiler`. This
-document defines the stable, redacted projection that developer tooling should
-share, so the Web Console and an AI/Developer MCP read the **same** structure and
-evidence instead of inventing their own.
+`@supacloud/compiler` already builds one application graph for local inspection.
+This document defines the stable, redacted projection that developer tooling
+should share, so the Web Console and an AI/Developer MCP read the **same**
+structure and evidence instead of inventing their own. The
+[Encore alignment roadmap](./encore-alignment-roadmap.md) is a proposal and does
+not drive project provision or this projection.
 
 The projection is a view of `ApplicationGraph`, never a second source of truth.
 

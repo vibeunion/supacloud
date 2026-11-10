@@ -4,6 +4,18 @@
 - 日期：2026-11-09
 - 范围：SupaCloud 数据访问、模型策略、Command 与存量项目迁移
 
+## 两套命令表
+
+不要把下面两套账本当成一张表，也不要合并它们的写入管线：
+
+| 账本 | 位置 | 用途 |
+| --- | --- | --- |
+| `supacloud_commands.receipts` | `packages/management-api/src/db/sql-modules/commands-public.sql` | 租户引导命令。`workflow_run_id` 外键指向 `supacloud_workflows.runs` |
+| `supacloud_commands.execution_receipts` 与 `execution_audit` | `packages/db/src/command-schema.ts` | 应用 durable Command。业务写入、回执和审计在应用事务里 |
+
+Management API 的 bootstrap 函数 `supacloud_commands.submit` 写入第一张表。
+应用 `createPostgresCommandStore` 写入第二组表。
+
 ## 决策
 
 SupaCloud 对应用公开的稳定边界是 **Database Contract**，不是某个 ORM 或模型编译器。

@@ -1,3 +1,6 @@
+// Not mounted on the published /realtime/v1 socket. Tests may compose an
+// Elixir upstream with RealtimeBunService; production upgrades must use
+// publicRealtimeUpstream and must not fail over to LISTEN/NOTIFY.
 import type { RealtimeBunService } from "./realtime-bun.service";
 import type { ResolvedProjectApiKey } from "../utils/project-auth";
 import { isRecord } from "../utils/project-config";

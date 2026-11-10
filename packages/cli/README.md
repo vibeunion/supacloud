@@ -49,19 +49,20 @@ supacloud app init --root ./orders --name orders
 cd orders
 bun install
 bun run check
-bun run dev
 ```
 
 The initializer needs no platform credentials and never overwrites existing
-projects. The default minimal template includes a health feature with a colocated
-test, strict compilation, an Elysia service, SDK dependencies and explicit
-development/test/staging/production environment wrappers. Select
+projects. The default minimal template is a `@supabase/supabase-js` client. It
+does not install `@supacloud/app`, the compiler, Elysia, or Effect. Select
+`--template app` for the health feature, compiler, and Elysia host. Select
 `--template command` for the persistent governed-command reference. Add HTTP
-routes and background jobs with `app generate`; there are no separate `http` or
-`edge` starter templates. The compiler is a development dependency.
-The demo binds to loopback and cannot run in staging/production. Production
-identity, persistence and durable governance must be supplied by the application.
-See [Application Starter](../../docs/application-starter.md) for the full contract.
+routes and background jobs with `app generate` inside those opt-in projects;
+there are no separate `http` or `edge` starter templates. The compiler is a
+development dependency of `--template app` only.
+The app-template demo binds to loopback and cannot run in staging/production.
+Production identity, persistence and durable governance must be supplied by the
+application. See [Application Starter](../../docs/application-starter.md) for the
+full contract.
 
 `app dev` runs the project's `dev` script; `app watch` only compiles and watches.
 `app dev --profile integration` requires a loopback database and a

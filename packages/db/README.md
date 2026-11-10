@@ -17,6 +17,12 @@ delivery. These commands do not provide automatic production synchronization
 or down migrations.
 ## ZenStack and Bun SQL
 
+ZenStack and Kysely are optional peers of this package, used by `./zenstack`,
+`./model`, and `./bun-dialect`. The main export, which the Management API
+control plane imports, does not load them. Install the peers in an application
+that uses the adapter. Do not add them back as required dependencies of
+`@supacloud/db`.
+
 Author models and data policies in `zenstack/schema.zmodel`, generate contracts
 with `supacloud-model generate`, and fail stale builds with `supacloud-model check`.
 `supacloud-model diff --candidate <file>` and `pull --candidate <file>` require an

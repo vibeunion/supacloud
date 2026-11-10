@@ -1,5 +1,6 @@
 // Generated from packages/db/src/command-schema.ts so starter generation has no runtime database dependency.
 // app-model-command-starter.test.ts enforces byte-for-byte parity with the database package.
+// These are application execution_receipts / execution_audit, not Management API supacloud_commands.receipts.
 export const COMMAND_RECEIPT_SQL = `CREATE SCHEMA IF NOT EXISTS supacloud_commands;
 REVOKE ALL ON SCHEMA supacloud_commands FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS supacloud_commands.execution_receipts (

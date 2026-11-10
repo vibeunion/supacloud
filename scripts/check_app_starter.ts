@@ -367,7 +367,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
   // in one packing pass, so every supported path stays smoke-covered.
   // Each template owns a separate project directory and only reads the shared
   // packed tarballs, so their acceptance checks can use the runner in parallel.
-  const templateResults = await Promise.allSettled((["minimal"] as const).map(async template => {
+  const templateResults = await Promise.allSettled((["app"] as const).map(async template => {
     const templateProject = join(root, `${template}-project`);
     await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
     const templateManifestPath = join(templateProject, "package.json");

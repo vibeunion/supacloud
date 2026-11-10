@@ -13,7 +13,7 @@ afterEach(async () => {
 test("target context connects maintained files, dependencies, preview repairs and bounded verification", async () => {
   const root = await mkdtemp(join(tmpdir(), "task-context-"));
   roots.push(root);
-  await initializeAppProject({ root, name: "sample" });
+  await initializeAppProject({ root, name: "sample", template: "app" });
   const repo = resolve(import.meta.dir, "../../../../..");
   await symlink(join(repo, "packages/cli/node_modules"), join(root, "node_modules"), "dir");
   const config = JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8"));

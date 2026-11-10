@@ -949,7 +949,8 @@ export async function initializeAppProject(options: { root?: string; name?: stri
     };
     const files = template === "command" ? appStarterFiles(name)
         : template === "model-command" ? modelCommandTemplateFiles(name, sdk)
-        : appTemplateFiles(name, template, sdk);
+        : template === "minimal" || template === "app" ? appTemplateFiles(name, template, sdk)
+        : (() => { throw new Error(`Unknown app init template: ${template}`); })();
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });

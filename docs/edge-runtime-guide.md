@@ -14,7 +14,7 @@ SupaCloud (:9090)             Edge Runtime (EDGE_RUNTIME_PORT, default :9005)
 └── Static Assets (ETag/304)  ├── Worker Thread Pool (4 threads, fixed ~80MB)
                               ├── Compatibility Shim (globalThis.Deno)
                               ├── URL Import Mapping (compat imports → npm/shims)
-                              └── /preheat endpoint (zero cold-start)
+                              └── /preheat endpoint (warm module cache; not a 0ms latency guarantee)
 
 Caddy Gateway (Admin API-driven):
   Automatic HTTPS, security headers, route JSON publishing, CORS, rate limiting
@@ -71,20 +71,19 @@ It does not support cross-origin cookie credentials and removes
 | Metric | Value |
 |--------|-------|
 | Memory (200 functions) | ~140MB |
-| Cold start (no preheat) | 8-15ms |
-| Cold start (with preheat) | **0ms** |
+| Cold start | Preheat imports the module into the LRU cache before the first request. That removes an import miss. It is not a measured 0ms request latency. |
 | Port | `EDGE_RUNTIME_PORT` (default: `9005`) |
 
 ### Function Preheating
 
-After deploying a function, SupaCloud automatically pre-imports the module into the Worker Thread Pool's LRU cache. This eliminates cold-start latency on the first real request.
+After deploying a function, SupaCloud pre-imports the module into the Worker Thread Pool's LRU cache when preheat succeeds. A warm cache avoids repeating that import on the next request. It does not guarantee 0ms end-to-end latency.
 
 ```
 Deploy flow:
   1. Bun.build() bundles source → .js
   2. invalidateCache() clears old version
   3. POST /preheat/:ref/:slug → Worker imports module ahead of time
-  4. First request hits warm cache → 0ms cold-start
+  4. A later request can reuse the warm module. Request time still includes auth, I/O and user code.
 ```
 
 ### Activation Artifact Integrity
@@ -428,25 +427,35 @@ For production heavy routes, use function config:
 
 With `background_routes`, requests that hit those subpaths will be enqueued even if the browser does not forward custom `x-supacloud-*` headers. This is the recommended model for `supabase-js` clients running behind CDNs, browser caches, or mixed frontend bundle versions.
 
-## Realtime Gateway Model
+## Realtime public contract
 
-Browser websocket traffic should enter through the Management API first:
+This section is the fact source for what `@supabase/supabase-js` talks to.
+Elixir Realtime and Bun `LISTEN/NOTIFY` are different implementations. They are
+not one socket stack, and the published route does not fail over from one to
+the other.
 
-- public route: `/realtime/v1/websocket`
-- upstream owner: Management API websocket proxy on `:9090`
-- Realtime container remains the internal upstream
+| Fact | Value |
+| --- | --- |
+| Client URL | `wss://<project-api-host>/realtime/v1/websocket?apikey=...&vsn=2.0.0` |
+| Gateway | Caddy forwards `/realtime/v1/websocket*` to Management API (`:9090` by default) |
+| Socket owner | Management API accepts the upgrade and proxies bytes |
+| Upstream | Elixir Realtime at `REALTIME_ADMIN_URL` (default `http://127.0.0.1:4000`), path rewritten from `/realtime/v1` to `/socket` |
+| Failover | Elixir close or error closes the client socket. There is no automatic switch to Bun `LISTEN/NOTIFY` |
+| Bun listener | `RealtimeBunService` is a separate in-process `LISTEN/NOTIFY` subscriber. It is not mounted on `/realtime/v1` |
 
-Do not route browser websocket traffic straight from Caddy to the Elixir Realtime container's `/socket` path. That older topology is prone to:
+HTTP `/realtime/v1/*` (broadcast and admin proxy calls) uses the same
+`REALTIME_ADMIN_URL` and is not handled by the Bun listener.
 
-- tenant host/path mismatches
-- wrong upstream rewrite behavior
-- websocket handshakes succeeding while channel joins fail against the wrong tenant context
-
-The current supported model is:
+Do not route browser websocket traffic straight from Caddy to the Elixir
+container's `/socket` path. That older topology is prone to tenant host/path
+mismatches: the handshake can succeed while the channel joins the wrong tenant.
 
 ```text
-browser -> Caddy -> Management API (:9090) -> Realtime upstream
+supabase-js -> Caddy -> Management API (:9090) -> Elixir Realtime (:4000)
 ```
+
+The legacy Management API route `/ws/realtime/v1/websocket` is the same Elixir
+proxy. It is not the URL supabase-js uses, and it does not attach the Bun listener.
 
 ## Realtime Tenant Recovery
 
