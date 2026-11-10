@@ -6,16 +6,20 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["bun"],
+    "types": [
+      "bun"
+    ],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
-    "allowImportingTsExtensions": true,
-    "paths": {
-      "@supacloud/db": ["../db/src/index.ts"],
-      "@supacloud/db/model-contract": ["../db/src/model-contract.ts"]
-    }
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts"
+  ]
 }

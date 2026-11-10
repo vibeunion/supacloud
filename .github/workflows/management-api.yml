@@ -332,6 +332,17 @@ jobs:
               bun test
               bun run build
               bun run ../../scripts/audit_dependencies.ts
+          - name: Database ZenStack Adapter
+            working-directory: packages/db-zenstack
+            script: |
+              bun run ../../scripts/build-command-dependencies.ts db-zenstack
+              bun install --frozen-lockfile
+              (cd ../compiler && bun install --frozen-lockfile)
+              (cd ../cli && bun install --frozen-lockfile)
+              bun run typecheck
+              bun run build
+              bun test
+              bun run ../../scripts/audit_dependencies.ts
           - name: Command Contracts
             working-directory: packages/contracts
             script: |
