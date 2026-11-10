@@ -19,6 +19,13 @@ test and rollback readiness. `parseDeploymentEvidence` fails closed:
 `unknown` observations never become `confirmed`, and missing recovery or
 rollback proof remains `incomplete`.
 
+`supacloud.platform-deployment-state.v1` is the single-node host read model for
+the next deployment-control-plane boundary. It records the supported host
+profile, desired release, observed component state and the current mutation
+recovery action. An interrupted or lost response is explicitly recovered by
+reading back the same mutation identity; the contract does not authorize an
+automatic second mutation.
+
 The database provider is represented as data (`provider`, `version`, `topology`,
 migration, backup and recovery evidence). The current single-node platform can
 use `postgresql`; this contract does not implement YugabyteDB or distributed

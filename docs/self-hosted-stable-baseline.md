@@ -102,6 +102,14 @@ Every mutating operation should follow this semantic sequence:
 5. Reconcile a lost or unknown response before allowing a new mutation.
 6. Report success, a recoverable failure, or an outcome requiring operator action.
 
+Single-node deployment control uses `supacloud.platform-deployment-state.v1` to
+record the supported host profile, desired release, observed component state,
+and the current operation receipt. An unknown observation or lost response must
+be reconciled with the original mutation identity; it must not create a second
+mutation automatically. This is a deployment-control read model. It does not
+replace the existing release manifest, database migration ledger, or the
+project-level `deployment-evidence.v1` acceptance evidence.
+
 The platform should extend existing project lifecycle and release contracts.
 It must not introduce a second project ledger, source-control system, or
 general workflow engine merely to unify names.

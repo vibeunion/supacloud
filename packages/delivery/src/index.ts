@@ -63,6 +63,15 @@ export type {
   DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus, DeploymentEvidenceIssue,
 } from "./deployment-evidence";
 export {
+  PLATFORM_DEPLOYMENT_STATE_SCHEMA, PlatformDeploymentComponentSchema, PlatformDeploymentStateSchema,
+  SINGLE_NODE_REQUIRED_COMPONENTS,
+  assertPlatformDeploymentTransition, derivePlatformDeploymentStatus, parsePlatformDeploymentState,
+  platformDeploymentRetryAction,
+} from "./platform-deployment";
+export type {
+  PlatformDeploymentComponent, PlatformDeploymentOperationPhase, PlatformDeploymentState, PlatformDeploymentStatus,
+} from "./platform-deployment";
+export {
   DELIVERY_TUPLE_SCHEMA, FaDeliveryTupleSchema, formatFaDeliveryTuple,
   isFaDeliveryTupleActive, parseFaDeliveryTuple,
 } from "./delivery-tuple";
