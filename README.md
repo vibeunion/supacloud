@@ -73,7 +73,7 @@ bun install
 bun run check
 ```
 
-This writes a `@supabase/supabase-js` client for a provisioned project's API URL and anon key. It does not install `@supacloud/app`, the compiler, or Effect, and it is not a production deployment. For the optional application stack, use `supacloud app init --template app` and follow that project's README. Replace demo adapters before integration; run business and database acceptance separately.
+This writes the forced compiler/Effect application stack (`@supacloud/app`, compiler, Elysia, Effect) with `@supabase/supabase-js` as the data-plane client. It is not a production deployment. For a client-only directory, use `supacloud app init --template client`. Replace demo adapters before integration; run business and database acceptance separately. Management API provision does not compile this project.
 
 <a id="supacloud-lite"></a>
 ### Run SupaCloud Lite
@@ -113,7 +113,7 @@ at `/usr/local/bin/supacloud` is a separate managed-host installation. See the
 
 ![Compile-time declarations become factories, client contracts and OpenAPI. The runtime Elysia host consumes compiled modules and invokes application-owned services.](docs/assets/readme/build-runtime.en.svg)
 
-Project data access uses `@supabase/supabase-js`. The packages below are the optional application-engineering stack from `app init --template app`. Management API provision does not compile that stack or import it.
+Project data access uses `@supabase/supabase-js`. The packages below are the forced application-engineering stack from default `app init` (`minimal`). Management API provision does not compile that stack or import it.
 
 `@supacloud/app` declares the application model; `@supacloud/compiler` analyzes it and emits wiring and contracts; `@supacloud/elysia` hosts compiled modules. **The HTTP host still installs Elysia.** Application metadata and business modules need not import native Elysia types, but shared schema dependencies still require coordinated upgrades. This does not establish portability to arbitrary frameworks or complete native Elysia feature parity. Static AOP and the existing Angular-style DI contracts are frozen; do not add runtime pointcuts or new Angular APIs.
 

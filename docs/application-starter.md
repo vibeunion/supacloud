@@ -6,15 +6,14 @@ enforcement limits are recorded in the [static AOP decision](architecture/static
 
 ## Goal and Boundaries
 
-The default `supacloud app init` writes a `@supabase/supabase-js` client. That
-client is the data-plane entry for a provisioned project. It does not install
-`@supacloud/app`, `@supacloud/compiler`, `@supacloud/elysia`, or Effect, and
-Management API provision does not compile it.
+The default `supacloud app init` writes the forced compiler/Effect stack:
+`@supacloud/app`, `@supacloud/compiler`, `@supacloud/elysia`, and Effect, with
+`@supabase/supabase-js` as the data-plane client. Management API provision does
+not compile that project, interpret Effect, or import `@supacloud/app`.
 
-The optional governed service is `supacloud app init --template app`. That
-template uses the existing `@supacloud/app`, `@supacloud/compiler` and
-`@supacloud/elysia` ownership boundaries. There is no aggregate `framework`
-package.
+The client-only scaffold is explicit: `supacloud app init --template client`.
+It must not install the compiler stack. There is no aggregate `framework`
+package. `app` remains an accepted alias of `minimal`.
 
 This is not an automatic deployment, production identity provider, database
 emulator, general-purpose workflow engine or complete Maker-Checker application.
@@ -22,14 +21,14 @@ Business persistence and authorization remain application-owned.
 
 ## Start
 
-The default template is `minimal`: `@supabase/supabase-js`, a typed client
-factory, and a local test. It does not generate a compiler, health controller,
-approval flow, attachments, Worker, or GraphQL. Use `--template app` for the
-feature-local health endpoint, compiler, and Elysia host. Use `--template command`
-for the complete durable reference described below. HTTP routes and background
-jobs are added through `app generate` inside an `app` or `command` project;
-there are no separate `http` or `edge` starter templates. Existing applications
-are not reorganized.
+The default template is `minimal`: a feature-local health endpoint, its test,
+compiler, Elysia host, Effect route, and frontend SDK dependencies. It does not
+generate approval, attachments, Worker, or GraphQL examples. Use
+`--template client` for a `@supabase/supabase-js`-only directory. Use
+`--template command` for the complete durable reference described below. HTTP
+routes and background jobs are added through `app generate` inside a `minimal`
+or `command` project; there are no separate `http` or `edge` starter templates.
+Existing applications are not reorganized.
 
 For a ZenStack-backed HTTP/Worker feature, use `--template model-command`:
 
@@ -72,17 +71,16 @@ supacloud app init --root ./orders --name orders
 cd orders
 bun install
 bun run check
+bun run dev
 ```
 
-That default project checks the supabase-js client. It has no `bun run dev`
-server. To work on the compiler stack instead:
+That default project is the compiler/Effect stack. For a client-only directory:
 
 ```sh
-supacloud app init --root ./orders --name orders --template app
-cd orders
+supacloud app init --root ./orders-client --name orders-client --template client
+cd orders-client
 bun install
 bun run check
-bun run dev
 ```
 
 Agent-driven setup can request the same handoff without parsing human text:
@@ -134,7 +132,7 @@ publication, `bun run scripts/check_app_starter.ts` tests locally packed artifac
 together; this is not evidence that those versions already exist on npm.
 
 The command and model-command templates include database tooling. The default
-minimal template and `--template app` do not install ZenStack or require
+minimal template and `--template client` do not install ZenStack or require
 `db:generate`. For both database templates, `db:generate`
 is an explicit first-use setup step after installation; commit `zenstack/generated/` and `db/contracts/`.
 Later default checks refuse stale contracts instead of silently regenerating them.
@@ -313,8 +311,8 @@ remain projections; see [Business State Machines](./business-state-machines.md).
 
 ## Acceptance Scenarios
 
-For the default minimal path, run `tests/client.test.ts`. For `--template app`,
-run its colocated health test. For other business changes,
+For the default minimal path, run its colocated health test. For `--template client`,
+run `tests/client.test.ts`. For other business changes,
 `supacloud app verify-plan --target <module>` reports individual nearby test
 commands and manual gaps without running them or scanning the repository.
 The scenarios below concern the explicit command reference, not features
@@ -324,8 +322,9 @@ implicitly installed into the minimal application.
 Scenario: Bootstrap without credentials
   Given an empty directory and no SupaCloud credentials
   When app init creates a project and its dependencies are installed
-  Then the default project typechecks and tests the supabase-js client
-  And it does not install @supacloud/app, the compiler, or Effect
+  Then the default project compiles, typechecks and runs the health test
+  And it installs @supacloud/app, the compiler, and Effect
+  And @supabase/supabase-js remains the data-plane client
 
 Scenario: Repeat a governed transition
   Given a draft review and an authorized local identity

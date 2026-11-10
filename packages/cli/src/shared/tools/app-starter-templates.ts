@@ -3,10 +3,50 @@ import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-env
 
 const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata } = starterMetadata.packages;
 
-export type StarterTemplate = "minimal" | "app" | "command" | "model-command";
+/** Canonical init templates. Unknown values fail closed. */
+export const STARTER_TEMPLATES = ["minimal", "client", "command", "model-command"] as const;
+export type StarterTemplate = (typeof STARTER_TEMPLATES)[number];
+
+/** Forced vibecoding default: compiler, Elysia, and @supacloud/app. */
+export const DEFAULT_STARTER_TEMPLATE = "minimal" satisfies StarterTemplate;
+
+/** Explicit data-plane-only scaffold. Never the default. */
+export const CLIENT_STARTER_TEMPLATE = "client" satisfies StarterTemplate;
+
+/**
+ * Accepted CLI aliases. `app` was the 2518 name for the compiler stack and
+ * resolves to `minimal` so packed smoke scripts keep working.
+ */
+export const STARTER_TEMPLATE_ALIASES = {
+  app: "minimal",
+} as const satisfies Readonly<Record<string, StarterTemplate>>;
+
+export type StarterTemplateInput = StarterTemplate | keyof typeof STARTER_TEMPLATE_ALIASES;
+
 export interface StarterSdkDependencies {
   "@supacloud/js": string;
   "@supabase/supabase-js": string;
+}
+
+export function isStarterTemplate(value: string): value is StarterTemplate {
+  return (STARTER_TEMPLATES as readonly string[]).includes(value);
+}
+
+/** Resolve CLI/API input to a canonical template. Undefined selects the forced default. */
+export function resolveStarterTemplate(input: string | undefined): StarterTemplate {
+  if (input === undefined) return DEFAULT_STARTER_TEMPLATE;
+  if (isStarterTemplate(input)) return input;
+  if (Object.hasOwn(STARTER_TEMPLATE_ALIASES, input)) {
+    return STARTER_TEMPLATE_ALIASES[input as keyof typeof STARTER_TEMPLATE_ALIASES];
+  }
+  throw new Error(
+    `Unknown app init template: ${input}. Use ${STARTER_TEMPLATES.join(", ")}`
+    + " (`app` is accepted as an alias of `minimal`).",
+  );
+}
+
+function assertNeverTemplate(value: never): never {
+  throw new Error(`Unhandled starter template: ${String(value)}`);
 }
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
@@ -58,27 +98,87 @@ console.log("Local demo: " + server.url);
 `;
 
 const APPLICATION_SOURCE = (name: string): string => `import { createApplication } from "@supacloud/elysia";
-import { createSupAuthRequestContext, type SupAuthContextOptions, type ApplicationOptions, type CommandGovernance } from "@supacloud/elysia";
+import {
+  createSupAuthRequestContext,
+  type SupAuthContextOptions,
+  type CommandGovernance,
+} from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
 
+/** Trusted-host adapters. Keep these explicit so indexed ApplicationOptions access cannot widen to any. */
 export interface AppAdapters {
-  deps: NonNullable<ApplicationOptions["deps"]>;
-  requestContext: NonNullable<ApplicationOptions["requestContext"]>;
+  deps: Record<string, unknown>;
+  requestContext: (
+    request: Request,
+    context: unknown,
+    signal: AbortSignal,
+  ) => unknown | Promise<unknown>;
   commandGovernance: CommandGovernance;
-  onExecution?: NonNullable<ApplicationOptions["onExecution"]>;
+  onExecution?: (event: Readonly<Record<string, unknown>>) => void | Promise<void>;
+}
+
+export interface CreatedApplication {
+  fetch: (request: Request) => Response | Promise<Response>;
+  initialize: () => Promise<void>;
+  destroy: () => Promise<void>;
+}
+
+async function awaitUnknown(value: unknown): Promise<void> {
+  if (value !== undefined) await value;
+}
+
+function readCreatedApplication(value: unknown): CreatedApplication {
+  if (value === null || typeof value !== "object") {
+    throw new Error("createApplication returned an invalid application host");
+  }
+  const fetch = Reflect.get(value, "fetch");
+  const initialize = Reflect.get(value, "initialize");
+  const destroy = Reflect.get(value, "destroy");
+  if (typeof fetch !== "function" || typeof initialize !== "function" || typeof destroy !== "function") {
+    throw new Error("createApplication returned an invalid application host");
+  }
+  return {
+    fetch: (request) => {
+      const result: unknown = Reflect.apply(fetch, value, [request]);
+      if (result instanceof Response) return result;
+      if (result !== null && typeof result === "object" && typeof Reflect.get(result, "then") === "function") {
+        return Promise.resolve(result).then((settled: unknown) => {
+          if (!(settled instanceof Response)) throw new Error("Application fetch must return Response");
+          return settled;
+        });
+      }
+      throw new Error("Application fetch must return Response");
+    },
+    initialize: async () => {
+      await awaitUnknown(Reflect.apply(initialize, value, []));
+    },
+    destroy: async () => {
+      await awaitUnknown(Reflect.apply(destroy, value, []));
+    },
+  };
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
-export function createApp(adapters: AppAdapters) {
-  return createApplication({
+export function createApp(adapters: AppAdapters): CreatedApplication {
+  const application: unknown = createApplication({
     ...adapters,
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
   });
+  return readCreatedApplication(application);
 }
 
-export function createSupAuthApp(identity: SupAuthContextOptions, adapters: Omit<AppAdapters, "requestContext">) {
-  return createApp({ ...adapters, requestContext: createSupAuthRequestContext(identity) });
+export function createSupAuthApp(
+  identity: SupAuthContextOptions,
+  adapters: Omit<AppAdapters, "requestContext">,
+): CreatedApplication {
+  const resolved: unknown = createSupAuthRequestContext(identity);
+  if (typeof resolved !== "function") {
+    throw new Error("createSupAuthRequestContext must return a requestContext function");
+  }
+  const requestContext: AppAdapters["requestContext"] = (request, context, signal) =>
+    Reflect.apply(resolved, undefined, [request, context, signal]);
+  return createApp({ ...adapters, requestContext });
 }
 `;
 
@@ -184,7 +284,7 @@ test("non-local http URLs are rejected", () => {
 });
 `;
 
-/** Default scaffold: official supabase-js, without the optional app/compiler/Effect stack. */
+/** Explicit `--template client`: official supabase-js only. Not the default. */
 function supabaseClientTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
     "package.json": json({
@@ -223,19 +323,19 @@ function supabaseClientTemplate(name: string, sdkDependencies: StarterSdkDepende
     "AGENTS.md": `# ${name}
 
 This project talks to a provisioned Supabase-compatible API with
-\`@supabase/supabase-js\`. That client is the data-plane default.
+\`@supabase/supabase-js\`. It is the explicit \`--template client\` scaffold.
 
 - Do not add \`@supacloud/app\`, \`@supacloud/compiler\`, \`@supacloud/elysia\`, or \`effect\` here.
-- The optional application stack is a separate project: \`supacloud app init --template app\`.
+- The forced default application stack is \`supacloud app init\` (\`minimal\`).
 - Durable SQL and model recipes are \`--template command\` and \`--template model-command\`.
 - Use the anon or publishable key. Never put a service-role or Management token in this client.
 - Management API provision does not compile this project and does not interpret Effect.
 `,
     "README.md": `# ${name}
 
-Official data-plane client for a provisioned project. This scaffold depends on
-\`@supabase/supabase-js\` only. It does not install \`@supacloud/app\`, the compiler,
-Elysia, or Effect.
+Explicit data-plane client (\`supacloud app init --template client\`) for a
+provisioned project. This scaffold depends on \`@supabase/supabase-js\` only. It
+does not install \`@supacloud/app\`, the compiler, Elysia, or Effect.
 
 ## Local check
 
@@ -254,11 +354,11 @@ Realtime uses the same client's \`channel()\` against the project's
 \`/realtime/v1/websocket\` endpoint. See the platform Realtime contract for which
 process owns that socket.
 
-## Optional application stack
+## Default application stack
 
-\`supacloud app init --template app\` is the explicit \`@supacloud/app\` + compiler +
-Effect project. \`--template command\` and \`--template model-command\` are the
-durable reference recipes. Do not add those dependencies to this client project.
+\`supacloud app init\` (template \`minimal\`) is the forced compiler + Effect
+project. \`--template command\` and \`--template model-command\` are the durable
+reference recipes. Do not add those dependencies to this client project.
 `,
   };
 }
@@ -327,9 +427,10 @@ export function createDemo() {
 `,
     "README.md": `# ${name}
 
-Opt-in application stack from \`supacloud app init --template app\`.
-The default \`app init\` scaffold is a \`@supabase/supabase-js\` client and does not
-include this compiler, Effect, or Elysia project.
+Default application stack from \`supacloud app init\` (template \`minimal\`).
+It installs \`@supacloud/app\`, the compiler, Elysia, and Effect. The data-plane
+client remains \`@supabase/supabase-js\` inside this project. Use
+\`--template client\` only when you need a client-only directory.
 
 ## Local development
 
@@ -378,9 +479,18 @@ regeneration, then validate types, database permissions and authenticated behavi
   };
 }
 
-/** `minimal` is the supabase-js client. `app` is the optional compiler/Effect stack. */
-export function appTemplateFiles(name: string, template: "minimal" | "app", sdkDependencies: StarterSdkDependencies): Record<string, string> {
-  if (template === "minimal") return supabaseClientTemplate(name, sdkDependencies);
-  if (template === "app") return appFrameworkTemplate(name, sdkDependencies);
-  throw new Error("Use appStarterFiles for the command recipe");
+/** `minimal` is the forced compiler/Effect stack. `client` is supabase-js only. */
+export function appTemplateFiles(
+  name: string,
+  template: "minimal" | "client",
+  sdkDependencies: StarterSdkDependencies,
+): Record<string, string> {
+  switch (template) {
+    case "client":
+      return supabaseClientTemplate(name, sdkDependencies);
+    case "minimal":
+      return appFrameworkTemplate(name, sdkDependencies);
+    default:
+      return assertNeverTemplate(template);
+  }
 }

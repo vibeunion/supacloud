@@ -53,7 +53,10 @@ test("initialization permits an existing git directory and refuses subsequent ov
     const root = await directory();
     await mkdir(join(root, ".git"));
     const result = await initializeAppProject({ root, name: "example" });
-    expect(result.files).toContain("src/client.ts");
+    expect(result.template).toBe("minimal");
+    expect(result.files).toContain("src/app.module.ts");
+    expect(result.files).toContain("src/features/health/health.ts");
+    expect(result.files).not.toContain("src/client.ts");
     await expect(initializeAppProject({ root, name: "example" })).rejects.toThrow("empty directory");
 });
 
@@ -97,7 +100,7 @@ test("the database starter registers live Catalog governance while default check
     expect(appStarterFiles("governed")["db/modules.ts"]).toContain('name: "starter"');
     expect(appStarterFiles("governed")["scripts/dev.ts"])
         .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');
-    const files = appTemplateFiles("plain", "app", {
+    const files = appTemplateFiles("plain", "minimal", {
         "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
     });
     expect(files["supacloud.config.ts"]).not.toContain("databaseGovernance");
@@ -120,7 +123,7 @@ test("starter route schemas live in contract-only files", () => {
     expect(framework["src/review/contracts.ts"]).toContain("export const HealthResult");
     expect(framework["src/review/uploads.ts"]).toContain('from "./contracts"');
 
-    const app = appTemplateFiles("example", "app", {
+    const app = appTemplateFiles("example", "minimal", {
         "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.118.0",
     });
     expect(app["src/features/health/health.ts"]).toContain('from "./contracts"');
@@ -341,7 +344,9 @@ test("starter documents external unified identity without adding an identity run
     const readme = files["README.md"];
     expect(readme).toContain("use SupAuth as the external user center");
     expect(readme).toContain("exports createSupAuthApp(identity, adapters)");
-    expect(files["src/application.ts"]).toContain("requestContext: createSupAuthRequestContext(identity)");
+    expect(files["src/application.ts"]).toContain("createSupAuthRequestContext(identity)");
+    expect(files["src/application.ts"]).toContain("const resolved: unknown = createSupAuthRequestContext(identity)");
+    expect(files["src/application.ts"]).toContain("readCreatedApplication");
     expect(readme).toContain("configured issuer and audience");
     expect(readme).toContain("application-local membership");
     expect(readme).toContain("never fall back to the demo identity");

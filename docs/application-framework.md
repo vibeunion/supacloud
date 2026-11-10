@@ -28,9 +28,9 @@ OpenAPI。升级旧路由时，按[路由契约升级迁移](./route-contract-mi
 
 ## 编写业务模块
 
-需要这套可选应用栈时执行 `supacloud app init --root ./orders --name orders --template app`，再进入目录运行
+默认应用栈执行 `supacloud app init --root ./orders --name orders`，再进入目录运行
 `bun install`、`bun run check`、`bun run dev`。默认 `app init` 只生成 `@supabase/supabase-js` 客户端，不编译应用。
-`--template app` 预置严格编译、状态声明、静态切面、内存治理测试和隔离的环境配置；生产需要显式接入持久化与可信身份适配器。
+默认 `minimal` 预置严格编译、状态声明、静态切面、内存治理测试和隔离的环境配置；生产需要显式接入持久化与可信身份适配器。仅客户端目录使用 `--template client`。
 静态 AOP 与现有 Angular 风格 DI 已冻结，不要新增运行时切点或新的 Angular API。
 完整边界与验收见 [Application Starter](./application-starter.md)。
 

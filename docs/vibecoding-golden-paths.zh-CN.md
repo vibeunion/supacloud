@@ -17,8 +17,10 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 ## 快速开始
 
 ```bash
-supacloud app init --root ./orders-api --name orders-api   # 默认 @supabase/supabase-js；应用栈用 --template app
+supacloud app init --root ./orders-api --name orders-api   # 默认编译器/Effect 栈
 cd orders-api && bun install && bun run check
+
+supacloud app init --template client --root ./orders-client --name orders-client  # 显式仅客户端
 
 supacloud app context --format json > context.json   # AI 读取已编译的项目图
 supacloud app doctor --format json > doctor.json     # 可执行诊断 + 修复计划
@@ -30,8 +32,8 @@ supacloud app fix --from-doctor doctor.json --fix-index 0  # 从诊断报告预�
 开发者与 AI 只面对一套 CLI，不需要记住底层包：
 
 ```bash
-supacloud app init        # 默认 supabase-js 客户端，不含编译器
-supacloud app init --template app  # 可选编译项目；业务切片位于 src/features/<feature>
+supacloud app init        # 默认编译器/Effect 项目；业务切片位于 src/features/<feature>
+supacloud app init --template client  # 显式仅 @supabase/supabase-js 客户端
 supacloud app dev         # 运行项目现有的本地开发脚本
 supacloud app watch       # 仅编译器 watch
 supacloud app verify-plan --target health  # 聚焦测试，不默认回退到全量测试

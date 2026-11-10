@@ -10,7 +10,7 @@ informed this workflow. No AponiaJS code or runtime is imported. Elysia stays at
 With the matching candidate/released CLI installed:
 
 ```sh
-supacloud app init --template app --name catalog-api --root ./catalog-api
+supacloud app init --name catalog-api --root ./catalog-api
 cd catalog-api
 bun install
 supacloud app generate --kind resource --name inventory \
@@ -21,7 +21,7 @@ bun run check
 bun run inspect
 ```
 
-`--template app` ships `src/app.module.ts`, a `type:app` composition
+Default `minimal` ships `src/app.module.ts`, a `type:app` composition
 module importing the actual `OrdersFeature` or `SyncFeature` supplied by that
 starter. The compiler discovers it. New resources belong in that root, not in an
 unrelated feature. No module-boundary policy is relaxed to make registration work.
