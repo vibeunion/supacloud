@@ -244,6 +244,7 @@ test('compiler builds local database source before rewriting its publication man
   const publication = block.split('prepare-command-package.mjs')[1] ?? '';
   assert.match(publication, /bun install --lockfile-only --registry https:\/\/registry\.npmjs\.org/);
   assert.doesNotMatch(publication, /--frozen-lockfile/);
+  assert.match(publication, /publish-npm-package\.mjs[\s\S]*git -C "\$GITHUB_WORKSPACE" checkout -- packages\/compiler\/package\.json packages\/compiler\/bun\.lock/);
   assert.match(block, /SUPACLOUD_NPM_PUBLISH_IGNORE_SCRIPTS:\s*["']1["']/);
 });
 test('elysia builds local fixtures before preparing its isolated publication', () => {

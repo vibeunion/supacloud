@@ -709,6 +709,9 @@ jobs:
           # frozen lockfile, so refresh the lockfile without rebuilding dist.
           bun install --lockfile-only --registry https://registry.npmjs.org
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+          # Later workspace builds must use the checked-out database source,
+          # not the published sibling rewritten for this package tarball.
+          git -C "$GITHUB_WORKSPACE" checkout -- packages/compiler/package.json packages/compiler/bun.lock
 
       # The CLI starter consumes the published Elysia adapter. Publish it
       # before the CLI install resolves the generated command dependency graph.
