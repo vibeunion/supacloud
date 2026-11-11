@@ -693,11 +693,18 @@ jobs:
         id: publish_compiler
         if: ${{ !cancelled() && steps.publish_delivery.outcome == 'success' && (needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/compiler
+        env:
+          # The build above already produced dist from the checked-out database.
+          # Do not let npm's prepublishOnly rebuild against the rewritten manifest.
+          SUPACLOUD_NPM_PUBLISH_IGNORE_SCRIPTS: "1"
         run: |
-          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
-          bun install --lockfile-only --registry https://registry.npmjs.org
-          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          # Build against the checked-out database source before rewriting the
+          # manifest to the published sibling version. The compiler may use
+          # database source that is newer than the latest published release.
+          bun install --frozen-lockfile
           bun run build
+          bun run test:package
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       # The CLI starter consumes the published Elysia adapter. Publish it
