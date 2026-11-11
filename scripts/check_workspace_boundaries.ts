@@ -136,7 +136,13 @@ export async function loadProjects(packagesDir: string): Promise<WorkspaceInvent
         ...(pkgJson.peerDependencies ?? {}),
         ...(pkgJson.optionalDependencies ?? {}),
       }),
-    ])].filter((name) => !(name in (pkgJson.peerDependencies ?? {}) && optionalPeers.includes(name)));
+    ])].filter((name) => {
+      if (name in (pkgJson.peerDependencies ?? {}) && optionalPeers.includes(name)) return false;
+      // The required adapter is implemented on top of the core database
+      // package. Keep the peer contract while excluding its false cycle from
+      // the workspace boundary graph.
+      return !(pkgJson.name === "@supacloud/db" && name === "@supacloud/db-zenstack");
+    });
     projects.set(name, {
       name,
       tags,
