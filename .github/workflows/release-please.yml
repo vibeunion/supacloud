@@ -705,6 +705,9 @@ jobs:
           bun run build
           bun run test:package
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          # Later CLI publication installs this workspace compiler with a
+          # frozen lockfile, so refresh the lockfile without rebuilding dist.
+          bun install --lockfile-only --registry https://registry.npmjs.org
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       # The CLI starter consumes the published Elysia adapter. Publish it
