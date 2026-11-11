@@ -9,7 +9,7 @@
         "@supacloud/commands": "file:../commands",
         "@supacloud/contracts": "file:../contracts",
         "effect": "4.0.5",
-        "exact-mirror": "1.2.6",
+        "exact-mirror": "1.2.7",
         "jose": "^6.2.13",
         "typebox": "1.4.3",
       },
@@ -18,11 +18,11 @@
         "@supacloud/db": "file:../db",
         "@supacloud/delivery": "file:../delivery",
         "@types/bun": "^1.4.4",
-        "elysia": "2.0.0-rc.1",
+        "elysia": "2.0.0-rc.3",
         "typescript": "7.1.0-beta",
       },
       "peerDependencies": {
-        "elysia": "2.0.0-rc.1",
+        "elysia": "2.0.0-rc.3",
       },
     },
   },
@@ -203,7 +203,7 @@
 
     "effect": ["effect@4.0.5", "https://registry.npmmirror.com/effect/-/effect-4.0.5.tgz", {}, "sha512-BY4/28NlpOd99yzmV741xbVGmp+1U7tks4oB7F/Png64bTa5tm5eCA6W0RiXsnuLDDoJpjfVSo4Dnq4BZb/89Q=="],
 
-    "elysia": ["elysia@2.0.0-rc.1", "https://registry.npmmirror.com/elysia/-/elysia-2.0.0-rc.1.tgz", { "dependencies": { "deuri": "^3.0.0", "memoirist": "1.2.3" }, "peerDependencies": { "@types/bun": ">= 1.3.0", "exact-mirror": ">= 1.2.6", "openapi-types": ">= 12.0.0", "typebox": ">= 1.3.0", "typescript": ">= 5.7.0" }, "optionalPeers": ["@types/bun", "typescript"] }, "sha512-DBfUtnQvCuR+kUNGZZV/qsCUKaTcpVa25rhVcpWhpqr7lsmpnoAEQqHf9HjCUYzpclejETpwQTgy7eabgtryvg=="],
+    "elysia": ["elysia@2.0.0-rc.3", "https://registry.npmmirror.com/elysia/-/elysia-2.0.0-rc.3.tgz", { "dependencies": { "deuri": "^3.0.0", "memoirist": "1.2.4" }, "peerDependencies": { "@types/bun": ">= 1.3.0", "exact-mirror": ">= 1.2.7", "openapi-types": ">= 12.0.0", "typebox": ">= 1.3.35", "typescript": ">= 5.7.0" }, "optionalPeers": ["@types/bun", "typescript"] }, "sha512-7W4qXQ6TBWGctaVwdYDhLFRKiXwROidVwdYEwlRLR5NaWLc17Mrj8CZOsFlD7xR+GzG/LrmvYjh/FC8vqkJvWw=="],
 
     "es-define-property": ["es-define-property@1.0.1", "https://registry.npmmirror.com/es-define-property/-/es-define-property-1.0.1.tgz", {}, "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g=="],
 
@@ -213,7 +213,7 @@
 
     "events-universal": ["events-universal@1.0.1", "https://registry.npmmirror.com/events-universal/-/events-universal-1.0.1.tgz", { "dependencies": { "bare-events": "^2.7.0" } }, "sha512-LUd5euvbMLpwOF8m6ivPCbhQeSiYVNb8Vs0fQ8QjXo0JTkEHpz8pxdQf0gStltaPpw0Cca8b39KxvK9cfKRiAw=="],
 
-    "exact-mirror": ["exact-mirror@1.2.6", "https://registry.npmmirror.com/exact-mirror/-/exact-mirror-1.2.6.tgz", { "peerDependencies": { "typebox": ">= 1.1.0" }, "optionalPeers": ["typebox"] }, "sha512-EGx81nhFP1GE94coJsz94FLzdxWrnkNCJdfdX44rbd7pVcAotWzDlBJUC7yy1Ae7d7dYKpoTtZ1jCAIz2IVtfA=="],
+    "exact-mirror": ["exact-mirror@1.2.7", "https://registry.npmmirror.com/exact-mirror/-/exact-mirror-1.2.7.tgz", { "peerDependencies": { "typebox": ">= 1.1.0" }, "optionalPeers": ["typebox"] }, "sha512-HhEYVm/y8qbEFnErtr0K7Jsuy0GzRlblZVyeaMoZBSKBDpNuELwzsWtzXQjezFVPka6ZqFaD6+EW3TW+x59vrw=="],
 
     "fast-fifo": ["fast-fifo@1.3.2", "https://registry.npmmirror.com/fast-fifo/-/fast-fifo-1.3.2.tgz", {}, "sha512-/d9sfos4yxzpwkDkuN7k2SqFKtYNmCTzgfEpz82x34IM9/zc8KGxQoXg1liNC/izpRM/MBdt44Nmx41ZWqk+FQ=="],
 
@@ -271,7 +271,7 @@
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "https://registry.npmmirror.com/math-intrinsics/-/math-intrinsics-1.1.0.tgz", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
-    "memoirist": ["memoirist@1.2.3", "https://registry.npmmirror.com/memoirist/-/memoirist-1.2.3.tgz", {}, "sha512-6wkntadi3vDUBX6y5UDuLsLr+hsojMkaapsZyGGzP6rZoYD6K/pAbrp1cZki24jMewoca3KofRYO0T6EEeHNVg=="],
+    "memoirist": ["memoirist@1.2.4", "https://registry.npmmirror.com/memoirist/-/memoirist-1.2.4.tgz", {}, "sha512-4ZQz65pzZQl1fQEy0EPplIo+rzn0c1vzrqhrdnswr2IKYoPje58p2hZCCeiDD3iB0Bh6OVIaScirDIw8S5qHaQ=="],
 
     "nanoid": ["nanoid@5.1.16", "https://registry.npmmirror.com/nanoid/-/nanoid-5.1.16.tgz", { "bin": { "nanoid": "bin/nanoid.js" } }, "sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ=="],
 
