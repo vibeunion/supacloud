@@ -703,6 +703,7 @@ jobs:
           # database source that is newer than the latest published release.
           bun install --frozen-lockfile
           bun run build
+          bun run test:package
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 

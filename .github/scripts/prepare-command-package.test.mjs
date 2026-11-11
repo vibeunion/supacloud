@@ -240,7 +240,7 @@ test('compiler builds local database source before rewriting its publication man
   const block = workflow.split('- name: Publish app compiler to NPM')[1]?.split('\n      - name:')[0];
   assert.ok(block);
   assert.ok(block.indexOf('bun run build') < block.indexOf('prepare-command-package.mjs'));
-  assert.match(block, /bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
+  assert.match(block, /bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*bun run test:package[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
   assert.doesNotMatch(block.split('prepare-command-package.mjs')[1] ?? '', /bun install/);
   assert.match(block, /SUPACLOUD_NPM_PUBLISH_IGNORE_SCRIPTS:\s*["']1["']/);
 });
