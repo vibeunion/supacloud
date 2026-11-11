@@ -242,6 +242,7 @@ test('compiler builds local database source before rewriting its publication man
   assert.ok(block.indexOf('bun run build') < block.indexOf('prepare-command-package.mjs'));
   assert.match(block, /bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
   assert.doesNotMatch(block.split('prepare-command-package.mjs')[1] ?? '', /bun install/);
+  assert.match(block, /SUPACLOUD_NPM_PUBLISH_IGNORE_SCRIPTS:\s*["']1["']/);
 });
 test('elysia builds local fixtures before preparing its isolated publication', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');

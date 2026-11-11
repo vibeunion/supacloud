@@ -9,6 +9,11 @@ const execFileAsync = promisify(execFile);
 const PUBLISH_ARGUMENTS = ['publish', '--provenance', '--access', 'public', `--registry=${NPM_REGISTRY}`];
 const MAX_NPM_OUTPUT_BYTES = 16 * 1024 * 1024;
 
+/** @param {boolean} ignoreScripts */
+function publishArguments(ignoreScripts) {
+  return ignoreScripts ? [...PUBLISH_ARGUMENTS, '--ignore-scripts'] : PUBLISH_ARGUMENTS;
+}
+
 /** @typedef {(arguments_: string[]) => Promise<{ stdout?: unknown, stderr?: unknown }>} NpmRunner */
 
 /** @param {string[]} arguments_ */
@@ -38,6 +43,7 @@ function packageIdentity(candidatePackage) {
  *   runNpm?: NpmRunner,
  *   sleep?: (ms: number) => Promise<void>,
  *   delays?: readonly number[],
+ *   ignoreScripts?: boolean,
  * }} options
  */
 export async function publishNpmPackage(options) {
@@ -54,7 +60,7 @@ export async function publishNpmPackage(options) {
 
   let published;
   try {
-    published = await runNpm(PUBLISH_ARGUMENTS);
+    published = await runNpm(publishArguments(options.ignoreScripts === true));
   } catch (error) {
     if (isNpmNotFoundError(error)) {
       throw new Error(
@@ -88,7 +94,10 @@ function isMainModule() {
 
 if (isMainModule()) {
   const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
-  const publication = await publishNpmPackage(packageIdentity(packageJson));
+  const publication = await publishNpmPackage({
+    ...packageIdentity(packageJson),
+    ignoreScripts: process.env['SUPACLOUD_NPM_PUBLISH_IGNORE_SCRIPTS'] === '1',
+  });
   if (publication.status === 'published') {
     if (publication.stdout.trim()) console.log(publication.stdout.trimEnd());
     if (publication.stderr.trim()) console.error(publication.stderr.trimEnd());
