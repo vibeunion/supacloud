@@ -1,4 +1,4 @@
-/// <reference path="./optional-db-zenstack.d.ts" />
+/// <reference path="./db-zenstack.d.ts" />
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -68,20 +68,20 @@ function paths(value: unknown): string[] {
   return result;
 }
 export function parseDatabaseSourcesConfig(value: unknown): DatabaseSourcesConfig {
-  if (!record(value) || value.version !== 1 || Object.keys(value).some(key =>
+  if (!record(value) || value["version"] !== 1 || Object.keys(value).some(key =>
     !["version", "schema", "functions", "migrations", "contracts", "audit", "consumers", "auditConsumers", "trustedHosts", "role", "policyRls"].includes(key))) {
     throw new Error("Invalid database.sources.json");
   }
-  const schema = paths(value.schema), consumers = paths(value.consumers), auditConsumers = paths(value.auditConsumers);
+  const schema = paths(value["schema"]), consumers = paths(value["consumers"]), auditConsumers = paths(value["auditConsumers"]);
   if (!schema.length || !consumers.length || schema.some(file => !file.endsWith(".ts") && !file.endsWith(".zmodel"))) throw new Error("Select ZModel or generated TypeScript schemas and consumer roots");
-  if (typeof value.role !== "string" || !/^[a-z_][a-z0-9_]*$/.test(value.role)) throw new Error("Select an explicit database role");
-  if (value.policyRls !== undefined && value.policyRls !== "deferred") throw new Error("policyRls must be deferred when set");
+  if (typeof value["role"] !== "string" || !/^[a-z_][a-z0-9_]*$/.test(value["role"])) throw new Error("Select an explicit database role");
+  if (value["policyRls"] !== undefined && value["policyRls"] !== "deferred") throw new Error("policyRls must be deferred when set");
   const config: DatabaseSourcesConfig = {
-    version: 1, schema, consumers, auditConsumers, role: value.role,
-    ...(value.policyRls === "deferred" ? { policyRls: "deferred" as const } : {}),
-    trustedHosts: paths(value.trustedHosts ?? ["src/host"]),
-    functions: pathValue(value.functions), migrations: pathValue(value.migrations),
-    contracts: pathValue(value.contracts), audit: pathValue(value.audit),
+    version: 1, schema, consumers, auditConsumers, role: value["role"],
+    ...(value["policyRls"] === "deferred" ? { policyRls: "deferred" as const } : {}),
+    trustedHosts: paths(value["trustedHosts"] ?? ["src/host"]),
+    functions: pathValue(value["functions"]), migrations: pathValue(value["migrations"]),
+    contracts: pathValue(value["contracts"]), audit: pathValue(value["audit"]),
   };
   if (config.trustedHosts.some(path => !path.startsWith("src/") || path === "src")) throw new Error("Trusted hosts must be explicit paths inside src/");
   const areas = [...schema, config.functions, config.migrations, config.contracts, config.audit];
@@ -265,10 +265,10 @@ async function boundaryFindings(
 }
 
 function migrationInputs(value: unknown): Input[] {
-  if (!record(value) || value.generator !== GENERATOR || !Array.isArray(value.migrations)) throw new Error("Invalid previous contract manifest");
-  return value.migrations.map(item => {
-    if (!record(item) || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error("Invalid migration baseline");
-    return { path: pathValue(item.path), sha256: item.sha256 };
+  if (!record(value) || value["generator"] !== GENERATOR || !Array.isArray(value["migrations"])) throw new Error("Invalid previous contract manifest");
+  return value["migrations"].map(item => {
+    if (!record(item) || typeof item["sha256"] !== "string" || !/^[a-f0-9]{64}$/.test(item["sha256"])) throw new Error("Invalid migration baseline");
+    return { path: pathValue(item["path"]), sha256: item["sha256"] };
   });
 }
 

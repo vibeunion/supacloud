@@ -1,4 +1,4 @@
-/// <reference path="./optional-db-zenstack.d.ts" />
+/// <reference path="./db-zenstack.d.ts" />
 /**
  * Compatibility re-export. The ZenStack adapter lives in `@supacloud/db-zenstack`.
  * Catalog and governance code in this package must not import it.

@@ -333,6 +333,7 @@ jobs:
             working-directory: packages/db
             script: |
               bun run ../../scripts/build-command-dependencies.ts db
+              (cd ../db-zenstack && bun install --force --frozen-lockfile && bun run build)
               bun install --frozen-lockfile
               # db tests compile the ZenStack adapter sources through
               # scripts/lib/starter-source-fixture.ts and import its built entry,
