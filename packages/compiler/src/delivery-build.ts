@@ -77,7 +77,9 @@ export async function buildDeliveryProject(
     if (new Set(assetOwners).size !== assetOwners.length) throw new Error("Duplicate target asset path.");
     const httpApplications = settings.build?.httpApplications ?? [];
     const workerApplications = settings.build?.workerApplications ?? [];
-    const hosts = new Map<string, { path: string; hash: string; kind: "http" | "worker" | "function" }>();
+    const hosts = new Map<string, {
+      path: string; hash: string; kind: "http" | "worker" | "function"; database: boolean;
+    }>();
     for (const [kind, applications] of [["http", httpApplications], ["worker", workerApplications]] as const) {
       for (const app of applications) {
         if (hosts.has(app.target)) throw new Error("Duplicate delivery application host.");
@@ -87,7 +89,9 @@ export async function buildDeliveryProject(
         }
         const path = resolve(sourceRoot, app.source);
         if (inside(generatedRoot, path) || !/\.[cm]?ts$/.test(path)) throw new Error("Hosts require application TypeScript source.");
-        hosts.set(app.target, { path, kind, hash: digest(await readOwned(sourceRoot, path)) });
+        hosts.set(app.target, {
+          path, kind, database: app.database === true, hash: digest(await readOwned(sourceRoot, path)),
+        });
       }
     }
     for (const target of planned.plan.targets) {
@@ -97,7 +101,7 @@ export async function buildDeliveryProject(
       if (inside(generatedRoot, path) || !/\.[cm]?ts$/.test(path)) {
         throw new Error("Function hosts require application TypeScript source.");
       }
-      hosts.set(target.name, { path, kind: "function", hash: digest(await readOwned(sourceRoot, path)) });
+      hosts.set(target.name, { path, kind: "function", database: false, hash: digest(await readOwned(sourceRoot, path)) });
     }
 
     phase = "migration-inputs";
@@ -184,8 +188,8 @@ export async function buildDeliveryProject(
           : host?.kind === "http" ? "bun-http-application"
             : host?.kind === "worker" ? "bun-worker-application" : "compiled-module-factory";
         applicationCode = rendered!.applicationCode
-          + (host?.kind === "http" ? renderDeliveryHttpEntry(generatedDirectory, host.path)
-            : host?.kind === "worker" ? renderDeliveryWorkerEntry(generatedDirectory, host.path)
+          + (host?.kind === "http" ? renderDeliveryHttpEntry(generatedDirectory, host.path, host.database)
+            : host?.kind === "worker" ? renderDeliveryWorkerEntry(generatedDirectory, host.path, host.database)
               : host?.kind === "function" ? renderDeliveryFunctionEntry(generatedDirectory, host.path) : "");
         generated = {
           "application.ts": applicationCode,

@@ -2,13 +2,55 @@ import { relativeImportPath } from "./util";
 import { renderDeliveryRuntimeIdentity } from "./delivery-readiness";
 
 /** The host owns polling and receipts; this entry owns only process lifetime. */
-export function renderDeliveryWorkerEntry(generatedDirectory: string, hostPath: string): string {
+export function renderDeliveryWorkerEntry(generatedDirectory: string, hostPath: string, database = false): string {
   const specifier = relativeImportPath(generatedDirectory, hostPath);
+  const databaseImports = database
+    ? `import { createBunSqlHost as createDeliverySqlHost } from "@supacloud/db/bun";`
+    : "";
+  const databaseFactory = database
+    ? `
+type DeliveryDatabaseFactory = (
+  pool: ReturnType<typeof createDeliverySqlHost>["pool"], lifecycle: { signal: AbortSignal },
+) => unknown | Promise<unknown>;
+const createDeliveryDatabase = (deliveryHostModule as {
+  createDeliveryDatabase?: DeliveryDatabaseFactory;
+}).createDeliveryDatabase;
+if (typeof createDeliveryDatabase !== "function") {
+  throw new Error("Invalid delivery database adapter.");
+}`
+    : "";
+  const databaseState = database
+    ? `
+  let databaseHost: ReturnType<typeof createDeliverySqlHost> | undefined;
+  let databaseClosing: Promise<void> | undefined;
+  const closeDatabase = () => databaseClosing ??= Promise.resolve().then(() => databaseHost?.close());`
+    : `
+  const closeDatabase = () => Promise.resolve();`;
+  const databaseStartup = database
+    ? `
+    databaseHost = createDeliverySqlHost({ env: deliveryProcess.env });
+    const dbClient = await createDeliveryDatabase(databaseHost.pool, { signal: lifecycle.signal });`
+    : "";
+  const lifecycleType = database ? "{ signal: AbortSignal; deps?: Record<string, unknown> }" : "{ signal: AbortSignal }";
+  const lifecycleArgument = database ? "{ signal, deps: { dbClient } }" : "{ signal }";
+  const closeOnAbort = database ? "true" : "host";
   return `
 import deliveryProcess from "node:process";
 import { isDeepStrictEqual as deliveryPolicyEqual } from "node:util";
-import { createDeliveryWorker } from ${JSON.stringify(specifier)};
+import * as deliveryHostModule from ${JSON.stringify(specifier)};
+${databaseImports}
 ${renderDeliveryRuntimeIdentity()}
+
+const createDeliveryWorkerCandidate = (deliveryHostModule as {
+  createDeliveryWorker?: (
+    modules: ReturnType<typeof createCompiledModules>, lifecycle: ${lifecycleType},
+  ) => DeliveryWorkerHost | Promise<DeliveryWorkerHost>;
+}).createDeliveryWorker;
+if (typeof createDeliveryWorkerCandidate !== "function") {
+  throw new Error("Invalid delivery worker host.");
+}
+const createDeliveryWorker = createDeliveryWorkerCandidate;
+${databaseFactory}
 
 interface DeliveryWorkerHost {
   start(): void | Promise<void>;
@@ -28,6 +70,7 @@ interface DeliveryWorkerHost {
   let deadline: ReturnType<typeof setTimeout> | undefined;
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   let healthPending = false;
+${databaseState}
   const finish = (failed: boolean) => {
     clearTimeout(deadline);
     clearInterval(keepAlive);
@@ -46,7 +89,10 @@ interface DeliveryWorkerHost {
   };
   const closeHost = () => {
     startDeadline();
-    return closing ??= Promise.resolve().then(() => host?.close());
+    return closing ??= Promise.resolve().then(async () => {
+      try { await host?.close(); }
+      finally { await closeDatabase(); }
+    });
   };
   const finishShutdown = async () => {
     await closeHost();
@@ -60,7 +106,7 @@ interface DeliveryWorkerHost {
     try { lifecycle.abort(); }
     catch { runtimeFailed = true; console.error("Delivery worker runtime failed."); }
     // A host may need close() to unblock start(). Success still waits for start.
-    if (host) void closeHost().catch(() => { runtimeFailed = true; });
+    if (${closeOnAbort}) void closeHost().catch(() => { runtimeFailed = true; });
     if (running) {
       void finishShutdown().catch(() => {
         console.error("Delivery worker shutdown failed.");
@@ -83,9 +129,10 @@ interface DeliveryWorkerHost {
     deliveryProcess.on("uncaughtException", runtimeFailure);
     deliveryProcess.on("unhandledRejection", runtimeFailure);
     const createHost: (
-      modules: ReturnType<typeof createCompiledModules>, lifecycle: { signal: AbortSignal },
+      modules: ReturnType<typeof createCompiledModules>, lifecycle: ${lifecycleType},
     ) => DeliveryWorkerHost | Promise<DeliveryWorkerHost> = createDeliveryWorker;
-    const candidate = await createHost(createCompiledModules(), { signal: lifecycle.signal });
+${databaseStartup}
+    const candidate = await createHost(createCompiledModules(), ${database ? "{ signal: lifecycle.signal, deps: { dbClient } }" : "{ signal: lifecycle.signal }"});
     if (!candidate || typeof candidate.close !== "function") throw new Error("Invalid delivery worker host.");
     host = candidate;
     const execution = deliveryProcess.env["SUPACLOUD_WORKER_EXECUTION"];
@@ -121,10 +168,8 @@ interface DeliveryWorkerHost {
       console.log(JSON.stringify({ event: "delivery-worker-started", ...(identity ? { identity } : {}) }));
     }
   } catch {
-    if (host) {
-      try { await closeHost(); }
-      catch { console.error("Delivery worker cleanup failed."); }
-    }
+    try { await closeHost(); }
+    catch { console.error("Delivery worker cleanup failed."); }
     console.error("Delivery worker startup failed.");
     finish(true);
   }
