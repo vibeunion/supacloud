@@ -233,3 +233,5 @@ function checkResponseTypes() {
   // @ts-expect-error Async validators cannot establish a synchronous contract.
   validatedJsonResponse(async () => true, { id: "receipt-1" });
 }
+
+void checkResponseTypes;

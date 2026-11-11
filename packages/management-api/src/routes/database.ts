@@ -23,7 +23,7 @@ import {
   withProjectMigrationLocks,
 } from "../services/migration-lock";
 import {
-  MigrationRouteError, deriveMigrationExecution, ensureMigrationTables, ensureTasksRealtimePublication,
+  MigrationRouteError, deriveMigrationExecution, ensureMigrationTables,
   migrationLedgerEntryMatches, applyRecordedMigration, withMigrationRoleSession,
   type RecordedMigrationInput, type ProjectMigrationCredentials,
 } from "../services/project-migration-executor";
@@ -333,7 +333,6 @@ async function runRlsTesterTransaction(roleDb: SQL, input: RlsTesterInput) {
     transactionOpen = true;
     ({ plan, rows } = await runRlsTesterQuery(connection, input.query));
     await connection.unsafe("ROLLBACK");
-    transactionOpen = false;
   } catch (error) {
     rollbackFailed = await rollbackRlsTesterTransaction(connection, input.dbName, transactionOpen);
     throw error;

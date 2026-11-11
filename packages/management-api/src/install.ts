@@ -435,8 +435,6 @@ async function runInteractiveConfig(
     let internalIp = configured.INTERNAL_IP || "";
     let publicDomain = configured.SUPABASE_PUBLIC_DOMAIN || configured.SUPABASE_DOMAIN || "";
     let storageType = configured.S3_STORAGE_TYPE || "";
-    let enableSsl = true;
-    let acmeClient = "le";
 
     if (!forceYes && (!internalIp || !publicDomain || !storageType)) {
         // IP selection logic
@@ -499,15 +497,11 @@ async function runInteractiveConfig(
         });
         publicDomain = projectConfig.publicDomain as string;
         storageType = projectConfig.storageType as string;
-        enableSsl = projectConfig.enableSsl as boolean;
-        acmeClient = (projectConfig.acmeClient as string) || 'le';
     } else {
         internalIp = internalIp || primaryIp;
         publicDomain = publicDomain || `api.${internalIp}.nip.io`;
         storageType = storageType || 'juicefs';
-        enableSsl = appConfig.enableSsl;
-        acmeClient = appConfig.acmeClient;
-        p.log.info(`Using config: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}, SSL=${enableSsl}`);
+        p.log.info(`Using config: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}, SSL=${appConfig.enableSsl}`);
     }
 
     const defaultStudio = deriveStudioDomain(publicDomain, internalIp);

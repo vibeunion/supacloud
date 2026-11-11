@@ -15,8 +15,6 @@ import type {
 } from "./types";
 import {
   camelName,
-  isJobContextToken,
-  isRequestContextToken,
   joinRoutePaths,
   relativeImportPath,
 } from "./util";
@@ -279,7 +277,7 @@ function freezeCompiledAspectData(value: unknown, ancestors = new Set<object>())
     Object.freeze(value);
   }
 }
-async function compiledAspectStep(context: CompiledAspectContext, handler: () => unknown | Promise<unknown>, run: (next: () => Promise<unknown>) => unknown | Promise<unknown>): Promise<unknown> {
+export async function compiledAspectStep(context: CompiledAspectContext, handler: () => unknown | Promise<unknown>, run: (next: () => Promise<unknown>) => unknown | Promise<unknown>): Promise<unknown> {
   const strict = context.kind === "command";
   let active = true, called = false, settled = false, failed = false;
   let failure: unknown, value: unknown;
@@ -314,7 +312,7 @@ async function compiledAspectStep(context: CompiledAspectContext, handler: () =>
     if (pending) await pending.catch(() => {});
   }
 }
-function observeCompiledAspect(observe: CompiledAspectObserver | undefined, stage: string, run: () => unknown | Promise<unknown>): unknown | Promise<unknown> {
+export function observeCompiledAspect(observe: CompiledAspectObserver | undefined, stage: string, run: () => unknown | Promise<unknown>): unknown | Promise<unknown> {
   return observe ? observe(stage, run) : run();
 }
 
@@ -330,7 +328,7 @@ function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
 
-function resolveFactoryValue(value: unknown): unknown {
+export function resolveFactoryValue(value: unknown): unknown {
   if (!isRecord(value) || !isFunction(value["factory"])) return undefined;
   return value["factory"]();
 }
@@ -377,7 +375,7 @@ function destroyScopeInstances(
 
 type CompiledServiceLifecycleEntry = { key: string; index?: number };
 
-async function initializeServiceInstances(
+export async function initializeServiceInstances(
   services: Record<string, unknown>,
   plan: readonly CompiledServiceLifecycleEntry[],
 ): Promise<void> {
@@ -394,7 +392,7 @@ async function initializeServiceInstances(
   }
 }
 
-function destroyServiceInstances(
+export function destroyServiceInstances(
   services: Record<string, unknown>,
   plan: readonly CompiledServiceLifecycleEntry[],
 ): Promise<void> {

@@ -2622,7 +2622,6 @@ export class ContainerRealtimeTenantSchemaRpc implements RealtimeTenantSchemaRpc
     assertProjectRef(projectRef);
     if (this.options.verifyOfficialArtifacts !== false) await this.assertContainerImageDigest();
     const target = await this.assertRpcTargetIdentity(projectRef, expectedIdentity);
-    const artifact = await this.artifact();
     const repairArtifact = await this.walColumnRepairArtifact();
     const directory = await this.remoteTempDirectory();
     const planPath = `${directory}/plan.json`;

@@ -27,6 +27,7 @@ describe("InjectionToken", () => {
       url: string;
     }
     const token = new InjectionToken<Config>("app.config");
+    void token;
     const config: Config = { url: "https://example.com" };
     const withFactory = new InjectionToken<Config>("app.config2", {
       factory: () => config,

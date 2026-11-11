@@ -66,6 +66,7 @@ describe("native HTTP context composition", () => {
         const prefix: string = context.catalog.prefix;
         // @ts-expect-error Dynamic compiled inputs cannot claim a route-specific type.
         const invalid: string = context.params.id;
+        void invalid;
         return { tenant, prefix, body: context.validated, id: context.params.id, url: request.url };
       },
     });
@@ -102,6 +103,7 @@ describe("native HTTP context composition", () => {
       const name: string = actor.tenant;
       // @ts-expect-error Context properties must not decay to any.
       const invalid: number = tenant;
+      void invalid;
       return { count, name, tenant };
     });
     expect(await (await app.handle(new Request("http://localhost/native"))).json())
@@ -115,6 +117,7 @@ describe("native HTTP context composition", () => {
         const count: number = services.catalog.count;
         // @ts-expect-error Service properties must not decay to any.
         const invalid: string = services.catalog.count;
+        void invalid;
         return count;
       });
     expect(await (await plugin.handle(new Request("http://localhost/service"))).json()).toBe(9);
@@ -210,6 +213,7 @@ describe("native HTTP context composition", () => {
         const name: string = body.name;
         // @ts-expect-error The schema must retain its inferred type.
         const invalid: number = body.name;
+        void invalid;
         return { label: name.toUpperCase() };
       }).as("plugin");
     const app = createApplication({
@@ -254,6 +258,7 @@ describe("native HTTP context composition", () => {
       requestContext: (_request, context) => {
         // @ts-expect-error Local plugin fields do not propagate through use().
         const hidden: number = context.privateValue;
+        void hidden;
         return { visible: true };
       },
     });
@@ -273,6 +278,7 @@ describe("native HTTP context composition", () => {
         const count: number = context.total;
         // @ts-expect-error Sandbox factories retain the same inference as production.
         const invalid: string = context.total;
+        void invalid;
         return { count };
       },
     });
@@ -285,6 +291,7 @@ describe("native HTTP context composition", () => {
       const label: string = context.label;
       // @ts-expect-error The options argument supplies contextual types to the factory.
       const invalid: number = context.label;
+      void invalid;
       return { label };
     }, { http });
     expect(await (await plugin.handle(request())).json()).toEqual({ label: "standalone" });

@@ -37,7 +37,6 @@ import {
   type ApplicationDocumentationOptions,
 } from "./documentation";
 import {
-  createDefaultEffectRuntime,
   runCompiledEffect,
   type CompiledEffectDescriptor,
   type SupaCloudEffectRuntime,
@@ -1508,7 +1507,6 @@ export function createModulePlugin<
       const routeHasAspects = compiled.aspectPipeline !== undefined || (compiled.aspects?.length ?? 0) > 0
         || route.aspectPipeline !== undefined || (route.aspects?.length ?? 0) > 0
         || command?.aspectPipeline !== undefined || (command?.aspects?.length ?? 0) > 0;
-      const routeInvoker = route.invoker;
       if (mappingPolicies.length > 0) {
         const responseValidators = Validator.response(schema.response, { normalize: options.normalize ?? true });
         Object.assign(schema, {

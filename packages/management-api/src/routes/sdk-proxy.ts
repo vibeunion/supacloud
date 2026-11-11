@@ -1,5 +1,4 @@
 import { Elysia } from "elysia";
-import { randomUUID } from "node:crypto";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { config } from "../config";
 import { sql as metaSql } from "../db";

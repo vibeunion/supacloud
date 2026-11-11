@@ -46,7 +46,7 @@ describe("Bun runtime version assets", () => {
     for (const dockerfilePath of runtimeDockerfiles) {
       const dockerfile = readRepoFile(dockerfilePath);
       expect(dockerfile).toMatch(new RegExp(`^ARG BUN_VERSION=${BUN_VERSION.replaceAll(".", "\\.")}$`, "m"));
-      expect(dockerfile).toContain("FROM oven/bun:${BUN_VERSION}");
+      expect(dockerfile).toContain("FROM oven/bun:${" + "BUN_VERSION}");
       expect(dockerfile).not.toContain("1.3.14");
     }
   });

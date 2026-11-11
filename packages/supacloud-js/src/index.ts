@@ -501,10 +501,6 @@ function normalizeSecondsFromOptions(
   return queueSeconds(options);
 }
 
-function isUnknownArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
-}
-
 function valueRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record: Record<string, unknown> = {};

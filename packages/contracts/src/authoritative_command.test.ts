@@ -867,7 +867,8 @@ describe("pending command recovery", () => {
       createPendingCommandRecovery(pendingContract, { ...transport, send: async () => state }, options);
       const recover = createPendingCommandRecovery(pendingContract, transport, options);
       // @ts-expect-error Recovery reads storage; callers cannot substitute request identity.
-      recover({ id: "different" });
+      const invalidRecoveryArguments: Parameters<typeof recover> = [{ id: "different" }];
+      void invalidRecoveryArguments;
     };
     expectTypeOf(checkTypeContracts).returns.toEqualTypeOf<void>();
   });
