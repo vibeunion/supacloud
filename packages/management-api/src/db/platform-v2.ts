@@ -192,7 +192,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
       scope VARCHAR(24) NOT NULL
         CONSTRAINT project_control_secrets_scope_check
-        CHECK (scope IN ('captcha', 'connector', 'auth-hook', 'webhook')),
+        CHECK (scope IN ('captcha', 'connector', 'auth-hook', 'sms-provider', 'webhook')),
       name VARCHAR(128) NOT NULL,
       value_encrypted TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -463,7 +463,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
     ALTER TABLE project_webhooks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
     ALTER TABLE project_control_secrets DROP CONSTRAINT IF EXISTS project_control_secrets_scope_check;
     ALTER TABLE project_control_secrets ADD CONSTRAINT project_control_secrets_scope_check
-      CHECK (scope IN ('captcha', 'connector', 'auth-hook', 'webhook'));
+      CHECK (scope IN ('captcha', 'connector', 'auth-hook', 'sms-provider', 'webhook'));
     CREATE INDEX IF NOT EXISTS project_webhooks_project_idx
       ON project_webhooks(project_ref, created_at ASC);
     CREATE INDEX IF NOT EXISTS project_webhooks_active_idx

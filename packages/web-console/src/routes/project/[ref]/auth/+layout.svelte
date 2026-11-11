@@ -5,7 +5,7 @@
   import { apiClient } from "$lib/api";
   import { loadAuthRuntime, type AuthRuntimeDescriptor } from "$lib/auth-runtime";
   import { t } from "svelte-i18n";
-  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck, ChevronDown, Fingerprint } from "lucide-svelte";
+  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck, ChevronDown, Fingerprint, Smartphone } from "lucide-svelte";
 
   const projectRef = $derived(page.params.ref ?? "");
   const currentPath = $derived(page.url.pathname);
@@ -51,6 +51,7 @@
         { labelKey: "AuthNav.tabs.url_configuration", path: "url-configuration", route: "/project/[ref]/auth/url-configuration", icon: Link2 },
         { labelKey: "AuthNav.tabs.email_templates", path: "templates", route: "/project/[ref]/auth/templates", icon: Mail },
         { labelKey: "AuthNav.tabs.smtp", path: "smtp", route: "/project/[ref]/auth/smtp", icon: Mail },
+        { labelKey: "AuthNav.tabs.sms", path: "sms", route: "/project/[ref]/auth/sms", icon: Smartphone },
       ],
     },
     {

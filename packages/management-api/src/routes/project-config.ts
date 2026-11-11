@@ -814,7 +814,10 @@ async function buildAuthConfigResponse(ref: string, settings: Record<string, unk
       oauthServerConfig.allow_dynamic_registration === true,
     oauth_server_authorization_path:
       oauthServerConfig.authorization_path ?? null,
-    sms_provider: authConfig.sms_provider ?? "twilio",
+    sms_provider:
+      (authConfig.sms as Record<string, unknown> | undefined)?.provider ??
+      authConfig.sms_provider ??
+      "twilio",
     experimental: authConfig.experimental ?? {},
     ...readStockPasskeyConfig(authConfig),
   };
