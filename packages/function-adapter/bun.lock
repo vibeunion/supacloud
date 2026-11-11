@@ -9,7 +9,7 @@
         "@sveltejs/vite-plugin-svelte": "^7.3.1",
         "@types/bun": "^1.4.4",
         "svelte": "^5.57.2",
-        "typescript": "7.1.0-dev.20261102.1",
+        "typescript": "7.1.0-dev.20261107.1",
         "vite": "^8.3.4",
       },
       "peerDependencies": {
@@ -85,19 +85,19 @@
 
     "@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
 
-    "@typescript/typescript-darwin-arm64": ["@typescript/typescript-darwin-arm64@7.1.0-dev.20261102.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-Lqujbb8jso9SuMF8Jv8lUagiihuuJCP2LDqfQsA70BWIvnQojcwVmvofVZ3mjFNTW2OKhShGYNlU/LZzNz25jg=="],
+    "@typescript/typescript-darwin-arm64": ["@typescript/typescript-darwin-arm64@7.1.0-dev.20261107.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-WcfWxPq7IghWsKVzWOojR9i2vANeuh1BHmsk1JZxBIGA++PdR/PUBs3ybPSBa+kuFcQxm/+5/7TGCBuRvlS74Q=="],
 
-    "@typescript/typescript-darwin-x64": ["@typescript/typescript-darwin-x64@7.1.0-dev.20261102.1", "", { "os": "darwin", "cpu": "x64" }, "sha512-rOkgtv9E7TP0Tgl1jaskq8EJFvcG6FO6wFM16IbC+0S4S+iBFTVkou2X3O+ns/ex2so5BErIs3AXtKV/Q5ySIQ=="],
+    "@typescript/typescript-darwin-x64": ["@typescript/typescript-darwin-x64@7.1.0-dev.20261107.1", "", { "os": "darwin", "cpu": "x64" }, "sha512-yWbbXj5Eor040FE9k9BiHpLrdD/QwSq0DRv17ZrvmvKkN7ThApzF5vFRJI/GHiVsjixfj85h2TqySGCjp/DR5g=="],
 
-    "@typescript/typescript-linux-arm": ["@typescript/typescript-linux-arm@7.1.0-dev.20261102.1", "", { "os": "linux", "cpu": "arm" }, "sha512-lHpGaqIS3g6Z9SvhYcvkWh7ciRRWFBAT05Ii23wDvciHkIDv0kkG9ubqHNEqjIH3HDyjwhxFB/0tdbxgxNjKww=="],
+    "@typescript/typescript-linux-arm": ["@typescript/typescript-linux-arm@7.1.0-dev.20261107.1", "", { "os": "linux", "cpu": "arm" }, "sha512-UbRHYA8cWG68/J3Amo21ZmceRxaJCKMRfzU3fWzdtfE4hxY8u1p6dNXfPxFtKRDw6uJ3YYicQtcyl6ujWlO2+g=="],
 
-    "@typescript/typescript-linux-arm64": ["@typescript/typescript-linux-arm64@7.1.0-dev.20261102.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-Sp9rfaw3UhXaT2+KwIa0SU5ar7g4kl+mRggfD/PQzPKgJiL9YrAWvbBiq1lpXXt5exdGLexiSOut//2O/LplJQ=="],
+    "@typescript/typescript-linux-arm64": ["@typescript/typescript-linux-arm64@7.1.0-dev.20261107.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-x5BsS6q6l2OwAJwHvxwZD2ynh6PcdB8Pd8ErxSCUURJJy9pHL3bniU5pEolFG4ZZ7GDxlQeN3mVMLisKIaM0UA=="],
 
-    "@typescript/typescript-linux-x64": ["@typescript/typescript-linux-x64@7.1.0-dev.20261102.1", "", { "os": "linux", "cpu": "x64" }, "sha512-tJzZqgoAiz6k+mN/OxRmSeEf1OmblugASGXZBTzn6A4+BlVOLu1N4rvF65jCwMBWMCEtIjSJEJwcQ17XobTSwg=="],
+    "@typescript/typescript-linux-x64": ["@typescript/typescript-linux-x64@7.1.0-dev.20261107.1", "", { "os": "linux", "cpu": "x64" }, "sha512-XSiXviT3UqYYoMmJadk9DHi/JwhZGWEdJM8Gie5/ztyIPiqjW/1gdpUXca6EQtfuR5TMWYuAAiRuqLsXVh1JKA=="],
 
-    "@typescript/typescript-win32-arm64": ["@typescript/typescript-win32-arm64@7.1.0-dev.20261102.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-bPLL+0+M38TL/2JYM2MwkthuKPvB1+5lXdRrf7EO9YOp8StoN8i/QtPEOBG8g9HxUdQl74LKnFoTr/OKC+Faog=="],
+    "@typescript/typescript-win32-arm64": ["@typescript/typescript-win32-arm64@7.1.0-dev.20261107.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-zhrwxS3k9XM00lXPFf4q1fQVl/azf+b5KlXXRQ7bnWpo609Ry3tl40b7+4UWYPRZoS/QdKv/HvGzU+NMfTNqZw=="],
 
-    "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.1.0-dev.20261102.1", "", { "os": "win32", "cpu": "x64" }, "sha512-JruaLShE1/9BSBTndgwkARyDEtuYMejsfTF4WBTcry6eE95PstXDLT69slICds/2ihkuBD2pngHuoai/r3OXeQ=="],
+    "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.1.0-dev.20261107.1", "", { "os": "win32", "cpu": "x64" }, "sha512-PmTzgN3zbtPORpKMbPTxAvYxm4ruv2rLClgRyic2HQRcyDoaJWaqyfhHLmAjUhbH7HcJVvjl2ZKCa2YgeQrSFA=="],
 
     "acorn": ["acorn@8.19.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw=="],
 
@@ -179,7 +179,7 @@
 
     "totalist": ["totalist@3.0.1", "", {}, "sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ=="],
 
-    "typescript": ["typescript@7.1.0-dev.20261102.1", "", { "optionalDependencies": { "@typescript/typescript-darwin-arm64": "7.1.0-dev.20261102.1", "@typescript/typescript-darwin-x64": "7.1.0-dev.20261102.1", "@typescript/typescript-linux-arm": "7.1.0-dev.20261102.1", "@typescript/typescript-linux-arm64": "7.1.0-dev.20261102.1", "@typescript/typescript-linux-x64": "7.1.0-dev.20261102.1", "@typescript/typescript-win32-arm64": "7.1.0-dev.20261102.1", "@typescript/typescript-win32-x64": "7.1.0-dev.20261102.1" }, "bin": { "tsc": "bin/tsc" } }, "sha512-oSEOA23BPTy2rri0alGxC2XU7zyEQw4W05lETiRgvXidZ8iFCCqAxwguX4MHzeobqmI7dgHOdIsdmUIkTeoOSg=="],
+    "typescript": ["typescript@7.1.0-dev.20261107.1", "", { "optionalDependencies": { "@typescript/typescript-darwin-arm64": "7.1.0-dev.20261107.1", "@typescript/typescript-darwin-x64": "7.1.0-dev.20261107.1", "@typescript/typescript-linux-arm": "7.1.0-dev.20261107.1", "@typescript/typescript-linux-arm64": "7.1.0-dev.20261107.1", "@typescript/typescript-linux-x64": "7.1.0-dev.20261107.1", "@typescript/typescript-win32-arm64": "7.1.0-dev.20261107.1", "@typescript/typescript-win32-x64": "7.1.0-dev.20261107.1" }, "bin": { "tsc": "bin/tsc" } }, "sha512-+k0DniIM77fEN7exEdvhFRoPgTg45ckL7AnfrvJQcF5/Z7pxel4eA+zfXZidjV9Qek4MbtKapI2Eyoj1gtzF1g=="],
 
     "undici-types": ["undici-types@8.12.3", "", {}, "sha512-EXE4ydL3S76dFb27UFjNVZHTyv/TLdATj/KUe29ptdcg6qXL48J2tZ3126E5kICj5jn781OR+XlVH1N6Mz8jbA=="],
 
