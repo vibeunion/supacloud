@@ -33,7 +33,7 @@
     "directory": "packages/supacloud"
   },
   "dependencies": {
-    "@supacloud/cli": "^0.120.1",
+    "@supacloud/cli": "^0.121.3",
     "@supacloud/admin": "^0.31.0"
   },
   "overrides": {
@@ -42,6 +42,6 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
-    "typescript": "7.1.0-dev.20261102.1"
+    "typescript": "7.1.0-beta"
   }
 }

@@ -23,10 +23,10 @@
   },
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
-    "@supabase/supabase-js": "^2.118.0",
-    "elysia": "2.0.0-rc.1",
+    "@supabase/supabase-js": "^2.119.0",
+    "elysia": "2.0.0-rc.3",
     "es-module-lexer": "3.0.4",
-    "exact-mirror": "1.2.6",
+    "exact-mirror": "1.2.7",
     "jose": "^6.2.15",
     "typebox": "1.4.3"
   },

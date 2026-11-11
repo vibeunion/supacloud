@@ -213,7 +213,7 @@ export function baseTemplateFiles(name: string, sdkDependencies: StarterSdkDepen
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         effect: "4.0.5",
-        elysia: "2.0.0-rc.1",
+        elysia: "2.0.0-rc.3",
         ...sdkDependencies,
       },
       devDependencies: {

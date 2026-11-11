@@ -1,10 +1,10 @@
 {
   "bun": "1.4.4",
   "packages": {
-    "elysia": "2.0.0-rc.1",
+    "elysia": "2.0.0-rc.3",
     "effect": "4.0.5",
     "typescript": "7.1.0-beta",
     "typebox": "1.4.3",
-    "exact-mirror": "1.2.6"
+    "exact-mirror": "1.2.7"
   }
 }

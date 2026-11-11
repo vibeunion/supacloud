@@ -296,6 +296,8 @@ jobs:
               bun run ../../scripts/build-command-dependencies.ts elysia
               (cd ../elysia && bun install --frozen-lockfile && bun run build)
               (cd ../db && bun install --frozen-lockfile && bun run build)
+              # Compiler tests typecheck and import the ZenStack adapter.
+              (cd ../db-zenstack && bun install --force --frozen-lockfile && bun run build:js)
               bun install --frozen-lockfile
             typecheck_script: |
               bun run typecheck
@@ -332,6 +334,10 @@ jobs:
             script: |
               bun run ../../scripts/build-command-dependencies.ts db
               bun install --frozen-lockfile
+              # db tests compile the ZenStack adapter sources through
+              # scripts/lib/starter-source-fixture.ts and import its built entry,
+              # so install and build its runtime output.
+              (cd ../db-zenstack && bun install --force --frozen-lockfile && bun run build:js)
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
               bun run typecheck:test

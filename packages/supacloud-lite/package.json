@@ -57,14 +57,14 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.10",
-    "@electric-sql/pglite-pg_textsearch": "0.0.12",
-    "@electric-sql/pglite-pgmq": "0.0.8",
-    "@electric-sql/pglite-pgvector": "0.0.11",
+    "@electric-sql/pglite": "0.5.15",
+    "@electric-sql/pglite-pg_textsearch": "0.0.17",
+    "@electric-sql/pglite-pgmq": "0.0.13",
+    "@electric-sql/pglite-pgvector": "0.0.16",
     "@electric-sql/pglite-postgis": "0.2.10",
     "@supacloud/db": "file:../db",
-    "exact-mirror": "1.2.6",
-    "fast-xml-parser": "5.11.2",
+    "exact-mirror": "1.2.7",
+    "fast-xml-parser": "5.12.0",
     "tar": "^7.5.22",
     "typebox": "1.4.3"
   },
@@ -76,7 +76,7 @@
     "@supabase/supabase-js": "2.118.0",
     "@types/bun": "^1.4.4",
     "effect": "4.0.5",
-    "elysia": "2.0.0-rc.1",
+    "elysia": "2.0.0-rc.3",
     "jose": "^6.2.13",
     "typescript": "7.1.0-beta"
   },
