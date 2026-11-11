@@ -23,6 +23,13 @@ when the migration ledger does not contain that SQL. Field-level `@deny`, relati
 predicates, grants and the command host role stay outside that projection.
 `policyRls: "deferred"` is the explicit exception for a model that is not the
 row projection; omitting it requires a match. See [Database Contract](database-contract.md).
+Relation predicates such as `review.ownerId`, field-level `@deny` as column
+privileges, grants, `FORCE ROW LEVEL SECURITY`, JWT claims on the command host,
+live `pg_get_expr` equality with the emitted predicate, and removing
+`policyRls: "deferred"` from the command starter are recorded follow-ups from
+[#2549](https://github.com/vibeunion/supacloud/pull/2549). They are not started
+here. `policyRls: "deferred"` does not mean the SQL already matches the model.
+See [Database Source Contracts](../database-source-contracts.md#recorded-follow-ups-from-2549).
 
 Reylo and Drizzle are removed, including their dependencies, public adapters,
 commands, starter configuration, query loaders and build caches. There is no

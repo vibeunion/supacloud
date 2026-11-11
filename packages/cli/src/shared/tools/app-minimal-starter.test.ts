@@ -17,6 +17,34 @@ async function fixture(template?: "minimal" | "client" | "app") {
   return root;
 }
 
+test("operator checklist matches the current default app init", async () => {
+  const repo = resolve(import.meta.dir, "../../../../..");
+  const en = await readFile(join(repo, "docs/self-hosted-stable-baseline.md"), "utf8");
+  const zh = await readFile(join(repo, "docs/self-hosted-stable-baseline.zh-CN.md"), "utf8");
+  const enRow = en.split("\n").find((line) => line.startsWith("| Default app init |"));
+  const zhRow = zh.split("\n").find((line) => line.startsWith("| 默认 app init |"));
+  expect(enRow).toBeDefined();
+  expect(zhRow).toBeDefined();
+  for (const row of [enRow!, zhRow!]) {
+    expect(row).toContain("minimal");
+    expect(row).toContain("@supacloud/app");
+    expect(row).toContain("@supacloud/compiler");
+    expect(row).toContain("@supacloud/elysia");
+    expect(row).toContain("Effect");
+    expect(row).toContain("@supabase/supabase-js");
+    expect(row).toContain("--template client");
+    expect(row).toContain("command");
+    expect(row).toContain("model-command");
+    expect(row).not.toContain("--template app");
+    expect(row).not.toContain("supabase-js` only");
+    expect(row).not.toContain("只生成");
+  }
+  expect(enRow).toContain("`app` is an alias of `minimal`");
+  expect(zhRow).toContain("`app` 是 `minimal` 的别名");
+  expect(enRow).toContain("supabase-js-only");
+  expect(zhRow).toContain("仅含 supabase-js");
+});
+
 test("resolveStarterTemplate forces minimal and accepts the app alias", () => {
   expect(resolveStarterTemplate(undefined)).toBe("minimal");
   expect(resolveStarterTemplate("minimal")).toBe("minimal");

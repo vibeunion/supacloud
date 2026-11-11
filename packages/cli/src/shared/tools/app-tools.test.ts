@@ -486,12 +486,22 @@ describe("app tools", () => {
         expect(pack.allowedDependencies.peerDependencies).toEqual(["react"]);
         expect(pack.commands.doctor).toContain("app doctor");
         expect(pack.commands.fix).toBe("supacloud app fix --fix <fix.json>");
+        expect(pack.defaults.readTransport).toBe("postgrest-supabase-js");
+        expect(pack.defaults.writeTransport).toEqual({
+            ordinaryCrud: "postgrest-supabase-js",
+            compilerLane: "model-command",
+            governedSql: "governed-sql",
+            legacyRpc: "legacy-rpc",
+        });
+        expect(pack.defaults.writeTransport).not.toBe("command-rpc");
         expect(pack.semantic.hash).toMatch(/^[a-f0-9]{64}$/);
         expect(pack.semantic.sourceHash).toMatch(/^[a-f0-9]{64}$/);
 
         const module = await app({ action: "context", root, target: "case", format: "json" });
         const modulePack = JSON.parse(module.content[0].text);
         expect(modulePack.subject).toBe("case");
+        expect(modulePack.conventions.writeTransport).toEqual(pack.defaults.writeTransport);
+        expect(modulePack.conventions.readTransport).toBe("postgrest-supabase-js");
         expect(modulePack.modules.map((entry: { name: string }) => entry.name))
             .toEqual(expect.arrayContaining(["case", "audit"]));
         expect(modulePack.relatedModules.imports).toEqual(expect.arrayContaining(["audit"]));

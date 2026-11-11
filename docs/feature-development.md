@@ -25,7 +25,13 @@ Command 权限决定“能否执行此业务动作”，ZenStack policy 决定�
 数据库约束保证数据不变量。PostgREST 与 `@supabase/supabase-js` 仍是普通读取和低风险
 CRUD 的一等数据面。行级 `@@allow` / `@@deny` 会投影成 `authenticated` RLS，并由
 现有 source contract 对照迁移账本；对不上就失败。字段级 `@deny`、关系谓词和显式
-`policyRls: "deferred"` 仍是受审查 SQL。PostgREST/RPC 继续由数据库角色与 RLS 保护，
+`policyRls: "deferred"` 仍是受审查 SQL。把关系谓词（例如 `review.ownerId`，不要猜测子查询）、
+字段级 `@deny` 的列权限、grants、`FORCE ROW LEVEL SECURITY`、命令宿主 JWT claims、
+`pg_get_expr` 与发出谓词的在线对照，以及去掉 command starter 的 `policyRls: "deferred"`，
+记为 [#2549](https://github.com/vibeunion/supacloud/pull/2549) 的后续，此处不实现。
+`policyRls: "deferred"` 不表示 SQL 已经与模型一致。见
+[Database Contract](architecture/database-contract.md#已记录的后续事项2549此处未开工)。
+PostgREST/RPC 继续由数据库角色与 RLS 保护，
 不能因为新增了 ZenStack policy 就移除这些保护。替换模型/策略适配器仍使用同一套 PostgreSQL
 Database Contract 和唯一迁移账本，不新增第二套写入数据库、查询语言或身份存储。
 

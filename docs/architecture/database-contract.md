@@ -40,6 +40,19 @@ checker 能跑时层是 `source`，checker 起不来时层仍是 `runtime`。它
 关系谓词或必须保留的手写 SQL 只有显式 `policyRls: "deferred"` 才跳过投影；省略该字段
 就是要求投影与账本一致。deferred 不表示两边已经一致。
 
+## 已记录的后续事项（#2549，此处未开工）
+
+下面几项是 [#2549](https://github.com/vibeunion/supacloud/pull/2549) 留下的后续。这里只记录，不实现。
+记录它们不会发出新的 SQL，不会改 command starter，也不会把行级投影说成全部 policy 的生成结果。
+当前发出的只有能投影的行级 `@@allow` / `@@deny` 所对应的 `authenticated` RLS。
+`policyRls: "deferred"` 不表示 SQL 已经与模型一致。
+
+- 关系谓词，例如 `review.ownerId`。不要猜测子查询。
+- 字段级 `@deny` 作为列权限。
+- Grants、`FORCE ROW LEVEL SECURITY`，以及在命令宿主上设置 JWT claims。
+- 在线 catalog 证明：`pg_get_expr` 的文本等于发出的谓词。这不是现有可选 `usingExpr` 对账。
+- 从 command starter 去掉 `policyRls: "deferred"`。`policyRls: "deferred"` 不表示 SQL 已经与模型一致。
+
 ## 四类入口
 
 | 入口 | 适用范围 | 约束 |

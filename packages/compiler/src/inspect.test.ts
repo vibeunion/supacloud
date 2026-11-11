@@ -229,13 +229,29 @@ export class FeatureModule {}`);
     expect(pack.files).toContain("src/features/case/case.module.ts");
     expect(pack.externalTokens).toContain("DB_CLIENT");
     expect(pack.relatedModules.imports).toEqual(["audit"]);
-    expect(pack.conventions).toMatchObject({
+    expect(pack.conventions).toEqual({
+      singleResult: "async-await",
+      eventComposition: "rxjs",
+      angularHost: "@supacloud/app/angular",
+      cancellation: "explicit-owner-signal",
       readTransport: "postgrest-supabase-js",
-      writeTransport: "command-rpc",
+      writeTransport: {
+        ordinaryCrud: "postgrest-supabase-js",
+        compilerLane: "model-command",
+        governedSql: "governed-sql",
+        legacyRpc: "legacy-rpc",
+      },
       writeRetry: "disabled",
       externalOutcome: "receipt-reconcile",
       databaseSource: "zmodel-append-only",
     });
+    expect(pack.conventions.writeTransport).not.toBe("command-rpc");
+    expect(Object.values(pack.conventions.writeTransport)).toEqual([
+      "postgrest-supabase-js",
+      "model-command",
+      "governed-sql",
+      "legacy-rpc",
+    ]);
   });
 
   test("context packs omit provider values and source expressions", () => {

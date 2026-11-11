@@ -67,6 +67,11 @@ function source、registry 或 catalog contract 中，记录签名、权限、�
 离线检查不替代下文的 Catalog、权限与行为验证。模型行级 policy 与已提交 RLS
 的一致性走现有 source contract（`policy-rls-mismatch` / `policy-rls-unsupported`），
 doctor 层仍是 `source` 或 checker 无法运行时的 `runtime`。不要为此再加一套 Catalog 码。
+证明 `pg_get_expr` 文本等于发出的行级谓词，以及关系谓词、字段级 `@deny`、grants、
+`FORCE ROW LEVEL SECURITY`、命令宿主 JWT claims、去掉 command starter 的
+`policyRls: "deferred"`，都是 [#2549](https://github.com/vibeunion/supacloud/pull/2549)
+已记录、尚未开工的后续。见 [Database Contract](architecture/database-contract.md#已记录的后续事项2549此处未开工)。
+`policyRls: "deferred"` 不表示 SQL 已经与模型一致。现有可选 `usingExpr` 对账不是那份在线证明。
 
 ```
 features/case/db/

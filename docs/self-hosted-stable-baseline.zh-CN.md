@@ -222,7 +222,7 @@ PostgreSQL 分开升级，但发布说明必须明确写出边界。
 | CONNECT | 新建项目库和分支库对 `PUBLIC` 和 `supabase_realtime_admin` 执行 `REVOKE CONNECT`。`role_<ref>` 和 `authenticator_<ref>` 只在自己的数据库上获得 `CONNECT`。 |
 | HBA 配对 | Pigsty 清单只在 `authenticator_<ref>` / `role_<ref>` 是“与数据库同名的 NOLOGIN 角色”的成员时，才从 `127.0.0.1/32` 放行（`samerole`），然后拒绝这两个名字模式的其他本机登录。重新套用的步骤见下文。 |
 | 集群 LOGIN 审计 | 不改名 `supabase_auth_admin` 和 `supabase_admin`。管理员调用 `GET /v1/system/cluster-login-audit` 查看当前会话的角色、数据库、客户端地址、应用名和状态。响应不含集群密码，也不含 SQL 文本。历史记录是这两个角色打开 `log_connections` 之后的 PostgreSQL `connection authorized` 行，以及租户库日志里的 `supacloud_cluster_login`。集群密码一旦泄漏，仍可以用这两个角色打开每一个租户库。审计不是隔离。 |
-| 默认 app init | `supacloud app init` 只生成 `@supabase/supabase-js`。编译器、Effect 和 `@supacloud/app` 使用 `app init --template app`。 |
+| 默认 app init | 不带参数的 `supacloud app init` 是模板 `minimal`。它安装 `@supacloud/app`、`@supacloud/compiler`、`@supacloud/elysia` 和 Effect。数据面客户端仍是 `@supabase/supabase-js`。`app` 是 `minimal` 的别名。`--template client` 是仅含 supabase-js 的脚手架。`command` 和 `model-command` 仍是显式配方。 |
 | ZenStack | ZenStack 位于 `@supacloud/db-zenstack`。Management API 的生产闭包不安装、不导入 ZenStack。`@supacloud/db` 不依赖它。 |
 | Angular 边界 | 调用 `inject()` 的注入器和 `HttpClient` 位于 `@supacloud/app/runtime`。`@supacloud/app`、`@supacloud/app/core`、`@supacloud/app/http` 和 `@supacloud/app/pending-work` 保持不依赖 Angular。 |
 | Compose 与 Pigsty | 不得把一次 `docker/self-host` 启动记成第二道验收门的双项目 Pigsty 通过。 |
