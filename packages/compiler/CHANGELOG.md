@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.5](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.4...compiler-v0.62.5) (2026-11-11)
+
+
+### Bug Fixes
+
+* **quality:** resolve code quality findings ([#2590](https://github.com/vibeunion/supacloud/issues/2590)) ([eff8397](https://github.com/vibeunion/supacloud/commit/eff8397480efe5c30c5d6d270457383e5f9d7edc))
+
 ## [0.62.4](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.3...compiler-v0.62.4) (2026-11-11)
 
 

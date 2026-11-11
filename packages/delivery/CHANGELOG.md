@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.27.0...delivery-v0.28.0) (2026-11-11)
+
+
+### Features
+
+* **compiler:** automate delivery database injection ([#2589](https://github.com/vibeunion/supacloud/issues/2589)) ([1fd1a25](https://github.com/vibeunion/supacloud/commit/1fd1a250ff96d115b7d83864dd602fc379c6da6d))
+
+
+### Bug Fixes
+
+* **quality:** resolve code quality findings ([#2590](https://github.com/vibeunion/supacloud/issues/2590)) ([eff8397](https://github.com/vibeunion/supacloud/commit/eff8397480efe5c30c5d6d270457383e5f9d7edc))
+
 ## [0.27.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.26.0...delivery-v0.27.0) (2026-11-10)
 
 
