@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.6](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.5...compiler-v0.62.6) (2026-11-11)
+
+
+### Bug Fixes
+
+* **compiler:** name the real write lanes in the context pack ([#2599](https://github.com/vibeunion/supacloud/issues/2599)) ([af0ad4d](https://github.com/vibeunion/supacloud/commit/af0ad4ddc51ee79e7ab2f37f7f5709a55b60fc16))
+
 ## [0.62.5](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.4...compiler-v0.62.5) (2026-11-11)
 
 
