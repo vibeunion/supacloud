@@ -5,7 +5,7 @@
     "": {
       "name": "@supacloud/lite",
       "dependencies": {
-        "@electric-sql/pglite": "0.5.10",
+        "@electric-sql/pglite": "0.5.15",
         "@electric-sql/pglite-pg_textsearch": "0.0.17",
         "@electric-sql/pglite-pgmq": "0.0.8",
         "@electric-sql/pglite-pgvector": "0.0.16",
@@ -51,13 +51,13 @@
 
     "@babel/runtime": ["@babel/runtime@8.0.8", "https://registry.npmmirror.com/@babel/runtime/-/runtime-8.0.8.tgz", {}, "sha512-dEu8nGlRqjsJsvviUUoSMfcRHpwomCiRlXsc2mPfJ79+ffTpDm+JtfUtTMzUrqCApHQnCsVPD3gT1ZT8RgBRCQ=="],
 
-    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.10", "https://registry.npmmirror.com/@electric-sql/pglite/-/pglite-0.5.10.tgz", {}, "sha512-tXc/25U3ulOkiRQuTFdwIv+JhBqtMdAF7Gvo6CfZZWtSB4+hgC4Wr2vwK5ngvvN5PJfAAEGIsfyCVy1JhCOBYw=="],
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.15", "https://registry.npmmirror.com/@electric-sql/pglite/-/pglite-0.5.15.tgz", {}, "sha512-ERZWgaRTxueGV4cvL1tfpAOzFCWTXoUtbCBqnf2FhHDVs/so9eAKaanvrwWF9Dntx7BYsmFQujVQ0/B4S8Mmiw=="],
 
-    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.0.17", "", { "peerDependencies": { "@electric-sql/pglite": "0.5.15" } }, "sha512-rE40e6lIfJ0L4GXOi9grv0N8qpZo/x6ZXjET70WEsnb+/4LgvGL438f/F6QQj6Nj1TfaVM+c3dbNVrf+M8d3FQ=="],
+    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.0.17", "https://registry.npmmirror.com/@electric-sql/pglite-pg_textsearch/-/pglite-pg_textsearch-0.0.17.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.15" } }, "sha512-rE40e6lIfJ0L4GXOi9grv0N8qpZo/x6ZXjET70WEsnb+/4LgvGL438f/F6QQj6Nj1TfaVM+c3dbNVrf+M8d3FQ=="],
 
     "@electric-sql/pglite-pgmq": ["@electric-sql/pglite-pgmq@0.0.8", "https://registry.npmmirror.com/@electric-sql/pglite-pgmq/-/pglite-pgmq-0.0.8.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.10" } }, "sha512-VX5+ZoOSfi/xq9KEub2hS2MGzHNR3500Xy/o7/dw+hY9bzzGdC5rp6yBnOo6fYevVcsdHqYxcvfsdtItlx+c7Q=="],
 
-    "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.0.16", "", { "peerDependencies": { "@electric-sql/pglite": "0.5.15" } }, "sha512-3usbMM/Zkn0h7wpSft1rsa8lcXz77Q+rGdTpm7UORwtISg4CSGprinmu5qnF23GE0FHLH0LxEyKoPPteHuZPIg=="],
+    "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.0.16", "https://registry.npmmirror.com/@electric-sql/pglite-pgvector/-/pglite-pgvector-0.0.16.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.15" } }, "sha512-3usbMM/Zkn0h7wpSft1rsa8lcXz77Q+rGdTpm7UORwtISg4CSGprinmu5qnF23GE0FHLH0LxEyKoPPteHuZPIg=="],
 
     "@electric-sql/pglite-postgis": ["@electric-sql/pglite-postgis@0.2.10", "https://registry.npmmirror.com/@electric-sql/pglite-postgis/-/pglite-postgis-0.2.10.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.10" } }, "sha512-og3jYjlZw42+zrSBeM1o1sy4ihjdvFf0G1jKecIQr38ljxmciu1/h7S08+rbZMFVdLr8NBB420gf05+yq8FGBA=="],
 
@@ -225,7 +225,7 @@
 
     "fast-xml-builder": ["fast-xml-builder@1.3.1", "https://registry.npmmirror.com/fast-xml-builder/-/fast-xml-builder-1.3.1.tgz", { "dependencies": { "path-expression-matcher": "^1.6.2", "xml-naming": "^0.3.0" } }, "sha512-pIM/1n3ntFXKYrUZwW7QCK0gAW7XY+wzj1YMIV3tLDvPj/V+zTGJK5e3/4WJfwj0qWw2ElNXiTixda/R+3YSug=="],
 
-    "fast-xml-parser": ["fast-xml-parser@5.12.0", "", { "dependencies": { "@nodable/entities": "^3.1.0", "fast-xml-builder": "^1.3.1", "is-unsafe": "^2.0.3", "path-expression-matcher": "^1.6.2", "strnum": "^2.5.1", "xml-naming": "^0.3.0" }, "bin": { "fxparser": "src/cli/cli.js" } }, "sha512-/pXxRBtwxY9w8z7YbgsvIPPcPvFDsTbIkWwTQJhzNJPokj+TbN6ftmcv4j/pEQDvOCNnKGDzuk5Bo2oogIOiFg=="],
+    "fast-xml-parser": ["fast-xml-parser@5.12.0", "https://registry.npmmirror.com/fast-xml-parser/-/fast-xml-parser-5.12.0.tgz", { "dependencies": { "@nodable/entities": "^3.1.0", "fast-xml-builder": "^1.3.1", "is-unsafe": "^2.0.3", "path-expression-matcher": "^1.6.2", "strnum": "^2.5.1", "xml-naming": "^0.3.0" }, "bin": { "fxparser": "src/cli/cli.js" } }, "sha512-/pXxRBtwxY9w8z7YbgsvIPPcPvFDsTbIkWwTQJhzNJPokj+TbN6ftmcv4j/pEQDvOCNnKGDzuk5Bo2oogIOiFg=="],
 
     "function-bind": ["function-bind@1.1.2", "https://registry.npmmirror.com/function-bind/-/function-bind-1.1.2.tgz", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
 
@@ -259,7 +259,7 @@
 
     "is-unc-path": ["is-unc-path@1.0.0", "https://registry.npmmirror.com/is-unc-path/-/is-unc-path-1.0.0.tgz", { "dependencies": { "unc-path-regex": "^0.1.2" } }, "sha512-mrGpVd0fs7WWLfVsStvgF6iEJnbjDFZh9/emhRDcGWTduTfNHd9CHeUwH3gYIjdbwo4On6hunkztwOaAw0yllQ=="],
 
-    "is-unsafe": ["is-unsafe@2.0.3", "", {}, "sha512-ZBllczCCO267vgdFb6Tq3pv+LhHaCiGMdr+ZsuL+OopruAg7S+3ZDs1vD0RPC0uSrkjzbraxaGjtX1YBxjPeFQ=="],
+    "is-unsafe": ["is-unsafe@2.0.3", "https://registry.npmmirror.com/is-unsafe/-/is-unsafe-2.0.3.tgz", {}, "sha512-ZBllczCCO267vgdFb6Tq3pv+LhHaCiGMdr+ZsuL+OopruAg7S+3ZDs1vD0RPC0uSrkjzbraxaGjtX1YBxjPeFQ=="],
 
     "is-windows": ["is-windows@1.0.2", "https://registry.npmmirror.com/is-windows/-/is-windows-1.0.2.tgz", {}, "sha512-eXK1UInq2bPmjyX6e3VHIzMLobc4J94i4AWn+Hpq3OU5KkrRC96OAcR3PRJ/pGu6m8TRnBHP9dkXQVsT/COVIA=="],
 
