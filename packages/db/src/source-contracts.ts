@@ -104,7 +104,7 @@ export function parseDatabaseSourcesConfig(value: unknown): DatabaseSourcesConfi
 
 async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch (error) {
-    if (record(error) && error.code === "ENOENT") return false;
+    if (record(error) && error["code"] === "ENOENT") return false;
     throw error;
   }
 }
