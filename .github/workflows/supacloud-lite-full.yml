@@ -51,6 +51,9 @@ jobs:
         run: |
           bun run ../../scripts/build-command-dependencies.ts supacloud-lite
           bun install --frozen-lockfile
+          # test/application-compatibility.test.ts imports ../../db-zenstack/src/model.js,
+          # so tsc typechecks that package's sources against its own dependencies.
+          (cd ../db-zenstack && bun install --force --frozen-lockfile && bun run build)
 
       - name: Run the complete Lite suite
         working-directory: packages/supacloud-lite
@@ -95,6 +98,13 @@ jobs:
           bun run ../../scripts/build-command-dependencies.ts supacloud-lite
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The Lite tests import the ZenStack adapter sources; typechecking them
+          # needs that package's own dependencies installed.
+          cd ../db-zenstack
+          bun install --force --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run the complete Lite suite on Windows
