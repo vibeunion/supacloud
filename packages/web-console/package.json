@@ -48,7 +48,7 @@
     "@svadmin/ai-elements": "0.14.0",
     "@svadmin/core": "^0.76.0",
     "@svadmin/elysia": "0.14.27",
-    "@svadmin/sveltekit": "0.13.23",
+    "@svadmin/sveltekit": "0.13.29",
     "@svadmin/ui": "0.115.0",
     "@tanstack/svelte-query": "^6.4.1",
     "lucide-svelte": "^1.0.1",
@@ -59,7 +59,7 @@
     "vidstack": "^1.15.7"
   },
   "overrides": {
-    "@svadmin/devtools": "0.6.3",
+    "@svadmin/devtools": "0.6.5",
     "dompurify": "3.4.17",
     "esbuild": "0.28.2",
     "joi": "18.3.1",
