@@ -27,7 +27,7 @@ if (!target || !outfile) {
 
 const originalGenerated = existsSync(generatedPath)
   ? readFileSync(generatedPath, "utf8")
-  : 'export const EMBEDDED_WORKER_HASH: string = "";\nexport const EMBEDDED_WORKER_SOURCE: string = "";\n';
+  : 'export const EMBEDDED_WORKER_HASH: string = Buffer.alloc(0).toString();\nexport const EMBEDDED_WORKER_SOURCE: string = Buffer.alloc(0).toString();\n';
 
 try {
   rmSync(tmpDir, { recursive: true, force: true });

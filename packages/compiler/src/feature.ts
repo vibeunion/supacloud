@@ -223,8 +223,7 @@ export function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode):
         }
       }
     }
-    if (!module) return diagnostics;
-    const declaredTags = new Set(module.controllers.flatMap((controller) =>
+    const declaredTags = new Set((module?.controllers ?? []).flatMap((controller) =>
       controller.routes.flatMap((route) => route.tags ?? [])));
     if (transition.persistence !== undefined && declaredTags.size > 0
       && transition.invalidateTags === undefined) {

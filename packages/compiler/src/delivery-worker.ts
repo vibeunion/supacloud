@@ -32,7 +32,7 @@ if (typeof createDeliveryDatabase !== "function") {
     const dbClient = await createDeliveryDatabase(databaseHost.pool, { signal: lifecycle.signal });`
     : "";
   const lifecycleType = database ? "{ signal: AbortSignal; deps?: Record<string, unknown> }" : "{ signal: AbortSignal }";
-  const lifecycleArgument = database ? "{ signal, deps: { dbClient } }" : "{ signal }";
+  const lifecycleArgument = database ? "{ signal: lifecycle.signal, deps: { dbClient } }" : "{ signal: lifecycle.signal }";
   const closeOnAbort = database ? "true" : "host";
   return `
 import deliveryProcess from "node:process";
@@ -132,7 +132,7 @@ ${databaseState}
       modules: ReturnType<typeof createCompiledModules>, lifecycle: ${lifecycleType},
     ) => DeliveryWorkerHost | Promise<DeliveryWorkerHost> = createDeliveryWorker;
 ${databaseStartup}
-    const candidate = await createHost(createCompiledModules(), ${database ? "{ signal: lifecycle.signal, deps: { dbClient } }" : "{ signal: lifecycle.signal }"});
+    const candidate = await createHost(createCompiledModules(), ${lifecycleArgument});
     if (!candidate || typeof candidate.close !== "function") throw new Error("Invalid delivery worker host.");
     host = candidate;
     const execution = deliveryProcess.env["SUPACLOUD_WORKER_EXECUTION"];
