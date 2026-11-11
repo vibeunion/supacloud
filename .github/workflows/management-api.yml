@@ -698,15 +698,29 @@ jobs:
       - name: Install local test dependencies
         run: |
           bash scripts/prepare_management_api_dependencies.sh
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates curl
+          install_with_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true install -y "$@"; then
+                return 0
+              fi
+              if [[ "$attempt" == 3 ]]; then
+                return 1
+              fi
+              sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update || true
+              sleep 10
+            done
+          }
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update
+          install_with_retry ca-certificates curl
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl --fail --silent --show-error --location \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          sudo apt-get update
-          sudo apt-get install -y postgresql-18
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update
+          install_with_retry postgresql-18
+          test -x /usr/lib/postgresql/18/bin/postgres
       - name: Verify activation journal on an owned cluster
         run: |
           "$SUPACLOUD_STARTER_POSTGRES_BIN/postgres" --version
