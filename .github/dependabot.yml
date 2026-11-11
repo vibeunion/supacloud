@@ -5,54 +5,81 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/management-api"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/edge-runtime"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/web-console"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/cli"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/admin"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/supacloud"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/function-adapter"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/supacloud-js"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   # The Lite package ships its own bun.lock; the npm_and_yarn ecosystem cannot
   # update it and Dependabot aborts the whole job with a misconfiguration error.
@@ -61,6 +88,9 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
