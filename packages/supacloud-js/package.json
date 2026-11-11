@@ -125,7 +125,7 @@
     "@supabase/supabase-js": "^2.118.0",
     "typescript": "7.1.0-beta",
     "@tanstack/query-core": "5.105.3",
-    "@tanstack/svelte-query": "6.3.9",
+    "@tanstack/svelte-query": "6.4.1",
     "typebox": "1.4.3",
     "svelte": "5.57.3"
   },

@@ -12,7 +12,7 @@
       "devDependencies": {
         "@supabase/supabase-js": "^2.118.0",
         "@tanstack/query-core": "5.105.3",
-        "@tanstack/svelte-query": "6.3.9",
+        "@tanstack/svelte-query": "6.4.1",
         "@types/bun": "^1.4.4",
         "svelte": "5.57.3",
         "typebox": "1.4.3",
@@ -60,7 +60,7 @@
 
     "@tanstack/query-core": ["@tanstack/query-core@5.105.3", "https://registry.npmmirror.com/@tanstack/query-core/-/query-core-5.105.3.tgz", {}, "sha512-v1rbNy7MB/4Akth7CQH+CerV13K7Ok9hAusEsfz4sCjDdu3/kOSJPoWfoB+YjdEX1eBFBWKNAGE5nqZCgdlHDw=="],
 
-    "@tanstack/svelte-query": ["@tanstack/svelte-query@6.3.9", "https://registry.npmmirror.com/@tanstack/svelte-query/-/svelte-query-6.3.9.tgz", { "dependencies": { "@tanstack/query-core": "5.105.3" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-AemjCleZHfuv7MRyS9Bxocm/UON3KByNeMP2BjeGFUTvT/3PiEQMB4Er72Wu33I5oy/qRjq+QY3+LK3zwztZ0w=="],
+    "@tanstack/svelte-query": ["@tanstack/svelte-query@6.4.1", "", { "dependencies": { "@tanstack/query-core": "5.107.1" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-5j0PrXJOx8Ay6s13UamdLL6oc4stG84kVv0/WwFN74y5mkWDR20wNs9idYD4wb3etAI/slmKzPQzNkAzumKkMg=="],
 
     "@types/bun": ["@types/bun@1.4.4", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.4.tgz", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
@@ -147,6 +147,8 @@
     "undici-types": ["undici-types@8.12.3", "https://registry.npmmirror.com/undici-types/-/undici-types-8.12.3.tgz", {}, "sha512-EXE4ydL3S76dFb27UFjNVZHTyv/TLdATj/KUe29ptdcg6qXL48J2tZ3126E5kICj5jn781OR+XlVH1N6Mz8jbA=="],
 
     "zimmerframe": ["zimmerframe@1.1.5", "https://registry.npmmirror.com/zimmerframe/-/zimmerframe-1.1.5.tgz", {}, "sha512-msJxIvYDYcoNL+PJsu+7qmpDWsYmAxTY+2TNYXXF0hzBzBk0BMecOqDOG/EckUoKCuKwObfbugIl8QpqHDXeFA=="],
+
+    "@tanstack/svelte-query/@tanstack/query-core": ["@tanstack/query-core@5.107.1", "", {}, "sha512-PSyAik11oQBEVOiVy5hjZWHmoUqOXqK1WYy4v55mcxozEfKaQgpUMsgnXhWjuESzSht8JfzqMS1m6M/9CpNgvg=="],
 
     "@types/node/undici-types": ["undici-types@8.9.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.9.0.tgz", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
   }
