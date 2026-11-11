@@ -31,7 +31,17 @@ export interface ContextPack {
     angularHost: "@supacloud/app/angular";
     cancellation: "explicit-owner-signal";
     readTransport: "postgrest-supabase-js";
-    writeTransport: "command-rpc";
+    /**
+     * Write paths on the one PostgreSQL database.
+     * ordinaryCrud is PostgREST and @supabase/supabase-js for low-risk CRUD.
+     * compilerLane is the compiler-application Command boundary.
+     */
+    writeTransport: {
+      ordinaryCrud: "postgrest-supabase-js";
+      compilerLane: "model-command";
+      governedSql: "governed-sql";
+      legacyRpc: "legacy-rpc";
+    };
     writeRetry: "disabled";
     externalOutcome: "receipt-reconcile";
     databaseSource: "zmodel-append-only";
@@ -202,7 +212,12 @@ export function createContextPack(graph: ApplicationGraph, subject: string, snap
       angularHost: "@supacloud/app/angular",
       cancellation: "explicit-owner-signal",
       readTransport: "postgrest-supabase-js",
-      writeTransport: "command-rpc",
+      writeTransport: {
+        ordinaryCrud: "postgrest-supabase-js",
+        compilerLane: "model-command",
+        governedSql: "governed-sql",
+        legacyRpc: "legacy-rpc",
+      },
       writeRetry: "disabled",
       externalOutcome: "receipt-reconcile",
       databaseSource: "zmodel-append-only",

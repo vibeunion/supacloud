@@ -96,6 +96,21 @@ explicitly not the row projection. The finding stays on the existing
 `database-source-contracts` check: `source` when the checker reports, `runtime`
 when the checker cannot run. This is not a live Catalog proof.
 
+## Recorded follow-ups from #2549
+
+These items were left by the row-policy projection. This section records them
+and does not start the work. Recording them does not emit SQL, does not change
+the command starter, and does not describe the row-policy projection as the
+generated result of every policy. The emitted SQL is still only the
+`authenticated` RLS for row-level `@@allow` / `@@deny` that the compiler can
+project. `policyRls: "deferred"` does not mean the SQL already matches the model.
+
+- Relation predicates such as `review.ownerId`. Do not guess a subquery.
+- Field-level `@deny` as column privileges.
+- Grants, `FORCE ROW LEVEL SECURITY`, and setting JWT claims on the command host.
+- Live catalog proof that `pg_get_expr` text equals the emitted predicate. The existing optional `usingExpr` reconcile is not that proof.
+- Removing `policyRls: "deferred"` from the command starter. `policyRls: "deferred"` does not mean the SQL already matches the model.
+
 The generated catalog contains signatures, types and input hashes, not function
 bodies. Function names are schema-qualified. JSON, records and custom SQL types
 remain `unknown`; bigint/numeric preserve `number | string`. No driver validation

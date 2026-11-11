@@ -568,7 +568,12 @@ interface ProjectContextPack {
     commands: Record<string, string>;
     defaults: {
         readTransport: "postgrest-supabase-js";
-        writeTransport: "command-rpc";
+        writeTransport: {
+            ordinaryCrud: "postgrest-supabase-js";
+            compilerLane: "model-command";
+            governedSql: "governed-sql";
+            legacyRpc: "legacy-rpc";
+        };
         writeRetry: "disabled";
         externalOutcome: "receipt-reconcile";
         databaseSource: "zmodel-append-only";
@@ -704,7 +709,12 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         },
         defaults: {
             readTransport: "postgrest-supabase-js",
-            writeTransport: "command-rpc",
+            writeTransport: {
+                ordinaryCrud: "postgrest-supabase-js",
+                compilerLane: "model-command",
+                governedSql: "governed-sql",
+                legacyRpc: "legacy-rpc",
+            },
             writeRetry: "disabled",
             externalOutcome: "receipt-reconcile",
             databaseSource: "zmodel-append-only",
