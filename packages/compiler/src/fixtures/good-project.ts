@@ -2,7 +2,7 @@ import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
 
 /**
  * Valid three-layer module fixture:
- * - tokens.ts: DB_CLIENT (platform injection), AUDIT_CONFIG, LOGGER, AUDIT_SERVICE,
+ * - tokens.ts: DB_CLIENT (trusted delivery host/runtime), AUDIT_CONFIG, LOGGER, AUDIT_SERVICE,
  *   CASE_REPOSITORY, CASE_SERVICE
  * - audit module: value provider + factory provider + class provider, exports AUDIT_SERVICE
  * - case module: imports audit; CaseRepository class provider, CaseService deps

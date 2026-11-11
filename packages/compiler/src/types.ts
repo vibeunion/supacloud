@@ -618,7 +618,7 @@ export interface ApplicationGraph {
   /** Offline query inventory for AI context. Kept in graphql.manifest.json, not app.manifest.json. */
   graphql?: GraphqlContractSummary;
   modules: ModuleNode[];
-  /** Depended token names provided by platform injection rather than any module. */
+  /** Depended token names provided by the trusted delivery host/runtime rather than any module. */
   externalTokens: string[];
   /**
    * Diagnostics produced during analysis (e.g. missing-deps), merged by compileProject.
