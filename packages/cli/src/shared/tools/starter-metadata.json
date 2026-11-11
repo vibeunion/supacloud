@@ -3,7 +3,7 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.62.3"
+      "version": "0.62.4"
     },
     "app": {
       "version": "0.39.2",

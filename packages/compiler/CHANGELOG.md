@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.4](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.3...compiler-v0.62.4) (2026-11-11)
+
+
+### Documentation
+
+* **compiler:** clarify delivery database injection boundary ([#2587](https://github.com/vibeunion/supacloud/issues/2587)) ([0f1b358](https://github.com/vibeunion/supacloud/commit/0f1b358651a67c190ad9574cd1fd79e8724b880d))
+
 ## [0.62.3](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.2...compiler-v0.62.3) (2026-11-11)
 
 
