@@ -288,7 +288,9 @@ test('elysia publication preserves beta support without waiting for build-only o
     const pkg = localSiblings.get(`@supacloud/${name}`);
     return `${pkg.name}@${pkg.version}`;
   }));
-  assert.deepEqual(result.package['peerDependencies'], { elysia: '2.0.0-rc.1' });
+  const compatibility = JSON.parse(readFileSync(new URL('../../packages/elysia/compatibility.json', import.meta.url), 'utf8'));
+  assert.equal(typeof compatibility.packages?.elysia, 'string');
+  assert.deepEqual(result.package['peerDependencies'], { elysia: compatibility.packages.elysia });
   assert.equal(input.overrides['@supacloud/delivery'], 'file:../delivery');
   assert.doesNotMatch(JSON.stringify(result.package), /file:|workspace:|link:/);
 });
