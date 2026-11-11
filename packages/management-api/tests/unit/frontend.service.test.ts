@@ -520,9 +520,8 @@ test("environment updates snapshot before locking and preserve masks and prototy
     await entered.promise;
     input["TOKEN"] = "later-secret";
     input["PLAIN"] = "later";
-    Object.defineProperty(input, "__proto__", {
-      value: "later", enumerable: true, configurable: true, writable: true,
-    });
+    const prototypeKey = Object.getOwnPropertyNames(input).find((key) => key === "__proto__");
+    if (prototypeKey !== undefined) input[prototypeKey] = "later";
     release.resolve();
     const updated = await pending;
     expect(updated?.env_vars).toMatchObject({ TOKEN: "private-marker", PLAIN: "captured" });

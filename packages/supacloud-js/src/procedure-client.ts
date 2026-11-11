@@ -114,7 +114,6 @@ async function readErrorBody(response: Response | undefined): Promise<Record<str
         if (bytes > maxBytes) return undefined;
         text += decoder.decode(chunk.value, { stream: true });
       }
-      return undefined;
     };
     return await Promise.race([
       read(),
