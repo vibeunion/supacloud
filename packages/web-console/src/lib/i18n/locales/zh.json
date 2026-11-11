@@ -1567,6 +1567,7 @@
       "url_configuration": "URL 配置",
       "email_templates": "邮件模板",
       "smtp": "SMTP",
+      "sms": "短信 OTP",
       "hooks": "Hooks"
     }
   },

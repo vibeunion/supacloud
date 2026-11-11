@@ -25,6 +25,7 @@ export { taskEventRoutes } from "./task-events";
 export { databaseRoutes } from "./database";
 export { databaseJitRoutes } from "./database-jit";
 export { authRoutes } from "./auth";
+export { authSmsRoutes } from "./auth-sms";
 export { authRuntimeRoutes } from "./auth-runtime";
 export { wechatAuthRoutes } from "./auth-wechat";
 export { chinaAuthRoutes } from "./auth-china";
