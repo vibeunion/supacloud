@@ -60,16 +60,16 @@ describe("SupaCloud root dashboard", () => {
   });
 
   test("locks the released svadmin adapters and Vite compatibility rule", () => {
-    expect(packageJson.dependencies["@svadmin/ai-elements"]).toBe("0.13.10");
-    expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.74.0");
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.112.0");
-    expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("0.13.23");
-    expect(packageJson.dependencies["@svadmin/elysia"]).toBe("0.14.25");
-    expect(lockSource).toContain('"@svadmin/ai-elements@0.13.10"');
-    expect(lockSource).toContain('"@svadmin/core@0.74.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.112.0"');
-    expect(lockSource).toContain('"@svadmin/sveltekit@0.13.23"');
-    expect(lockSource).toContain('"@svadmin/elysia@0.14.25"');
+    expect(packageJson.dependencies["@svadmin/ai-elements"]).toBe("0.14.0");
+    expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.76.0");
+    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.115.0");
+    expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("0.13.29");
+    expect(packageJson.dependencies["@svadmin/elysia"]).toBe("0.14.27");
+    expect(lockSource).toContain('"@svadmin/ai-elements@0.14.0"');
+    expect(lockSource).toContain('"@svadmin/core@0.76.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.115.0"');
+    expect(lockSource).toContain('"@svadmin/sveltekit@0.13.29"');
+    expect(lockSource).toContain('"@svadmin/elysia@0.14.27"');
     expect(viteSource).toContain("'@svadmin/core'");
   });
 });
