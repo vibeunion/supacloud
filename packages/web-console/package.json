@@ -41,7 +41,7 @@
     "tailwindcss": "^4.3.4",
     "typescript": "~6.0.3",
     "vaul-svelte": "^0.3.2",
-    "vite": "8.3.5"
+    "vite": "8.3.6"
   },
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
