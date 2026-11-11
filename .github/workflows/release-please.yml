@@ -661,6 +661,9 @@ jobs:
           cd "$build_root/packages/supacloud-lite"
           bun run ../../scripts/build-command-dependencies.ts supacloud-lite
           bun install --frozen-lockfile
+          # The compatibility test imports the adapter source directly, so
+          # install its source package dependencies in the isolated build root.
+          (cd ../db-zenstack && bun install --force --frozen-lockfile)
           bun run check
           node ../../.github/scripts/prepare-command-package.mjs
           node ../../.github/scripts/publish-npm-package.mjs
