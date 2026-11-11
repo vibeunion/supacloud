@@ -715,6 +715,7 @@ jobs:
           install_with_retry ca-certificates curl
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl --fail --silent --show-error --location \
+            --retry 10 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
