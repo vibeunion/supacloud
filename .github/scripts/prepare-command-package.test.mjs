@@ -229,11 +229,19 @@ test('release order and preparation cover every package using local command depe
   assert.ok(app < elysia, 'app must publish before elysia so the rewritten app version is already on npm');
   assert.ok(cli > 0 && admin > cli, 'admin must publish after its CLI dependency');
   assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
-  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'compiler', 'supacloud-js']) {
+  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(block);
     assert.match(block, /prepare-command-package\.mjs[\s\S]*bun install --lockfile-only[\s\S]*bun install --frozen-lockfile/);
   }
+});
+test('compiler builds local database source before rewriting its publication manifest', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  const block = workflow.split('- name: Publish app compiler to NPM')[1]?.split('\n      - name:')[0];
+  assert.ok(block);
+  assert.ok(block.indexOf('bun run build') < block.indexOf('prepare-command-package.mjs'));
+  assert.match(block, /bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
+  assert.doesNotMatch(block.split('prepare-command-package.mjs')[1] ?? '', /bun install/);
 });
 test('elysia builds local fixtures before preparing its isolated publication', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
