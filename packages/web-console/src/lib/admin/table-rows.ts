@@ -29,7 +29,7 @@ export function formatTableValue(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value === "boolean" || typeof value === "bigint") return String(value);
-  if (value !== null && typeof value === "object") {
+  if (typeof value === "object") {
     try {
       const serialized = JSON.stringify(value);
       if (typeof serialized === "string") return serialized;

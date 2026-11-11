@@ -26,7 +26,6 @@ import {
 } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { $ } from "bun";
 import * as fs from "node:fs/promises";
 import { projectLogService } from "./project-logs.service";
 import { projectOpsService } from "./project-ops.service";

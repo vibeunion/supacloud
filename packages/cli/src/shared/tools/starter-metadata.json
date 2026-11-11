@@ -3,22 +3,22 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.62.3"
+      "version": "0.62.5"
     },
     "app": {
-      "version": "0.39.2",
+      "version": "0.39.3",
       "dependencies": {
         "rxjs": "7.8.2"
       }
     },
     "elysia": {
-      "version": "0.42.3"
+      "version": "0.42.4"
     },
     "commands": {
       "version": "0.12.0"
     },
     "contracts": {
-      "version": "0.16.1"
+      "version": "0.16.2"
     },
     "db": {
       "version": "0.24.2",
@@ -29,7 +29,7 @@
       }
     },
     "dbZenstack": {
-      "version": "0.2.1",
+      "version": "0.2.2",
       "dependencies": {
         "@zenstackhq/orm": "3.10.0",
         "@zenstackhq/schema": "3.10.0",
@@ -45,7 +45,7 @@
       }
     },
     "sdk": {
-      "version": "0.48.2",
+      "version": "0.48.3",
       "peerDependencies": {
         "@supabase/supabase-js": "^2.118.0"
       }

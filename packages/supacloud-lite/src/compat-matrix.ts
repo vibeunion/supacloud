@@ -7,7 +7,7 @@
 export const SUPABASE_JS_PIN = '2.118.0'
 export const SUPABASE_CLI_PIN = '2.122.0'
 export const REALTIME_IMAGE_TAG = 'v2.150.0'
-export const EDGE_RUNTIME_PACKAGE_VERSION = '0.38.3' // x-release-please-version
+export const EDGE_RUNTIME_PACKAGE_VERSION = '0.38.4' // x-release-please-version
 
 export type MatrixComponent = 'supabase-js' | 'cli' | 'realtime' | 'storage' | 'edge-functions'
 

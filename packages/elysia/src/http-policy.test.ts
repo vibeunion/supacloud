@@ -43,6 +43,7 @@ test("policies compile once, execute after validation/context and before request
           const tenant: string = http.tenant;
           // @ts-expect-error Native plugin context must not decay to any.
           const invalid: number = http.tenant;
+          void invalid;
           expect(tenant).toBe("demo");
           expect(http.params.id).toBe(42);
           expect(requestContext).toEqual({ user: "alice" });

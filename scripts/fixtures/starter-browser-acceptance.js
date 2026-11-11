@@ -1,4 +1,4 @@
-async page => {
+globalThis.starterBrowserAcceptance = async page => {
   const check = (condition, message) => { if (!condition) throw new Error(message); };
   const state = (id, value) => page.waitForFunction(
     ([id, value]) => document.getElementById(id)?.textContent === value, [id, value],

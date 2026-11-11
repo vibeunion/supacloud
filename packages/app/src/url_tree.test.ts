@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   DefaultUrlSerializer,
-  UrlSegmentGroup,
-  UrlTree,
 } from "./url_tree";
 
 describe("Angular-inspired UrlTree and DefaultUrlSerializer", () => {

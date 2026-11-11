@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { signal, computed, effect, untracked, linkedSignal } from "./signal";
+import { signal, computed, effect, linkedSignal } from "./signal";
 import { createDestroyRef } from "./context";
 
 describe("framework-neutral signal boundaries", () => {

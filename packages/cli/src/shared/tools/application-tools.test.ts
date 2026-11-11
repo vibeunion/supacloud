@@ -20,10 +20,6 @@ import { createServer, type Socket } from "node:net";
 import type { ToolInvocation } from "../tool-server";
 import { mutationRequestFingerprint } from "../mutation-protocol";
 
-const activationId = "11234567-89ab-4def-8123-456789abcdef";
-const configurationId = "31234567-89ab-4def-8123-456789abcdef";
-const releaseId = "a".repeat(64);
-
 function record(manifest = "a".repeat(64), projectRef = "project"): ApplicationReleaseRecord {
   return {
     schema: "supacloud.application-release.v1",

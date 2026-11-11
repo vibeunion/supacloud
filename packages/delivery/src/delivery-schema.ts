@@ -61,10 +61,14 @@ export const DeliveryOptionsSchema = Type.Object({
     httpApplications: Type.Optional(Type.Array(Type.Object({
       target: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
       source: DeliveryFilePathSchema,
+      /** Let the generated delivery wrapper create and inject DB_CLIENT. */
+      database: Type.Optional(Type.Boolean()),
     }, objectOptions))),
     workerApplications: Type.Optional(Type.Array(Type.Object({
       target: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
       source: DeliveryFilePathSchema,
+      /** Let the generated delivery wrapper create and inject DB_CLIENT. */
+      database: Type.Optional(Type.Boolean()),
     }, objectOptions))),
     assets: Type.Optional(Type.Array(Type.Object({
       target: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),

@@ -1201,10 +1201,6 @@ export class WorkerPool {
       started = true;
     } catch (error) {
       if (finished) return;
-      if (started) {
-        retireWithFailure(500, error instanceof Error ? error : new Error(String(error)));
-        return;
-      }
       cleanup(); outputLease.release();
       if (opts.request.body && !opts.request.body.locked) void opts.request.body.cancel().catch(() => {});
       resolveOnce(error instanceof BodyLimitError

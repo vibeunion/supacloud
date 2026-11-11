@@ -15,7 +15,6 @@ const text = Type.String();
 const nullableText = Type.Union([text, Type.Null()]);
 const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const nullableDate = Type.Union([dateSchema, Type.Null()]);
-const jsonObject = Type.Record(Type.String(), Type.Unknown());
 const taskStatus = Type.Union([
   Type.Literal("pending"), Type.Literal("leased"), Type.Literal("running"),
   Type.Literal("retry_scheduled"), Type.Literal("succeeded"), Type.Literal("failed"),

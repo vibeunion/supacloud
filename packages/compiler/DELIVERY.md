@@ -272,6 +272,28 @@ For an HTTP target, explicitly supply a trusted host composition module:
 }
 ```
 
+When the host exports a `createDeliveryDatabase` adapter factory, the build can
+own the connection setup for it:
+
+```json
+{
+  "version": 1,
+  "build": {
+    "httpApplications": [
+      { "target": "api", "source": "delivery-host.ts", "database": true }
+    ]
+  }
+}
+```
+
+With `database: true`, the generated delivery wrapper creates the platform Bun
+SQL host, calls `createDeliveryDatabase(pool, { signal })`, and passes the result
+to the application host as `lifecycle.deps.dbClient`. The wrapper closes the
+database pool together with the application host. Worker hosts support the same
+option. Existing hosts without this flag retain the original lifecycle contract.
+Targets using this option must include `@supacloud/db` as a runtime dependency so
+the generated bundle can carry the Bun SQL adapter.
+
 `source` is a TypeScript file relative to the configured source root. It must
 export `createDeliveryApplication(modules, lifecycle)` returning, synchronously
 or asynchronously, `{ fetch(request): Response | Promise<Response>, close() }`.
@@ -282,18 +304,24 @@ Job targets, missing files, symlinks and paths into generated output are rejecte
 For a stateless, public HTTP application:
 
 ```ts
+import type { SQL } from "bun";
 import { createApplication, type CompiledModule } from "@supacloud/elysia";
 
 export function createDeliveryApplication(
   modules: CompiledModule[],
-  { signal }: { signal: AbortSignal },
+  { signal, deps }: { signal: AbortSignal; deps?: Record<string, unknown> },
 ) {
   signal.throwIfAborted();
-  const app = createApplication({ modules });
+  const app = createApplication({ modules, deps });
   return {
     fetch: (request: Request) => app.handle(request),
     close() {},
   };
+}
+
+export function createDeliveryDatabase(pool: SQL, { signal }: { signal: AbortSignal }) {
+  signal.throwIfAborted();
+  return makeApplicationDatabaseClient(pool);
 }
 ```
 

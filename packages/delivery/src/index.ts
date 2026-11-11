@@ -1,5 +1,5 @@
 import {
-  DELIVERY_ARTIFACT_MAX_FILE_BYTES, DELIVERY_ARTIFACT_MAX_TOTAL_BYTES,
+  DELIVERY_ARTIFACT_MAX_TOTAL_BYTES,
   readDeliveryManifest, readVerifiedDeliveryFiles,
 } from "./delivery-artifact";
 export { DELIVERY_ARTIFACT_MAX_FILE_BYTES, DELIVERY_ARTIFACT_MAX_TOTAL_BYTES } from "./delivery-artifact";

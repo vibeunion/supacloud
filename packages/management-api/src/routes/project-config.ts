@@ -526,7 +526,7 @@ function buildCustomHostnameResponse(domainInfo: unknown) {
   const response = cloneTemplate(
     OPENAPI_CUSTOM_HOSTNAME_RESPONSE_TEMPLATE,
   ) as Record<string, unknown>;
-  const raw = (domainInfo as Record<string, unknown>) || {};
+  const raw = recordOrEmpty(domainInfo);
   const hostname =
     typeof raw.custom_hostname === "string" ? raw.custom_hostname : "";
   const configured = hostname.length > 0;
