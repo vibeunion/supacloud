@@ -121,11 +121,19 @@ export function createMigrationLedgerEntry(input: MigrationLedgerEntryInput): Mi
     .filter((statement): statement is string => typeof statement === "string")
     .map(normalizeStatement)
     .filter(Boolean);
+  // Older Supabase ledgers can retain a verified checksum while omitting the
+  // original SQL body. Treat that row as a sealed historical baseline: the
+  // checksum remains the identity evidence and no SQL is reconstructed or
+  // replayed. Rows with no stored checksum still use the deterministic empty
+  // statement checksum, preserving the ordinary ledger contract.
+  const checksum = statements.length === 0 && /^[a-f0-9]{64}$/.test(input.checksum?.trim() ?? "")
+    ? input.checksum!.trim()
+    : calculateMigrationChecksum({ version, name, statements });
   return {
     version,
     name,
     statements,
-    checksum: calculateMigrationChecksum({ version, name, statements }),
+    checksum,
     stored_checksum: input.checksum?.trim() || null,
     applied_at: input.appliedAt?.trim() || null,
   };

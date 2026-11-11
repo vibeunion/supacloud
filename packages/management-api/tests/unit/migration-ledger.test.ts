@@ -159,6 +159,19 @@ describe("migration ledger compatibility", () => {
     await expect(readMigrationInventory(database)).rejects.toMatchObject({ conflictingVersions: ["1"] });
   });
 
+  test("accepts a sealed historical baseline whose SQL body is absent", async () => {
+    const checksum = "d".repeat(64);
+    const database = { unsafe: async (query: string) => {
+      if (query.includes("public.schema_migrations")) throw postgresError("42P01", "missing legacy ledger");
+      return [{ version: "20261028120000", name: "manual_template_markers", statements: null, checksum, applied_at: null }];
+    } };
+
+    await expect(readMigrationInventory(database)).resolves.toEqual([{
+      version: "20261028120000", name: "manual_template_markers", statements: [],
+      statement_count: 0, checksum, applied_at: null,
+    }]);
+  });
+
   test("fails closed when canonical and legacy SQL differ for the same version", async () => {
     const database = {
       unsafe: async (query: string) => query.includes("supabase_migrations.schema_migrations")
