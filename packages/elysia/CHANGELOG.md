@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.42.3](https://github.com/vibeunion/supacloud/compare/elysia-v0.42.2...elysia-v0.42.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **ci:** restore main's Elysia pin and TanStack dedupe ([#2585](https://github.com/vibeunion/supacloud/issues/2585)) ([96c3130](https://github.com/vibeunion/supacloud/commit/96c31304224f8cd8ca03a8525850a4859472fd6d))
+* **elysia:** align every pin on Elysia 2.0.0-rc.3 ([#2575](https://github.com/vibeunion/supacloud/issues/2575)) ([2f1e7d5](https://github.com/vibeunion/supacloud/commit/2f1e7d5f1714685a872d5eea3e445797c1171b84))
+* publish the pending-work app subpath with the next elysia release ([#2553](https://github.com/vibeunion/supacloud/issues/2553)) ([94ccd82](https://github.com/vibeunion/supacloud/commit/94ccd82e3848c135e80f07e3c83e4b808c0ee062))
+
 ## [0.42.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.42.1...elysia-v0.42.2) (2026-11-10)
 
 

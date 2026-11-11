@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.38.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.2...edge-runtime-v0.38.3) (2026-11-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @supabase/supabase-js in /packages/edge-runtime ([#2559](https://github.com/vibeunion/supacloud/issues/2559)) ([dee14ac](https://github.com/vibeunion/supacloud/commit/dee14ac6cdc82582e5f572aa0e324ba776708445))
+* **deps:** bump elysia in /packages/edge-runtime ([#2560](https://github.com/vibeunion/supacloud/issues/2560)) ([bb2524a](https://github.com/vibeunion/supacloud/commit/bb2524a5142f685cad08c4dba64c4b7739a757c1))
+* **deps:** bump exact-mirror in /packages/edge-runtime ([#2557](https://github.com/vibeunion/supacloud/issues/2557)) ([7711af5](https://github.com/vibeunion/supacloud/commit/7711af5ba5690d77b0fcecad149b50418f67770e))
+
 ## [0.38.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.1...edge-runtime-v0.38.2) (2026-11-07)
 
 

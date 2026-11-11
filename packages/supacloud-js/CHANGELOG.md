@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.48.2](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.1...supacloud-js-v0.48.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **ci:** restore main's Elysia pin and TanStack dedupe ([#2585](https://github.com/vibeunion/supacloud/issues/2585)) ([96c3130](https://github.com/vibeunion/supacloud/commit/96c31304224f8cd8ca03a8525850a4859472fd6d))
+* publish the pending-work app subpath with the next elysia release ([#2553](https://github.com/vibeunion/supacloud/issues/2553)) ([94ccd82](https://github.com/vibeunion/supacloud/commit/94ccd82e3848c135e80f07e3c83e4b808c0ee062))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @supabase/supabase-js in /packages/supacloud-js ([#2563](https://github.com/vibeunion/supacloud/issues/2563)) ([08d3d31](https://github.com/vibeunion/supacloud/commit/08d3d31ed36f2c6d4b19c5b163291737d919a338))
+* **deps-dev:** bump @tanstack/svelte-query in /packages/supacloud-js ([#2566](https://github.com/vibeunion/supacloud/issues/2566)) ([f8ee690](https://github.com/vibeunion/supacloud/commit/f8ee690099683eea4ec9dcbcddd54b5070158c95))
+* **deps-dev:** bump typebox in /packages/supacloud-js ([#2564](https://github.com/vibeunion/supacloud/issues/2564)) ([5bf809d](https://github.com/vibeunion/supacloud/commit/5bf809dff2dbca32edbb09acfcf98399fe803d5d))
+
 ## [0.48.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.0...supacloud-js-v0.48.1) (2026-11-06)
 
 

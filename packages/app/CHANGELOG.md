@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.2](https://github.com/vibeunion/supacloud/compare/app-v0.39.1...app-v0.39.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* publish the pending-work app subpath with the next elysia release ([#2553](https://github.com/vibeunion/supacloud/issues/2553)) ([94ccd82](https://github.com/vibeunion/supacloud/commit/94ccd82e3848c135e80f07e3c83e4b808c0ee062))
+
 ## [0.39.1](https://github.com/vibeunion/supacloud/compare/app-v0.39.0...app-v0.39.1) (2026-11-07)
 
 
