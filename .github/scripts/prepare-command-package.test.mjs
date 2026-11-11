@@ -487,7 +487,11 @@ test('elysia publication rejects a published app version that lacks an imported 
     const filesWithoutPendingWork = [
       'dist/index.js', 'dist/index.d.ts', 'dist/execution.js', 'dist/execution.d.ts', 'dist/pending_work.d.ts', 'package.json',
     ];
-    /** @param {Record<string, unknown>} exportsMap @param {readonly string[]} files */
+    /**
+     * @param {Record<string, unknown>} exportsMap
+     * @param {readonly string[]} files
+     * @returns {(args: string[]) => Promise<{ stdout: string }>}
+     */
     const runNpm = (exportsMap, files) => async (args) => {
       if (args[0] === 'view') return { stdout: `${JSON.stringify(exportsMap)}\n` };
       if (args[0] === 'pack') return { stdout: JSON.stringify([{ files: files.map((path) => ({ path })) }]) };

@@ -12,12 +12,14 @@ const templatePaths = [
 ];
 
 /** Parse Bun's emitted JSON-with-trailing-commas without evaluating repository code. */
+/** @param {string} source */
 export function parseLockfile(source) {
   return JSON.parse(source.replace(/"(?:\\.|[^"\\])*"|,(?=\s*[}\]])/g,
+    /** @param {string} token */
     (token) => token.startsWith(',') ? '' : token));
 }
 
-/** @param {unknown} value */
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -133,6 +135,7 @@ function shippingTypeScript(directory, files = []) {
 }
 
 /** Shipping adapter source must stay within the workspace app export map. Test files are excluded. */
+/** @param {string} root */
 export function checkAdapterAppImports(root) {
   const manifestPath = resolve(root, 'packages/app/package.json');
   if (!existsSync(manifestPath)) return [];
@@ -151,8 +154,10 @@ export function checkAdapterAppImports(root) {
 }
 
 /** Check repository-owned declarations, not third-party or isolated user dependencies. */
+/** @param {string} root */
 export function checkElysiaCompatibility(root) {
   const problems = [];
+  /** @param {string} path */
   const readJSON = (path) => JSON.parse(readFileSync(resolve(root, path), 'utf8'));
   const matrix = readJSON('packages/elysia/compatibility.json');
   const expected = matrix.packages?.elysia;
