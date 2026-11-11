@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.31.0",
-        "@supacloud/cli": "^0.121.3",
+        "@supacloud/cli": "^0.121.6",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
@@ -65,9 +65,9 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.31.0", "", { "dependencies": { "@supacloud/cli": "0.117.0", "@supacloud/delivery": "0.25.0", "ssh2": "^1.17.0", "typebox": "1.4.3" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-xR5QRKLcFiml1GWF9t5pFPINubzGUF+4MhvsamwKYqSDwQhiTFJ0s01t4tWuaDMyHuXc90zgNywSyrYalNCrSA=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.121.3", "", { "dependencies": { "@supacloud/compiler": "^0.62.2", "@supacloud/db": "0.24.2", "@supacloud/delivery": "0.27.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-Anqqdl1cML5+oPZ8pXjvT/tuaL3lPQMLMxVVCwhqmlGwfJrvcXlxgH4aFY9ordpzOJH8K8haYklYrhGCJGyV0g=="],
+    "@supacloud/cli": ["@supacloud/cli@0.121.6", "", { "dependencies": { "@supacloud/compiler": "^0.62.5", "@supacloud/db": "0.24.2", "@supacloud/delivery": "0.28.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-dD39TiM/EjzrNJWorTbYXt8qNyYqMZkklhsHCFcAgDKIRlrkKG9+S+eOYvYqGUPs7VE+7I4RvKY9g0wfygY6Qg=="],
 
-    "@supacloud/compiler": ["@supacloud/compiler@0.62.2", "", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "0.24.2", "@supacloud/delivery": "0.27.0", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "bin": { "supacloud-compiler": "dist/cli.js" } }, "sha512-7RZheSotjdMpIA/kp4EcSu9lM0SPFr2O26uAuiTvqHpWFVq7KmYwyaL/ZqtvRYn/1spdnA0vfnmmRyJ6sdsW+g=="],
+    "@supacloud/compiler": ["@supacloud/compiler@0.62.5", "", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "0.24.2", "@supacloud/delivery": "0.28.0", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "bin": { "supacloud-compiler": "dist/cli.js" } }, "sha512-rDr3+HnNoGp3kxfU/0lEFwOe7wM7fSoIKr1sqExPXCsElPMk82ycEL+Gte1etZCE2T4JaMIQEnJjDjYJt2SACA=="],
 
     "@supacloud/contracts": ["@supacloud/contracts@0.16.1", "", {}, "sha512-QuizVHaZfeDszzqaMhVl9qeW40HCbtttKVdjFAidLiPoD6NzgwYB53UrtI3sHVFLii/Zdq9qn2NtSp7N/8cHlA=="],
 
@@ -329,9 +329,9 @@
 
     "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.117.0", "", { "dependencies": { "@supacloud/compiler": "^0.57.0", "@supacloud/db": "0.21.0", "@supacloud/delivery": "0.25.0", "typebox": "1.4.3" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-2aLrdAaaxc6/x6765OHLGKr+Mi4JwPrA9YXyg1Zi+XGdM2pQB1TdXAhCWH62OD8IcU6Yp/BglU0/sOnfg/qAhA=="],
 
-    "@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@0.27.0", "", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" } }, "sha512-zaXKmyn9+AN6jOml1eufhz/pwybckh4D9jF5EwQiCIWk1qXCovztw1RUrCZB2GVqf8teWE+vSU8+gn1iBughMQ=="],
+    "@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@0.28.0", "", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" } }, "sha512-RBeC0KswaJ4lfdI3TMPmevzfs2rDwhf9z2h0oNsIoXNozULfE4CzPT78T2liNkYaHVl4Lzw6WIBAUyFvwxOAog=="],
 
-    "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@0.27.0", "", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" } }, "sha512-zaXKmyn9+AN6jOml1eufhz/pwybckh4D9jF5EwQiCIWk1qXCovztw1RUrCZB2GVqf8teWE+vSU8+gn1iBughMQ=="],
+    "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@0.28.0", "", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" } }, "sha512-RBeC0KswaJ4lfdI3TMPmevzfs2rDwhf9z2h0oNsIoXNozULfE4CzPT78T2liNkYaHVl4Lzw6WIBAUyFvwxOAog=="],
 
     "@zenstackhq/sdk/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
