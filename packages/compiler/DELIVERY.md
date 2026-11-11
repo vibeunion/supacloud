@@ -304,6 +304,40 @@ another generated application or manually adding routes bypasses target ownershi
 The host is trusted application code, not a sandbox, and build success cannot
 prove that its exposed routes or security policy match the plan.
 
+### Database adapter boundary
+
+`DB_CLIENT` is an application dependency token, not a database connection that
+the compiler or the delivery runtime creates automatically. The delivery host
+is the trusted composition root: it selects the project database, creates the
+pool, adapts it to the application's database port, and passes that port to
+`createApplication({ deps: { dbClient } })`.
+
+For the Bun PostgreSQL adapter, use `createBunSqlHost` from `@supacloud/db/bun`:
+
+```ts
+import { createBunSqlHost } from "@supacloud/db/bun";
+import { createApplication, type CompiledModule } from "@supacloud/elysia";
+
+export function createDeliveryApplication(modules: CompiledModule[]) {
+  const host = createBunSqlHost();
+  const dbClient = makeApplicationDatabaseClient(host.pool);
+  const app = createApplication({ modules, deps: { dbClient } });
+  return {
+    fetch: (request: Request) => app.handle(request),
+    close: () => host.close(),
+  };
+}
+```
+
+`createBunSqlHost` reads `DATABASE_URL`, or the private Unix-socket settings
+`DATABASE_SOCKET_PATH`, `DATABASE_NAME` and `DATABASE_USER`, from the target's
+runtime environment. The deployment service stores those values in the target
+environment file; they are not bundled into the build, sent to the browser, or
+passed into application modules. A host that uses another database driver may
+use its own runtime secret and adapter instead. Removing the connection input
+without supplying an equivalent host-owned adapter leaves `DB_CLIENT` absent
+and causes applications that require persistence to fail closed.
+
 Move the **entire** `bundle` directory to the destination and run:
 
 ```sh

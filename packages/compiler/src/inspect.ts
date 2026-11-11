@@ -102,7 +102,7 @@ export function explainGraph(graph: ApplicationGraph, subject: string): string {
     ]);
     return [
       `EXTERNAL TOKEN ${subject}`,
-      "  provided by: platform runtime",
+      "  provided by: trusted delivery host/runtime",
       `  references: ${references.length > 0 ? references.join(", ") : "-"}`,
     ].join("\n");
   }
