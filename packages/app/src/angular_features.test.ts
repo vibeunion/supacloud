@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { DOCUMENT } from "./platform";
 import { APP_BASE_HREF, ROUTER_CONFIGURATION, provideRouter, withComponentInputBinding, withRouterConfig, withTitleStrategy } from "./route_provider";
-import { DefaultTitleStrategy, TITLE_STRATEGY, TitleStrategy } from "./title_strategy";
+import { TITLE_STRATEGY, TitleStrategy } from "./title_strategy";
 import { joinWithSlash, normalizePath, stripTrailingSlash } from "./location";
 import { TestBed } from "./testing";
 import { executeRoutePipeline } from "./route_pipeline";

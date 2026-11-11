@@ -357,7 +357,7 @@ test("bounded read-ahead releases execution slots while unread responses stay ch
 });
 
 test("aborting a buffered response cannot cancel the next execution on its reused Worker", async () => {
-  const { dispatch, pool, budget } = await fixture(`
+  const { dispatch, budget } = await fixture(`
     export default async () => {
       if (process.env.NEXT === 'yes') { await Bun.sleep(80); return new Response('next'); }
       let chunks = 0;

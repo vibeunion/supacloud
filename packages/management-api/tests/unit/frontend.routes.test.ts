@@ -5,7 +5,7 @@ import {
   FrontendReleaseError,
   frontendReleaseService,
 } from "../../src/services/frontend-release.service";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import * as filesystem from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";

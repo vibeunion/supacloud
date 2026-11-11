@@ -3,7 +3,7 @@ import { expect, mock, test } from "bun:test";
 import { SQL } from "bun";
 import { Elysia } from "elysia";
 import { strict as assert } from "node:assert";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "../../../compiler/src/fixtures/runtime-source";

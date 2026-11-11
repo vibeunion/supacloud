@@ -40,7 +40,6 @@ const REPAIR_FILES = realtimeSchemaFixture.files.filter((file) => REPAIR_PATHS.i
 const PROFILE = realtimeSchemaFixture.profileContents;
 const MANIFEST = realtimeSchemaFixture.manifestContents;
 const MANIFEST_SHA256 = realtimeSchemaFixture.manifestSha256;
-const MANIFEST_LOAD_ORDER = (JSON.parse(MANIFEST) as { loadOrder: string[] }).loadOrder;
 const SCHEMA_FILES = realtimeSchemaFixture.files;
 
 function artifactHash(files: readonly { path: string; sql: string }[]): string {

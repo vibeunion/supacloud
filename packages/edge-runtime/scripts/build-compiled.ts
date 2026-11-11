@@ -27,7 +27,7 @@ if (!target || !outfile) {
 
 const originalGenerated = existsSync(generatedPath)
   ? readFileSync(generatedPath, "utf8")
-  : 'export const EMBEDDED_WORKER_HASH = "";\nexport const EMBEDDED_WORKER_SOURCE = "";\n';
+  : 'export const EMBEDDED_WORKER_HASH: string = "";\nexport const EMBEDDED_WORKER_SOURCE: string = "";\n';
 
 try {
   rmSync(tmpDir, { recursive: true, force: true });
@@ -58,8 +58,8 @@ try {
   await writeFile(
     generatedPath,
     [
-      `export const EMBEDDED_WORKER_HASH = ${JSON.stringify(workerHash)};`,
-      `export const EMBEDDED_WORKER_SOURCE = ${JSON.stringify(workerSource)};`,
+      `export const EMBEDDED_WORKER_HASH: string = ${JSON.stringify(workerHash)};`,
+      `export const EMBEDDED_WORKER_SOURCE: string = ${JSON.stringify(workerSource)};`,
       "",
     ].join("\n"),
   );

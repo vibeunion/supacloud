@@ -12,7 +12,6 @@ assert.ok(process.env.DATABASE_URL);
 const queue = `acceptance_${crypto.randomUUID().replaceAll("-", "").slice(0, 20)}`;
 const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 const evidence: Record<string, boolean> = {};
-let creationAttempted = false;
 
 async function request(path: string, init: RequestInit = {}): Promise<{ response: Response; body: any }> {
   const response = await fetch(`${base}/v1/projects/${ref}${path}`, {
@@ -63,7 +62,6 @@ try {
   });
 
   try {
-    creationAttempted = true;
     const createdResponse = await request("/tasks/queues", {
       method: "POST", body: JSON.stringify({ queue_name: queue }),
     });
@@ -135,14 +133,12 @@ try {
     assert.equal(empty.response.status, 204, JSON.stringify(empty.body));
     evidence.emptyReadConfirmed = true;
   } finally {
-    if (creationAttempted) {
-      const [existing] = await projectDb`
-        SELECT count(*)::int AS count FROM pgmq.list_queues() WHERE queue_name = ${queue}
-      `;
-      if (Number(existing.count) > 0) {
-        const dropped = await request(`/tasks/queues/${queue}`, { method: "DELETE" });
-        assert.ok([204, 404].includes(dropped.response.status), JSON.stringify(dropped.body));
-      }
+    const [existing] = await projectDb`
+      SELECT count(*)::int AS count FROM pgmq.list_queues() WHERE queue_name = ${queue}
+    `;
+    if (Number(existing.count) > 0) {
+      const dropped = await request(`/tasks/queues/${queue}`, { method: "DELETE" });
+      assert.ok([204, 404].includes(dropped.response.status), JSON.stringify(dropped.body));
     }
     const [remaining] = await projectDb`
       SELECT count(*)::int AS count

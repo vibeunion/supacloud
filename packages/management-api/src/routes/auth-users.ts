@@ -1155,7 +1155,7 @@ export const userManagementRoutes = new Elysia({ prefix: authUserRoutePrefix })
           });
           return deletionStateUnavailable("user_deletion_failure_state_unavailable");
         }
-        if (deleteResponse && !deleteResponse.ok && deleteError) {
+        if (!deleteResponse.ok && deleteError) {
           set.status = deleteResponse.status;
           return deleteError;
         }

@@ -195,7 +195,6 @@ test.each([false, true])("app release composes one deployment and preserves acce
     const calls: Array<Record<string, unknown>> = [];
     const releaseId = "a".repeat(64);
     const configurationId = "11234567-89ab-4def-8123-456789abcdef";
-    const activationId = "21234567-89ab-4def-8123-456789abcdef";
     try {
         const result = await runAppTool({
             action: "release", root, ref: identity.ref, id: identity.id,

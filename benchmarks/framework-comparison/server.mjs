@@ -14,7 +14,6 @@ if (!adapter || !Number.isInteger(port) || port < 1 || port > 65_535) {
 }
 
 const STATIC_RESPONSE = Object.freeze({ ok: true, value: 42 });
-const BODY_RESPONSE = Object.freeze({ ok: true, value: 42, label: "benchmark" });
 const packageVersions = {
   ...(adapter === "elysia-native-contract-bun" || adapter === "supacloud-elysia-bun" ? { elysia: "2.0.0-rc.1" } : {}),
   ...(adapter === "supacloud-elysia-bun" ? { supacloudCore: process.env.SUPACLOUD_CORE_VERSION ?? JSON.parse(await readFile(new URL("../../packages/elysia/package.json", import.meta.url), "utf8")).version } : {}),

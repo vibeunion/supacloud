@@ -73,7 +73,7 @@ export class TransferState {
     const state = new TransferState();
     try {
       const parsed: unknown = JSON.parse(json);
-      if (parsed && typeof parsed === "object" && parsed !== null) {
+      if (parsed && typeof parsed === "object") {
         for (const [k, v] of Object.entries(parsed)) {
           state.set(k, v);
         }

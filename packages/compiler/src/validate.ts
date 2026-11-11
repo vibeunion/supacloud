@@ -789,7 +789,6 @@ export function validateGraph(
             const cycleKey = [...cycle].sort().join("|");
             if (!reportedRedirectCycles.has(cycleKey)) {
               reportedRedirectCycles.add(cycleKey);
-              const meta = COMPILER_DIAGNOSTIC_CODES["circular-route-redirect"];
               error(
                 "circular-route-redirect",
                 `Route redirect chain forms a cycle: ${cycle.join(" -> ")}`,

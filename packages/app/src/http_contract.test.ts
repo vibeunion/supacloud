@@ -84,5 +84,8 @@ function contractTypes(client: HttpClient) {
   const blob: Promise<Blob> = client.request("GET", "/items", { responseType: "blob" });
   // @ts-expect-error observe: response takes precedence over responseType.
   const wrong: Promise<string> = client.get("/items", { observe: "response", responseType: "text" });
+  void [unchecked, response, text, blob, wrong];
   return result;
 }
+
+void contractTypes;

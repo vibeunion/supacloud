@@ -1231,7 +1231,7 @@ export class AuthHandler {
     if (prepared.kind === 'signup_disabled') {
       return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
     }
-    const { user, code, linkToken } = prepared
+    const { code, linkToken } = prepared
     const kind = tokenType === 'otp' ? 'magiclink' : tokenType
     const linkUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
     linkUrl.searchParams.set('token', linkToken)
@@ -3091,7 +3091,7 @@ export class AuthHandler {
       if (factor.rows[0].status === 'verified' && !hasAal2) {
         return authError(403, 'insufficient_aal', 'AAL2 required to unenroll a verified MFA factor')
       }
-      const del = await query(
+      await query(
         `delete from auth.mfa_factors where id = $1 and user_id = $2 returning id`,
         [factorId, user.id],
       )

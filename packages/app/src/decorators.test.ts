@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   Command,
   Controller,
-  Delete,
   Get,
   Head,
   Inject,
@@ -11,9 +10,7 @@ import {
   Module,
   Optional,
   Options,
-  Patch,
   Post,
-  Put,
   Query,
   Host,
   Self,

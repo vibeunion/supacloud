@@ -1,6 +1,5 @@
 import { getProjectDb, sql, type ProjectTask } from "../db";
 import { projectRepository } from "../repositories/project.repository";
-import { parseTaskRecord } from "../utils/task-record";
 import { decodeProjectTask, projectTaskColumns } from "../db/contracts/task-row";
 import { readPgmqProjectDatabase } from "../utils/pgmq-project";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
