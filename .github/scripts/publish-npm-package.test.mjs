@@ -69,6 +69,27 @@ describe('retry-safe npm publishing', () => {
     ]);
   });
 
+  test('skips lifecycle scripts when the caller already built the package', async () => {
+    const runner = recordingRunner([
+      npmNotFoundError('@supacloud/compiler@0.62.3'),
+      { stdout: '+ @supacloud/compiler@0.62.3\n', stderr: '' },
+      { stdout: '"0.62.3"\n', stderr: '' },
+    ]);
+
+    await publishNpmPackage({
+      name: '@supacloud/compiler',
+      version: '0.62.3',
+      runNpm: runner.runNpm,
+      ignoreScripts: true,
+    });
+
+    assert.deepEqual(runner.calls, [
+      viewArgs('@supacloud/compiler@0.62.3'),
+      [...publishArgs, '--ignore-scripts'],
+      viewArgs('@supacloud/compiler@0.62.3'),
+    ]);
+  });
+
   test('accepts an explicit HTTP 404 without an npm error code', async () => {
     const notFound = Object.assign(new Error('npm view failed'), {
       stderr: 'npm error 404 Not Found',
