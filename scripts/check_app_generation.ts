@@ -11,6 +11,11 @@ import { fileURLToPath } from "node:url";
 import { installStarterConsumer, runStarterCommand, starterInstallArgs } from "./check_app_starter";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// The Elysia pin has a single source of truth: the compatibility matrix that
+// check-elysia-compatibility.mjs also validates.
+const compatibility = JSON.parse(await readFile(join(repo, "packages/elysia/compatibility.json"), "utf8"));
+const elysiaPin = compatibility.packages?.elysia;
+assert.equal(typeof elysiaPin, "string", "compatibility.json must pin the Elysia version");
 const temporary = await mkdtemp(join(tmpdir(), "supacloud-packed-generation-"));
 const runner = join(temporary, "runner");
 const project = join(temporary, "project");
@@ -62,7 +67,7 @@ try {
     const cli = join(runner, "node_modules/@supacloud/cli/dist/index.js");
     await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "app"], runner);
     const generatedManifest = JSON.parse(await readFile(join(project, "package.json"), "utf8"));
-    assert.equal(generatedManifest.dependencies.elysia, "2.0.0-rc.1");
+    assert.equal(generatedManifest.dependencies.elysia, elysiaPin);
     // Candidate tarballs replace only project-owned packages; third-party versions
     // and the generated template otherwise remain exactly as the CLI emitted them.
     for (const group of ["dependencies", "devDependencies"]) {
@@ -121,7 +126,7 @@ const invalidResult: InventoryResult = { id: 1 };
 void typedResult; void invalidResult;
 
 const version = await Bun.file("node_modules/elysia/package.json").json();
-assert.equal(version.version, "2.0.0-rc.1");
+assert.equal(version.version, ${JSON.stringify(elysiaPin)});
 const module = createCompiledModules().find(value => value.name === "inventory");
 assert.ok(module);
 const unavailableApp = new Elysia().use(createModulePlugin(module, module.createServices({}, {})));
