@@ -424,6 +424,7 @@ test('lite publication builds sibling command packages before typecheck', () => 
   const end = workflow.indexOf('\n      - name:', start + 1);
   const block = workflow.slice(start, end);
   assert.match(block, /build-command-dependencies\.ts supacloud-lite/);
+  assert.match(block, /bun install --frozen-lockfile[\s\S]*cd \.\.\/db-zenstack && bun install --force --frozen-lockfile/);
   assert.match(block, /bun run check/);
 });
 
