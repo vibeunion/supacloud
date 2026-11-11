@@ -24,7 +24,6 @@ const managementDb = mock((strings: TemplateStringsArray) => {
   return Promise.resolve([]);
 });
 const getProject = mock(async (ref: string) => ({ ref }));
-const requireAdminAuth = mock(async () => undefined);
 const requireProjectOrAdminAuth = mock(async () => undefined as undefined | {
   status: number;
   body: { error: string };

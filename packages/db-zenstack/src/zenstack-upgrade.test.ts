@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as ts from "../../db/src/typescript";
-import { BunPostgresDialect, type BunSqlPool } from "./bun-dialect";
+import { type BunSqlPool } from "./bun-dialect";
 import { compileModel, modelProcess } from "./model";
 import { modelMain } from "./model-cli";
 import { createZenStackDatabase } from "./zenstack";

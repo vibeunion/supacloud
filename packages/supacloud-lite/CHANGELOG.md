@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.2...supacloud-lite-v0.39.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **quality:** resolve code quality findings ([#2590](https://github.com/vibeunion/supacloud/issues/2590)) ([eff8397](https://github.com/vibeunion/supacloud/commit/eff8397480efe5c30c5d6d270457383e5f9d7edc))
+
 ## [0.39.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.1...supacloud-lite-v0.39.2) (2026-11-11)
 
 

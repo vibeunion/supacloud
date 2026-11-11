@@ -254,8 +254,7 @@ function topLevelDoBodies(sql: string): string[] {
     const masked = maskSqlPolicyNoise(sql);
     const doKeywordPattern = /(?:^|;)\s*DO\b/gi;
     const bodies: string[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = doKeywordPattern.exec(masked)) !== null) {
+    while (doKeywordPattern.exec(masked) !== null) {
         const body = doStatementBody(sql, doKeywordPattern.lastIndex);
         if (body !== null) bodies.push(body);
     }

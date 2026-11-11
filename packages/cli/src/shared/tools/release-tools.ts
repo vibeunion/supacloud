@@ -829,7 +829,6 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
         web: Boolean(args.web),
     };
 
-    const canonicalJson = genericScopedReleaseScopeJson(scope);
     const scopeSha256 = genericScopedReleaseScopeSha256(scope);
     const formatted = JSON.stringify(canonicalValue(scope), null, 2) + "\n";
     writeFileSync(filePath, formatted, "utf8");

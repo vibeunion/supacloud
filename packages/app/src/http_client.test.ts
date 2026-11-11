@@ -5,14 +5,11 @@ import { HttpContext, HttpContextToken } from "./http_context";
 import {
   HttpClient,
   HttpErrorResponse,
-  HTTP_CLIENT_CONFIG,
-  HTTP_INTERCEPTORS,
   provideHttpClient,
   withFetch,
   withInterceptors,
 } from "./http_client";
 import { createEnvironmentInjector } from "./inject";
-import { TestBed } from "./testing";
 
 describe("Angular-inspired HttpParams and HttpHeaders", () => {
   test("HttpParams provides immutable query parameter construction", () => {

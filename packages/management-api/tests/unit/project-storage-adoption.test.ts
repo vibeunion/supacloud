@@ -6,7 +6,6 @@ import {
 } from "../../src/services/project-storage-migration";
 import { createProjectStorageRegistry, type ProjectStorageDependencies } from "../../src/services/project-storage-registry";
 import {
-  ProjectStorageError,
   parseProjectS3Settings,
   type ProjectStorageInventory,
 } from "../../src/services/project-storage-contract";

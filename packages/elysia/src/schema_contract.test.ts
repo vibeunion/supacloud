@@ -80,8 +80,11 @@ function schemaTypes() {
   const wrong: { version: string } = contract.result({});
   // @ts-expect-error A return type cannot be asserted through the schema parameter.
   createSchemaDecoder<{ version: string }>(response);
+  void wrong;
   return { input, result };
 }
+
+void schemaTypes;
 
 const routeContract = defineRouteContract({
   body: t.Object({ name: t.String({ minLength: 1 }) }),

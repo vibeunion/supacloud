@@ -30,14 +30,6 @@ export interface TraitHandler {
   detect(node: ts.Node): string | undefined;
 }
 
-const DECORATOR_TRAITS: Record<string, TraitKind> = {
-  Module: "module",
-  Injectable: "injectable",
-  Controller: "controller",
-  Command: "command",
-  Query: "query",
-};
-
 export class TraitCompiler {
   private readonly handlers: readonly TraitHandler[];
 

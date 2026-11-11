@@ -18,7 +18,7 @@ export function decodeCommandJson(value: unknown): CommandJson {
     if (depth > 100) throw new TypeError("Invalid command JSON");
     if (item === null || typeof item === "boolean" || typeof item === "string") return item;
     if (typeof item === "number" && Number.isFinite(item)) return item;
-    if (typeof item !== "object" || item === null || ancestors.has(item)) throw new TypeError("Invalid command JSON");
+    if (typeof item !== "object" || ancestors.has(item)) throw new TypeError("Invalid command JSON");
     ancestors.add(item);
     try {
       if (Array.isArray(item)) return Array.from(item, (entry: unknown) => visit(entry, depth + 1));

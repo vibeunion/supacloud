@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertElysiaAppPublication, assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
+import { assertElysiaAppPublication, assertPublishedDependencies, prepareCommandPackage } from './prepare-command-package.mjs';
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 import { resolveManagementRecovery } from './recover-management-release.mjs';
 import { publishNpmPackage } from './publish-npm-package.mjs';

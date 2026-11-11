@@ -1,5 +1,5 @@
 import { jsonResponseSchema } from "../utils/json-response-schema";
-import { Elysia, t, status } from "elysia";
+import { Elysia, t } from "elysia";
 import { getHealth, getMetrics } from '../services/monitor.service';
 
 const ErrorResponse = t.Object({ error: t.String() });

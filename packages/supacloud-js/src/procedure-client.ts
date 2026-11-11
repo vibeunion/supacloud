@@ -96,7 +96,6 @@ async function readErrorBody(response: Response | undefined): Promise<Record<str
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > maxBytes)) return undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let finished = false;
   try {
     reader = response.clone().body?.getReader();
     if (!reader) return undefined;
@@ -105,9 +104,8 @@ async function readErrorBody(response: Response | undefined): Promise<Record<str
       const decoder = new TextDecoder("utf-8", { fatal: true });
       let bytes = 0;
       let text = "";
-      while (!finished) {
+      while (true) {
         const chunk = await current.read();
-        if (finished) return undefined;
         if (chunk.done) {
           const body: unknown = JSON.parse(text + decoder.decode());
           return isRecord(body) ? body : undefined;
@@ -116,7 +114,6 @@ async function readErrorBody(response: Response | undefined): Promise<Record<str
         if (bytes > maxBytes) return undefined;
         text += decoder.decode(chunk.value, { stream: true });
       }
-      return undefined;
     };
     return await Promise.race([
       read(),
@@ -125,7 +122,6 @@ async function readErrorBody(response: Response | undefined): Promise<Record<str
   } catch {
     return undefined;
   } finally {
-    finished = true;
     clearTimeout(timer);
     // Cancelling a clone can await its untouched sibling; never await that here.
     void reader?.cancel().catch(() => {});
