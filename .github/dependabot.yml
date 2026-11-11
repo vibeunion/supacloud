@@ -54,6 +54,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
 
+  # The Lite package ships its own bun.lock; the npm_and_yarn ecosystem cannot
+  # update it and Dependabot aborts the whole job with a misconfiguration error.
+  - package-ecosystem: "bun"
+    directory: "/packages/supacloud-lite"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
