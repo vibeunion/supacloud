@@ -105,7 +105,7 @@ linuxPrivilegeTest("compiled probe reads a same-UID process without CAP_SYS_PTRA
     expect(capabilityMask("CapEff")).toBe(managementCapabilityMask);
     expect(capabilityMask("CapPrm")).toBe(managementCapabilityMask);
     expect(capabilityMask("CapBnd")).toBe(managementCapabilityMask);
-    expect(Number((managementCapabilityMask / 0x80000n) % 2n)).toBe(0);
+    expect(managementCapabilityMask.toString(2).padStart(20, "0").at(-20)).toBe("0");
     expect((await readFile(`/proc/${targetPid}/cmdline`)).byteLength).toBeGreaterThan(0);
     await expect(readlink(`/proc/${targetPid}/exe`)).rejects.toBeDefined();
     await expect(readFile(`/proc/${targetPid}/environ`)).rejects.toBeDefined();
