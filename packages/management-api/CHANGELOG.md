@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.133.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.133.2...management-api-v0.133.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **management-api:** reconcile drifted anon JWT keys ([#2593](https://github.com/vibeunion/supacloud/issues/2593)) ([3df6d17](https://github.com/vibeunion/supacloud/commit/3df6d1798ad425a3a421b5383c535aeb12115a26))
+* **quality:** avoid BigInt capability arithmetic ([#2595](https://github.com/vibeunion/supacloud/issues/2595)) ([088e34c](https://github.com/vibeunion/supacloud/commit/088e34cb2b3a8bee872d48b98434c308f9d3e2fa))
+* **quality:** remove redundant capability constant check ([#2597](https://github.com/vibeunion/supacloud/issues/2597)) ([b46e60e](https://github.com/vibeunion/supacloud/commit/b46e60e511aead2e68781aec72d1057e06247e33))
+
 ## [0.133.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.133.1...management-api-v0.133.2) (2026-11-11)
 
 
