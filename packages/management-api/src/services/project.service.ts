@@ -41,6 +41,7 @@ import {
   DEFAULT_BACKGROUND_TASK_SETTINGS,
 } from "../config/background-task-settings";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
+import { resolveAlignedAnonKey, resolveStoredAnonKey } from "../utils/anon-key";
 import {
   ProjectMigrationLockError,
   withProjectMigrationLocks,
@@ -222,7 +223,28 @@ export class ProjectService {
   async getProject(ref: string): Promise<ProjectDetailResponse | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
-    return await this.toDetailResponse(project);
+    return await this.toDetailResponse(await this.ensureAlignedAnonKey(project));
+  }
+
+  private async ensureAlignedAnonKey(project: Project): Promise<Project> {
+    const anonKey = await resolveAlignedAnonKey(project);
+    const storedAnonKey = resolveStoredAnonKey(project);
+    if (!anonKey) {
+      throw new Error(`Project ${project.ref} has no valid anon key`);
+    }
+    if (anonKey === storedAnonKey) {
+      return project;
+    }
+
+    const repaired = await projectRepository.updateApiKeys(project.ref, {
+      jwt_secret: project.jwt_secret,
+      anon_key: anonKey,
+      service_role_key: project.service_role_key,
+    });
+    if (!repaired) {
+      throw new Error(`Project ${project.ref} legacy API key repair was not persisted`);
+    }
+    return repaired;
   }
 
   // Create project
@@ -761,13 +783,14 @@ export class ProjectService {
   } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
+    const alignedProject = await this.ensureAlignedAnonKey(project);
 
     return {
-      anon_key: project.anon_key,
-      service_role_key: project.service_role_key,
-      publishable_key: project.publishable_key || null,
-      secret_key: project.secret_key_encrypted
-        ? decryptSecretIfNeeded(project.secret_key_encrypted)
+      anon_key: alignedProject.anon_key,
+      service_role_key: alignedProject.service_role_key,
+      publishable_key: alignedProject.publishable_key || null,
+      secret_key: alignedProject.secret_key_encrypted
+        ? decryptSecretIfNeeded(alignedProject.secret_key_encrypted)
         : null,
     };
   }
@@ -1000,6 +1023,76 @@ export class ProjectService {
 
   // --- API Key Management ---
 
+  private async persistLegacyApiKeySecrets(
+    ref: string,
+    keys: { jwt_secret: string; anon_key: string; service_role_key: string },
+  ): Promise<void> {
+    const writes = await Promise.all([
+      databaseService.upsertSecret(ref, "JWT_SECRET", keys.jwt_secret),
+      databaseService.upsertSecret(ref, "SUPABASE_ANON_KEY", keys.anon_key),
+      databaseService.upsertSecret(ref, "SUPABASE_SERVICE_ROLE_KEY", keys.service_role_key),
+    ]);
+    if (writes.some((written) => !written)) {
+      throw new Error(`Project ${ref} legacy API key secrets were not persisted`);
+    }
+  }
+
+  private async rollbackLegacyApiKeyRotation(
+    ref: string,
+    previous: Project,
+  ): Promise<void> {
+    const failures: unknown[] = [];
+    const attempt = async (operation: () => Promise<unknown>) => {
+      try {
+        await operation();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+    };
+
+    await attempt(async () => {
+      const restored = await projectRepository.updateApiKeys(ref, {
+        jwt_secret: previous.jwt_secret,
+        anon_key: previous.anon_key,
+        service_role_key: previous.service_role_key,
+      });
+      if (!restored) throw new Error(`Project ${ref} legacy API key metadata rollback failed`);
+    });
+    await attempt(() => this.persistLegacyApiKeySecrets(ref, {
+      jwt_secret: previous.jwt_secret,
+      anon_key: previous.anon_key,
+      service_role_key: previous.service_role_key,
+    }));
+    await attempt(async () => {
+      if (!(await gatewayService.setupJwt(ref, previous.jwt_secret))) {
+        throw new Error(`Project ${ref} gateway JWT rollback failed`);
+      }
+    });
+    await attempt(async () => {
+      const { realtimeService } = await import("./realtime.service");
+      const dbName = await resolveDbName(ref);
+      const restored = await realtimeService.updateTenant({
+        projectRef: ref,
+        dbName,
+        dbPassword: previous.db_password,
+        jwtSecret: previous.jwt_secret,
+        projectConfig: previous.config,
+      });
+      if (!restored) throw new Error(`Project ${ref} Realtime JWT rollback failed`);
+    });
+    await attempt(async () => {
+      const { tenantRuntimeService } = await import("./tenant-runtime.service");
+      await tenantRuntimeService.restartRuntime(ref);
+    });
+
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `Project ${ref} legacy API key rotation rollback was incomplete`,
+      );
+    }
+  }
+
   async rotateApiKeys(
     ref: string,
   ): Promise<{
@@ -1015,39 +1108,57 @@ export class ProjectService {
       jwtService.generateServiceRoleKey(jwtSecret),
     ]);
 
-    // 1. Update keys in master database
-    await projectRepository.updateApiKeys(ref, {
-      jwt_secret: jwtSecret,
-      anon_key: anonKey,
-      service_role_key: serviceRoleKey,
-    });
+    try {
+      // 1. Update keys in master database
+      const updated = await projectRepository.updateApiKeys(ref, {
+        jwt_secret: jwtSecret,
+        anon_key: anonKey,
+        service_role_key: serviceRoleKey,
+      });
+      if (!updated) throw new Error(`Project ${ref} legacy API key metadata update failed`);
 
-    // 2. Update keys in Edge Runtime secrets
-    await databaseService.upsertSecret(ref, "JWT_SECRET", jwtSecret);
-    await databaseService.upsertSecret(ref, "SUPABASE_ANON_KEY", anonKey);
-    await databaseService.upsertSecret(
-      ref,
-      "SUPABASE_SERVICE_ROLE_KEY",
-      serviceRoleKey,
-    );
+      // 2. Update Edge Runtime secrets
+      await this.persistLegacyApiKeySecrets(ref, {
+        jwt_secret: jwtSecret,
+        anon_key: anonKey,
+        service_role_key: serviceRoleKey,
+      });
 
-    // 3. Update Gateway JWT
-    await gatewayService.setupJwt(ref, jwtSecret);
+      // 3. Update Gateway JWT
+      if (!(await gatewayService.setupJwt(ref, jwtSecret))) {
+        throw new Error(`Project ${ref} gateway JWT update failed`);
+      }
 
-    // 4. Update Realtime JWT
-    const { realtimeService } = await import("./realtime.service");
-    const dbName = await resolveDbName(ref);
-    await realtimeService.updateTenant({
-      projectRef: ref,
-      dbName,
-      dbPassword: project.db_password,
-      jwtSecret,
-      projectConfig: project.config,
-    });
+      // 4. Update Realtime JWT
+      const { realtimeService } = await import("./realtime.service");
+      const dbName = await resolveDbName(ref);
+      if (!(await realtimeService.updateTenant({
+        projectRef: ref,
+        dbName,
+        dbPassword: project.db_password,
+        jwtSecret,
+        projectConfig: project.config,
+      }))) {
+        throw new Error(`Project ${ref} Realtime JWT update failed`);
+      }
 
-    // 5. Restart PostgREST and GoTrue to pickup new keys
-    const { tenantRuntimeService } = await import("./tenant-runtime.service");
-    await tenantRuntimeService.restartRuntime(ref);
+      // 5. Restart PostgREST and GoTrue to pick up new keys
+      const { tenantRuntimeService } = await import("./tenant-runtime.service");
+      await tenantRuntimeService.restartRuntime(ref);
+    } catch (error: unknown) {
+      try {
+        await this.rollbackLegacyApiKeyRotation(ref, project);
+      } catch (rollbackError: unknown) {
+        logger.error(`[ProjectService] Legacy API key rotation rollback failed for ${ref}`, {
+          error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        });
+        throw new AggregateError(
+          [error, rollbackError],
+          `Project ${ref} legacy API key rotation failed and rollback was incomplete`,
+        );
+      }
+      throw error;
+    }
 
     logger.info(
       `[ProjectService] Rotated API keys, synchronized secrets, and reloaded runtimes for ${ref}`,

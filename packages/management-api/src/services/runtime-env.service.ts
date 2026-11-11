@@ -14,6 +14,10 @@ import {
   resolveStoredServiceRoleKey,
 } from "../utils/service-role";
 import {
+  resolveAlignedAnonKey,
+  resolveStoredAnonKey,
+} from "../utils/anon-key";
+import {
   buildSharedProjectJwtVerificationMaterial,
   normalizeProjectJwtKeys,
   resolveSharedAuthIssuer,
@@ -83,16 +87,21 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   );
 
   const storedServiceRoleKey = resolveStoredServiceRoleKey(project);
+  const storedAnonKey = resolveStoredAnonKey(project);
   // Runtime environments outlive request-scoped OIDC tokens. Only repair the
-  // durable credential here; never persist a newly minted short-lived token.
+  // durable credentials here; never persist a newly minted short-lived token.
+  const anonKey = await resolveAlignedAnonKey(project);
   const serviceRoleKey = await resolveAlignedServiceRoleKey(project);
+  if (!anonKey) {
+    throw new Error(`Project ${projectRef} has no valid anon key`);
+  }
   if (!serviceRoleKey) {
     throw new Error(`Project ${projectRef} has no valid service-role key`);
   }
-  if (serviceRoleKey !== storedServiceRoleKey) {
+  if (anonKey !== storedAnonKey || serviceRoleKey !== storedServiceRoleKey) {
     const repaired = await projectRepository.updateApiKeys(projectRef, {
       jwt_secret: project.jwt_secret,
-      anon_key: project.anon_key,
+      anon_key: anonKey,
       service_role_key: serviceRoleKey,
     });
     if (!repaired) {
@@ -110,7 +119,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   return {
     ...env,
     SUPABASE_URL: supabaseUrl,
-    SUPABASE_ANON_KEY: project.anon_key,
+    SUPABASE_ANON_KEY: anonKey,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
     SUPACLOUD_SERVICE_JWT_VERIFIER: serviceJwtVerifier ? JSON.stringify(serviceJwtVerifier) : "",
     ...(project.publishable_key ? { SUPABASE_PUBLISHABLE_KEY: project.publishable_key } : {}),
