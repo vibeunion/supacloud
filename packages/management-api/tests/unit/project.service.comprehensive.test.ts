@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { SignJWT } from "jose";
 import * as fs from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -292,7 +293,7 @@ describe("ProjectService - Comprehensive", () => {
     tenantRuntimeServiceMock.pauseProjectRuntime.mockResolvedValue(undefined);
     tenantRuntimeServiceMock.resumeProjectRuntime.mockResolvedValue({ status: "running" });
     tenantRuntimeServiceMock.restartRuntime.mockResolvedValue({ status: "running" });
-    realtimeServiceMock.updateTenant.mockResolvedValue(undefined);
+    realtimeServiceMock.updateTenant.mockResolvedValue(true);
   });
 
   test("listProjects returns empty array when no projects", async () => {
@@ -693,6 +694,34 @@ describe("ProjectService - Comprehensive", () => {
     expect(result?.service_role_key).toBe("service.key.test");
   });
 
+  test("repairs a stale legacy anon key before returning project credentials", async () => {
+    const staleKey = await new SignJWT({ role: "anon" })
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuer("supabase")
+      .setIssuedAt()
+      .setExpirationTime("10y")
+      .sign(new TextEncoder().encode("old-secret-with-at-least-32-characters"));
+    const staleProject = {
+      ...mockProject,
+      jwt_secret: "current-secret-with-at-least-32-characters",
+      anon_key: staleKey,
+    };
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(staleProject);
+    projectRepositoryMock.updateApiKeys.mockResolvedValueOnce({
+      ...staleProject,
+      anon_key: "rotated-anon-key",
+    });
+
+    const result = await service.getApiKeys("test123abc");
+
+    expect(result?.anon_key).toBe("rotated-anon-key");
+    expect(projectRepositoryMock.updateApiKeys).toHaveBeenCalledWith("test123abc", {
+      jwt_secret: staleProject.jwt_secret,
+      anon_key: "rotated-anon-key",
+      service_role_key: staleProject.service_role_key,
+    });
+  });
+
   test("rotateApiKeys preserves opaque keys and rotates legacy JWT state", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
 
@@ -710,6 +739,26 @@ describe("ProjectService - Comprehensive", () => {
     expect(projectRepositoryMock.updateOpaqueApiKeys).not.toHaveBeenCalled();
     expect(jwtServiceMock.generateOpaqueKeySet).not.toHaveBeenCalled();
     expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledWith("test123abc");
+  });
+
+  test("rolls back legacy API key state when a downstream rotation step fails", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    realtimeServiceMock.updateTenant
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await expect(service.rotateApiKeys("test123abc")).rejects.toThrow(
+      "Realtime JWT update failed",
+    );
+
+    expect(projectRepositoryMock.updateApiKeys).toHaveBeenCalledTimes(2);
+    expect(projectRepositoryMock.updateApiKeys).toHaveBeenLastCalledWith("test123abc", {
+      jwt_secret: mockProject.jwt_secret,
+      anon_key: mockProject.anon_key,
+      service_role_key: mockProject.service_role_key,
+    });
+    expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledTimes(1);
+    expect(realtimeServiceMock.updateTenant).toHaveBeenCalledTimes(2);
   });
 
   test("rotateOpaqueApiKeys does not invalidate legacy JWT sessions", async () => {

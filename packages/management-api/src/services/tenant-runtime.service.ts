@@ -42,6 +42,11 @@ import {
 import type { PostgresConnectionConfig } from "./tenant-runtime-config";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { revealProjectSecrets } from "../repositories/project-secret-at-rest";
+import { projectRepository } from "../repositories/project.repository";
+import {
+    resolveAlignedAnonKey,
+    resolveStoredAnonKey,
+} from "../utils/anon-key";
 import {
     getAuthRuntimeDescriptor,
     isSharedAuthRuntime,
@@ -1151,13 +1156,29 @@ class TenantRuntimeService {
           FROM projects
           WHERE ref=${ref}
         `;
-        const project = stored ? revealProjectSecrets(stored) : null;
+        let project = stored ? revealProjectSecrets(stored) : null;
 
         if (!project || !project.db_password || !project.jwt_secret) {
             throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
         }
         if (typeof project.db_name !== "string" || !project.db_name.trim()) {
             throw new Error(`Cannot find authoritative database name for project ${ref}`);
+        }
+
+        const anonKey = await resolveAlignedAnonKey(project);
+        if (!anonKey) {
+            throw new Error(`Project ${ref} has no valid anon key`);
+        }
+        if (anonKey !== resolveStoredAnonKey(project)) {
+            const repaired = await projectRepository.updateApiKeys(ref, {
+                jwt_secret: project.jwt_secret,
+                anon_key: anonKey,
+                service_role_key: project.service_role_key,
+            });
+            if (!repaired) {
+                throw new Error(`Project ${ref} legacy API key repair was not persisted`);
+            }
+            project = repaired;
         }
 
         const projectConfig = normalizeProjectConfig(project.config);

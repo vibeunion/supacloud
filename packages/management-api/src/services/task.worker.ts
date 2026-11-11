@@ -23,17 +23,26 @@ import {
     isStoredServiceRoleKeyAligned,
     resolveAlignedServiceRoleKey,
 } from "../utils/service-role";
+import {
+    isStoredAnonKeyAligned,
+    resolveAlignedAnonKey,
+} from "../utils/anon-key";
 
 async function repairInvalidServiceRoleKey(project: Project): Promise<void> {
-    if (await isStoredServiceRoleKeyAligned(project)) return;
+    const [serviceRoleAligned, anonAligned] = await Promise.all([
+        isStoredServiceRoleKeyAligned(project),
+        isStoredAnonKeyAligned(project),
+    ]);
+    if (serviceRoleAligned && anonAligned) return;
 
     const serviceRoleKey = await resolveAlignedServiceRoleKey(project);
-    if (!serviceRoleKey) {
-        throw new Error(`Project ${project.ref} has no usable JWT secret for service-role key repair`);
+    const anonKey = await resolveAlignedAnonKey(project);
+    if (!serviceRoleKey || !anonKey) {
+        throw new Error(`Project ${project.ref} has no usable JWT secret for API key repair`);
     }
     await projectRepository.updateApiKeys(project.ref, {
         jwt_secret: project.jwt_secret,
-        anon_key: project.anon_key,
+        anon_key: anonKey,
         service_role_key: serviceRoleKey,
     });
 }
