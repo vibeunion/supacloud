@@ -53,12 +53,25 @@ an exact pin is not a reason to postpone security maintenance.
 
 `node scripts/check-elysia-compatibility.mjs` checks those declarations, the
 adapter's resolved lockfile tuple, each direct consumer's locked Elysia version
-and local `file:../elysia` peer snapshots. Its regression tests run with
+and local `file:../elysia` peer snapshots. It also scans shipping adapter source
+for static `@supacloud/app` and `@supacloud/app/*` imports and requires each one
+to be an export in `packages/app/package.json` with a runtime JavaScript target.
+Test files are outside that scan. Its regression tests run with
 `node --test scripts/check-elysia-compatibility.test.mjs` and do not need Bun or
-installed dependencies. This is a declaration/lock-metadata gate, not a scan of
-all source imports and not a substitute for `bun install --frozen-lockfile`.
+installed dependencies. Registry comparison is the publication step below.
+`bun install --frozen-lockfile` remains the lockfile gate.
 The adapter lock's local app/compiler/delivery schema snapshots are checked too,
 including nested copies, so an old schema graph cannot pass on root pins alone.
+
+Publication repeats the subpath check against the registry. `prepare-command-package.mjs`
+rewrites `file:../app` to the sibling package's exact version, then reads the
+built `dist` JavaScript and declarations. That exact version must already be on
+npm, its `exports` must include every imported subpath, and the tarball must
+contain each export's runtime JavaScript file. A workspace export added under an
+already published version fails this check. `@supacloud/elysia@0.42.2` declared
+`@supacloud/app@0.39.1`, whose tarball has `dist/pending_work.d.ts` and no
+`./pending-work` export or `dist/pending-work.js`. Release `@supacloud/app`
+before `@supacloud/elysia` in the same release-please run.
 
 The Elysia Compatibility workflow separately builds local dependencies, installs
 with the frozen lockfile, checks types, and runs native/adapter HTTP conformance

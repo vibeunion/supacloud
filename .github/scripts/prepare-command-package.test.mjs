@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { assertElysiaAppPublication, assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 import { resolveManagementRecovery } from './recover-management-release.mjs';
 import { publishNpmPackage } from './publish-npm-package.mjs';
@@ -224,6 +226,7 @@ test('release order and preparation cover every package using local command depe
   const compiler = workflow.indexOf('name: Publish app compiler to NPM');
   assert.ok(delivery > 0 && compiler > delivery && cli > compiler);
   assert.ok(contracts > 0 && commands > contracts && database > commands && app > database && svelte > contracts && elysia > database);
+  assert.ok(app < elysia, 'app must publish before elysia so the rewritten app version is already on npm');
   assert.ok(cli > 0 && admin > cli, 'admin must publish after its CLI dependency');
   assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
   for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'compiler', 'supacloud-js']) {
@@ -457,6 +460,75 @@ test('fresh protocol consumers all publish the same exact contracts version', ()
     assert.equal(dependencies['@supacloud/contracts'], contractsVersion);
     assert.ok(prepared.required.includes(`@supacloud/contracts@${contractsVersion}`));
   }
+});
+
+test('elysia publication rejects a published app version that lacks an imported subpath', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'elysia-app-subpath-'));
+  try {
+    await assert.rejects(
+      () => assertElysiaAppPublication(directory, { dependencies: { '@supacloud/app': '0.39.2' } }, {
+        runNpm: async () => { throw new Error('registry must not be consulted'); },
+      }),
+      /requires dist\/ before rewriting @supacloud\/app/,
+    );
+    mkdirSync(join(directory, 'dist'));
+    writeFileSync(join(directory, 'dist/index.js'), [
+      'import { requireFeatureRequestContext } from "@supacloud/app";',
+      'import { freezeAspectData } from "@supacloud/app/execution";',
+      'import { PendingWorkRegistry } from "@supacloud/app/pending-work";',
+    ].join('\n'));
+    writeFileSync(join(directory, 'dist/index.d.ts'), 'import { PendingWorkRegistry } from "@supacloud/app/pending-work";\n');
+    writeFileSync(join(directory, 'dist/bun-aot.js'), 'import { PendingWorkRegistry } from "@supacloud/app/pending-work";\n');
+    writeFileSync(join(directory, 'dist/worker.d.ts'), 'import { PendingWorkRegistry } from "@supacloud/app/pending-work";\n');
+    const publishedWithoutPendingWork = {
+      '.': { types: './dist/index.d.ts', import: './dist/index.js', default: './dist/index.js' },
+      './execution': { types: './dist/execution.d.ts', import: './dist/execution.js', default: './dist/execution.js' },
+    };
+    const filesWithoutPendingWork = [
+      'dist/index.js', 'dist/index.d.ts', 'dist/execution.js', 'dist/execution.d.ts', 'dist/pending_work.d.ts', 'package.json',
+    ];
+    /** @param {Record<string, unknown>} exportsMap @param {readonly string[]} files */
+    const runNpm = (exportsMap, files) => async (args) => {
+      if (args[0] === 'view') return { stdout: `${JSON.stringify(exportsMap)}\n` };
+      if (args[0] === 'pack') return { stdout: JSON.stringify([{ files: files.map((path) => ({ path })) }]) };
+      throw new Error(`unexpected npm ${args.join(' ')}`);
+    };
+    const prepared = {
+      name: '@supacloud/elysia',
+      dependencies: { '@supacloud/app': '0.39.1' },
+    };
+    await assert.rejects(
+      () => assertElysiaAppPublication(directory, prepared, { runNpm: runNpm(publishedWithoutPendingWork, filesWithoutPendingWork) }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Refusing to publish @supacloud\/elysia against @supacloud\/app@0\.39\.1/);
+        assert.match(error.message, /static import @supacloud\/app\/pending-work is not an export \(\.\/pending-work\)/);
+        assert.match(error.message, /Publish a new @supacloud\/app version/);
+        return true;
+      },
+    );
+    const publishedWithMissingFile = {
+      ...publishedWithoutPendingWork,
+      './pending-work': { types: './dist/pending-work.d.ts', import: './dist/pending-work.js', default: './dist/pending-work.js' },
+    };
+    await assert.rejects(
+      () => assertElysiaAppPublication(directory, prepared, { runNpm: runNpm(publishedWithMissingFile, filesWithoutPendingWork) }),
+      /runtime file \.\/dist\/pending-work\.js is not in the published tarball/,
+    );
+    const filesWithPendingWork = [...filesWithoutPendingWork, 'dist/pending-work.js', 'dist/pending-work.d.ts'];
+    await assertElysiaAppPublication(directory, prepared, { runNpm: runNpm(publishedWithMissingFile, filesWithPendingWork) });
+    await assert.rejects(
+      () => assertElysiaAppPublication(directory, { dependencies: { '@supacloud/app': 'file:../app' } }, { runNpm: async () => { throw new Error('registry must not be consulted'); } }),
+      /exact @supacloud\/app version, not file:\.\.\/app/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('elysia publication checks the registry after the dependency rewrite and before the manifest write', () => {
+  const source = readFileSync(new URL('./prepare-command-package.mjs', import.meta.url), 'utf8');
+  assert.match(source, /await assertPublishedDependencies\(result\.required\);\n {2}if \(candidate\['name'\] === '@supacloud\/elysia'\) await assertElysiaAppPublication\(directory, result\.package\);\n {2}await writeFile/);
 });
 
 test('Lite publishes a current exact database dependency after database publication', () => {
