@@ -12,7 +12,7 @@ function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
   }
-  return value;
+  return value as Record<string, unknown>;
 }
 
 test("the pending-work subpath publishes a runtime JavaScript entry", async () => {
