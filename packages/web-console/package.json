@@ -24,7 +24,7 @@
     "@types/papaparse": "^5.5.2",
     "@typescript/native": "npm:typescript@7.1.0-beta",
     "autoprefixer": "^10.6.2",
-    "bits-ui": "^2.20.3",
+    "bits-ui": "^2.20.6",
     "clsx": "^2.1.1",
     "jsdom": "31.0.0",
     "mode-watcher": "^1.1.0",
