@@ -533,7 +533,7 @@ const diagnostics = validateGraph(graph, /* strict */ false);
 ```ts
 interface ApplicationGraph {
   modules: ModuleNode[];     // 模块：providers/controllers/commands/jobs/queries/aspects/exports/imports/featureSpec
-  externalTokens: string[];  // 被依赖但无任何模块提供的 token（平台注入，如 DB_CLIENT、REQUEST_CONTEXT）
+  externalTokens: string[];  // 被依赖但无任何模块提供的 token（由受信任宿主/运行时组合根提供，如 DB_CLIENT、REQUEST_CONTEXT）
 }
 ```
 

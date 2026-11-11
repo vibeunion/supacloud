@@ -214,7 +214,7 @@ export class FeatureModule {}`);
   test("explainGraph 支持模块、provider 和 external token", () => {
     expect(explainGraph(graph, "case")).toContain("imported by: -");
     expect(explainGraph(graph, "CaseService")).toContain("PROVIDER CaseService");
-    expect(explainGraph(graph, "DB_CLIENT")).toContain("provided by: platform runtime");
+    expect(explainGraph(graph, "DB_CLIENT")).toContain("provided by: trusted delivery host/runtime");
   });
 
   test("explainGraph 对未知对象给出可操作的 known names", () => {
