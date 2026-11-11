@@ -1,7 +1,7 @@
-// Build-time shim for the optional `@supacloud/db-zenstack` adapter.
+// Build-time declaration bridge for the required `@supacloud/db-zenstack` peer.
 // The compatibility entry points re-export the adapter but must type-check and
-// emit declarations without installing the adapter in the control-plane package.
-// Consumers that import those entry points resolve the adapter's real types.
+// emit declarations while the adapter is built in its owning package.
+// Consumers resolve the required peer's real runtime and declaration types.
 declare module "@supacloud/db-zenstack" {
   export function createZenStackDatabase(...args: unknown[]): unknown;
   export class BunPostgresDialect {

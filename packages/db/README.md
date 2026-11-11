@@ -54,7 +54,8 @@ requiring a particular generator.
 `defineReadQuery` and `createBunReadDatabase` remain available for reviewed native
 platform reads, with result decoders, read-only transactions and timeouts. Keep
 least-privilege roles and RLS for all direct PostgREST/RPC access. Model policies
-do not replace database permissions.
+do not replace grants. Row-level `@@allow` / `@@deny` emit `authenticated` RLS, and
+`supacloud-db check` fails when the migration ledger does not contain it.
 
 See [the breaking upgrade guide](../../docs/architecture/zenstack-upgrade.md).
 

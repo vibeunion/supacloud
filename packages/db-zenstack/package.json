@@ -1,7 +1,7 @@
 {
   "name": "@supacloud/db-zenstack",
   "version": "0.2.1",
-  "description": "Optional ZenStack model adapter for SupaCloud. Not part of the control-plane database package.",
+  "description": "Required ZenStack model adapter for the SupaCloud Vibecoding stack.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

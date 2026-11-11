@@ -122,6 +122,11 @@ snapshot and a role-scoped `pg_graphql` schema snapshot. The generated barrel
 exports `Database`, `QueryData`, ZModel schema types and GraphQL contracts.
 Consumers need `@supabase/supabase-js` and their ZenStack dependencies.
 
+Optional `modelPolicy` is the ZModel whose row-level `@@allow` / `@@deny` rules
+are emitted as `rls.sql`. `--check` fails closed when the migration list does not
+contain those statements. Ordinary reads stay on PostgREST. This does not apply
+SQL or replace a command host policy.
+
 `--check` detects drift in supplied snapshots, local ZModel imports, RPC
 registry/catalog inputs, migration content/order and generated artifacts without
 writing. This is an offline check, not proof of live database parity or

@@ -55,6 +55,39 @@ test("configuration rejects unknown options and requires real input paths", () =
   expect(() => parseDatabaseContractsOptions({ mode: "code-first" }, "/tmp")).toThrow();
 });
 
+test("model policy RLS is emitted into the contract and diverges closed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "database-contracts-rls-"));
+  try {
+    const policy = `type Principal { id String @@auth() }
+model Note {
+  id String @id
+  owner String
+  @@map("notes")
+  @@allow("read", auth() != null && owner == auth().id)
+}
+`;
+    await writeFixtureProject(root, { "schema.zmodel": policy, "migrations/001.sql": "SELECT 1;" });
+    const options = parseDatabaseContractsOptions({
+      rootDir: ".", outDir: "generated", role: "authenticated", modelPolicy: "schema.zmodel",
+      migrations: ["migrations/001.sql"],
+    }, root);
+    await expect(generateDatabaseContracts(options)).rejects.toThrow(/policy-rls-mismatch/);
+    expect(await readFile(join(root, "migrations/001.sql"), "utf8")).toBe("SELECT 1;");
+    const { emitPolicyRls } = await import("@supacloud/db/source-contracts");
+    await writeFixtureProject(root, { "migrations/001.sql": `${emitPolicyRls(policy).statements.join("\n")}\n` });
+    const written = await generateDatabaseContracts(options);
+    expect(written.written).toContain("rls.sql");
+    expect(await readFile(join(root, "generated/rls.sql"), "utf8")).toContain('CREATE POLICY "notes_select"');
+    expect((await generateDatabaseContracts(options, true)).upToDate).toBe(true);
+    await writeFixtureProject(root, { "schema.zmodel": policy.replace("owner == auth().id", "false") });
+    const before = await readFile(join(root, "generated/rls.sql"), "utf8");
+    await expect(generateDatabaseContracts(options, true)).rejects.toThrow(/policy-rls-mismatch/);
+    expect(await readFile(join(root, "generated/rls.sql"), "utf8")).toBe(before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("generated barrel retains real PostgREST projections, ZenStack row types and GraphQL result types", async () => {
   const root = await mkdtemp(join(tmpdir(), "database-contract-consumer-"));
   try {

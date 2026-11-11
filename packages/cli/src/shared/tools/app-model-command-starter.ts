@@ -354,9 +354,19 @@ DO $role$ BEGIN
 END $role$;
 REVOKE ALL ON public.model_orders FROM PUBLIC;
 ALTER TABLE public.model_orders ENABLE ROW LEVEL SECURITY;
--- Only the trusted model host may use this role. Tenant/owner filtering is enforced by ZenStack.
--- Do not grant this role to PostgREST/browser users; those paths need their own row policies.
+-- The host role is a trusted command connection. It does not set request.jwt.claims,
+-- so this bypass is not the model row projection. Do not grant it to PostgREST.
 CREATE POLICY model_orders_host ON public.model_orders TO model_orders_app USING (true) WITH CHECK (true);
+-- Authenticated RLS is projected from zenstack/schema.zmodel @@allow rules.
+-- Grants stay reviewed; these policies do not by themselves grant table access.
+DO $supacloud_policy_rls$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE "authenticated" NOLOGIN; END IF; END $supacloud_policy_rls$;
+ALTER TABLE "public"."model_orders" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "model_orders_select" ON "public"."model_orders";
+CREATE POLICY "model_orders_select" ON "public"."model_orders" FOR SELECT TO "authenticated" USING ((((auth.jwt() IS NOT NULL) AND ("tenant_id" = (auth.jwt() ->> 'tenantId'))) AND (("owner_id" = (auth.jwt() ->> 'id')) OR ((auth.jwt() ->> 'canApprove') = 'true'))));
+DROP POLICY IF EXISTS "model_orders_insert" ON "public"."model_orders";
+CREATE POLICY "model_orders_insert" ON "public"."model_orders" FOR INSERT TO "authenticated" WITH CHECK (((((((auth.jwt() IS NOT NULL) AND ((auth.jwt() ->> 'canCreate') = 'true')) AND ("tenant_id" = (auth.jwt() ->> 'tenantId'))) AND ("owner_id" = (auth.jwt() ->> 'id'))) AND ("state" = 'draft')) AND ("version" = 1)));
+DROP POLICY IF EXISTS "model_orders_update" ON "public"."model_orders";
+CREATE POLICY "model_orders_update" ON "public"."model_orders" FOR UPDATE TO "authenticated" USING ((((auth.jwt() IS NOT NULL) AND ((auth.jwt() ->> 'canApprove') = 'true')) AND ("tenant_id" = (auth.jwt() ->> 'tenantId')))) WITH CHECK ((((auth.jwt() IS NOT NULL) AND ((auth.jwt() ->> 'canApprove') = 'true')) AND ("tenant_id" = (auth.jwt() ->> 'tenantId'))));
 GRANT USAGE ON SCHEMA public, supacloud_commands TO model_orders_app;
 GRANT SELECT, INSERT, UPDATE ON public.model_orders TO model_orders_app;
 GRANT SELECT, INSERT, UPDATE ON supacloud_commands.execution_receipts TO model_orders_app;
@@ -408,6 +418,9 @@ export default defineSupacloudConfig({
     "db/modules.ts": `import { defineDatabaseModule } from "@supacloud/db";
 export default defineDatabaseModule({ name: "orders", tables: ["public.model_orders"], policies: [
   { name: "model_orders_host", table: "public.model_orders", operation: "all", roles: ["model_orders_app"], source: "migrations/002-model-orders.sql", tests: ["tests/database-governance.sql"] },
+  { name: "model_orders_select", table: "public.model_orders", operation: "select", roles: ["authenticated"], source: "migrations/002-model-orders.sql", tests: ["tests/database-governance.sql"] },
+  { name: "model_orders_insert", table: "public.model_orders", operation: "insert", roles: ["authenticated"], source: "migrations/002-model-orders.sql", tests: ["tests/database-governance.sql"] },
+  { name: "model_orders_update", table: "public.model_orders", operation: "update", roles: ["authenticated"], source: "migrations/002-model-orders.sql", tests: ["tests/database-governance.sql"] },
 ] });
 `,
     "tests/database-governance.sql": `BEGIN READ ONLY;
@@ -418,6 +431,11 @@ DO $check$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_policies WHERE schemaname='public' AND tablename='model_orders'
     AND policyname='model_orders_host' AND roles=ARRAY['model_orders_app']::name[] AND cmd='ALL') THEN
     RAISE EXCEPTION 'model_orders trusted host policy is required';
+  END IF;
+  IF (SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='model_orders'
+    AND policyname IN ('model_orders_select','model_orders_insert','model_orders_update')
+    AND 'authenticated'=ANY(roles)) <> 3 THEN
+    RAISE EXCEPTION 'model_orders authenticated policies must match the model row projection';
   END IF;
 END $check$;
 ROLLBACK;
@@ -472,7 +490,7 @@ Connect the existing queue consumer to host.worker(claim, signal). Acknowledge o
 
 The receipt migration uses the same supacloud_commands ledger as the platform. It supports local transactional commands; external commands and durable recovery still require the existing Commands/Workflow runtime. Never apply a second migration history.
 
-The model_orders_app role is a trusted-server capability. ZenStack enforces row ownership and tenant isolation for this recipe; the SQL policy restricts access to that role. Do not grant it to PostgREST/authenticated users. Direct database APIs need their own row policies.
+The model_orders_app role is a trusted-server capability and does not set request.jwt.claims. Its SQL policy is a host bypass, not the model row projection; do not grant that role to PostgREST. Authenticated SELECT, INSERT and UPDATE policies are emitted from the ZModel @@allow rules and must stay in the migration. They do not grant privileges; add a reviewed GRANT before exposing the table through PostgREST.
 
 To change the schema: bun run db:generate, bun run db:check, then bun run db:diff -- --candidate output/database-audit/change.sql against an explicit shadow database. Review forward SQL before promotion. Stop intake and drain HTTP/worker work before host.dispose(), then close the caller-owned pool.
 `,

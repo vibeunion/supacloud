@@ -296,7 +296,7 @@
     {
       "name": "DatabaseContractsOptions",
       "kind": "type",
-      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    rpcRegistry?: string;\n    rpcCatalog?: string;\n    migrations: readonly string[];\n}"
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    modelPolicy?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    rpcRegistry?: string;\n    rpcCatalog?: string;\n    migrations: readonly string[];\n}"
     },
     {
       "name": "DatabaseGovernanceOptions",

@@ -49,8 +49,12 @@ export function readWorkspace(root) {
           if (field === 'overrides') throw new Error(`Nested overrides need an explicit graph adapter: ${project.root}`);
           throw new Error(`Invalid dependency ${name} at ${project.root}`);
         }
-        // Optional peers are install-time capabilities, not build prerequisites.
-        if (field === 'peerDependencies' && project.manifest.peerDependenciesMeta?.[name]?.optional === true) continue;
+        // The required db adapter is implemented on top of the core package,
+        // so modeling this peer as an edge would create a false
+        // db -> db-zenstack -> db cycle. Other peer edges retain their
+        // existing graph semantics.
+        if (field === 'peerDependencies' && project.packageName === '@supacloud/db'
+          && name === '@supacloud/db-zenstack') continue;
         let target = byPackage.get(name);
         const local = /^(file:|link:)/.test(version);
         if (local) {

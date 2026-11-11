@@ -6,7 +6,6 @@ const root = resolve(import.meta.dir, "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
-  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   devDependencies?: Record<string, string>;
 };
 
@@ -27,14 +26,13 @@ function localImports(source: string): string[] {
   });
 }
 
-test("the control-plane entry does not require ZenStack, Kysely, or the adapter package", () => {
+test("the control-plane entry keeps ZenStack behind the required adapter peer", () => {
   for (const name of adapterPackages) {
     expect(manifest.dependencies?.[name]).toBeUndefined();
     expect(manifest.devDependencies?.[name]).toBeUndefined();
     if (name === "@supacloud/db-zenstack") {
-      // Compatibility entry points may declare the adapter only as an optional peer.
+      // Compatibility entry points require the selected model adapter at runtime.
       expect(manifest.peerDependencies?.[name]).toBeDefined();
-      expect(manifest.peerDependenciesMeta?.[name]?.optional).toBe(true);
     } else {
       expect(manifest.peerDependencies?.[name]).toBeUndefined();
     }

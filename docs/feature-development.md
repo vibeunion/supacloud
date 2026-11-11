@@ -23,8 +23,10 @@ lockfile 和已发布的匹配版本为准；升级分支中的实现不代表 n
 Command 只是编译器应用车道的写入边界，不是全平台唯一业务写入路径。在该车道内，
 Command 权限决定“能否执行此业务动作”，ZenStack policy 决定“能访问哪些记录”。
 数据库约束保证数据不变量。PostgREST 与 `@supabase/supabase-js` 仍是普通读取和低风险
-CRUD 的一等数据面。PostgREST/RPC 继续由数据库角色与 RLS 保护，不能因为新增了
-ZenStack policy 就移除这些保护。替换模型/策略适配器仍使用同一套 PostgreSQL
+CRUD 的一等数据面。行级 `@@allow` / `@@deny` 会投影成 `authenticated` RLS，并由
+现有 source contract 对照迁移账本；对不上就失败。字段级 `@deny`、关系谓词和显式
+`policyRls: "deferred"` 仍是受审查 SQL。PostgREST/RPC 继续由数据库角色与 RLS 保护，
+不能因为新增了 ZenStack policy 就移除这些保护。替换模型/策略适配器仍使用同一套 PostgreSQL
 Database Contract 和唯一迁移账本，不新增第二套写入数据库、查询语言或身份存储。
 
 每个数据入口还必须标记为 `model-command`、`postgrest-read`、`governed-sql` 或

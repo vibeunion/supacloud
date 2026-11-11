@@ -9,6 +9,8 @@ export const STARTER_DATABASE_CONFIG = {
   auditConsumers: [],
   trustedHosts: ["src/host", "src/delivery-host.ts", "src/delivery-worker.ts"],
   role: "starter_review_http",
+  // Relation predicates and storage fences are reviewed SQL, not the emitted row projection.
+  policyRls: "deferred",
 };
 
 export const STARTER_DATABASE_MODEL = `datasource db {
@@ -171,10 +173,11 @@ export const STARTER_DATABASE_GUIDE = `
 Maintain zenstack/schema.zmodel. Run \`bun run db:generate\` to compile model and RPC
 contracts; commit generated types with their sources. Do not introduce any/@ts-ignore
 to bypass model or contract diagnostics. \`bun run db:check\` compares
-fresh generation without writing files or opening a database. Model read policies
-complement existing database RLS; command writes still use the shared transaction,
-receipt and audit boundary, not unrestricted CRUD. SQL constraints, RPCs and RLS
-remain explicit reviewed migrations when the model language cannot express them.
+fresh generation without writing files or opening a database. This starter sets
+\`policyRls\` to \`deferred\` because relation predicates and storage fences are reviewed
+SQL, not the authenticated row-policy projection. Command writes still use the shared
+transaction, receipt and audit boundary, not unrestricted CRUD. SQL constraints, RPCs
+and RLS remain explicit reviewed migrations when the model language cannot express them.
 
 Use \`bun run db:diff -- --candidate output/database-audit/change.sql\` with an
 explicit read-only SUPACLOUD_MODEL_DATABASE_URL. Review the SQL, then promote a new

@@ -37,6 +37,10 @@ for (const name of ["contracts", "commands", "compiler", "db", "db-zenstack", "a
   // file dependency carries the generated declarations and typebox resolution.
   if (name === "db") {
     await run(resolve(root, "packages/cli"), ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);
+    // The policy-RLS integration test imports the required adapter source.
+    const adapter = resolve(root, "packages/db-zenstack");
+    await run(adapter, ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);
+    await run(adapter, ["run", "build"]);
   }
   // Bun copies file dependencies; refresh them after upstream builds.
   await run(cwd, ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);
