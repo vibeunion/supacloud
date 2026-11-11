@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.133.0...management-api-v0.133.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **elysia:** align every pin on Elysia 2.0.0-rc.3 ([#2575](https://github.com/vibeunion/supacloud/issues/2575)) ([2f1e7d5](https://github.com/vibeunion/supacloud/commit/2f1e7d5f1714685a872d5eea3e445797c1171b84))
+
 ## [0.133.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.132.0...management-api-v0.133.0) (2026-11-10)
 
 

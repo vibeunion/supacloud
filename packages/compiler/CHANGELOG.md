@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.3](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.2...compiler-v0.62.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **elysia:** align every pin on Elysia 2.0.0-rc.3 ([#2575](https://github.com/vibeunion/supacloud/issues/2575)) ([2f1e7d5](https://github.com/vibeunion/supacloud/commit/2f1e7d5f1714685a872d5eea3e445797c1171b84))
+
 ## [0.62.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.1...compiler-v0.62.2) (2026-11-10)
 
 

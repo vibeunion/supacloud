@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.2](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.9.1...function-adapter-v0.9.2) (2026-11-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump typescript in /packages/function-adapter ([#2565](https://github.com/vibeunion/supacloud/issues/2565)) ([914961a](https://github.com/vibeunion/supacloud/commit/914961affd02fa75afb9b930781fe7857ac5de6e))
+* **deps-dev:** bump vite in /packages/function-adapter ([#2562](https://github.com/vibeunion/supacloud/issues/2562)) ([d7d13dc](https://github.com/vibeunion/supacloud/commit/d7d13dca1f7ac93672ea76f63a7fc34fbfa018b7))
+* **deps:** pin TypeScript to 7.1.0-beta ([#2576](https://github.com/vibeunion/supacloud/issues/2576)) ([8bb3b2d](https://github.com/vibeunion/supacloud/commit/8bb3b2dd8c029455ccf15b6bd42086bdb04fb7e1))
+
 ## [0.9.1](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.9.0...function-adapter-v0.9.1) (2026-11-06)
 
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.11](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.10...supacloud-v0.19.11) (2026-11-11)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2550](https://github.com/vibeunion/supacloud/issues/2550)) ([bbd5d1f](https://github.com/vibeunion/supacloud/commit/bbd5d1f19ed448b5cdabc33e6dafcda4b7164b74))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump typescript in /packages/supacloud ([#2567](https://github.com/vibeunion/supacloud/issues/2567)) ([72ed661](https://github.com/vibeunion/supacloud/commit/72ed661af47756a99f2c6c9dd38b813531e5686f))
+* **deps:** pin TypeScript to 7.1.0-beta ([#2576](https://github.com/vibeunion/supacloud/issues/2576)) ([8bb3b2d](https://github.com/vibeunion/supacloud/commit/8bb3b2dd8c029455ccf15b6bd42086bdb04fb7e1))
+
 ## [0.19.10](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.9...supacloud-v0.19.10) (2026-11-10)
 
 

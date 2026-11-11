@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.15.0...pgredis-runtime-v0.15.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **elysia:** align every pin on Elysia 2.0.0-rc.3 ([#2575](https://github.com/vibeunion/supacloud/issues/2575)) ([2f1e7d5](https://github.com/vibeunion/supacloud/commit/2f1e7d5f1714685a872d5eea3e445797c1171b84))
+
 ## [0.15.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.14.4...pgredis-runtime-v0.15.0) (2026-11-05)
 
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.39.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.1...supacloud-lite-v0.39.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **elysia:** align every pin on Elysia 2.0.0-rc.3 ([#2575](https://github.com/vibeunion/supacloud/issues/2575)) ([2f1e7d5](https://github.com/vibeunion/supacloud/commit/2f1e7d5f1714685a872d5eea3e445797c1171b84))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @electric-sql/pglite in /packages/supacloud-lite ([#2569](https://github.com/vibeunion/supacloud/issues/2569)) ([2334953](https://github.com/vibeunion/supacloud/commit/2334953a4a63e4cfc00017982bbf6c24c28fc9ad))
+* **deps:** bump @electric-sql/pglite-pg_textsearch ([#2572](https://github.com/vibeunion/supacloud/issues/2572)) ([fea652c](https://github.com/vibeunion/supacloud/commit/fea652c5fc1ef0d8e54a7ed9bfab8d1f6a1e69c5))
+* **deps:** bump @electric-sql/pglite-pgmq in /packages/supacloud-lite ([#2568](https://github.com/vibeunion/supacloud/issues/2568)) ([727847a](https://github.com/vibeunion/supacloud/commit/727847aefd3bf1f3129bab9b11765d4469973ba2))
+* **deps:** bump @electric-sql/pglite-pgvector ([#2571](https://github.com/vibeunion/supacloud/issues/2571)) ([48f6efb](https://github.com/vibeunion/supacloud/commit/48f6efb33ce91ac2f064d3ae040cb3b4aa086ca1))
+* **deps:** bump @electric-sql/pglite-postgis ([#2584](https://github.com/vibeunion/supacloud/issues/2584)) ([86ab176](https://github.com/vibeunion/supacloud/commit/86ab176b55919fe61ba4f567c0d6296ddb39638d))
+* **deps:** bump fast-xml-parser in /packages/supacloud-lite ([#2570](https://github.com/vibeunion/supacloud/issues/2570)) ([d8c50b1](https://github.com/vibeunion/supacloud/commit/d8c50b135af5bc7c10fc53b9d888cc6a3acbb067))
+
 ## [0.39.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.0...supacloud-lite-v0.39.1) (2026-11-10)
 
 
