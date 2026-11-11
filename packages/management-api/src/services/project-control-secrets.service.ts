@@ -4,7 +4,7 @@ import { encryptSecretIfNeeded, decryptSecretIfNeeded } from "../utils/secret-cr
 import { ValidationError } from "../utils/errors";
 import { PROJECT_STORAGE_SECRET } from "./project-storage-contract";
 
-export const CONTROL_SECRET_SCOPES = ["captcha", "connector", "auth-hook"] as const;
+export const CONTROL_SECRET_SCOPES = ["captcha", "connector", "auth-hook", "sms-provider"] as const;
 export type ControlSecretScope = (typeof CONTROL_SECRET_SCOPES)[number];
 export type ManagedControlSecretScope = ControlSecretScope | "webhook";
 

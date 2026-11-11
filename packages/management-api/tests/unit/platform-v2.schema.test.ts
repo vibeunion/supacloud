@@ -88,7 +88,7 @@ describe("platform v2 schema contract", () => {
 
   test("does not store webhook secrets in plaintext or allow audit mutation", () => {
     expect(schema).toContain("value_encrypted TEXT NOT NULL");
-    expect(schema).toContain("'auth-hook', 'webhook'");
+    expect(schema).toContain("'auth-hook', 'sms-provider', 'webhook'");
     expect(schema).toContain("migrateLegacyControlSecrets");
     expect(schema).toContain("migrateWebhookSecretsToControlStore");
     expect(schema).toContain("SET secret_encrypted = NULL, previous_secret_encrypted = NULL");

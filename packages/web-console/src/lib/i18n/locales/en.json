@@ -1567,6 +1567,7 @@
       "url_configuration": "URL Configuration",
       "email_templates": "Email Templates",
       "smtp": "SMTP",
+      "sms": "SMS OTP",
       "hooks": "Hooks"
     }
   },

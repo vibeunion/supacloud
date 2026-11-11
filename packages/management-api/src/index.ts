@@ -800,6 +800,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     databaseRoutes,
     databaseJitRoutes,
     authRoutes,
+    authSmsRoutes,
     wechatAuthRoutes,
     chinaAuthRoutes,
     userManagementRoutes,
@@ -936,6 +937,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(databaseRoutes)
       .use(databaseJitRoutes)
       .use(authRoutes)
+      .use(authSmsRoutes)
       .use(authRuntimeRoutes)
       .use(wechatAuthRoutes)
       .use(chinaAuthRoutes)
