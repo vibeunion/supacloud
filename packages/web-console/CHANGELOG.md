@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.57.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.56.3...web-console-v0.57.0) (2026-11-11)
+
+
+### Features
+
+* **auth:** add Tencent Cloud SMS OTP provider ([#2601](https://github.com/vibeunion/supacloud/issues/2601)) ([11e5ef7](https://github.com/vibeunion/supacloud/commit/11e5ef7cfd00d0b9102892113d34f8af852b8f98))
+
+
+### Bug Fixes
+
+* **management-api:** preserve sealed migration checksums ([#2600](https://github.com/vibeunion/supacloud/issues/2600)) ([530ee07](https://github.com/vibeunion/supacloud/commit/530ee0747c42b1f38f850437f3abf9b9f78d9bd9))
+
 ## [0.56.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.56.2...web-console-v0.56.3) (2026-11-11)
 
 
