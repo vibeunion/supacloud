@@ -6,7 +6,12 @@
     "types": [
       "bun"
     ],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@supabase/supabase-js": [
+        "../supacloud-js/node_modules/@supabase/supabase-js"
+      ]
+    }
   },
   "include": [
     "src/**/*.test.ts",
