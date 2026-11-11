@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.2.1...db-zenstack-v0.2.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **quality:** resolve code quality findings ([#2590](https://github.com/vibeunion/supacloud/issues/2590)) ([eff8397](https://github.com/vibeunion/supacloud/commit/eff8397480efe5c30c5d6d270457383e5f9d7edc))
+
 ## [0.2.1](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.2.0...db-zenstack-v0.2.1) (2026-11-10)
 
 
