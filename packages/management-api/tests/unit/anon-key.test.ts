@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SignJWT } from "jose";
 import { jwtService } from "../../src/services/jwt.service";
 import {
   isStoredAnonKeyAligned,
@@ -24,6 +25,24 @@ describe("anon-key utils", () => {
       anon_key: key,
       jwt_secret: "current-secret-with-at-least-32-characters",
     })).resolves.toBe(false);
+  });
+
+  test("preserves the official Supabase demo anon issuer", async () => {
+    const secret = "supabase-demo-secret-with-at-least-32-characters";
+    const key = await new SignJWT({ role: "anon" })
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuer("supabase-demo")
+      .setExpirationTime("1h")
+      .sign(new TextEncoder().encode(secret));
+
+    await expect(isStoredAnonKeyAligned({
+      anon_key: key,
+      jwt_secret: secret,
+    })).resolves.toBe(true);
+    await expect(resolveAlignedAnonKey({
+      anon_key: key,
+      jwt_secret: secret,
+    })).resolves.toBe(key);
   });
 
   test("derives an aligned replacement for a stale legacy key", async () => {

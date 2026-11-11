@@ -48,7 +48,11 @@ export async function isStoredAnonKeyAligned(
       new TextEncoder().encode(project.jwt_secret),
       { algorithms: ["HS256"] },
     );
-    return payload["role"] === "anon" && payload["iss"] === "supabase";
+    const issuer = payload["iss"];
+    return (
+      payload["role"] === "anon" &&
+      (issuer === "supabase" || issuer === "supabase-demo")
+    );
   } catch {
     return false;
   }
