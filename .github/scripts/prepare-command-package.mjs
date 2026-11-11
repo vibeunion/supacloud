@@ -1,10 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isRecord, packageVersion, stableVersionPrecedence } from './package-validation.mjs';
-import { waitForRegistryVersion } from './npm-registry-visibility.mjs';
+import { NPM_REGISTRY, waitForRegistryVersion } from './npm-registry-visibility.mjs';
+import { appPackageSpecifiers, unmetAppSubpaths } from '../../scripts/check-elysia-compatibility.mjs';
 
 export { isNpmNotFoundError } from './npm-registry-visibility.mjs';
 
@@ -90,6 +92,82 @@ export async function assertPublishedDependencies(required, options = {}) {
   }
 }
 
+/**
+ * Read the built adapter. Publication must see the same static imports that
+ * ship in dist, including declaration files such as worker.d.ts.
+ * @param {string} directory
+ */
+function readElysiaDist(directory) {
+  const dist = resolve(directory, 'dist');
+  if (!existsSync(dist)) {
+    throw new Error('@supacloud/elysia publication requires dist/ before rewriting @supacloud/app');
+  }
+  /** @type {string[]} */
+  const texts = [];
+  /** @param {string} current */
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && /\.(?:mjs|cjs|js|d\.ts)$/.test(entry.name)) texts.push(readFileSync(path, 'utf8'));
+    }
+  };
+  walk(dist);
+  if (texts.length === 0) throw new Error('@supacloud/elysia dist/ has no JavaScript or declaration files');
+  return texts.join('\n');
+}
+
+/** @param {unknown} stdout @param {string} label */
+function parseNpmJson(stdout, label) {
+  if (typeof stdout !== 'string' || stdout.trim() === '') throw new Error(`npm returned no ${label}`);
+  return JSON.parse(stdout);
+}
+
+/**
+ * The rewritten dependency is an exact version. Its registry manifest, not the
+ * workspace package.json, decides whether that version actually exports the
+ * subpath. @supacloud/app@0.39.1 is the case this rejects: the workspace export
+ * exists, and the published tarball does not.
+ * @param {string} directory
+ * @param {Record<string, unknown>} prepared
+ * @param {{ runNpm?: (arguments_: string[]) => Promise<{ stdout?: unknown, stderr?: unknown }> }} [options]
+ */
+export async function assertElysiaAppPublication(directory, prepared, options = {}) {
+  const specifiers = appPackageSpecifiers(readElysiaDist(directory));
+  const dependencies = prepared['dependencies'];
+  const range = isRecord(dependencies) ? dependencies['@supacloud/app'] : undefined;
+  if (typeof range !== 'string' || !/^\d+\.\d+\.\d+$/.test(range)) {
+    throw new Error(`@supacloud/elysia must publish an exact @supacloud/app version, not ${String(range)}`);
+  }
+  if (specifiers.length === 0) return;
+  const runNpm = options.runNpm ?? ((arguments_) => run('npm', arguments_));
+  const spec = `@supacloud/app@${range}`;
+  const viewed = await runNpm(['view', spec, 'exports', '--json', `--registry=${NPM_REGISTRY}`]);
+  const parsedExports = parseNpmJson(viewed.stdout, `${spec} exports`);
+  const exportsMap = isRecord(parsedExports) && Object.prototype.hasOwnProperty.call(parsedExports, '.')
+    ? parsedExports
+    : isRecord(parsedExports) && isRecord(parsedExports[range]) && Object.prototype.hasOwnProperty.call(parsedExports[range], '.')
+      ? parsedExports[range]
+      : null;
+  if (!isRecord(exportsMap)) throw new Error(`npm returned invalid exports for ${spec}`);
+  const packed = await runNpm(['pack', spec, '--dry-run', '--ignore-scripts', '--json', `--registry=${NPM_REGISTRY}`]);
+  const reports = parseNpmJson(packed.stdout, `${spec} pack inventory`);
+  if (!Array.isArray(reports) || reports.length !== 1 || !isRecord(reports[0]) || !Array.isArray(reports[0]['files'])) {
+    throw new Error(`npm pack did not return one file inventory for ${spec}`);
+  }
+  const files = reports[0]['files'].map((file) => {
+    if (!isRecord(file) || typeof file['path'] !== 'string') throw new Error(`npm pack returned an invalid file entry for ${spec}`);
+    return file['path'];
+  });
+  const problems = unmetAppSubpaths(specifiers, exportsMap, files);
+  if (problems.length > 0) {
+    throw new Error(
+      `Refusing to publish @supacloud/elysia against ${spec}.\n${problems.join('\n')}\n`
+      + 'Publish a new @supacloud/app version that contains these exports before this adapter.',
+    );
+  }
+}
+
 /** Registry reads retry on a just-published 404. Failure leaves the manifest untouched. */
 async function prepare(directory = process.cwd()) {
   const path = resolve(directory, 'package.json');
@@ -102,6 +180,7 @@ async function prepare(directory = process.cwd()) {
   for (const name of directories) siblings.set(packageName(name), await readJson(resolve(root, name, 'package.json')));
   const result = prepareCommandPackage(candidate, siblings);
   await assertPublishedDependencies(result.required);
+  if (candidate['name'] === '@supacloud/elysia') await assertElysiaAppPublication(directory, result.package);
   await writeFile(path, `${JSON.stringify(result.package, null, 2)}\n`);
 }
 

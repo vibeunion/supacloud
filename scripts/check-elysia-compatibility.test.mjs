@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { checkElysiaCompatibility, parseLockfile } from './check-elysia-compatibility.mjs';
+import { appPackageSpecifiers, checkElysiaCompatibility, parseLockfile } from './check-elysia-compatibility.mjs';
 
 const version = '2.0.0-rc.1';
 const templates = [
@@ -223,6 +223,50 @@ test('rejects mixed legacy and active schema dependencies in populated snapshots
     });
     assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local schema metadata/);
   }
+});
+
+test('reads static app imports and ignores mention of the specifier in other strings', () => {
+  const source = [
+    'import { requireFeatureRequestContext } from "@supacloud/app";',
+    'import {',
+    '  executionTrace,',
+    '  observeExecution',
+    '} from "@supacloud/app/execution";',
+    'import { PendingWorkRegistry as PendingWorkRegistry2 } from "@supacloud/app/pending-work";',
+    'import type { CommandRuntimeAudit } from "@supacloud/app";',
+    'export { PendingWorkRegistry } from "@supacloud/app/pending-work";',
+    'const load = () => import("@supacloud/app/pending-work");',
+    'import "@supacloud/app/execution";',
+    'const note = "depends on @supacloud/app/missing";',
+    'const query = "SELECT import FROM t";',
+  ].join('\n');
+  assert.deepEqual(appPackageSpecifiers(source), [
+    '@supacloud/app',
+    '@supacloud/app/execution',
+    '@supacloud/app/pending-work',
+  ]);
+});
+
+test('rejects a shipping app subpath the workspace package does not export', (t) => {
+  const f = fixture(t);
+  f.write('packages/elysia/src/index.ts', 'import { PendingWorkRegistry } from "@supacloud/app/pending-work";\n');
+  f.write('packages/elysia/src/pending-work-host.test.ts', 'import { Missing } from "@supacloud/app/not-shipped";\n');
+  f.edit('packages/app/package.json', (p) => {
+    p.exports = { '.': { import: './dist/index.js', default: './dist/index.js' } };
+  });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /src\/index\.ts: static import @supacloud\/app\/pending-work is not an export/);
+  f.edit('packages/app/package.json', (p) => {
+    p.exports['./pending-work'] = { types: './dist/pending-work.d.ts' };
+  });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /export \.\/pending-work has no runtime JavaScript target/);
+  f.edit('packages/app/package.json', (p) => {
+    p.exports['./pending-work'] = {
+      types: './dist/pending-work.d.ts',
+      import: './dist/pending-work.js',
+      default: './dist/pending-work.js',
+    };
+  });
+  assert.deepEqual(checkElysiaCompatibility(f.root), []);
 });
 
 test('distinguishes missing schema dependencies from empty Bun deduplication placeholders', (t) => {

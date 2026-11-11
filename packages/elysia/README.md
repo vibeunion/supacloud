@@ -62,8 +62,11 @@ do not establish a wider RC version matrix or Node.js runtime compatibility.
 
 Keep the exact Elysia peer until additional versions have their own acceptance
 evidence. A server using this adapter still installs Elysia; application metadata
-and business modules need not import native Elysia types. See the
-[dependency boundary and upgrade policy](../../docs/elysia-compatibility.md).
+and business modules need not import native Elysia types. Publication rewrites
+`@supacloud/app` from `file:../app` to that sibling's exact version. Every static
+import of `@supacloud/app` or a subpath, including `@supacloud/app/pending-work`,
+must be an export of the published app tarball, runtime JavaScript file included.
+See the [dependency boundary and upgrade policy](../../docs/elysia-compatibility.md).
 
 ## Identity-bound ZenStack read adapter
 

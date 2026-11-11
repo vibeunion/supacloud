@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const sections = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
@@ -12,14 +12,152 @@ const templatePaths = [
 ];
 
 /** Parse Bun's emitted JSON-with-trailing-commas without evaluating repository code. */
+/** @param {string} source */
 export function parseLockfile(source) {
   return JSON.parse(source.replace(/"(?:\\.|[^"\\])*"|,(?=\s*[}\]])/g,
+    /** @param {string} token */
     (token) => token.startsWith(',') ? '' : token));
 }
 
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Static `@supacloud/app` and `@supacloud/app/*` imports.
+ * Literal specifiers only; a computed import is invisible to this scan.
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function appPackageSpecifiers(source) {
+  /** @type {Set<string>} */
+  const found = new Set();
+  const patterns = [
+    /(?:^|[^\w$])(?:import|export)\s*(?:type\s+)?[^"'`;]{0,4000}?\sfrom\s*["'](@supacloud\/app(?:\/[^"'\\\r\n]*)?)["']/g,
+    /(?:^|[^\w$])import\s*["'](@supacloud\/app(?:\/[^"'\\\r\n]*)?)["']/g,
+    /(?:^|[^\w$])import\s*\(\s*["'](@supacloud\/app(?:\/[^"'\\\r\n]*)?)["']/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (match[1]) found.add(match[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+/** @param {string} specifier */
+export function appExportSubpath(specifier) {
+  if (specifier === '@supacloud/app') return '.';
+  if (specifier.startsWith('@supacloud/app/')) return `.${specifier.slice('@supacloud/app'.length)}`;
+  return null;
+}
+
+/**
+ * @param {unknown} entry
+ * @param {boolean} typesOnly
+ * @returns {string[]}
+ */
+function conditionalTargets(entry, typesOnly) {
+  /** @type {string[]} */
+  const targets = [];
+  /** @param {unknown} value @param {boolean} inTypes */
+  const visit = (value, inTypes) => {
+    if (typeof value === 'string') {
+      const wanted = typesOnly
+        ? inTypes && value.startsWith('./') && value.endsWith('.d.ts')
+        : !inTypes && value.startsWith('./') && value.endsWith('.js');
+      if (wanted) targets.push(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, inTypes);
+      return;
+    }
+    if (!isRecord(value)) return;
+    for (const [key, child] of Object.entries(value)) visit(child, inTypes || key === 'types');
+  };
+  visit(entry, false);
+  return [...new Set(targets)];
+}
+
+/**
+ * Compare static app imports with an export map.
+ * When `files` is set, every runtime and declaration target must be in that tarball inventory.
+ * @param {readonly string[]} specifiers
+ * @param {unknown} exportsMap
+ * @param {readonly string[] | undefined} [files]
+ * @returns {string[]}
+ */
+export function unmetAppSubpaths(specifiers, exportsMap, files) {
+  /** @type {string[]} */
+  const problems = [];
+  /** @type {Set<string> | undefined} */
+  const inventory = files === undefined ? undefined : new Set(files.map((file) => file.replace(/^\.\//, '').replace(/^package\//, '')));
+  for (const specifier of [...specifiers].sort()) {
+    const subpath = appExportSubpath(specifier);
+    if (!subpath || !isRecord(exportsMap) || exportsMap[subpath] === undefined) {
+      problems.push(`static import ${specifier} is not an export (${subpath ?? 'unrecognized specifier'})`);
+      continue;
+    }
+    const runtime = conditionalTargets(exportsMap[subpath], false);
+    if (runtime.length === 0) {
+      problems.push(`static import ${specifier} export ${subpath} has no runtime JavaScript target`);
+      continue;
+    }
+    if (inventory) {
+      for (const target of runtime) {
+        if (!inventory.has(target.replace(/^\.\//, ''))) {
+          problems.push(`static import ${specifier} runtime file ${target} is not in the published tarball`);
+        }
+      }
+      for (const target of conditionalTargets(exportsMap[subpath], true)) {
+        if (!inventory.has(target.replace(/^\.\//, ''))) {
+          problems.push(`static import ${specifier} type file ${target} is not in the published tarball`);
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+/** @param {string} directory @param {string[]} files */
+function shippingTypeScript(directory, files = []) {
+  if (!existsSync(directory)) return files;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) shippingTypeScript(path, files);
+    else if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts') && !entry.name.endsWith('.test.ts')) {
+      files.push(path);
+    }
+  }
+  return files;
+}
+
+/** Shipping adapter source must stay within the workspace app export map. Test files are excluded. */
+/** @param {string} root */
+export function checkAdapterAppImports(root) {
+  const manifestPath = resolve(root, 'packages/app/package.json');
+  if (!existsSync(manifestPath)) return [];
+  /** @type {unknown} */
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const exportsMap = isRecord(manifest) ? manifest['exports'] : undefined;
+  /** @type {string[]} */
+  const problems = [];
+  for (const file of shippingTypeScript(resolve(root, 'packages/elysia/src'))) {
+    const relative = file.slice(resolve(root).length + 1);
+    for (const problem of unmetAppSubpaths(appPackageSpecifiers(readFileSync(file, 'utf8')), exportsMap)) {
+      problems.push(`${relative}: ${problem}`);
+    }
+  }
+  return problems;
+}
+
 /** Check repository-owned declarations, not third-party or isolated user dependencies. */
+/** @param {string} root */
 export function checkElysiaCompatibility(root) {
   const problems = [];
+  /** @param {string} path */
   const readJSON = (path) => JSON.parse(readFileSync(resolve(root, path), 'utf8'));
   const matrix = readJSON('packages/elysia/compatibility.json');
   const expected = matrix.packages?.elysia;
@@ -136,6 +274,7 @@ export function checkElysiaCompatibility(root) {
       problems.push(`${path}: generated/accepted Elysia version must equal ${expected}`);
     }
   }
+  problems.push(...checkAdapterAppImports(root));
   return problems;
 }
 
