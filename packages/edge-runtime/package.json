@@ -24,7 +24,7 @@
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
     "@supabase/supabase-js": "^2.118.0",
-    "elysia": "2.0.0-rc.1",
+    "elysia": "2.0.0-rc.3",
     "es-module-lexer": "3.0.4",
     "exact-mirror": "1.2.6",
     "jose": "^6.2.15",
