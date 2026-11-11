@@ -390,7 +390,7 @@ export function modelCommandTemplateFiles(name: string, sdk: StarterSdkDependenc
       dependencies: { "@supacloud/app": "^" + app.version, "@supacloud/elysia": "^" + elysia.version,
         "@supacloud/commands": "^" + commands.version, "@supacloud/contracts": "^" + contracts.version,
         "@supacloud/db": "^" + db.version, "@supacloud/db-zenstack": "^" + dbZenstack.version,
-        ...db.dependencies, ...dbZenstack.dependencies, typebox: "1.4.3", effect: "4.0.5", elysia: "2.0.0-rc.1", ...sdk },
+        ...db.dependencies, ...dbZenstack.dependencies, typebox: "1.4.3", effect: "4.0.5", elysia: "2.0.0-rc.3", ...sdk },
       devDependencies: { "@supacloud/compiler": "^" + compiler.version, ...db.devDependencies, ...dbZenstack.devDependencies, "@types/bun": "^1.4.4", typescript: "7.1.0-beta" },
     }),
     "supacloud.config.ts": `import { defineSupacloudConfig } from "@supacloud/compiler";
