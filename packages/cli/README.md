@@ -743,6 +743,8 @@ supacloud supabase migration_new --name add_accounts
 supacloud supabase db_diff --schema public --name add_accounts
 supacloud supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud frontend list --ref abc123
+supacloud frontend set_env --ref abc123 --id web \
+  --env_vars '{"VITE_API_URL":"https://api.example.com"}'
 supacloud branch create --name feature-orders --data_mode schema_only
 supacloud branch promotion_plan --branch_ref preview123
 supacloud branch promote --branch_ref preview123 --plan_checksum <sha256>

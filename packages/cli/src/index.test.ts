@@ -353,6 +353,35 @@ describe("supacloud process contract", () => {
         expect(response.stderr).not.toContain("--mutation_id");
     });
 
+    test("accepts a JSON environment object for frontend set_env", async () => {
+        let request: { method: string; path: string; body: unknown } | undefined;
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            async fetch(input) {
+                const url = new URL(input.url);
+                request = { method: input.method, path: url.pathname, body: await input.json() };
+                return Response.json({ success: true });
+            },
+        });
+        servers.push(server);
+        const response = await runProjectCli([
+            "frontend", "set_env", "--ref", "demo-project", "--id", "web",
+            "--env_vars", '{"VITE_API_URL":"https://api.example.test","VITE_FLAG":"on"}',
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "demo-project",
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(request).toEqual({
+            method: "PUT", path: "/v1/projects/demo-project/frontend/deployments/web/env",
+            body: { env_vars: { VITE_API_URL: "https://api.example.test", VITE_FLAG: "on" } },
+        });
+        expect(response.stdout).toContain("Set 2 env vars");
+        expect(response.stdout + response.stderr).not.toContain("test-token");
+    });
+
     test("keeps frontend rollback help focused on the target without project configuration", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-rollback-help-"));
         temporaryDirectories.push(workspace);

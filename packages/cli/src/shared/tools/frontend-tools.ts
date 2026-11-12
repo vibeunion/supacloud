@@ -13,6 +13,23 @@ import {
     verifyFrontendRelease,
 } from "./frontend-release-control";
 
+function parseEnvironmentVariables(value: unknown): Record<string, string> | undefined {
+    if (value === undefined) return undefined;
+    const candidate: unknown = typeof value === "string" ? (() => {
+        try { return JSON.parse(value) as unknown; }
+        catch { throw new Error("'env_vars' must be a valid JSON object"); }
+    })() : value;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error("'env_vars' must be a JSON object");
+    }
+    const environment: Record<string, string> = {};
+    for (const [name, entry] of Object.entries(candidate)) {
+        if (typeof entry !== "string") throw new Error(`'env_vars.${name}' must be a string`);
+        environment[name] = entry;
+    }
+    return environment;
+}
+
 export function registerFrontendTools(server: ToolServer, http: HttpTransport): void {
     registerTool(server,
         "frontend",
@@ -37,7 +54,10 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
             install_command: optional(Type.String(), "[create/update] Install command override"),
             node_version: optional(Type.String(), "[create/update] Node.js version"),
             health_check_path: optional(Type.String(), "[create/update] SSR readiness path (default: /)"),
-            env_vars: optional(Type.Record(Type.String(), Type.String()), "[create/update/set_env] Environment variables"),
+            env_vars: optional(Type.Union([
+                Type.Record(Type.String(), Type.String()),
+                Type.String({ minLength: 2, maxLength: 262_144 }),
+            ]), "[create/update/set_env] JSON object, for example {\"VITE_API_URL\":\"https://...\"}"),
             release_id: optional(Type.String(), "[get_release] SHA-256 release ID; [rollback] optional, defaults to journal-verified previous release"),
             cursor: optional(Type.String(), "[list_releases] Last release SHA-256 cursor"),
             limit: optional(Type.Number(), "[list_releases] Page size, 1-100 (default 50)"),
@@ -50,6 +70,7 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
             const need: <T>(field: string, value: T) => asserts value is NonNullable<T> = (field, value) => {
                 if (value === undefined || value === null || value === "") throw new Error(`'${field}' required for '${action}'`);
             };
+            const environment = parseEnvironmentVariables(env_vars);
             const ok = (res: HttpResult<unknown>) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 
             let text: string;
@@ -65,13 +86,13 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
                 case "create":
                     need("ref", ref); need("name", name); need("framework", framework);
                     text = ok(await http.post(`/v1/projects/${ref}/frontend/deployments`, {
-                        name, framework, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars,
+                        name, framework, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars: environment,
                     }));
                     break;
                 case "update":
                     need("ref", ref); need("id", id);
                     text = ok(await http.patch(`/v1/projects/${ref}/frontend/deployments/${id}`, {
-                        name, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars,
+                        name, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars: environment,
                     }));
                     break;
                 case "delete":
@@ -97,9 +118,9 @@ Actions: list, get, create, update, delete, build_logs, add_domain, remove_domai
                         ? `✅ Domain ${domain} removed` : `❌ Failed`;
                     break;
                 case "set_env":
-                    need("ref", ref); need("id", id); need("env_vars", env_vars);
-                    text = (await http.put(`/v1/projects/${ref}/frontend/deployments/${id}/env`, { env_vars })).ok
-                        ? `✅ Set ${Object.keys(env_vars).length} env vars` : `❌ Failed`;
+                    need("ref", ref); need("id", id); need("env_vars", environment);
+                    text = (await http.put(`/v1/projects/${ref}/frontend/deployments/${id}/env`, { env_vars: environment })).ok
+                        ? `✅ Set ${Object.keys(environment).length} env vars` : `❌ Failed`;
                     break;
                 case "list_frameworks":
                     text = ok(await http.get("/v1/projects/_/frontend/frameworks"));
