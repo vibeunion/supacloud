@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.136.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.135.0...management-api-v0.136.0) (2026-11-12)
+
+
+### Features
+
+* **cli:** keep model adoption behind Management API ([#2621](https://github.com/vibeunion/supacloud/issues/2621)) ([fd9c64f](https://github.com/vibeunion/supacloud/commit/fd9c64f222764790ed060da4d644cd276edc1c7c))
+
 ## [0.135.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.134.2...management-api-v0.135.0) (2026-11-12)
 
 
