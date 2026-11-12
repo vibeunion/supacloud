@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.135.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.134.2...management-api-v0.135.0) (2026-11-12)
+
+
+### Features
+
+* support Tencent SMS validity minutes ([#2617](https://github.com/vibeunion/supacloud/issues/2617)) ([8c6f0bc](https://github.com/vibeunion/supacloud/commit/8c6f0bcbdd0ee8830eaae3514125a4ce95d38119))
+
 ## [0.134.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.134.1...management-api-v0.134.2) (2026-11-12)
 
 

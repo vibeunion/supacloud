@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.57.0...web-console-v0.58.0) (2026-11-12)
+
+
+### Features
+
+* support Tencent SMS validity minutes ([#2617](https://github.com/vibeunion/supacloud/issues/2617)) ([8c6f0bc](https://github.com/vibeunion/supacloud/commit/8c6f0bcbdd0ee8830eaae3514125a4ce95d38119))
+
 ## [0.57.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.56.3...web-console-v0.57.0) (2026-11-11)
 
 
