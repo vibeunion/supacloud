@@ -186,12 +186,18 @@ export async function sendTencentSms(input: {
   const responseRecord = recordValue(responseBody);
   const responseData = recordValue(responseRecord.Response);
   const error = recordValue(responseData.Error);
-  if (!response.ok || Object.keys(error).length > 0 || responseData.SendStatusSet && !Array.isArray(responseData.SendStatusSet)) {
+  if (
+    !response.ok
+    || !Object.hasOwn(responseRecord, "Response")
+    || Object.keys(error).length > 0
+    || !Array.isArray(responseData.SendStatusSet)
+    || responseData.SendStatusSet.length === 0
+  ) {
     throw new Error("Tencent SMS provider rejected the request");
   }
   const sendStatus = Array.isArray(responseData.SendStatusSet)
     ? recordValue(responseData.SendStatusSet[0])
     : {};
-  if (sendStatus.Code && sendStatus.Code !== "Ok") throw new Error("Tencent SMS provider rejected the request");
+  if (sendStatus.Code !== "Ok") throw new Error("Tencent SMS provider rejected the request");
   return typeof responseData.RequestId === "string" ? { requestId: responseData.RequestId } : {};
 }

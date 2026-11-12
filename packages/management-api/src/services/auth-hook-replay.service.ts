@@ -22,3 +22,18 @@ export async function consumeAuthHookWebhookId(projectRef: string, webhookId: st
     return inserted.length === 1;
   });
 }
+
+/**
+ * Release a reservation when processing failed before the hook side effect
+ * completed. Successful deliveries keep their reservation until the TTL so a
+ * retry cannot send the same OTP twice.
+ */
+export async function releaseAuthHookWebhookId(projectRef: string, webhookId: string): Promise<void> {
+  if (!WEBHOOK_ID_PATTERN.test(webhookId)) return;
+  const replayKey = `auth-hook:${projectRef}:${webhookId}`;
+  if (replayKey.length > 128) return;
+  await sql`
+    DELETE FROM supaoauth_bff_proof_nonces
+    WHERE nonce = ${replayKey}
+  `;
+}

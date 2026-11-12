@@ -4,7 +4,7 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectService } from "../services";
 import { projectControlSecretsService } from "../services/project-control-secrets.service";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
-import { consumeAuthHookWebhookId } from "../services/auth-hook-replay.service";
+import { consumeAuthHookWebhookId, releaseAuthHookWebhookId } from "../services/auth-hook-replay.service";
 import { StandardWebhookVerificationError, verifyStandardWebhook } from "../services/standard-webhooks.service";
 import {
   createTencentSmsHookSecret,
@@ -237,6 +237,7 @@ const runtimeRoute = new Elysia({ prefix: "/v1/projects/:ref/auth/sms" })
     const webhookId = request.headers.get("webhook-id") ?? "";
     const webhookTimestamp = request.headers.get("webhook-timestamp") ?? "";
     const webhookSignature = request.headers.get("webhook-signature") ?? "";
+    let replayReserved = false;
     try {
       const secret = await projectControlSecretsService.readRequiredValue(params.ref, "auth-hook", "send_sms_hook");
       verifyStandardWebhook({
@@ -249,6 +250,7 @@ const runtimeRoute = new Elysia({ prefix: "/v1/projects/:ref/auth/sms" })
       if (!await consumeAuthHookWebhookId(params.ref, webhookId)) {
         return status(409, { code: "WEBHOOK_REPLAY", message: "SMS hook replay detected" });
       }
+      replayReserved = true;
       const payload = JSON.parse(rawBody.toString("utf8")) as unknown;
       const probe = recordValue(recordValue(payload).supaoauth_hook_probe);
       if (Object.keys(probe).length > 0) {
@@ -263,8 +265,12 @@ const runtimeRoute = new Elysia({ prefix: "/v1/projects/:ref/auth/sms" })
       };
       const message = parseTencentSmsHookPayload(payload);
       await sendTencentSms({ config: sms, credentials, phone: message.phone, code: message.code });
+      replayReserved = false;
       return {};
     } catch (error: unknown) {
+      if (replayReserved) {
+        await releaseAuthHookWebhookId(params.ref, webhookId).catch(() => {});
+      }
       if (error instanceof StandardWebhookVerificationError) {
         set.status = 401;
         return { code: "INVALID_AUTH_HOOK", message: "Invalid SMS hook signature" };
