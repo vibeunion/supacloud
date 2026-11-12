@@ -123,16 +123,18 @@ bun run db:check
 两个脚本分别执行模型/源契约的生成与只读一致性校验。一起提交 ZModel、
 `zenstack/generated/`、`db/contracts/` 和相关源文件。
 
-结构变更时，显式设置 `SUPACLOUD_MODEL_DATABASE_URL` 指向本地或影子数据库：
+结构变更时，先生成并检查模型，再通过 Management API 规划迁移：
 
 ```sh
-bun run db:diff -- --candidate output/database-audit/change.sql
+bun run db:plan
+bun run db:apply -- --approved_digest <reviewed-digest>
 ```
 
-审查候选中的删表、默认值、约束、映射和不支持的 PostgreSQL 对象，再将必要
-变更加入新的迁移。应用使用现有 `supacloud db plan` / `db apply` 流程。
-`db:pull` 仅用于存量结构核对，输出新的 `.zmodel` 候选，不能代替日常模型维护，
-也无法推导业务权限。不要恢复 `dev migrate`、Drizzle 命令或运行另一套 migrate/db push。
+`db:plan` 将迁移字节发送到 Management API，由项目数据库绑定执行只读审查并
+返回精确摘要；`db:apply` 只接受已审查摘要。CLI 不读取 `DATABASE_URL`，也不要求
+数据库开放公网端口。`db:pull` 仅用于存量结构核对，输出新的 `.zmodel` 候选，
+不能代替日常模型维护，也无法推导业务权限。不要恢复 `dev migrate`、Drizzle
+命令或运行另一套 migrate/db push。
 
 ## 验证按改动选择
 

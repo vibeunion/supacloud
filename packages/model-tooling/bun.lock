@@ -6,9 +6,6 @@
       "name": "@supacloud/model-tooling",
       "dependencies": {
         "@supacloud/db-zenstack": "^0.2.2",
-        "@zenstackhq/cli": "3.10.0",
-        "pg": "8.23.1",
-        "prisma": "6.19.3",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
@@ -18,8 +15,6 @@
   },
   "overrides": {
     "@supacloud/db-zenstack": "file:../db-zenstack",
-    "deepmerge-ts": "8.0.2",
-    "prisma": "6.19.3",
   },
   "packages": {
     "@chevrotain/cst-dts-gen": ["@chevrotain/cst-dts-gen@12.0.0", "https://registry.npmmirror.com/@chevrotain/cst-dts-gen/-/cst-dts-gen-12.0.0.tgz", { "dependencies": { "@chevrotain/gast": "12.0.0", "@chevrotain/types": "12.0.0" } }, "sha512-fSL4KXjTl7cDgf0B5Rip9Q05BOrYvkJV/RrBTE/bKDN096E4hN/ySpcBK5B24T76dlQ2i32Zc3PAE27jFnFrKg=="],
@@ -186,7 +181,7 @@
 
     "decimal.js": ["decimal.js@10.6.0", "https://registry.npmmirror.com/decimal.js/-/decimal.js-10.6.0.tgz", {}, "sha512-YpgQiITW3JXGntzdUmyUR1V812Hn8T1YVXhCu+wO3OpS4eU9l4YdD3qjyiKdV6mvV29zapkMeD390UVEf2lkUg=="],
 
-    "deepmerge-ts": ["deepmerge-ts@8.0.2", "https://registry.npmmirror.com/deepmerge-ts/-/deepmerge-ts-8.0.2.tgz", {}, "sha512-uqbvqLUMrc6p0MO+WBRtTxY55hmyh94WRwI5a++PZe54X+bfVh59FSN7uWCBCW1CCVjzjnrwzfI8zidE2obMMw=="],
+    "deepmerge-ts": ["deepmerge-ts@7.1.5", "https://registry.npmmirror.com/deepmerge-ts/-/deepmerge-ts-7.1.5.tgz", {}, "sha512-HOJkrhaYsweh+W+e74Yn7YStZOilkoPb6fycpwNLKzSPtruFs48nYis0zy5yJz1+ktUhHxoRDJ27RQAWLIJVJw=="],
 
     "defaults": ["defaults@1.0.4", "https://registry.npmmirror.com/defaults/-/defaults-1.0.4.tgz", { "dependencies": { "clone": "^1.0.2" } }, "sha512-eFuaLoy/Rxalv2kr+lqMlUnrDWV+3j4pljOIJgLIhI058IQfWJ7vXhyEIHu+HtC738klGALYxOKDO0bQP3tg8A=="],
 

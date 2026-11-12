@@ -28,9 +28,11 @@ with `supacloud-model generate`, and fail stale builds with `supacloud-model che
 Install `@supacloud/model-tooling` as a development dependency for this binary;
 it owns the ZenStack and PostgreSQL introspection toolchain. Do not add `pg` or
 `@zenstackhq/cli` to the application manifest directly.
-`supacloud-model diff --candidate <file>` and `pull --candidate <file>` require an
-explicit `SUPACLOUD_MODEL_DATABASE_URL` and never apply migrations. Use the
-existing SupaCloud deployment ledger after reviewing candidates.
+`supacloud-model pull --candidate <file>` uses the Management API project
+binding and never receives a `DATABASE_URL` or opens a PostgreSQL connection.
+`supacloud db plan` and `supacloud db apply --approved_digest <digest>` use the
+same remote binding and existing SupaCloud deployment ledger; they never expose
+database credentials to the user CLI or apply an unreviewed migration.
 
 `pull` also adopts a database that has no maintained model yet: it introspects
 through a temporary datasource-only model, so a migrated project does not need a

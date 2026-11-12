@@ -61,7 +61,7 @@ export function starterMetadata(cwd = root) {
       entry.dependencies = Object.fromEntries(modelPackages.map(name => [name, dependency(manifest, 'dependencies', name)]));
     }
     if (alias === 'modelTooling') {
-      const toolingPackages = ['@supacloud/db-zenstack', '@zenstackhq/cli', 'prisma', 'pg'];
+      const toolingPackages = ['@supacloud/db-zenstack'];
       entry.dependencies = Object.fromEntries(toolingPackages.map(name => [name, dependency(manifest, 'dependencies', name)]));
     }
     if (alias === 'sdk') entry.peerDependencies = { '@supabase/supabase-js': dependency(manifest, 'peerDependencies', '@supabase/supabase-js') };

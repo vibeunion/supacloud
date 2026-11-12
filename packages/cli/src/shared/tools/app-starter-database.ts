@@ -179,20 +179,24 @@ SQL, not the authenticated row-policy projection. Command writes still use the s
 transaction, receipt and audit boundary, not unrestricted CRUD. SQL constraints, RPCs
 and RLS remain explicit reviewed migrations when the model language cannot express them.
 
-Use \`bun run db:diff -- --candidate output/database-audit/change.sql\` with an
-explicit read-only SUPACLOUD_MODEL_DATABASE_URL. Review the SQL, then promote a new
-forward migration through the existing SupaCloud plan/apply ledger. Never run
-zen migrate deploy or db push against a managed production database.
-\`bun run db:pull -- --candidate output/database-audit/schema.zmodel\` writes a
-review candidate only; it never overwrites the maintained model. Add policies
-before adopting introspection output. Keep one migration history and preserve RLS.
+Use \`bun run db:plan\` to send the reviewed migration directory to the
+Management API for a remote, read-only plan. Review the returned digest, then run
+\`bun run db:apply -- --approved_digest <digest>\` to apply the exact same bytes
+through the project migration ledger. Neither command needs DATABASE_URL or a
+public PostgreSQL port. Never run zen migrate deploy or db push against a managed
+production database.
+\`bun run db:pull -- --candidate output/database-audit/schema.zmodel\` uses the
+same Management API binding and writes a review candidate only; it never
+overwrites the maintained model. Add policies before adopting introspection
+output. Keep one migration history and preserve RLS.
 
 Adopting a database that has no model yet starts with the same command: pull
-introspects through a temporary datasource-only model, so no hand-written ZModel
-is required. Review the candidate, add the policy plugin and @@allow rules, move
-it to zenstack/schema.zmodel, then run \`bun run db:generate\`. Until that file
-exists, \`db:diff\` and \`db:generate\` fail closed instead of building from an
-unreviewed introspection result. Keep the host wiring unchanged: one
+introspects through a temporary datasource-only model inside the Management API,
+so no hand-written ZModel is required. Review the candidate, add the policy
+plugin and @@allow rules, move it to zenstack/schema.zmodel, then run
+\`bun run db:generate\`. Until that file exists, \`db:plan\` and
+\`db:generate\` fail closed instead of building from an unreviewed
+introspection result. Keep the host wiring unchanged: one
 createZenStackDatabase composition root supplies read-only models and the
 transactional command store.
 `;

@@ -23,7 +23,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun run clean && bun build src/index.ts --outdir dist --target node --external @supacloud/db-zenstack/cli --external @zenstackhq/cli --external pg --external prisma && bun run build:types",
+    "build": "bun run clean && bun build src/index.ts --outdir dist --target node --external @supacloud/db-zenstack/model && bun run build:types",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -37,18 +37,13 @@
     "directory": "packages/model-tooling"
   },
   "dependencies": {
-    "@supacloud/db-zenstack": "^0.2.2",
-    "@zenstackhq/cli": "3.10.0",
-    "pg": "8.23.1",
-    "prisma": "6.19.3"
+    "@supacloud/db-zenstack": "^0.2.2"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
     "typescript": "7.1.0-beta"
   },
   "overrides": {
-    "@supacloud/db-zenstack": "file:../db-zenstack",
-    "deepmerge-ts": "8.0.2",
-    "prisma": "6.19.3"
+    "@supacloud/db-zenstack": "file:../db-zenstack"
   }
 }

@@ -265,32 +265,29 @@ may be archived as historical evidence; do not rewrite the applied SQL.
    `zenstack/generated/` and `db/contracts/` together. Each configured root ZModel
    has its generated output in the adjacent `generated/` directory. The source
    gate checks fresh model generation before accepting a new source manifest.
-5. Set `SUPACLOUD_MODEL_DATABASE_URL` explicitly to the local/shadow database,
-   preferably with a read-only account. Commands accept no ambient production
-   default and never apply SQL:
+5. Use the Management API project binding for database operations. The CLI sends
+   only project context and migration bytes, so it does not need
+   `SUPACLOUD_MODEL_DATABASE_URL`, `DATABASE_URL` or a public PostgreSQL port:
 
    ```sh
    bun run db:pull -- --candidate output/database-audit/baseline.zmodel
-   bun run db:diff -- --candidate output/database-audit/change.sql
+   bun run db:plan
+   bun run db:apply -- --approved_digest <reviewed-digest>
    ```
 
    A project that already owns a database but no maintained model starts at
-   `db:pull`: introspection runs through a temporary datasource-only model and
-   writes only the candidate. Review it, add the policy plugin and `@@allow`
-   rules, move it to `zenstack/schema.zmodel`, then run `db:generate`. `db:diff`
-   and `db:generate` still require the maintained model, so an unreviewed
-   introspection result can never become the build input by accident.
+   `db:pull`: introspection runs inside the Management API and writes only the
+   candidate. Review it, add the policy plugin and `@@allow` rules, move it to
+   `zenstack/schema.zmodel`, then run `db:generate`. `db:plan` and `db:generate`
+   still require the maintained model, so an unreviewed introspection result can
+   never become the build input by accident.
 
-   Candidate files must be new, outside generated contracts, and use `.zmodel`
-   or `.sql` respectively. Review introspection output; it cannot infer business
-   policy. Diff compares the selected database with the generated Prisma model.
+   Candidate files must be new and outside generated contracts. Review
+   introspection output; it cannot infer business policy. Migration planning and
+   application remain bound to the existing Management API ledger.
 
-   A project that already owns a database but no maintained model starts at
-   `db:pull`: introspection runs through a temporary datasource-only model and
-   writes only the candidate. Review it, add the policy plugin and `@@allow`
-   rules, move it to `zenstack/schema.zmodel`, then run `db:generate`. `db:diff`
-   and `db:generate` still require the maintained model, so an unreviewed
-   introspection result can never become the build input by accident.
+   The Management API keeps the database connection private to the selected
+   project binding. The CLI receives only the review candidate and plan result.
 6. Replay the existing migrations in a shadow database. Review the baseline diff
    and remove unintended table/column drops or constraint changes by correcting
    the model first. Prisma cannot express every PostgreSQL object: preserve

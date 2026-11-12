@@ -321,8 +321,10 @@ test("the starter ships a default database-adoption flow for projects without a 
     expect(manifest.devDependencies["@supacloud/model-tooling"]).toMatch(/^\^\d+\.\d+\.\d+/);
     expect(manifest.devDependencies["@zenstackhq/cli"]).toBeUndefined();
     expect(manifest.devDependencies.pg).toBeUndefined();
+    expect(manifest.scripts["db:plan"]).toBe("supacloud db plan --dir migrations");
+    expect(manifest.scripts["db:apply"]).toBe("supacloud db apply --dir migrations");
     expect(files["AGENTS.md"]).toContain("Adopting a database that has no model yet");
-    expect(files["AGENTS.md"]).toContain("db:diff");
+    expect(files["AGENTS.md"]).toContain("db:plan");
     expect(files["db/schema.ts"]).toContain("zenstack/generated/models");
 });
 
@@ -402,6 +404,6 @@ test("the starter ships a default database-adoption flow for projects without a 
     expect(files["zenstack/schema.zmodel"]).toContain('provider = "postgresql"');
     expect(files["package.json"]).toContain('"db:pull": "supacloud-model pull"');
     expect(files["AGENTS.md"]).toContain("Adopting a database that has no model yet");
-    expect(files["AGENTS.md"]).toContain("db:diff");
+    expect(files["AGENTS.md"]).toContain("db:plan");
     expect(files["db/schema.ts"]).toContain("zenstack/generated/models");
 });

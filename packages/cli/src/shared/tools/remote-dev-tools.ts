@@ -78,7 +78,7 @@ async function readProjectConfig(root: string): Promise<ProjectConfig> {
         const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
         if (parsed && typeof parsed === "object" && "dev" in parsed && parsed.dev
             && typeof parsed.dev === "object" && "database" in parsed.dev) {
-            throw new Error("dev.database was removed; use supacloud-model diff and db plan/apply");
+            throw new Error("dev.database was removed; use db:plan/db:apply through the Management API");
         }
         return parsed && typeof parsed === "object" ? parsed as ProjectConfig : {};
     } catch (error) {

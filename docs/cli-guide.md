@@ -184,18 +184,18 @@ using the existing SupaCloud database plan/apply workflow:
 
 ```bash
 bun run db:generate
-bun run db:diff -- --candidate db/migration-candidates/change.sql
+bun run db:plan
+bun run db:apply -- --approved_digest <reviewed-digest>
 ```
 
-Set `SUPACLOUD_MODEL_DATABASE_URL` explicitly to a local/shadow database. Candidate
-generation never applies SQL. An existing database can be adopted before any
-model exists: `bun run db:pull -- --candidate output/database-audit/schema.zmodel`
-introspects through a temporary datasource-only model and writes only that
-candidate. Review it, add the policy plugin and `@@allow` rules, move it to
-`zenstack/schema.zmodel`, then run `bun run db:generate`; `db:diff` and
-`db:generate` remain blocked until the maintained model exists. Promote reviewed
-SQL to the existing migration directory, then use `supacloud db plan` and
-`supacloud db apply` with the selected environment and exact approved digest.
+The plan and apply commands use the Management API project binding. The CLI
+does not receive `DATABASE_URL`, open a PostgreSQL connection, or require a
+public database port. An existing database can be adopted before any model
+exists: `bun run db:pull -- --candidate output/database-audit/schema.zmodel`
+introspects inside the Management API and writes only that candidate. Review it,
+add the policy plugin and `@@allow` rules, move it to `zenstack/schema.zmodel`,
+then run `bun run db:generate`; `db:plan` and `db:generate` remain blocked until
+the maintained model exists. Apply only the exact digest returned by `db:plan`.
 See [upgrade steps](architecture/zenstack-upgrade.md).
 
 For executable application delivery, bind the application in the selected profile

@@ -165,8 +165,11 @@ share the same watch/recompile/restart loop. It does not add a second watcher.
 `supacloud app watch` is the compile-only inspection command.
 For compatibility, `app dev --once` / `--watch=false` remain compile-only.
 Remote test-server sync and reload remain `supacloud dev sync` and
-`supacloud dev watch`. Generate migration candidates with `bun run db:diff`,
-review them, then use the existing `supacloud db plan` / `db apply` workflow.
+`supacloud dev watch`. Generate and review a remote migration plan with
+`bun run db:plan`, then apply the exact returned digest with
+`bun run db:apply -- --approved_digest <reviewed-digest>`. The Management API
+owns the database binding; the CLI does not need `DATABASE_URL` or a public
+PostgreSQL port.
 
 | Profile | Intended use | Requirement |
 | --- | --- | --- |
