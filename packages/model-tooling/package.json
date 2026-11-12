@@ -28,6 +28,7 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.json --noEmit",
     "test": "bun test"
   },
   "license": "Apache-2.0",
