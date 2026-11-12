@@ -64,6 +64,13 @@ export function buildTenantPsqlInvocation(
     return {
         cmd: [
             "psql",
+            // 必须显式 -X / -t / -A：调用方会把 stdout 当值解析（凭据、配置）。
+            // 若用户级 ~/.psqlrc 开了 \timing 或 pager，输出里会混入「时间：0.994 ms」
+            // 之类的内容，平台就会把脏串写进 db_password / jwt_secret / JWKS，
+            // 表现为所有 JWT 一律 401 且 api-keys/rotate 无法回滚。
+            "-X",
+            "-t",
+            "-A",
             "-h", connection.host,
             "-p", connection.port,
             "-U", connection.user,
