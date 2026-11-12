@@ -10,6 +10,7 @@
     sms_sdk_app_id: string;
     sign_name: string;
     template_id: string;
+    otp_validity_minutes: number | null;
     secret_id_configured: boolean;
     secret_key_configured: boolean;
     hook_configured: boolean;
@@ -23,6 +24,7 @@
     sms_sdk_app_id: "",
     sign_name: "",
     template_id: "",
+    otp_validity_minutes: null,
     secret_id_configured: false,
     secret_key_configured: false,
     hook_configured: false,
@@ -57,12 +59,13 @@
     saving = true;
     message = null;
     try {
-      const body: Record<string, string> = {
+      const body: Record<string, string | null> = {
         provider: config.provider,
         region: config.region,
         sms_sdk_app_id: config.sms_sdk_app_id,
         sign_name: config.sign_name,
         template_id: config.template_id,
+        otp_validity_minutes: config.otp_validity_minutes === null ? null : String(config.otp_validity_minutes),
       };
       if (secretId.trim()) body.secret_id = secretId.trim();
       if (secretKey.trim()) body.secret_key = secretKey.trim();
@@ -123,7 +126,7 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <Smartphone size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">腾讯云短信模板必须包含一个验证码变量。保存后平台会自动配置 GoTrue 的 Send SMS Hook，短信密钥只会保存到项目的加密控制密钥中。</p>
+    <p class="text-xs text-blue-700">默认发送一个验证码变量；如果腾讯云模板还包含“有效分钟数”变量，请填写下方分钟数。保存后平台会自动配置 GoTrue 的 Send SMS Hook，短信密钥只会保存到项目的加密控制密钥中。</p>
   </div>
 
   {#if loading}
@@ -150,13 +153,14 @@
           <label class="space-y-1.5"><span class="text-xs font-medium">SmsSdkAppId</span><input bind:value={config.sms_sdk_app_id} placeholder="1400xxxxxx" class="w-full rounded-md border bg-background px-3 py-2 text-sm" /></label>
           <label class="space-y-1.5"><span class="text-xs font-medium">短信签名</span><input bind:value={config.sign_name} placeholder="我的应用" class="w-full rounded-md border bg-background px-3 py-2 text-sm" /></label>
           <label class="space-y-1.5"><span class="text-xs font-medium">模板 ID</span><input bind:value={config.template_id} placeholder="1234567" class="w-full rounded-md border bg-background px-3 py-2 text-sm" /></label>
+          <label class="space-y-1.5"><span class="text-xs font-medium">有效分钟数（可选）</span><input bind:value={config.otp_validity_minutes} type="number" min="1" max="60" step="1" placeholder="例如 5" class="w-full rounded-md border bg-background px-3 py-2 text-sm" /><span class="text-[10px] text-muted-foreground">仅用于模板包含第二个“分钟数”变量时。</span></label>
           <label class="space-y-1.5"><span class="text-xs font-medium">SecretId {#if config.secret_id_configured}<span class="text-green-600">（已配置）</span>{/if}</span><input bind:value={secretId} type="password" autocomplete="off" placeholder={config.secret_id_configured ? "留空以保留现有密钥" : "请输入 SecretId"} class="w-full rounded-md border bg-background px-3 py-2 text-sm" /></label>
           <label class="space-y-1.5"><span class="text-xs font-medium">SecretKey {#if config.secret_key_configured}<span class="text-green-600">（已配置）</span>{/if}</span><input bind:value={secretKey} type="password" autocomplete="new-password" placeholder={config.secret_key_configured ? "留空以保留现有密钥" : "请输入 SecretKey"} class="w-full rounded-md border bg-background px-3 py-2 text-sm" /></label>
         </div>
 
         <div class="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 flex items-start gap-2">
           <AlertTriangle size={14} class="text-amber-600 mt-0.5 shrink-0" />
-          <p class="text-xs text-amber-700">测试发送会使用验证码 123456。请确认腾讯云短信模板只有一个验证码参数，并且已完成国内短信签名和模板审核。</p>
+          <p class="text-xs text-amber-700">测试发送会使用验证码 123456；如果模板有第二个分钟数变量，请先填写有效分钟数，并确认签名和模板已审核通过。</p>
         </div>
 
         <div class="flex flex-col gap-2 sm:flex-row sm:items-end">

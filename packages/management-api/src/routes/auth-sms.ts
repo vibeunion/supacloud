@@ -29,6 +29,14 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function otpValidityMinutes(value: unknown, fallback: number | null = null): number | null {
+  if (value === undefined) return fallback;
+  if (value === null || value === "") return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return Number.NaN;
+}
+
 function providerValue(value: unknown, strict = false): SmsProvider {
   if (value === undefined || value === null || value === "") return "none";
   if (value === "none" || value === "tencent_cloud") return value;
@@ -42,6 +50,7 @@ function readSmsConfig(auth: RecordValue): {
   sms_sdk_app_id: string;
   sign_name: string;
   template_id: string;
+  otp_validity_minutes: number | null;
 } {
   const sms = recordValue(auth.sms);
   return {
@@ -50,6 +59,7 @@ function readSmsConfig(auth: RecordValue): {
     sms_sdk_app_id: stringValue(sms.sms_sdk_app_id) ?? "",
     sign_name: stringValue(sms.sign_name) ?? "",
     template_id: stringValue(sms.template_id) ?? "",
+    otp_validity_minutes: otpValidityMinutes(sms.otp_validity_minutes),
   };
 }
 
@@ -76,6 +86,7 @@ function configResponse(input: {
     sms_sdk_app_id: input.sms.sms_sdk_app_id,
     sign_name: input.sms.sign_name,
     template_id: input.sms.template_id,
+    otp_validity_minutes: input.sms.otp_validity_minutes,
     secret_id_configured: input.secretIdConfigured,
     secret_key_configured: input.secretKeyConfigured,
     hook_configured: input.hookConfigured,
@@ -130,11 +141,12 @@ async function saveTencentConfig(
     sms_sdk_app_id: stringValue(body.sms_sdk_app_id) ?? currentSms.sms_sdk_app_id,
     sign_name: stringValue(body.sign_name) ?? currentSms.sign_name,
     template_id: stringValue(body.template_id) ?? currentSms.template_id,
+    otp_validity_minutes: otpValidityMinutes(body.otp_validity_minutes, currentSms.otp_validity_minutes),
   };
 
   if (!SMS_PROVIDER_VALUES.includes(provider)) throw new Error("Unsupported SMS provider");
   if (provider === "tencent_cloud") {
-    validateTencentSmsConfig({ ...sms, provider: "tencent_cloud" });
+    const normalizedSms = validateTencentSmsConfig({ ...sms, provider: "tencent_cloud" });
     const existingSecretId = await projectControlSecretsService.readValue(ref, "sms-provider", "tencent_secret_id");
     const existingSecretKey = await projectControlSecretsService.readValue(ref, "sms-provider", "tencent_secret_key");
     const secretId = stringValue(body.secret_id) ?? existingSecretId;
@@ -150,7 +162,7 @@ async function saveTencentConfig(
     const currentHooks = recordValue(currentAuth.hooks);
     const updatedAuth = {
       ...currentAuth,
-      sms,
+      sms: normalizedSms,
       external_phone_enabled: true,
       hooks: {
         ...currentHooks,

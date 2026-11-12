@@ -7,6 +7,8 @@ const TENCENT_SMS_VERSION = "2021-01-11";
 const TENCENT_SMS_TIMEOUT_MS = 5_000;
 const E164_PHONE_PATTERN = /^\+[1-9]\d{7,14}$/;
 const OTP_PATTERN = /^\d{4,8}$/;
+const OTP_VALIDITY_MINUTES_MIN = 1;
+const OTP_VALIDITY_MINUTES_MAX = 60;
 
 export type TencentSmsConfig = {
   provider: "tencent_cloud";
@@ -14,6 +16,7 @@ export type TencentSmsConfig = {
   sms_sdk_app_id: string;
   sign_name: string;
   template_id: string;
+  otp_validity_minutes: number | null;
 };
 
 export type TencentSmsCredentials = {
@@ -135,8 +138,17 @@ export function validateTencentSmsConfig(config: Partial<TencentSmsConfig>): Ten
   const smsSdkAppId = stringValue(config.sms_sdk_app_id);
   const signName = stringValue(config.sign_name);
   const templateId = stringValue(config.template_id);
+  const otpValidityMinutes = config.otp_validity_minutes ?? null;
   if (!region || !smsSdkAppId || !signName || !templateId) {
     throw new Error("Tencent SMS requires region, SMS SDK App ID, sign name, and template ID");
+  }
+  if (
+    otpValidityMinutes !== null
+    && (!Number.isInteger(otpValidityMinutes)
+      || otpValidityMinutes < OTP_VALIDITY_MINUTES_MIN
+      || otpValidityMinutes > OTP_VALIDITY_MINUTES_MAX)
+  ) {
+    throw new Error(`Tencent SMS validity minutes must be an integer from ${OTP_VALIDITY_MINUTES_MIN} to ${OTP_VALIDITY_MINUTES_MAX}`);
   }
   return {
     provider: "tencent_cloud",
@@ -144,6 +156,7 @@ export function validateTencentSmsConfig(config: Partial<TencentSmsConfig>): Ten
     sms_sdk_app_id: smsSdkAppId,
     sign_name: signName,
     template_id: templateId,
+    otp_validity_minutes: otpValidityMinutes,
   };
 }
 
@@ -159,11 +172,14 @@ export async function sendTencentSms(input: {
   if (!OTP_PATTERN.test(input.code)) throw new Error("OTP must contain 4 to 8 digits");
   if (!input.credentials.secretId || !input.credentials.secretKey) throw new Error("Tencent SMS credentials are missing");
 
+  const templateParamSet = input.config.otp_validity_minutes === null
+    ? [input.code]
+    : [input.code, String(input.config.otp_validity_minutes)];
   const payload = JSON.stringify({
     SmsSdkAppId: input.config.sms_sdk_app_id,
     SignName: input.config.sign_name,
     TemplateId: input.config.template_id,
-    TemplateParamSet: [input.code],
+    TemplateParamSet: templateParamSet,
     PhoneNumberSet: [input.phone],
   });
   const timestamp = input.now ?? Math.floor(Date.now() / 1000);
