@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.3...supacloud-lite-v0.39.4) (2026-11-12)
+
+
+### Bug Fixes
+
+* **lite:** enforce UTC database timezone ([#2609](https://github.com/vibeunion/supacloud/issues/2609)) ([3c2ac46](https://github.com/vibeunion/supacloud/commit/3c2ac46a902af6421f5d16da4526569b4da9c954))
+
 ## [0.39.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.2...supacloud-lite-v0.39.3) (2026-11-11)
 
 
