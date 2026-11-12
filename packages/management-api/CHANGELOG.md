@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.134.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.134.1...management-api-v0.134.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **management-api:** invoke psql with -X -t -A so captured output cannot be polluted by ~/.psqlrc ([#2608](https://github.com/vibeunion/supacloud/issues/2608)) ([5a4eea7](https://github.com/vibeunion/supacloud/commit/5a4eea7c62b09bee78a0e1407ad6efad01497b8a))
+
 ## [0.134.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.134.0...management-api-v0.134.1) (2026-11-12)
 
 
