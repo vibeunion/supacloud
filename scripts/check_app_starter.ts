@@ -121,7 +121,7 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   // Test the release artifacts together before they exist on the public registry.
   manifest.overrides = { ...manifest.overrides };
-  for (const name of ["contracts", "commands", "db", "db-zenstack", "app", "delivery", "compiler", "elysia", "query", "js"]) {
+  for (const name of ["contracts", "commands", "db", "db-zenstack", "model-tooling", "app", "delivery", "compiler", "elysia", "query", "js"]) {
     const directory = join(repo, "packages", name === "js" ? "supacloud-js" : name);
     await run(starterInstallArgs("workspace"), directory);
     await run(["run", "build"], directory);
@@ -141,6 +141,9 @@ try {
     if (!Object.hasOwn(manifest.dependencies, `@supacloud/${name}`)) {
       manifest.devDependencies[`@supacloud/${name}`] = tarballs.get(name);
     }
+  }
+  if (Object.hasOwn(manifest.devDependencies, "@supacloud/model-tooling")) {
+    manifest.devDependencies["@supacloud/model-tooling"] = tarballs.get("model-tooling");
   }
   addStarterTestDependencies(manifest);
   await copyFile(join(repo, "scripts/fixtures/starter-persistence.fixture"), join(project, "tests/persistence.ts"));

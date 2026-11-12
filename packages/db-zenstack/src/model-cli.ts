@@ -5,7 +5,20 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BOOTSTRAP_MODEL_SCHEMA, compileModel, modelProcess } from "./model";
 
-export async function modelMain(argv: string[]): Promise<void> {
+export type ModelToolCommand = {
+  readonly executable: string;
+  readonly args?: readonly string[];
+};
+
+export interface ModelToolchain {
+  resolve(binary: "zen" | "prisma"): ModelToolCommand;
+}
+
+function defaultToolchain(root = process.cwd()): ModelToolchain {
+  return { resolve: binary => ({ executable: resolve(root, "node_modules/.bin", binary) }) };
+}
+
+export async function modelMain(argv: string[], toolchain = defaultToolchain()): Promise<void> {
   const [command, ...flags] = argv;
   if (!["generate", "check", "diff", "pull"].includes(command ?? "")) throw new Error("Usage: supacloud-model generate|check|diff|pull [--schema file] [--output dir] [--candidate file]");
   const options = new Map<string, string>();
@@ -52,11 +65,12 @@ export async function modelMain(argv: string[]): Promise<void> {
       await compileModel(source, join(validation, "generated"));
     }
     const operation = modelProcess(command, source, output, candidate);
-    const binary = resolve("node_modules/.bin", operation.binary);
-    if (!existsSync(binary)) throw new Error(`Install the pinned ${operation.binary} tooling in the application`);
+    const tool = toolchain.resolve(operation.binary);
+    if (!existsSync(tool.executable)) throw new Error(`Install the pinned ${operation.binary} tooling in the application`);
     await mkdir(dirname(candidate), { recursive: true });
-    const child = Bun.spawn([binary, ...operation.args], {
-      env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: ["ignore", "inherit", "inherit"],
+    const { SUPACLOUD_MODEL_DATABASE_URL: _selectedDatabaseUrl, ...parentEnv } = process.env;
+    const child = Bun.spawn([tool.executable, ...(tool.args ?? []), ...operation.args], {
+      env: { ...parentEnv, DATABASE_URL: databaseUrl }, stdio: ["ignore", "inherit", "inherit"],
     });
     if (await child.exited !== 0) throw new Error("Model candidate generation failed; nothing was applied");
     if (!bootstrap) return;

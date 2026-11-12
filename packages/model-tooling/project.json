@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/model-tooling",
+  "tags": ["scope:tooling", "type:cli"],
+  "projectType": "application",
+  "sourceRoot": "packages/model-tooling/src"
+}

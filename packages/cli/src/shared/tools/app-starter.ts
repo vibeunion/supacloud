@@ -23,7 +23,7 @@ import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
 import { STARTER_REVIEW_QUERY } from "./app-starter-query";
 import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
-const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, dbZenstack: dbZenstackMetadata, sdk: sdkMetadata } = starterMetadata.packages;
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, dbZenstack: dbZenstackMetadata, modelTooling: modelToolingMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -46,7 +46,9 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "db:generate": "supacloud-model generate && supacloud-db generate",
                 "db:check": "supacloud-model check && supacloud-db check",
                 "db:assess": "supacloud-db assess",
-                "db:diff": "supacloud-model diff",
+                "db:diff": "supacloud db plan --dir migrations",
+                "db:plan": "supacloud db plan --dir migrations",
+                "db:apply": "supacloud db apply --dir migrations",
                 "db:pull": "supacloud-model pull",
                 check: "bun run db:check && bun run compile && bun run check:generated && bun run typecheck && bun run test",
                 test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
@@ -75,8 +77,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
-                ...dbMetadata.devDependencies,
-                ...dbZenstackMetadata.devDependencies,
+                "@supacloud/model-tooling": `^${modelToolingMetadata.version}`,
                 "@types/bun": "^1.4.4",
                 typescript: "7.1.0-beta",
             },

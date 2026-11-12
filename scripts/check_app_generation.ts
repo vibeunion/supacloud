@@ -46,7 +46,7 @@ try {
     // version may not be published yet; registry resolution would hang or fail.
     const candidates: [name: string, directory: string][] = [
         ["contracts", "contracts"], ["commands", "commands"], ["delivery", "delivery"],
-        ["compiler", "compiler"], ["db", "db"], ["db-zenstack", "db-zenstack"], ["app", "app"], ["elysia", "elysia"],
+        ["compiler", "compiler"], ["db", "db"], ["db-zenstack", "db-zenstack"], ["model-tooling", "model-tooling"], ["app", "app"], ["elysia", "elysia"],
         // @supacloud/js depends on the locally linked @supacloud/query package.
         ["query", "query"], ["js", "supacloud-js"], ["cli", "cli"],
     ];

@@ -9,6 +9,7 @@ export const STARTER_PACKAGES = Object.freeze({
   elysia: ['elysia', '@supacloud/elysia'], commands: ['commands', '@supacloud/commands'],
   contracts: ['contracts', '@supacloud/contracts'], db: ['db', '@supacloud/db'],
   dbZenstack: ['db-zenstack', '@supacloud/db-zenstack'],
+  modelTooling: ['model-tooling', '@supacloud/model-tooling'],
   sdk: ['supacloud-js', '@supacloud/js'],
 });
 const generator = 'supacloud/starter-metadata-v1';
@@ -58,7 +59,10 @@ export function starterMetadata(cwd = root) {
     if (alias === 'dbZenstack') {
       const modelPackages = ['@zenstackhq/orm', '@zenstackhq/schema', '@zenstackhq/plugin-policy', '@zenstackhq/language', '@zenstackhq/sdk', 'kysely'];
       entry.dependencies = Object.fromEntries(modelPackages.map(name => [name, dependency(manifest, 'dependencies', name)]));
-      entry.devDependencies = Object.fromEntries(['@zenstackhq/cli', 'prisma', 'pg'].map(name => [name, dependency(manifest, 'devDependencies', name)]));
+    }
+    if (alias === 'modelTooling') {
+      const toolingPackages = ['@supacloud/db-zenstack'];
+      entry.dependencies = Object.fromEntries(toolingPackages.map(name => [name, dependency(manifest, 'dependencies', name)]));
     }
     if (alias === 'sdk') entry.peerDependencies = { '@supabase/supabase-js': dependency(manifest, 'peerDependencies', '@supabase/supabase-js') };
     packages[alias] = entry;

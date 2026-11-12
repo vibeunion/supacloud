@@ -375,7 +375,7 @@ GRANT SELECT, INSERT ON supacloud_commands.execution_audit TO model_orders_app;
 
 /** Complete model-backed business recipe; the complex native-SQL command recipe stays separate. */
 export function modelCommandTemplateFiles(name: string, sdk: StarterSdkDependencies): Record<string, string> {
-  const { app, compiler, elysia, commands, contracts, db, dbZenstack } = metadata.packages;
+  const { app, compiler, elysia, commands, contracts, db, dbZenstack, modelTooling } = metadata.packages;
   const files = baseTemplateFiles(name, sdk);
   delete files["scripts/dev.ts"];
   delete files["scripts/serve.ts"];
@@ -391,7 +391,7 @@ export function modelCommandTemplateFiles(name: string, sdk: StarterSdkDependenc
       name, version: "0.0.0", private: true, type: "module", engines: { bun: ">=1.4.4" },
       scripts: {
         "db:generate": "supacloud-model generate && supacloud-db generate", "db:check": "supacloud-model check && supacloud-db check",
-        "db:diff": "supacloud-model diff", "db:pull": "supacloud-model pull",
+        "db:diff": "supacloud db plan --dir migrations", "db:plan": "supacloud db plan --dir migrations", "db:apply": "supacloud db apply --dir migrations", "db:pull": "supacloud-model pull",
         compile: "supacloud-compiler compile", "check:generated": "supacloud-compiler check", typecheck: "tsc --noEmit",
         check: "bun run db:check && bun run check:generated && bun run typecheck", test: "bun test",
         build: "bun run db:check && bun run compile && bun run typecheck && bun build src/application.ts --target bun --outdir output/supacloud",
@@ -401,7 +401,7 @@ export function modelCommandTemplateFiles(name: string, sdk: StarterSdkDependenc
         "@supacloud/commands": "^" + commands.version, "@supacloud/contracts": "^" + contracts.version,
         "@supacloud/db": "^" + db.version, "@supacloud/db-zenstack": "^" + dbZenstack.version,
         ...db.dependencies, ...dbZenstack.dependencies, typebox: "1.4.3", effect: "4.0.5", elysia: "2.0.0-rc.3", ...sdk },
-      devDependencies: { "@supacloud/compiler": "^" + compiler.version, ...db.devDependencies, ...dbZenstack.devDependencies, "@types/bun": "^1.4.4", typescript: "7.1.0-beta" },
+      devDependencies: { "@supacloud/compiler": "^" + compiler.version, "@supacloud/model-tooling": "^" + modelTooling.version, "@types/bun": "^1.4.4", typescript: "7.1.0-beta" },
     }),
     "supacloud.config.ts": `import { defineSupacloudConfig } from "@supacloud/compiler";
 export default defineSupacloudConfig({
@@ -492,7 +492,7 @@ The receipt migration uses the same supacloud_commands ledger as the platform. I
 
 The model_orders_app role is a trusted-server capability and does not set request.jwt.claims. Its SQL policy is a host bypass, not the model row projection; do not grant that role to PostgREST. Authenticated SELECT, INSERT and UPDATE policies are emitted from the ZModel @@allow rules and must stay in the migration. They do not grant privileges; add a reviewed GRANT before exposing the table through PostgREST.
 
-To change the schema: bun run db:generate, bun run db:check, then bun run db:diff -- --candidate output/database-audit/change.sql against an explicit shadow database. Review forward SQL before promotion. Stop intake and drain HTTP/worker work before host.dispose(), then close the caller-owned pool.
+To change the schema: bun run db:generate, bun run db:check, then bun run db:plan. Review the Management API's remote plan and run bun run db:apply -- --approved_digest <digest> after approval. The CLI does not receive a database URL. Stop intake and drain HTTP/worker work before host.dispose(), then close the caller-owned pool.
 `,
   };
 }

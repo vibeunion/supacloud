@@ -18,9 +18,9 @@ test("the CLI release gate resolves the emitted framework dependencies without l
   });
   expect(Object.keys(versions).sort()).toEqual([
     "@supacloud/app", "@supacloud/commands", "@supacloud/compiler", "@supacloud/contracts",
-    "@supacloud/db", "@supacloud/db-zenstack", "@supacloud/elysia", "@supacloud/js",
+    "@supacloud/db", "@supacloud/db-zenstack", "@supacloud/elysia", "@supacloud/js", "@supacloud/model-tooling",
   ]);
-  expect(requests).toHaveLength(8);
+  expect(requests).toHaveLength(9);
   for (const args of requests) {
     expect(args[0]).toBe("view");
     expect(args.slice(2)).toEqual(["version", "--json", "--registry=https://registry.npmjs.org"]);

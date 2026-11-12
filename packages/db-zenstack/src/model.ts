@@ -53,7 +53,8 @@ export async function compileModel(schemaFile: string, output: string, check = f
 }
 
 export type ModelCommand = "generate" | "check" | "diff" | "pull";
-export function modelProcess(command: "diff" | "pull", schema: string, generated: string, candidate: string) {
+export type ModelProcess = { readonly binary: "prisma" | "zen"; readonly args: readonly string[] };
+export function modelProcess(command: "diff" | "pull", schema: string, generated: string, candidate: string): ModelProcess {
   // Diff introspects DATABASE_URL through the generated datasource. It never applies SQL
   // or invokes migrate dev/deploy; production has only the existing SupaCloud ledger.
   return command === "diff"

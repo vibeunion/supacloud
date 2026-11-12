@@ -1,0 +1,50 @@
+{
+  "name": "@supacloud/model-tooling",
+  "version": "0.1.0",
+  "description": "SupaCloud model adoption and migration tooling.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "supacloud-model": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "NOTICE",
+    "LICENSE-APACHE-2.0.txt",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run clean && bun build src/index.ts --outdir dist --target node --external @supacloud/db-zenstack/model && bun run build:types",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/model-tooling"
+  },
+  "dependencies": {
+    "@supacloud/db-zenstack": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "7.1.0-beta"
+  },
+  "overrides": {
+    "@supacloud/db-zenstack": "file:../db-zenstack"
+  }
+}

@@ -9,7 +9,9 @@ reviewed operations.
 
 ## Model and migration boundary
 
-ZModel owns the maintained structure; `supacloud-model diff` emits SQL candidates.
+ZModel owns the maintained structure; `supacloud db plan` asks the Management API
+to review the maintained migration directory without exposing a database URL to
+the user CLI.
 Review and promote forward SQL into the existing migration directory. SupaCloud
 remains the only executor and applied-migration ledger. Do not run Prisma migrate
 dev/deploy or ZenStack db push against that same history.

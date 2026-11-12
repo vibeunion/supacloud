@@ -71,7 +71,7 @@ test("pinned candidate generator never applies or rewrites migration history", a
   expect(modelProcess("diff", "schema.zmodel", "generated", "candidate.sql").args).not.toContain("deploy");
   await expect(modelMain(["migrate"])).rejects.toThrow("Usage");
   const files = appStarterFiles("model-upgrade");
-  expect(files["package.json"]).toContain("supacloud-model diff");
+  expect(files["package.json"]).toContain("supacloud db plan --dir migrations");
   expect(Object.keys(files).join("\n") + files["package.json"]).not.toMatch(/drizzle|reylo/i);
 }, 30_000);
 const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];

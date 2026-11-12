@@ -191,6 +191,19 @@
         }
       ]
     },
+    "packages/model-tooling": {
+      "release-type": "node",
+      "component": "model-tooling",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.modelTooling.version"
+        }
+      ]
+    },
     "packages/testing": {
       "release-type": "node",
       "component": "testing",

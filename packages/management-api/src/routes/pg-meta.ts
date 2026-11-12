@@ -9,6 +9,13 @@ import { Elysia, status, t } from "elysia";
 import * as authMiddleware from "../middleware/auth";
 import { resolveDbName, getProjectDb } from "../db";
 import { projectRepository } from "../repositories/project.repository";
+import {
+  renderDatabaseModelCandidate,
+  type DatabaseModelCatalog,
+  type DatabaseModelColumn,
+  type DatabaseModelForeignKey,
+  type DatabaseModelTable,
+} from "../services/database-model-candidate";
 
 async function queryTenant(ref: string, sqlText: string): Promise<Record<string, unknown>[]> {
   const dbName = await resolveDbName(ref);
@@ -335,5 +342,92 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
       return rows;
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
+    }
+  })
+
+  .get("/model-candidate", {
+    query: t.Object({ schema: t.Optional(t.String()) }),
+    detail: { tags: ["pg-meta"], summary: "Generate a reviewed ZModel candidate through the project database binding" },
+  }, async ({ params, query }) => {
+    if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
+    const requested = (query.schema ?? "public").split(",").map(value => value.trim()).filter(Boolean);
+    if (!requested.length || requested.some(value => !/^[a-z_][a-z0-9_$]*$/i.test(value))) {
+      return status(400, { error: "schema must contain PostgreSQL identifiers" });
+    }
+    const predicate = requested.map(value => `'${value.replaceAll("'", "''")}'`).join(",");
+    try {
+      const [columns, primaryKeys, foreignKeys, enums, schemas, policies] = await Promise.all([
+        queryTenant(params.ref, `
+          SELECT n.nspname AS schema, c.relname AS table_name, a.attname AS column_name,
+                 format_type(a.atttypid, a.atttypmod) AS data_type,
+                 t.typname AS udt_name, NOT a.attnotnull AS nullable,
+                 pg_get_expr(d.adbin, d.adrelid) AS default_expression
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+            JOIN pg_type t ON t.oid = a.atttypid
+            LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+           WHERE c.relkind IN ('r', 'p') AND n.nspname IN (${predicate})
+           ORDER BY n.nspname, c.relname, a.attnum`),
+        queryTenant(params.ref, `
+          SELECT n.nspname AS schema, c.relname AS table_name, a.attname AS column_name
+            FROM pg_constraint con
+            JOIN pg_class c ON c.oid = con.conrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS key(attnum, position) ON true
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = key.attnum
+           WHERE con.contype = 'p' AND n.nspname IN (${predicate})
+           ORDER BY n.nspname, c.relname, key.position`),
+        queryTenant(params.ref, `
+          SELECT n.nspname AS schema, c.relname AS table_name, a.attname AS column_name,
+                 fn.nspname AS foreign_schema, fc.relname AS foreign_table, fa.attname AS foreign_column
+            FROM pg_constraint con
+            JOIN pg_class c ON c.oid = con.conrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_class fc ON fc.oid = con.confrelid
+            JOIN pg_namespace fn ON fn.oid = fc.relnamespace
+            JOIN LATERAL unnest(con.conkey, con.confkey) AS key(attnum, foreign_attnum) ON true
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = key.attnum
+            JOIN pg_attribute fa ON fa.attrelid = fc.oid AND fa.attnum = key.foreign_attnum
+           WHERE con.contype = 'f' AND n.nspname IN (${predicate})
+           ORDER BY n.nspname, c.relname, a.attname`),
+        queryTenant(params.ref, `
+          SELECT n.nspname AS schema, t.typname AS name, e.enumlabel AS value
+            FROM pg_type t
+            JOIN pg_namespace n ON n.oid = t.typnamespace
+            JOIN pg_enum e ON e.enumtypid = t.oid
+           WHERE n.nspname IN (${predicate})
+           ORDER BY n.nspname, t.typname, e.enumsortorder`),
+        queryTenant(params.ref, `
+          SELECT n.nspname AS schema FROM pg_namespace n
+           WHERE n.nspname IN (${predicate}) ORDER BY n.nspname`),
+        queryTenant(params.ref, `SELECT count(*)::int AS count FROM pg_policies WHERE schemaname IN (${predicate})`),
+      ]);
+      const tableMap = new Map<string, { schema: string; name: string; columns: DatabaseModelColumn[]; primaryKey: string[]; foreignKeys: DatabaseModelForeignKey[] }>();
+      for (const row of columns) {
+        const schema = String(row.schema), name = String(row.table_name), key = `${schema}.${name}`;
+        const table = tableMap.get(key) ?? { schema, name, columns: [], primaryKey: [], foreignKeys: [] };
+        table.columns.push({ name: String(row.column_name), dataType: String(row.data_type), udtName: String(row.udt_name), nullable: row.nullable === true, defaultExpression: row.default_expression === null ? null : String(row.default_expression) });
+        tableMap.set(key, table);
+      }
+      for (const row of primaryKeys) tableMap.get(`${row.schema}.${row.table_name}`)?.primaryKey.push(String(row.column_name));
+      for (const row of foreignKeys) tableMap.get(`${row.schema}.${row.table_name}`)?.foreignKeys.push({ column: String(row.column_name), foreignSchema: String(row.foreign_schema), foreignTable: String(row.foreign_table), foreignColumn: String(row.foreign_column) });
+      const enumMap = new Map<string, { schema: string; name: string; values: string[] }>();
+      for (const row of enums) {
+        const key = `${row.schema}.${row.name}`;
+        const item = enumMap.get(key) ?? { schema: String(row.schema), name: String(row.name), values: [] };
+        item.values.push(String(row.value)); enumMap.set(key, item);
+      }
+      const catalog: DatabaseModelCatalog = {
+        schemas: schemas.map(row => String(row.schema)),
+        tables: [...tableMap.values()] as DatabaseModelTable[],
+        enums: [...enumMap.values()],
+        policyCount: Number(policies[0]?.count ?? 0),
+      };
+      return renderDatabaseModelCandidate(catalog);
+    } catch {
+      // Keep catalog adapter errors, including connection details, inside the
+      // Management API. The CLI receives only a stable transport error.
+      return status(503, { error: "Database model introspection unavailable" });
     }
   });
