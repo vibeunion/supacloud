@@ -25,6 +25,9 @@ model transaction. Do not add it as a dependency of `@supacloud/db`.
 
 Author models and data policies in `zenstack/schema.zmodel`, generate contracts
 with `supacloud-model generate`, and fail stale builds with `supacloud-model check`.
+Install `@supacloud/model-tooling` as a development dependency for this binary;
+it owns the ZenStack and PostgreSQL introspection toolchain. Do not add `pg` or
+`@zenstackhq/cli` to the application manifest directly.
 `supacloud-model diff --candidate <file>` and `pull --candidate <file>` require an
 explicit `SUPACLOUD_MODEL_DATABASE_URL` and never apply migrations. Use the
 existing SupaCloud deployment ledger after reviewing candidates.
