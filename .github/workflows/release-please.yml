@@ -79,6 +79,7 @@ jobs:
       elysia_released: ${{ steps.release.outputs['packages/elysia--release_created'] }}
       db_released: ${{ steps.release.outputs['packages/db--release_created'] }}
       db_zenstack_released: ${{ steps.release.outputs['packages/db-zenstack--release_created'] }}
+      model_tooling_released: ${{ steps.release.outputs['packages/model-tooling--release_created'] }}
       testing_released: ${{ steps.release.outputs['packages/testing--release_created'] }}
     steps:
       - name: Checkout recovery control scripts
@@ -638,6 +639,18 @@ jobs:
       - name: Publish database ZenStack adapter to NPM
         if: ${{ always() && (needs.release-please.outputs.db_zenstack_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/db-zenstack
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish model tooling to NPM
+        if: ${{ always() && (needs.release-please.outputs.model_tooling_released == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/model-tooling
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |

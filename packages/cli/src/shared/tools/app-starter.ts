@@ -23,7 +23,7 @@ import { STARTER_REVIEW_RECEIPTS } from "./app-starter-receipts";
 import { STARTER_REVIEW_QUERY } from "./app-starter-query";
 import { STARTER_TASK_CONTRACTS, STARTER_TASK_FEATURE, STARTER_TASK_HOST, STARTER_TASK_SCHEMA } from "./app-starter-tasks";
 
-const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, dbZenstack: dbZenstackMetadata, sdk: sdkMetadata } = starterMetadata.packages;
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, dbZenstack: dbZenstackMetadata, modelTooling: modelToolingMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -75,8 +75,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
-                ...dbMetadata.devDependencies,
-                ...dbZenstackMetadata.devDependencies,
+                "@supacloud/model-tooling": `^${modelToolingMetadata.version}`,
                 "@types/bun": "^1.4.4",
                 typescript: "7.1.0-beta",
             },

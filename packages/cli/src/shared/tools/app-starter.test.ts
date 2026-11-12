@@ -317,6 +317,10 @@ test("the starter ships a default database-adoption flow for projects without a 
     const files = appStarterFiles("example");
     expect(files["zenstack/schema.zmodel"]).toContain('provider = "postgresql"');
     expect(files["package.json"]).toContain('"db:pull": "supacloud-model pull"');
+    const manifest = JSON.parse(requireValue(files["package.json"]));
+    expect(manifest.devDependencies["@supacloud/model-tooling"]).toMatch(/^\^\d+\.\d+\.\d+/);
+    expect(manifest.devDependencies["@zenstackhq/cli"]).toBeUndefined();
+    expect(manifest.devDependencies.pg).toBeUndefined();
     expect(files["AGENTS.md"]).toContain("Adopting a database that has no model yet");
     expect(files["AGENTS.md"]).toContain("db:diff");
     expect(files["db/schema.ts"]).toContain("zenstack/generated/models");
