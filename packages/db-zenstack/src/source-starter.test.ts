@@ -50,7 +50,7 @@ test("default checks run before regeneration and ZenStack candidate paths never 
   expect(files["package.json"]).toContain('"check": "bun run db:check &&');
   expect(files["package.json"]).toContain('"build": "bun run db:check &&');
   expect(files["package.json"]).toContain('"@zenstackhq/orm": "3.10.0"');
-  expect(files["package.json"]).toContain('"supacloud-model diff"');
+  expect(files["package.json"]).toContain('"supacloud db plan --dir migrations"');
   expect(files["zenstack/schema.zmodel"]).toContain("@@allow");
   expect(files[".gitignore"]).toContain("output/database-audit/");
   expect(files["AGENTS.md"]).toContain("schema.zmodel");
