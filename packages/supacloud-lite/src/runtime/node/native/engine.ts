@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { extract as extractTar } from 'tar'
 import { acquireDataDirLock } from '../../db/data-dir-lock.js'
 import type { DbEngine } from '../../db/engine.js'
+import { INITIALIZE_TIMEZONE_SQL } from '../../db/initialize-timezone.js'
 import {
   buildPowerSyncPostgresArgs,
   writePowerSyncHba,
@@ -364,7 +365,7 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
       throw new Error(`timed out waiting for embedded postgres at ${socketPath}`)
     }
 
-    return await buildWireEngine({
+    const engine = await buildWireEngine({
       connect,
       onClose: async () => {
         removeExitHandler?.()
@@ -373,6 +374,16 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
         await releaseLock()
       },
     })
+    try {
+      await engine.exec(INITIALIZE_TIMEZONE_SQL)
+    } catch (error) {
+      const [cleanup] = await Promise.allSettled([engine.close()])
+      if (cleanup.status === 'rejected') {
+        throw new AggregateError([error, cleanup.reason], 'native PostgreSQL timezone initialization and cleanup failed')
+      }
+      throw error
+    }
+    return engine
   } catch (error) {
     removeExitHandler?.()
     const processToStop = postgres

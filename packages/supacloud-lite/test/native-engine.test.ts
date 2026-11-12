@@ -121,6 +121,24 @@ describe.skipIf(!nativeIntegrationEnabled)('native PostgreSQL engine', () => {
     }
   }, 120_000)
 
+  test('enforces UTC after reopening a database with an explicit timezone', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'supacloud-lite-native-timezone-'))
+    temporaryDirectories.push(projectRoot)
+    const dataDir = join(projectRoot, 'pgdata')
+    const first = await createNativeEngine({ dataDir })
+    await first.exec(`alter database postgres set timezone to 'Asia/Shanghai'`)
+    await first.close()
+
+    const reopened = await createNativeEngine({ dataDir })
+    try {
+      expect((await reopened.query<{ timezone: string }>(`select current_setting('timezone') as timezone`)).rows).toEqual([
+        { timezone: 'UTC' },
+      ])
+    } finally {
+      await reopened.close()
+    }
+  }, 120_000)
+
   test('enables a bounded PowerSync source only through the explicit profile', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'supacloud-lite-native-powersync-'))
     temporaryDirectories.push(projectRoot)
