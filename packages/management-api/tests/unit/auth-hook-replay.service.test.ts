@@ -13,13 +13,21 @@ const transaction = mock((strings: TemplateStringsArray, ...values: unknown[]) =
   return Promise.resolve([]);
 });
 
+const sql = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
+  const query = strings.join("?");
+  if (query.includes("DELETE FROM supaoauth_bff_proof_nonces") && query.includes("WHERE nonce")) {
+    consumedKeys.delete(String(values[0]));
+  }
+  return Promise.resolve([]);
+});
+
 mock.module("../../src/db", () => ({
-  sql: Object.assign(mock(() => Promise.resolve([])), {
+  sql: Object.assign(sql, {
     begin: async (command: (database: typeof transaction) => Promise<unknown>) => command(transaction),
   }),
 }));
 
-const { consumeAuthHookWebhookId } = await import("../../src/services/auth-hook-replay.service");
+const { consumeAuthHookWebhookId, releaseAuthHookWebhookId } = await import("../../src/services/auth-hook-replay.service");
 
 describe("auth hook replay guard", () => {
   beforeEach(() => {
@@ -37,5 +45,12 @@ describe("auth hook replay guard", () => {
   test("rejects malformed webhook IDs before touching storage", async () => {
     expect(await consumeAuthHookWebhookId("proj_1", "id with spaces")).toBe(false);
     expect(transaction).not.toHaveBeenCalled();
+  });
+
+  test("releases a reserved webhook ID after a failed delivery", async () => {
+    const webhookId = "cf25da76-84af-4dca-8b75-b96ad5531d8a";
+    expect(await consumeAuthHookWebhookId("proj_1", webhookId)).toBe(true);
+    await releaseAuthHookWebhookId("proj_1", webhookId);
+    expect(await consumeAuthHookWebhookId("proj_1", webhookId)).toBe(true);
   });
 });

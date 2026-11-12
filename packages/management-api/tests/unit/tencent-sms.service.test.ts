@@ -68,4 +68,16 @@ describe("Tencent Cloud SMS adapter", () => {
       PhoneNumberSet: ["+8613800138000"],
     });
   });
+
+  test("rejects a successful HTTP response without a send status", async () => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({ Response: {} }), { status: 200 });
+    await expect(sendTencentSms({
+      config,
+      credentials: { secretId: "AKIDexample", secretKey: "secret-key" },
+      phone: "+8613800138000",
+      code: "123456",
+      fetcher,
+      now: 1_700_000_000,
+    })).rejects.toThrow("provider rejected");
+  });
 });
