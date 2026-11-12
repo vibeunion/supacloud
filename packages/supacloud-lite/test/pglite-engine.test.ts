@@ -92,26 +92,26 @@ test('bootstraps all bundled extensions by default', async () => {
   }
 })
 
-test('defaults fresh and reopened databases to UTC while preserving an explicit database timezone', async () => {
+test('enforces UTC for fresh, reopened, and explicitly configured databases', async () => {
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-timezone-'))
   try {
     const freshFull = await runTimezoneProbe(join(projectDir, 'fresh-full'), 'full', 'Asia/Shanghai')
     expectFullUtcProbe(freshFull)
 
     const reopenedFullDir = join(projectDir, 'reopened-full')
-    expectLegacyHostTimezone(await runTimezoneProbe(reopenedFullDir, 'create-legacy', 'Asia/Shanghai'))
+    await runTimezoneProbe(reopenedFullDir, 'create-legacy', 'Asia/Shanghai')
     expectFullUtcProbe(await runTimezoneProbe(reopenedFullDir, 'full', 'UTC'))
 
     const freshMinimal = await runTimezoneProbe(join(projectDir, 'fresh-minimal'), 'minimal', 'Asia/Shanghai')
     expectMinimalUtcProbe(freshMinimal)
 
     const reopenedMinimalDir = join(projectDir, 'reopened-minimal')
-    expectLegacyHostTimezone(await runTimezoneProbe(reopenedMinimalDir, 'create-legacy', 'Asia/Shanghai'))
+    await runTimezoneProbe(reopenedMinimalDir, 'create-legacy', 'Asia/Shanghai')
     expectMinimalUtcProbe(await runTimezoneProbe(reopenedMinimalDir, 'minimal', 'UTC'))
 
     const customTimezoneDir = join(projectDir, 'custom-timezone')
     await runTimezoneProbe(customTimezoneDir, 'set-custom-timezone', 'UTC')
-    expectCustomTimezone(await runTimezoneProbe(customTimezoneDir, 'full', 'UTC'))
+    expectExplicitTimezoneUtc(await runTimezoneProbe(customTimezoneDir, 'full', 'UTC'))
   } finally {
     await rm(projectDir, { recursive: true, force: true })
   }
@@ -125,7 +125,7 @@ test('closes a ready PGlite instance when timezone initialization fails', async 
   const originalExec = PGlite.prototype.exec
   let failedInstance: PGlite | undefined
   PGlite.prototype.exec = async function (query, options) {
-    if (query.includes('declare configured_timezone')) {
+    if (query.includes("set_config('TimeZone', 'UTC', false)")) {
       failedInstance = this
       throw initializationError
     }
@@ -171,13 +171,6 @@ async function runTimezoneProbe(
   return parseTimezoneProbe(stdout)
 }
 
-function expectLegacyHostTimezone(probe: TimezoneProbe): void {
-  expect(probe.kind).toBe('engine')
-  if (probe.kind !== 'engine') throw new Error('legacy timezone probe did not use the engine path')
-  expect(probe.session_timezone).not.toBe('UTC')
-  expect(probe.observed_at).toBe('2026-08-10T08:00:00+08:00')
-}
-
 function expectFullUtcProbe(probe: TimezoneProbe): void {
   expect(probe.kind).toBe('data-api')
   if (probe.kind !== 'data-api') throw new Error('full timezone probe did not use the Data API path')
@@ -193,12 +186,12 @@ function expectMinimalUtcProbe(probe: TimezoneProbe): void {
   expect(probe.observed_at).toBe('2026-08-10T00:00:00+00:00')
 }
 
-function expectCustomTimezone(probe: TimezoneProbe): void {
+function expectExplicitTimezoneUtc(probe: TimezoneProbe): void {
   expect(probe.kind).toBe('data-api')
-  if (probe.kind !== 'data-api') throw new Error('custom timezone probe did not use the Data API path')
-  expect(probe.session_timezone).toBe('Asia/Shanghai')
-  expect(probe.table_observed_at).toBe('2026-08-10T08:00:00+08:00')
-  expect(probe.rpc_observed_at).toBe('2026-08-10T08:00:00+08:00')
+  if (probe.kind !== 'data-api') throw new Error('explicit timezone probe did not use the Data API path')
+  expect(probe.session_timezone).toBe('UTC')
+  expect(probe.table_observed_at).toBe('2026-08-10T00:00:00+00:00')
+  expect(probe.rpc_observed_at).toBe('2026-08-10T00:00:00+00:00')
 }
 
 function parseTimezoneProbe(serializedProbe: string): TimezoneProbe {

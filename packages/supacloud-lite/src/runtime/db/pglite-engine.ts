@@ -6,26 +6,7 @@ import {
   STANDALONE_PGLITE_ASSETS,
   type StandalonePgliteAssets,
 } from '../../standalone-assets-protocol.js'
-
-const INITIALIZE_TIMEZONE_SQL = `
-do $$
-declare configured_timezone text;
-begin
-  select split_part(setting, '=', 2) into configured_timezone
-  from pg_db_role_setting
-  cross join lateral unnest(setconfig) as setting
-  where setdatabase = (select oid from pg_database where datname = current_database())
-    and setrole = 0
-    and lower(split_part(setting, '=', 1)) = 'timezone'
-  limit 1;
-
-  if configured_timezone is null then
-    configured_timezone := 'UTC';
-    execute format('alter database %I set timezone to %L', current_database(), configured_timezone);
-  end if;
-  perform set_config('TimeZone', configured_timezone, false);
-end $$;
-`
+import { INITIALIZE_TIMEZONE_SQL } from './initialize-timezone.js'
 
 /**
  * Build a {@link DbEngine} backed by PGlite (WASM Postgres) at `dataDir`, or an
@@ -122,8 +103,8 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
         : {}),
     })
     await pg.waitReady
-    // PGlite inherits the host timezone at initdb, and its current session does
-    // not apply ALTER DATABASE settings.
+    // PGlite inherits the host timezone at initdb, so force both the persisted
+    // database default and the current session to UTC.
     try {
       if (!options.inspectOnly) await pg.exec(INITIALIZE_TIMEZONE_SQL)
     } catch (error) {
