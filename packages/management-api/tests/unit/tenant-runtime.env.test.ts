@@ -51,7 +51,7 @@ describe("TenantRuntimeService safe config serialization", () => {
       database: "supa test",
     }, ["-Atqc", "SELECT 1"]);
     expect(invocation.cmd).toEqual([
-      "psql", "-h", "127.0.0.1", "-p", "6432", "-U", "postgres", "-d", "supa test", "-Atqc", "SELECT 1",
+      "psql", "-X", "-t", "-A", "-h", "127.0.0.1", "-p", "6432", "-U", "postgres", "-d", "supa test", "-Atqc", "SELECT 1",
     ]);
     expect(invocation.cmd.join(" ")).not.toContain(special);
     expect(invocation.env).toEqual({ PGPASSWORD: special });
