@@ -86,6 +86,7 @@ function configResponse(input: {
     sms_sdk_app_id: input.sms.sms_sdk_app_id,
     sign_name: input.sms.sign_name,
     template_id: input.sms.template_id,
+    otp_validity_minutes: input.sms.otp_validity_minutes,
     secret_id_configured: input.secretIdConfigured,
     secret_key_configured: input.secretKeyConfigured,
     hook_configured: input.hookConfigured,
