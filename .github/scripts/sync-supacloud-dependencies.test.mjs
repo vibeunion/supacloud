@@ -196,6 +196,11 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.match(workflow, /SUPACLOUD_SYNC_CLI: \$\{\{ needs\.release-please\.outputs\.cli_released == 'true' \|\| inputs\.recover_npm == true \}\}/);
     assert.match(workflow, /SUPACLOUD_SYNC_ADMIN: \$\{\{ needs\.release-please\.outputs\.admin_released == 'true' \|\| inputs\.recover_npm == true \}\}/);
     assert.match(workflow, /- name: Wait for published dependencies\n\s+if: \$\{\{ steps\.synchronize\.outputs\.changed == 'true' \}\}/);
+    const waitStep = workflow.split('- name: Wait for published dependencies\n')[1]?.split('\n      - name:')[0] ?? '';
+    assert.match(waitStep, /npm pack "\$spec" --dry-run --ignore-scripts --json --registry=https:\/\/registry\.npmjs\.org/);
+    assert.match(waitStep, /available=false/);
+    assert.match(waitStep, /available=true/);
+    assert.match(waitStep, /if \[\[ "\$available" != true \]\]/);
     assert.match(workflow, /- name: Regenerate and verify umbrella lockfile\n\s+if: \$\{\{ steps\.synchronize\.outputs\.changed == 'true' \}\}/);
     assert.match(workflow, /- name: Open dependency synchronization PR\n\s+if: \$\{\{ steps\.synchronize\.outputs\.changed == 'true' \}\}/);
     const synchronizeIndex = workflow.indexOf('- name: Synchronize umbrella dependencies');

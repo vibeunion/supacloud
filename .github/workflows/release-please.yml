@@ -853,17 +853,20 @@ jobs:
           fi
           for spec in "${specs[@]}"; do
             published=""
+            available=false
             for attempt in $(seq 1 12); do
               published="$(npm view "$spec" version 2>/dev/null || true)"
-              if [[ "$published" == "${spec##*@}" ]]; then
+              if [[ "$published" == "${spec##*@}" ]] && \
+                npm pack "$spec" --dry-run --ignore-scripts --json --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+                available=true
                 break
               fi
               if [[ "$attempt" -lt 12 ]]; then
                 sleep 5
               fi
             done
-            if [[ "$published" != "${spec##*@}" ]]; then
-              echo "Published package is not visible: $spec" >&2
+            if [[ "$available" != true ]]; then
+              echo "Published package tarball is not available: $spec" >&2
               exit 1
             fi
           done
