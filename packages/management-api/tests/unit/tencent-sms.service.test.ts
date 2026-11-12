@@ -69,6 +69,28 @@ describe("Tencent Cloud SMS adapter", () => {
     });
   });
 
+  test("adds the configured validity minutes as a second template parameter", async () => {
+    let request: RequestInit | undefined;
+    const fetcher: typeof fetch = async (_input, init) => {
+      request = init;
+      return new Response(JSON.stringify({ Response: { RequestId: "request-2", SendStatusSet: [{ Code: "Ok" }] } }), { status: 200 });
+    };
+    await expect(sendTencentSms({
+      config: validateTencentSmsConfig({ ...config, otp_validity_minutes: 5 }),
+      credentials: { secretId: "AKIDexample", secretKey: "secret-key" },
+      phone: "+8613800138000",
+      code: "123456",
+      fetcher,
+      now: 1_700_000_000,
+    })).resolves.toEqual({ requestId: "request-2" });
+    expect(JSON.parse(String(request?.body)).TemplateParamSet).toEqual(["123456", "5"]);
+  });
+
+  test("rejects an invalid validity-minute value", () => {
+    expect(() => validateTencentSmsConfig({ ...config, otp_validity_minutes: 0 })).toThrow("validity minutes");
+    expect(() => validateTencentSmsConfig({ ...config, otp_validity_minutes: 61 })).toThrow("validity minutes");
+  });
+
   test("rejects a successful HTTP response without a send status", async () => {
     const fetcher: typeof fetch = async () => new Response(JSON.stringify({ Response: {} }), { status: 200 });
     await expect(sendTencentSms({
