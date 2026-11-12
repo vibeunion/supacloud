@@ -105,6 +105,22 @@ The CLI first performs a bounded read-only protocol check. A missing, mismatched
 or cross-environment response stops the command before building or uploading.
 Upgrade the CLI and server together; there is no legacy deployment fallback.
 
+### User-managed frontend environment variables
+
+Project users can update a frontend deployment without SSH access. Pass a JSON
+object to `frontend set_env`; the CLI sends it through the project-scoped
+Management API and the deployment keeps the values masked on reads:
+
+```bash
+supacloud frontend set_env --ref abc123 --id web \
+  --env_vars '{"VITE_API_URL":"https://api.example.com","VITE_FLAG":"on"}'
+```
+
+Build-time variables remain in `supacloud.json` under `frontend.buildEnv` and
+are supplied by `supacloud deploy`. Edge Function secrets use
+`supacloud secrets upsert --from-env` instead of being embedded in a static
+frontend build.
+
 ### Application rollback
 
 Application releases can be inspected and rolled back without guessing from the
