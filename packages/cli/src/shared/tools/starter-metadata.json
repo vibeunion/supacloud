@@ -37,8 +37,12 @@
         "@zenstackhq/language": "3.10.0",
         "@zenstackhq/sdk": "3.10.0",
         "kysely": "0.29.0"
-      },
-      "devDependencies": {
+      }
+    },
+    "modelTooling": {
+      "version": "0.1.0",
+      "dependencies": {
+        "@supacloud/db-zenstack": "^0.2.2",
         "@zenstackhq/cli": "3.10.0",
         "prisma": "6.19.3",
         "pg": "8.23.1"

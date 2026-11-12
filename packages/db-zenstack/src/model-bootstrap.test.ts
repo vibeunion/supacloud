@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { BOOTSTRAP_MODEL_SCHEMA, compileModel } from "./model";
@@ -45,6 +45,37 @@ test("adoption requires an explicit database and never writes maintained files",
   }
   expect(existsSync(join(root, "zenstack"))).toBe(false);
   expect(existsSync(join(root, "output"))).toBe(false);
+});
+
+test("candidate tooling receives only the child datasource variable", async () => {
+  const root = await temporary();
+  const schema = join(root, "zenstack/schema.zmodel");
+  const candidate = join(root, "output/database-audit/adopted.zmodel");
+  const capture = join(root, "tooling-env.json");
+  const tool = join(root, "tool.ts");
+  await mkdir(join(root, "zenstack"));
+  await writeFile(schema, BOOTSTRAP_MODEL_SCHEMA);
+  await writeFile(tool, `await Bun.write(process.env["MODEL_TOOLING_CAPTURE"]!, JSON.stringify({
+  selected: process.env["SUPACLOUD_MODEL_DATABASE_URL"], database: process.env["DATABASE_URL"],
+}));`);
+  const previousSelected = process.env["SUPACLOUD_MODEL_DATABASE_URL"];
+  const previousCapture = process.env["MODEL_TOOLING_CAPTURE"];
+  const selected = "postgresql://readonly:secret@127.0.0.1:5432/example";
+  try {
+    process.env["SUPACLOUD_MODEL_DATABASE_URL"] = selected;
+    process.env["MODEL_TOOLING_CAPTURE"] = capture;
+    await modelMain(["pull", "--schema", schema, "--candidate", candidate], {
+      resolve: () => ({ executable: process.execPath, args: [tool] }),
+    });
+  } finally {
+    if (previousSelected === undefined) delete process.env["SUPACLOUD_MODEL_DATABASE_URL"];
+    else process.env["SUPACLOUD_MODEL_DATABASE_URL"] = previousSelected;
+    if (previousCapture === undefined) delete process.env["MODEL_TOOLING_CAPTURE"];
+    else process.env["MODEL_TOOLING_CAPTURE"] = previousCapture;
+  }
+  const seen = JSON.parse(await readFile(capture, "utf8")) as { selected?: string; database?: string };
+  expect(seen.selected).toBeUndefined();
+  expect(seen.database).toBe(selected);
 });
 
 const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];

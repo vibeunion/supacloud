@@ -28,5 +28,7 @@ declare module "@supacloud/db-zenstack/model" {
 }
 
 declare module "@supacloud/db-zenstack/cli" {
-  export function modelMain(argv: string[]): Promise<void>;
+  export type ModelToolCommand = { readonly executable: string; readonly args?: readonly string[] };
+  export interface ModelToolchain { resolve(binary: "zen" | "prisma"): ModelToolCommand; }
+  export function modelMain(argv: string[], toolchain?: ModelToolchain): Promise<void>;
 }
