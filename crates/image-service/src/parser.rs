@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetFormat {
+    Avif,
     WebP,
     Jpeg,
     Png,
@@ -15,6 +16,7 @@ pub enum TargetFormat {
 impl TargetFormat {
     pub fn mime_type(&self) -> &'static str {
         match self {
+            TargetFormat::Avif => "image/avif",
             TargetFormat::WebP => "image/webp",
             TargetFormat::Jpeg => "image/jpeg",
             TargetFormat::Png => "image/png",
@@ -30,6 +32,7 @@ impl FromStr for TargetFormat {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
+            "avif" => Ok(TargetFormat::Avif),
             "webp" => Ok(TargetFormat::WebP),
             "jpeg" | "jpg" => Ok(TargetFormat::Jpeg),
             "png" => Ok(TargetFormat::Png),
@@ -72,7 +75,7 @@ impl Default for TransformOptions {
             smart: false,
             flip_horizontal: false,
             flip_vertical: false,
-            format: Some(TargetFormat::WebP),
+            format: None,
             quality: 80,
             blur_sigma: None,
             sharpen_sigma: None,
@@ -256,6 +259,16 @@ mod tests {
         assert_eq!(opt.blur_sigma, Some(2.5));
         assert!(opt.grayscale);
         assert_eq!(opt.rotate_deg, Some(90));
+    }
+
+    #[test]
+    fn test_parse_avif_and_negotiate_by_default() {
+        let explicit = parse_path("/filters:format(avif):quality(72)/");
+        assert_eq!(explicit.format, Some(TargetFormat::Avif));
+        assert_eq!(explicit.quality, 72);
+
+        let negotiated = parse_path("/fit-in/320x240/");
+        assert_eq!(negotiated.format, None);
     }
 
     #[test]

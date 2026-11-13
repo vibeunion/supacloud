@@ -60,8 +60,19 @@ function captureFetch(calls: Array<{ url: string; method: string; body: any }>) 
     return () => { globalThis.fetch = originalFetch; };
 }
 
-function findCorsSubroute(route: any) {
-    return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes) && !handler.errors);
+function findCorsSubroute(route: unknown) {
+    if (!route || typeof route !== "object") return undefined;
+    const handle = (route as Record<string, unknown>).handle;
+    if (!Array.isArray(handle)) return undefined;
+    return handle.find((handler) => {
+        if (!handler || typeof handler !== "object") return false;
+        const candidate = handler as Record<string, unknown>;
+        const routes = candidate.routes;
+        return candidate.handler === "subroute"
+            && Array.isArray(routes)
+            && !candidate.errors
+            && !routes.some((child) => findHandlerDeep(child, "cache"));
+    });
 }
 
 function findHandler(route: unknown, handlerName: string): Record<string, unknown> | undefined {
@@ -72,6 +83,24 @@ function findHandler(route: unknown, handlerName: string): Record<string, unknow
         if (!handler || typeof handler !== "object" || Array.isArray(handler)) return false;
         return (handler as Record<string, unknown>).handler === handlerName;
     });
+}
+
+function findHandlerDeep(value: unknown, handlerName: string): Record<string, unknown> | undefined {
+    if (Array.isArray(value)) {
+        for (const child of value) {
+            const found = findHandlerDeep(child, handlerName);
+            if (found) return found;
+        }
+        return undefined;
+    }
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    if (record.handler === handlerName) return record;
+    for (const child of Object.values(record)) {
+        const found = findHandlerDeep(child, handlerName);
+        if (found) return found;
+    }
+    return undefined;
 }
 
 function findReverseProxyHandlers(routes: any[]) {
@@ -533,6 +562,7 @@ describe("CaddyGatewayProvider", () => {
         const restEncode = findHandler(rest, "encode");
         const opaqueRestEncode = findHandler(opaqueRest, "encode");
         const storageEncode = findHandler(storage, "encode");
+        const publicImageCache = findHandlerDeep(storage, "cache");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
         expect(restEncode).toEqual({
@@ -543,6 +573,25 @@ describe("CaddyGatewayProvider", () => {
         });
         expect(opaqueRestEncode).toEqual(restEncode);
         expect(storageEncode).toBeUndefined();
+        expect(publicImageCache).toMatchObject({
+            Configuration: {
+                DefaultCache: {
+                    allowed_http_verbs: ["GET", "HEAD"],
+                    cache_name: "supacloud-public-images",
+                    ttl: "1h",
+                    stale: "24h",
+                    headers: ["Accept"],
+                    storers: ["simplefs"],
+                    simplefs: {
+                        found: true,
+                        path: "/data/supacloud-public-image-cache",
+                        configuration: { size: 2048, directory_size: "5GB" },
+                    },
+                },
+            },
+        });
+        expect(JSON.stringify(storage)).toContain('"handler":"cache"');
+        expect(JSON.stringify(storageResumable)).not.toContain('"handler":"cache"');
         expect(management?.handle).toContainEqual(inventoryCompression);
         for (const route of [rest, storage, storageResumable, functions, admin, realtime]) {
             expect(route?.handle).not.toContainEqual(inventoryCompression);
@@ -593,7 +642,7 @@ describe("CaddyGatewayProvider", () => {
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
         expect(findCorsSubroute(storage)).toBeUndefined();
         expect(findCorsSubroute(storageResumable)).toBeUndefined();
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         expect(storageProxy?.flush_interval).toBeUndefined();
         const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(restProxy?.flush_interval).toBe(-1);
@@ -2225,7 +2274,7 @@ describe("CaddyGatewayProvider", () => {
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const storage = routes.find((route: any) => route["@id"] === "route-project-freshref-storage");
-        const storageProxy = storage?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
 
         expect(storage?.handle?.some((handler: any) => handler.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(storageProxy?.headers?.request?.set?.["Host"]).toEqual([`freshref.api.${config.baseDomain}`]);
@@ -2600,7 +2649,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(apiRoutes.length).toBeGreaterThan(0);
 
         for (const route of apiRoutes) {
-            const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
+            const proxy = findHandlerDeep(route, "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
             const routeId = String(route["@id"] || "");
             const usesProjectCanonicalHost = routeId.endsWith("-storage") || routeId.endsWith("-storage-resumable") || routeId.endsWith("-functions");
@@ -2634,7 +2683,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(resumable?.match?.[0]?.path).toEqual(["/storage/v1/upload/resumable*"]);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
 
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         const resumableProxy = resumable?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(resumable?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
@@ -2713,7 +2762,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(storage).toBeDefined();
         expect(storage?.handle?.some((handler: any) => handler.strip_path_prefix === "/storage/v1")).toBe(false);
 
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         expect(storageProxy?.flush_interval).toBeUndefined();
         expect(storageProxy?.headers?.response?.delete).toBeUndefined();
         const requestSet = storageProxy?.headers?.request?.set;
@@ -2875,7 +2924,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(authAdmin?.match?.[0]?.host).toContain("api.custom.example.com");
 
         // All routes with the custom domain must still have correct headers
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         const requestSet = storageProxy?.headers?.request?.set;
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(requestSet?.["Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
