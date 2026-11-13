@@ -70,10 +70,10 @@ return 503 before the per-request limit is reached. Increase that budget togethe
 with unusually large upload limits, accounting for collection and transfer copies.
 See [Edge Function memory controls](edge-function-memory.md).
 
-Management API project-scoped image transforms use the same 500 MiB default for
+Management API project-scoped image transforms use a stricter 64 MiB default for
 source and `max_bytes` output filtering. Set
 `SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES` to a positive byte count up to
-524288000 to lower that limit for the service, then restart it. This is an
+67108864 to lower that limit for the service, then restart it. This is an
 operator limit; URL parameters cannot raise it.
 
 Management API standard Storage uploads also advertise and enforce a 500 MiB

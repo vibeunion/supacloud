@@ -72,6 +72,11 @@ import {
 import { publicScheduledFunctionProjectConfig } from "../utils/scheduled-function-config";
 import { normalizeOAuthServerConfig } from "../utils/project-config";
 import {
+  mergeDeliveryOptimization,
+  normalizeDeliveryOptimization,
+  parseDeliveryOptimizationPatch,
+} from "../services/delivery-optimization";
+import {
   type ReplicationSettingRow,
   summarizePowerSyncReadiness,
 } from "../services/replication-readiness";
@@ -3059,6 +3064,74 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       return {
         success: true,
         message: `Custom rate limit removed for ${body.path}`,
+      };
+    },
+  )
+  // --- Cloudflare-style delivery optimization policy ---
+  .get(
+    "/:ref/config/delivery-optimization",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project delivery optimization policy" },
+    },
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      return {
+        project_ref: params.ref,
+        delivery_optimization: normalizeDeliveryOptimization(settings["delivery_optimization"]),
+      };
+    },
+  )
+  .patch(
+    "/:ref/config/delivery-optimization",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["projects"], summary: "Update project delivery optimization policy" },
+    },
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+
+      let nextPolicy;
+      try {
+        parseDeliveryOptimizationPatch(body);
+        nextPolicy = mergeDeliveryOptimization(settings["delivery_optimization"], body);
+      } catch (error: unknown) {
+        return status(400, {
+          code: "DELIVERY_OPTIMIZATION_INVALID",
+          message: error instanceof Error ? error.message : "Invalid delivery optimization policy",
+        });
+      }
+
+      const previousPolicy = normalizeDeliveryOptimization(settings["delivery_optimization"]);
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        delivery_optimization: nextPolicy,
+      });
+      if (!updated) return status(500, {
+        code: "DELIVERY_OPTIMIZATION_PERSIST_FAILED",
+        message: "Failed to persist delivery optimization policy",
+      });
+      const { frontendService } = await import("../services/frontend.service");
+      const frontend = await frontendService.reconcileGatewayRoutes(params.ref);
+      if (frontend.errors.length > 0) {
+        return status(502, {
+          code: "DELIVERY_OPTIMIZATION_GATEWAY_RECONCILE_FAILED",
+          message: "Policy was saved but the frontend gateway route could not be reconciled",
+          project_ref: params.ref,
+          delivery_optimization: nextPolicy,
+          frontend,
+        });
+      }
+
+      return {
+        project_ref: params.ref,
+        delivery_optimization: nextPolicy,
+        previous_delivery_optimization: previousPolicy,
+        frontend,
+        success: true,
+        operation: "update_delivery_optimization",
       };
     },
   )

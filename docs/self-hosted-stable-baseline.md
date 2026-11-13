@@ -44,7 +44,7 @@ The first stable release should publish one primary deployment profile:
 | Primary OS acceptance target | Ubuntu 24.04 LTS |
 | Primary architecture acceptance target | `amd64` |
 | Database substrate | Pigsty `v4.5.0`, PostgreSQL 18 |
-| Gateway | SupaCloud-managed Caddy systemd service |
+| Gateway | SupaCloud-managed Caddy systemd service with safe response compression and static-asset cache defaults |
 | Platform runtime | Management API, Web Console, project runtimes, and VictoriaLogs |
 | Storage | JuiceFS with PostgreSQL metadata, unless a project explicitly binds a supported S3-compatible backend |
 | Artifact mode | Published, checksum-verified, provenance-verified release artifacts |
@@ -127,6 +127,24 @@ the measurements from the only executed drill are in
 [control-plane brief outage](control-plane-outage.md). That drill is not a
 production failure test and does not make the single-node baseline highly
 available.
+
+### Delivery optimization boundary
+
+The single-host baseline enables safe delivery defaults at the managed Caddy
+gateway. Responses use negotiated `zstd`/`gzip` compression where the existing
+route contract allows it. Versioned frontend assets are cached by Caddy's
+`cache-handler` with the Badger storage module; `GET` and `HEAD` are the only
+cacheable methods, and `Cache-Status` exposes hit/miss behavior. HTML, release
+pointers, API/Auth, uploads, cookie-bearing responses, and other private traffic
+remain uncached.
+
+Each project can select `disabled`, `public_versioned`, or `public` asset caching
+from the Web Console delivery optimization settings. The cache lives in the
+Caddy state directory on one host. It is not a multi-node shared cache, and a
+distributed adapter needs separate capacity, invalidation, and recovery evidence
+before that deployment profile can be supported. SupaCloud does not depend on
+Imagor or perform implicit request-time image transformations; prebuilt AVIF/WebP
+sidecars are served when present.
 
 ### Infrastructure
 

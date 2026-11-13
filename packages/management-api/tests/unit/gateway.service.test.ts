@@ -60,8 +60,47 @@ function captureFetch(calls: Array<{ url: string; method: string; body: any }>) 
     return () => { globalThis.fetch = originalFetch; };
 }
 
-function findCorsSubroute(route: any) {
-    return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes) && !handler.errors);
+function findCorsSubroute(route: unknown) {
+    if (!route || typeof route !== "object") return undefined;
+    const handle = (route as Record<string, unknown>).handle;
+    if (!Array.isArray(handle)) return undefined;
+    return handle.find((handler) => {
+        if (!handler || typeof handler !== "object") return false;
+        const candidate = handler as Record<string, unknown>;
+        const routes = candidate.routes;
+        return candidate.handler === "subroute"
+            && Array.isArray(routes)
+            && !candidate.errors
+            && !routes.some((child) => findHandlerDeep(child, "cache"));
+    });
+}
+
+function findHandler(route: unknown, handlerName: string): Record<string, unknown> | undefined {
+    if (!route || typeof route !== "object" || Array.isArray(route)) return undefined;
+    const handle = (route as { handle?: unknown }).handle;
+    if (!Array.isArray(handle)) return undefined;
+    return handle.find((handler: unknown): handler is Record<string, unknown> => {
+        if (!handler || typeof handler !== "object" || Array.isArray(handler)) return false;
+        return (handler as Record<string, unknown>).handler === handlerName;
+    });
+}
+
+function findHandlerDeep(value: unknown, handlerName: string): Record<string, unknown> | undefined {
+    if (Array.isArray(value)) {
+        for (const child of value) {
+            const found = findHandlerDeep(child, handlerName);
+            if (found) return found;
+        }
+        return undefined;
+    }
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    if (record.handler === handlerName) return record;
+    for (const child of Object.values(record)) {
+        const found = findHandlerDeep(child, handlerName);
+        if (found) return found;
+    }
+    return undefined;
 }
 
 function findReverseProxyHandlers(routes: any[]) {
@@ -520,8 +559,39 @@ describe("CaddyGatewayProvider", () => {
         const admin = routes.find((route: any) => route["@id"] === "route-project-testref123-auth-admin");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
+        const restEncode = findHandler(rest, "encode");
+        const opaqueRestEncode = findHandler(opaqueRest, "encode");
+        const storageEncode = findHandler(storage, "encode");
+        const publicImageCache = findHandlerDeep(storage, "cache");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
+        expect(restEncode).toEqual({
+            handler: "encode",
+            encodings: { zstd: {}, gzip: {} },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        });
+        expect(opaqueRestEncode).toEqual(restEncode);
+        expect(storageEncode).toBeUndefined();
+        expect(publicImageCache).toMatchObject({
+            Configuration: {
+                DefaultCache: {
+                    allowed_http_verbs: ["GET", "HEAD"],
+                    cache_name: "supacloud-public-images",
+                    ttl: "1h",
+                    stale: "24h",
+                    headers: ["Accept"],
+                    storers: ["simplefs"],
+                    simplefs: {
+                        found: true,
+                        path: "/data/supacloud-public-image-cache",
+                        configuration: { size: 2048, directory_size: "5GB" },
+                    },
+                },
+            },
+        });
+        expect(JSON.stringify(storage)).toContain('"handler":"cache"');
+        expect(JSON.stringify(storageResumable)).not.toContain('"handler":"cache"');
         expect(management?.handle).toContainEqual(inventoryCompression);
         for (const route of [rest, storage, storageResumable, functions, admin, realtime]) {
             expect(route?.handle).not.toContainEqual(inventoryCompression);
@@ -572,7 +642,7 @@ describe("CaddyGatewayProvider", () => {
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
         expect(findCorsSubroute(storage)).toBeUndefined();
         expect(findCorsSubroute(storageResumable)).toBeUndefined();
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         expect(storageProxy?.flush_interval).toBeUndefined();
         const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(restProxy?.flush_interval).toBe(-1);
@@ -1063,7 +1133,16 @@ describe("CaddyGatewayProvider", () => {
         expect(avifRouteIndex).toBeLessThan(assetRouteIndex);
         expect(webpRouteIndex).toBeLessThan(assetRouteIndex);
         expect(assetRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}"]);
-        expect(assetRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=31536000, immutable"]);
+        expect(assetRoute?.handle?.[0]?.handler).toBe("cache");
+        expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.cache_name).toBe("supacloud-static");
+        expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.badger).toEqual({
+            found: true,
+            path: expect.stringContaining("http-cache"),
+        });
+        expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.key?.headers).toContain(
+            "X-SupaCloud-Frontend-Release",
+        );
+        expect(assetRoute?.handle?.[1]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=31536000, immutable"]);
         expect(assetRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(assetRoute?.terminal).toBe(true);
         expect(missingAssetRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
@@ -1080,8 +1159,12 @@ describe("CaddyGatewayProvider", () => {
         expect(webpRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.webp"]);
         expect(avifRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(avifRoute?.terminal).toBe(true);
+        expect(avifRoute?.handle?.[0]?.handler).toBe("cache");
+        expect(avifRoute?.handle?.[1]?.response?.add?.Vary).toEqual(["Accept"]);
         expect(webpRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(webpRoute?.terminal).toBe(true);
+        expect(webpRoute?.handle?.[0]?.handler).toBe("cache");
+        expect(webpRoute?.handle?.[1]?.response?.add?.Vary).toEqual(["Accept"]);
         expect(fileServer?.handler).toBe("file_server");
         expect(fileServer?.root).toBe("/var/supacloud/frontends/proj123/0000002b/build");
         expect(fileServer?.precompressed).toEqual({ br: {}, zstd: {}, gzip: {} });
@@ -1106,6 +1189,36 @@ describe("CaddyGatewayProvider", () => {
                 "/var/supacloud/frontends/proj123/fa-web/releases/a/build",
             );
             await expect(provider.readFrontendStaticRoot("proj123", "missing")).resolves.toBeNull();
+        } finally {
+            restore();
+        }
+    });
+
+    test("renders public asset caching with bounded browser lifetime", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.configureFrontendRoute({
+                projectRef: "public-assets",
+                deploymentId: "0000002d",
+                hosts: ["public.example.com"],
+                root: "/var/supacloud/frontends/public-assets/0000002d/build",
+                mode: "static",
+                cacheMode: "public",
+                cacheTtlSeconds: 600,
+                cacheStaleWhileRevalidateSeconds: 30,
+            });
+
+            const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const route = routes.find((item: any) => item["@id"] === "route-frontend-public-assets-0000002d");
+            const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
+            const assetRoute = subroute?.routes?.find((item: any) => item.match?.[0]?.file?.try_files?.includes("{http.request.uri.path}"));
+            expect(assetRoute?.match?.[0]?.path).toContain("/images/*");
+            expect(assetRoute?.match?.[0]?.path).toContain("*.css");
+            expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.ttl).toBe("600s");
+            expect(assetRoute?.handle?.[1]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=600"]);
         } finally {
             restore();
         }
@@ -1777,6 +1890,12 @@ describe("CaddyGatewayProvider", () => {
         expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
         expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
         expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");
+        expect(findHandler(docs, "encode")).toEqual({
+            handler: "encode",
+            encodings: { zstd: {}, gzip: {} },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        });
         expect(docs?.handle?.[0]?.response?.set?.["X-Robots-Tag"]).toEqual(["noindex"]);
         expect(disabled).toBeUndefined();
 
@@ -1895,14 +2014,16 @@ describe("CaddyGatewayProvider", () => {
         expect(assets?.match?.[0]?.host).toEqual(["auth.example.com"]);
         expect(assets?.match?.[0]?.path).toEqual(["/admin/_app/*", "/admin/assets/*"]);
         expect(assets?.handle?.[0]).toEqual({ handler: "rewrite", strip_path_prefix: "/admin" });
-        expect(assets?.handle?.[1]?.handler).toBe("file_server");
-        expect(assets?.handle?.[1]?.root).toBe(staticRoot);
+        expect(assets?.handle?.[1]?.handler).toBe("encode");
+        expect(assets?.handle?.[2]?.handler).toBe("file_server");
+        expect(assets?.handle?.[2]?.root).toBe(staticRoot);
 
         expect(spa?.match?.[0]?.path).toEqual(["/admin", "/admin/*"]);
         expect(spa?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
         expect(spa?.handle?.[1]).toEqual({ handler: "rewrite", uri: "/index.html" });
-        expect(spa?.handle?.[2]?.handler).toBe("file_server");
-        expect(spa?.handle?.[2]?.root).toBe(staticRoot);
+        expect(spa?.handle?.[2]?.handler).toBe("encode");
+        expect(spa?.handle?.[3]?.handler).toBe("file_server");
+        expect(spa?.handle?.[3]?.root).toBe(staticRoot);
         expect(routes.indexOf(assets)).toBeLessThan(routes.indexOf(spa));
 
         restore();
@@ -2194,7 +2315,7 @@ describe("CaddyGatewayProvider", () => {
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const storage = routes.find((route: any) => route["@id"] === "route-project-freshref-storage");
-        const storageProxy = storage?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
 
         expect(storage?.handle?.some((handler: any) => handler.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(storageProxy?.headers?.request?.set?.["Host"]).toEqual([`freshref.api.${config.baseDomain}`]);
@@ -2569,7 +2690,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(apiRoutes.length).toBeGreaterThan(0);
 
         for (const route of apiRoutes) {
-            const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
+            const proxy = findHandlerDeep(route, "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
             const routeId = String(route["@id"] || "");
             const usesProjectCanonicalHost = routeId.endsWith("-storage") || routeId.endsWith("-storage-resumable") || routeId.endsWith("-functions");
@@ -2603,7 +2724,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(resumable?.match?.[0]?.path).toEqual(["/storage/v1/upload/resumable*"]);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
 
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         const resumableProxy = resumable?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(resumable?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
@@ -2682,7 +2803,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(storage).toBeDefined();
         expect(storage?.handle?.some((handler: any) => handler.strip_path_prefix === "/storage/v1")).toBe(false);
 
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         expect(storageProxy?.flush_interval).toBeUndefined();
         expect(storageProxy?.headers?.response?.delete).toBeUndefined();
         const requestSet = storageProxy?.headers?.request?.set;
@@ -2844,7 +2965,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(authAdmin?.match?.[0]?.host).toContain("api.custom.example.com");
 
         // All routes with the custom domain must still have correct headers
-        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const storageProxy = findHandlerDeep(storage, "reverse_proxy");
         const requestSet = storageProxy?.headers?.request?.set;
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(requestSet?.["Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);

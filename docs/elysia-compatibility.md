@@ -39,8 +39,8 @@ improvement, zero overhead or framework portability is established by this PR.
 ## RC policy
 
 `packages/elysia/compatibility.json` records the required acceptance target, not
-proof that a test run passed. The Elysia target is `2.0.0-rc.1`, with active
-`typebox` 1.4.3 and `exact-mirror` 1.2.6. Bun and both TypeScript engines are
+proof that a test run passed. The Elysia target is `2.0.0-rc.4`, with active
+`typebox` 1.4.3 and `exact-mirror` 1.2.7. Bun and both TypeScript engines are
 also recorded. The adapter peer and development dependencies, repository-owned
 direct Elysia consumers, CLI scaffold literals and compiler migration target must
 agree. Published templates retain version literals so that the compiler and CLI
