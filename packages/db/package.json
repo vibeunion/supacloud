@@ -98,7 +98,7 @@
     "typescript": "7.1.0-beta"
   },
   "peerDependencies": {
-    "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0"
+    "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0 || ^0.3.0"
   },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",

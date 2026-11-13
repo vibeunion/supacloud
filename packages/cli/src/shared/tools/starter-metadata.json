@@ -25,7 +25,7 @@
       "dependencies": {},
       "devDependencies": {},
       "peerDependencies": {
-        "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0"
+        "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0 || ^0.3.0"
       }
     },
     "dbZenstack": {
@@ -42,7 +42,7 @@
     "modelTooling": {
       "version": "0.1.0",
       "dependencies": {
-        "@supacloud/db-zenstack": "^0.2.2"
+        "@supacloud/db-zenstack": "^0.2.2 || ^0.3.0"
       }
     },
     "sdk": {
