@@ -57,7 +57,7 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
-    "@supacloud/db": "file:../db",
+    "@supacloud/db": "0.25.0",
     "@supacloud/delivery": "file:../delivery",
     "typebox": "1.4.3",
     "@graphql-codegen/core": "^6.2.2",
@@ -69,6 +69,7 @@
   },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",
+    "@supacloud/db": "file:../db",
     "@graphql-tools/utils": "^12.0.4",
     "@whatwg-node/promise-helpers": "2.0.0",
     "deepmerge-ts": "8.0.2",
