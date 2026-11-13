@@ -57,7 +57,7 @@
 
     "@supacloud/contracts": ["@supacloud/contracts@0.16.1", "", {}, "sha512-QuizVHaZfeDszzqaMhVl9qeW40HCbtttKVdjFAidLiPoD6NzgwYB53UrtI3sHVFLii/Zdq9qn2NtSp7N/8cHlA=="],
 
-    "@supacloud/db": ["@supacloud/db@0.24.2", "", { "dependencies": { "@supacloud/contracts": "0.16.1", "libpg-query": "18.1.5", "typescript": "7.1.0-beta" }, "peerDependencies": { "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0" }, "optionalPeers": ["@supacloud/db-zenstack"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-model": "dist/model-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-rGCJAcpM3JdJItgiDV9peRf5q0mw7zINQLpYCX72/yA4xF+WcGVo0r7cM10NKuZUmfRbXWSti4lWnV2mCJoxPg=="],
+    "@supacloud/db": ["@supacloud/db@0.24.2", "", { "dependencies": { "@supacloud/contracts": "0.16.1", "libpg-query": "18.1.5", "typescript": "7.1.0-beta" }, "peerDependencies": { "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0" }, "optionalPeers": ["@supacloud/db-zenstack"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-rGCJAcpM3JdJItgiDV9peRf5q0mw7zINQLpYCX72/yA4xF+WcGVo0r7cM10NKuZUmfRbXWSti4lWnV2mCJoxPg=="],
 
     "@supacloud/delivery": ["@supacloud/delivery@0.28.0", "", { "dependencies": { "tar-stream": "^3.2.2", "typebox": "1.4.3" } }, "sha512-RBeC0KswaJ4lfdI3TMPmevzfs2rDwhf9z2h0oNsIoXNozULfE4CzPT78T2liNkYaHVl4Lzw6WIBAUyFvwxOAog=="],
 

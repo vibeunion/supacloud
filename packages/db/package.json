@@ -8,8 +8,7 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "supacloud-sql-impact": "./dist/sql-impact-cli.js",
-    "supacloud-db": "./dist/source-contracts-cli.js",
-    "supacloud-model": "./dist/model-cli.js"
+    "supacloud-db": "./dist/source-contracts-cli.js"
   },
   "exports": {
     "./source-contracts": {

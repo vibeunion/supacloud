@@ -2,6 +2,7 @@ export interface DatabaseModelColumn {
   readonly name: string;
   readonly dataType: string;
   readonly udtName: string;
+  readonly udtSchema: string | null;
   readonly nullable: boolean;
   readonly defaultExpression: string | null;
 }
@@ -111,10 +112,15 @@ export function renderDatabaseModelCandidate(catalog: DatabaseModelCatalog): Dat
   ];
 
   const usedEnumNames = new Set<string>();
+  const enumNames = new Map<string, string>();
   for (const item of catalog.enums) {
     const enumName = uniqueIdentifier(item.schema === "public" ? item.name : `${item.schema}_${item.name}`, "Enum", usedEnumNames);
+    enumNames.set(`${item.schema}.${item.name}`, enumName);
     const usedValues = new Set<string>();
-    lines.push(`enum ${enumName} {`, ...item.values.map(value => `  ${uniqueIdentifier(value, "Value", usedValues)}`), "}", "");
+    lines.push(`enum ${enumName} {`, ...item.values.map(value => {
+      const name = uniqueIdentifier(value, "Value", usedValues);
+      return `  ${name}${name === value ? "" : ` @map(${quote(value)})`}`;
+    }), "}", "");
   }
 
   const usedModelNames = new Set<string>();
@@ -132,7 +138,9 @@ export function renderDatabaseModelCandidate(catalog: DatabaseModelCatalog): Dat
       const mapped = field === column.name ? "" : ` @map(${quote(column.name)})`;
       const optional = column.nullable && !table.primaryKey.includes(column.name) ? "?" : "";
       const primary = table.primaryKey.length === 1 && table.primaryKey[0] === column.name ? " @id" : "";
-      lines.push(`  ${field} ${scalarType(column)}${optional}${primary}${mapped}${defaultAttribute(column.defaultExpression)}`);
+      const enumType = enumNames.get(`${column.udtSchema ?? table.schema}.${column.udtName.replace(/^_/, "")}`);
+      const type = enumType ? (column.udtName.startsWith("_") || column.dataType.toLowerCase() === "array" ? `${enumType}[]` : enumType) : scalarType(column);
+      lines.push(`  ${field} ${type}${optional}${primary}${mapped}${defaultAttribute(column.defaultExpression)}`);
     }
     if (table.primaryKey.length > 1) {
       lines.push(`  @@id([${table.primaryKey.map(fieldIdentifier).join(", ")}])`);
