@@ -2,7 +2,18 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { remotePull, runModelCommand } from "./index";
+import { remotePull, resolveReviewCandidate, runModelCommand } from "./index";
+
+test("pull keeps maintained and generated model files outside the candidate boundary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-model-paths-"));
+  try {
+    expect(() => resolveReviewCandidate("zenstack/schema.zmodel", root)).toThrow("outside the maintained model");
+    expect(() => resolveReviewCandidate("zenstack/generated/schema.zmodel", root)).toThrow("outside the maintained model");
+    expect(resolveReviewCandidate("output/database-audit/model.zmodel", root)).toBe(join(root, "output/database-audit/model.zmodel"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("remote pull sends only Management API context and writes a review candidate", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-model-tooling-"));

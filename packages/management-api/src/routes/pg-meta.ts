@@ -360,12 +360,14 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
         queryTenant(params.ref, `
           SELECT n.nspname AS schema, c.relname AS table_name, a.attname AS column_name,
                  format_type(a.atttypid, a.atttypmod) AS data_type,
-                 t.typname AS udt_name, NOT a.attnotnull AS nullable,
+                 t.typname AS udt_name, type_schema.nspname AS udt_schema,
+                 NOT a.attnotnull AS nullable,
                  pg_get_expr(d.adbin, d.adrelid) AS default_expression
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
             JOIN pg_type t ON t.oid = a.atttypid
+            JOIN pg_namespace type_schema ON type_schema.oid = t.typnamespace
             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
            WHERE c.relkind IN ('r', 'p') AND n.nspname IN (${predicate})
            ORDER BY n.nspname, c.relname, a.attnum`),
@@ -407,7 +409,7 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
       for (const row of columns) {
         const schema = String(row.schema), name = String(row.table_name), key = `${schema}.${name}`;
         const table = tableMap.get(key) ?? { schema, name, columns: [], primaryKey: [], foreignKeys: [] };
-        table.columns.push({ name: String(row.column_name), dataType: String(row.data_type), udtName: String(row.udt_name), nullable: row.nullable === true, defaultExpression: row.default_expression === null ? null : String(row.default_expression) });
+        table.columns.push({ name: String(row.column_name), dataType: String(row.data_type), udtName: String(row.udt_name), udtSchema: row.udt_schema === null ? null : String(row.udt_schema), nullable: row.nullable === true, defaultExpression: row.default_expression === null ? null : String(row.default_expression) });
         tableMap.set(key, table);
       }
       for (const row of primaryKeys) tableMap.get(`${row.schema}.${row.table_name}`)?.primaryKey.push(String(row.column_name));
