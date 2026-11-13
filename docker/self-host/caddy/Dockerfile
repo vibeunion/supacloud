@@ -7,6 +7,8 @@ RUN go version \
     && GOBIN=/usr/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7 \
     && xcaddy build v2.11.7 \
         --with github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db \
+        --with github.com/caddyserver/cache-handler@v0.17.0 \
+        --with github.com/darkweak/storages/badger/caddy@v0.0.23 \
         --output /usr/bin/caddy
 
 FROM caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772

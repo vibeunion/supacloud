@@ -1084,7 +1084,16 @@ describe("CaddyGatewayProvider", () => {
         expect(avifRouteIndex).toBeLessThan(assetRouteIndex);
         expect(webpRouteIndex).toBeLessThan(assetRouteIndex);
         expect(assetRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}"]);
-        expect(assetRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=31536000, immutable"]);
+        expect(assetRoute?.handle?.[0]?.handler).toBe("cache");
+        expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.cache_name).toBe("supacloud-static");
+        expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.badger).toEqual({
+            found: true,
+            path: expect.stringContaining("http-cache"),
+        });
+        expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.key?.headers).toContain(
+            "X-SupaCloud-Frontend-Release",
+        );
+        expect(assetRoute?.handle?.[1]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=31536000, immutable"]);
         expect(assetRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(assetRoute?.terminal).toBe(true);
         expect(missingAssetRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
@@ -1101,10 +1110,12 @@ describe("CaddyGatewayProvider", () => {
         expect(webpRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.webp"]);
         expect(avifRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(avifRoute?.terminal).toBe(true);
-        expect(avifRoute?.handle?.[0]?.response?.add?.Vary).toEqual(["Accept"]);
+        expect(avifRoute?.handle?.[0]?.handler).toBe("cache");
+        expect(avifRoute?.handle?.[1]?.response?.add?.Vary).toEqual(["Accept"]);
         expect(webpRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(webpRoute?.terminal).toBe(true);
-        expect(webpRoute?.handle?.[0]?.response?.add?.Vary).toEqual(["Accept"]);
+        expect(webpRoute?.handle?.[0]?.handler).toBe("cache");
+        expect(webpRoute?.handle?.[1]?.response?.add?.Vary).toEqual(["Accept"]);
         expect(fileServer?.handler).toBe("file_server");
         expect(fileServer?.root).toBe("/var/supacloud/frontends/proj123/0000002b/build");
         expect(fileServer?.precompressed).toEqual({ br: {}, zstd: {}, gzip: {} });
@@ -1129,6 +1140,36 @@ describe("CaddyGatewayProvider", () => {
                 "/var/supacloud/frontends/proj123/fa-web/releases/a/build",
             );
             await expect(provider.readFrontendStaticRoot("proj123", "missing")).resolves.toBeNull();
+        } finally {
+            restore();
+        }
+    });
+
+    test("renders public asset caching with bounded browser lifetime", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.configureFrontendRoute({
+                projectRef: "public-assets",
+                deploymentId: "0000002d",
+                hosts: ["public.example.com"],
+                root: "/var/supacloud/frontends/public-assets/0000002d/build",
+                mode: "static",
+                cacheMode: "public",
+                cacheTtlSeconds: 600,
+                cacheStaleWhileRevalidateSeconds: 30,
+            });
+
+            const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const route = routes.find((item: any) => item["@id"] === "route-frontend-public-assets-0000002d");
+            const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
+            const assetRoute = subroute?.routes?.find((item: any) => item.match?.[0]?.file?.try_files?.includes("{http.request.uri.path}"));
+            expect(assetRoute?.match?.[0]?.path).toContain("/images/*");
+            expect(assetRoute?.match?.[0]?.path).toContain("*.css");
+            expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.ttl).toBe("600s");
+            expect(assetRoute?.handle?.[1]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=600"]);
         } finally {
             restore();
         }

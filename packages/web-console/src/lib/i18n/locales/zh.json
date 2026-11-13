@@ -1170,6 +1170,7 @@
     "tab_scaling": "扩展/副本",
     "tab_custom_domains": "域名",
     "tab_network": "网络",
+    "tab_delivery_optimization": "交付优化",
     "tab_pooling": "连接池",
     "tab_jwt": "JWT",
     "tab_log_drains": "日志转发",

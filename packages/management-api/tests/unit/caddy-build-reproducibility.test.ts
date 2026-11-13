@@ -31,6 +31,10 @@ const caddyEntrypoint = readFileSync(
   new URL("../../../../docker/self-host/caddy/entrypoint.sh", import.meta.url),
   "utf8",
 );
+const caddySmoke = readFileSync(
+  new URL("../../../../scripts/test_supacloud_caddy_edge_proxy.sh", import.meta.url),
+  "utf8",
+);
 const devCompose = readFileSync(
   new URL("../../../../docker/dev/docker-compose.yml", import.meta.url),
   "utf8",
@@ -211,6 +215,24 @@ exit 1
     );
   });
 
+  test("pins the HTTP cache handler and Badger storage modules", () => {
+    expect(builder).toContain('CACHE_HANDLER_MODULE_VERSION="${CACHE_HANDLER_MODULE_VERSION:-v0.17.0}"');
+    expect(builder).toContain('BADGER_STORAGE_MODULE_VERSION="${BADGER_STORAGE_MODULE_VERSION:-v0.0.23}"');
+    expect(builder).toContain("github.com/caddyserver/cache-handler@");
+    expect(builder).toContain("github.com/darkweak/storages/badger/caddy@");
+    expect(caddyDockerfile).toContain("github.com/caddyserver/cache-handler@v0.17.0");
+    expect(caddyDockerfile).toContain("github.com/darkweak/storages/badger/caddy@v0.0.23");
+  });
+
+  test("Caddy smoke covers the Badger static cache miss and hit contract", () => {
+    expect(caddySmoke).toContain('"handler": "cache"');
+    expect(caddySmoke).toContain('"cache_name": "supacloud-static"');
+    expect(caddySmoke).toContain('"found": true');
+    expect(caddySmoke).toContain('^Cache-Status: .*fwd=uri-miss');
+    expect(caddySmoke).toContain('^Cache-Status: .*hit');
+    expect(caddySmoke).toContain('^Cache-Control: public, max-age=31536000, immutable');
+  });
+
   test("self-host and development Compose build the pinned custom Caddy image", () => {
     expect(caddyDockerfile.match(/^FROM .+$/gm)).toEqual([
       "FROM caddy:2.11.7-builder@sha256:b25f47453fa02f7e66c0828b4b1343658808b9000950b6825c4a1cb0c988f5f8 AS builder",
@@ -252,6 +274,8 @@ exit 1
     );
     expect(integration).toContain("supacloud-caddy:2.11.7-ratelimit list-modules");
     expect(integration).toContain("grep -Fx http.handlers.rate_limit");
+    expect(integration).toContain("grep -Fx http.handlers.cache");
+    expect(integration).toContain("grep -Fx storages.cache.badger");
     expect(integration).toContain("grep -Fx http.matchers.query");
     expect(integration).toContain(
       '$RUNNER_TEMP/caddy-ci.json:/etc/supacloud/caddy/config.json:ro',

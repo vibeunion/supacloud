@@ -6,12 +6,24 @@ GO_VERSION="${GO_VERSION:-1.27.1}"
 XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 RATE_LIMIT_MODULE_VERSION="${RATE_LIMIT_MODULE_VERSION:-5625512f24f6f59d6f64fb3aafe5eecff0b286db}"
 RATE_LIMIT_MODULE="${RATE_LIMIT_MODULE:-github.com/mholt/caddy-ratelimit@${RATE_LIMIT_MODULE_VERSION}}"
+CACHE_HANDLER_MODULE_VERSION="${CACHE_HANDLER_MODULE_VERSION:-v0.17.0}"
+CACHE_HANDLER_MODULE="${CACHE_HANDLER_MODULE:-github.com/caddyserver/cache-handler@${CACHE_HANDLER_MODULE_VERSION}}"
+BADGER_STORAGE_MODULE_VERSION="${BADGER_STORAGE_MODULE_VERSION:-v0.0.23}"
+BADGER_STORAGE_MODULE="${BADGER_STORAGE_MODULE:-github.com/darkweak/storages/badger/caddy@${BADGER_STORAGE_MODULE_VERSION}}"
 CADDY_BUILD_TARGETS="${CADDY_BUILD_TARGETS:-linux-amd64 linux-arm64}"
 OUT_DIR="${OUT_DIR:-dist}"
 mkdir -p "$OUT_DIR"
 
 if [[ "$RATE_LIMIT_MODULE" != *@* ]]; then
   echo "RATE_LIMIT_MODULE must include an immutable @version or @commit" >&2
+  exit 1
+fi
+if [[ "$CACHE_HANDLER_MODULE" != *@* ]]; then
+  echo "CACHE_HANDLER_MODULE must include an immutable @version or @commit" >&2
+  exit 1
+fi
+if [[ "$BADGER_STORAGE_MODULE" != *@* ]]; then
+  echo "BADGER_STORAGE_MODULE must include an immutable @version or @commit" >&2
   exit 1
 fi
 
@@ -37,6 +49,8 @@ build_one() {
   echo "=> building supacloud-caddy-${suffix}"
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 xcaddy build "$CADDY_VERSION" \
     --with "$RATE_LIMIT_MODULE" \
+    --with "$CACHE_HANDLER_MODULE" \
+    --with "$BADGER_STORAGE_MODULE" \
     --output "$OUT_DIR/supacloud-caddy-${suffix}"
   chmod 0755 "$OUT_DIR/supacloud-caddy-${suffix}"
 }

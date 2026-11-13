@@ -1127,6 +1127,10 @@ export class FrontendService {
   ): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
     const { gatewayService } = await import("./gateway.service");
+    const { projectService } = await import("./project.service");
+    const { normalizeDeliveryOptimization } = await import("./delivery-optimization");
+    const projectSettings = await projectService.getProjectSettings(deployment.project_ref).catch(() => null);
+    const deliveryOptimization = normalizeDeliveryOptimization(projectSettings?.["delivery_optimization"]);
     await gatewayService.configureFrontendRoute({
       projectRef: deployment.project_ref,
       deploymentId: deployment.id,
@@ -1138,6 +1142,10 @@ export class FrontendService {
             ...(activeBuildDir && activeReleaseId ? { releaseId: activeReleaseId } : {}),
           }
         : { mode: "proxy", port }),
+      cacheStaticAssets: !isSSR && deliveryOptimization.cache_mode !== "disabled",
+      cacheMode: deliveryOptimization.cache_mode,
+      cacheTtlSeconds: deliveryOptimization.cache_ttl_seconds,
+      cacheStaleWhileRevalidateSeconds: deliveryOptimization.stale_while_revalidate_seconds,
     });
   }
 

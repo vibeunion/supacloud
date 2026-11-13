@@ -15,6 +15,7 @@
     { id: "scaling", labelKey: "ProjectSettings.tab_scaling" },
     { id: "custom-domains", labelKey: "ProjectSettings.tab_custom_domains" },
     { id: "network", labelKey: "ProjectSettings.tab_network" },
+    { id: "delivery-optimization", labelKey: "ProjectSettings.tab_delivery_optimization" },
     { id: "pooling", labelKey: "ProjectSettings.tab_pooling" },
     { id: "jwt", labelKey: "ProjectSettings.tab_jwt" },
     { id: "log-drains", labelKey: "ProjectSettings.tab_log_drains" },

@@ -2011,14 +2011,14 @@ install_caddy_gateway() {
         curl -fsSL "$SUPACLOUD_CADDY_URL" -o "$target"
         chmod 0755 "$target"
     elif [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh" ]] && command -v go >/dev/null 2>&1; then
-        log_info "Building supacloud-caddy locally with xcaddy and the rate-limit module..."
+        log_info "Building supacloud-caddy locally with xcaddy, rate-limit, and HTTP cache modules..."
         GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
         PATH="/usr/local/bin:$PATH" GO_VERSION="$GO_VERSION" XCADDY_VERSION="$XCADDY_VERSION" \
             OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
         install -m 0755 "/tmp/supacloud-caddy-build/supacloud-caddy-linux-${arch}" "$target"
         rm -rf /tmp/supacloud-caddy-build
     elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then
-        log_warn "Installing stock Caddy fallback without SupaCloud rate-limit module. Do not use this for production rate limits."
+        log_warn "Installing stock Caddy fallback without SupaCloud rate-limit/cache modules. Do not use this for production delivery optimization."
         local caddy_version="${CADDY_VERSION:-2.11.7}"
         local caddy_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_${arch}.tar.gz"
         mkdir -p /tmp/supacloud-caddy

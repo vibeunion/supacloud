@@ -128,6 +128,24 @@ the measurements from the only executed drill are in
 production failure test and does not make the single-node baseline highly
 available.
 
+### Delivery optimization boundary
+
+The single-host baseline enables safe delivery defaults at the managed Caddy
+gateway. Responses use negotiated `zstd`/`gzip` compression where the existing
+route contract allows it. Versioned frontend assets are cached by Caddy's
+`cache-handler` with the Badger storage module; `GET` and `HEAD` are the only
+cacheable methods, and `Cache-Status` exposes hit/miss behavior. HTML, release
+pointers, API/Auth, uploads, cookie-bearing responses, and other private traffic
+remain uncached.
+
+Each project can select `disabled`, `public_versioned`, or `public` asset caching
+from the Web Console delivery optimization settings. The cache lives in the
+Caddy state directory on one host. It is not a multi-node shared cache, and a
+distributed adapter needs separate capacity, invalidation, and recovery evidence
+before that deployment profile can be supported. SupaCloud does not depend on
+Imagor or perform implicit request-time image transformations; prebuilt AVIF/WebP
+sidecars are served when present.
+
 ### Infrastructure
 
 Pigsty remains the database infrastructure provider. SupaCloud owns the

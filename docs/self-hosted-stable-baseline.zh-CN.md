@@ -114,6 +114,19 @@ Realtime 仍进入 Management API。本地契约、边界和唯一一次实测�
 [control-plane brief outage](control-plane-outage.md)。这不是生产故障证明，
 也不把单机基线说成高可用。
 
+### 交付优化边界
+
+单机基线在受管 Caddy 网关启用安全的交付默认值。现有路由契约允许时使用协商的
+`zstd`/`gzip` 压缩；版本化前端资源使用 Caddy `cache-handler` 和 Badger 存储模块
+缓存。只有 `GET`/`HEAD` 可以进入该缓存，并通过 `Cache-Status` 暴露命中与未命中。
+HTML、发布指针、API/Auth、上传、带 Cookie 响应和其他私有流量保持不缓存。
+
+项目可以在 Web Console 的“交付优化”设置中选择 `disabled`、`public_versioned` 或
+`public` 资源缓存。缓存位于单台主机的 Caddy 状态目录，不是多节点共享缓存。要支持
+分布式缓存，还需要单独的容量、失效和恢复证据；这些证据完成前不扩大单机基线的部署范围。
+SupaCloud 不依赖 Imagor，也不隐式执行请求时图片变换；存在预构建的 AVIF/WebP sidecar
+时才提供对应变体。
+
 ### 基础设施
 
 Pigsty 继续作为数据库基础设施提供方。SupaCloud 负责项目级产品契约：隔离、路由、
