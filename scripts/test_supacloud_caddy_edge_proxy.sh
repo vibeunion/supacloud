@@ -20,6 +20,7 @@ fi
 work_dir="$(mktemp -d "$HOME/.supacloud-caddy-edge.XXXXXX")"
 functions_dir="$work_dir/functions"
 tenants_dir="$work_dir/tenants"
+static_dir="$work_dir/static"
 cancel_started_path=""
 edge_log="$work_dir/edge-runtime.log"
 caddy_log="$work_dir/caddy.log"
@@ -52,7 +53,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$functions_dir/$PROJECT_REF" "$tenants_dir"
+mkdir -p "$functions_dir/$PROJECT_REF" "$tenants_dir" "$static_dir"
+printf 'supacloud-static-cache-smoke\n' >"$static_dir/app.js"
 cancel_started_path="$(cd "$functions_dir/$PROJECT_REF" && pwd -P)/slow-request-started"
 cat >"$tenants_dir/$PROJECT_REF.env" <<EOF
 CANCEL_STARTED_PATH=$cancel_started_path
@@ -93,6 +95,31 @@ cat >"$work_dir/caddy.json" <<EOF
           "listen": ["127.0.0.1:$CADDY_PORT"],
           "automatic_https": { "disable": true },
           "routes": [{
+            "match": [{ "host": ["static.edge.test"], "path": ["/*"] }],
+            "handle": [
+              {
+                "handler": "cache",
+                "Configuration": {
+                  "DefaultCache": {
+                    "allowed_http_verbs": ["GET", "HEAD"],
+                    "cache_name": "supacloud-static",
+                    "default_cache_control": "public, max-age=31536000, immutable",
+                    "ttl": "31536000s",
+                    "stale": "3600s",
+                    "badger": {
+                      "found": true,
+                      "path": "$work_dir/http-cache"
+                    },
+                    "key": {
+                      "headers": ["Accept", "Accept-Encoding"]
+                    }
+                  }
+                }
+              },
+              { "handler": "file_server", "root": "$static_dir" }
+            ],
+            "terminal": true
+          }, {
             "match": [{ "host": ["auth.edge.test"], "path": ["/__rate_limit_probe"] }],
             "handle": [
               {
@@ -193,6 +220,21 @@ if [[ "$caddy_ready" != true ]]; then
   exit 1
 fi
 
+curl -fsS --max-time 5 -D "$work_dir/static-first.headers" -o "$work_dir/static-first.body" \
+  -H "Host: static.edge.test" "http://127.0.0.1:$CADDY_PORT/app.js"
+curl -fsS --max-time 5 -D "$work_dir/static-second.headers" -o "$work_dir/static-second.body" \
+  -H "Host: static.edge.test" "http://127.0.0.1:$CADDY_PORT/app.js"
+if ! grep -qi '^Cache-Status: .*fwd=uri-miss' "$work_dir/static-first.headers" \
+  || ! grep -qi '^Cache-Status: .*hit' "$work_dir/static-second.headers" \
+  || ! grep -qi '^Cache-Control: public, max-age=31536000, immutable' "$work_dir/static-second.headers" \
+  || ! cmp -s "$work_dir/static-first.body" "$work_dir/static-second.body"; then
+  echo "Caddy Badger static cache did not produce the expected MISS/HIT contract" >&2
+  cat "$work_dir/static-first.headers" >&2
+  cat "$work_dir/static-second.headers" >&2
+  cat "$caddy_log" >&2
+  exit 1
+fi
+
 for expected_status in 200 200 429; do
   actual_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
     -H "Host: auth.edge.test" "http://127.0.0.1:$CADDY_PORT/__rate_limit_probe")"
@@ -277,4 +319,4 @@ if [[ "$probe_failed" == true ]]; then
   exit 1
 fi
 
-echo "Caddy rate limiting, disconnect cancellation, and 12 concurrent Edge Runtime round-trips passed"
+echo "Caddy Badger static cache, rate limiting, disconnect cancellation, and 12 concurrent Edge Runtime round-trips passed"

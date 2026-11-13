@@ -9,6 +9,7 @@ RUN go version \
         --with github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db \
         --with github.com/caddyserver/cache-handler@07d7af2130699eb840e1f4ed49ef817da4201c2e \
         --with github.com/darkweak/storages/simplefs/caddy@81250fe6fc63358ff9f12faa72b01f36e48ed60c \
+        --with github.com/darkweak/storages/badger/caddy@v0.0.23 \
         --output /usr/bin/caddy
 
 FROM caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772

@@ -10,6 +10,8 @@ CACHE_MODULE_VERSION="${CACHE_MODULE_VERSION:-07d7af2130699eb840e1f4ed49ef817da4
 CACHE_MODULE="${CACHE_MODULE:-github.com/caddyserver/cache-handler@${CACHE_MODULE_VERSION}}"
 CACHE_STORAGE_MODULE_VERSION="${CACHE_STORAGE_MODULE_VERSION:-81250fe6fc63358ff9f12faa72b01f36e48ed60c}"
 CACHE_STORAGE_MODULE="${CACHE_STORAGE_MODULE:-github.com/darkweak/storages/simplefs/caddy@${CACHE_STORAGE_MODULE_VERSION}}"
+BADGER_STORAGE_MODULE_VERSION="${BADGER_STORAGE_MODULE_VERSION:-v0.0.23}"
+BADGER_STORAGE_MODULE="${BADGER_STORAGE_MODULE:-github.com/darkweak/storages/badger/caddy@${BADGER_STORAGE_MODULE_VERSION}}"
 CADDY_BUILD_TARGETS="${CADDY_BUILD_TARGETS:-linux-amd64 linux-arm64}"
 OUT_DIR="${OUT_DIR:-dist}"
 mkdir -p "$OUT_DIR"
@@ -24,6 +26,10 @@ if [[ "$CACHE_MODULE" != *@* ]]; then
 fi
 if [[ "$CACHE_STORAGE_MODULE" != *@* ]]; then
   echo "CACHE_STORAGE_MODULE must include an immutable @version or @commit" >&2
+  exit 1
+fi
+if [[ "$BADGER_STORAGE_MODULE" != *@* ]]; then
+  echo "BADGER_STORAGE_MODULE must include an immutable @version or @commit" >&2
   exit 1
 fi
 
@@ -51,6 +57,7 @@ build_one() {
     --with "$RATE_LIMIT_MODULE" \
     --with "$CACHE_MODULE" \
     --with "$CACHE_STORAGE_MODULE" \
+    --with "$BADGER_STORAGE_MODULE" \
     --output "$OUT_DIR/supacloud-caddy-${suffix}"
   chmod 0755 "$OUT_DIR/supacloud-caddy-${suffix}"
 }

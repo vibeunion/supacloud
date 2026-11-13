@@ -14,6 +14,10 @@ import { uniqueStrings } from "../utils/strings";
 import { isRecord, recordOrEmpty } from "../utils/record";
 import { stableStringify } from "../utils/stable-json";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
+import {
+    DEFAULT_DELIVERY_OPTIMIZATION,
+    type DeliveryCacheMode,
+} from "./delivery-optimization";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
@@ -209,6 +213,10 @@ export interface FrontendGatewayRoute {
     root?: string;
     mode?: "proxy" | "static";
     releaseId?: string;
+    cacheStaticAssets?: boolean;
+    cacheMode?: DeliveryCacheMode;
+    cacheTtlSeconds?: number;
+    cacheStaleWhileRevalidateSeconds?: number;
 }
 
 interface CaddyGatewayFileOperations {
@@ -1232,6 +1240,32 @@ export class CaddyGatewayProvider implements GatewayProvider {
         return makeEncodeHandler();
     }
 
+    private makeStaticCacheHandler(
+        cacheControl: string,
+        ttlSeconds = 31_536_000,
+        staleSeconds = 3600,
+    ): Record<string, unknown> {
+        return {
+            handler: "cache",
+            Configuration: {
+                DefaultCache: {
+                    allowed_http_verbs: ["GET", "HEAD"],
+                    cache_name: "supacloud-static",
+                    default_cache_control: cacheControl,
+                    ttl: `${ttlSeconds}s`,
+                    stale: `${staleSeconds}s`,
+                    badger: {
+                        found: true,
+                        path: path.join(config.caddyStateDir, "http-cache"),
+                    },
+                    key: {
+                        headers: ["Accept", "Accept-Encoding", "X-SupaCloud-Frontend-Release"],
+                    },
+                },
+            },
+        };
+    }
+
     private makeStaticSecurityHeaders(): Record<string, unknown> {
         return {
             handler: "headers",
@@ -1239,6 +1273,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 set: {
                     "X-Content-Type-Options": ["nosniff"],
                     "Referrer-Policy": ["strict-origin-when-cross-origin"],
+                },
+            },
+        };
+    }
+
+    private makeStaticReleaseRequestHeader(releaseId: string): Record<string, unknown> {
+        return {
+            handler: "headers",
+            request: {
+                set: {
+                    "X-SupaCloud-Frontend-Release": [releaseId],
                 },
             },
         };
@@ -1293,16 +1338,33 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeStaticAssetRoute(root: string, cacheControl: string): CaddyRoute {
+    private makeStaticAssetRoute(
+        root: string,
+        cacheControl: string,
+        cache?: { enabled: boolean; mode?: DeliveryCacheMode; ttlSeconds: number; staleSeconds: number },
+    ): CaddyRoute {
+        const assetPaths = cache?.mode === "public"
+            ? [
+                "/_app/*", "/assets/*", "/static/*", "/images/*", "/fonts/*",
+                "/favicon.ico", "/robots.txt", "*.css", "*.js", "*.mjs",
+                "*.woff", "*.woff2", "*.png", "*.jpg", "*.jpeg", "*.gif",
+                "*.svg", "*.webp", "*.avif",
+            ]
+            : ["/_app/*", "/assets/*"];
         return {
             match: [{
-                path: ["/_app/*", "/assets/*"],
+                path: assetPaths,
                 file: {
                     root,
                     try_files: ["{http.request.uri.path}"],
                 },
             }],
             handle: [
+                ...(cache?.enabled === false ? [] : [this.makeStaticCacheHandler(
+                    cacheControl,
+                    cache?.ttlSeconds,
+                    cache?.staleSeconds,
+                )]),
                 this.makeStaticCacheHeaders(cacheControl),
                 {
                     handler: "rewrite",
@@ -1314,10 +1376,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeMissingStaticAssetRoute(): CaddyRoute {
+    private makeMissingStaticAssetRoute(mode?: DeliveryCacheMode): CaddyRoute {
+        const assetPaths = mode === "public"
+            ? [
+                "/_app/*", "/assets/*", "/static/*", "/images/*", "/fonts/*",
+                "/favicon.ico", "/robots.txt", "*.css", "*.js", "*.mjs",
+                "*.woff", "*.woff2", "*.png", "*.jpg", "*.jpeg", "*.gif",
+                "*.svg", "*.webp", "*.avif",
+            ]
+            : ["/_app/*", "/assets/*"];
         return {
             match: [{
-                path: ["/_app/*", "/assets/*"],
+                path: assetPaths,
             }],
             handle: [
                 this.makeStaticCacheHeaders("no-cache"),
@@ -1330,7 +1400,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeStaticImageVariantRoute(root: string, accept: string, suffix: ".avif" | ".webp"): CaddyRoute {
+    private makeStaticImageVariantRoute(
+        root: string,
+        accept: string,
+        suffix: ".avif" | ".webp",
+        cache?: { enabled: boolean; ttlSeconds: number; staleSeconds: number },
+        cacheControl = "public, max-age=31536000, immutable",
+    ): CaddyRoute {
         return {
             match: [{
                 header: {
@@ -1341,7 +1417,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     try_files: [`{http.request.uri.path}${suffix}`],
                 },
             }],
-            handle: [{
+            handle: [
+                ...(cache?.enabled === false ? [] : [this.makeStaticCacheHandler(
+                    cacheControl,
+                    cache?.ttlSeconds,
+                    cache?.staleSeconds,
+                )]), {
                 handler: "headers",
                 response: {
                     add: {
@@ -1388,7 +1469,21 @@ export class CaddyGatewayProvider implements GatewayProvider {
             throw new Error("Caddy static frontend routes require a root directory");
         }
 
-        const immutableCache = "public, max-age=31536000, immutable";
+        const cacheMode = route.cacheMode ?? "public_versioned";
+        const cacheEnabled = route.cacheStaticAssets !== false && cacheMode !== "disabled";
+        const cacheTtlSeconds = route.cacheTtlSeconds ?? DEFAULT_DELIVERY_OPTIMIZATION.cache_ttl_seconds;
+        const cacheStaleSeconds = route.cacheStaleWhileRevalidateSeconds ?? DEFAULT_DELIVERY_OPTIMIZATION.stale_while_revalidate_seconds;
+        const assetCacheControl = !cacheEnabled
+            ? "no-cache"
+            : cacheMode === "public"
+                ? `public, max-age=${cacheTtlSeconds}`
+                : `public, max-age=${cacheTtlSeconds}, immutable`;
+        const assetCache = {
+            enabled: cacheEnabled,
+            mode: cacheMode,
+            ttlSeconds: cacheTtlSeconds,
+            staleSeconds: cacheStaleSeconds,
+        };
         const defaultCache = "public, max-age=3600";
 
         return {
@@ -1399,16 +1494,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
             }],
             handle: [
                 this.makeStaticSecurityHeaders(),
+                ...(route.releaseId ? [this.makeStaticReleaseRequestHeader(route.releaseId)] : []),
                 this.makeStaticCacheHeaders(defaultCache),
                 this.makeEncodeHandler(),
                 {
                     handler: "subroute",
                     routes: [
                         ...(route.releaseId ? [this.makeStaticReleasePointerRoute(route.releaseId)] : []),
-                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif"),
-                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp"),
-                        this.makeStaticAssetRoute(route.root, immutableCache),
-                        this.makeMissingStaticAssetRoute(),
+                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif", assetCache, assetCacheControl),
+                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp", assetCache, assetCacheControl),
+                        this.makeStaticAssetRoute(route.root, assetCacheControl, assetCache),
+                        this.makeMissingStaticAssetRoute(cacheMode),
                         {
                             match: [{ path: ["/", "*.html"] }],
                             handle: [this.makeStaticCacheHeaders("no-cache")],
