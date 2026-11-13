@@ -38,6 +38,7 @@ import {
     makeFunctionCorsErrorFallback,
     makeCorsSubroute,
     makeCustomGatewayRoute,
+    makeEncodeHandler,
     makeReverseProxy,
     makeStaticFileServer,
     normalizeCaddyHost,
@@ -1228,15 +1229,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private makeEncodeHandler(): Record<string, unknown> {
-        return {
-            handler: "encode",
-            encodings: {
-                zstd: {},
-                gzip: {},
-            },
-            prefer: ["zstd", "gzip"],
-            minimum_length: 1024,
-        };
+        return makeEncodeHandler();
     }
 
     private makeStaticSecurityHeaders(): Record<string, unknown> {
@@ -1349,6 +1342,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 },
             }],
             handle: [{
+                handler: "headers",
+                response: {
+                    add: {
+                        Vary: ["Accept"],
+                    },
+                },
+            }, {
                 handler: "rewrite",
                 uri: "{http.matchers.file.relative}",
             }, makeStaticFileServer(root)],
@@ -1445,6 +1445,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         methods?: string[];
         pathRegexp?: string;
         encodeMigrationInventory?: boolean;
+        encodeResponses?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
@@ -1478,6 +1479,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 handle: [this.makeEncodeHandler()],
             }],
         });
+        if (opts.encodeResponses) handle.push(this.makeEncodeHandler());
         const proxy = makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify);
         attachControlPlaneFailover(proxy, opts.failoverUpstream);
         handle.push(proxy);
@@ -1508,6 +1510,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         projectRef: string;
         corsOrigins?: string[];
         readTimeout?: number;
+        encodeResponses?: boolean;
     }): CaddyRoute {
         const route = this.makeRoute(opts);
         const baseMatch = Array.isArray(route["match"])
@@ -1820,6 +1823,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 projectRef,
                 corsOrigins,
                 readTimeout: config.restProxyTimeoutMs,
+                encodeResponses: true,
             });
             restOpenApiRoute["__supacloud_priority"] = 200;
 
@@ -1832,6 +1836,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     projectRef,
                     corsOrigins,
                     readTimeout: config.restProxyTimeoutMs,
+                    encodeResponses: true,
                 }),
                 this.makeOpaqueApiKeyProxyRoute({
                     id: caddyRouteId(projectRef, "opaque-graphql"),
@@ -1841,6 +1846,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     projectRef,
                     corsOrigins,
                     readTimeout: config.restProxyTimeoutMs,
+                    encodeResponses: true,
                 }),
                 ...(!externalAuthUpstream || sharedAuthProxy ? [this.makeOpaqueApiKeyProxyRoute({
                     id: caddyRouteId(projectRef, "opaque-auth"),
@@ -1877,8 +1883,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 })] : []),
                 restOpenApiRoute,
                 ...opaqueRoutes,
-                this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins, encodeResponses: true }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "auth"),
                     hosts,

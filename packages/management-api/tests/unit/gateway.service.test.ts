@@ -520,8 +520,19 @@ describe("CaddyGatewayProvider", () => {
         const admin = routes.find((route: any) => route["@id"] === "route-project-testref123-auth-admin");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
+        const restEncode = rest?.handle?.find((handler: any) => handler.handler === "encode");
+        const opaqueRestEncode = opaqueRest?.handle?.find((handler: any) => handler.handler === "encode");
+        const storageEncode = storage?.handle?.find((handler: any) => handler.handler === "encode");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
+        expect(restEncode).toEqual({
+            handler: "encode",
+            encodings: { zstd: {}, gzip: {} },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        });
+        expect(opaqueRestEncode).toEqual(restEncode);
+        expect(storageEncode).toBeUndefined();
         expect(management?.handle).toContainEqual(inventoryCompression);
         for (const route of [rest, storage, storageResumable, functions, admin, realtime]) {
             expect(route?.handle).not.toContainEqual(inventoryCompression);
@@ -1080,8 +1091,10 @@ describe("CaddyGatewayProvider", () => {
         expect(webpRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.webp"]);
         expect(avifRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(avifRoute?.terminal).toBe(true);
+        expect(avifRoute?.handle?.[0]?.response?.add?.Vary).toEqual(["Accept"]);
         expect(webpRoute?.handle?.at(-1)?.handler).toBe("file_server");
         expect(webpRoute?.terminal).toBe(true);
+        expect(webpRoute?.handle?.[0]?.response?.add?.Vary).toEqual(["Accept"]);
         expect(fileServer?.handler).toBe("file_server");
         expect(fileServer?.root).toBe("/var/supacloud/frontends/proj123/0000002b/build");
         expect(fileServer?.precompressed).toEqual({ br: {}, zstd: {}, gzip: {} });
@@ -1777,6 +1790,12 @@ describe("CaddyGatewayProvider", () => {
         expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
         expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
         expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");
+        expect(docs?.handle?.find((handler: any) => handler.handler === "encode")).toEqual({
+            handler: "encode",
+            encodings: { zstd: {}, gzip: {} },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        });
         expect(docs?.handle?.[0]?.response?.set?.["X-Robots-Tag"]).toEqual(["noindex"]);
         expect(disabled).toBeUndefined();
 
@@ -1895,14 +1914,16 @@ describe("CaddyGatewayProvider", () => {
         expect(assets?.match?.[0]?.host).toEqual(["auth.example.com"]);
         expect(assets?.match?.[0]?.path).toEqual(["/admin/_app/*", "/admin/assets/*"]);
         expect(assets?.handle?.[0]).toEqual({ handler: "rewrite", strip_path_prefix: "/admin" });
-        expect(assets?.handle?.[1]?.handler).toBe("file_server");
-        expect(assets?.handle?.[1]?.root).toBe(staticRoot);
+        expect(assets?.handle?.[1]?.handler).toBe("encode");
+        expect(assets?.handle?.[2]?.handler).toBe("file_server");
+        expect(assets?.handle?.[2]?.root).toBe(staticRoot);
 
         expect(spa?.match?.[0]?.path).toEqual(["/admin", "/admin/*"]);
         expect(spa?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
         expect(spa?.handle?.[1]).toEqual({ handler: "rewrite", uri: "/index.html" });
-        expect(spa?.handle?.[2]?.handler).toBe("file_server");
-        expect(spa?.handle?.[2]?.root).toBe(staticRoot);
+        expect(spa?.handle?.[2]?.handler).toBe("encode");
+        expect(spa?.handle?.[3]?.handler).toBe("file_server");
+        expect(spa?.handle?.[3]?.root).toBe(staticRoot);
         expect(routes.indexOf(assets)).toBeLessThan(routes.indexOf(spa));
 
         restore();
