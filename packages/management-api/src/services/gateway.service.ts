@@ -1425,6 +1425,30 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private makePublicImageCacheHandler(): Record<string, unknown> {
+        return {
+            handler: "cache",
+            Configuration: {
+                DefaultCache: {
+                    allowed_http_verbs: ["GET", "HEAD"],
+                    cache_name: "supacloud-public-images",
+                    ttl: "1h",
+                    stale: "24h",
+                    headers: ["Accept"],
+                    storers: ["simplefs"],
+                    simplefs: {
+                        found: true,
+                        path: "/data/supacloud-public-image-cache",
+                        configuration: {
+                            size: 2048,
+                            directory_size: "5GB",
+                        },
+                    },
+                },
+            },
+        };
+    }
+
     private makeRoute(opts: {
         id: string;
         hosts: string[];
@@ -1446,6 +1470,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         pathRegexp?: string;
         encodeMigrationInventory?: boolean;
         encodeResponses?: boolean;
+        cachePublicImages?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
@@ -1482,6 +1507,20 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (opts.encodeResponses) handle.push(this.makeEncodeHandler());
         const proxy = makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify);
         attachControlPlaneFailover(proxy, opts.failoverUpstream);
+        if (opts.cachePublicImages) {
+            const cachedProxy = makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify);
+            attachControlPlaneFailover(cachedProxy, opts.failoverUpstream);
+            handle.push({
+                handler: "subroute",
+                routes: [
+                    {
+                        match: [{ path: ["/storage/v1/render/image/public/*", "/render/image/public/*"] }],
+                        handle: [this.makePublicImageCacheHandler(), cachedProxy],
+                        terminal: true,
+                    },
+                ],
+            });
+        }
         handle.push(proxy);
 
         return {
@@ -1957,6 +1996,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     corsOrigins,
                     preserveUpstreamCors: true,
                     streaming: false,
+                    cachePublicImages: true,
                 }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime-api"), hosts, path: "/realtime/v1/api*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 60_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime"), hosts, path: "/realtime/v1/websocket*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 86_400_000, corsOrigins }),

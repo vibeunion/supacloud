@@ -26,6 +26,9 @@ import {
     checkImagorHealth,
     ImagorRequestError,
     imagorOutputContentType,
+    imageTransformEtag,
+    imageTransformUsesAccept,
+    PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL,
     resolveImagorMaxBytes,
     runImagor,
     runImagorWithRequest,
@@ -140,7 +143,7 @@ async function ensureImageTransformAccess(request: Request, ref: string, bucket:
     return await requireProjectOrAdminAuth(request, ref);
 }
 
-type TransformSource = { bytes: ArrayBuffer; contentType: string };
+type TransformSource = { bytes: ArrayBuffer; contentType: string; version: string };
 
 class TransformSourceTooLargeError extends Error {}
 
@@ -161,7 +164,9 @@ async function loadTransformSource(ref: string, bucket: string, path: string): P
     }
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength > MAX_TRANSFORM_SOURCE_BYTES) throw new TransformSourceTooLargeError();
-    return { bytes, contentType: response.headers.get("content-type") || "application/octet-stream" };
+    const info = await StorageRLS.getObjectInfo(ref, bucket, normalizedPath, undefined, true).catch(() => null);
+    const version = String(info?.version || info?.etag || info?.updated_at || info?.id || normalizedPath);
+    return { bytes, contentType: response.headers.get("content-type") || "application/octet-stream", version };
 }
 
 async function resolveTransformSource(request: Request, ref: string, bucket: string, path: string | undefined) {
@@ -212,8 +217,9 @@ async function transformRawImageBytes(
     }
 
     try {
-        const imagorRequest = buildImagorRequest(query);
-        const { response: result } = await runImagorWithRequest(query, { bytes, contentType: sourceContentType });
+        const accept = request.headers.get("accept") || undefined;
+        const imagorRequest = buildImagorRequest(query, "standard", accept);
+        const { response: result } = await runImagorWithRequest(query, { bytes, contentType: sourceContentType }, "standard", { accept });
         if (!result.ok) {
             await result.body?.cancel();
             logger.error("Imagor raw image transform failed:", { status: result.status });
@@ -223,6 +229,7 @@ async function transformRawImageBytes(
         set.headers["Content-Type"] =
             imagorOutputContentType(result, imagorRequest, sourceContentType) || "image/webp";
         set.headers["Cache-Control"] = "private, max-age=3600";
+        if (imageTransformUsesAccept(query)) set.headers["Vary"] = "Accept";
         set.headers["X-Image-Engine"] = "imagor/libvips";
         return new Response(result.body, { headers: set.headers as unknown as HeadersInit });
     } catch (error: unknown) {
@@ -527,6 +534,8 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             const { request: imagorRequest, response: res } = await runImagorWithRequest(
                 query as Record<string, unknown>,
                 resolved.source,
+                "standard",
+                { accept: request.headers.get("accept") || undefined },
             );
             if (!res.ok) {
                 await res.body?.cancel();
@@ -536,7 +545,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
             // Stream the processed image back to client with caching headers
             set.headers['Content-Type'] = imagorOutputContentType(res, imagorRequest, resolved.source.contentType) || "image/webp";
-            set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+            set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            if (imageTransformUsesAccept(query as Record<string, unknown>)) set.headers['Vary'] = 'Accept';
             set.headers['X-Image-Engine'] = 'imagor/libvips';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
@@ -572,6 +583,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 transformQuery,
                 resolved.source,
                 "smartcrop",
+                { accept: request.headers.get("accept") || undefined },
             );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
@@ -579,7 +591,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
-            set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+            set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
             if (err instanceof ImagorRequestError) {
@@ -602,14 +616,21 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 opacity: query.opacity || 0.3,
                 quality: query.quality || 85,
             };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(transformQuery, resolved.source, "watermark");
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+                transformQuery,
+                resolved.source,
+                "watermark",
+                { accept: request.headers.get("accept") || undefined },
+            );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
                 imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
-            set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+            set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
             if (err instanceof ImagorRequestError) {
@@ -630,14 +651,21 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 sigma: query.sigma || 10,
                 quality: query.quality || 60,
             };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(transformQuery, resolved.source, "blur");
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+                transformQuery,
+                resolved.source,
+                "blur",
+                { accept: request.headers.get("accept") || undefined },
+            );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
                 imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
-            set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+            set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
             if (err instanceof ImagorRequestError) {
@@ -675,14 +703,21 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 width: query.width || 150,
                 quality: query.quality || 70,
             };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(transformQuery, resolved.source, "thumbnail");
+            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+                transformQuery,
+                resolved.source,
+                "thumbnail",
+                { accept: request.headers.get("accept") || undefined },
+            );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = imagorOutputContentType(
                 res,
                 imagorRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
-            set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+            set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
             if (err instanceof ImagorRequestError) {

@@ -73,6 +73,7 @@ Caddy runs as a native systemd service, fully managed via the Caddy Admin API:
 - **Programmable Rate Limiting**: Per-tenant rate limits can be set via `PUT /v1/projects/:ref/gateway/rate-limit` (supports tier presets or custom second/minute/hour values).
 - Safe delivery optimization is enabled by default at the gateway boundary: REST/GraphQL responses and opaque API-key variants use Caddy `zstd`/`gzip` encoding for responses of at least 1 KiB. Auth, Storage uploads/downloads, Functions, Realtime, and streaming routes keep their existing transport behavior.
 - Static frontend routes and custom static routes serve precompressed sidecars when available and fall back to the same negotiated encoding. Hashed `/_app/*` and `/assets/*` files use immutable caching; HTML and the release pointer remain revalidated or uncached. Negotiated AVIF/WebP variants emit `Vary: Accept`.
+- Public Storage image transforms are cached at Caddy's image boundary for one hour with stale-while-revalidate. The cache is limited to public transform paths, keys the negotiated `Accept` representation, and persists in the Caddy `/data` volume through the pinned SimpleFS provider; private, signed, upload, and ordinary download paths never enter this cache.
 - The gateway does not rewrite arbitrary HTML, JavaScript, or authenticated responses. Build-time asset optimization and explicit CDN or image transformation policies remain opt-in.
 - No manual config editing or daemon reload workflow — all changes take effect via Admin API publishing.
 

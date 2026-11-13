@@ -3,7 +3,8 @@
 use crate::parser::{TargetFormat, TransformOptions};
 use fast_image_resize::images::Image;
 use fast_image_resize::{PixelType, Resizer};
-use image::{imageops, DynamicImage, GenericImageView, ImageFormat, ImageReader, RgbaImage};
+use image::codecs::{avif::AvifEncoder, jpeg::JpegEncoder};
+use image::{imageops, DynamicImage, GenericImageView, ImageEncoder, ImageFormat, ImageReader, RgbaImage};
 use std::io::Cursor;
 
 pub const MAX_IMAGE_WIDTH: u32 = 10000;
@@ -219,19 +220,30 @@ fn apply_filters(img: &mut DynamicImage, options: &TransformOptions) {
     }
 }
 
-fn encode_image(img: &DynamicImage, format: TargetFormat, _quality: u8) -> Result<Vec<u8>, EngineError> {
+fn encode_image(img: &DynamicImage, format: TargetFormat, quality: u8) -> Result<Vec<u8>, EngineError> {
     let mut buffer = Cursor::new(Vec::new());
-    let target_format = match format {
-        TargetFormat::WebP => ImageFormat::WebP,
-        TargetFormat::Jpeg => ImageFormat::Jpeg,
-        TargetFormat::Png => ImageFormat::Png,
-        TargetFormat::Gif => ImageFormat::Gif,
-        TargetFormat::Bmp => ImageFormat::Bmp,
-        TargetFormat::Tiff => ImageFormat::Tiff,
+    let result = match format {
+        TargetFormat::Avif => {
+            let rgba = img.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            AvifEncoder::new_with_speed_quality(&mut buffer, 6, quality)
+                .write_image(&rgba, width, height, image::ExtendedColorType::Rgba8)
+        }
+        TargetFormat::Jpeg => {
+            JpegEncoder::new_with_quality(&mut buffer, quality)
+                .encode_image(img)
+        }
+        TargetFormat::WebP => {
+            // image-webp currently exposes lossless VP8L only; Imagor remains the
+            // lossy WebP path when a caller needs quality-controlled output.
+            img.write_to(&mut buffer, ImageFormat::WebP)
+        }
+        TargetFormat::Png => img.write_to(&mut buffer, ImageFormat::Png),
+        TargetFormat::Gif => img.write_to(&mut buffer, ImageFormat::Gif),
+        TargetFormat::Bmp => img.write_to(&mut buffer, ImageFormat::Bmp),
+        TargetFormat::Tiff => img.write_to(&mut buffer, ImageFormat::Tiff),
     };
-
-    img.write_to(&mut buffer, target_format)
-        .map_err(|e| EngineError::EncodeError(e.to_string()))?;
+    result.map_err(|e| EngineError::EncodeError(e.to_string()))?;
 
     Ok(buffer.into_inner())
 }
@@ -258,6 +270,19 @@ mod tests {
         let out = process_image(&png_bytes, &opt).unwrap();
         assert_eq!(out.content_type, "image/webp");
         assert!(!out.bytes.is_empty());
+    }
+
+    #[test]
+    fn test_process_avif() {
+        let png_bytes = create_test_image(64, 32);
+        let mut opt = TransformOptions::default();
+        opt.format = Some(TargetFormat::Avif);
+        opt.quality = 72;
+
+        let out = process_image(&png_bytes, &opt).unwrap();
+        assert_eq!(out.content_type, "image/avif");
+        assert!(!out.bytes.is_empty());
+        assert!(out.bytes.windows(4).any(|window| window == b"ftyp"));
     }
 
     #[test]

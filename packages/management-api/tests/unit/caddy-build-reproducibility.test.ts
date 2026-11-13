@@ -211,6 +211,22 @@ exit 1
     );
   });
 
+  test("pins the public image cache plugin to an immutable upstream commit", () => {
+    expect(builder).toContain("07d7af2130699eb840e1f4ed49ef817da4201c2e");
+    expect(builder).toContain("github.com/caddyserver/cache-handler@");
+    expect(builder).not.toContain(
+      'CACHE_MODULE="${CACHE_MODULE:-github.com/caddyserver/cache-handler}"',
+    );
+  });
+
+  test("pins the public image cache storage to an immutable upstream commit", () => {
+    expect(builder).toContain("81250fe6fc63358ff9f12faa72b01f36e48ed60c");
+    expect(builder).toContain("github.com/darkweak/storages/simplefs/caddy@");
+    expect(builder).not.toContain(
+      'CACHE_STORAGE_MODULE="${CACHE_STORAGE_MODULE:-github.com/darkweak/storages/simplefs/caddy}"',
+    );
+  });
+
   test("self-host and development Compose build the pinned custom Caddy image", () => {
     expect(caddyDockerfile.match(/^FROM .+$/gm)).toEqual([
       "FROM caddy:2.11.7-builder@sha256:b25f47453fa02f7e66c0828b4b1343658808b9000950b6825c4a1cb0c988f5f8 AS builder",
@@ -219,6 +235,12 @@ exit 1
     expect(caddyDockerfile).toContain("xcaddy/cmd/xcaddy@v0.4.7");
     expect(caddyDockerfile).toContain(
       "github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db",
+    );
+    expect(caddyDockerfile).toContain(
+      "github.com/caddyserver/cache-handler@07d7af2130699eb840e1f4ed49ef817da4201c2e",
+    );
+    expect(caddyDockerfile).toContain(
+      "github.com/darkweak/storages/simplefs/caddy@81250fe6fc63358ff9f12faa72b01f36e48ed60c",
     );
     expect(caddyDockerfile).not.toContain("@latest");
     expect(caddyDockerfile).toContain('ENTRYPOINT ["/usr/local/bin/supacloud-caddy-entrypoint"]');
@@ -252,6 +274,7 @@ exit 1
     );
     expect(integration).toContain("supacloud-caddy:2.11.7-ratelimit list-modules");
     expect(integration).toContain("grep -Fx http.handlers.rate_limit");
+    expect(integration).toContain("grep -Fx http.handlers.cache");
     expect(integration).toContain("grep -Fx http.matchers.query");
     expect(integration).toContain(
       '$RUNNER_TEMP/caddy-ci.json:/etc/supacloud/caddy/config.json:ro',

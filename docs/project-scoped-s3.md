@@ -175,9 +175,12 @@ binding; a later repair of that project re-runs the same overlap check.
 Existing public/signed Storage API URLs remain unchanged. The management image
 routes load the source object through the project's storage driver and forward
 the bytes to the image service, so private buckets need no anonymous or
-presigned source URL and the service's remote-URL flag is not required. Sources
-larger than the configured image-transform limit are rejected with `413`; the
-default is 500 MiB and `SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES` can lower it.
+presigned source URL and the service's remote-URL flag is not required. Public
+transform responses carry a version-derived ETag, negotiate AVIF/WebP with
+`Vary: Accept`, and are cacheable by the gateway for one hour; the cache is not
+marked immutable because an object path may be overwritten. Sources larger than
+the configured image-transform limit are rejected with `413`; the default is
+64 MiB and `SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES` can lower it.
 Upstream image errors do not expose storage coordinates to callers or logs.
 
 For objects owned by an application but not registered in SupaCloud Storage,
