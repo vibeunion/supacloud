@@ -5,7 +5,12 @@ import { projectStorageRoutes, storageRoutes } from "../../src/routes/storage";
 import { StorageService } from "../../src/services/storage.service";
 import { mockBuckets, StorageRLS } from "../../src/services/storage-rls";
 import { storageVectorInternals } from "../../src/services/storage-vector.service";
-import { DEFAULT_IMAGOR_MAX_BYTES, resolveImagorMaxBytes } from "../../src/services/imagor.service";
+import {
+  buildImagorRequest,
+  DEFAULT_IMAGOR_MAX_BYTES,
+  imageTransformUsesAccept,
+  resolveImagorMaxBytes,
+} from "../../src/services/imagor.service";
 
 const BASE = "http://localhost";
 const CURRENT_REVISION = "1786406400000000";
@@ -17,12 +22,24 @@ function request(path: string, init?: RequestInit) {
 }
 
 describe("storage management routes", () => {
-  test("image transformation limits default to 500 MiB and accept lower operator settings", () => {
-    expect(DEFAULT_IMAGOR_MAX_BYTES).toBe(500 * 1024 * 1024);
+  test("image transformation limits default to 64 MiB and accept lower operator settings", () => {
+    expect(DEFAULT_IMAGOR_MAX_BYTES).toBe(64 * 1024 * 1024);
     expect(resolveImagorMaxBytes("128")).toBe(128);
     expect(resolveImagorMaxBytes(String(DEFAULT_IMAGOR_MAX_BYTES))).toBe(DEFAULT_IMAGOR_MAX_BYTES);
     expect(resolveImagorMaxBytes(String(DEFAULT_IMAGOR_MAX_BYTES + 1))).toBe(DEFAULT_IMAGOR_MAX_BYTES);
     expect(resolveImagorMaxBytes("invalid")).toBe(DEFAULT_IMAGOR_MAX_BYTES);
+  });
+  test("image transforms negotiate AVIF/WebP and reject remote watermark sources by default", () => {
+    const avif = buildImagorRequest({ width: 320 }, "standard", "image/avif,image/webp");
+    const webp = buildImagorRequest({ width: 320 }, "standard", "image/webp");
+    const origin = buildImagorRequest({ width: 320, format: "origin" }, "standard", "image/avif");
+    expect(avif.path).toContain("format(avif)");
+    expect(webp.path).toContain("format(webp)");
+    expect(origin.path).toContain("format(avif)");
+    expect(imageTransformUsesAccept({ width: 320 })).toBe(true);
+    expect(imageTransformUsesAccept({ format: "png" })).toBe(false);
+    expect(() => buildImagorRequest({ image: "https://untrusted.example/image.png" }, "watermark"))
+      .toThrow("Remote watermark images are not allowed");
   });
   test("Web Console can manage vector buckets through project-scoped routes", async () => {
     storageVectorInternals.resetMockStore();

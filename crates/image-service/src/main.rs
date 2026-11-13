@@ -1,6 +1,6 @@
 use axum::{
     body::Bytes,
-    extract::Path,
+    extract::{DefaultBodyLimit, Path},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -42,6 +42,7 @@ async fn main() {
         .route("/health", get(healthcheck))
         .route("/", post(handle_root_post))
         .route("/{*path}", post(handle_transform_post).get(handle_get_dispatch))
+        .layer(DefaultBodyLimit::max(engine::MAX_PAYLOAD_BYTES))
         .layer(TraceLayer::new_for_http());
 
     info!("🚀 SupaCloud Image Service (Rust) listening on http://{}", addr);
@@ -110,12 +111,15 @@ async fn handle_transform(
     }
 
     let mut options = parse_path(&path);
+    let negotiated_format = options.format.is_none();
 
     // imgproxy Pro Auto-Format Negotiation:
     // If no format is explicitly configured, check Accept header
     if options.format.is_none() {
         if let Some(accept) = headers.get(header::ACCEPT).and_then(|h| h.to_str().ok()) {
-            if accept.contains("image/webp") {
+            if accept.contains("image/avif") {
+                options.format = Some(parser::TargetFormat::Avif);
+            } else if accept.contains("image/webp") {
                 options.format = Some(parser::TargetFormat::WebP);
             }
         }
@@ -139,8 +143,11 @@ async fn handle_transform(
             );
             res_headers.insert(
                 header::CACHE_CONTROL,
-                "public, max-age=31536000, immutable".parse().unwrap(),
+                "public, max-age=3600, stale-while-revalidate=86400".parse().unwrap(),
             );
+            if negotiated_format {
+                res_headers.insert(header::VARY, "Accept".parse().unwrap());
+            }
 
             (StatusCode::OK, res_headers, output.bytes).into_response()
         }
