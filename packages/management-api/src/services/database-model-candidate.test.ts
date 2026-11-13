@@ -20,3 +20,20 @@ test("remote database model candidates are reviewable and contain no connection 
   expect(result.candidate).not.toContain("postgresql://");
   expect(result.warnings).toContain("1 PostgreSQL policies were detected; relationship and policy rules require explicit review");
 });
+
+test("remote database model candidates preserve non-public schemas and unique model names", () => {
+  const result = renderDatabaseModelCandidate({
+    schemas: ["billing", "public"],
+    policyCount: 0,
+    enums: [],
+    tables: [
+      { schema: "billing", name: "orders", primaryKey: [], foreignKeys: [], columns: [] },
+      { schema: "public", name: "orders", primaryKey: [], foreignKeys: [], columns: [] },
+    ],
+  });
+  expect(result.candidate).toContain('schemas = ["billing"]');
+  expect(result.candidate).toContain("model BillingOrders");
+  expect(result.candidate).toContain('@@schema("billing")');
+  expect(result.candidate).toContain("model Orders");
+  expect(result.candidate.match(/^model /gm)).toHaveLength(2);
+});
