@@ -1518,15 +1518,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
                         handle: [this.makePublicImageCacheHandler(), cachedProxy],
                         terminal: true,
                     },
-                    {
-                        handle: [proxy],
-                        terminal: true,
-                    },
                 ],
             });
-        } else {
-            handle.push(proxy);
         }
+        handle.push(proxy);
 
         return {
             "@id": opts.id,
