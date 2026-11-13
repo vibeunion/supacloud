@@ -48,11 +48,11 @@ The manifest describes static declarations; host options can add lifecycle hooks
 or select the request pipeline. Native Elysia macros supplied by the host are
 not inferred from application declarations.
 
-The Elysia peer and development dependency are pinned to `2.0.0-rc.1`.
+The Elysia peer and development dependency are pinned to `2.0.0-rc.4`.
 The runtime adapter pins Effect `4.0.5` and consumes its `Exit`-based
 execution boundary.
 `compatibility.json` records the acceptance target: Bun 1.4.4, Elysia
-2.0.0-rc.1, Effect 4.0.5, `typebox` 1.4.3, `exact-mirror` 1.2.6,
+2.0.0-rc.4, Effect 4.0.5, `typebox` 1.4.3, `exact-mirror` 1.2.7,
 TypeScript CLI 7.0.2 and the compiler's separate TypeScript 6 semantic API 6.0.2.
 The matrix is a
 required target, not proof of an execution. See the dated, commit-specific
@@ -405,7 +405,7 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 ## Installation
 
 ```bash
-bun add --exact @supacloud/elysia elysia@2.0.0-rc.1
+bun add --exact @supacloud/elysia elysia@2.0.0-rc.4
 ```
 
 ## Usage
