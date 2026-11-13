@@ -26,7 +26,7 @@
   "dependencies": {
     "@postgresx/bun-listen": "0.3.2",
     "@postgresx/noredis": "0.11.0",
-    "elysia": "2.0.0-rc.3",
+    "elysia": "2.0.0-rc.4",
     "exact-mirror": "1.2.7",
     "typebox": "1.4.3"
   },

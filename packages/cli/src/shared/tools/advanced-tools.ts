@@ -52,7 +52,7 @@ function scaffoldFiles(framework: FunctionFramework, slug: string): Record<strin
             "package.json": JSON.stringify({
                 private: true,
                 type: "module",
-                dependencies: { elysia: "2.0.0-rc.3" },
+                dependencies: { elysia: "2.0.0-rc.4" },
             }, null, 2) + "\n",
             "index.ts": `import { Elysia } from "elysia";\n\nexport default new Elysia()\n  .get("/", () => ({ function: "${slug}", framework: "elysia" }));\n`,
         };

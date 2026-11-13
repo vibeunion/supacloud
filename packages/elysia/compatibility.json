@@ -1,7 +1,7 @@
 {
   "bun": "1.4.4",
   "packages": {
-    "elysia": "2.0.0-rc.3",
+    "elysia": "2.0.0-rc.4",
     "effect": "4.0.5",
     "typescript": "7.1.0-beta",
     "typebox": "1.4.3",
