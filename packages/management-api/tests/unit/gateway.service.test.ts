@@ -64,6 +64,16 @@ function findCorsSubroute(route: any) {
     return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes) && !handler.errors);
 }
 
+function findHandler(route: unknown, handlerName: string): Record<string, unknown> | undefined {
+    if (!route || typeof route !== "object" || Array.isArray(route)) return undefined;
+    const handle = (route as { handle?: unknown }).handle;
+    if (!Array.isArray(handle)) return undefined;
+    return handle.find((handler: unknown): handler is Record<string, unknown> => {
+        if (!handler || typeof handler !== "object" || Array.isArray(handler)) return false;
+        return (handler as Record<string, unknown>).handler === handlerName;
+    });
+}
+
 function findReverseProxyHandlers(routes: any[]) {
     return routes.flatMap((route: any) => route.handle ?? [])
         .filter((handler: any) => handler.handler === "reverse_proxy");
@@ -520,9 +530,9 @@ describe("CaddyGatewayProvider", () => {
         const admin = routes.find((route: any) => route["@id"] === "route-project-testref123-auth-admin");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
-        const restEncode = rest?.handle?.find((handler: any) => handler.handler === "encode");
-        const opaqueRestEncode = opaqueRest?.handle?.find((handler: any) => handler.handler === "encode");
-        const storageEncode = storage?.handle?.find((handler: any) => handler.handler === "encode");
+        const restEncode = findHandler(rest, "encode");
+        const opaqueRestEncode = findHandler(opaqueRest, "encode");
+        const storageEncode = findHandler(storage, "encode");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
         expect(restEncode).toEqual({
@@ -1790,7 +1800,7 @@ describe("CaddyGatewayProvider", () => {
         expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
         expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
         expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");
-        expect(docs?.handle?.find((handler: any) => handler.handler === "encode")).toEqual({
+        expect(findHandler(docs, "encode")).toEqual({
             handler: "encode",
             encodings: { zstd: {}, gzip: {} },
             prefer: ["zstd", "gzip"],
