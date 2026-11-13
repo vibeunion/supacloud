@@ -338,10 +338,16 @@ describe("gateway route builders", () => {
         expect(route).toBeDefined();
         expect(route?.["@id"]).toBe("route-custom-gateway-proj1-spa-admin");
         const handle = route?.handle as any[];
-        expect(handle).toHaveLength(2);
+        expect(handle).toHaveLength(3);
         expect(handle[0]).toEqual({ handler: "rewrite", strip_path_prefix: "/admin" });
-        expect(handle[1].handler).toBe("subroute");
-        const subroutes = handle[1].routes;
+        expect(handle[1]).toEqual({
+            handler: "encode",
+            encodings: { zstd: {}, gzip: {} },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        });
+        expect(handle[2].handler).toBe("subroute");
+        const subroutes = handle[2].routes;
         expect(subroutes[0].match[0].file.try_files).toEqual(["{http.request.uri.path}", "{http.request.uri.path}/", "/index.html"]);
         expect(subroutes[0].handle[0]).toEqual({ handler: "rewrite", uri: "{http.matchers.file.relative}" });
         expect(subroutes[1].handler).toBe("file_server");

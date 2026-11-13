@@ -19,6 +19,19 @@ export const MAX_CUSTOM_GATEWAY_HOSTS = 20;
 // Hosted applications can exceed twenty exact paths; keep the larger Caddy matcher bounded.
 export const MAX_CUSTOM_GATEWAY_PATHS = 32;
 
+/** Caddy's standard response compression policy for selected normal responses. */
+export function makeEncodeHandler(): Record<string, unknown> {
+    return {
+        handler: "encode",
+        encodings: {
+            zstd: {},
+            gzip: {},
+        },
+        prefer: ["zstd", "gzip"],
+        minimum_length: 1024,
+    };
+}
+
 export interface CustomGatewayRouteConfig {
     id: string;
     hosts: string[];
@@ -686,6 +699,7 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         }
         if (route.rewrite_uri) handle.push({ handler: "rewrite", uri: route.rewrite_uri });
         else if (route.strip_prefix) handle.push({ handler: "rewrite", strip_path_prefix: route.strip_prefix });
+        handle.push(makeEncodeHandler());
         if (route.spa) {
             handle.push({
                 handler: "subroute",

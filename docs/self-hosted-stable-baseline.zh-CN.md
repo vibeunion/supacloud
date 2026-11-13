@@ -40,7 +40,7 @@ Supabase 风格项目。
 | 首要操作系统验收目标 | Ubuntu 24.04 LTS |
 | 首要架构验收目标 | `amd64` |
 | 数据库底座 | Pigsty `v4.5.0`、PostgreSQL 18 |
-| 网关 | SupaCloud 管理的 Caddy systemd 服务 |
+| 网关 | SupaCloud 管理的 Caddy systemd 服务，默认启用安全的响应压缩与静态资源缓存策略 |
 | 平台运行时 | Management API、Web Console、项目运行时和 VictoriaLogs |
 | 存储 | PostgreSQL 元数据的 JuiceFS；项目显式绑定受支持的 S3 兼容后端时另行验收 |
 | 制品模式 | 已发布、校验和通过且来源证明通过的 Release 制品 |

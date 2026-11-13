@@ -44,7 +44,7 @@ The first stable release should publish one primary deployment profile:
 | Primary OS acceptance target | Ubuntu 24.04 LTS |
 | Primary architecture acceptance target | `amd64` |
 | Database substrate | Pigsty `v4.5.0`, PostgreSQL 18 |
-| Gateway | SupaCloud-managed Caddy systemd service |
+| Gateway | SupaCloud-managed Caddy systemd service with safe response compression and static-asset cache defaults |
 | Platform runtime | Management API, Web Console, project runtimes, and VictoriaLogs |
 | Storage | JuiceFS with PostgreSQL metadata, unless a project explicitly binds a supported S3-compatible backend |
 | Artifact mode | Published, checksum-verified, provenance-verified release artifacts |
