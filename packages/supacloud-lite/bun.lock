@@ -123,7 +123,7 @@
 
     "@supacloud/app": ["@supacloud/app@file:../app", { "dependencies": { "@supacloud/contracts": "file:../contracts", "rxjs": "7.8.2", "typebox": "1.4.3" }, "devDependencies": { "@angular/compiler": "22.2.4", "@angular/core": "22.2.4", "@types/bun": "^1.4.4", "@types/node": "^26.6.6", "typescript": "7.1.0-beta" }, "peerDependencies": { "@angular/core": "^22.2.2" }, "optionalPeers": ["@angular/core"] }],
 
-    "@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "0.25.0", "@supacloud/delivery": "file:../delivery", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "@zenstackhq/orm": "3.10.0", "@zenstackhq/schema": "3.10.0" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
+    "@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "@zenstackhq/orm": "3.10.0", "@zenstackhq/schema": "3.10.0" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
 
     "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.4", "typescript": "7.1.0-beta" } }],
 
@@ -429,7 +429,7 @@
 
     "@supacloud/elysia/@supacloud/commands": ["@supacloud/commands@file:../commands", { "dependencies": { "@supacloud/contracts": "file:../contracts" }, "devDependencies": { "@types/bun": "1.4.4", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "peerDependencies": { "typebox": "1.4.3" }, "optionalPeers": ["typebox"] }],
 
-    "@supacloud/elysia/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "0.25.0", "@supacloud/delivery": "file:../delivery", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "@zenstackhq/orm": "3.10.0", "@zenstackhq/schema": "3.10.0" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
+    "@supacloud/elysia/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.2", "@graphql-codegen/typed-document-node": "^7.2.0", "@graphql-codegen/typescript-operations": "^6.1.10", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/db": "file:../db", "@supacloud/delivery": "file:../delivery", "graphql": "^16", "typebox": "1.4.3", "typescript": "7.1.0-beta" }, "devDependencies": { "@supabase/supabase-js": "2.118.0", "@types/bun": "^1.4.4", "@zenstackhq/orm": "3.10.0", "@zenstackhq/schema": "3.10.0" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
 
     "@supacloud/elysia/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.4", "typescript": "7.1.0-beta" } }],
 
