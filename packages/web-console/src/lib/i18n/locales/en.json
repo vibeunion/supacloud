@@ -1170,6 +1170,7 @@
     "tab_scaling": "Scaling / Replicas",
     "tab_custom_domains": "Domains",
     "tab_network": "Network",
+    "tab_delivery_optimization": "Delivery Optimization",
     "tab_pooling": "Connection Pooling",
     "tab_jwt": "JWT",
     "tab_log_drains": "Log Drains",

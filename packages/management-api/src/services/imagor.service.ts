@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { config } from "../config";
 
 export type ImageTransformQuery = Record<string, unknown>;
@@ -21,7 +22,40 @@ export class ImagorRequestError extends Error {
     }
 }
 
-export const DEFAULT_IMAGOR_MAX_BYTES = 500 * 1024 * 1024;
+export const DEFAULT_IMAGOR_MAX_BYTES = 64 * 1024 * 1024;
+
+export const PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL =
+    "public, max-age=3600, stale-while-revalidate=86400";
+
+function allowedWatermarkOrigins(): Set<string> {
+    return new Set((process.env.SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((value) => value.trim().replace(/\/+$/, "").toLowerCase())
+        .filter(Boolean));
+}
+
+function negotiatedFormat(query: ImageTransformQuery, accept: string | undefined): string | undefined {
+    const requested = queryString(query, "format")?.toLowerCase();
+    if (requested && requested !== "origin") return undefined;
+    const normalized = accept?.toLowerCase() || "";
+    if (normalized.includes("image/avif")) return "avif";
+    if (normalized.includes("image/webp")) return "webp";
+    return undefined;
+}
+
+export function imageTransformEtag(sourceVersion: string, request: ImagorRequest): string {
+    const digest = createHash("sha256")
+        .update(sourceVersion)
+        .update("\0")
+        .update(request.path)
+        .digest("base64url");
+    return `"supacloud-image-${digest}"`;
+}
+
+export function imageTransformUsesAccept(query: ImageTransformQuery): boolean {
+    const format = queryString(query, "format")?.toLowerCase();
+    return format === undefined || format === "origin";
+}
 
 export function resolveImagorMaxBytes(value = process.env.SUPACLOUD_IMAGE_TRANSFORM_MAX_BYTES): number {
     const configured = Number(value);
@@ -255,6 +289,16 @@ function addTextOrImageOverlay(query: ImageTransformQuery, filters: string[]): v
     }
 
     if (image !== undefined && /^https?:\/\//i.test(image)) {
+        let origin = "";
+        try {
+            const url = new URL(image);
+            origin = url.origin.toLowerCase();
+        } catch {
+            throw new ImagorRequestError("Watermark image URL is invalid");
+        }
+        if (!allowedWatermarkOrigins().has(origin)) {
+            throw new ImagorRequestError("Remote watermark images are not allowed");
+        }
         filters.push(filter("watermark", [
             `b64:${base64Url(image)}`,
             queryString(query, "wm_x") || x,
@@ -277,21 +321,27 @@ function normalizeDimensions(query: ImageTransformQuery, operation: ImagorOperat
 export function buildImagorRequest(
     query: ImageTransformQuery,
     operation: ImagorOperation = "standard",
+    accept?: string,
 ): ImagorRequest {
+    const requestedFormat = queryString(query, "format")?.toLowerCase();
+    const negotiated = negotiatedFormat(query, accept);
+    const effectiveQuery = negotiated && (requestedFormat === undefined || requestedFormat === "origin")
+        ? { ...query, format: negotiated }
+        : query;
     const parts: string[] = [];
     if (operation === "info") parts.push("meta");
 
-    const [width, height] = normalizeDimensions(query, operation);
-    const resize = queryString(query, "resize")?.toLowerCase() || (operation === "thumbnail" ? "contain" : "cover");
-    const fitIn = enabled(query, "fit_in") || resize === "contain" || resize === "embed";
-    const stretch = resize === "fill" || enabled(query, "stretch");
-    const smart = enabled(query, "smartcrop") || enabled(query, "smart") || resize === "smartcrop";
-    const flipHorizontal = queryString(query, "flip") === "horizontal" || queryString(query, "flip") === "both" || enabled(query, "flip_h");
-    const flipVertical = queryString(query, "flip") === "vertical" || queryString(query, "flip") === "both" || enabled(query, "flip_v");
+    const [width, height] = normalizeDimensions(effectiveQuery, operation);
+    const resize = queryString(effectiveQuery, "resize")?.toLowerCase() || (operation === "thumbnail" ? "contain" : "cover");
+    const fitIn = enabled(effectiveQuery, "fit_in") || resize === "contain" || resize === "embed";
+    const stretch = resize === "fill" || enabled(effectiveQuery, "stretch");
+    const smart = enabled(effectiveQuery, "smartcrop") || enabled(effectiveQuery, "smart") || resize === "smartcrop";
+    const flipHorizontal = queryString(effectiveQuery, "flip") === "horizontal" || queryString(effectiveQuery, "flip") === "both" || enabled(effectiveQuery, "flip_h");
+    const flipVertical = queryString(effectiveQuery, "flip") === "vertical" || queryString(effectiveQuery, "flip") === "both" || enabled(effectiveQuery, "flip_v");
 
-    if (enabled(query, "adaptive_full_fit_in")) parts.push("adaptive-full-fit-in");
-    else if (enabled(query, "adaptive_fit_in")) parts.push("adaptive-fit-in");
-    else if (enabled(query, "full_fit_in")) parts.push("full-fit-in");
+    if (enabled(effectiveQuery, "adaptive_full_fit_in")) parts.push("adaptive-full-fit-in");
+    else if (enabled(effectiveQuery, "adaptive_fit_in")) parts.push("adaptive-fit-in");
+    else if (enabled(effectiveQuery, "full_fit_in")) parts.push("full-fit-in");
     else if (fitIn) parts.push("fit-in");
     else if (stretch) parts.push("stretch");
 
@@ -301,7 +351,7 @@ export function buildImagorRequest(
         parts.push(`${widthPart}x${heightPart}`);
     }
 
-    const padding = queryString(query, "padding");
+    const padding = queryString(effectiveQuery, "padding");
     if (padding) {
         const paddingValues = padding.split(",").map((value) => value.trim());
         const normalizedPadding = paddingValues.length === 2
@@ -315,23 +365,23 @@ export function buildImagorRequest(
         }
     }
 
-    const horizontal = queryString(query, "align") || queryString(query, "gravity_x");
-    const vertical = queryString(query, "valign") || queryString(query, "gravity_y");
+    const horizontal = queryString(effectiveQuery, "align") || queryString(effectiveQuery, "gravity_x");
+    const vertical = queryString(effectiveQuery, "valign") || queryString(effectiveQuery, "gravity_y");
     if (horizontal && /^(left|right|center)$/.test(horizontal)) parts.push(horizontal);
     if (vertical && /^(top|bottom|middle|center)$/.test(vertical)) parts.push(vertical === "center" ? "middle" : vertical);
     if (smart) parts.push("smart");
 
     const filters: string[] = [];
-    addStandardFilters(query, filters, operation !== "info");
-    if (operation === "watermark" || queryString(query, "text") || queryString(query, "watermark") || queryString(query, "image") || queryString(query, "wm_image")) {
-        addTextOrImageOverlay(query, filters);
+    addStandardFilters(effectiveQuery, filters, operation !== "info");
+    if (operation === "watermark" || queryString(effectiveQuery, "text") || queryString(effectiveQuery, "watermark") || queryString(effectiveQuery, "image") || queryString(effectiveQuery, "wm_image")) {
+        addTextOrImageOverlay(effectiveQuery, filters);
     }
 
     const filterSegment = filters.length > 0 ? `filters:${filters.join(":")}` : "";
     if (filterSegment) parts.push(filterSegment);
     if (parts.length === 0 && operation !== "info") parts.push("filters:format(webp):quality(80)");
 
-    const outputFormat = operation === "info" ? null : normalizeFormat(query) || "webp";
+    const outputFormat = operation === "info" ? null : normalizeFormat(effectiveQuery) || "webp";
     return {
         path: `/${parts.join("/")}/`,
         outputFormat,
@@ -393,10 +443,11 @@ export async function runImagorWithRequest(
     query: ImageTransformQuery,
     source: ImagorSource,
     operation: ImagorOperation = "standard",
+    options: { accept?: string } = {},
 ): Promise<{ request: ImagorRequest; response: Response }> {
     const sourceMediaType = mediaType(source.contentType);
     const isPdf = sourceMediaType === PDF_CONTENT_TYPE;
-    const request = buildImagorRequest(isPdf ? pdfRenderQuery(query) : query, operation);
+    const request = buildImagorRequest(isPdf ? pdfRenderQuery(query) : query, operation, options.accept);
     const response = await fetch(`${IMAGOR_URL}${request.path}`, {
         method: "POST",
         headers: { "Content-Type": isPdf ? PDF_CONTENT_TYPE : source.contentType },

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { compileModel } from "@supacloud/db-zenstack/model";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type RemoteCandidateResponse = {
   readonly candidate?: unknown;
@@ -37,13 +38,23 @@ function requireRemoteContext(): { baseUrl: string; token: string; ref: string }
 }
 
 /** Pull a review-only model candidate through the Management API. */
-export async function remotePull(args: readonly string[]): Promise<void> {
-  const candidateArg = option(args, "--candidate");
+export function resolveReviewCandidate(candidateArg: string, projectRoot = process.cwd()): string {
   if (!candidateArg || !candidateArg.endsWith(".zmodel")) {
     throw new Error("Remote model pull requires a fresh --candidate <file.zmodel>");
   }
-  const candidate = resolve(candidateArg);
+  const candidate = resolve(projectRoot, candidateArg);
+  const maintainedSchema = resolve(projectRoot, "zenstack/schema.zmodel");
+  const generatedRoot = resolve(projectRoot, "zenstack/generated");
+  if (candidate === maintainedSchema || candidate === generatedRoot || candidate.startsWith(`${generatedRoot}${sep}`)) {
+    throw new Error("Candidate must be outside the maintained model and generated contracts");
+  }
   if (existsSync(candidate)) throw new Error(`Refusing to overwrite model candidate: ${candidateArg}`);
+  return candidate;
+}
+
+export async function remotePull(args: readonly string[]): Promise<void> {
+  const candidateArg = option(args, "--candidate");
+  const candidate = resolveReviewCandidate(candidateArg ?? "");
   const context = requireRemoteContext();
   const schema = schemas(option(args, "--schema"));
   const response = await fetch(
@@ -90,7 +101,11 @@ export async function runModelCommand(args: readonly string[]): Promise<void> {
   }
 }
 
-if (import.meta.main) {
+const isMainModule = process.argv[1]
+  && existsSync(process.argv[1])
+  && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+
+if (isMainModule) {
   try {
     await runModelCommand(process.argv.slice(2));
   } catch (error) {

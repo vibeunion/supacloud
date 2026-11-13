@@ -14,6 +14,10 @@ import { uniqueStrings } from "../utils/strings";
 import { isRecord, recordOrEmpty } from "../utils/record";
 import { stableStringify } from "../utils/stable-json";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
+import {
+    DEFAULT_DELIVERY_OPTIMIZATION,
+    type DeliveryCacheMode,
+} from "./delivery-optimization";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
@@ -38,6 +42,7 @@ import {
     makeFunctionCorsErrorFallback,
     makeCorsSubroute,
     makeCustomGatewayRoute,
+    makeEncodeHandler,
     makeReverseProxy,
     makeStaticFileServer,
     normalizeCaddyHost,
@@ -208,6 +213,10 @@ export interface FrontendGatewayRoute {
     root?: string;
     mode?: "proxy" | "static";
     releaseId?: string;
+    cacheStaticAssets?: boolean;
+    cacheMode?: DeliveryCacheMode;
+    cacheTtlSeconds?: number;
+    cacheStaleWhileRevalidateSeconds?: number;
 }
 
 interface CaddyGatewayFileOperations {
@@ -1228,14 +1237,32 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private makeEncodeHandler(): Record<string, unknown> {
+        return makeEncodeHandler();
+    }
+
+    private makeStaticCacheHandler(
+        cacheControl: string,
+        ttlSeconds = 31_536_000,
+        staleSeconds = 3600,
+    ): Record<string, unknown> {
         return {
-            handler: "encode",
-            encodings: {
-                zstd: {},
-                gzip: {},
+            handler: "cache",
+            Configuration: {
+                DefaultCache: {
+                    allowed_http_verbs: ["GET", "HEAD"],
+                    cache_name: "supacloud-static",
+                    default_cache_control: cacheControl,
+                    ttl: `${ttlSeconds}s`,
+                    stale: `${staleSeconds}s`,
+                    badger: {
+                        found: true,
+                        path: path.join(config.caddyStateDir, "http-cache"),
+                    },
+                    key: {
+                        headers: ["Accept", "Accept-Encoding", "X-SupaCloud-Frontend-Release"],
+                    },
+                },
             },
-            prefer: ["zstd", "gzip"],
-            minimum_length: 1024,
         };
     }
 
@@ -1246,6 +1273,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 set: {
                     "X-Content-Type-Options": ["nosniff"],
                     "Referrer-Policy": ["strict-origin-when-cross-origin"],
+                },
+            },
+        };
+    }
+
+    private makeStaticReleaseRequestHeader(releaseId: string): Record<string, unknown> {
+        return {
+            handler: "headers",
+            request: {
+                set: {
+                    "X-SupaCloud-Frontend-Release": [releaseId],
                 },
             },
         };
@@ -1300,16 +1338,33 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeStaticAssetRoute(root: string, cacheControl: string): CaddyRoute {
+    private makeStaticAssetRoute(
+        root: string,
+        cacheControl: string,
+        cache?: { enabled: boolean; mode?: DeliveryCacheMode; ttlSeconds: number; staleSeconds: number },
+    ): CaddyRoute {
+        const assetPaths = cache?.mode === "public"
+            ? [
+                "/_app/*", "/assets/*", "/static/*", "/images/*", "/fonts/*",
+                "/favicon.ico", "/robots.txt", "*.css", "*.js", "*.mjs",
+                "*.woff", "*.woff2", "*.png", "*.jpg", "*.jpeg", "*.gif",
+                "*.svg", "*.webp", "*.avif",
+            ]
+            : ["/_app/*", "/assets/*"];
         return {
             match: [{
-                path: ["/_app/*", "/assets/*"],
+                path: assetPaths,
                 file: {
                     root,
                     try_files: ["{http.request.uri.path}"],
                 },
             }],
             handle: [
+                ...(cache?.enabled === false ? [] : [this.makeStaticCacheHandler(
+                    cacheControl,
+                    cache?.ttlSeconds,
+                    cache?.staleSeconds,
+                )]),
                 this.makeStaticCacheHeaders(cacheControl),
                 {
                     handler: "rewrite",
@@ -1321,10 +1376,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeMissingStaticAssetRoute(): CaddyRoute {
+    private makeMissingStaticAssetRoute(mode?: DeliveryCacheMode): CaddyRoute {
+        const assetPaths = mode === "public"
+            ? [
+                "/_app/*", "/assets/*", "/static/*", "/images/*", "/fonts/*",
+                "/favicon.ico", "/robots.txt", "*.css", "*.js", "*.mjs",
+                "*.woff", "*.woff2", "*.png", "*.jpg", "*.jpeg", "*.gif",
+                "*.svg", "*.webp", "*.avif",
+            ]
+            : ["/_app/*", "/assets/*"];
         return {
             match: [{
-                path: ["/_app/*", "/assets/*"],
+                path: assetPaths,
             }],
             handle: [
                 this.makeStaticCacheHeaders("no-cache"),
@@ -1337,7 +1400,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeStaticImageVariantRoute(root: string, accept: string, suffix: ".avif" | ".webp"): CaddyRoute {
+    private makeStaticImageVariantRoute(
+        root: string,
+        accept: string,
+        suffix: ".avif" | ".webp",
+        cache?: { enabled: boolean; ttlSeconds: number; staleSeconds: number },
+        cacheControl = "public, max-age=31536000, immutable",
+    ): CaddyRoute {
         return {
             match: [{
                 header: {
@@ -1348,7 +1417,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     try_files: [`{http.request.uri.path}${suffix}`],
                 },
             }],
-            handle: [{
+            handle: [
+                ...(cache?.enabled === false ? [] : [this.makeStaticCacheHandler(
+                    cacheControl,
+                    cache?.ttlSeconds,
+                    cache?.staleSeconds,
+                )]), {
+                handler: "headers",
+                response: {
+                    add: {
+                        Vary: ["Accept"],
+                    },
+                },
+            }, {
                 handler: "rewrite",
                 uri: "{http.matchers.file.relative}",
             }, makeStaticFileServer(root)],
@@ -1388,7 +1469,21 @@ export class CaddyGatewayProvider implements GatewayProvider {
             throw new Error("Caddy static frontend routes require a root directory");
         }
 
-        const immutableCache = "public, max-age=31536000, immutable";
+        const cacheMode = route.cacheMode ?? "public_versioned";
+        const cacheEnabled = route.cacheStaticAssets !== false && cacheMode !== "disabled";
+        const cacheTtlSeconds = route.cacheTtlSeconds ?? DEFAULT_DELIVERY_OPTIMIZATION.cache_ttl_seconds;
+        const cacheStaleSeconds = route.cacheStaleWhileRevalidateSeconds ?? DEFAULT_DELIVERY_OPTIMIZATION.stale_while_revalidate_seconds;
+        const assetCacheControl = !cacheEnabled
+            ? "no-cache"
+            : cacheMode === "public"
+                ? `public, max-age=${cacheTtlSeconds}`
+                : `public, max-age=${cacheTtlSeconds}, immutable`;
+        const assetCache = {
+            enabled: cacheEnabled,
+            mode: cacheMode,
+            ttlSeconds: cacheTtlSeconds,
+            staleSeconds: cacheStaleSeconds,
+        };
         const defaultCache = "public, max-age=3600";
 
         return {
@@ -1399,16 +1494,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
             }],
             handle: [
                 this.makeStaticSecurityHeaders(),
+                ...(route.releaseId ? [this.makeStaticReleaseRequestHeader(route.releaseId)] : []),
                 this.makeStaticCacheHeaders(defaultCache),
                 this.makeEncodeHandler(),
                 {
                     handler: "subroute",
                     routes: [
                         ...(route.releaseId ? [this.makeStaticReleasePointerRoute(route.releaseId)] : []),
-                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif"),
-                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp"),
-                        this.makeStaticAssetRoute(route.root, immutableCache),
-                        this.makeMissingStaticAssetRoute(),
+                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif", assetCache, assetCacheControl),
+                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp", assetCache, assetCacheControl),
+                        this.makeStaticAssetRoute(route.root, assetCacheControl, assetCache),
+                        this.makeMissingStaticAssetRoute(cacheMode),
                         {
                             match: [{ path: ["/", "*.html"] }],
                             handle: [this.makeStaticCacheHeaders("no-cache")],
@@ -1422,6 +1518,30 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 },
             ],
             terminal: true,
+        };
+    }
+
+    private makePublicImageCacheHandler(): Record<string, unknown> {
+        return {
+            handler: "cache",
+            Configuration: {
+                DefaultCache: {
+                    allowed_http_verbs: ["GET", "HEAD"],
+                    cache_name: "supacloud-public-images",
+                    ttl: "1h",
+                    stale: "24h",
+                    headers: ["Accept"],
+                    storers: ["simplefs"],
+                    simplefs: {
+                        found: true,
+                        path: "/data/supacloud-public-image-cache",
+                        configuration: {
+                            size: 2048,
+                            directory_size: "5GB",
+                        },
+                    },
+                },
+            },
         };
     }
 
@@ -1445,6 +1565,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
         methods?: string[];
         pathRegexp?: string;
         encodeMigrationInventory?: boolean;
+        encodeResponses?: boolean;
+        cachePublicImages?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
@@ -1478,8 +1600,23 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 handle: [this.makeEncodeHandler()],
             }],
         });
+        if (opts.encodeResponses) handle.push(this.makeEncodeHandler());
         const proxy = makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify);
         attachControlPlaneFailover(proxy, opts.failoverUpstream);
+        if (opts.cachePublicImages) {
+            const cachedProxy = makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify);
+            attachControlPlaneFailover(cachedProxy, opts.failoverUpstream);
+            handle.push({
+                handler: "subroute",
+                routes: [
+                    {
+                        match: [{ path: ["/storage/v1/render/image/public/*", "/render/image/public/*"] }],
+                        handle: [this.makePublicImageCacheHandler(), cachedProxy],
+                        terminal: true,
+                    },
+                ],
+            });
+        }
         handle.push(proxy);
 
         return {
@@ -1508,6 +1645,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         projectRef: string;
         corsOrigins?: string[];
         readTimeout?: number;
+        encodeResponses?: boolean;
     }): CaddyRoute {
         const route = this.makeRoute(opts);
         const baseMatch = Array.isArray(route["match"])
@@ -1820,6 +1958,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 projectRef,
                 corsOrigins,
                 readTimeout: config.restProxyTimeoutMs,
+                encodeResponses: true,
             });
             restOpenApiRoute["__supacloud_priority"] = 200;
 
@@ -1832,6 +1971,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     projectRef,
                     corsOrigins,
                     readTimeout: config.restProxyTimeoutMs,
+                    encodeResponses: true,
                 }),
                 this.makeOpaqueApiKeyProxyRoute({
                     id: caddyRouteId(projectRef, "opaque-graphql"),
@@ -1841,6 +1981,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     projectRef,
                     corsOrigins,
                     readTimeout: config.restProxyTimeoutMs,
+                    encodeResponses: true,
                 }),
                 ...(!externalAuthUpstream || sharedAuthProxy ? [this.makeOpaqueApiKeyProxyRoute({
                     id: caddyRouteId(projectRef, "opaque-auth"),
@@ -1877,8 +2018,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 })] : []),
                 restOpenApiRoute,
                 ...opaqueRoutes,
-                this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins, encodeResponses: true }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "auth"),
                     hosts,
@@ -1951,6 +2092,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     corsOrigins,
                     preserveUpstreamCors: true,
                     streaming: false,
+                    cachePublicImages: true,
                 }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime-api"), hosts, path: "/realtime/v1/api*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 60_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime"), hosts, path: "/realtime/v1/websocket*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 86_400_000, corsOrigins }),

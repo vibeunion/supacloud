@@ -97,7 +97,7 @@ SUPACLOUD_INSTALL_KEYS=(
     S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
-    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY SUPACLOUD_IMAGE_ENGINE IMAGOR_IMAGE IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
+    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY SUPACLOUD_IMAGE_ENGINE SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS IMAGOR_IMAGE IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
     SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
@@ -499,6 +499,7 @@ recover_legacy_install_config() {
     apply_recovered_env_value EDGE_RUNTIME_PORT "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT
     apply_recovered_env_value EDGE_MAX_BODY_SIZE_MB "$MANAGEMENT_ENV_FILE" EDGE_MAX_BODY_SIZE_MB
     apply_recovered_env_value SUPACLOUD_IMAGE_ENGINE "$MANAGEMENT_ENV_FILE" SUPACLOUD_IMAGE_ENGINE
+    apply_recovered_env_value SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS "$MANAGEMENT_ENV_FILE" SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS
     apply_recovered_env_value SUPACLOUD_REALTIME_ENGINE "$MANAGEMENT_ENV_FILE" SUPACLOUD_REALTIME_ENGINE
     apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGOR_IMAGE
     if [[ -z "${IMAGOR_IMAGE:-}" ]]; then
@@ -2011,14 +2012,14 @@ install_caddy_gateway() {
         curl -fsSL "$SUPACLOUD_CADDY_URL" -o "$target"
         chmod 0755 "$target"
     elif [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh" ]] && command -v go >/dev/null 2>&1; then
-        log_info "Building supacloud-caddy locally with xcaddy and the rate-limit module..."
+        log_info "Building supacloud-caddy locally with xcaddy, rate-limit, and HTTP cache modules..."
         GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
         PATH="/usr/local/bin:$PATH" GO_VERSION="$GO_VERSION" XCADDY_VERSION="$XCADDY_VERSION" \
             OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
         install -m 0755 "/tmp/supacloud-caddy-build/supacloud-caddy-linux-${arch}" "$target"
         rm -rf /tmp/supacloud-caddy-build
     elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then
-        log_warn "Installing stock Caddy fallback without SupaCloud rate-limit module. Do not use this for production rate limits."
+        log_warn "Installing stock Caddy fallback without SupaCloud rate-limit/cache modules. Do not use this for production delivery optimization."
         local caddy_version="${CADDY_VERSION:-2.11.7}"
         local caddy_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_${arch}.tar.gz"
         mkdir -p /tmp/supacloud-caddy
@@ -3744,6 +3745,7 @@ install_management_api() {
         TUS_MAX_SIZE "${TUS_MAX_SIZE:-524288000}" \
         TUS_MAX_CHUNK_SIZE "${TUS_MAX_CHUNK_SIZE:-16777216}" \
         SUPACLOUD_IMAGE_ENGINE "${SUPACLOUD_IMAGE_ENGINE:-rust}" \
+        SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS "${SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS:-}" \
         IMAGOR_IMAGE "${IMAGOR_IMAGE:-${IMAGINARY_IMAGE:-shumc/imagor:1.9.8}}" \
         JWT_SECRET "$JWT_SECRET" \
         SUPACLOUD_JWT_SECRET "$JWT_SECRET" \

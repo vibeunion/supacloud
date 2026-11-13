@@ -71,6 +71,12 @@ Caddy runs as a native systemd service, fully managed via the Caddy Admin API:
 - Per-route CORS, rate-limiting, auth forwarding, and websocket behavior are rendered dynamically into JSON config.
 - Global Automatic HTTPS, security response headers, and TLS issuance policy are configured at the gateway level.
 - **Programmable Rate Limiting**: Per-tenant rate limits can be set via `PUT /v1/projects/:ref/gateway/rate-limit` (supports tier presets or custom second/minute/hour values).
+- Safe delivery optimization is enabled by default at the gateway boundary: REST/GraphQL responses and opaque API-key variants use Caddy `zstd`/`gzip` encoding for responses of at least 1 KiB. Auth, Storage uploads/downloads, Functions, Realtime, and streaming routes keep their existing transport behavior.
+- Static frontend routes and custom static routes serve precompressed sidecars when available and fall back to the same negotiated encoding. Hashed `/_app/*` and `/assets/*` files use immutable caching by default; a project can opt into the broader public asset path set from Web Console **Settings → Delivery optimization** (`GET/PATCH /v1/projects/:ref/config/delivery-optimization`). HTML and the release pointer remain revalidated or uncached. Negotiated AVIF/WebP sidecars emit `Vary: Accept`.
+- The static cache is Caddy `cache-handler` with the Badger storage module. It accepts only `GET`/`HEAD`, varies on `Accept` and `Accept-Encoding`, and returns `Cache-Status` for hit/miss observability. API, authorization, cookie-bearing, upload, and private responses are not placed in this shared cache. Badger is a single-host cache under the Caddy state directory; multi-node shared caching requires a later distributed storage adapter and is outside the single-host baseline.
+- Public Storage image transforms use a separate Caddy image boundary with a one-hour stale-while-revalidate cache backed by SimpleFS. The cache is limited to public transform paths and keys the negotiated `Accept` representation; private, signed, upload, and ordinary download paths never enter it. This PR does not add Imagor or request-time image transformation; prebuilt `.avif`/`.webp` sidecars remain supported.
+
+- The gateway does not rewrite arbitrary HTML, JavaScript, or authenticated responses. Build-time asset optimization and explicit CDN or image transformation policies remain opt-in.
 - No manual config editing or daemon reload workflow — all changes take effect via Admin API publishing.
 
 ### 3. Storage API
