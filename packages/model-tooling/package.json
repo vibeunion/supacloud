@@ -38,7 +38,7 @@
     "directory": "packages/model-tooling"
   },
   "dependencies": {
-    "@supacloud/db-zenstack": "^0.2.2 || ^0.3.0"
+    "@supacloud/db-zenstack": "^0.3.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
