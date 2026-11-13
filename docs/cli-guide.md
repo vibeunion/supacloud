@@ -41,6 +41,52 @@ supacloud env check
 supacloud --env test deploy
 ```
 
+## Reduced configuration and automation
+
+The CLI keeps the environment file as a small, environment-specific input. Run
+an onboarding plan before writing repository metadata:
+
+```bash
+supacloud onboard --profile solo --domain api.example.com
+supacloud onboard --profile solo --domain api.example.com --write
+supacloud config doctor --format json
+supacloud config explain --key SUPACLOUD_API_URL
+supacloud app doctor --format json
+```
+
+`onboard` derives the Studio origin, storage backend, internal service URLs and
+component versions from the selected profile. It never adopts an arbitrary
+PostgreSQL process and never prints credentials. `config doctor` reports each
+value as a profile input, a derived default, a secret, or a local override.
+After `env sync`, `app doctor` also reports missing named secrets without
+including their values.
+
+After `project bootstrap` or an existing project binding, `env sync` stores
+non-secret environment metadata in `supacloud.json`. It writes only a reduced
+profile example containing `SUPACLOUD_ENV` and a runtime-injected API token;
+secret values and service-role credentials never enter that file:
+
+```bash
+supacloud env sync --env test
+supacloud env sync --env test --write
+supacloud --env test status
+```
+
+The Management URL, project ref and application IDs can then be read from the
+selected `supacloud.json` environment metadata. The token remains the only
+credential supplied by the selected environment file.
+
+Generate a provider workflow without putting a token in the repository:
+
+```bash
+supacloud pipeline connect --provider github --preview
+supacloud pipeline connect --provider github --preview --write
+```
+
+The generated workflow references provider-managed secrets and reuses the
+existing `deploy` and application Preview contracts. It does not create a
+provider webhook or copy secrets automatically.
+
 `deploy init` creates `supacloud.json`, non-secret
 `.env.supacloud.test.example` and `.env.supacloud.production.example` files,
 and adds ignore rules for real profile files. It never overwrites an existing
@@ -749,7 +795,18 @@ npx @supacloud/admin ssh diagnose
 npx @supacloud/admin ssh install --public_domain api.example.com --studio_domain studio.example.com
 npx @supacloud/admin project list
 npx @supacloud/admin project create --name my-app
+npx @supacloud/admin project bootstrap --from ./supacloud.yaml --wait
+npx @supacloud/admin project bootstrap_status --ref abc123
+npx @supacloud/admin project bootstrap_reconcile --ref abc123
+npx @supacloud/admin platform doctor
 ```
+
+`project bootstrap` composes the existing project create endpoint with its
+durable provisioning saga. The receipt contains only the project identity and
+task summary; one-time credentials are not printed. If a provisioning task
+fails, `bootstrap_reconcile` retries the failed task identity rather than
+creating another project. `platform doctor` reads project health and backup
+readiness and returns a bounded, secret-free upgrade preflight summary.
 
 SSH actions additionally require a pinned server host key:
 

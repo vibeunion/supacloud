@@ -78,6 +78,37 @@ function parseEnvFile(contents: string): Record<string, string> {
     return values;
 }
 
+function projectConfigValues(cwd: string, environment: string): Record<string, string> {
+    const path = resolve(cwd, "supacloud.json");
+    if (!existsSync(path)) return {};
+    try {
+        const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+        const root = parsed as Record<string, unknown>;
+        const context = root.context;
+        if (!context || typeof context !== "object" || Array.isArray(context)) return {};
+        const contextRecord = context as Record<string, unknown>;
+        const environments = contextRecord.environments;
+        if (!environments || typeof environments !== "object" || Array.isArray(environments)) return {};
+        const selected = (environments as Record<string, unknown>)[environment];
+        if (!selected || typeof selected !== "object" || Array.isArray(selected)) return {};
+        const values = selected as Record<string, unknown>;
+        const output: Record<string, string> = {};
+        const mappings: Record<string, string> = {
+            api_url: "SUPACLOUD_API_URL",
+            project_ref: "SUPACLOUD_PROJECT_REF",
+            application_id: "SUPACLOUD_APPLICATION_ID",
+            environment_id: "SUPACLOUD_APPLICATION_ENVIRONMENT_ID",
+        };
+        for (const [source, target] of Object.entries(mappings)) {
+            if (typeof values[source] === "string" && values[source].trim()) output[target] = values[source].trim();
+        }
+        return output;
+    } catch {
+        return {};
+    }
+}
+
 function readEnvFile(path: string, required: boolean): Record<string, string> {
     if (!existsSync(path)) {
         if (required) throw new Error(`SupaCloud environment file not found: ${path}`);
@@ -200,16 +231,32 @@ function explicitEnvironmentSource(cwd: string, envFile: string): ContextSource 
 
 function contextSource(env: NodeJS.ProcessEnv, cwd: string, selection: ContextSelection): ContextSource {
     if (selection.environmentName && selection.envFile) throw new Error("Environment selectors are mutually exclusive");
-    if (selection.environmentName) return namedEnvironmentSource(cwd, selection.environmentName);
-    if (selection.envFile) return explicitEnvironmentSource(cwd, selection.envFile);
+    if (selection.environmentName) {
+        const source = namedEnvironmentSource(cwd, selection.environmentName);
+        return {
+            ...source,
+            values: { ...projectConfigValues(cwd, source.environment), ...source.values },
+        };
+    }
+    if (selection.envFile) {
+        const source = explicitEnvironmentSource(cwd, selection.envFile);
+        return {
+            ...source,
+            values: { ...projectConfigValues(cwd, source.environment), ...source.values },
+        };
+    }
 
     if (env.SUPACLOUD_ENV) {
         const environment = normalizeEnvironmentName(env.SUPACLOUD_ENV);
-        const values = processValues(env);
+        const values = { ...projectConfigValues(cwd, environment), ...processValues(env) };
         if (completeProjectContext(values)) {
             return { values, kind: "process_env", path: null, environment };
         }
-        return namedEnvironmentSource(cwd, env.SUPACLOUD_ENV);
+        const source = namedEnvironmentSource(cwd, env.SUPACLOUD_ENV);
+        return {
+            ...source,
+            values: { ...projectConfigValues(cwd, source.environment), ...source.values },
+        };
     }
     if (hasProcessContext(env)) {
         return { values: processValues(env), kind: "process_env", path: null, environment: "" };
@@ -218,6 +265,14 @@ function contextSource(env: NodeJS.ProcessEnv, cwd: string, selection: ContextSe
     const path = resolve(cwd, ".env");
     const values = readEnvFile(path, false);
     const environment = values.SUPACLOUD_ENV ? normalizeEnvironmentName(values.SUPACLOUD_ENV) : "";
+    if (environment) {
+        return {
+            values: { ...projectConfigValues(cwd, environment), ...values },
+            kind: "legacy_dotenv",
+            path: existsSync(path) ? path : null,
+            environment,
+        };
+    }
     return { values, kind: Object.keys(values).length ? "legacy_dotenv" : "none", path: existsSync(path) ? path : null, environment };
 }
 

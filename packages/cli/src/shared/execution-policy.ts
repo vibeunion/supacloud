@@ -11,9 +11,15 @@ interface ModulePolicy {
 }
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
+    config: {
+        read: ["doctor", "explain"],
+    },
+    pipeline: {
+        local: ["connect"],
+    },
     deploy: { local: ["init"], write: ["deploy"] },
     applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_promotion_status", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan", "list_previews", "get_preview"],
-        write: ["upload_release", "put_configuration", "deploy_application", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
+        write: ["upload_release", "put_configuration", "deploy_application", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "preview_pull_request", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
@@ -83,11 +89,11 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ai: { local: ["show_skill", "install_skill"] },
     mcp: { local: ["config"] },
     init: { local: ["init"] },
-    env: { local: ["list", "check"] },
+    env: { local: ["list", "check", "sync"] },
     app: {
         local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "lens", "doctor", "fix", "plan", "build"],
         read: ["status", "evidence", "logs", "transfer-plan", "promote-plan", "rollback-plan", "history", "deploy-plan", "diff", "promote-status", "preview-plan", "previews", "preview-list", "preview-status"],
-        write: ["release", "upload", "configure", "transfer", "promote", "promote-reconcile", "deploy", "rollback", "reconcile", "retire", "preview", "preview-create", "preview-reconcile", "preview-cleanup"],
+        write: ["release", "upload", "configure", "transfer", "promote", "promote-reconcile", "deploy", "rollback", "reconcile", "retire", "preview", "preview-create", "preview-reconcile", "preview-cleanup", "preview-pr"],
     },
     db: {
         local: ["context", "lint", "explain", "diff", "role_sql"],

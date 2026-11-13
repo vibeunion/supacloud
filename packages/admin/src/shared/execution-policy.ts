@@ -13,12 +13,12 @@ interface ModulePolicy {
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     project: {
         read: [
-            "list", "get", "endpoints", "list_endpoints", "settings", "api_keys", "health", "logs", "tasks", "services", "runtime_snapshot",
+            "list", "get", "endpoints", "list_endpoints", "bootstrap_status", "settings", "api_keys", "health", "logs", "tasks", "services", "runtime_snapshot",
         ],
-        write: ["create", "delete", "pause", "restore", "restart", "update_settings"],
+        write: ["create", "bootstrap", "bootstrap_reconcile", "delete", "pause", "restore", "restart", "update_settings"],
     },
     platform: {
-        read: ["metrics", "list_backups", "list_logical_backups", "network", "list_orgs", "get_org"],
+        read: ["doctor", "metrics", "list_backups", "list_logical_backups", "network", "list_orgs", "get_org"],
         write: ["create_backup", "create_logical_backup", "restore_logical_backup", "update_network"],
     },
     gateway: {
@@ -50,6 +50,7 @@ const DYNAMIC_ACTION_FIELDS: Record<string, string> = {
 
 const REFLESS_WRITE_ACTIONS = new Set([
     "project.create",
+    "project.bootstrap",
     "ssh.setup",
     "ssh.install",
     "ssh.upgrade",
@@ -127,7 +128,7 @@ function requestedProjectRef(
 ): string | null {
     if (moduleName === "ssh") return sshRequestedProjectRef(action, args);
     if (moduleName === "project") {
-        return ["list", "list_endpoints", "create"].includes(action) ? null : stringArgument(args, "ref");
+        return ["list", "list_endpoints", "create", "bootstrap"].includes(action) ? null : stringArgument(args, "ref");
     }
     if (moduleName === "platform") {
         return PLATFORM_PROJECT_REF_ACTIONS.has(action) ? stringArgument(args, "ref") : null;

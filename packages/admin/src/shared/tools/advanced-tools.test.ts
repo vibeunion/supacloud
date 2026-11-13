@@ -20,6 +20,20 @@ function platformTool(http: Record<string, unknown>) {
 }
 
 describe("admin platform backup CLI", () => {
+    test("platform doctor aggregates project health and backup readiness without exposing values", async () => {
+        const { callback } = platformTool({
+            get: async (path: string) => {
+                if (path === "/v1/projects") return { ok: true, status: 200, data: [{ ref: "demo" }] };
+                if (path.endsWith("/health")) return { ok: true, status: 200, data: { ok: true } };
+                return { ok: true, status: 200, data: { backups: [{ secret: "hidden" }] } };
+            },
+        });
+        const result = await callback({ action: "doctor" });
+        expect(result.isError).not.toBe(true);
+        expect(result.content[0].text).toContain("supacloud.platform-doctor.v1");
+        expect(result.content[0].text).not.toContain("hidden");
+    });
+
     test("requires an explicit full physical backup type", async () => {
         const { schema, callback } = platformTool({});
 
