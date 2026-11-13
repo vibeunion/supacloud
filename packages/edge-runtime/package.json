@@ -27,7 +27,7 @@
     "elysia": "2.0.0-rc.4",
     "es-module-lexer": "3.0.4",
     "exact-mirror": "1.2.7",
-    "jose": "^6.2.15",
+    "jose": "^6.2.17",
     "typebox": "1.4.3"
   },
   "devDependencies": {
