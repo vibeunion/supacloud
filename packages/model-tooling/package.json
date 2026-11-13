@@ -7,7 +7,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "supacloud-model": "./dist/index.js"
+    "supacloud-model": "dist/index.js"
   },
   "exports": {
     ".": {
@@ -34,7 +34,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vibeunion/supacloud.git",
+    "url": "git+https://github.com/vibeunion/supacloud.git",
     "directory": "packages/model-tooling"
   },
   "dependencies": {

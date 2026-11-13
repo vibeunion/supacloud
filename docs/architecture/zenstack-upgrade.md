@@ -226,7 +226,7 @@ boundary.
 | `@supacloud/db/drizzle`, `/drizzle-bun` | `@supacloud/db/zenstack` for models; `/bun` for trusted operational SQL |
 | ORM table objects in `defineDatabaseModule.tables` | Explicit qualified names such as `public.orders` |
 | `drizzleSchema` compiler option | `modelSchema: "zenstack/generated/schema.ts"` |
-| ORM configs and generate/pull scripts | `supacloud-model generate/check/diff/pull` |
+| ORM configs and generate/pull scripts | `supacloud-model generate/check/pull` plus the existing `db plan` / `db apply` workflow |
 | `dev migrate` and its config/flags | Generate/review a candidate, then the existing `db plan` / `db apply` workflow |
 | `scanDrizzleSql` | `scanQuerySql`, scanning Kysely SQL escape hatches |
 
@@ -242,10 +242,11 @@ may be archived as historical evidence; do not rewrite the applied SQL.
    not establish npm availability. The release publisher rewrites repository
    `file:` references to released versions. Keep the umbrella's semver ranges
    synchronized with the published CLI/admin releases.
-2. Remove the old ORM/query-generator dependencies. Pin ZenStack packages to
-   `3.10.0` and Kysely to `0.29.0`. Development tooling is ZenStack CLI `3.10.0`,
-   Prisma `6.19.3` and `pg` `8.23.1`. `pg` is needed only by ZenStack introspection;
-   application model queries use Bun SQL. Regenerate and commit the lockfile.
+2. Remove the old ORM/query-generator dependencies. Pin the runtime ZenStack
+   packages to `3.10.0` and Kysely to `0.29.0`. Install the separate
+   `@supacloud/model-tooling` development package for the pinned ZenStack CLI,
+   Prisma `6.19.3` and `pg` `8.23.1`; application model queries use Bun SQL.
+   Regenerate and commit the lockfile.
 3. Author `zenstack/schema.zmodel`, preserving SQL names via `@map`/`@@map`, native
    types, nullability, defaults, relation actions, keys and indexes. Use PostgreSQL
    with `url = env("DATABASE_URL")`, without alternate direct/shadow URL fields.
