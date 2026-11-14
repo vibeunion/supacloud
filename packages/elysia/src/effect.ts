@@ -46,6 +46,7 @@ export class EffectApplicationError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "EffectApplicationError";
@@ -137,6 +138,7 @@ function mapEffectFailure(
       instanceMessage ?? mapping.message ?? mapping.code,
       instanceStatus ?? mapping.status,
       instanceCode ?? mapping.code,
+      isRecord(error) && "details" in error ? error.details : undefined,
     );
   }
   if (tag === "TimeoutException" || tag === "TimeoutError") {
