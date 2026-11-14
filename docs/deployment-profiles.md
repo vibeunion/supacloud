@@ -20,6 +20,13 @@ health checks and recovery metadata. `setup.sh` is only the verified bootstrap;
 the Admin installer reconciles the plan and preserves evidence for failed or
 unknown stages.
 
+Operator input is intentionally conditional. `solo` derives component ports,
+internal URLs, service paths, Studio origin and generated keys. An external
+database requires an explicit database URL, and external object storage
+requires its own endpoint and credentials; unused provider settings are not
+requested. Generated `install.env` and `management-api.env` files are runtime
+artifacts, while the onboarding plan remains the operator-facing input.
+
 The `solo` and `podman` profiles share the same project, identity, migration,
 Storage, Realtime and Management API contracts. Lite remains a separate
 single-project local-first runtime and is not evidence of Full Platform

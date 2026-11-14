@@ -34,6 +34,8 @@ import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
 import { initializeProject, registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
+import { registerConfigurationTools } from "./shared/tools/configuration-tools";
+import { registerPipelineTools } from "./shared/tools/pipeline-tools";
 import { runProjectDeployment } from "./shared/tools/project-deployment";
 import type { ToolSchema } from "./shared/schema";
 import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
@@ -258,6 +260,9 @@ USAGE
   ${preferredCommand} [global flags] deploy [--flags]
   ${preferredCommand} [global flags] <module> <action> [--flags]
   ${preferredCommand} deploy init [--root <directory>]
+  ${preferredCommand} onboard [--profile solo] [--domain <domain>] [--write]
+  ${preferredCommand} config <doctor|explain>
+  ${preferredCommand} pipeline connect [--write] [--preview]
   ${preferredCommand} env <list|check> [--root <directory>]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
@@ -292,7 +297,11 @@ DEFAULT CONTEXT
 EXAMPLES
 
   ${preferredCommand} deploy init
+  ${preferredCommand} onboard
+  ${preferredCommand} config doctor --format json
+  ${preferredCommand} config explain --key SUPACLOUD_API_URL
   ${preferredCommand} env check
+  ${preferredCommand} env sync --env test --write
   ${preferredCommand} env check --format json
   ${preferredCommand} status
   ${preferredCommand} deploy
@@ -455,6 +464,13 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     Object.assign(tools, captureTools((server) => registerDeveloperExperienceTools(server, {
         cwd: process.cwd(),
         activeContext: context,
+    })));
+    Object.assign(tools, captureTools((server) => registerConfigurationTools(server, {
+        cwd: process.cwd(),
+        activeContext: context,
+    })));
+    Object.assign(tools, captureTools((server) => registerPipelineTools(server, {
+        cwd: process.cwd(),
     })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {

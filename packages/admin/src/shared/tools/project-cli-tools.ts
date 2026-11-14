@@ -30,6 +30,14 @@ import {
     projectEndpointRead,
 } from "./project-endpoint-read";
 import { parseProjectRuntimeSnapshot } from "./project-runtime-snapshot";
+import {
+    bootstrapReceipt,
+    readBootstrapTasks,
+    readProjectBootstrapSpec,
+    retryFailedBootstrapTasks,
+    summarizeBootstrapTasks,
+    waitForBootstrap,
+} from "./project-bootstrap";
 
 const PROJECT_SERVICE_NAMES = [
     "postgrest", "gotrue", "storage", "postgresql", "realtime", "gateway",
@@ -578,10 +586,10 @@ export function registerAdminProjectCliTools(
     const fileOperations = options.projectEnvFileOperations;
     registerTool(server,
         "project",
-        "Platform-level project lifecycle management. Actions: list, list_endpoints, create, get, endpoints, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, runtime_snapshot, service_control",
+        "Platform-level project lifecycle management. Actions: list, list_endpoints, create, bootstrap, bootstrap_status, bootstrap_reconcile, get, endpoints, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, runtime_snapshot, service_control",
         {
             action: withDescription(stringEnum([
-                "list", "list_endpoints", "create", "get", "endpoints", "delete", "pause", "restore",
+                "list", "list_endpoints", "create", "bootstrap", "bootstrap_status", "bootstrap_reconcile", "get", "endpoints", "delete", "pause", "restore",
                 "restart", "settings", "update_settings", "api_keys",
                 "health", "logs", "tasks", "services", "runtime_snapshot", "service_control",
             ]), "Action to perform"),
@@ -593,6 +601,9 @@ export function registerAdminProjectCliTools(
             api_domain: optional(Type.String(), "[create] Explicit API domain"),
             auth_domain: optional(Type.String(), "[create] Explicit Auth/OIDC domain"),
             studio_domain: optional(Type.String(), "[create] Explicit Studio domain"),
+            from: optional(Type.String(), "[bootstrap] JSON or simple YAML project bootstrap file"),
+            wait: optional(Type.Boolean(), "[bootstrap] Wait for provisioning tasks to finish"),
+            timeout_seconds: optional(Type.Number({ minimum: 1, maximum: 3600 }), "[bootstrap] Provisioning wait budget"),
             env_file: optional(
                 Type.String(),
                 "[create] Linux-only absolute new application env path for parent-bound service-role delivery (0600)",
@@ -619,6 +630,9 @@ export function registerAdminProjectCliTools(
             api_domain,
             auth_domain,
             studio_domain,
+            from,
+            wait,
+            timeout_seconds,
             env_file,
             environment,
             settings,
@@ -678,6 +692,54 @@ export function registerAdminProjectCliTools(
                         { projectName: name, apiOrigin: boundApiOrigin },
                         fileOperations,
                     );
+                }
+                case "bootstrap": {
+                    if (!from) throw new Error("'from' is required for bootstrap");
+                    const spec = await readProjectBootstrapSpec(from);
+                    const createRequest: Record<string, string | undefined> = {
+                        name: spec.name,
+                        region: spec.region || "local",
+                        organization_id: spec.organization_id,
+                    };
+                    if (spec.domain) createRequest.domain = spec.domain;
+                    if (spec.api_domain) createRequest.api_domain = spec.api_domain;
+                    if (spec.auth_domain) createRequest.auth_domain = spec.auth_domain;
+                    if (spec.studio_domain) createRequest.studio_domain = spec.studio_domain;
+                    const response = await http.post("/v1/projects", createRequest, { timeoutMs: 60_000 });
+                    if (!response.ok || response.status !== 201) {
+                        return projectCreateMutationFailure(response);
+                    }
+                    const identity = parseProjectCreateWithoutCredentials(response.data, expectedProjectApiOrigin(spec.domain, spec.api_domain));
+                    if (!identity) return projectCreateFailure("OUTCOME_UNKNOWN", response.status);
+                    const shouldWait = wait === true;
+                    const tasks = shouldWait
+                        ? await waitForBootstrap(http, identity.projectRef, (timeout_seconds ?? 300) * 1_000)
+                        : await readBootstrapTasks(http, identity.projectRef);
+                    return projectToolResponse(JSON.stringify(bootstrapReceipt(response, spec, identity.projectRef, tasks, shouldWait), null, 2));
+                }
+                case "bootstrap_status": {
+                    const resolvedRef = resolveRef(ref);
+                    const tasks = await readBootstrapTasks(http, resolvedRef);
+                    return projectToolResponse(JSON.stringify({
+                        schema: "supacloud.project-bootstrap-status.v1",
+                        project_ref: resolvedRef,
+                        provisioning: summarizeBootstrapTasks(tasks),
+                        tasks,
+                    }, null, 2));
+                }
+                case "bootstrap_reconcile": {
+                    const resolvedRef = resolveRef(ref);
+                    const tasks = await readBootstrapTasks(http, resolvedRef);
+                    const retried = await retryFailedBootstrapTasks(http, resolvedRef, tasks);
+                    const refreshed = retried.length > 0
+                        ? await readBootstrapTasks(http, resolvedRef)
+                        : tasks;
+                    return projectToolResponse(JSON.stringify({
+                        schema: "supacloud.project-bootstrap-reconcile.v1",
+                        project_ref: resolvedRef,
+                        retried_task_ids: retried,
+                        provisioning: summarizeBootstrapTasks(refreshed),
+                    }, null, 2));
                 }
                 case "get": {
                     const resolvedRef = resolveRef(ref);

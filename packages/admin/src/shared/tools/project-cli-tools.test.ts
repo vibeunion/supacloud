@@ -219,6 +219,43 @@ function captureUserProjectTool(http: Record<string, unknown>, projectRef: strin
 }
 
 describe("admin project reads", () => {
+    test("bootstrap composes project creation with the existing provisioning saga", async () => {
+        const root = createSandbox();
+        const configPath = join(root, "supacloud.yaml");
+        writeFileSync(configPath, "name: secure-project\nregion: local\ndomain: example.com\n");
+        const requests: string[] = [];
+        const projectCallback = captureAdminProjectTool({
+            post: async (path: string) => {
+                requests.push(`POST ${path}`);
+                return {
+                    ok: true,
+                    status: 201,
+                    data: { ref: CREATE_PROJECT_REF, name: "secure-project", api: { url: "https://api.example.com" } },
+                };
+            },
+            get: async (path: string) => {
+                requests.push(`GET ${path}`);
+                return {
+                    ok: true,
+                    status: 200,
+                    data: [
+                        { id: "db", task_type: "provision_db", status: "succeeded" },
+                        { id: "runtime", task_type: "provision_runtime", status: "succeeded" },
+                    ],
+                };
+            },
+        });
+        const response = await projectCallback({ action: "bootstrap", from: configPath, wait: true });
+        expect(response.isError).not.toBe(true);
+        expect(response.content[0].text).toContain("supacloud.project-bootstrap.v1");
+        expect(response.content[0].text).toContain('"status": "ready"');
+        expect(response.content[0].text).not.toContain("service_role");
+        expect(requests).toEqual([
+            "POST /v1/projects",
+            `GET /v1/projects/${CREATE_PROJECT_REF}/tasks?limit=100`,
+        ]);
+    });
+
     test("wires Admin and user reads through bounded credential-safe projections", async () => {
         const remoteSecret = "wired-project-private-sentinel";
         const summary = {

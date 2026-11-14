@@ -345,6 +345,32 @@ describe("resolveSupaCloudContext", () => {
         });
     });
 
+    test("derives management URL and project ref from supacloud.json context metadata", () => {
+        const workspace = temporaryWorkspace();
+        writeFileSync(join(workspace, "supacloud.json"), JSON.stringify({
+            context: {
+                environments: {
+                    test: {
+                        api_url: "https://management.example.com",
+                        project_ref: "metadata-ref",
+                    },
+                },
+            },
+        }) + "\n");
+        writeEnvironment(workspace, ".env.supacloud.test", {
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_TOKEN: "metadata-token",
+        });
+
+        const context = resolveSupaCloudContext({}, workspace, { environmentName: "test" });
+        expect(context).toMatchObject({
+            apiUrl: "https://management.example.com",
+            apiToken: "metadata-token",
+            projectRef: "metadata-ref",
+            environment: "test",
+        });
+    });
+
     test("uses SUPACLOUD_ENV as a strict named selector when process context is incomplete", () => {
         const workspace = temporaryWorkspace();
         writeEnvironment(workspace, ".env.supacloud.test", {
