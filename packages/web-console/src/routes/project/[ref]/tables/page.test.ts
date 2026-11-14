@@ -219,9 +219,9 @@ describe("database tables column visibility", () => {
     const packageJson: unknown = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.115.0" } });
-    expect(lockSource).toContain('"@svadmin/ui": "0.115.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.115.0"');
+    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.120.0" } });
+    expect(lockSource).toContain('"@svadmin/ui": "0.120.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.120.0"');
   });
 
   test("keeps every installed SVAdmin adapter compatible with the shared Core", async () => {
@@ -233,6 +233,19 @@ describe("database tables column visibility", () => {
         new URL(`node_modules/@svadmin/${name}/package.json`, packageRoot),
       ).json();
       expect(Bun.semver.satisfies(core.version, adapter.peerDependencies["@svadmin/core"])).toBe(true);
+    }
+  });
+
+  test("shares one compatible TypeBox with the SVAdmin resource contracts", async () => {
+    const typebox: { version: string } = await Bun.file(
+      new URL("node_modules/typebox/package.json", packageRoot),
+    ).json();
+    const sharedModule = Bun.resolveSync("typebox", fileURLToPath(packageRoot));
+    for (const name of ["core", "ui", "ai-elements"]) {
+      const adapterUrl = new URL(`node_modules/@svadmin/${name}/package.json`, packageRoot);
+      const adapter: { dependencies: { typebox: string } } = await Bun.file(adapterUrl).json();
+      expect(Bun.semver.satisfies(typebox.version, adapter.dependencies.typebox)).toBe(true);
+      expect(Bun.resolveSync("typebox", fileURLToPath(adapterUrl))).toBe(sharedModule);
     }
   });
 
