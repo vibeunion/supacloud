@@ -1,5 +1,5 @@
 export type ImageTransformResize = 'contain' | 'fill'
-export type ImageTransformFormat = 'origin' | 'jpeg' | 'png' | 'webp'
+export type ImageTransformFormat = 'origin' | 'jpeg' | 'png' | 'webp' | 'avif'
 
 export interface ImageTransformOptions {
   width?: number
@@ -118,14 +118,14 @@ export function parseImageTransform(query: URLSearchParams): ImageTransformParse
 
   const formatValue = query.get('format')
   const format: ImageTransformFormat = formatValue === null ? 'origin' : (formatValue as ImageTransformFormat)
-  if (format !== 'origin' && format !== 'jpeg' && format !== 'png' && format !== 'webp') {
-    return invalid('format must be one of origin, jpeg, png, or webp')
+  if (format !== 'origin' && format !== 'jpeg' && format !== 'png' && format !== 'webp' && format !== 'avif') {
+    return invalid('format must be one of origin, jpeg, png, webp, or avif')
   }
 
   const quality = parseQuality(query.get('quality'))
   if (typeof quality !== 'number' && quality !== undefined) return quality
   if (quality !== undefined && format === 'png') {
-    return invalid('quality is supported only for jpeg and webp output')
+    return invalid('quality is supported only for jpeg, webp, or avif output')
   }
 
   return {
@@ -235,8 +235,8 @@ export async function transformImage(
   }
 
   const outputFormat = options.format === 'origin' ? metadata.format : options.format
-  if (options.quality !== undefined && outputFormat !== 'jpeg' && outputFormat !== 'webp') {
-    return invalid('quality is supported only for jpeg and webp output')
+  if (options.quality !== undefined && outputFormat !== 'jpeg' && outputFormat !== 'webp' && outputFormat !== 'avif') {
+    return invalid('quality is supported only for jpeg, webp, or avif output')
   }
   const contentType = IMAGE_FORMAT_CONTENT_TYPES[outputFormat]
   if (!contentType) {
@@ -255,6 +255,8 @@ export async function transformImage(
     image.png()
   } else if (options.format === 'webp' || (options.format === 'origin' && outputFormat === 'webp' && options.quality !== undefined)) {
     image.webp(options.quality === undefined ? undefined : { quality: options.quality })
+  } else if (options.format === 'avif' || (options.format === 'origin' && outputFormat === 'avif' && options.quality !== undefined)) {
+    image.avif(options.quality === undefined ? undefined : { quality: options.quality })
   }
 
   try {

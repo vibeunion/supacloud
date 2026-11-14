@@ -9,6 +9,7 @@
 - [Deploy Guide](./deploy-guide.md) - Complete deployment guide
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
+- [Project Bootstrap Example](./project-bootstrap.yml.example) - Minimal project provisioning input
 - [Self-Hosted Stable Baseline](./self-hosted-stable-baseline.md) - Primary product boundary, supported profile, acceptance gates, and evidence states
 - [Deployment Profiles](./deployment-profiles.md) - Solo, Podman single-node, Pigsty and cluster boundaries
 - [Podman Single-Node to Cluster Migration](./podman-cluster-migration.md) - Quadlet boundary and cluster handoff

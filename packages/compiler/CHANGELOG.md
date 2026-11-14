@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.62.7](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.6...compiler-v0.62.7) (2026-11-14)
+
+
+### Bug Fixes
+
+* **db:** support ZenStack adapter 0.3 ([#2643](https://github.com/vibeunion/supacloud/issues/2643)) ([420e5b4](https://github.com/vibeunion/supacloud/commit/420e5b4eb9c43d3a2d07c421112d781716655673))
+* **elysia:** accept compiler effect mode route metadata ([#2649](https://github.com/vibeunion/supacloud/issues/2649)) ([2642b20](https://github.com/vibeunion/supacloud/commit/2642b20d8aa2cff061f8a4edae0f0f94fec51066))
+* **elysia:** upgrade runtime to 2.0.0-rc.4 ([#2625](https://github.com/vibeunion/supacloud/issues/2625)) ([d07c4d6](https://github.com/vibeunion/supacloud/commit/d07c4d61e4fa6ebceab485e2e0455f7ed2479294))
+* **model-tooling:** close adoption boundary gaps ([#2644](https://github.com/vibeunion/supacloud/issues/2644)) ([97ec1f3](https://github.com/vibeunion/supacloud/commit/97ec1f3e8400cee7327a06ba6628a67620e31941))
+
 ## [0.62.6](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.5...compiler-v0.62.6) (2026-11-11)
 
 

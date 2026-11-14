@@ -595,7 +595,7 @@ const running = await startProjectServer({
 await running.close()
 ```
 
-图片变换目前提供 Bun.Image 的兼容子集：`width`、`height`、`resize=fill|contain`，以及 `format=origin|jpeg|png|webp` 和 JPEG/WebP `quality`。`resize=cover` 需要裁剪能力，当前 Bun 运行时没有对应 API，因此会明确返回不支持错误，不会错误地把图片拉伸成 `cover`。
+图片变换目前提供 Bun.Image 的兼容子集：`width`、`height`、`resize=fill|contain`，以及 `format=origin|jpeg|png|webp|avif` 和 JPEG/WebP/AVIF `quality`。AVIF 编码依赖宿主机的 AV1 编码器；Linux 或未安装对应系统编解码器时会返回 `UnsupportedImageFormat`，调用方应回退到 WebP 或原图。`resize=cover` 需要裁剪能力，当前 Bun 运行时没有对应 API，因此会明确返回不支持错误，不会错误地把图片拉伸成 `cover`。
 
 Storage 还提供两个运维端点：`GET /storage/v1/status` 无需项目 API key，返回服务名称、版本和健康状态；`GET /storage/v1/metrics` 需要 `service_role`，以 Prometheus 文本格式输出 bucket 数、对象元数据行数和声明对象总字节数。指标只统计 Lite 自己的 `storage` schema，不代表远端 S3 bucket 的真实用量或后台清理延迟。
 
@@ -1172,7 +1172,7 @@ const running = await startProjectServer({
 await running.close()
 ```
 
-Image transforms currently provide a compatible subset of Bun.Image: `width`, `height`, `resize=fill|contain`, as well as `format=origin|jpeg|png|webp` and JPEG/WebP `quality`. `resize=cover` requires cropping capability, which the current Bun runtime does not have a corresponding API for, so it explicitly returns an unsupported error instead of incorrectly stretching the image to `cover`.
+Image transforms currently provide a compatible subset of Bun.Image: `width`, `height`, `resize=fill|contain`, as well as `format=origin|jpeg|png|webp|avif` and JPEG/WebP/AVIF `quality`. AVIF encoding depends on an AV1 encoder supplied by the host; Linux or hosts without the required system codec return `UnsupportedImageFormat`, so callers should fall back to WebP or the original. `resize=cover` requires cropping capability, which the current Bun runtime does not have a corresponding API for, so it explicitly returns an unsupported error instead of incorrectly stretching the image to `cover`.
 
 Storage also exposes two operational endpoints: `GET /storage/v1/status` needs no project API key and returns the service name, version, and health; `GET /storage/v1/metrics` requires `service_role` and returns Prometheus text with bucket count, object metadata rows, and declared object bytes. These metrics cover Lite's `storage` schema only; they do not claim the real usage of a remote S3 bucket or background cleanup latency.
 

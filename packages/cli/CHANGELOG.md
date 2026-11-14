@@ -14,6 +14,22 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.123.0](https://github.com/vibeunion/supacloud/compare/cli-v0.122.0...cli-v0.123.0) (2026-11-14)
+
+
+### Features
+
+* automate onboarding and environment configuration ([#2648](https://github.com/vibeunion/supacloud/issues/2648)) ([67b8623](https://github.com/vibeunion/supacloud/commit/67b862328d40be421218026dffa88a2921456830))
+
+
+### Bug Fixes
+
+* **cli:** make configuration automation executable ([#2650](https://github.com/vibeunion/supacloud/issues/2650)) ([d4c71de](https://github.com/vibeunion/supacloud/commit/d4c71de93b91123ac9de9ee414e31cdd6697578d))
+* **db:** support ZenStack adapter 0.3 ([#2643](https://github.com/vibeunion/supacloud/issues/2643)) ([420e5b4](https://github.com/vibeunion/supacloud/commit/420e5b4eb9c43d3a2d07c421112d781716655673))
+* **deps:** align db adapter and compiler versions ([#2642](https://github.com/vibeunion/supacloud/issues/2642)) ([5f7c63a](https://github.com/vibeunion/supacloud/commit/5f7c63a32e2d85f0166f20c9a0073737ff153a47))
+* **elysia:** upgrade runtime to 2.0.0-rc.4 ([#2625](https://github.com/vibeunion/supacloud/issues/2625)) ([d07c4d6](https://github.com/vibeunion/supacloud/commit/d07c4d61e4fa6ebceab485e2e0455f7ed2479294))
+* **model-tooling:** close adoption boundary gaps ([#2644](https://github.com/vibeunion/supacloud/issues/2644)) ([97ec1f3](https://github.com/vibeunion/supacloud/commit/97ec1f3e8400cee7327a06ba6628a67620e31941))
+
 ## [0.122.0](https://github.com/vibeunion/supacloud/compare/cli-v0.121.9...cli-v0.122.0) (2026-11-12)
 
 

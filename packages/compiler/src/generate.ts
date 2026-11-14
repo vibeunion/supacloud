@@ -101,7 +101,17 @@ const INTERFACES = `export interface CompiledRoute {
   responses?: Record<string | number, unknown>;
   effect?: {
     required: true;
-    errors?: Array<{ tag: string; status: number; code: string; message?: string }>;
+    errors?: Array<{
+      tag: string;
+      status: number;
+      code: string;
+      message?: string;
+      codeFromError?: boolean;
+      messageFromError?: boolean;
+      statusFromError?: boolean;
+      retryable?: boolean;
+      outcomeUnknown?: boolean;
+    }>;
     dependencies?: string[];
     retry?: "none" | "explicit";
     maxAttempts?: number;

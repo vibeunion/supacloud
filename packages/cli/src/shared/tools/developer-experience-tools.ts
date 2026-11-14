@@ -5,9 +5,10 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { ApplicationIdSchema } from "@supacloud/delivery";
 import { resolveSupaCloudContext, type ContextCredentialScope, type ResolvedContext } from "../context";
-import { optional, stringEnum, withDescription } from "../schema";
+import { optional, stringEnum } from "../schema";
 import type { ToolSchema } from "../schema";
 import { registerTool, type ToolResult, type ToolServer } from "../tool-server";
+import { environmentSyncSchema, syncEnvironmentProfile } from "./configuration-tools";
 
 export interface InitRequest {
     root?: string;
@@ -15,8 +16,10 @@ export interface InitRequest {
 }
 
 interface EnvironmentRequest {
-    action: "list" | "check";
+    action: "list" | "check" | "sync";
     root?: string;
+    environment?: string;
+    write?: boolean;
     format?: "text" | "json";
 }
 
@@ -60,7 +63,7 @@ export const initToolSchema: ToolSchema = {
 };
 
 export const environmentToolSchema: ToolSchema = {
-    action: withDescription(stringEnum(["list", "check"]), "Environment profile inspection action"),
+    ...environmentSyncSchema,
     root: optional(Type.String(), "Project directory containing .env.supacloud.* files"),
     format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
 };
@@ -382,7 +385,11 @@ export function registerDeveloperExperienceTools(
         "env",
         "List or locally validate named SupaCloud environment profiles without contacting the platform or printing secrets.",
         environmentToolSchema,
-        (request) => inspectEnvironment(request as unknown as EnvironmentRequest, options),
+        (request) => {
+            const input = request as unknown as EnvironmentRequest;
+            if (input.action === "sync") return syncEnvironmentProfile(input as unknown as Record<string, unknown>, options);
+            return inspectEnvironment(input, options);
+        },
     );
 }
 

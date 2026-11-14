@@ -9,6 +9,7 @@ import { releaseControlFailure, releaseControlMutationFailure, releaseControlSuc
 
 export const APPLICATION_PREVIEW_ACTIONS = [
   "get_preview_plan", "create_preview", "list_previews", "get_preview", "reconcile_preview", "cleanup_preview",
+  "preview_pull_request",
 ] as const;
 
 const previewIdSchema = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$" });
@@ -26,6 +27,9 @@ export const APPLICATION_PREVIEW_FIELDS = {
   ttl_seconds: optional(ttlSecondsSchema, "[get_preview_plan/create_preview] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL"),
   wait: optional(Type.Boolean(), "[create_preview/get_preview] Wait for verified readiness of this preview only"),
   timeout_seconds: optional(waitSecondsSchema, "[create_preview/get_preview] Observation budget with wait, from 1 to 3600 seconds (default 300)"),
+  pull_request_action: optional(stringEnum(["opened", "closed"]), "[preview_pull_request] Pull request lifecycle action"),
+  repository: optional(Type.String({ pattern: "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$" }), "[preview_pull_request] Repository owner/name"),
+  pull_request_number: optional(Type.Integer({ minimum: 1, maximum: 1_000_000_000 }), "[preview_pull_request] Pull request number"),
 };
 
 const strict = { additionalProperties: false };
@@ -84,6 +88,7 @@ const actionFields: Record<string, readonly string[]> = {
   get_preview: ["preview_id", "wait", "timeout_seconds"],
   reconcile_preview: ["preview_id"],
   cleanup_preview: ["preview_id"],
+  preview_pull_request: ["pull_request_action", "repository", "pull_request_number", "release_id"],
 };
 
 function timestamp(value: string): boolean {
@@ -229,6 +234,42 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
   const identity = { project_ref: ref, application_id: id, environment_id: environment };
   const applicationPath = `/v1/projects/${project}/applications/${encodeURIComponent(id)}`;
   const path = `${applicationPath}/environments/${encodeURIComponent(environment)}`;
+  if (action === "preview_pull_request") {
+    const lifecycle = required(args, "pull_request_action");
+    const repository = required(args, "repository");
+    const releaseId = required(args, "release_id");
+    const number = args["pull_request_number"];
+    if (!Value.Check(ApplicationReleaseIdSchema, releaseId)
+      || !/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(repository)
+      || (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1 || number > 1_000_000_000)) {
+      throw new Error("Invalid pull request preview identity");
+    }
+    const result = await http.post(`${path}/preview-pull-requests`, {
+      action: lifecycle,
+      repository,
+      number,
+      release_id: releaseId,
+    }, { timeoutMs: 120_000, maxJsonBytes: 1_048_576, responseTimeoutMs: 30_000 });
+    const payload = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+      ? result.data as Record<string, unknown>
+      : null;
+    if (!result.ok || !payload || payload["action"] !== lifecycle || typeof payload["preview_id"] !== "string"
+      || typeof payload["status"] !== "string" || !Array.isArray(payload["leftovers"])) {
+      return releaseControlFailure(operation, result.ok ? "INVALID_RESPONSE" : "HTTP_ERROR",
+        result.transportError ? null : result.status, identity);
+    }
+    const preview = payload["receipt"] === null || payload["receipt"] === undefined
+      ? null
+      : receipt(payload["receipt"], { ref, id, environment, previewId: payload["preview_id"] as string });
+    return releaseControlSuccess(operation, {
+      ...identity,
+      action: lifecycle,
+      preview_id: payload["preview_id"],
+      status: payload["status"],
+      leftovers: (payload["leftovers"] as unknown[]).filter(value => typeof value === "string").slice(0, 64),
+      receipt: preview,
+    });
+  }
   const previewId = action === "get_preview" || action === "reconcile_preview" || action === "cleanup_preview"
     ? required(args, "preview_id")
     : action === "create_preview"

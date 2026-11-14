@@ -16,7 +16,7 @@ test("static registration mounts generated routes and refuses pre-migration HTTP
       imports: [], exports: [], providers: [], commands: [], queries: [],
       controllers: [{ className: "Probe", path: "/api/", scope: "application", deps: [],
         file: "source.ts", importPath: "source", routes: [
-          { method: "GET", path: "/health", handler: "read" },
+          { method: "GET", path: "/health", handler: "read", effectMode: "simple" },
           { method: "POST", path: "/echo", handler: "echo", handlerParams: [{ name: "body", kind: "body" }] },
         ] }],
     }] };

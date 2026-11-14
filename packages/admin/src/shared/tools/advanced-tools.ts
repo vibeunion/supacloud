@@ -185,10 +185,10 @@ Actions: list, upsert, delete`,
     registerTool(server,
         "platform",
         `Platform monitoring, backups, network, and organizations.
-Actions: metrics, list_backups, create_backup, list_logical_backups, create_logical_backup, restore_logical_backup, network, update_network, list_orgs, get_org`,
+Actions: doctor, metrics, list_backups, create_backup, list_logical_backups, create_logical_backup, restore_logical_backup, network, update_network, list_orgs, get_org`,
         {
             action: withDescription(stringEnum([
-                "metrics", "list_backups", "create_backup",
+                "doctor", "metrics", "list_backups", "create_backup",
                 "list_logical_backups", "create_logical_backup", "restore_logical_backup",
                 "network", "update_network",
                 "list_orgs", "get_org",
@@ -211,6 +211,40 @@ Actions: metrics, list_backups, create_backup, list_logical_backups, create_logi
             }
             let text: string;
             switch (action) {
+                case "doctor": {
+                    const projectsResponse = await http.get("/v1/projects", { maxResponseBytes: 256 * 1024 });
+                    const projects = Array.isArray(projectsResponse.data)
+                        ? projectsResponse.data
+                        : (projectsResponse.data && typeof projectsResponse.data === "object" && Array.isArray((projectsResponse.data as Record<string, unknown>).projects)
+                            ? (projectsResponse.data as Record<string, unknown>).projects as unknown[]
+                            : []);
+                    const checks = await Promise.all(projects.slice(0, 100).map(async candidate => {
+                        const project = candidate && typeof candidate === "object" ? candidate as Record<string, unknown> : {};
+                        const projectRef = typeof project.ref === "string" ? project.ref : null;
+                        if (!projectRef) return { project_ref: null, health: "invalid_project", backup: "unknown" };
+                        const [health, backups] = await Promise.all([
+                            http.get(`/v1/projects/${encodeURIComponent(projectRef)}/health`, { maxResponseBytes: 64 * 1024 }),
+                            http.get(`/v1/projects/${encodeURIComponent(projectRef)}/database/backups`, { maxResponseBytes: 128 * 1024 }),
+                        ]);
+                        return {
+                            project_ref: projectRef,
+                            health: health.ok ? "ok" : "unhealthy",
+                            backup: backups.ok ? "available" : "unavailable",
+                        };
+                    }));
+                    const failed = checks.filter(check => check.health !== "ok" || check.backup !== "available");
+                    return {
+                        content: [{ type: "text" as const, text: JSON.stringify({
+                            schema: "supacloud.platform-doctor.v1",
+                            ok: projectsResponse.ok && failed.length === 0,
+                            project_count: checks.length,
+                            failed_count: failed.length,
+                            checks,
+                            next: failed.length ? ["Inspect the project health and backup endpoints before upgrade"] : ["Platform is ready for the selected upgrade plan"],
+                        }, null, 2) }],
+                        isError: !projectsResponse.ok || failed.length > 0,
+                    };
+                }
                 case "metrics":
                     text = JSON.stringify((await http.get("/v1/monitor/system")).data, null, 2);
                     break;

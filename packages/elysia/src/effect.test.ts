@@ -56,6 +56,33 @@ test("uses bounded instance code, message and status only when the mapping opts 
   });
 });
 
+test("preserves public details from a mapped Effect failure", async () => {
+  await expect(runCompiledEffect(
+    Effect.fail({
+      _tag: "IntegrationNotConfigured",
+      code: "INTEGRATION_NOT_CONFIGURED",
+      message: "Integration is not configured",
+      status: 503,
+      details: { integration: "pdf_export", status: "not_configured" },
+    }),
+    {
+      required: true,
+      errors: [{
+        tag: "IntegrationNotConfigured",
+        status: 503,
+        code: "INTEGRATION_NOT_CONFIGURED",
+        codeFromError: true,
+        messageFromError: true,
+        statusFromError: true,
+      }],
+    },
+  )).rejects.toMatchObject({
+    status: 503,
+    code: "INTEGRATION_NOT_CONFIGURED",
+    details: { integration: "pdf_export", status: "not_configured" },
+  });
+});
+
 test("ignores out-of-range instance statuses", async () => {
   await expect(runCompiledEffect(
     Effect.fail({ _tag: "FA_ROUTE_FAILURE", code: "X", message: "x", status: 200 }),

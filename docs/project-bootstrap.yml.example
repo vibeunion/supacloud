@@ -1,0 +1,7 @@
+name: orders
+region: local
+domain: example.com
+# api_domain: api.example.com
+# auth_domain: auth.example.com
+# studio_domain: studio.example.com
+# environment: test

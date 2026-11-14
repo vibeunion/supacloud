@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/admin-v0.32.0...admin-v0.33.0) (2026-11-14)
+
+
+### Features
+
+* automate onboarding and environment configuration ([#2648](https://github.com/vibeunion/supacloud/issues/2648)) ([67b8623](https://github.com/vibeunion/supacloud/commit/67b862328d40be421218026dffa88a2921456830))
+
+
+### Bug Fixes
+
+* **model-tooling:** close adoption boundary gaps ([#2644](https://github.com/vibeunion/supacloud/issues/2644)) ([97ec1f3](https://github.com/vibeunion/supacloud/commit/97ec1f3e8400cee7327a06ba6628a67620e31941))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/admin-v0.31.0...admin-v0.32.0) (2026-11-10)
 
 

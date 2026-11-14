@@ -101,6 +101,7 @@ test("preview aliases preserve receipts and classify recovery as an explicit wri
     "preview-plan": "get_preview_plan", preview: "create_preview", previews: "list_previews",
     "preview-list": "list_previews", "preview-status": "get_preview",
     "preview-reconcile": "reconcile_preview", "preview-cleanup": "cleanup_preview",
+    "preview-pr": "preview_pull_request",
   } as const;
   for (const [alias, action] of Object.entries(aliases)) {
     const readOnly = ["preview-plan", "previews", "preview-list", "preview-status"].includes(alias);
@@ -164,6 +165,25 @@ test("preview creation verifies the source then posts once without claiming read
       configuration_id: configurationId, data_mode: "schema_only",
     } },
   ]);
+});
+
+test("pull request preview action uses a stable repository and PR identity", async () => {
+  const requests: string[] = [];
+  const response = {
+    action: "opened", preview_id: previewId, status: "ready", leftovers: [], receipt: preview("ready"),
+  };
+  await withServer(request => {
+    requests.push(`${request.method} ${new URL(request.url).pathname}`);
+    return Response.json(response, { status: 202 });
+  }, async http => {
+    const result = await register(http)({
+      action: "preview_pull_request", ...args,
+      pull_request_action: "opened", repository: "vibeunion/orders", pull_request_number: 42,
+      release_id: sourceRelease.release_id,
+    });
+    expect(output(result)).toMatchObject({ ok: true, action: "opened", preview_id: previewId, status: "ready" });
+  });
+  expect(requests).toEqual([`POST ${path}/preview-pull-requests`]);
 });
 
 test("preview reconciliation uses one explicit POST while status remains a read-only GET", async () => {

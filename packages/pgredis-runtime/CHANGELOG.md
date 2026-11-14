@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.15.1...pgredis-runtime-v0.15.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **elysia:** upgrade runtime to 2.0.0-rc.4 ([#2625](https://github.com/vibeunion/supacloud/issues/2625)) ([d07c4d6](https://github.com/vibeunion/supacloud/commit/d07c4d61e4fa6ebceab485e2e0455f7ed2479294))
+
 ## [0.15.1](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.15.0...pgredis-runtime-v0.15.1) (2026-11-11)
 
 

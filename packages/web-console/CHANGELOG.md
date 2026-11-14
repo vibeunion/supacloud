@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.58.0...web-console-v0.59.0) (2026-11-14)
+
+
+### Features
+
+* **delivery:** add Cloudflare-style optimization policy ([#2647](https://github.com/vibeunion/supacloud/issues/2647)) ([0c8b3e4](https://github.com/vibeunion/supacloud/commit/0c8b3e40514482bb59d4d6a94967dc46f96180db))
+
 ## [0.58.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.57.0...web-console-v0.58.0) (2026-11-12)
 
 

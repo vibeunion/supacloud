@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.40.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.4...supacloud-lite-v0.40.0) (2026-11-14)
+
+
+### Features
+
+* **lite:** support AVIF image transforms ([#2651](https://github.com/vibeunion/supacloud/issues/2651)) ([4860ea2](https://github.com/vibeunion/supacloud/commit/4860ea24d304940a40596c2a9cab58ddd9d2959b))
+
+
+### Bug Fixes
+
+* **db:** support ZenStack adapter 0.3 ([#2643](https://github.com/vibeunion/supacloud/issues/2643)) ([420e5b4](https://github.com/vibeunion/supacloud/commit/420e5b4eb9c43d3a2d07c421112d781716655673))
+* **deps:** align db adapter and compiler versions ([#2642](https://github.com/vibeunion/supacloud/issues/2642)) ([5f7c63a](https://github.com/vibeunion/supacloud/commit/5f7c63a32e2d85f0166f20c9a0073737ff153a47))
+* **elysia:** upgrade runtime to 2.0.0-rc.4 ([#2625](https://github.com/vibeunion/supacloud/issues/2625)) ([d07c4d6](https://github.com/vibeunion/supacloud/commit/d07c4d61e4fa6ebceab485e2e0455f7ed2479294))
+* **model-tooling:** close adoption boundary gaps ([#2644](https://github.com/vibeunion/supacloud/issues/2644)) ([97ec1f3](https://github.com/vibeunion/supacloud/commit/97ec1f3e8400cee7327a06ba6628a67620e31941))
+
 ## [0.39.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.39.3...supacloud-lite-v0.39.4) (2026-11-12)
 
 

@@ -48,6 +48,7 @@ import { featureScaffold } from "./app-feature";
 import { runLocalDevelopment } from "./app-local-dev";
 import { createVerificationPlan } from "./app-verification-plan";
 import { applyScaffoldWrites, planScaffoldWrites, scaffoldPath, ScaffoldError, type ScaffoldWrite } from "./app-scaffold-writes";
+import { readSecretGap } from "./configuration-tools";
 
 const REMOTE_APP_ACTIONS = {
     upload: "upload_release",
@@ -60,6 +61,7 @@ const REMOTE_APP_ACTIONS = {
     "preview-create": "create_preview",
     "preview-status": "get_preview",
     "preview-cleanup": "cleanup_preview",
+    "preview-pr": "preview_pull_request",
     transfer: "transfer_release",
     configure: "put_configuration",
     deploy: "deploy_release",
@@ -828,6 +830,15 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const doctor = doctorProject(root, outDir,
         { ...result.graph, ...(context ? { modules: context.modules } : {}), diagnostics: [] },
         result.upToDate, context?.diagnostics ?? result.diagnostics);
+    const secretGap = await readSecretGap(root, process.env.SUPACLOUD_ENV?.trim() ?? "");
+    if (secretGap.missing.length > 0) {
+        doctor.errors += 1;
+        doctor.diagnostics = [...(doctor.diagnostics ?? []), {
+            severity: "error",
+            code: "SUPACLOUD_SECRET_MISSING",
+            message: `Missing environment secrets: ${secretGap.missing.join(", ")}`,
+        }];
+    }
     const database = context ? null : checkAppDatabaseSources(root);
     if (database) {
         doctor.checks.push(database);
@@ -854,11 +865,15 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     if (args.format === "json") {
         return textResult(
             JSON.stringify({ ok: doctor.errors === 0, next, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts,
+                secretGap,
                 ...(scope ? { scope } : {}), ...doctor }, null, 2),
             doctor.errors > 0,
         );
     }
     const lines = doctor.checks.map((check) => formatDoctorCheck(check));
+    if (secretGap.required.length > 0) {
+        lines.push(`Environment secrets (${secretGap.environment}): ${secretGap.missing.length === 0 ? "ready" : `missing ${secretGap.missing.join(", ")}`}`);
+    }
     if (scope) lines.unshift(`TARGET ${scope.target}; omitted project diagnostics=${scope.omittedProjectDiagnostics}; generated drift remains project-wide`);
     for (const diagnostic of doctor.diagnostics ?? []) {
         lines.push(formatDiagnostic(diagnostic));
@@ -1761,7 +1776,12 @@ function formatWorkflowObservation(result: ToolResult, action: AppToolArguments[
                 ...list.previews.map(preview => `${preview.preview_id}  ${preview.status}  ${preview.resources.database_branch.branch_ref}`),
             ].join("\n"));
         }
-        if (["preview-plan", "preview-create", "preview-status", "preview-reconcile", "preview-cleanup"].includes(action)) {
+        if (action === "preview-pr") {
+            const status = typeof data.status === "string" ? data.status : "unknown";
+            const previewId = typeof data.preview_id === "string" ? data.preview_id : "unknown";
+            return textResult(`${label}: PR preview ${status}\nPreview: ${previewId}`);
+        }
+        if (["preview-plan", "preview-create", "preview-status", "preview-reconcile", "preview-cleanup", "preview-pr"].includes(action)) {
             const preview = parsePreviewReceipt(data.preview ?? data, identity);
             return textResult([
                 `${label}: ${preview.status}`,
@@ -1950,7 +1970,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "lens", "doctor", "fix",
                 "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "evidence", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
-                "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
+                "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup", "preview-pr",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "client", "command", "model-command", "app"]), "[init] minimal (default) is the compiler/Effect stack; client is @supabase/supabase-js only; command is the native-SQL reference; model-command adds ZenStack HTTP/worker commands; app is an alias of minimal"),
