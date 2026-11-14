@@ -23,6 +23,10 @@ describe('storage image transforms', () => {
       ok: true,
       value: { width: 8, height: 4, resize: 'fill', format: 'webp', quality: 80 },
     })
+    expect(parseImageTransform(new URLSearchParams('width=8&height=4&resize=fill&format=avif&quality=50'))).toEqual({
+      ok: true,
+      value: { width: 8, height: 4, resize: 'fill', format: 'avif', quality: 50 },
+    })
   })
 
   test('rejects cover and invalid transform parameters', () => {
@@ -63,7 +67,7 @@ describe('storage image transforms', () => {
     expect(await dimensions(heightOnly)).toEqual({ width: 8, height: 4 })
   })
 
-  test('supports origin, jpeg, png, and webp with scoped quality', async () => {
+  test('supports origin, jpeg, png, webp, and AVIF with scoped quality', async () => {
     const origin = await transformImage(sourcePng, parseOptions('resize=contain&format=origin'))
     expectSuccess(origin, 'image/png')
 
@@ -75,6 +79,15 @@ describe('storage image transforms', () => {
 
     const webp = await transformImage(sourcePng, parseOptions('resize=contain&format=webp&quality=80'))
     expectSuccess(webp, 'image/webp')
+
+    const avif = await transformImage(sourcePng, parseOptions('resize=contain&format=avif&quality=50'))
+    if (avif.ok) {
+      expect(avif.contentType).toBe('image/avif')
+      expect((await new Bun.Image(avif.bytes).metadata()).format).toBe('avif')
+    } else {
+      expect(avif.status).toBe(415)
+      expect(avif.error).toBe('UnsupportedImageFormat')
+    }
 
     const originWithQuality = await transformImage(sourcePng, parseOptions('resize=contain&format=origin&quality=80'))
     expect(originWithQuality.ok).toBe(false)
