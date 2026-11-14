@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.5](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.4...edge-runtime-v0.38.5) (2026-11-14)
+
+
+### Bug Fixes
+
+* **elysia:** upgrade runtime to 2.0.0-rc.4 ([#2625](https://github.com/vibeunion/supacloud/issues/2625)) ([d07c4d6](https://github.com/vibeunion/supacloud/commit/d07c4d61e4fa6ebceab485e2e0455f7ed2479294))
+
 ## [0.38.4](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.3...edge-runtime-v0.38.4) (2026-11-11)
 
 

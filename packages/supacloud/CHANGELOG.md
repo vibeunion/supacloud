@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.15](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.14...supacloud-v0.19.15) (2026-11-14)
+
+
+### Bug Fixes
+
+* **model-tooling:** close adoption boundary gaps ([#2644](https://github.com/vibeunion/supacloud/issues/2644)) ([97ec1f3](https://github.com/vibeunion/supacloud/commit/97ec1f3e8400cee7327a06ba6628a67620e31941))
+
 ## [0.19.14](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.13...supacloud-v0.19.14) (2026-11-12)
 
 
