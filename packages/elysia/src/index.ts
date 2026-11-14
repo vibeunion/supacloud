@@ -1271,6 +1271,7 @@ export function createModulePlugin<
   const supportedFields = new Set([
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
+    "effectMode",
     "effect",
     "directInvoker", "directInvokerFast", "executionMode",
     "command", "aspects", "aspectPipeline",
