@@ -2,4 +2,4 @@
 // Kept in its own module because a release-please generic extra-file rewrites
 // every annotated version in a file to the same value; one package per file
 // keeps independent releases from corrupting each other's tested pin.
-export const MIGRATION_APP_VERSION = "0.39.3"; // x-release-please-version
+export const MIGRATION_APP_VERSION = "0.39.4"; // x-release-please-version
