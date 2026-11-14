@@ -253,20 +253,20 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     const payload = result.data && typeof result.data === "object" && !Array.isArray(result.data)
       ? result.data as Record<string, unknown>
       : null;
-    if (!result.ok || !payload || payload.action !== lifecycle || typeof payload.preview_id !== "string"
-      || typeof payload.status !== "string" || !Array.isArray(payload.leftovers)) {
+    if (!result.ok || !payload || payload["action"] !== lifecycle || typeof payload["preview_id"] !== "string"
+      || typeof payload["status"] !== "string" || !Array.isArray(payload["leftovers"])) {
       return releaseControlFailure(operation, result.ok ? "INVALID_RESPONSE" : "HTTP_ERROR",
         result.transportError ? null : result.status, identity);
     }
-    const preview = payload.receipt === null || payload.receipt === undefined
+    const preview = payload["receipt"] === null || payload["receipt"] === undefined
       ? null
-      : receipt(payload.receipt, { ref, id, environment, previewId: payload.preview_id });
+      : receipt(payload["receipt"], { ref, id, environment, previewId: payload["preview_id"] as string });
     return releaseControlSuccess(operation, {
       ...identity,
       action: lifecycle,
-      preview_id: payload.preview_id,
-      status: payload.status,
-      leftovers: payload.leftovers.filter(value => typeof value === "string").slice(0, 64),
+      preview_id: payload["preview_id"],
+      status: payload["status"],
+      leftovers: (payload["leftovers"] as unknown[]).filter(value => typeof value === "string").slice(0, 64),
       receipt: preview,
     });
   }
