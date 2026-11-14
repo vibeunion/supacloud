@@ -27,6 +27,18 @@ type TimezoneProbe = EngineTimezoneProbe | DataApiTimezoneProbe
 
 const emptyWasmModule = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]))
 
+test('keeps bundled extensions compatible with the installed PGlite core', async () => {
+  const core: { version: string } = await Bun.file(
+    new URL('../node_modules/@electric-sql/pglite/package.json', import.meta.url),
+  ).json()
+  for (const name of ['pglite-pg_textsearch', 'pglite-pgmq', 'pglite-pgvector', 'pglite-postgis']) {
+    const extension: { peerDependencies: { '@electric-sql/pglite': string } } = await Bun.file(
+      new URL(`../node_modules/@electric-sql/${name}/package.json`, import.meta.url),
+    ).json()
+    expect(Bun.semver.satisfies(core.version, extension.peerDependencies['@electric-sql/pglite'])).toBe(true)
+  }
+})
+
 test('preserves standalone extension preparation errors and releases the data lock', async () => {
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-pglite-assets-'))
   const dataDir = join(projectDir, 'db')
