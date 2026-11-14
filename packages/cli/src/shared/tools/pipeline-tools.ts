@@ -40,9 +40,20 @@ async function readJson(path: string): Promise<Record<string, unknown>> {
 function workflow(provider: string, preview: boolean): string {
     if (provider !== "github") {
         return [
-            "# SupaCloud pipeline plan",
-            "# Configure the provider webhook with the generated deploy endpoint.",
-            "# Keep SUPACLOUD_DEPLOY_TOKEN in the provider secret store.",
+            "stages:",
+            "  - deploy",
+            "",
+            "supacloud_deploy:",
+            "  stage: deploy",
+            "  image: node:24",
+            "  rules:",
+            "    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'",
+            "  variables:",
+            "    SUPACLOUD_API_URL: $SUPACLOUD_API_URL",
+            "    SUPACLOUD_API_TOKEN: $SUPACLOUD_DEPLOY_TOKEN",
+            "    SUPACLOUD_PROJECT_REF: $SUPACLOUD_PROJECT_REF",
+            "  script:",
+            "    - npx @supacloud/cli deploy",
             "",
         ].join("\n");
     }
@@ -63,7 +74,7 @@ function workflow(provider: string, preview: boolean): string {
         "          --pull_request_number \${{ github.event.pull_request.number }}",
         "          --release_id \${{ vars.SUPACLOUD_RELEASE_ID }}",
     ].join("\n") : "";
-    return `name: SupaCloud deploy\n\non:\n${events}\n\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Deploy to SupaCloud\n        if: \${{ github.event_name == 'push' || github.event.action == '' }}\n        env:\n          SUPACLOUD_DEPLOY_TOKEN: \${{ secrets.SUPACLOUD_DEPLOY_TOKEN }}\n          SUPACLOUD_PROJECT_REF: \${{ secrets.SUPACLOUD_PROJECT_REF }}\n          SUPACLOUD_DEPLOYMENT_ID: \${{ secrets.SUPACLOUD_DEPLOYMENT_ID }}\n        run: npx @supacloud/cli deploy\n${previewSteps}`;
+    return `name: SupaCloud deploy\n\non:\n${events}\n\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Deploy to SupaCloud\n        if: \${{ github.event_name == 'push' || github.event.action == '' }}\n        env:\n          SUPACLOUD_API_URL: \${{ secrets.SUPACLOUD_API_URL }}\n          SUPACLOUD_API_TOKEN: \${{ secrets.SUPACLOUD_DEPLOY_TOKEN }}\n          SUPACLOUD_PROJECT_REF: \${{ secrets.SUPACLOUD_PROJECT_REF }}\n        run: npx @supacloud/cli deploy\n${previewSteps}`;
 }
 
 export async function connectPipeline(args: Record<string, unknown>, options: PipelineToolOptions = {}): Promise<ToolResult> {
@@ -79,14 +90,14 @@ export async function connectPipeline(args: Record<string, unknown>, options: Pi
     const outputDirectory = typeof frontend?.outputDirectory === "string" ? frontend.outputDirectory : "dist";
     const workflowPath = provider === "github"
         ? join(root, ".github", "workflows", "supacloud-deploy.yml")
-        : join(root, ".gitlab-ci.supacloud.yml");
+        : join(root, ".gitlab-ci.yml");
     const result = {
         schema: "supacloud.pipeline-connection.v1",
         provider,
         root,
         detected: { build_command: buildCommand, output_directory: outputDirectory },
         workflow: workflowPath,
-        secrets: ["SUPACLOUD_DEPLOY_TOKEN", "SUPACLOUD_PROJECT_REF", "SUPACLOUD_DEPLOYMENT_ID"],
+        secrets: ["SUPACLOUD_DEPLOY_TOKEN", "SUPACLOUD_API_URL", "SUPACLOUD_PROJECT_REF"],
         variables: args.preview === true
             ? ["SUPACLOUD_APPLICATION_ID", "SUPACLOUD_ENVIRONMENT_ID", "SUPACLOUD_RELEASE_ID"]
             : [],
@@ -100,6 +111,9 @@ export async function connectPipeline(args: Record<string, unknown>, options: Pi
         `workflow: ${workflowPath}`,
         "No files were changed. Re-run with --write after reviewing the generated workflow.",
     ].join("\n"));
+    if (provider === "gitlab" && existsSync(workflowPath)) {
+        throw new Error(`Refusing to overwrite existing GitLab workflow: ${workflowPath}`);
+    }
     await mkdir(resolve(workflowPath, ".."), { recursive: true });
     await writeFile(workflowPath, workflow(provider, args.preview === true), { encoding: "utf8", mode: 0o644 });
     return jsonResult({ ...result, written: true });

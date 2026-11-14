@@ -80,6 +80,19 @@ describe("configuration automation", () => {
         expect(JSON.parse(doctor.content[0].text)).toMatchObject({ schema: "supacloud.configuration.doctor.v1", environment: "test" });
     });
 
+    test("configuration doctor fails closed when no required context is configured", async () => {
+        const root = await workspace();
+        await writeFile(join(root, "supacloud.json"), "{}\n");
+        const tools = new Map<string, (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }>; isError?: boolean }>>();
+        registerConfigurationTools({ tool(name, _description, _schema, callback) { tools.set(name, callback as never); } }, { cwd: root });
+        const doctor = await tools.get("config")!({ action: "doctor", root, format: "json" });
+        expect(doctor.isError).toBe(true);
+        expect(JSON.parse(doctor.content[0].text)).toMatchObject({
+            ok: false,
+            missing: ["SUPACLOUD_API_TOKEN", "SUPACLOUD_API_URL", "SUPACLOUD_PROJECT_REF"],
+        });
+    });
+
     test("secret gap inspection reports names without reading values into output", async () => {
         const root = await workspace();
         await writeFile(join(root, "supacloud.json"), JSON.stringify({

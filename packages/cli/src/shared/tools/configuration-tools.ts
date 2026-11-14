@@ -12,6 +12,9 @@ export interface ConfigurationToolOptions {
     activeContext?: ResolvedContext;
 }
 
+const MANAGEMENT_CONFIGURATION_KEYS = ["SUPACLOUD_API_URL", "SUPACLOUD_API_TOKEN", "SUPACLOUD_PROJECT_REF"] as const;
+const APPLICATION_CONFIGURATION_KEYS = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPACLOUD_PROJECT_REF"] as const;
+
 export const onboardToolSchema: ToolSchema = {
     root: optional(Type.String(), "Repository or configuration root (default: current directory)"),
     profile: optional(stringEnum(["solo", "podman", "pigsty", "cluster"]), "Deployment profile (default: solo)"),
@@ -141,6 +144,12 @@ function configurationEntries(values: Record<string, string>): Array<Record<stri
     });
 }
 
+function requiredConfigurationKeys(activeContext?: ResolvedContext): readonly string[] {
+    return activeContext?.credentialScope === "project_application"
+        ? APPLICATION_CONFIGURATION_KEYS
+        : MANAGEMENT_CONFIGURATION_KEYS;
+}
+
 function parseSimpleYaml(content: string): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     let section: Record<string, unknown> | null = null;
@@ -255,13 +264,16 @@ async function runConfiguration(args: Record<string, unknown>, options: Configur
         ...Object.fromEntries(Object.entries(metadata).filter(([, value]) => typeof value === "string") as Array<[string, string]>),
         ...profileValues,
     };
-    const entries = configurationEntries(values);
+    const entries = configurationEntries(Object.fromEntries([
+        ...Object.entries(values),
+        ...requiredConfigurationKeys(options.activeContext).map(name => [name, values[name] ?? ""]),
+    ]));
     if (args.action === "explain") {
         const key = typeof args.key === "string" ? args.key.trim() : "";
         const selected = key ? entries.filter(entry => entry.name === key) : entries;
         return jsonResult({ schema: "supacloud.configuration.explain.v1", root, environment: environment || null, entries: selected });
     }
-    const missing = entries.filter(entry => entry.kind !== "secret" && entry.configured === false).map(entry => entry.name);
+    const missing = entries.filter(entry => entry.configured === false).map(entry => entry.name);
     const secrets = entries.filter(entry => entry.kind === "secret").map(entry => entry.name);
     const result = {
         schema: "supacloud.configuration.doctor.v1",
