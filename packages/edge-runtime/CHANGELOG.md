@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.6](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.5...edge-runtime-v0.38.6) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** adopt compatible Lite, SDK and console upgrades ([#2633](https://github.com/vibeunion/supacloud/issues/2633)) ([90cd99e](https://github.com/vibeunion/supacloud/commit/90cd99e1cbb3f9e9ca55aff56997982bdcbabb45))
+
 ## [0.38.5](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.4...edge-runtime-v0.38.5) (2026-11-14)
 
 

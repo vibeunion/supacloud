@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.4](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.3...supacloud-js-v0.48.4) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** adopt compatible Lite, SDK and console upgrades ([#2633](https://github.com/vibeunion/supacloud/issues/2633)) ([90cd99e](https://github.com/vibeunion/supacloud/commit/90cd99e1cbb3f9e9ca55aff56997982bdcbabb45))
+
 ## [0.48.3](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.2...supacloud-js-v0.48.3) (2026-11-11)
 
 
