@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "node:assert/strict";
 
 import { config } from "../../src/config";
 import {
+    buildTenantCorsOrigins,
     MAX_CUSTOM_GATEWAY_PATHS,
     makeCorsSubroute,
     makeCustomGatewayRoute,
@@ -121,6 +123,65 @@ describe("gateway route builders", () => {
         expect(subroute.routes[0].handle.at(-1)).toEqual({ handler: "static_response", status_code: 204 });
         expect(subroute.routes[0].match.some((matcher: any) => matcher.header?.Origin?.includes("https://app.example.com"))).toBe(true);
         expect(subroute.routes[0].match.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("preview-"))).toBe(true);
+    });
+
+    test("default tenant CORS accepts precise loopback origins for preflight and normal responses", () => {
+        const subroute = makeCorsSubroute(buildTenantCorsOrigins("loopback-test"));
+        ok(subroute);
+        const routes = subroute["routes"] as {
+            match: {
+                method?: string[];
+                header_regexp?: { Origin: { pattern: string } };
+            }[];
+            handle: {
+                handler: string;
+                status_code?: number;
+                response?: { set: Record<string, string[]> };
+            }[];
+            terminal?: boolean;
+        }[];
+        expect(routes).toHaveLength(2);
+
+        for (const [index, route] of routes.entries()) {
+            const pattern = route.match.find((matcher) => matcher.header_regexp)?.header_regexp?.Origin.pattern;
+            ok(pattern);
+            const originMatcher = new RegExp(pattern);
+            for (const protocol of ["http", "https"]) {
+                for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+                    for (const port of ["", ":3000", ":5173"]) {
+                        expect(originMatcher.test(`${protocol}://${host}${port}`)).toBe(true);
+                    }
+                }
+            }
+            for (const origin of [
+                "http://localhost.example.com:5173",
+                "http://127.0.0.1.example.com:5173",
+                "http://127.0.0.10:5173",
+                "http://[::10]:5173",
+                "http://[::ffff:127.0.0.1]:5173",
+                "http://[2001:db8::1]:5173",
+                "http://0.0.0.0:5173",
+                "http://192.168.1.10:5173",
+                "http://user@localhost:5173",
+                "http://localhost:5173/path",
+                "ftp://localhost:5173",
+                "ws://[::1]:5173",
+                "null",
+            ]) {
+                expect(originMatcher.test(origin)).toBe(false);
+            }
+
+            const headers = route.handle.find((handler) => handler.handler === "headers")?.response?.set;
+            expect(headers?.["Access-Control-Allow-Origin"]).toEqual(["{http.request.header.Origin}"]);
+            expect(headers?.["Access-Control-Allow-Credentials"]).toEqual(["true"]);
+            expect(route.match.every((matcher) => index === 0
+                ? matcher.method?.includes("OPTIONS")
+                : matcher.method === undefined)).toBe(true);
+            if (index === 0) {
+                expect(route.terminal).toBe(true);
+                expect(route.handle.at(-1)).toEqual({ handler: "static_response", status_code: 204 });
+            }
+        }
     });
 
     test("accepts the maximum bounded hosted route path count", () => {
