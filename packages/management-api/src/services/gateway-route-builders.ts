@@ -77,6 +77,7 @@ export const DEFAULT_CORS_ORIGINS = [
     "~^https?://.*\\.dbbaby\\.top$",
     "~^https?://localhost(:[0-9]+)?$",
     "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$",
+    "~^https?://\\[::1\\](:[0-9]+)?$",
 ];
 
 const WILDCARD_CORS_ORIGIN = "*";

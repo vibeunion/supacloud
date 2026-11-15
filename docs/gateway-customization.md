@@ -182,6 +182,22 @@ curl -X POST "$HOST/v1/projects/$REF/gateway/routes" \
 
 ## 网关配置（tier / CORS / JWT）
 
+### 本地开发 CORS
+
+使用默认 CORS 来源列表的 Caddy 受管路由，会在项目域名之外自动允许以下本机来源，
+无需逐个添加开发端口：
+
+- `http://localhost` 和 `https://localhost`
+- `http://127.0.0.1` 和 `https://127.0.0.1`
+- `http://[::1]` 和 `https://[::1]`（IPv6 loopback）
+
+以上来源均支持不带端口或任意端口，例如 `http://localhost:5173`、
+`http://[::1]:3000`。预检和正常响应使用相同的来源规则，匹配后返回具体 Origin
+并允许 credentials。本机规则不包含 `localhost.example.com`、其它 IP 或 `null` 来源。
+
+自定义路由使用自己的 `cors` 配置；Function 路由按
+[Function CORS 模式](edge-runtime-guide.md#function-cors)处理。
+
 ### 默认安全限流
 
 Caddy 默认在路径 rewrite/strip-prefix 之前执行四个互相隔离的 1 分钟滑动窗口。每个 zone
