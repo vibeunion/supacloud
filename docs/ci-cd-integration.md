@@ -114,6 +114,8 @@ curl -X PUT http://localhost:9090/v1/projects/my-project/frontend/deployments/ab
 
 ### 3. 自动部署流程
 
+Provider 回调由各自的 Webhook 签名或 Deploy Token 在路由内校验，不需要额外携带 SupaCloud Management API 的 Bearer Token。`/v1/webhooks/deploy` 和 `/v1/webhooks/callback` 是管理接口，仍必须携带 Deploy Token Bearer。
+
 ```
 GitHub Push Event
        │

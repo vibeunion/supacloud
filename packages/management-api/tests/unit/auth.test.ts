@@ -9,7 +9,9 @@ import {
 import {
   createAuthResolver,
   getAuthContext,
+  checkAuth,
   isInvitationAcceptanceRequest,
+  isPublicProviderWebhookRequest,
   isSameOriginStudioRequest,
   requireAdminAuth,
 } from "../../src/middleware/auth";
@@ -69,6 +71,30 @@ describe("Auth Middleware Logic", () => {
         role: "service_role",
       }),
     ).toEqual(["urocrsxqvrudgdgndiny"]);
+  });
+
+  test.each(["github", "gitlab", "gitee", "gitcode"])(
+    "allows the POST provider callback %s to reach its route-level verifier",
+    async (provider) => {
+      const request = new Request(`https://api.example.com/v1/webhooks/${provider}`, {
+        method: "POST",
+        body: "{}",
+      });
+      expect(isPublicProviderWebhookRequest(request)).toBe(true);
+      expect(await checkAuth(request)).toBeUndefined();
+    },
+  );
+
+  test.each([
+    ["GET", "/v1/webhooks/github"],
+    ["POST", "/v1/webhooks/github/extra"],
+    ["POST", "/v1/webhooks/deploy"],
+    ["POST", "/v1/webhooks/callback"],
+    ["POST", "/v1/projects/proj_1/webhooks/events"],
+  ])("keeps non-provider webhook paths behind management auth: %s %s", async (method, path) => {
+    const request = new Request(`https://api.example.com${path}`, { method, body: method === "POST" ? "{}" : undefined });
+    expect(isPublicProviderWebhookRequest(request)).toBe(false);
+    expect(await checkAuth(request)).toMatchObject({ status: 401 });
   });
 
   test("accepts a valid Studio cookie but rejects cross-origin cookie writes", async () => {

@@ -397,6 +397,19 @@ export async function getTaskOutputInvoker(request: Request, expectedRef?: strin
   return resolveTaskOutputInvoker(request, verifyProjectJwt, hasSupaOAuthDelegationHeaders(request), expectedRef);
 }
 
+const PUBLIC_PROVIDER_WEBHOOK_PATH = /^\/v1\/webhooks\/(?:github|gitlab|gitee|gitcode)\/?$/;
+
+/**
+ * Provider callbacks authenticate with their own webhook secret or deploy token
+ * inside the route handler. They must reach that verifier without also needing
+ * a SupaCloud management Bearer token. Keep the allowlist exact: deployment
+ * control endpoints under /v1/webhooks remain management-authenticated.
+ */
+export function isPublicProviderWebhookRequest(request: Request): boolean {
+  return request.method.toUpperCase() === "POST"
+    && PUBLIC_PROVIDER_WEBHOOK_PATH.test(new URL(request.url).pathname);
+}
+
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
   // GoTrue signs this runtime callback with Standard Webhooks, not a management
   // bearer token. The SMS handler verifies the project secret and replay ID.
@@ -404,6 +417,7 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     && /^\/v1\/projects\/[^/]+\/auth\/sms\/tencent\/?$/.test(new URL(request.url).pathname)) {
     return undefined;
   }
+  if (isPublicProviderWebhookRequest(request)) return undefined;
   if (await getTaskOutputInvoker(request)) return undefined;
   const auth = await getAuthContext(request);
   return "status" in auth ? auth : undefined;

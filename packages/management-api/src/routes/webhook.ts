@@ -138,16 +138,6 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const repoFullName = payload.repository.full_name;
       const gitUrl = payload.repository.clone_url;
 
-      // Auto-branching: create preview branches for non-base branch pushes.
-      let autoBranchResults: unknown = null;
-      try {
-        autoBranchResults = await processAutoBranchingFromPush(gitUrl, branch, commitSha);
-      } catch (e: unknown) {
-        logger.debug("[webhook/github] auto-branching check failed", {
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-
       const deployments = await findDeploymentsByGitUrl(gitUrl, branch);
 
       if (deployments.length === 0) {
@@ -159,6 +149,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       }
 
       const results = [];
+      let authenticatedDeployment = false;
 
       for (const deployment of deployments) {
         try {
@@ -188,6 +179,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
              results.push({ deployment_id: deployment.id, success: false, error: "Invalid webhook signature" });
              continue;
           }
+          authenticatedDeployment = true;
 
           const recordId = await frontendService.createDeploymentRecord(
             deployment.project_ref,
@@ -231,6 +223,19 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
             project_ref: deployment.project_ref,
             success: false,
             error: (error instanceof Error ? error.message : String(error)),
+          });
+        }
+      }
+
+      // Do not mutate project branch configuration until at least one matching
+      // deployment has passed its GitHub signature check.
+      let autoBranchResults: unknown = null;
+      if (authenticatedDeployment) {
+        try {
+          autoBranchResults = await processAutoBranchingFromPush(gitUrl, branch, commitSha);
+        } catch (e: unknown) {
+          logger.debug("[webhook/github] auto-branching check failed", {
+            error: e instanceof Error ? e.message : String(e),
           });
         }
       }
