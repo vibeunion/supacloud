@@ -245,7 +245,7 @@ The Web Console tracks the newest jointly compatible published SVAdmin line
 verified against npm on 2026-11-16:
 
 - `@svadmin/core` `0.84.0`
-- `@svadmin/ui` `0.131.1`
+- `@svadmin/ui` `0.131.2`
 - `@svadmin/elysia` `0.14.37`
 - `@svadmin/sveltekit` `0.13.35`
 - `@svadmin/ai-elements` `0.15.3`
