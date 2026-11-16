@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.7](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.6...edge-runtime-v0.38.7) (2026-11-16)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2658](https://github.com/vibeunion/supacloud/issues/2658)) ([352d4fd](https://github.com/vibeunion/supacloud/commit/352d4fd5ecfa7cbd7b8f449690d26d5ef2158f26))
+
 ## [0.38.6](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.5...edge-runtime-v0.38.6) (2026-11-15)
 
 
