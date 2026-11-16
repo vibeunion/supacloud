@@ -29,8 +29,15 @@ describe("Tencent Cloud SMS adapter", () => {
     })).toEqual({ phone: "+8613800138000", code: "654321" });
   });
 
+  test("normalizes GoTrue phone values that omit the leading plus", () => {
+    expect(parseTencentSmsHookPayload({
+      user: { phone: "8613800138000" },
+      sms: { otp: "123456" },
+    })).toEqual({ phone: "+8613800138000", code: "123456" });
+  });
+
   test("rejects malformed phone numbers and missing OTPs", () => {
-    expect(() => parseTencentSmsHookPayload({ user: { phone: "13800138000" }, sms: { otp: "123456" } })).toThrow("E.164");
+    expect(() => parseTencentSmsHookPayload({ user: { phone: "138001" }, sms: { otp: "123456" } })).toThrow("E.164");
     expect(() => parseTencentSmsHookPayload({ user: { phone: "+8613800138000" }, sms: { content: "No code" } })).toThrow("numeric OTP");
   });
 
