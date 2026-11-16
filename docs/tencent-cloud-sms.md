@@ -14,4 +14,6 @@ SupaCloud 的项目级 Auth 配置支持通过平台托管的腾讯云 SMS 适�
 
 平台适配器使用腾讯云 SMS `SendSms` API 的 TC3-HMAC-SHA256 签名。GoTrue Hook 请求必须通过 Standard Webhooks v1 签名校验；验证码从结构化 `otp`/`code` 字段读取，兼容只提供渲染短信内容的 GoTrue 版本。手机号必须是 E.164 格式，例如 `+8613800138000`。
 
+运行时回调 `POST /v1/projects/:ref/auth/sms/tencent` 使用项目级 Hook 签名和重放保护鉴权，不要求 GoTrue 额外携带 Management API Bearer Token，也不需要项目自建转接服务。签名缺失、无效、过期或使用其他项目的密钥时拒绝发送短信；配置读取、配置修改及测试发送接口仍要求管理权限。
+
 控制台的测试发送使用验证码 `123456`，只用于验证腾讯云账号、签名和模板配置。生产 OTP 的发送频率和重放保护仍由 GoTrue 与平台 Hook 校验负责。
