@@ -398,6 +398,12 @@ export async function getTaskOutputInvoker(request: Request, expectedRef?: strin
 }
 
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
+  // GoTrue signs this runtime callback with Standard Webhooks, not a management
+  // bearer token. The SMS handler verifies the project secret and replay ID.
+  if (request.method.toUpperCase() === "POST"
+    && /^\/v1\/projects\/[^/]+\/auth\/sms\/tencent\/?$/.test(new URL(request.url).pathname)) {
+    return undefined;
+  }
   if (await getTaskOutputInvoker(request)) return undefined;
   const auth = await getAuthContext(request);
   return "status" in auth ? auth : undefined;
