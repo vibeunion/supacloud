@@ -10,6 +10,7 @@ import {
   createTencentSmsHookSecret,
   parseTencentSmsHookPayload,
   sendTencentSms,
+  TencentSmsHookPayloadError,
   validateTencentSmsConfig,
 } from "../services/tencent-sms.service";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
@@ -116,8 +117,13 @@ async function readConfigResponse(ref: string) {
   });
 }
 
+export function buildSendSmsHookUri(apiBaseUrl: string, projectRef: string): string {
+  const base = apiBaseUrl.trim().replace(/\/+$/, "");
+  return `${base}/v1/projects/${encodeURIComponent(projectRef)}/auth/sms/tencent`;
+}
+
 function hookUri(ref: string): string {
-  return `${config.supacloudApiUrl.replace(/\/+$/, "")}/v1/projects/${encodeURIComponent(ref)}/auth/sms/tencent`;
+  return buildSendSmsHookUri(config.supacloudApiUrl, ref);
 }
 
 async function requireSmsProject(request: Request, ref: string) {
@@ -286,6 +292,10 @@ const runtimeRoute = new Elysia({ prefix: "/v1/projects/:ref/auth/sms" })
       if (error instanceof StandardWebhookVerificationError) {
         set.status = 401;
         return { code: "INVALID_AUTH_HOOK", message: "Invalid SMS hook signature" };
+      }
+      if (error instanceof TencentSmsHookPayloadError || error instanceof SyntaxError) {
+        set.status = 400;
+        return { code: "INVALID_SMS_HOOK_PAYLOAD", message: "SMS hook payload is invalid" };
       }
       set.status = 502;
       return { code: "SMS_PROVIDER_FAILED", message: "Unable to send the verification code" };
