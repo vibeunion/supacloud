@@ -258,8 +258,10 @@ describe("supabase bootstrap schema", () => {
     );
 
     for (const source of [runtimeMigration, scriptMigration]) {
-      expect(source).toContain("SELECT version::text, statements, name, checksum, inserted_at");
+      expect(source).toContain("SELECT version::bigint, statements, name, checksum, inserted_at");
       expect(source).toContain("canonical.checksum IS NULL");
+      expect(source).toContain("canonical.version::text = legacy.version::text");
+      expect(source).toContain("canonical.name = canonical.version::text");
       expect(source).not.toContain("SELECT version, version FROM public.schema_migrations");
     }
   });
@@ -393,6 +395,7 @@ describe("supabase bootstrap schema", () => {
     expect(prerequestBody).toContain("-v ON_ERROR_STOP=1");
     expect(prerequestBody).toContain("throw new Error(`psql exited with code");
     expect(prepareBody).toContain("await this.ensureTenantSchemaMigrations(ref);");
+    expect(prepareBody).toContain("await this.ensureOneTimeTokensAndGraphQL(ref);");
     expect(prepareBody).toContain("await this.ensurePostgrestPrerequest(");
     expect(prepareBody).toContain("jwtPolicy.thirdPartyJwtPolicy");
     expect(prepareBody).toContain("jwtPolicy.localJwtIssuer");

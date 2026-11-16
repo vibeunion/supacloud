@@ -433,14 +433,14 @@ BEGIN
         checksum = legacy.checksum,
         inserted_at = legacy.inserted_at
     FROM public.schema_migrations legacy
-    WHERE canonical.version = legacy.version::text
+    WHERE canonical.version::text = legacy.version::text
       AND canonical.checksum IS NULL
       AND COALESCE(cardinality(canonical.statements), 0) = 0
-      AND (canonical.name IS NULL OR canonical.name = canonical.version);
+      AND (canonical.name IS NULL OR canonical.name = canonical.version::text);
 
     INSERT INTO supabase_migrations.schema_migrations
       (version, statements, name, checksum, inserted_at)
-    SELECT version::text, statements, name, checksum, inserted_at
+    SELECT version::bigint, statements, name, checksum, inserted_at
     FROM public.schema_migrations
     ON CONFLICT (version) DO NOTHING;
   END IF;

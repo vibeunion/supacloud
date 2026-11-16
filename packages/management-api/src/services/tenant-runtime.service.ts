@@ -2676,6 +2676,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
     private async preparePostgrestRuntime(ref: string): Promise<void> {
         await this.ensurePostgrestBinary();
         await this.installSystemdTemplate("checked");
+        await this.ensureOneTimeTokensAndGraphQL(ref);
         await this.ensureTenantSchemaMigrations(ref);
         const jwtPolicy = await this.getTenantCredentials(ref);
         await this.ensurePostgrestPrerequest(
