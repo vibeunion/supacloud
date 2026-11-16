@@ -242,23 +242,19 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 ### Web Console upgrade baseline
 
 The Web Console tracks the newest jointly compatible published SVAdmin line
-verified against npm on 2026-11-05:
+verified against npm on 2026-11-13:
 
-- `@svadmin/core` `0.74.0`
-- `@svadmin/ui` `0.112.0`
-- `@svadmin/elysia` `0.14.25`
-- `@svadmin/sveltekit` `0.13.23`
-- `@svadmin/ai-elements` `0.13.10`
+- `@svadmin/core` `0.84.0`
+- `@svadmin/ui` `0.131.1`
+- `@svadmin/elysia` `0.14.37`
+- `@svadmin/sveltekit` `0.13.35`
+- `@svadmin/ai-elements` `0.15.3`
 
-The npm `latest` tags for Core (`0.75.0`), UI (`0.113.0`) and Elysia
-(`0.14.26`) are newer, but AI Elements `0.13.10` still requires Core
-`^0.74.0`. Keep the compatible set above until a matching AI Elements release
-is published. The source releases Core `0.76.0`, UI `0.114.0`, Elysia
-`0.14.27`, SvelteKit `0.13.25` and AI Elements `0.14.0` were not available
-on npm at verification time. Do not substitute local source packages or widen
-peer ranges to bypass this publication gap. Pin the transitive
-`@svadmin/devtools` dependency to `0.6.3`: UI allows `^0.6.3`, but `0.6.4`
-requires Core `^0.75.0`.
+These packages form one compatible set: UI, Elysia, SvelteKit and AI Elements
+declare `@svadmin/core` peer ranges satisfied by `0.84.0`. The Console pins the
+transitive `@svadmin/devtools` dependency to `0.6.15`, matching the UI release.
+Do not substitute local source packages or widen peer ranges to bypass a
+publication gap.
 
 Core 0.70 removed `useRelation`, `UseRelationOptions`, `appendTenantCacheKey`
 and `queryKeyMatchesTenant`; the Console does not use these retired APIs. Its
