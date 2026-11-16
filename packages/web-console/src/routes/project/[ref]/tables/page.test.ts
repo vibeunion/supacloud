@@ -219,9 +219,9 @@ describe("database tables column visibility", () => {
     const packageJson: unknown = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.131.1" } });
-    expect(lockSource).toContain('"@svadmin/ui": "0.131.1"');
-    expect(lockSource).toContain('"@svadmin/ui@0.131.1"');
+    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.131.2" } });
+    expect(lockSource).toContain('"@svadmin/ui": "0.131.2"');
+    expect(lockSource).toContain('"@svadmin/ui@0.131.2"');
   });
 
   test("keeps every installed SVAdmin adapter compatible with the shared Core", async () => {
