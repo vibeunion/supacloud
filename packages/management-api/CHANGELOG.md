@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.2...management-api-v0.137.3) (2026-11-16)
+
+
+### Bug Fixes
+
+* **webhooks:** allow provider callbacks through auth guard ([#2662](https://github.com/vibeunion/supacloud/issues/2662)) ([cc32dad](https://github.com/vibeunion/supacloud/commit/cc32dad02cfd2ff8be3bdfab69ba73189496e350))
+
 ## [0.137.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.1...management-api-v0.137.2) (2026-11-16)
 
 
