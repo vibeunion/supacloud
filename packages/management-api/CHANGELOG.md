@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.1...management-api-v0.137.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **auth:** accept signed GoTrue SMS callbacks without bearer tokens ([#2655](https://github.com/vibeunion/supacloud/issues/2655)) ([08cd876](https://github.com/vibeunion/supacloud/commit/08cd876bafb796a86a5e251d500442e597a122a6))
+
 ## [0.137.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.0...management-api-v0.137.1) (2026-11-15)
 
 

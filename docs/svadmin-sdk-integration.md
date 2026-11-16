@@ -242,7 +242,7 @@ SMTP, hooks and other unrelated forms remain outside this scoped migration.
 ### Web Console upgrade baseline
 
 The Web Console tracks the newest jointly compatible published SVAdmin line
-verified against npm on 2026-11-13:
+verified against npm on 2026-11-16:
 
 - `@svadmin/core` `0.84.0`
 - `@svadmin/ui` `0.131.1`
