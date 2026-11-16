@@ -6,6 +6,8 @@ const TENCENT_SMS_ACTION = "SendSms";
 const TENCENT_SMS_VERSION = "2021-01-11";
 const TENCENT_SMS_TIMEOUT_MS = 5_000;
 const E164_PHONE_PATTERN = /^\+[1-9]\d{7,14}$/;
+// GoTrue validateE164Format runs after formatPhoneNumber, which deletes "+".
+const GOTRUE_PHONE_DIGITS_PATTERN = /^[1-9]\d{1,14}$/;
 const OTP_PATTERN = /^\d{4,8}$/;
 const OTP_VALIDITY_MINUTES_MIN = 1;
 const OTP_VALIDITY_MINUTES_MAX = 60;
@@ -28,6 +30,13 @@ export type TencentSmsHookPayload = {
   phone: string;
   code: string;
 };
+
+export class TencentSmsHookPayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TencentSmsHookPayloadError";
+  }
+}
 
 type RecordValue = Record<string, unknown>;
 
@@ -114,11 +123,30 @@ function codeFromContent(value: unknown): string | null {
   return candidates.length === 1 && OTP_PATTERN.test(candidates[0] ?? "") ? candidates[0] ?? null : null;
 }
 
+function normalizeGoTruePhone(value: string | null): string | null {
+  if (!value) return null;
+  // supabase/auth v2.197 internal/api/phone.go formatPhoneNumber strips "+"
+  // before the Send SMS Hook. sms.phone is that stripped destination.
+  const digits = value.startsWith("+") ? value.slice(1) : value;
+  if (!GOTRUE_PHONE_DIGITS_PATTERN.test(digits)) return null;
+  const e164 = `+${digits}`;
+  return E164_PHONE_PATTERN.test(e164) ? e164 : null;
+}
+
 export function parseTencentSmsHookPayload(payload: unknown): TencentSmsHookPayload {
   const root = recordValue(payload);
   const user = recordValue(root.user);
   const sms = recordValue(root.sms);
-  const phone = stringValue(sms.phone) ?? stringValue(user.phone) ?? stringValue(root.phone);
+  // sms.phone is the OTP destination, including a phone-change number.
+  // Do not fall back to user.phone when it is present but not dialable.
+  const explicitDestination = stringValue(sms.phone);
+  const phone = explicitDestination
+    ? normalizeGoTruePhone(explicitDestination)
+    : (
+      normalizeGoTruePhone(stringValue(user.new_phone))
+      ?? normalizeGoTruePhone(stringValue(user.phone))
+      ?? normalizeGoTruePhone(stringValue(root.phone))
+    );
   const code = extractCode(sms.otp)
     ?? extractCode(sms.code)
     ?? extractCode(root.otp)
@@ -126,10 +154,10 @@ export function parseTencentSmsHookPayload(payload: unknown): TencentSmsHookPayl
     ?? codeFromContent(sms.content)
     ?? codeFromContent(sms.message)
     ?? codeFromContent(root.content);
-  if (!phone || !E164_PHONE_PATTERN.test(phone)) {
-    throw new Error("Tencent SMS hook payload must contain an E.164 phone number");
+  if (!phone) {
+    throw new TencentSmsHookPayloadError("Tencent SMS hook payload must contain an E.164 phone number");
   }
-  if (!code) throw new Error("Tencent SMS hook payload must contain a numeric OTP");
+  if (!code) throw new TencentSmsHookPayloadError("Tencent SMS hook payload must contain a numeric OTP");
   return { phone, code };
 }
 

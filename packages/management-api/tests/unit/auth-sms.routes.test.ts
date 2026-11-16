@@ -49,7 +49,7 @@ mock.module("../../src/services/auth-runtime.service", () => ({
 }));
 
 const { checkAuth } = await import("../../src/middleware/auth");
-const { authSmsRoutes } = await import("../../src/routes/auth-sms");
+const { authSmsRoutes, buildSendSmsHookUri } = await import("../../src/routes/auth-sms");
 // Exercise the real management guard before the real SMS route, as index.ts does.
 const app = new Elysia()
   .onBeforeHandle(async ({ request, set }) => {
@@ -61,7 +61,11 @@ const app = new Elysia()
   })
   .use(authSmsRoutes);
 
-const smsBody = JSON.stringify({ user: { phone: "+8613800138000" }, sms: { otp: "123456" } });
+const goTruePhone = "8613800138000";
+const smsBody = JSON.stringify({
+  user: { phone: goTruePhone },
+  sms: { otp: "123456", phone: goTruePhone },
+});
 
 function hookRequest(options: {
   path?: string;
@@ -101,8 +105,43 @@ describe("GoTrue SMS hook authentication through the management guard", () => {
     expect(readRequiredValue).toHaveBeenCalledWith(projectRef, "auth-hook", "send_sms_hook");
     expect(sendTencentSms).toHaveBeenCalledTimes(1);
     expect(sendTencentSms).toHaveBeenCalledWith(expect.objectContaining({
-      phone: "+8613800138000", code: "123456",
+      phone: `+${goTruePhone}`, code: "123456",
     }));
+  });
+
+  test("sends a phone-change OTP to sms.phone", async () => {
+    const response = await app.handle(hookRequest({ body: JSON.stringify({
+      user: { phone: goTruePhone, new_phone: "8613900139000" },
+      sms: { otp: "654321", phone: "8613900139000" },
+    }) }));
+    expect(response.status).toBe(200);
+    expect(sendTencentSms).toHaveBeenCalledWith(expect.objectContaining({
+      phone: "+8613900139000", code: "654321",
+    }));
+  });
+
+  test("returns 400 for a malformed GoTrue phone instead of 502", async () => {
+    const response = await app.handle(hookRequest({ body: JSON.stringify({
+      user: { phone: goTruePhone },
+      sms: { otp: "123456", phone: "012345678901" },
+    }) }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_SMS_HOOK_PAYLOAD" });
+    expect(sendTencentSms).not.toHaveBeenCalled();
+  });
+
+  test("returns 502 when Tencent rejects a valid hook payload", async () => {
+    sendTencentSms.mockRejectedValueOnce(new Error("provider rejected"));
+    const response = await app.handle(hookRequest());
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ code: "SMS_PROVIDER_FAILED" });
+  });
+
+  test("registers the management API Send SMS Hook URL", () => {
+    expect(buildSendSmsHookUri("https://api.example.com/", projectRef))
+      .toBe(`https://api.example.com/v1/projects/${projectRef}/auth/sms/tencent`);
+    expect(buildSendSmsHookUri("https://api.example.com", "a/b"))
+      .toBe("https://api.example.com/v1/projects/a%2Fb/auth/sms/tencent");
   });
 
   test("verifies a signed runtime probe without sending SMS", async () => {

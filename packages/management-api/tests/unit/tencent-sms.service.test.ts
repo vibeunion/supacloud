@@ -15,7 +15,21 @@ const config = validateTencentSmsConfig({
 });
 
 describe("Tencent Cloud SMS adapter", () => {
-  test("parses a structured GoTrue SMS hook payload", () => {
+  test("parses a GoTrue v2.197 send-sms payload that omits the leading plus", () => {
+    expect(parseTencentSmsHookPayload({
+      user: { phone: "8613800138000" },
+      sms: { otp: "123456", phone: "8613800138000" },
+    })).toEqual({ phone: "+8613800138000", code: "123456" });
+  });
+
+  test("uses sms.phone as the phone-change destination", () => {
+    expect(parseTencentSmsHookPayload({
+      user: { phone: "8613800138000", new_phone: "8613900139000" },
+      sms: { otp: "654321", phone: "8613900139000" },
+    })).toEqual({ phone: "+8613900139000", code: "654321" });
+  });
+
+  test("parses a structured payload that already includes E.164", () => {
     expect(parseTencentSmsHookPayload({
       user: { phone: "+8613800138000" },
       sms: { action: "signup", otp: "123456" },
@@ -30,7 +44,14 @@ describe("Tencent Cloud SMS adapter", () => {
   });
 
   test("rejects malformed phone numbers and missing OTPs", () => {
-    expect(() => parseTencentSmsHookPayload({ user: { phone: "13800138000" }, sms: { otp: "123456" } })).toThrow("E.164");
+    expect(() => parseTencentSmsHookPayload({
+      user: { phone: "8613800138000" },
+      sms: { otp: "123456", phone: "012345678901" },
+    })).toThrow("E.164");
+    expect(() => parseTencentSmsHookPayload({
+      user: { phone: "+8613800138000" },
+      sms: { phone: "1234567", otp: "123456" },
+    })).toThrow("E.164");
     expect(() => parseTencentSmsHookPayload({ user: { phone: "+8613800138000" }, sms: { content: "No code" } })).toThrow("numeric OTP");
   });
 

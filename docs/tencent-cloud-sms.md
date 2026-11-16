@@ -12,8 +12,12 @@ SupaCloud 的项目级 Auth 配置支持通过平台托管的腾讯云 SMS 适�
 
 凭据保存于项目级加密控制密钥，不会写入公开的 Auth 配置。保存腾讯云配置后，平台会为该租户启用 GoTrue `send_sms_hook`，并将 Hook 指向 Management API 的平台适配器。停用 Provider 会关闭租户的手机号 OTP，但保留已保存的凭据，方便重新启用。
 
-平台适配器使用腾讯云 SMS `SendSms` API 的 TC3-HMAC-SHA256 签名。GoTrue Hook 请求必须通过 Standard Webhooks v1 签名校验；验证码从结构化 `otp`/`code` 字段读取，兼容只提供渲染短信内容的 GoTrue 版本。手机号必须是 E.164 格式，例如 `+8613800138000`。
+平台适配器使用腾讯云 SMS `SendSms` API 的 TC3-HMAC-SHA256 签名。GoTrue Hook 请求必须通过 Standard Webhooks v1 签名校验；验证码从结构化 `otp`/`code` 字段读取，兼容只提供渲染短信内容的 GoTrue 版本。
 
 运行时回调 `POST /v1/projects/:ref/auth/sms/tencent` 使用项目级 Hook 签名和重放保护鉴权，不要求 GoTrue 额外携带 Management API Bearer Token，也不需要项目自建转接服务。签名缺失、无效、过期或使用其他项目的密钥时拒绝发送短信；配置读取、配置修改及测试发送接口仍要求管理权限。
 
 控制台的测试发送使用验证码 `123456`，只用于验证腾讯云账号、签名和模板配置。生产 OTP 的发送频率和重放保护仍由 GoTrue 与平台 Hook 校验负责。
+
+## Send SMS Hook contract
+
+GoTrue v2.197 `formatPhoneNumber` removes the leading `+` before `POST /v1/projects/:ref/auth/sms/tencent`. The destination is `sms.phone` (for example `8613800138000` on a phone change, not the previous `user.phone`). The adapter restores E.164 (`+8613800138000`) and sends that value to Tencent Cloud. A signed valid payload returns HTTP 200 and `{}`. A malformed phone or OTP returns HTTP 400. HTTP 502 is only the Tencent Cloud rejection, not the response for a reachable hook that received a valid GoTrue payload. The hook URI stored for `GOTRUE_HOOK_SEND_SMS_URI` is `{SUPACLOUD_API_URL}/v1/projects/{ref}/auth/sms/tencent`.
