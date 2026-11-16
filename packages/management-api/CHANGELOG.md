@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.4](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.3...management-api-v0.137.4) (2026-11-16)
+
+
+### Bug Fixes
+
+* **gateway:** isolate Caddy cache paths during validation ([#2664](https://github.com/vibeunion/supacloud/issues/2664)) ([aa025a8](https://github.com/vibeunion/supacloud/commit/aa025a838e0ead009d3b3942908bf30ae6ed6a45))
+
 ## [0.137.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.2...management-api-v0.137.3) (2026-11-16)
 
 
