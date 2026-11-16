@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.7](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.6...edge-runtime-v0.38.7) (2026-11-16)
+
+
+### Tests
+
+* **edge-runtime:** stabilize live heap sampling fixtures ([#2659](https://github.com/vibeunion/supacloud/issues/2659)) ([117c572](https://github.com/vibeunion/supacloud/commit/117c5727cc0a8f2cac4205bd71f710b5bbdc0e15)); production sampling behavior and budgets are unchanged.
+
 ## [0.38.6](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.5...edge-runtime-v0.38.6) (2026-11-15)
 
 
