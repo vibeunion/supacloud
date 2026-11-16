@@ -118,7 +118,8 @@ export function parseTencentSmsHookPayload(payload: unknown): TencentSmsHookPayl
   const root = recordValue(payload);
   const user = recordValue(root.user);
   const sms = recordValue(root.sms);
-  const phone = stringValue(sms.phone) ?? stringValue(user.phone) ?? stringValue(root.phone);
+  const rawPhone = stringValue(sms.phone) ?? stringValue(user.phone) ?? stringValue(root.phone);
+  const phone = rawPhone && rawPhone.startsWith("+") ? rawPhone : rawPhone && /^\d{8,15}$/.test(rawPhone) ? `+${rawPhone}` : rawPhone;
   const code = extractCode(sms.otp)
     ?? extractCode(sms.code)
     ?? extractCode(root.otp)
