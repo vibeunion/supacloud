@@ -30,6 +30,34 @@ function recordOf(candidateValue: unknown): Record<string, unknown> | undefined 
         : undefined;
 }
 
+/**
+ * Caddy's Badger-backed cache opens an exclusive directory lock. Validation
+ * and isolated startup checks must never point at the live gateway cache,
+ * because the production Caddy process may be holding that lock.
+ */
+export function isolateCaddyCachePaths(candidateConfig: unknown, cacheRoot: string): Record<string, unknown> {
+    const isolatedConfig = structuredClone(candidateConfig) as Record<string, unknown>;
+    let cacheIndex = 0;
+    const visit = (value: unknown): void => {
+        if (Array.isArray(value)) {
+            value.forEach((entry) => visit(entry));
+            return;
+        }
+        const record = recordOf(value);
+        if (!record) return;
+        for (const [childKey, childValue] of Object.entries(record)) {
+            if (childKey === "path" && typeof childValue === "string" && childValue.includes("http-cache")) {
+                record[childKey] = join(cacheRoot, String(cacheIndex));
+                cacheIndex += 1;
+            } else {
+                visit(childValue);
+            }
+        }
+    };
+    visit(isolatedConfig);
+    return isolatedConfig;
+}
+
 function collectCaddyIds(caddyNode: unknown, location: string, seen: Map<string, string>): void {
     if (Array.isArray(caddyNode)) {
         caddyNode.forEach((entry, index) => collectCaddyIds(entry, `${location}/${index}`, seen));
@@ -52,7 +80,7 @@ export function assertUniqueCaddyIds(candidateConfig: unknown): void {
 }
 
 function isolatedStartupConfig(candidateConfig: unknown, storageRoot: string): Record<string, unknown> {
-    const isolatedConfig = structuredClone(candidateConfig) as Record<string, unknown>;
+    const isolatedConfig = isolateCaddyCachePaths(candidateConfig, join(storageRoot, "http-cache"));
     isolatedConfig["admin"] = { disabled: true };
     isolatedConfig["storage"] = { module: "file_system", root: storageRoot };
 

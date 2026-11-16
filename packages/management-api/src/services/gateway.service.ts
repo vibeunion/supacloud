@@ -18,7 +18,7 @@ import {
     DEFAULT_DELIVERY_OPTIMIZATION,
     type DeliveryCacheMode,
 } from "./delivery-optimization";
-import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
+import { assertUniqueCaddyIds, isolateCaddyCachePaths, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
     FRONTEND_RELEASE_POINTER_PATH,
@@ -973,10 +973,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
             return;
         }
 
-        const result = await $`${config.caddyBinaryPath} validate --config ${candidatePath}`.nothrow().quiet();
-        if (result.exitCode !== 0) {
-            const detail = result.stderr.toString() || result.stdout.toString();
-            throw new Error(`Caddy config validation failed: ${detail.slice(0, 1000)}`);
+        const validationRoot = await fs.mkdtemp(`${candidatePath}.validation-`);
+        const validationPath = path.join(validationRoot, "config.json");
+        try {
+            await fs.writeFile(validationPath, JSON.stringify(
+                isolateCaddyCachePaths(candidateConfig, path.join(validationRoot, "http-cache")),
+            ));
+            const result = await $`${config.caddyBinaryPath} validate --config ${validationPath}`.nothrow().quiet();
+            if (result.exitCode !== 0) {
+                const detail = result.stderr.toString() || result.stdout.toString();
+                throw new Error(`Caddy config validation failed: ${detail.slice(0, 1000)}`);
+            }
+        } finally {
+            await fs.rm(validationRoot, { recursive: true, force: true });
         }
         await runCaddyStartupPreflight(config.caddyBinaryPath, candidatePath, candidateConfig);
     }
