@@ -20,15 +20,19 @@ afterEach(async () => {
   else process.env.EDGE_WORKER_HEAP_BUDGET_BYTES = originalHeapBudget;
 });
 
-async function projectFixture(retainMebibytes: number) {
+async function projectFixture(retainedBatches: number) {
   const projectRoot = await mkdtemp(join(homedir(), ".supacloud-memory-sampling-"));
   roots.push(projectRoot);
   await Bun.write(join(projectRoot, "fn.ts"), `
     const retained: unknown[] = [];
     export default () => {
-      for (let index = 0; index < ${retainMebibytes}; index++) {
-        retained.push(new Uint8Array(1024 * 1024).fill(7));
+      for (let index = 0; index < ${retainedBatches}; index++) {
+        // Retain JS objects: typed-array backing stores are external memory,
+        // while this regression observes the worker's live JS heap.
+        retained.push(Array.from({ length: 32 * 1024 }, (_, value) => ({ value })));
       }
+      // Remove unrelated import/request garbage before comparing live samples.
+      Bun.gc(true);
       return new Response("ok");
     };
   `);
@@ -63,7 +67,7 @@ describe("WorkerPool heap sampling", () => {
     try {
       const first = await reportHeap(pool, fixture);
       expect(first).toBeGreaterThan(0);
-      // A second execution retains 4MiB more. Inside the sampling window the
+      // A second execution retains more objects. Inside the sampling window the
       // pool must keep reporting the previous sample rather than paying for
       // another full heap walk.
       const second = await reportHeap(pool, fixture);
@@ -164,17 +168,17 @@ describe("WorkerPool heap sampling", () => {
 
   test("preheat forces a fresh sample within a warm sampling window", async () => {
     process.env.EDGE_WORKER_MEMORY_SAMPLE_INTERVAL_MS = "600000";
-    process.env.EDGE_WORKER_HEAP_BUDGET_BYTES = String(128 * 1024 ** 2);
+    process.env.EDGE_WORKER_HEAP_BUDGET_BYTES = String(64 * 1024 ** 2);
     const fixture = await projectFixture(0);
     const pool = new WorkerPool({ size: 1, requestTimeout: 10_000, smol: true });
     pools.push(pool);
     const first = await reportHeap(pool, fixture);
     expect(first).toBeGreaterThan(0);
-    expect(first).toBeLessThan(128 * 1024 ** 2);
+    expect(first).toBeLessThan(64 * 1024 ** 2);
     const file = join(fixture.projectRoot, "large.ts");
     await Bun.write(file, `
-      const retained = new Array(32 * 1024 * 1024).fill(7);
-      export default () => new Response(String(retained.length));
+      const retained = Array.from({ length: 2 * 1024 * 1024 }, (_, value) => ({ value }));
+      export default () => new Response(String(retained.at(-1).value));
     `);
     expect(await pool.preheat("large", file, fixture.projectRoot, {}, {
       projectRef: "test-project", bytecode: "off",
