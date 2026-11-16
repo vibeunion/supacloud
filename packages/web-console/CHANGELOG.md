@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.1...web-console-v0.59.2) (2026-11-16)
+
+
+### Miscellaneous Chores
+
+* **web-console:** upgrade svadmin to latest compatible set ([#2656](https://github.com/vibeunion/supacloud/issues/2656)) ([70a42b4](https://github.com/vibeunion/supacloud/commit/70a42b4d48a02e52abaec52fd80825b1fdae6457))
+
 ## [0.59.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.0...web-console-v0.59.1) (2026-11-15)
 
 
