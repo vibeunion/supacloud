@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.0...management-api-v0.137.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **gateway:** allow IPv6 loopback CORS by default ([#2653](https://github.com/vibeunion/supacloud/issues/2653)) ([9954791](https://github.com/vibeunion/supacloud/commit/9954791cd753fb545fe45fbf82ea322964872dba))
+
 ## [0.137.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.136.0...management-api-v0.137.0) (2026-11-14)
 
 
