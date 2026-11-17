@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.40.3...supacloud-lite-v0.41.0) (2026-11-17)
+
+
+### Features
+
+* **lite:** add local CAPTCHA for public OTP ([#2679](https://github.com/vibeunion/supacloud/issues/2679)) ([5ab4ad7](https://github.com/vibeunion/supacloud/commit/5ab4ad7d6e300531ca94a042da70e475e73fa6e8))
+
 ## [0.40.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.40.2...supacloud-lite-v0.40.3) (2026-11-17)
 
 

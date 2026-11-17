@@ -694,6 +694,23 @@ When bound to loopback, Lite enables a local SMS inbox compatible with `signInWi
 
 Phone numbers must use E.164. SMS codes are stored as domain-separated keyed HMACs, are single-use, burn after five wrong attempts, and are limited by trusted connection IP plus a keyed phone fingerprint, with a persistent 60-second per-phone send cooldown by default. Provider failures are sanitized and never log the phone, code, SMS body, or raw provider response.
 
+For a self-hosted anti-bot gate, enable the built-in local CAPTCHA before public
+OTP issuance:
+
+```toml
+[auth.captcha]
+provider = "local"
+challenge_ttl = "3m"
+max_attempts = 5
+```
+
+Clients fetch `GET /auth/v1/captcha/challenge`, display the returned image, and
+pass `<challenge-id>.<answer>` as Supabase Auth's `options.captchaToken` for
+`signUp`, `signInWithOtp`, or `resetPasswordForEmail`. Challenges are bound to
+the request source, expire automatically, allow only a small number of failed
+attempts, and are consumed once. The provider is disabled by default and does
+not require hCaptcha, Turnstile, or another overseas service.
+
 `signInWithSSO()` can use a configured OAuth/OIDC provider. Pass the provider
 name as `provider_id`, or configure `sso_domains = ["example.com"]` under
 `[auth.external.<provider>]` for domain-based resolution:
