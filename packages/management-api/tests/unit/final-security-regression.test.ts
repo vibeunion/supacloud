@@ -11,6 +11,7 @@ import {
   edgeFunctionService,
 } from "../../src/services/edge-function.service";
 import { runtimeEnvService } from "../../src/services/runtime-env.service";
+import { runtimeCacheService } from "../../src/services/runtime-cache.service";
 import { restoreLogicalBackup } from "../../src/services/logical-backup.service";
 import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
 import { decryptSecretIfNeeded, isEncryptedSecret } from "../../src/utils/secret-crypto";
@@ -450,6 +451,50 @@ describe("final security regressions", () => {
       ]);
     } finally {
       getSecretsSpy.mockRestore();
+    }
+  });
+
+  test("function secret writes invalidate Edge Runtime env cache", async () => {
+    const upsertSecretsSpy = spyOn(projectService, "upsertSecrets").mockResolvedValue(true);
+    const invalidateSpy = spyOn(runtimeCacheService, "invalidateProjectRuntimeEnv").mockResolvedValue(true);
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/hello/secrets", {
+        method: "POST",
+        headers: jsonMasterHeaders,
+        body: JSON.stringify([{ name: "DATABASE_URL", value: "postgres://tenant" }]),
+      });
+
+      expect(response.status).toBe(200);
+      expect(upsertSecretsSpy).toHaveBeenCalledWith("proj_1", [
+        { name: "EDGEFN_HELLO_DATABASE_URL", value: "postgres://tenant" },
+      ]);
+      expect(invalidateSpy).toHaveBeenCalledWith("proj_1");
+    } finally {
+      upsertSecretsSpy.mockRestore();
+      invalidateSpy.mockRestore();
+    }
+  });
+
+  test("function secret deletes invalidate Edge Runtime env cache", async () => {
+    const deleteSecretSpy = spyOn(projectService, "deleteSecret").mockResolvedValue(true);
+    const invalidateSpy = spyOn(runtimeCacheService, "invalidateProjectRuntimeEnv").mockResolvedValue(true);
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/hello/secrets", {
+        method: "DELETE",
+        headers: jsonMasterHeaders,
+        body: JSON.stringify(["DATABASE_URL"]),
+      });
+
+      expect(response.status).toBe(200);
+      expect(deleteSecretSpy).toHaveBeenCalledWith("proj_1", "EDGEFN_HELLO_DATABASE_URL");
+      expect(invalidateSpy).toHaveBeenCalledWith("proj_1");
+    } finally {
+      deleteSecretSpy.mockRestore();
+      invalidateSpy.mockRestore();
     }
   });
 
