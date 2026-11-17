@@ -14,6 +14,7 @@ import { resolveRedirect } from './redirect.js'
 import { RateLimiter } from './rate-limit.js'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js'
 import { verifySolanaSignIn } from './web3.js'
+import { createCaptchaChallenge, parseCaptchaToken } from './captcha.js'
 
 /** Construction-time config for {@link AuthHandler}. */
 export interface AuthConfig {
@@ -386,8 +387,14 @@ export class AuthHandler {
           autoconfirm: this.settings.autoconfirm,
           mailer_autoconfirm: this.settings.autoconfirm,
           minimum_password_length: this.settings.minPasswordLength,
+          captcha: {
+            enabled: this.settings.captchaProvider === 'local',
+            provider: this.settings.captchaProvider,
+            challenge_endpoint: this.settings.captchaProvider === 'local' ? '/auth/v1/captcha/challenge' : null,
+          },
         })
       }
+      if (path === 'captcha/challenge' && method === 'GET') return await this.createCaptchaChallenge(req)
       if (path === 'signup' && method === 'POST') return this.limit('signup', req) ?? (await this.signup(req))
       if (path === 'token' && method === 'POST') return this.limit('token', req) ?? (await this.token(req, url))
       if (path === 'user' && method === 'GET') return await this.getUser(req)
@@ -474,6 +481,7 @@ export class AuthHandler {
       data?: Record<string, unknown>
       code_challenge?: string | null
       code_challenge_method?: string | null
+      gotrue_meta_security?: { captcha_token?: string }
     }
     try {
       const parsed: unknown = await req.json()
@@ -501,6 +509,8 @@ export class AuthHandler {
       }))
     }
 
+    const captchaError = await this.requireCaptcha(body.gotrue_meta_security?.captcha_token, req)
+    if (captchaError) return captchaError
     if (this.settings.disableSignup) {
       return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
     }
@@ -1263,7 +1273,10 @@ export class AuthHandler {
       data?: Record<string, unknown>
       code_challenge?: string | null
       code_challenge_method?: string | null
+      gotrue_meta_security?: { captcha_token?: string }
     }
+    const captchaError = await this.requireCaptcha(body.gotrue_meta_security?.captcha_token, req)
+    if (captchaError) return captchaError
     if (body.email && body.phone) return authError(400, 'validation_failed', 'email and phone are mutually exclusive')
     if (body.phone !== undefined) {
       if (body.channel !== undefined && body.channel !== 'sms') {
@@ -1294,6 +1307,93 @@ export class AuthHandler {
       body.code_challenge,
       body.code_challenge_method
     )
+  }
+
+  private async createCaptchaChallenge(req: Request): Promise<Response> {
+    if (this.settings.captchaProvider !== 'local') {
+      return authError(404, 'captcha_disabled', 'CAPTCHA is disabled')
+    }
+    const limited = this.limit('captcha', req)
+    if (limited) return limited
+    const challenge = createCaptchaChallenge()
+    const client = req.headers.get('x-supacloud-lite-remote-addr') ?? 'local'
+    const clientFingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:captcha-client:v1', client)
+    const answerDigest = await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:captcha-answer:v1',
+      `${challenge.id}\0${challenge.answer}\0${clientFingerprint}`,
+    )
+    await this.db.query(
+      `delete from auth.captcha_challenges
+        where expires_at <= now()
+           or consumed_at <= now() - interval '1 hour'`,
+    )
+    await this.db.query(
+      `insert into auth.captcha_challenges
+         (id, answer_digest, client_fingerprint, expires_at)
+       values ($1, $2, $3, now() + $4::interval)`,
+      [
+        challenge.id,
+        answerDigest,
+        clientFingerprint,
+        `${this.settings.captchaChallengeTtlSeconds} seconds`,
+      ],
+    )
+    const expiresAt = new Date(Date.now() + this.settings.captchaChallengeTtlSeconds * 1000).toISOString()
+    return json(200, {
+      id: challenge.id,
+      image: challenge.image,
+      expires_at: expiresAt,
+      expires_in: this.settings.captchaChallengeTtlSeconds,
+    }, {
+      'cache-control': 'no-store',
+    })
+  }
+
+  private async requireCaptcha(token: string | undefined, req: Request): Promise<Response | null> {
+    if (this.settings.captchaProvider !== 'local') return null
+    const parsed = typeof token === 'string' ? parseCaptchaToken(token) : null
+    if (!parsed) return authError(400, 'captcha_required', 'A valid CAPTCHA challenge is required')
+    const client = req.headers.get('x-supacloud-lite-remote-addr') ?? 'local'
+    const clientFingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:captcha-client:v1', client)
+    const answerDigest = await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:captcha-answer:v1',
+      `${parsed.id}\0${parsed.answer}\0${clientFingerprint}`,
+    )
+    const verified = await this.db.transaction(async (query) => {
+      const current = await query<{ answer_digest: string; client_fingerprint: string; attempts: number }>(
+        `select answer_digest, client_fingerprint, attempts
+           from auth.captcha_challenges
+          where id = $1
+          for update`,
+        [parsed.id],
+      )
+      const row = current.rows[0]
+      if (
+        !row
+        || row.client_fingerprint !== clientFingerprint
+        || row.attempts >= this.settings.captchaMaxAttempts
+      ) return false
+      if (row.answer_digest !== answerDigest) {
+        await query(
+          `update auth.captcha_challenges
+              set attempts = attempts + 1
+            where id = $1 and consumed_at is null and expires_at > now()`,
+          [parsed.id],
+        )
+        return false
+      }
+      const consumed = await query(
+        `update auth.captcha_challenges
+            set consumed_at = now()
+          where id = $1 and consumed_at is null and expires_at > now()
+          returning id`,
+        [parsed.id],
+      )
+      return consumed.rows.length === 1
+    })
+    return verified ? null : authError(422, 'captcha_failed', 'CAPTCHA verification failed')
   }
 
   private async resendEmailChange(
@@ -1563,7 +1663,10 @@ export class AuthHandler {
       email?: string
       code_challenge?: string | null
       code_challenge_method?: string | null
+      gotrue_meta_security?: { captcha_token?: string }
     }
+    const captchaError = await this.requireCaptcha(body.gotrue_meta_security?.captcha_token, req)
+    if (captchaError) return captchaError
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
     return this.issueToken(
