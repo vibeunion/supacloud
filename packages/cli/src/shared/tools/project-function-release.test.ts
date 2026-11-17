@@ -153,3 +153,49 @@ test("returns outcome unknown when atomic publication acknowledgement is unavail
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("returns outcome unknown for a malformed atomic publication receipt", async () => {
+    const { root, manifest } = temporaryManifest();
+    const http = {
+        get: async (path: string) => path.endsWith("/function-releases")
+            ? {
+                ok: true, status: 200,
+                data: { project_ref: "proj", active_release_id: null, functions: [] },
+            }
+            : {
+                ok: true, status: 200,
+                data: {
+                    project_ref: "proj", slug: path.includes("/beta/") ? "beta" : "alpha",
+                    active_version: "absent", activation_id: "legacy", verify_jwt: true, background_routes: [],
+                },
+            },
+        postReleaseMutation: async (path: string) => path.endsWith("/stage")
+            ? {
+                ok: true, status: 200,
+                data: {
+                    version: "1",
+                    artifact_sha256: path.includes("/beta/") ? BETA_ARTIFACT : ALPHA_ARTIFACT,
+                },
+            }
+            : {
+                ok: true, status: 200,
+                data: {
+                    project_ref: "proj", active_release_id: MUTATION_ID, generation: 1,
+                    functions: [{ slug: "alpha", version: "1", activation_id: "legacy" }],
+                    mutation: { mutation_id: MUTATION_ID, status: "succeeded" },
+                },
+            },
+    } as unknown as HttpTransport;
+
+    try {
+        const response = await deployFunctionManifest(http, {
+            ref: "proj", manifest, "bundles-dir": root, atomic: true, "mutation-id": MUTATION_ID,
+        });
+        const payload = JSON.parse(response.content[0].text);
+        expect(response.isError).toBe(true);
+        expect(payload.error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+        expect(payload.mutation_id).toBe(MUTATION_ID);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
