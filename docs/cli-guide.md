@@ -752,8 +752,9 @@ The public CLI and Management API accept it only as the expected active version;
 immutable source reads and activation targets still require positive versions.
 
 Multi-Function release units are available through the opt-in Management
-`function-releases` API; see [project release manifests](project-release-manifest.md)
-for staging, atomic authority switching, recovery and in-flight semantics.
+`function-releases` API and the CLI `edge_functions deploy_manifest --atomic`;
+see [project release manifests](project-release-manifest.md) for the manifest
+format, staging, atomic authority switching, recovery and in-flight semantics.
 
 A cross-component release can be described as one immutable
 `supacloud.release-control.v2` contract and checked locally before any mutation:
@@ -767,10 +768,11 @@ environment, and reports the canonical `scope_sha256`. See
 [application release contract](application-release-contract.md) for the schema,
 receipt and execution boundaries.
 
-The CLI `edge_functions deploy_manifest --atomic` interface remains proposed.
-Existing per-function runners must still stop on `OUTCOME_UNKNOWN` and
-reconcile with `edge_functions list` plus immutable version reads. They cannot
-mutate members already enrolled in a project release individually.
+`edge_functions deploy_manifest --atomic` stages every manifest entry and
+publishes one complete project release. Existing per-function runners must
+still stop on `OUTCOME_UNKNOWN` and reconcile with `edge_functions list` plus
+immutable version reads. They cannot mutate members already enrolled in a
+project release individually.
 
 The readback contract stays simple for automation: `edge_functions list`
 prints a JSON array whose entries have a string `slug` and a non-negative safe

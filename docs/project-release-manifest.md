@@ -1,5 +1,59 @@
 # Multi-function release units
 
+## CLI
+
+The project-scoped CLI can stage and publish a complete Function release with
+one compare-and-swap publication:
+
+```bash
+supacloud edge_functions deploy_manifest \
+  --ref "$PROJECT_REF" \
+  --manifest supacloud.functions.json \
+  --bundles-dir ./dist/functions \
+  --atomic \
+  --mutation-id "$MUTATION_ID"
+```
+
+`--mutation-id` is optional; CI can provide a UUIDv4 to correlate the release
+receipt with the mutation. The CLI returns `OUTCOME_UNKNOWN` for a transport
+failure, HTTP 408/5xx, or malformed mutation receipt. Check the project release
+status before retrying: if that mutation is already active, stop. Otherwise
+start a new attempt with a new mutation ID, because staging creates new
+immutable Function versions and changes the release request fingerprint.
+
+The manifest is JSON with one to 128 entries:
+
+```json
+{
+  "functions": [
+    {
+      "slug": "api",
+      "entrypoint": "functions/api/index.ts",
+      "verify_jwt": false,
+      "framework": "fetch",
+      "bytecode": "off",
+      "background_routes": ["/jobs/*"],
+      "capabilities": {
+        "secrets": ["API_KEY"],
+        "outbound_hosts": ["api.example.com"],
+        "bindings": ["DATABASE_URL"],
+        "background": true
+      },
+      "limits": {
+        "timeout_ms": 30000
+      }
+    }
+  ]
+}
+```
+
+`slug` values must be unique and safe for Function URLs. `entrypoint` is
+required and must stay inside the current project. With `--bundles-dir`, the
+CLI uploads the prebuilt UTF-8 bundle at `<bundles-dir>/<slug>.js`; without
+that option it runs `bun build` for each entrypoint before staging. Existing
+members of the active release are retained, so removing a member requires a
+separate release policy change rather than an accidental omission.
+
 ## Acceptance contract
 
 ```gherkin
