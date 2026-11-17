@@ -271,18 +271,44 @@ function stagedVersion(payload: unknown): string | null {
     return value.version;
 }
 
-function releaseReceipt(payload: unknown, projectRef: string, mutationId: string): Record<string, unknown> | null {
+type ExpectedReleaseMember = { slug: string; version: string };
+
+function releaseReceipt(
+    payload: unknown,
+    projectRef: string,
+    mutationId: string,
+    expectedMembers: readonly ExpectedReleaseMember[],
+): Record<string, unknown> | null {
     const value = record(payload);
     if (!value || value.project_ref !== projectRef
-        || value.active_release_id !== mutationId || !Number.isSafeInteger(value.generation)
-        || !Array.isArray(value.functions)) return null;
+        || value.active_release_id !== mutationId || typeof value.generation !== "number"
+        || !Number.isSafeInteger(value.generation) || value.generation < 1
+        || !Array.isArray(value.functions) || value.functions.length !== expectedMembers.length) return null;
+    const observed = new Map<string, { slug: string; version: string; activation_id: string }>();
+    for (const candidate of value.functions) {
+        const entry = record(candidate);
+        if (!entry || typeof entry.slug !== "string" || !SAFE_SLUG_PATTERN.test(entry.slug)
+            || observed.has(entry.slug) || !positiveVersion(entry.version)
+            || !validObservedFunctionActivationId(entry.activation_id)) return null;
+        observed.set(entry.slug, {
+            slug: entry.slug,
+            version: entry.version,
+            activation_id: entry.activation_id,
+        });
+    }
+    for (const expected of expectedMembers) {
+        const actual = observed.get(expected.slug);
+        if (!actual || actual.version !== expected.version) return null;
+    }
+    const mutation = record(value.mutation);
+    if (!mutation || mutation.mutation_id !== mutationId || mutation.status !== "succeeded") return null;
     return {
         project_ref: projectRef,
         mutation_id: mutationId,
         active_release_id: mutationId,
         generation: value.generation,
-        functions: value.functions,
-        mutation: value.mutation ?? null,
+        functions: [...observed.values()],
+        mutation: { mutation_id: mutationId, status: "succeeded" },
     };
 }
 
@@ -336,8 +362,13 @@ export async function deployFunctionManifest(
             { timeoutMs: 5 * 60_000 },
         );
         const version = stagedVersion(stageResponse.data);
-        if (!stageResponse.ok || !version) {
+        if (!stageResponse.ok) {
             return releaseControlMutationFailure(RELEASE_OPERATION, stageResponse, {
+                project_ref: projectRef, mutation_id: mutationId, slug: entry.slug,
+            });
+        }
+        if (!version) {
+            return releaseControlFailure(RELEASE_OPERATION, "OUTCOME_UNKNOWN", stageResponse.status, {
                 project_ref: projectRef, mutation_id: mutationId, slug: entry.slug,
             });
         }
@@ -361,9 +392,18 @@ export async function deployFunctionManifest(
         },
         { timeoutMs: 5 * 60_000 },
     );
-    const receipt = releaseReceipt(releaseResponse.data, projectRef, mutationId);
-    if (!releaseResponse.ok || !receipt) {
+    if (!releaseResponse.ok) {
         return releaseControlMutationFailure(RELEASE_OPERATION, releaseResponse, {
+            project_ref: projectRef,
+            mutation_id: mutationId,
+            expected_release_id: status.active_release_id,
+            staged_functions: staged.map(({ slug, version }) => ({ slug, version })),
+            retained_functions: missing,
+        });
+    }
+    const receipt = releaseReceipt(releaseResponse.data, projectRef, mutationId, [...members.values()]);
+    if (!receipt) {
+        return releaseControlFailure(RELEASE_OPERATION, "OUTCOME_UNKNOWN", releaseResponse.status, {
             project_ref: projectRef,
             mutation_id: mutationId,
             expected_release_id: status.active_release_id,
