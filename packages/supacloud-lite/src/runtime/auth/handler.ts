@@ -14,7 +14,7 @@ import { resolveRedirect } from './redirect.js'
 import { RateLimiter } from './rate-limit.js'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js'
 import { verifySolanaSignIn } from './web3.js'
-import { captchaImageDataUri, createCaptchaChallenge, parseCaptchaToken } from './captcha.js'
+import { createCaptchaChallenge, parseCaptchaToken } from './captcha.js'
 
 /** Construction-time config for {@link AuthHandler}. */
 export interface AuthConfig {
@@ -1339,7 +1339,7 @@ export class AuthHandler {
     const expiresAt = new Date(Date.now() + this.settings.captchaChallengeTtlSeconds * 1000).toISOString()
     return json(200, {
       id: challenge.id,
-      image: captchaImageDataUri(challenge.svg),
+      image: challenge.image,
       expires_at: expiresAt,
       expires_in: this.settings.captchaChallengeTtlSeconds,
     }, {

@@ -225,6 +225,8 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
     otpExpirySeconds: { min: 1, max: Number.MAX_SAFE_INTEGER },
     smsOtpCooldownSeconds: { min: 0, max: 86_400 },
     maxEnrolledFactors: { min: 1, max: Number.MAX_SAFE_INTEGER },
+    captchaChallengeTtlSeconds: { min: 1, max: 3_600 },
+    captchaMaxAttempts: { min: 1, max: 20 },
     recoveryCodesCount: { min: 1, max: 50 },
     recoveryCodeLength: { min: 8, max: 64 },
     recoveryCodesMaxVerifyAttempts: { min: 1, max: 20 },
@@ -261,18 +263,6 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
   }
   if ('captchaProvider' in patch && patch["captchaProvider"] !== 'none' && patch["captchaProvider"] !== 'local') {
     return 'captchaProvider must be "none" or "local"'
-  }
-  const captchaBounds: Record<string, { min: number; max: number }> = {
-    captchaChallengeTtlSeconds: { min: 1, max: 3_600 },
-    captchaMaxAttempts: { min: 1, max: 20 },
-  }
-  for (const k of ['captchaChallengeTtlSeconds', 'captchaMaxAttempts']) {
-    if (!(k in patch)) continue
-    const value = patch[k]
-    const bounds = captchaBounds[k]
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < bounds.min || value > bounds.max) {
-      return `${k} must be a number between ${bounds.min} and ${bounds.max}`
-    }
   }
   Object.assign(target, sanitize({ ...target, ...patch }))
   return null

@@ -38,7 +38,7 @@ const CAPTCHA_ALPHABET = Object.keys(CAPTCHA_GLYPHS).join('')
 export type CaptchaChallenge = {
   id: string
   answer: string
-  svg: string
+  image: string
 }
 
 function randomAnswer(length = 5): string {
@@ -54,49 +54,191 @@ function randomAnswer(length = 5): string {
   return answer
 }
 
-function randomSignedOffset(): number {
+function randomRange(min: number, max: number): number {
   const byte = crypto.getRandomValues(new Uint8Array(1))[0] ?? 0
-  return (byte % 17) - 8
+  return min + (byte % (max - min + 1))
+}
+
+function setPixel(pixels: Uint8Array, width: number, x: number, y: number, color: readonly [number, number, number, number]): void {
+  if (x < 0 || y < 0 || x >= width || y >= pixels.length / (width * 4)) return
+  const offset = (y * width + x) * 4
+  pixels[offset] = color[0]
+  pixels[offset + 1] = color[1]
+  pixels[offset + 2] = color[2]
+  pixels[offset + 3] = color[3]
+}
+
+function drawRect(
+  pixels: Uint8Array,
+  width: number,
+  x: number,
+  y: number,
+  rectWidth: number,
+  rectHeight: number,
+  color: readonly [number, number, number, number],
+): void {
+  for (let row = 0; row < rectHeight; row += 1) {
+    for (let column = 0; column < rectWidth; column += 1) {
+      setPixel(pixels, width, x + column, y + row, color)
+    }
+  }
+}
+
+function drawLine(
+  pixels: Uint8Array,
+  width: number,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  color: readonly [number, number, number, number],
+): void {
+  const distance = Math.max(Math.abs(endX - startX), Math.abs(endY - startY))
+  for (let step = 0; step <= distance; step += 1) {
+    const progress = distance === 0 ? 0 : step / distance
+    setPixel(
+      pixels,
+      width,
+      Math.round(startX + (endX - startX) * progress),
+      Math.round(startY + (endY - startY) * progress),
+      color,
+    )
+  }
+}
+
+function adler32(bytes: Uint8Array): number {
+  let sumA = 1
+  let sumB = 0
+  for (const byte of bytes) {
+    sumA = (sumA + byte) % 65521
+    sumB = (sumB + sumA) % 65521
+  }
+  return ((sumB << 16) | sumA) >>> 0
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff
+  for (const byte of bytes) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function ascii(value: string): Uint8Array {
+  return Uint8Array.from([...value].map((character) => character.charCodeAt(0)))
+}
+
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const typeBytes = ascii(type)
+  const body = new Uint8Array(typeBytes.length + data.length)
+  body.set(typeBytes)
+  body.set(data, typeBytes.length)
+  const result = new Uint8Array(12 + data.length)
+  const view = new DataView(result.buffer)
+  view.setUint32(0, data.length)
+  result.set(body, 4)
+  view.setUint32(8 + data.length, crc32(body))
+  return result
+}
+
+function zlibStore(bytes: Uint8Array): Uint8Array {
+  const blocks: Uint8Array[] = []
+  let offset = 0
+  do {
+    const length = Math.min(65_535, bytes.length - offset)
+    const block = new Uint8Array(5 + length)
+    block[0] = offset + length >= bytes.length ? 1 : 0
+    block[1] = length & 0xff
+    block[2] = length >>> 8
+    block[3] = (~length) & 0xff
+    block[4] = (~length) >>> 8
+    block.set(bytes.subarray(offset, offset + length), 5)
+    blocks.push(block)
+    offset += length
+  } while (offset < bytes.length)
+  const result = new Uint8Array(2 + blocks.reduce((total, block) => total + block.length, 0) + 4)
+  result[0] = 0x78
+  result[1] = 0x01
+  let cursor = 2
+  for (const block of blocks) {
+    result.set(block, cursor)
+    cursor += block.length
+  }
+  new DataView(result.buffer).setUint32(cursor, adler32(bytes))
+  return result
+}
+
+function encodePng(width: number, height: number, pixels: Uint8Array): string {
+  const scanlines = new Uint8Array(height * (width * 4 + 1))
+  for (let row = 0; row < height; row += 1) {
+    const sourceStart = row * width * 4
+    const targetStart = row * (width * 4 + 1)
+    scanlines[targetStart] = 0
+    scanlines.set(pixels.subarray(sourceStart, sourceStart + width * 4), targetStart + 1)
+  }
+  const header = new Uint8Array(13)
+  const headerView = new DataView(header.buffer)
+  headerView.setUint32(0, width)
+  headerView.setUint32(4, height)
+  header[8] = 8
+  header[9] = 6
+  const signature = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
+  const bytes = [signature, pngChunk('IHDR', header), pngChunk('IDAT', zlibStore(scanlines)), pngChunk('IEND', new Uint8Array())]
+  const output = new Uint8Array(bytes.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+  for (const part of bytes) {
+    output.set(part, offset)
+    offset += part.length
+  }
+  let binary = ''
+  for (const byte of output) binary += String.fromCharCode(byte)
+  return `data:image/png;base64,${btoa(binary)}`
+}
+
+function renderCaptcha(answer: string): string {
+  const width = 190
+  const height = 56
+  const pixels = new Uint8Array(width * height * 4)
+  const background: readonly [number, number, number, number] = [248, 250, 252, 255]
+  const noise: readonly [number, number, number, number] = [148, 163, 184, 120]
+  const dot: readonly [number, number, number, number] = [51, 65, 85, 105]
+  const foreground: readonly [number, number, number, number] = [15, 23, 42, 255]
+  for (let row = 0; row < height; row += 1) drawRect(pixels, width, 0, row, width, 1, background)
+  for (let index = 0; index < 7; index += 1) {
+    drawLine(pixels, width, randomRange(0, 30), randomRange(5, 50), randomRange(160, 189), randomRange(5, 50), noise)
+  }
+  for (let index = 0; index < 32; index += 1) {
+    drawRect(pixels, width, randomRange(3, 186), randomRange(4, 51), randomRange(1, 2), randomRange(1, 2), dot)
+  }
+  for (const [index, character] of [...answer].entries()) {
+    const glyph = CAPTCHA_GLYPHS[character] ?? CAPTCHA_GLYPHS['2']
+    const originX = 15 + index * 35
+    const originY = 10
+    const cellSize = 3
+    for (const [rowIndex, row] of glyph.entries()) {
+      for (const [columnIndex, pixel] of [...row].entries()) {
+        if (pixel !== '1') continue
+        drawRect(
+          pixels,
+          width,
+          Math.round(originX + columnIndex * (cellSize + 1)),
+          Math.round(originY + rowIndex * (cellSize + 1)),
+          cellSize,
+          cellSize,
+          foreground,
+        )
+      }
+    }
+  }
+  return encodePng(width, height, pixels)
 }
 
 export function createCaptchaChallenge(): CaptchaChallenge {
   const answer = randomAnswer()
-  const id = crypto.randomUUID()
-  const characters = [...answer].map((character, index) => {
-    const x = 18 + index * 34
-    const y = 11
-    const rotation = randomSignedOffset()
-    const glyph = CAPTCHA_GLYPHS[character] ?? CAPTCHA_GLYPHS['2']
-    const pixels = glyph.flatMap((row, rowIndex) => [...row].flatMap((pixel, columnIndex) => (
-      pixel === '1'
-        ? [`<rect x="${x + columnIndex * 4}" y="${y + rowIndex * 4}" width="3" height="3"/>`]
-        : []
-    ))).join('')
-    return `<g class="captcha-glyph" transform="rotate(${rotation} ${x + 10} ${y + 14})">${pixels}</g>`
-  }).join('')
-  const lines = Array.from({ length: 6 }, (_, index) => {
-    const y = 12 + index * 9
-    const end = 20 + (index * 29) % 120
-    return `<path d="M${index * 31},${y} C${end},${y - 8} ${70 + index * 12},${y + 15} 178,${y + 2}" />`
-  }).join('')
-  const dots = Array.from({ length: 24 }, (_, index) => {
-    const x = 8 + (index * 47) % 178
-    const y = 8 + (index * 23) % 46
-    return `<circle cx="${x}" cy="${y}" r="${index % 3 === 0 ? 1.5 : 1}" />`
-  }).join('')
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="190" height="56" viewBox="0 0 190 56" role="img" aria-label="CAPTCHA">',
-    '<rect width="190" height="56" rx="6" fill="#f8fafc"/>',
-    `<g fill="none" stroke="#94a3b8" stroke-width="1" opacity=".65">${lines}</g>`,
-    `<g fill="#334155" opacity=".45">${dots}</g>`,
-    `<g fill="#0f172a">${characters}</g>`,
-    '</svg>',
-  ].join('')
-  return { id, answer, svg }
-}
-
-export function captchaImageDataUri(svg: string): string {
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+  return { id: crypto.randomUUID(), answer, image: renderCaptcha(answer) }
 }
 
 export function parseCaptchaToken(token: string): { id: string; answer: string } | null {

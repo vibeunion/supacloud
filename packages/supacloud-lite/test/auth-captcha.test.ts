@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { createClient } from '@supabase/supabase-js'
 import { createLiteBackend, type SupaCloudLiteBackend } from '../src/index.js'
 import { CAPTCHA_GLYPHS } from '../src/runtime/auth/captcha.js'
+import { applyAuthSettingsPatch, DEFAULT_AUTH_SETTINGS } from '../src/runtime/auth/settings.js'
 
 const backends: SupaCloudLiteBackend[] = []
 
@@ -23,14 +24,46 @@ async function challengeFor(backend: SupaCloudLiteBackend): Promise<{ id: string
   expect(response.status).toBe(200)
   expect(response.headers.get('cache-control')).toBe('no-store')
   const body = await response.json() as { id: string; image: string }
-  const svg = decodeURIComponent(body.image.slice(body.image.indexOf(',') + 1))
+  const imageBytes = Uint8Array.from(atob(body.image.slice('data:image/png;base64,'.length)), (character) => character.charCodeAt(0))
+  const view = new DataView(imageBytes.buffer)
+  expect([...imageBytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+  const width = view.getUint32(16)
+  const height = view.getUint32(20)
+  const compressed: number[] = []
+  let offset = 8
+  while (offset < imageBytes.length) {
+    const length = view.getUint32(offset)
+    const type = String.fromCharCode(...imageBytes.subarray(offset + 4, offset + 8))
+    if (type === 'IDAT') compressed.push(...imageBytes.subarray(offset + 8, offset + 8 + length))
+    offset += 12 + length
+  }
+  const inflated: number[] = []
+  let compressedOffset = 2
+  while (compressedOffset < compressed.length - 4) {
+    const header = compressed[compressedOffset] ?? 0
+    const length = (compressed[compressedOffset + 1] ?? 0) | ((compressed[compressedOffset + 2] ?? 0) << 8)
+    expect((header >> 1) & 3).toBe(0)
+    inflated.push(...compressed.slice(compressedOffset + 5, compressedOffset + 5 + length))
+    compressedOffset += 5 + length
+    if (header & 1) break
+  }
+  const pixels = new Uint8Array(width * height * 4)
+  const stride = width * 4 + 1
+  for (let row = 0; row < height; row += 1) {
+    expect(inflated[row * stride]).toBe(0)
+    pixels.set(inflated.slice(row * stride + 1, row * stride + stride), row * width * 4)
+  }
+  const isDark = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return false
+    const pixel = (y * width + x) * 4
+    return (pixels[pixel + 3] ?? 0) > 200 && (pixels[pixel] ?? 255) < 80
+  }
   const reverseGlyphs = new Map(Object.entries(CAPTCHA_GLYPHS).map(([character, glyph]) => [glyph.join(''), character]))
-  const answer = [...svg.matchAll(/<g class="captcha-glyph"[^>]*>([\s\S]*?)<\/g>/g)].map((match, index) => {
-    const pixels = new Set([...match[1].matchAll(/<rect x="(\d+)" y="(\d+)"/g)].map((pixel) => `${pixel[1]}:${pixel[2]}`))
-    const originX = 18 + index * 34
-    const originY = 11
+  const answer = Array.from({ length: 5 }, (_, index) => {
+    const originX = 15 + index * 35
+    const originY = 10
     const glyph = Array.from({ length: 7 }, (_, row) =>
-      Array.from({ length: 5 }, (_, column) => pixels.has(`${originX + column * 4}:${originY + row * 4}`) ? '1' : '0').join('')
+      Array.from({ length: 5 }, (_, column) => isDark(originX + column * 4 + 1, originY + row * 4 + 1) ? '1' : '0').join('')
     ).join('')
     return reverseGlyphs.get(glyph) ?? ''
   }).join('')
@@ -39,6 +72,20 @@ async function challengeFor(backend: SupaCloudLiteBackend): Promise<{ id: string
 }
 
 describe('local CAPTCHA', () => {
+  test('validates runtime CAPTCHA settings without throwing', () => {
+    const settings = { ...DEFAULT_AUTH_SETTINGS }
+    expect(applyAuthSettingsPatch(settings, {
+      captchaProvider: 'local',
+      captchaChallengeTtlSeconds: 240,
+      captchaMaxAttempts: 7,
+    })).toBeNull()
+    expect(settings).toMatchObject({
+      captchaProvider: 'local',
+      captchaChallengeTtlSeconds: 240,
+      captchaMaxAttempts: 7,
+    })
+  })
+
   test('advertises the local challenge endpoint and blocks OTP issuance without a token', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64),
