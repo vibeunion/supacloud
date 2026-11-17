@@ -8,7 +8,7 @@ export function isTransientAuditFailure(output: string): boolean {
   return /\b(?:408|425|429|5\d\d)\b|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE)\b|ConnectionClosed|UND_ERR_SOCKET|socket hang up|fetch failed|network timeout/i.test(output);
 }
 
-export function auditArguments(ignore = process.env.SUPACLOUD_AUDIT_IGNORE): string[] {
+export function auditArguments(ignore = process.env["SUPACLOUD_AUDIT_IGNORE"]): string[] {
   const advisoryIds = (ignore ?? "")
     .split(/[\s,]+/u)
     .map((value) => value.trim())
