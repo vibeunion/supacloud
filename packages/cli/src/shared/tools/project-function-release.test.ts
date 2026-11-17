@@ -9,6 +9,9 @@ const RELEASE_ID = "a1111111-1111-4111-8111-111111111111";
 const ALPHA_ACTIVATION = "b2222222-2222-4222-8222-222222222222";
 const BETA_ACTIVATION = "c3333333-3333-4333-8333-333333333333";
 const MUTATION_ID = "d4444444-4444-4444-8444-444444444444";
+const RELEASED_ALPHA_ACTIVATION = "e5555555-5555-4555-8555-555555555555";
+const RELEASED_BETA_ACTIVATION = "f6666666-6666-4666-8666-666666666666";
+const RELEASED_LEGACY_ACTIVATION = "a7777777-7777-4777-8777-777777777777";
 const ALPHA_ARTIFACT = "a".repeat(64);
 const BETA_ARTIFACT = "b".repeat(64);
 
@@ -66,9 +69,9 @@ test("stages requested functions and publishes one complete project release", as
                 data: {
                     project_ref: "proj", active_release_id: MUTATION_ID, generation: 4,
                     functions: [
-                        { slug: "alpha", version: "8", activation_id: ALPHA_ACTIVATION },
-                        { slug: "beta", version: "3", activation_id: BETA_ACTIVATION },
-                        { slug: "legacy", version: "7", activation_id: "legacy" },
+                        { slug: "alpha", version: "8", activation_id: RELEASED_ALPHA_ACTIVATION },
+                        { slug: "beta", version: "3", activation_id: RELEASED_BETA_ACTIVATION },
+                        { slug: "legacy", version: "7", activation_id: RELEASED_LEGACY_ACTIVATION },
                     ],
                     mutation: { mutation_id: MUTATION_ID, status: "succeeded" },
                 },
@@ -94,6 +97,11 @@ test("stages requested functions and publishes one complete project release", as
             expected_release_id: RELEASE_ID,
             retained_functions: ["legacy"],
         });
+        expect(payload.functions).toEqual([
+            { slug: "alpha", version: "8", activation_id: RELEASED_ALPHA_ACTIVATION },
+            { slug: "beta", version: "3", activation_id: RELEASED_BETA_ACTIVATION },
+            { slug: "legacy", version: "7", activation_id: RELEASED_LEGACY_ACTIVATION },
+        ]);
         const releaseCall = requests.find((request) => request.path.endsWith("/function-releases") && request.method === "POST");
         expect(releaseCall?.body).toEqual({
             mutation_id: MUTATION_ID,

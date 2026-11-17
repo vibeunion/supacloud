@@ -271,13 +271,13 @@ function stagedVersion(payload: unknown): string | null {
     return value.version;
 }
 
-type ReleaseMember = { slug: string; version: string; expected_activation_id: string };
+type ExpectedReleaseMember = { slug: string; version: string };
 
 function releaseReceipt(
     payload: unknown,
     projectRef: string,
     mutationId: string,
-    expectedMembers: readonly ReleaseMember[],
+    expectedMembers: readonly ExpectedReleaseMember[],
 ): Record<string, unknown> | null {
     const value = record(payload);
     if (!value || value.project_ref !== projectRef
@@ -298,9 +298,7 @@ function releaseReceipt(
     }
     for (const expected of expectedMembers) {
         const actual = observed.get(expected.slug);
-        if (!actual || actual.version !== expected.version || actual.activation_id !== expected.expected_activation_id) {
-            return null;
-        }
+        if (!actual || actual.version !== expected.version) return null;
     }
     const mutation = record(value.mutation);
     if (!mutation || mutation.mutation_id !== mutationId || mutation.status !== "succeeded") return null;
