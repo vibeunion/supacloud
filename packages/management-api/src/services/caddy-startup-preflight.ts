@@ -2,7 +2,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const CADDY_STARTUP_MARKER = "serving initial configuration";
-const CADDY_STARTUP_TIMEOUT_MS = 5_000;
+// The production gateway can contain several thousand routes and cache
+// handlers. A fixed five-second deadline caused false failures while Caddy
+// was still starting successfully on a busy host.
+const CADDY_STARTUP_TIMEOUT_MS = 30_000;
 
 type CaddyProcess = {
     readonly exitCode: number | null;
