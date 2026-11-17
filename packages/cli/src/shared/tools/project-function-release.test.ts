@@ -9,6 +9,8 @@ const RELEASE_ID = "a1111111-1111-4111-8111-111111111111";
 const ALPHA_ACTIVATION = "b2222222-2222-4222-8222-222222222222";
 const BETA_ACTIVATION = "c3333333-3333-4333-8333-333333333333";
 const MUTATION_ID = "d4444444-4444-4444-8444-444444444444";
+const ALPHA_ARTIFACT = "a".repeat(64);
+const BETA_ARTIFACT = "b".repeat(64);
 
 function temporaryManifest(): { root: string; manifest: string } {
     const root = mkdtempSync(join(tmpdir(), "supacloud-function-release-test-"));
@@ -54,10 +56,10 @@ test("stages requested functions and publishes one complete project release", as
         postReleaseMutation: async (path: string, body: unknown) => {
             requests.push({ method: "POST", path, body });
             if (path.endsWith("/alpha/stage")) {
-                return { ok: true, status: 200, data: { project_ref: "proj", slug: "alpha", version: "8" } };
+                return { ok: true, status: 200, data: { version: "8", artifact_sha256: ALPHA_ARTIFACT } };
             }
             if (path.endsWith("/beta/stage")) {
-                return { ok: true, status: 200, data: { project_ref: "proj", slug: "beta", version: "3" } };
+                return { ok: true, status: 200, data: { version: "3", artifact_sha256: BETA_ARTIFACT } };
             }
             return {
                 ok: true, status: 200,
@@ -129,9 +131,8 @@ test("returns outcome unknown when atomic publication acknowledgement is unavail
             ? {
                 ok: true, status: 200,
                 data: {
-                    project_ref: "proj",
-                    slug: path.includes("/beta/") ? "beta" : "alpha",
                     version: "1",
+                    artifact_sha256: path.includes("/beta/") ? BETA_ARTIFACT : ALPHA_ARTIFACT,
                 },
             }
             : {

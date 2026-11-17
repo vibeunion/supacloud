@@ -14,10 +14,12 @@ supacloud edge_functions deploy_manifest \
   --mutation-id "$MUTATION_ID"
 ```
 
-`--mutation-id` is optional, but CI should provide a UUIDv4 that remains stable
-when retrying an uncertain response. The CLI returns `OUTCOME_UNKNOWN` for a
-transport failure, HTTP 408/5xx, or malformed mutation receipt; retry with the
-same mutation ID after checking the release status.
+`--mutation-id` is optional; CI can provide a UUIDv4 to correlate the release
+receipt with the mutation. The CLI returns `OUTCOME_UNKNOWN` for a transport
+failure, HTTP 408/5xx, or malformed mutation receipt. Check the project release
+status before retrying: if that mutation is already active, stop. Otherwise
+start a new attempt with a new mutation ID, because staging creates new
+immutable Function versions and changes the release request fingerprint.
 
 The manifest is JSON with one to 128 entries:
 

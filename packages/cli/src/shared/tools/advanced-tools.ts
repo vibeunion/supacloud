@@ -1041,7 +1041,7 @@ Actions: list, get_config, deploy, deploy_bundle, deploy_manifest, config, sourc
             manifest: optional(Type.String(), "[deploy_manifest] JSON release manifest path"),
             "bundles-dir": optional(Type.String(), "[deploy_manifest] Directory containing prebuilt <slug>.js files"),
             atomic: optional(Type.Boolean(), "[deploy_manifest] Required atomic project release publication"),
-            "mutation-id": optional(Type.String(), "[deploy_manifest] Retry-stable UUIDv4"),
+            "mutation-id": optional(Type.String(), "[deploy_manifest] Release mutation correlation UUIDv4"),
         },
         async (args) => {
             // AOT imports trusted application code, so block it before any local execution.

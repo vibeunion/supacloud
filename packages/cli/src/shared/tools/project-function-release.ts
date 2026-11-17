@@ -17,6 +17,7 @@ import {
 const SAFE_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const RELEASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const POSITIVE_VERSION_PATTERN = /^[1-9][0-9]*$/;
+const ARTIFACT_SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const FRAMEWORKS = ["fetch", "elysia", "hono", "sveltekit-function"] as const;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_FUNCTIONS = 128;
@@ -262,9 +263,11 @@ function stageConfig(entry: ManifestEntry): Record<string, unknown> {
     };
 }
 
-function stagedVersion(payload: unknown, projectRef: string, slug: string): string | null {
+function stagedVersion(payload: unknown): string | null {
     const value = record(payload);
-    if (!value || value.project_ref !== projectRef || value.slug !== slug || !positiveVersion(value.version)) return null;
+    if (!value || !positiveVersion(value.version)
+        || typeof value.artifact_sha256 !== "string"
+        || !ARTIFACT_SHA256_PATTERN.test(value.artifact_sha256)) return null;
     return value.version;
 }
 
@@ -332,7 +335,7 @@ export async function deployFunctionManifest(
             { code, config: stageConfig(entry) },
             { timeoutMs: 5 * 60_000 },
         );
-        const version = stagedVersion(stageResponse.data, projectRef, entry.slug);
+        const version = stagedVersion(stageResponse.data);
         if (!stageResponse.ok || !version) {
             return releaseControlMutationFailure(RELEASE_OPERATION, stageResponse, {
                 project_ref: projectRef, mutation_id: mutationId, slug: entry.slug,
