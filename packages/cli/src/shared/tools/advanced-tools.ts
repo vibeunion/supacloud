@@ -40,6 +40,9 @@ import {
     validObservedFunctionActivationId as validObservedActivationId,
     type FunctionConfigInput as EdgeFunctionConfigInput,
 } from "./edge-function-response";
+import {
+    deployFunctionManifest,
+} from "./project-function-release";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 const FORBIDDEN_BUNDLE_SEGMENTS = new Set(["node_modules", ".git"]);
 const EDGE_FUNCTION_DEPLOY_TIMEOUT_MS = 5 * 60_000;
@@ -990,9 +993,9 @@ export function registerAdvancedTools(
     registerTool(server,
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
-Actions: list, get_config, deploy, deploy_bundle, config, source, activate, delete, check, scaffold`,
+Actions: list, get_config, deploy, deploy_bundle, deploy_manifest, config, source, activate, delete, check, scaffold`,
         {
-            action: withDescription(stringEnum(["list", "get_config", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check", "scaffold"]), "Action"),
+            action: withDescription(stringEnum(["list", "get_config", "deploy", "deploy_bundle", "deploy_manifest", "config", "source", "activate", "delete", "check", "scaffold"]), "Action"),
             ref: optional(Type.String(), "Project ref (not used by scaffold)"),
             slug: optional(Type.String(), "[get_config/deploy/deploy_bundle/config/source/activate/delete/check] Function name"),
             version: withDescription(functionVersionSchema, "[source/activate] Existing immutable Function version; source requires a positive version"),
@@ -1035,6 +1038,10 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 expectedActivationIdSchema,
                 "[deploy/deploy_bundle/config/activate/delete] Required activation ID from list, or 'legacy' for a new or legacy function",
             ),
+            manifest: optional(Type.String(), "[deploy_manifest] JSON release manifest path"),
+            "bundles-dir": optional(Type.String(), "[deploy_manifest] Directory containing prebuilt <slug>.js files"),
+            atomic: optional(Type.Boolean(), "[deploy_manifest] Required atomic project release publication"),
+            "mutation-id": optional(Type.String(), "[deploy_manifest] Retry-stable UUIDv4"),
         },
         async (args) => {
             // AOT imports trusted application code, so block it before any local execution.
@@ -1046,6 +1053,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             }
             validateFunctionAot(args);
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
+            if (args.action === "deploy_manifest") return deployFunctionManifest(http, args, options);
             if (args.action === "scaffold") {
                 return { content: [{ type: "text" as const, text: scaffoldFunction(args.path, args.slug, args.framework) }] };
             }
