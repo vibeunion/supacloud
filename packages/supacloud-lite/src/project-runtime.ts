@@ -119,6 +119,7 @@ function liteFunctionRuntimeEnv(port: number, functionEnv: Record<string, string
     // these host-owned bindings.
     SUPACLOUD_PROJECT_REF: LITE_PROJECT_REF,
     X_PROJECT_REF: LITE_PROJECT_REF,
+    SUPACLOUD_RUNTIME_MODE: 'lite',
     SUPACLOUD_INTERNAL_SUPABASE_URL: internalBaseUrl,
     SUPACLOUD_INTERNAL_AUTH_URL: `${internalBaseUrl}/auth/v1`,
     SUPACLOUD_INTERNAL_REST_URL: `${internalBaseUrl}/rest/v1`,

@@ -305,6 +305,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     SUPABASE_URL: apiUrl,
     SUPABASE_ANON_KEY: anonKey,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    SUPACLOUD_RUNTIME_MODE: 'lite',
   }
 
   // install the Deno global once per process; the shim's Deno.env is bound to
