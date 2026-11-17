@@ -175,6 +175,16 @@ create table if not exists auth.config (
   updated_at timestamptz default now()
 );
 
+create table if not exists auth.captcha_challenges (
+  id uuid primary key,
+  answer_digest text not null,
+  client_fingerprint text not null,
+  attempts int not null default 0,
+  created_at timestamptz default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
+);
+
 create table if not exists storage.buckets (
   id text primary key,
   name text not null unique,
@@ -508,6 +518,16 @@ create table if not exists auth.config (
   key text primary key,
   value jsonb not null,
   updated_at timestamptz default now()
+);
+
+create table if not exists auth.captcha_challenges (
+  id uuid primary key,
+  answer_digest text not null,
+  client_fingerprint text not null,
+  attempts int not null default 0,
+  created_at timestamptz default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
 );
 
 grant usage on schema auth to anon, authenticated, service_role;

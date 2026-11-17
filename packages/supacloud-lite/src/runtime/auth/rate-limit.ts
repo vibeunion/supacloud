@@ -23,6 +23,7 @@ export const DEFAULT_AUTH_RATE_LIMITS: Record<string, RateLimitRule> = {
   otp: { limit: 10, windowMs: 60 * 60 * 1000 },
   recover: { limit: 10, windowMs: 60 * 60 * 1000 },
   sms: { limit: 10, windowMs: 60 * 60 * 1000 },
+  captcha: { limit: 30, windowMs: 60 * 60 * 1000 },
   verify: { limit: 30, windowMs: 5 * 60 * 1000 },
 }
 

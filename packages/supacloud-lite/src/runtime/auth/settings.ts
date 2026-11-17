@@ -36,6 +36,12 @@ export interface AuthSettings {
   smsOtpCooldownSeconds: number
   /** SMS body template. Must contain the Supabase-compatible {{ .Code }} placeholder. */
   smsTemplate: string
+  /** CAPTCHA provider used for public OTP issuance. */
+  captchaProvider: 'none' | 'local'
+  /** Lifetime of a local CAPTCHA challenge in seconds. */
+  captchaChallengeTtlSeconds: number
+  /** Maximum failed attempts before a local CAPTCHA challenge is retired. */
+  captchaMaxAttempts: number
   /** Max MFA factors a user may enroll (auth.mfa.max_enrolled_factors). */
   maxEnrolledFactors: number
   /** Allow TOTP enrollment (auth.mfa.totp.enroll_enabled). */
@@ -70,6 +76,9 @@ export const DEFAULT_AUTH_SETTINGS: AuthSettings = {
   smsSignupEnabled: true,
   smsOtpCooldownSeconds: 60,
   smsTemplate: 'Your one-time code is {{ .Code }}',
+  captchaProvider: 'none',
+  captchaChallengeTtlSeconds: 180,
+  captchaMaxAttempts: 5,
   maxEnrolledFactors: 10,
   totpEnrollEnabled: true,
   totpVerifyEnabled: true,
@@ -114,6 +123,23 @@ function sanitize(raw: Record<string, unknown>): AuthSettings {
     && /\{\{\s*\.Code\s*\}\}/.test(raw["smsTemplate"])
   ) {
     s.smsTemplate = raw["smsTemplate"]
+  }
+  if (raw["captchaProvider"] === 'none' || raw["captchaProvider"] === 'local') {
+    s.captchaProvider = raw["captchaProvider"]
+  }
+  if (
+    typeof raw["captchaChallengeTtlSeconds"] === 'number'
+    && Number.isFinite(raw["captchaChallengeTtlSeconds"])
+    && raw["captchaChallengeTtlSeconds"] > 0
+  ) {
+    s.captchaChallengeTtlSeconds = Math.max(1, Math.min(3_600, Math.floor(raw["captchaChallengeTtlSeconds"])))
+  }
+  if (
+    typeof raw["captchaMaxAttempts"] === 'number'
+    && Number.isFinite(raw["captchaMaxAttempts"])
+    && raw["captchaMaxAttempts"] > 0
+  ) {
+    s.captchaMaxAttempts = Math.max(1, Math.min(20, Math.floor(raw["captchaMaxAttempts"])))
   }
   if (typeof raw["maxEnrolledFactors"] === 'number' && Number.isFinite(raw["maxEnrolledFactors"]) && raw["maxEnrolledFactors"] > 0) {
     s.maxEnrolledFactors = Math.floor(raw["maxEnrolledFactors"])
@@ -182,9 +208,10 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
   ]
   const NUMBER_KEYS = [
     'minPasswordLength', 'otpLength', 'otpExpirySeconds', 'smsOtpCooldownSeconds', 'maxEnrolledFactors',
+    'captchaChallengeTtlSeconds', 'captchaMaxAttempts',
     'recoveryCodesCount', 'recoveryCodeLength', 'recoveryCodesMaxVerifyAttempts', 'recoveryCodesLockoutSeconds',
   ]
-  const KEYS = [...BOOL_KEYS, ...NUMBER_KEYS, 'disabledProviders', 'smsTemplate']
+  const KEYS = [...BOOL_KEYS, ...NUMBER_KEYS, 'disabledProviders', 'smsTemplate', 'captchaProvider']
   for (const k of Object.keys(patch)) {
     if (!KEYS.includes(k)) return `unknown setting: ${k}`
   }
@@ -230,6 +257,21 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
       || !/\{\{\s*\.Code\s*\}\}/.test(template)
     ) {
       return 'smsTemplate must contain {{ .Code }} and be at most 1000 characters'
+    }
+  }
+  if ('captchaProvider' in patch && patch["captchaProvider"] !== 'none' && patch["captchaProvider"] !== 'local') {
+    return 'captchaProvider must be "none" or "local"'
+  }
+  const captchaBounds: Record<string, { min: number; max: number }> = {
+    captchaChallengeTtlSeconds: { min: 1, max: 3_600 },
+    captchaMaxAttempts: { min: 1, max: 20 },
+  }
+  for (const k of ['captchaChallengeTtlSeconds', 'captchaMaxAttempts']) {
+    if (!(k in patch)) continue
+    const value = patch[k]
+    const bounds = captchaBounds[k]
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < bounds.min || value > bounds.max) {
+      return `${k} must be a number between ${bounds.min} and ${bounds.max}`
     }
   }
   Object.assign(target, sanitize({ ...target, ...patch }))

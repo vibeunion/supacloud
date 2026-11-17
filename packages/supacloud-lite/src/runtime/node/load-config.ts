@@ -200,11 +200,12 @@ function readAuth(root: ConfigTable, env: Environment): AuthConfig {
   return out
 }
 
-/** The [auth]/[auth.email]/[auth.mfa] keys that become AuthSettings defaults. */
+/** The [auth]/[auth.email]/[auth.sms]/[auth.captcha]/[auth.mfa] keys that become AuthSettings defaults. */
 function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   const auth = tableAt(root, 'auth')
   const email = tableAt(root, 'auth.email')
   const sms = tableAt(root, 'auth.sms')
+  const captcha = tableAt(root, 'auth.captcha')
   const mfa = tableAt(root, 'auth.mfa')
   const mfaTotp = tableAt(root, 'auth.mfa.totp')
   const recoveryCodes = tableAt(root, 'auth.mfa.recovery_codes')
@@ -244,6 +245,13 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   if (smsFrequency !== undefined) out.smsOtpCooldownSeconds = smsFrequency
   const smsTemplate = getString(sms, 'template')
   if (smsTemplate !== undefined) out.smsTemplate = smsTemplate
+
+  const captchaProvider = getString(captcha, 'provider')
+  if (captchaProvider === 'none' || captchaProvider === 'local') out.captchaProvider = captchaProvider
+  const captchaTtl = getDurationSeconds(captcha, 'challenge_ttl')
+  if (captchaTtl !== undefined) out.captchaChallengeTtlSeconds = captchaTtl
+  const captchaAttempts = getInt(captcha, 'max_attempts')
+  if (captchaAttempts !== undefined) out.captchaMaxAttempts = captchaAttempts
 
   const maxFactors = getInt(mfa, 'max_enrolled_factors')
   if (maxFactors !== undefined) out.maxEnrolledFactors = maxFactors
