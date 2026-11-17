@@ -2,6 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { requireProjectOrAdminAuth, getVerifiedRequestPrincipal } from "../middleware/auth";
 import { isUserManagedFunctionSecretName } from "../utils/project-secret-visibility";
+import { runtimeCacheService } from "../services/runtime-cache.service";
 import {
   activeFunctionVersionNumber,
   EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
@@ -1477,6 +1478,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           code: "500",
         });
       }
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
+      }
       return {};
     },
   )
@@ -1500,6 +1504,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           message: `Failed to delete ${failed} secret(s)`,
           code: "500",
         });
+      }
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
       }
       return {};
     },
@@ -1546,6 +1553,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           code: "500",
         });
       }
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
+      }
       return {};
     },
   )
@@ -1571,6 +1581,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           message: `Failed to delete ${failed} secret(s)`,
           code: "500",
         });
+      }
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
       }
       return {};
     },
