@@ -110,6 +110,26 @@ describe('local CAPTCHA', () => {
     expect(backend.smsInbox?.list()).toHaveLength(0)
   })
 
+  test('blocks signup and password recovery without a token', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      authSettings: { captchaProvider: 'local', autoconfirm: false },
+      log: () => {},
+    })
+    backends.push(backend)
+    const client = clientFor(backend)
+
+    const signup = await client.auth.signUp({
+      email: 'captcha-signup@example.test',
+      password: 'correct-horse-battery-staple',
+    })
+    expect(signup.error?.code).toBe('captcha_required')
+
+    const recovery = await client.auth.resetPasswordForEmail('captcha-recovery@example.test')
+    expect(recovery.error?.code).toBe('captcha_required')
+  })
+
   test('accepts one challenge token and rejects replay', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64),

@@ -705,11 +705,11 @@ max_attempts = 5
 ```
 
 Clients fetch `GET /auth/v1/captcha/challenge`, display the returned image, and
-pass `<challenge-id>.<answer>` as Supabase Auth's `options.captchaToken`.
-Challenges are bound to the request source, expire automatically, allow only a
-small number of failed attempts, and are consumed once. The provider is
-disabled by default and does not require hCaptcha, Turnstile, or another
-overseas service.
+pass `<challenge-id>.<answer>` as Supabase Auth's `options.captchaToken` for
+`signUp`, `signInWithOtp`, or `resetPasswordForEmail`. Challenges are bound to
+the request source, expire automatically, allow only a small number of failed
+attempts, and are consumed once. The provider is disabled by default and does
+not require hCaptcha, Turnstile, or another overseas service.
 
 `signInWithSSO()` can use a configured OAuth/OIDC provider. Pass the provider
 name as `provider_id`, or configure `sso_domains = ["example.com"]` under

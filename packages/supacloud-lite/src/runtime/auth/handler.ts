@@ -481,6 +481,7 @@ export class AuthHandler {
       data?: Record<string, unknown>
       code_challenge?: string | null
       code_challenge_method?: string | null
+      gotrue_meta_security?: { captcha_token?: string }
     }
     try {
       const parsed: unknown = await req.json()
@@ -508,6 +509,8 @@ export class AuthHandler {
       }))
     }
 
+    const captchaError = await this.requireCaptcha(body.gotrue_meta_security?.captcha_token, req)
+    if (captchaError) return captchaError
     if (this.settings.disableSignup) {
       return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
     }
@@ -1660,7 +1663,10 @@ export class AuthHandler {
       email?: string
       code_challenge?: string | null
       code_challenge_method?: string | null
+      gotrue_meta_security?: { captcha_token?: string }
     }
+    const captchaError = await this.requireCaptcha(body.gotrue_meta_security?.captcha_token, req)
+    if (captchaError) return captchaError
     const email = normalizeEmailInput(body.email)
     if (!email) return authError(400, 'validation_failed', 'email is required')
     return this.issueToken(
