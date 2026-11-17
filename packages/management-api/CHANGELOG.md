@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.137.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.5...management-api-v0.137.6) (2026-11-17)
+
+
+### Bug Fixes
+
+* **management-api:** repair tenant runtime migrations ([#2669](https://github.com/vibeunion/supacloud/issues/2669)) ([7f1cda7](https://github.com/vibeunion/supacloud/commit/7f1cda7f6dff18d1d078c02a1ef4b41f18e7c7c8))
+
+
+### Documentation
+
+* **management-api:** record SMS hook fix in 0.137.5 ([#2670](https://github.com/vibeunion/supacloud/issues/2670)) ([bc69f6f](https://github.com/vibeunion/supacloud/commit/bc69f6f45eebc86c4c09edca89d4f765b4e21e1b))
+
 ## [0.137.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.4...management-api-v0.137.5) (2026-11-16)
 
 
