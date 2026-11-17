@@ -141,7 +141,6 @@ export interface FunctionResponse {
   background_routes?: string[];
   capabilities?: EdgeFunctionCapabilities;
   limits?: EdgeFunctionLimits;
-  import_map: boolean;
   entrypoint_path: string;
   created_at: string;
   updated_at: string;
@@ -872,8 +871,7 @@ export class ProjectService {
         background_routes: cfg.background_routes || [],
         capabilities: cfg.capabilities ?? {},
         limits: cfg.limits ?? {},
-        import_map: !!cfg.import_map,
-        entrypoint_path: `file:///home/deno/functions/${slug}/index.ts`,
+        entrypoint_path: `${slug}/${cfg.entrypoint ?? "index.ts"}`,
         created_at,
         updated_at,
       });

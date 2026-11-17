@@ -5683,24 +5683,8 @@ EOF
 # ==============================================================================
 EOF
 
-    # 3. Edge Functions Deno/Bun Hint
     mkdir -p /opt/supacloud/functions
-    cat << "EOF" > /opt/supacloud/functions/deno.json
-{
-  "==============================================================================": "",
-  "🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)": "",
-  "==============================================================================": "",
-  "WARNING": "THIS IS NOT A DENO PROJECT!",
-  "ARCHITECTURE": "SupaCloud Edge Functions run natively on BUN, not Deno.",
-  "RULES": [
-    "DO NOT use `supabase functions` CLI",
-    "DO NOT add Deno-specific imports",
-    "USE pure TypeScript compiled via Bun",
-    "Read the actual function sources in the subdirectories"
-  ]
-}
-EOF
-    log_info "AI Agent breadcrumbs deployed successfully."
+    log_info "Edge Functions directory prepared."
 }
 
 # ========== Main Function ==========

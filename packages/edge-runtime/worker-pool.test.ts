@@ -1063,7 +1063,7 @@ describe("WorkerPool subprocess guard", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-runtime-module-project-"));
     const outsideRoot = await mkdtemp(join(tmpdir(), "supacloud-runtime-module-outside-"));
     const outsideAssetPath = join(outsideRoot, "secret.txt");
-    const runtimeModulePath = join(import.meta.dir, "deno-compat.ts");
+    const runtimeModulePath = join(import.meta.dir, "runtime-sandbox.ts");
     const functionPath = join(projectRoot, "runtime-import.ts");
     await Bun.write(outsideAssetPath, "outside-secret");
     await Bun.write(functionPath, `
@@ -3318,115 +3318,6 @@ describe("WorkerPool module cache", () => {
       }
     `;
   }
-
-  test("executes Deno.serve on first load and keeps explicit exports authoritative", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-deno-serve-first-"));
-    const servePath = join(projectRoot, "serve.ts");
-    const exportedPath = join(projectRoot, "exported.ts");
-    await Bun.write(servePath, `Deno.serve(() => new Response("serve-first"));`);
-    await Bun.write(exportedPath, `
-      Deno.serve(() => new Response("captured"));
-      export default () => new Response("exported");
-    `);
-
-    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
-    pools.push(pool);
-
-    try {
-      const serveResponse = await pool.dispatch({
-        functionId: "proj_serve_first",
-        projectRef: "test-project",
-        functionPath: servePath,
-        projectRoot,
-        moduleVersion: "v1",
-        env: {},
-        request: new Request("http://edge.local/functions/v1/serve-first"),
-      });
-      expect(serveResponse.status).toBe(200);
-      expect(await serveResponse.text()).toBe("serve-first");
-
-      const exportedResponse = await pool.dispatch({
-        functionId: "proj_serve_exported",
-        projectRef: "test-project",
-        functionPath: exportedPath,
-        projectRoot,
-        moduleVersion: "v1",
-        env: {},
-        request: new Request("http://edge.local/functions/v1/serve-exported"),
-      });
-      expect(await exportedResponse.text()).toBe("exported");
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("caches a Deno.serve handler loaded during preheat", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-deno-serve-preheat-"));
-    const functionPath = join(projectRoot, "serve.ts");
-    await Bun.write(functionPath, `Deno.serve(() => new Response("preheated-serve"));`);
-
-    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
-    pools.push(pool);
-
-    try {
-      expect(await pool.preheat(
-        "proj_serve_preheat",
-        functionPath,
-        projectRoot,
-        {},
-        { projectRef: "proj_serve_preheat", moduleVersion: "v1" },
-      )).toBe(true);
-
-      const response = await pool.dispatch({
-        functionId: "proj_serve_preheat",
-        projectRef: "proj_serve_preheat",
-        functionPath,
-        projectRoot,
-        moduleVersion: "v1",
-        env: {},
-        request: new Request("http://edge.local/functions/v1/serve-preheat"),
-      });
-      expect(await response.text()).toBe("preheated-serve");
-
-      const metrics = pool.snapshotMetrics("serve_preheat");
-      expect(metrics["serve_preheat_total_module_cache_hits"]).toBe(1);
-      expect(metrics["serve_preheat_total_module_cache_misses"]).toBe(1);
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("keeps each cached Deno.serve handler isolated from later imports", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-deno-serve-cache-"));
-    const functionAPath = join(projectRoot, "serve-a.ts");
-    const functionBPath = join(projectRoot, "serve-b.ts");
-    await Bun.write(functionAPath, `Deno.serve(() => new Response("serve-a"));`);
-    await Bun.write(functionBPath, `Deno.serve(() => new Response("serve-b"));`);
-
-    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
-    pools.push(pool);
-    const dispatch = (functionId: string, functionPath: string) => pool.dispatch({
-      functionId,
-      projectRef: "test-project",
-      functionPath,
-      projectRoot,
-      moduleVersion: "v1",
-      env: {},
-      request: new Request(`http://edge.local/functions/v1/${functionId}`),
-    });
-
-    try {
-      expect(await (await dispatch("proj_serve_a", functionAPath)).text()).toBe("serve-a");
-      expect(await (await dispatch("proj_serve_b", functionBPath)).text()).toBe("serve-b");
-      expect(await (await dispatch("proj_serve_a", functionAPath)).text()).toBe("serve-a");
-
-      const metrics = pool.snapshotMetrics("serve_cache");
-      expect(metrics["serve_cache_total_module_cache_hits"]).toBe(1);
-      expect(metrics["serve_cache_total_module_cache_misses"]).toBe(2);
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
 
   test("reuses stable module versions and reloads when moduleVersion changes", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-module-cache-"));

@@ -992,7 +992,7 @@ export function registerAdvancedTools(
     // ═══ Edge Functions (8→1) ═══
     registerTool(server,
         "edge_functions",
-        `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
+        `Edge Function management (Bun-native serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
 Actions: list, get_config, deploy, deploy_bundle, deploy_manifest, config, source, activate, delete, check, scaffold`,
         {
             action: withDescription(stringEnum(["list", "get_config", "deploy", "deploy_bundle", "deploy_manifest", "config", "source", "activate", "delete", "check", "scaffold"]), "Action"),

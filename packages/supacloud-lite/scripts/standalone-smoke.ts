@@ -68,7 +68,7 @@ values (1, 'preserved-v1')
 on conflict (id) do update set body = excluded.body;
 `)
   await writeFile(join(functionDir, 'index.ts'), `
-Deno.serve(() => Response.json({ ok: true, runtime: 'standalone' }))
+export default () => Response.json({ ok: true, runtime: 'standalone' })
 `)
   await writeFile(join(fetchObjectFunctionDir, 'index.ts'), `
 export default {

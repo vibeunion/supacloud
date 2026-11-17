@@ -17,7 +17,7 @@ export function registerAdvancedTools(server: ToolServer, http: HttpTransport): 
     // ═══ Edge Functions (5→1) ═══
     registerTool(server,
         "edge_functions",
-        `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
+        `Edge Function management (Bun-native serverless). Server auto-bundles dependencies.
 Actions: list, deploy, deploy_bundle, source, delete, check`,
         {
             action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "source", "delete", "check"]), "Action"),

@@ -33,7 +33,7 @@ Legend:
 |---|---|---|---|
 | Core Postgres + REST API + Auth + Realtime + Storage | **Built-in** | **Built-in** | **Built-in** |
 | OAuth 2.1 / OIDC Provider | **Built-in** (project-scoped, Supabase-compatible beta surface) | **Built-in** (beta) | Partial / operator-configured |
-| Edge Functions runtime | **Built-in** (Bun-based, Deno-compat layer) | **Built-in** | **Built-in** |
+| Edge Functions runtime | **Built-in** (Bun-based) | **Built-in** | **Built-in** |
 | Multi-project control plane on one cluster/server | **Built-in** | **Built-in** | **External / manual** |
 | Organization, team, and project member governance | **Partial** (control-plane members, teams, collaborator capability allowlists, project audit export, API key rotation; no SCIM and no KMS API calls) | **Built-in** | **External / manual** |
 | Project lifecycle API (create/pause/restore/restart/settings) | **Built-in** | **Built-in** via Management API | **External / manual** |

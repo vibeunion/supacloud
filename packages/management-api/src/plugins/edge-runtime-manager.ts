@@ -117,7 +117,7 @@ function edgeRuntimeCommand(runnerPath: string): string[] {
 
 /**
  * Manages the Edge Function Runner as a child Bun process.
- * The runner uses deno-compat shim to execute user-authored Deno-style functions.
+ * The runner executes Bun-native function bundles in an isolated worker pool.
  *
  * Handles lifecycle: start, health check, crash recovery with exponential backoff.
  */

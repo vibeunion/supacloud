@@ -817,7 +817,6 @@ describe("edgeFunctionService bundle metadata", () => {
         version: "1",
         verify_jwt: false,
         background_routes: [],
-        import_map: null,
         entrypoint: null,
       })),
     ]);
@@ -1603,7 +1602,6 @@ describe("edgeFunctionService bundle metadata", () => {
       slug,
       files: {
         "worker.ts": "export default { fetch: () => new Response('bundle') };",
-        "import_map.json": JSON.stringify({ imports: {} }),
       },
       entrypoint: "worker.ts",
     });
@@ -1616,7 +1614,6 @@ describe("edgeFunctionService bundle metadata", () => {
 
     expect(singleFile).toMatchObject({ success: true, version: "2" });
     expect(Object.hasOwn(singleFile.config!, "entrypoint")).toBe(false);
-    expect(Object.hasOwn(singleFile.config!, "import_map")).toBe(false);
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("single-file");
   });
 
@@ -1721,7 +1718,6 @@ describe("edgeFunctionService bundle metadata", () => {
       background_routes: ["/legacy/*"],
     });
     expect(Object.hasOwn(restored!, "entrypoint")).toBe(false);
-    expect(Object.hasOwn(restored!, "import_map")).toBe(false);
     expect(await edgeFunctionService.read(ref, slug)).toContain("legacy");
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("legacy-source");
     expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("0");

@@ -3,11 +3,6 @@ import path from "path";
 import { builtinModules, syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
 
-export type CapturedServeHandler = (
-  request: Request,
-) => Response | Promise<Response>;
-
-let capturedServeHandler: CapturedServeHandler | null = null;
 export const SUBPROCESS_DISABLED_MESSAGE =
   "Subprocess execution is disabled in the multi-tenant Edge Runtime.";
 export const FILESYSTEM_DISABLED_MESSAGE =
@@ -67,7 +62,6 @@ export function tenantBuiltinSpecifier(request: unknown): string | null {
   if (!TENANT_NODE_BUILTINS.has(bareSpecifier)) return null;
   return `node:${bareSpecifier}`;
 }
-
 export function isKnownRuntimeBuiltinSpecifier(request: string): boolean {
   return request === "bun"
     || KNOWN_RUNTIME_BUILTINS.has(request.replace(/^node:/, ""));
@@ -115,13 +109,6 @@ export function initializeProjectRootControl(): (root: string | null) => void {
   }
   projectRootControlInitialized = true;
   return setProjectRoot;
-}
-
-export function getCapturedServeHandler() {
-  return capturedServeHandler;
-}
-export function clearCapturedServeHandler() {
-  capturedServeHandler = null;
 }
 
 export function disableSubprocessApis(): void {
@@ -359,12 +346,6 @@ function guardFunctionExports(
   }
 }
 
-function capturedHandler(candidate: unknown): CapturedServeHandler | null {
-  return typeof candidate === "function"
-    ? candidate as CapturedServeHandler
-    : null;
-}
-
 type ProjectPathContext = {
   lexicalRoot: string;
   realRoot: string;
@@ -494,7 +475,6 @@ const FILE_DESCRIPTOR_OPERATIONS = new Set([
 
 const projectPathContext = new AsyncLocalStorage<ProjectPathContext | null>();
 let activeProjectPathContext: ProjectPathContext | null = null;
-let injectedEnvRef: Record<string, string> = {};
 
 function setProjectRoot(root: string | null) {
   if (!root) {
@@ -508,10 +488,6 @@ function setProjectRoot(root: string | null) {
     realRoot: runtimeFs.realpathSync(lexicalRoot),
   };
   projectPathContext.enterWith(activeProjectPathContext);
-}
-
-export function setInjectedEnv(env: Record<string, string>) {
-  injectedEnvRef = env;
 }
 
 function isPathInside(candidate: string, base: string): boolean {
@@ -645,269 +621,3 @@ export function assertPathInProject(value: unknown): void {
     throw new Error(`Access denied: path "${requestedPath}" is outside the project directory`);
   }
 }
-
-const envWriteLog: Set<string> = new Set();
-
-const denoCompat = {
-  env: {
-    get: (k: string) => injectedEnvRef[k],
-    set: (k: string, v: string) => {
-      envWriteLog.add(k);
-      injectedEnvRef[k] = v;
-      process.env[k] = v;
-    },
-    delete: (k: string) => {
-      envWriteLog.add(k);
-      delete injectedEnvRef[k];
-      delete process.env[k];
-    },
-    has: (k: string) => k in injectedEnvRef,
-    toObject: () => ({ ...injectedEnvRef }),
-  },
-
-  readTextFile: (p: string) => {
-    assertPathInProject(p);
-    return runtimeBunFile(p).text();
-  },
-  readFile: (p: string) => {
-    assertPathInProject(p);
-    return runtimeBunFile(p)
-      .arrayBuffer()
-      .then((b: ArrayBuffer) => new Uint8Array(b));
-  },
-  writeTextFile: (p: string, d: string) => {
-    assertPathInProject(p);
-    return runtimeBunWrite(p, d).then(() => {});
-  },
-  writeFile: (p: string, d: Uint8Array) => {
-    assertPathInProject(p);
-    return runtimeBunWrite(p, d).then(() => {});
-  },
-  stat: async (p: string) => {
-    assertPathInProject(p);
-    const s = await runtimeFs.stat(p);
-    return {
-      isFile: s.isFile(),
-      isDirectory: s.isDirectory(),
-      size: s.size,
-      mtime: s.mtime,
-    };
-  },
-  readDir: async function* (p: string) {
-    assertPathInProject(p);
-    const entries = await runtimeFs.readdir(p, { withFileTypes: true });
-    for (const e of entries) {
-      yield {
-        name: e.name,
-        isFile: e.isFile(),
-        isDirectory: e.isDirectory(),
-        isSymlink: e.isSymbolicLink(),
-      };
-    }
-  },
-  mkdir: (p: string, opts?: { recursive?: boolean }) => {
-    assertPathInProject(p);
-    return runtimeFs.mkdir(p, opts);
-  },
-  remove: (p: string, opts?: { recursive?: boolean }) => {
-    assertPathInProject(p);
-    return runtimeFs.rm(p, opts);
-  },
-
-  readTextFileSync: (p: string) => {
-    assertPathInProject(p);
-    return runtimeFs.readFileSync(p, "utf-8");
-  },
-  writeFileSync: (p: string, d: string | Uint8Array) => {
-    assertPathInProject(p);
-    if (typeof d === "string") {
-      runtimeFs.writeFileSync(p, d, "utf-8");
-    } else {
-      runtimeFs.writeFileSync(p, d);
-    }
-  },
-  statSync: (p: string) => {
-    assertPathInProject(p);
-    const s = runtimeFs.statSync(p);
-    return {
-      isFile: s.isFile(),
-      isDirectory: s.isDirectory(),
-      isSymlink: s.isSymbolicLink(),
-      size: s.size,
-      mtime: s.mtime,
-      atime: s.atime,
-      birthtime: s.birthtime,
-      mode: s.mode,
-    };
-  },
-  readDirSync: function* (p: string) {
-    assertPathInProject(p);
-    const entries = runtimeFs.readdirSync(p, { withFileTypes: true });
-    for (const e of entries) {
-      yield {
-        name: e.name,
-        isFile: e.isFile(),
-        isDirectory: e.isDirectory(),
-        isSymlink: e.isSymbolicLink(),
-      };
-    }
-  },
-  removeSync: (p: string, opts?: { recursive?: boolean }) => {
-    assertPathInProject(p);
-    if (opts?.recursive) {
-      runtimeFs.rmSync(p, { recursive: true });
-    } else {
-      runtimeFs.rmSync(p);
-    }
-  },
-  mkdirSync: (p: string, opts?: { recursive?: boolean }) => {
-    assertPathInProject(p);
-    runtimeFs.mkdirSync(p, opts);
-  },
-
-  exit: (c?: number) => process.exit(c),
-  cwd: () => process.cwd(),
-  args: process.argv.slice(2),
-  pid: process.pid,
-  build: {
-    os:
-      process.platform === "linux"
-        ? "linux"
-        : process.platform === "darwin"
-          ? "darwin"
-          : "windows",
-  },
-  networkInterfaces: () => [],
-  hostname: () => process.env.HOSTNAME || "edge-runtime",
-  version: { deno: "1.40.0-compat-bun", v8: "n/a", typescript: "5.4" },
-
-  listen: () => {
-    throw new Error("Deno.listen() not supported, use Elysia");
-  },
-  connect: () => {
-    throw new Error("Deno.connect() not supported, use fetch/Bun.connect");
-  },
-  Command: class Command {
-    constructor(
-      _cmd: string,
-      _opts?: {
-        args?: string[];
-        cwd?: string;
-        env?: Record<string, string>;
-        stdin?: "inherit" | "piped" | "null";
-        stdout?: "inherit" | "piped" | "null";
-        stderr?: "inherit" | "piped" | "null";
-      },
-    ) {
-      throw new Error(
-        SUBPROCESS_DISABLED_MESSAGE,
-      );
-    }
-  },
-  serve: (handlerOrOpts: unknown, maybeHandler?: unknown) => {
-    const options = handlerOrOpts && typeof handlerOrOpts === "object"
-      ? handlerOrOpts as Record<string, unknown>
-      : {};
-    capturedServeHandler = capturedHandler(handlerOrOpts)
-      || capturedHandler(maybeHandler)
-      || capturedHandler(options.handler)
-      || capturedHandler(options.fetch);
-    const mockServer = {
-      finished: Promise.resolve(),
-      shutdown: async () => {},
-      ref: () => mockServer,
-      unref: () => mockServer,
-      addr: { transport: "tcp" as const, hostname: "0.0.0.0", port: 0 },
-    };
-    return mockServer;
-  },
-
-  inspect: (v: unknown) => JSON.stringify(v, null, 2),
-
-  upgradeWebSocket: (
-    _req: Request,
-    _opts?: { protocol?: string | string[] },
-  ) => {
-    throw new Error(
-      "Deno.upgradeWebSocket() is not supported in Bun Edge Runtime. " +
-        "Use the standard WebSocket API or return a Response with status 101 from your function handler.",
-    );
-  },
-};
-
-const denoErrors = {
-  NotFound: class NotFound extends Error {
-    constructor(msg?: string) { super(msg); this.name = "NotFound"; }
-  },
-  PermissionDenied: class PermissionDenied extends Error {
-    constructor(msg?: string) { super(msg); this.name = "PermissionDenied"; }
-  },
-  ConnectionRefused: class ConnectionRefused extends Error {
-    constructor(msg?: string) { super(msg); this.name = "ConnectionRefused"; }
-  },
-  ConnectionReset: class ConnectionReset extends Error {
-    constructor(msg?: string) { super(msg); this.name = "ConnectionReset"; }
-  },
-  ConnectionAborted: class ConnectionAborted extends Error {
-    constructor(msg?: string) { super(msg); this.name = "ConnectionAborted"; }
-  },
-  NotConnected: class NotConnected extends Error {
-    constructor(msg?: string) { super(msg); this.name = "NotConnected"; }
-  },
-  AddrInUse: class AddrInUse extends Error {
-    constructor(msg?: string) { super(msg); this.name = "AddrInUse"; }
-  },
-  AddrNotAvailable: class AddrNotAvailable extends Error {
-    constructor(msg?: string) { super(msg); this.name = "AddrNotAvailable"; }
-  },
-  BrokenPipe: class BrokenPipe extends Error {
-    constructor(msg?: string) { super(msg); this.name = "BrokenPipe"; }
-  },
-  AlreadyExists: class AlreadyExists extends Error {
-    constructor(msg?: string) { super(msg); this.name = "AlreadyExists"; }
-  },
-  InvalidData: class InvalidData extends Error {
-    constructor(msg?: string) { super(msg); this.name = "InvalidData"; }
-  },
-  TimedOut: class TimedOut extends Error {
-    constructor(msg?: string) { super(msg); this.name = "TimedOut"; }
-  },
-  Interrupted: class Interrupted extends Error {
-    constructor(msg?: string) { super(msg); this.name = "Interrupted"; }
-  },
-  WriteZero: class WriteZero extends Error {
-    constructor(msg?: string) { super(msg); this.name = "WriteZero"; }
-  },
-  UnexpectedEof: class UnexpectedEof extends Error {
-    constructor(msg?: string) { super(msg); this.name = "UnexpectedEof"; }
-  },
-  Http: class Http extends Error {
-    constructor(msg?: string) { super(msg); this.name = "Http"; }
-  },
-  Busy: class Busy extends Error {
-    constructor(msg?: string) { super(msg); this.name = "Busy"; }
-  },
-  NotSupported: class NotSupported extends Error {
-    constructor(msg?: string) { super(msg); this.name = "NotSupported"; }
-  },
-};
-
-const denoPermissions = {
-  query: async (_desc: unknown) => ({ state: "granted" as const }),
-  request: async (_desc: unknown) => ({ state: "granted" as const }),
-  revoke: async (_desc: unknown) => ({ state: "denied" as const }),
-};
-
-const openKv = async (_path?: string) => {
-  throw new denoErrors.NotSupported(
-    "Deno.openKv is disabled; use the request-scoped SupaCloud.pgredis binding",
-  );
-};
-
-Object.assign(globalThis, {
-  Deno: { ...denoCompat, errors: denoErrors, permissions: denoPermissions, openKv },
-});
-
-export { envWriteLog };
-
-console.log("[Deno Compat] Loaded Deno API compatibility shim");

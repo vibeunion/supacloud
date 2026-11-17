@@ -1,12 +1,11 @@
 /**
- * Bundle an edge function with Bun.build so it runs under Bun like it would on
- * Supabase's Deno edge runtime. This resolves what a plain `import()` can't:
+ * Bundle an edge function with Bun.build so TypeScript and dependency imports
+ * resolve before the function is loaded. This resolves what a plain `import()` can't:
  *   - TypeScript and multi-file functions (relative imports)
- *   - `npm:` / `jsr:` specifiers  → rewritten to esm.sh and fetched
+ *   - `npm:` specifiers  → rewritten to esm.sh and fetched
  *   - `https://` URL imports       → fetched (and their transitive deps)
  *
- * Remote modules are fetched at bundle time (first run) and disk-cached, the
- * same trade Deno makes.
+ * Remote modules are fetched at bundle time (first run) and disk-cached.
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -14,10 +13,9 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-/** Map a Deno-style specifier to a fetchable URL. Pure - unit tested. */
+/** Map an npm specifier to a fetchable URL. Pure - unit tested. */
 export function rewriteRemoteSpecifier(spec: string): string {
   if (spec.startsWith('npm:')) return `https://esm.sh/${spec.slice(4)}`
-  if (spec.startsWith('jsr:')) return `https://esm.sh/jsr/${spec.slice(4)}`
   return spec // already an http(s) URL
 }
 
@@ -35,12 +33,12 @@ async function fetchModule(url: string): Promise<string> {
   return body
 }
 
-/** Bun plugin: resolve npm:/jsr:/https imports by fetching from esm.sh. */
+/** Bun plugin: resolve npm:/https imports by fetching from esm.sh. */
 function remotePlugin(): Bun.BunPlugin {
   return {
     name: 'supacloud-lite-remote',
     setup(build: Bun.PluginBuilder) {
-      build.onResolve({ filter: /^(npm:|jsr:|https?:\/\/)/ }, (args: { path: string }) => ({
+      build.onResolve({ filter: /^(npm:|https?:\/\/)/ }, (args: { path: string }) => ({
         path: rewriteRemoteSpecifier(args.path),
         namespace: 'http-url',
       }))

@@ -1,6 +1,5 @@
 import { memoryUsage as jscMemoryUsage } from "bun:jsc";
 import { bodyBufferBudget, positiveBytes, responseBufferBudget } from "./body-transfer";
-import "./url-import-plugin";
 import { projectReleaseFunctionManifest } from "./project-release";
 import { createProjectReleasePreheatRoutes, PROJECT_PREHEAT_SCHEMA } from "./project-release-preheat";
 import { Elysia } from "elysia";

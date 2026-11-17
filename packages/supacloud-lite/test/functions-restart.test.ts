@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startProjectServer } from '../src/project-runtime.js'
 
-test('reloads Deno.serve and default fetch-object functions after an in-process restart', async () => {
+test('reloads default function and fetch-object functions after an in-process restart', async () => {
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-function-restart-'))
   await mkdir(join(projectDir, 'supabase', 'functions', 'restart'), { recursive: true })
   await mkdir(join(projectDir, 'supabase', 'functions', 'fetch-object'), { recursive: true })
   await writeFile(
     join(projectDir, 'supabase', 'functions', 'restart', 'index.ts'),
-    `Deno.serve(() => Response.json({ restarted: true }))\n`
+    `export default () => Response.json({ restarted: true })\n`
   )
   await writeFile(
     join(projectDir, 'supabase', 'functions', 'fetch-object', 'index.ts'),

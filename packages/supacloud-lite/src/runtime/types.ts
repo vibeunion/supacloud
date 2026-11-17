@@ -96,7 +96,7 @@ export interface BackendConfig {
   functions?: Map<string, import('./functions/handler.js').FunctionRegistryValue> | Record<string, import('./functions/handler.js').FunctionRegistryValue>
   /** Per-function JWT verification setting from config.toml; false makes the function public. */
   functionVerifyJwt?: Record<string, boolean>
-  /** Extra env/secrets exposed to functions via Deno.env and ctx.env (e.g. from supabase/functions/.env). */
+  /** Extra env/secrets exposed to functions via FunctionContext.env (e.g. from supabase/functions/.env). */
   functionEnv?: Record<string, string>
   /** Mail transport for OTP/magic-link/recovery emails. Default: console logger. */
   mailer?: Mailer

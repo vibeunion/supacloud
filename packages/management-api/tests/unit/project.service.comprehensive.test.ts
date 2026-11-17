@@ -280,7 +280,6 @@ describe("ProjectService - Comprehensive", () => {
       version: "2",
       bundled: true,
       files: 2,
-      import_map: null,
     });
     edgeFunctionServiceMock.runtimeCheck.mockResolvedValue({
       runtime_url: "http://127.0.0.1:9005",

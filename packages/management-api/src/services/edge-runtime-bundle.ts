@@ -114,7 +114,7 @@ function isTypeDirectiveComment(comment: CommentToken): boolean {
   if (comment.type === "Line" && /^\/+\s*<reference\b/i.test(comment.value)) {
     return true;
   }
-  return /^\s*(?:\*\s*)?@(deno-types|ts-types|ts-self-types)\b/i.test(comment.value);
+  return /^\s*(?:\*\s*)?@(ts-types|ts-self-types)\b/i.test(comment.value);
 }
 
 function blankDirectiveComment(code: string, comment: CommentToken): SourceReplacement {

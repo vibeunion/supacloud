@@ -12,8 +12,8 @@ SupaCloud (:9090)             Edge Runtime (EDGE_RUNTIME_PORT, default :9005)
 ├── SSE Log Stream (/logs/stream)
 ├── WebSocket (/ws/tasks)     ├── Elysia Server
 └── Static Assets (ETag/304)  ├── Worker Thread Pool (4 threads, fixed ~80MB)
-                              ├── Compatibility Shim (globalThis.Deno)
-                              ├── URL Import Mapping (compat imports → npm/shims)
+                              ├── Bun-native function loader
+                              ├── Isolated runtime sandbox
                               └── /preheat endpoint (import ahead of the request)
 
 Caddy Gateway (Admin API-driven):
@@ -119,11 +119,9 @@ That document is a proposal, not a supported runtime API.
 
 The Bun entrypoint is `packages/edge-runtime/server.ts`. Production Release installs render the standalone unit with `/usr/local/bin/supacloud-edge-runtime`; Bun source mode is available only when local installation is explicitly selected with `SUPACLOUD_SETUP_ARTIFACT_MODE=local`.
 
-**User function dependencies** are auto-scanned during deployment:
-- `npm:xxx` — Bun native support ✅
-- `https://esm.sh/xxx` — URL import mapping converts to npm package ✅
-- `https://deno.land/std/...` — Mapped to local shims for compatibility ✅
-- Other npm imports — Auto-scanned and installed ✅
+**User function dependencies** are bundled with Bun during deployment:
+- `npm:xxx` — Bun native support
+- Local and package imports — resolved by `Bun.build()`
 
 ## Outbound HTTPS Trust
 
@@ -475,18 +473,16 @@ bun run realtime:reconcile-schema
 
 For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`. Older installs that used an invalid key may need a one-time env fix plus the reconciliation commands above.
 
-## Compatibility Shim
+## Function Contract
 
-The runtime is Bun-native. Compatibility shims allow legacy Deno-oriented user code to keep running while the recommended authoring model stays on standard Bun/Request/Response APIs.
+The runtime accepts Bun-native standard Web API handlers and framework router
+objects. Functions should export one of the following:
 
-| Legacy Pattern | Recommended Pattern |
+| Supported Pattern | Contract |
 |----------------|---------------------|
-| `Deno.serve()` | default exported handler |
-| `Deno.readTextFile(path)` | `Bun.file(path).text()` |
-| `Deno.env.get(key)` | `process.env[key]` |
-| `Deno.stat(path)` | `fs/promises.stat()` |
-| `import "https://esm.sh/xxx"` | `import "xxx"` |
-| `import "https://deno.land/std/..."` | built-in shim or platform-native API |
+| Default function | `(request, context) => Response` |
+| Default `handle()` object | Elysia-style router |
+| Default `fetch()` object | Hono-style router |
 
 ## Service Management
 

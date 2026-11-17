@@ -26,7 +26,7 @@ const LIST_STRING_FIELDS = [
     "updated_at",
     "framework",
 ] as const;
-const LIST_BOOLEAN_FIELDS = ["verify_jwt", "import_map"] as const;
+const LIST_BOOLEAN_FIELDS = ["verify_jwt"] as const;
 
 export type FunctionConfigInput = {
     verify_jwt?: boolean;
@@ -47,7 +47,6 @@ export type FunctionIdentityResponse = {
     background_routes: string[];
     framework?: FunctionFramework;
     version?: string;
-    import_map?: string;
     entrypoint?: string;
     capabilities?: FunctionCapabilities;
     limits?: FunctionLimits;
@@ -190,13 +189,11 @@ export function projectedFunctionList(payload: unknown): Array<Record<string, un
 
 function optionalConfigFields(
     response: Record<string, unknown>,
-): Pick<FunctionIdentityResponse, "version" | "import_map" | "entrypoint"> | null {
+): Pick<FunctionIdentityResponse, "version" | "entrypoint"> | null {
     if (response.version !== undefined && !canonicalVersion(response.version)) return null;
-    if (response.import_map !== undefined && typeof response.import_map !== "string") return null;
     if (response.entrypoint !== undefined && typeof response.entrypoint !== "string") return null;
     return {
         ...(response.version === undefined ? {} : { version: response.version }),
-        ...(response.import_map === undefined ? {} : { import_map: response.import_map }),
         ...(response.entrypoint === undefined ? {} : { entrypoint: response.entrypoint }),
     };
 }

@@ -74,8 +74,8 @@ must read tenant credentials at runtime. Module initialization still occurs
 when the published bundle is loaded; AOT does not remove all cold-start work.
 
 Inline source, prebundled input, `deploy_bundle`, other frameworks, and other
-actions cannot enable this option. Custom bundler plugins/import-map handling
-are not added here. Apps needing them can build in their own trusted pipeline
+actions cannot enable this option. Custom bundler plugins or module-resolution
+rules are not added here. Apps needing them can build in their own trusted pipeline
 and use the existing verified `--prebundled-path` workflow. Compiler delivery
 schemas and server-side user-code execution are not changed.
 
