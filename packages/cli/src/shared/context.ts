@@ -152,6 +152,27 @@ function inferProjectRefFromSupabaseUrl(value: string): string {
     return new URL(value).hostname.match(/^([a-z0-9-]+)\.api\./i)?.[1] ?? "";
 }
 
+function inferManagementApiUrlFromSupabaseUrl(value: string, projectRef = ""): string {
+    if (!value) return "";
+    const url = new URL(value);
+    const host = url.hostname;
+    if (host.startsWith("api.")) {
+        url.hostname = `studio.${host.slice("api.".length)}`;
+        return url.origin;
+    }
+
+    const ref = projectRef.trim();
+    if (ref && host.startsWith(`${ref}.api.`)) {
+        url.hostname = `studio-${ref}.${host.slice(`${ref}.api.`.length)}`;
+        return url.origin;
+    }
+
+    const managedHost = host.match(/^([a-z0-9-]+)\.api\.(.+)$/i);
+    if (!managedHost) return "";
+    url.hostname = `studio-${managedHost[1]}.${managedHost[2]}`;
+    return url.origin;
+}
+
 function sourceCredentialScope(
     values: Record<string, string>,
     explicitApiUrl: string,
@@ -173,6 +194,7 @@ function sourceProjectCore(values: Record<string, string>) {
     const explicitApiUrl = values.SUPACLOUD_API_URL || "";
     const credentialScope = sourceCredentialScope(values, explicitApiUrl, supabaseUrl);
     const managementUrl = explicitApiUrl
+        || (credentialScope === "management" ? inferManagementApiUrlFromSupabaseUrl(supabaseUrl, projectRef) : "")
         || (values.SUPACLOUD_HOST ? `http://${values.SUPACLOUD_HOST}:9090` : "");
     const apiUrl = credentialScope === "management" ? canonicalApiOrigin(managementUrl) : "";
     const apiToken = credentialScope === "management" ? values.SUPACLOUD_API_TOKEN || "" : "";

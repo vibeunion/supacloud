@@ -115,7 +115,11 @@ derives the matching Management API host. For example,
 The managed hostname also supplies project ref `abc123`. A custom domain such
 as `https://api.example.com` can derive the Management API host but not a project
 ref; set `SUPACLOUD_PROJECT_REF` or pass `--ref`. Set `SUPACLOUD_API_URL`
-explicitly to override host inference.
+explicitly to override host inference. When `SUPACLOUD_API_TOKEN` is present,
+the inferred host is used for Management API commands, so a standard managed
+project only needs its project API URL and Management token. The
+`SUPABASE_SERVICE_ROLE_KEY` remains an application credential and is never
+used as a Management token.
 
 ### Typical commands
 
