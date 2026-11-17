@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.7](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.6...management-api-v0.137.7) (2026-11-17)
+
+
+### Bug Fixes
+
+* **management-api:** invalidate edge env after function secret changes ([#2677](https://github.com/vibeunion/supacloud/issues/2677)) ([f99c786](https://github.com/vibeunion/supacloud/commit/f99c786573928ae3e0586af3c5f95b62f67a844d))
+
 ## [0.137.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.5...management-api-v0.137.6) (2026-11-17)
 
 
