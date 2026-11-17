@@ -7,9 +7,17 @@ export function isTransientAuditFailure(output: string): boolean {
   return /\b(?:408|425|429|5\d\d)\b|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE)\b|ConnectionClosed|UND_ERR_SOCKET|socket hang up|fetch failed|network timeout/i.test(output);
 }
 
+export function auditArguments(ignore = process.env.SUPACLOUD_AUDIT_IGNORE): string[] {
+  const advisoryIds = (ignore ?? "")
+    .split(/[\s,]+/u)
+    .map((value) => value.trim())
+    .filter((value) => /^(?:GHSA-[a-z0-9-]+|\d+)$/iu.test(value));
+  return ["audit", "--audit-level", "high", ...advisoryIds.flatMap((value) => ["--ignore", value])];
+}
+
 function runAudit(): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["audit", "--audit-level", "high"], {
+    const child = spawn(process.execPath, auditArguments(), {
       stdio: ["inherit", "pipe", "pipe"],
       env: { ...process.env, npm_config_registry: "https://registry.npmjs.org" },
     });

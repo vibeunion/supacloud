@@ -251,7 +251,9 @@ jobs:
               bun run typecheck
               bun test
               bun run build
-              bun run ../../scripts/audit_dependencies.ts
+              # picomatch has no released fix for GHSA-fc5q-39xc-vjpf; keep the
+              # function adapter audit explicit until the upstream fix ships.
+              SUPACLOUD_AUDIT_IGNORE=GHSA-fc5q-39xc-vjpf bun run ../../scripts/audit_dependencies.ts
           - name: Worker Delivery
             working-directory: packages/worker
             script: |
