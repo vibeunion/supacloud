@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.3](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.40.2...supacloud-lite-v0.40.3) (2026-11-17)
+
+
+### Bug Fixes
+
+* **lite:** expose runtime mode to functions ([#2675](https://github.com/vibeunion/supacloud/issues/2675)) ([5500847](https://github.com/vibeunion/supacloud/commit/550084739d882112396cae42454b5080ad8c58ab))
+
 ## [0.40.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.40.1...supacloud-lite-v0.40.2) (2026-11-16)
 
 
