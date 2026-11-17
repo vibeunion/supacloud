@@ -53,6 +53,7 @@ describe('project runtime', () => {
       `export default () => Response.json({
         projectRef: Deno.env.get('SUPACLOUD_PROJECT_REF'),
         headerProjectRef: Deno.env.get('X_PROJECT_REF'),
+        runtimeMode: Deno.env.get('SUPACLOUD_RUNTIME_MODE'),
         internalSupabase: Deno.env.get('SUPACLOUD_INTERNAL_SUPABASE_URL'),
         internalAuth: Deno.env.get('SUPACLOUD_INTERNAL_AUTH_URL'),
         internalRest: Deno.env.get('SUPACLOUD_INTERNAL_REST_URL'),
@@ -64,6 +65,7 @@ describe('project runtime', () => {
       join(projectDir, 'supabase', 'functions', '.env'),
       [
         'SUPACLOUD_PROJECT_REF=wrong-project',
+        'SUPACLOUD_RUNTIME_MODE=supacloud',
         'SUPABASE_URL=https://wrong.example.com',
         'CUSTOM_SECRET=kept',
       ].join('\n')
@@ -84,6 +86,7 @@ describe('project runtime', () => {
       expect(await response.json()).toEqual({
         projectRef: 'local',
         headerProjectRef: 'local',
+        runtimeMode: 'lite',
         internalSupabase: 'http://127.0.0.1:54567',
         internalAuth: 'http://127.0.0.1:54567/auth/v1',
         internalRest: 'http://127.0.0.1:54567/rest/v1',

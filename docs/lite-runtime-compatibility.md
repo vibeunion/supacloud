@@ -60,6 +60,7 @@ Scenario: Edge Functions receive the same project routing environment
   Given a project with a function that uses Supabase-compatible internal routing
   When Lite invokes that function
   Then it receives the local project ref and X-Project-Ref values
+  And it receives SUPACLOUD_RUNTIME_MODE=lite
   And it receives internal Auth, REST and Supabase URLs for the running Lite port
   And function .env values cannot redirect the host-owned base client
 
