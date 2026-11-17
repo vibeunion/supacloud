@@ -98,6 +98,49 @@ describe("resolveSupaCloudContext", () => {
         expect(context.credentialScope).toBe("management");
     });
 
+    test("infers Management API URL when an explicit Management token is provided", () => {
+        const context = resolveSupaCloudContext({
+            SUPABASE_URL: "https://abc123.api.example.com/",
+            SUPACLOUD_API_TOKEN: "management-token",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context).toMatchObject({
+            apiUrl: "https://studio-abc123.example.com",
+            apiToken: "management-token",
+            projectRef: "abc123",
+            credentialScope: "management",
+        });
+    });
+
+    test("infers a custom Management API host without reusing an application key", () => {
+        const context = resolveSupaCloudContext({
+            SUPABASE_URL: "https://api.example.com",
+            SUPACLOUD_API_TOKEN: "management-token",
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context).toMatchObject({
+            apiUrl: "https://studio.example.com",
+            apiToken: "management-token",
+            inferredServiceRoleKey: "application-service-role",
+            credentialScope: "management",
+        });
+    });
+
+    test("does not infer Management API access from an application service-role key", () => {
+        const context = resolveSupaCloudContext({
+            SUPABASE_URL: "https://abc123.api.example.com",
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context).toMatchObject({
+            apiUrl: "",
+            apiToken: "",
+            credentialScope: "project_application",
+            projectRef: "abc123",
+        });
+    });
+
     test("prefers SUPACLOUD_API_TOKEN within one atomic source", () => {
         const context = resolveSupaCloudContext({
             SUPACLOUD_API_URL: "https://management.example.com",
