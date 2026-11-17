@@ -5,6 +5,7 @@
 
 ### Bug Fixes
 
+* **management-api:** stop Send SMS Hook 502 on GoTrue phone OTPs ([#2666](https://github.com/vibeunion/supacloud/issues/2666)) ([2deee54](https://github.com/vibeunion/supacloud/commit/2deee543576c08257a808a11a9a0ee9fb51a90c5))
 * **auth:** normalize GoTrue SMS phone numbers ([#2667](https://github.com/vibeunion/supacloud/issues/2667)) ([d325ed9](https://github.com/vibeunion/supacloud/commit/d325ed9cb629a5eca9b880fdf09b8653d7ee3af0))
 
 ## [0.137.4](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.3...management-api-v0.137.4) (2026-11-16)
