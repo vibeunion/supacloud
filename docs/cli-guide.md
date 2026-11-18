@@ -85,7 +85,17 @@ supacloud pipeline connect --provider github --preview --write
 
 The generated workflow references provider-managed secrets and reuses the
 existing `deploy` and application Preview contracts. It does not create a
-provider webhook or copy secrets automatically.
+provider webhook or copy secrets automatically. A repository with
+`supacloud.workspace.json` is the exception: `pipeline connect` writes a
+plan-only `workspace plan` workflow and does not emit `deploy`. See
+[Monorepo workspace plan](./workspace-monorepo.md).
+
+```bash
+supacloud workspace plan --environment staging --base <commit> --format json
+```
+
+`workspace plan` reads the monorepo map and prints affected applications. It
+does not build, deploy, or select a project that the map does not name.
 
 `deploy init` creates `supacloud.json`, non-secret
 `.env.supacloud.test.example` and `.env.supacloud.production.example` files,
