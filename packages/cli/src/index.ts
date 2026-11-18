@@ -36,6 +36,7 @@ import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
 import { initializeProject, registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
 import { registerConfigurationTools } from "./shared/tools/configuration-tools";
 import { registerPipelineTools } from "./shared/tools/pipeline-tools";
+import { registerWorkspaceTools } from "./shared/tools/workspace-plan";
 import { runProjectDeployment } from "./shared/tools/project-deployment";
 import type { ToolSchema } from "./shared/schema";
 import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
@@ -263,6 +264,7 @@ USAGE
   ${preferredCommand} onboard [--profile solo] [--domain <domain>] [--write]
   ${preferredCommand} config <doctor|explain>
   ${preferredCommand} pipeline connect [--write] [--preview]
+  ${preferredCommand} workspace plan --environment <name> (--base <commit> | --changed <file>)
   ${preferredCommand} env <list|check> [--root <directory>]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
@@ -301,6 +303,7 @@ EXAMPLES
   ${preferredCommand} config doctor --format json
   ${preferredCommand} config explain --key SUPACLOUD_API_URL
   ${preferredCommand} env check
+  ${preferredCommand} workspace plan --environment staging --base <commit> --format json
   ${preferredCommand} env sync --env test --write
   ${preferredCommand} env check --format json
   ${preferredCommand} status
@@ -470,6 +473,9 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         activeContext: context,
     })));
     Object.assign(tools, captureTools((server) => registerPipelineTools(server, {
+        cwd: process.cwd(),
+    })));
+    Object.assign(tools, captureTools((server) => registerWorkspaceTools(server, {
         cwd: process.cwd(),
     })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
@@ -725,7 +731,7 @@ async function main() {
     }
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
-    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db", "env"].includes(args[0]) && cliTools[args[0]]) {
+    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db", "env", "workspace"].includes(args[0]) && cliTools[args[0]]) {
         if ("action" in cliTools[args[0]].schema && args[0] !== "deploy") {
             if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
                 console.error(`This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`);

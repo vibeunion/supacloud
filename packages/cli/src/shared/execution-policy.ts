@@ -101,6 +101,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["apply"],
     },
     dev: { read: ["status"], write: ["sync", "watch", "migrate"] },
+    workspace: { local: ["plan"] },
 };
 
 export interface ExecutionAuthorization {

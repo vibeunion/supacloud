@@ -24,6 +24,21 @@ test("pipeline connect detects build settings and writes a secret-free GitHub wo
     expect(workflow).toContain("secrets.SUPACLOUD_API_URL");
 });
 
+test("pipeline connect writes a plan-only workflow when a workspace map is present", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-pipeline-workspace-"));
+    roots.push(root);
+    await writeFile(join(root, "supacloud.workspace.json"), "{}\n");
+    const result = await connectPipeline({ root, provider: "github", write: true, preview: true, format: "json" });
+    const body = result.content[0]?.text ?? "";
+    expect(body).toContain("\"workspace_plan_only\": true");
+    expect(body).toContain("\"preview\": false");
+    const workflow = await readFile(join(root, ".github/workflows/supacloud-deploy.yml"), "utf8");
+    expect(workflow).toContain("workspace plan");
+    expect(workflow).not.toContain("cli deploy");
+    expect(workflow).not.toContain("SUPACLOUD_DEPLOY_TOKEN");
+    expect(workflow).not.toContain("pull_request:");
+});
+
 test("pipeline connect writes an executable GitLab CI workflow", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-pipeline-gitlab-"));
     roots.push(root);

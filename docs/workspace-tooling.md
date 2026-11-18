@@ -12,6 +12,9 @@ This tooling does not add a remote cache, distributed execution, CI pruning,
 customer-source migration, deployment, or a replacement release engine. Full
 validation and packed/generated-consumer acceptance remain required.
 
+Customer monorepos that build more than one SupaCloud application use
+[Monorepo workspace plan](workspace-monorepo.md), not this runner.
+
 `bun --filter` is not the scheduler. It selects packages inside one Bun workspace
 and runs one script name in dependency order. This repository is not a Bun
 workspace: each package has its own lockfile, and turning the root into a
