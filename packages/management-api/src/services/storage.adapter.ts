@@ -520,16 +520,22 @@ export class S3Driver implements StorageDriver {
     accessKey?: string;
     secretKey?: string;
     endpoint: string;
+    region?: string;
     bucket: string;
   } | null> {
     if (process.env["CI"] || process.env["GITHUB_ACTIONS"] || process.env.NODE_ENV === "test") {
+      const external = config.storageType === "external";
       return {
-        accessKey: process.env["S3_ACCESS_KEY"] || "minioadmin",
-        secretKey: process.env["S3_SECRET_KEY"] || "minioadmin",
+        accessKey: (external ? process.env["EXTERNAL_S3_ACCESS_KEY"] : undefined)
+          || process.env["S3_ACCESS_KEY"] || "minioadmin",
+        secretKey: (external ? process.env["EXTERNAL_S3_SECRET_KEY"] : undefined)
+          || process.env["S3_SECRET_KEY"] || "minioadmin",
         endpoint: this.normalizeEndpoint(
           config.s3Endpoint || "http://127.0.0.1:9000",
         ),
-        bucket: resolveBucketName(projectRef),
+        region: config.s3Region,
+        bucket: (external ? process.env["EXTERNAL_S3_BUCKET"] : undefined)
+          || process.env["S3_BUCKET"] || resolveBucketName(projectRef),
       };
     }
 
@@ -538,20 +544,27 @@ export class S3Driver implements StorageDriver {
       projectRef,
     ]);
     if (!success) {
-      const accessKey = process.env["S3_ACCESS_KEY"] || undefined;
-      const secretKey = process.env["S3_SECRET_KEY"] || undefined;
+      const external = config.storageType === "external";
+      const accessKey = (external ? process.env["EXTERNAL_S3_ACCESS_KEY"] : undefined)
+        || process.env["S3_ACCESS_KEY"] || undefined;
+      const secretKey = (external ? process.env["EXTERNAL_S3_SECRET_KEY"] : undefined)
+        || process.env["S3_SECRET_KEY"] || undefined;
       return {
         ...(accessKey === undefined ? {} : { accessKey }),
         ...(secretKey === undefined ? {} : { secretKey }),
         endpoint: this.normalizeEndpoint(config.s3Endpoint),
-        bucket: resolveBucketName(projectRef),
+        region: config.s3Region,
+        bucket: (external ? process.env["EXTERNAL_S3_BUCKET"] : undefined)
+          || process.env["S3_BUCKET"] || resolveBucketName(projectRef),
       };
     }
     const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim();
     const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim();
+    const region = output.match(/REGION=([^\n]+)/)?.[1]?.trim() || config.s3Region;
     return {
       ...(accessKey === undefined ? {} : { accessKey }),
       ...(secretKey === undefined ? {} : { secretKey }),
+      region,
       endpoint: this.normalizeEndpoint(
         output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint,
       ),
@@ -565,6 +578,7 @@ export class S3Driver implements StorageDriver {
     accessKey: string;
     secretKey: string;
     endpoint: string;
+    region?: string;
     bucket: string;
   }): S3Client {
     const baseUrl = creds.endpoint.endsWith("/")
@@ -574,7 +588,7 @@ export class S3Driver implements StorageDriver {
       accessKeyId: creds.accessKey,
       secretAccessKey: creds.secretKey,
       endpoint: baseUrl,
-      region: "us-east-1", // or config
+      region: creds.region || config.s3Region || "us-east-1",
       bucket: creds.bucket,
     });
   }
