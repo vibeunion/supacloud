@@ -9,6 +9,7 @@ PROJECT_REF="${2:-}"
 
 # S3 configuration (loaded from environment variables)
 S3_ENDPOINT="${S3_ENDPOINT:-http://localhost:9000}"
+S3_REGION="${S3_REGION:-us-east-1}"
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 S3_STORAGE_TYPE="${S3_STORAGE_TYPE:-juicefs}"
@@ -42,6 +43,7 @@ load_credentials() {
             ;;
         external)
             S3_ENDPOINT="${EXTERNAL_S3_ENDPOINT:-$S3_ENDPOINT}"
+            S3_REGION="${EXTERNAL_S3_REGION:-$S3_REGION}"
             S3_ACCESS_KEY="${EXTERNAL_S3_ACCESS_KEY:-$S3_ACCESS_KEY}"
             S3_SECRET_KEY="${EXTERNAL_S3_SECRET_KEY:-$S3_SECRET_KEY}"
             BUCKET_NAME="${EXTERNAL_S3_BUCKET:-$BUCKET_NAME}"
@@ -126,6 +128,7 @@ get_credentials() {
     echo "ACCESS_KEY=${S3_ACCESS_KEY}"
     echo "SECRET_KEY=${S3_SECRET_KEY}"
     echo "ENDPOINT=${S3_ENDPOINT}"
+    echo "REGION=${S3_REGION}"
     echo "BUCKET=${BUCKET_NAME}"
 }
 

@@ -64,6 +64,15 @@ function loadStorageType(env: Record<string, string>) {
   return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
 }
 
+function loadStorageProjection(env: Record<string, string>) {
+  const result = spawnSync("bun", ["-e", [
+    'import { config } from "./src/config.ts";',
+    'console.log(`RESULT=${config.storageType}:${config.s3Endpoint}:${config.s3Region}`);',
+  ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
+}
+
 function loadNodeEnvironment(env: Record<string, string>) {
   const result = spawnSync("bun", ["-e", [
     'import { config } from "./src/config.ts";',
@@ -308,6 +317,17 @@ describe("production config loading boundaries", () => {
       SUPACLOUD_LEGACY_CONFIG_ENV_FILE: legacy,
       SUPACLOUD_LOCAL_ENV_FILE: local,
     }))).toBe("external");
+  });
+
+  test("external S3 environment overrides legacy endpoint and region", () => {
+    expect(loadStorageProjection(cleanEnv({
+      NODE_ENV: "production",
+      S3_STORAGE_TYPE: "external",
+      S3_ENDPOINT: "http://localhost:9000",
+      S3_REGION: "us-east-1",
+      EXTERNAL_S3_ENDPOINT: "https://s3-home.aizhuliren.cn",
+      EXTERNAL_S3_REGION: "cn-north-1",
+    }))).toBe("external:https://s3-home.aizhuliren.cn:cn-north-1");
   });
 
   test("legacy config requires explicit opt-in and cannot override explicit environment", () => {

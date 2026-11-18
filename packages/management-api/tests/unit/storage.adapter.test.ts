@@ -80,6 +80,58 @@ describe("S3Driver uploadFile", () => {
     }
   });
 
+  test("uses external S3 credentials, bucket and region in CI fallback mode", async () => {
+    const previous = {
+      nodeEnv: process.env.NODE_ENV,
+      ci: process.env.CI,
+      storageType: config.storageType,
+      endpoint: config.s3Endpoint,
+      region: config.s3Region,
+      externalEndpoint: process.env.EXTERNAL_S3_ENDPOINT,
+      externalRegion: process.env.EXTERNAL_S3_REGION,
+      externalBucket: process.env.EXTERNAL_S3_BUCKET,
+      externalAccess: process.env.EXTERNAL_S3_ACCESS_KEY,
+      externalSecret: process.env.EXTERNAL_S3_SECRET_KEY,
+    };
+    process.env.NODE_ENV = "test";
+    process.env.CI = "true";
+    config.storageType = "external";
+    config.s3Endpoint = "https://s3-home.aizhuliren.cn";
+    config.s3Region = "cn-north-1";
+    process.env.EXTERNAL_S3_ENDPOINT = config.s3Endpoint;
+    process.env.EXTERNAL_S3_REGION = config.s3Region;
+    process.env.EXTERNAL_S3_BUCKET = "aorist";
+    process.env.EXTERNAL_S3_ACCESS_KEY = "external-access";
+    process.env.EXTERNAL_S3_SECRET_KEY = "external-secret";
+
+    try {
+      const driver = new S3Driver();
+      const creds = await (driver as unknown as { getCreds(ref: string): Promise<unknown> }).getCreds("testref");
+      expect(creds).toMatchObject({
+        accessKey: "external-access",
+        secretKey: "external-secret",
+        endpoint: "https://s3-home.aizhuliren.cn",
+        region: "cn-north-1",
+        bucket: "aorist",
+      });
+    } finally {
+      if (previous.nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous.nodeEnv;
+      if (previous.ci === undefined) delete process.env.CI; else process.env.CI = previous.ci;
+      config.storageType = previous.storageType;
+      config.s3Endpoint = previous.endpoint;
+      config.s3Region = previous.region;
+      for (const [key, value] of [
+        ["EXTERNAL_S3_ENDPOINT", previous.externalEndpoint],
+        ["EXTERNAL_S3_REGION", previous.externalRegion],
+        ["EXTERNAL_S3_BUCKET", previous.externalBucket],
+        ["EXTERNAL_S3_ACCESS_KEY", previous.externalAccess],
+        ["EXTERNAL_S3_SECRET_KEY", previous.externalSecret],
+      ] as const) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  });
+
   test("checks bucket emptiness with a bounded prefix query", async () => {
     const driver = new S3Driver();
     let listOptions: unknown;

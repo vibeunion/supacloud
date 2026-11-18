@@ -217,6 +217,14 @@ if (!["function", "auto", "permissive"].includes(edgeFunctionsCorsModeValue)) {
   throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function, auto, or permissive");
 }
 const edgeFunctionsCorsMode = edgeFunctionsCorsModeValue as "function" | "auto" | "permissive";
+const storageType = getEnv("S3_STORAGE_TYPE", getEnv("STORAGE_TYPE", "juicefs")).trim().toLowerCase();
+const defaultS3Endpoint = isGithubActions ? "http://127.0.0.1:9000" : "http://localhost:9000";
+const s3Endpoint = storageType === "external"
+  ? getEnv("EXTERNAL_S3_ENDPOINT", getEnv("S3_ENDPOINT", defaultS3Endpoint))
+  : getEnv("S3_ENDPOINT", defaultS3Endpoint);
+const s3Region = storageType === "external"
+  ? getEnv("EXTERNAL_S3_REGION", getEnv("S3_REGION", "us-east-1"))
+  : getEnv("S3_REGION", "us-east-1");
 const dashboardUsername = getEnv("DASHBOARD_USERNAME", getEnv("STUDIO_USERNAME", "admin"));
 const dashboardPassword = getEnv("DASHBOARD_PASSWORD", getEnv("STUDIO_PASSWORD", "supabase"));
 const port = Number(getEnv("PORT", "9090"));
@@ -289,9 +297,9 @@ export const config: Config = {
   studioInternal: getEnv("STUDIO_INTERNAL", "127.0.0.1:3000"),
   supacloudApiUrl: getEnv("SUPACLOUD_API_URL", `http://${getEnv("MANAGEMENT_API_INTERNAL", `127.0.0.1:${port}`)}`),
 
-  s3Endpoint: getEnv("S3_ENDPOINT", isGithubActions ? "http://127.0.0.1:9000" : "http://localhost:9000"),
-  s3Region: getEnv("S3_REGION", "us-east-1"),
-  storageType: getEnv("S3_STORAGE_TYPE", getEnv("STORAGE_TYPE", "juicefs")),
+  s3Endpoint,
+  s3Region,
+  storageType,
   storageMountPoint: getEnv("STORAGE_MOUNT_POINT", "/data/storage"),
 
   imagorUrl: getEnv("IMAGOR_URL", getEnv("IMAGINARY_URL", "http://127.0.0.1:9010")),
