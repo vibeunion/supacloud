@@ -10,6 +10,7 @@ import {
 import { config } from "../config";
 import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { ensureApplicationConfigurationSchema } from "./application-configuration-schema";
+import { ensureWorkspaceReleaseApprovalSchema } from "./workspace-release-approval-schema";
 import { ensureApplicationRuntimeAllocationSchema } from "./application-runtime-allocation-schema";
 import { ensureApplicationCapacitySchema } from "./application-capacity-schema";
 import { ensureUsageMeterSchema } from "./usage-meter-schema";
@@ -610,6 +611,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
     ON CONFLICT (project_ref, principal_id) DO NOTHING
   `;
   await ensureApplicationConfigurationSchema(transaction);
+  await ensureWorkspaceReleaseApprovalSchema(transaction);
   await ensureApplicationRuntimeAllocationSchema(transaction);
   await ensureApplicationCapacitySchema(transaction);
   await ensureUsageMeterSchema(transaction);

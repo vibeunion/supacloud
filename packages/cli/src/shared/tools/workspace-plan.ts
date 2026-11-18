@@ -113,6 +113,7 @@ export interface WorkspacePlan {
         push_webhook: "not-registered";
         deploy_time_enforcement: false;
     };
+    repository: string | null;
     applications: WorkspacePlanApplication[];
     unresolved: WorkspacePlanUnresolved[];
     diagnostics: WorkspacePlanDiagnostic[];
@@ -128,6 +129,7 @@ interface ConfiguredApplication {
 }
 
 interface WorkspaceConfig {
+    repository: string | null;
     applications: ConfiguredApplication[];
     sharedPaths: string[];
 }
@@ -166,16 +168,28 @@ const configSchema = Type.Object({
         }, { additionalProperties: false })),
     }, { additionalProperties: false }), { minItems: 1, maxItems: WORKSPACE_PLAN_LIMITS.applications }),
     shared_paths: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: WORKSPACE_PLAN_LIMITS.sharedPaths }),
+    repository: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 }, { additionalProperties: false });
 
 export const workspaceToolSchema: ToolSchema = {
-    action: withDescription(stringEnum(["plan"]), "Workspace action"),
-    root: optional(Type.String(), "[plan] Repository root (default: current directory)"),
-    environment: optional(Type.String(), "[plan] Required environment name. Selects that binding only"),
-    base: optional(Type.String(), "[plan] Git baseline commit. Mutually exclusive with --changed"),
-    head: optional(Type.String(), "[plan] Git head (default: HEAD). Requires --base"),
-    changed: optional(Type.String(), "[plan] In-repo file of relative paths, one per line. Mutually exclusive with --base"),
-    format: optional(stringEnum(["text", "json"]), "[plan] Output format (default: text)"),
+    action: withDescription(stringEnum(["plan", "execute", "retry", "promote", "rollback", "reconcile", "status"]), "Workspace action"),
+    root: optional(Type.String(), "[plan/execute/retry/promote/rollback/reconcile/status] Repository root (default: current directory)"),
+    environment: optional(Type.String(), "[plan/execute/retry/promote/rollback/reconcile/status] Required environment name. Selects that binding only"),
+    base: optional(Type.String(), "[plan/execute/retry/status] Git baseline commit. Mutually exclusive with --changed"),
+    head: optional(Type.String(), "[plan/execute/retry/status] Git head (default: HEAD). Requires --base"),
+    changed: optional(Type.String(), "[plan/execute/retry/status] In-repo file of relative paths, one per line. Mutually exclusive with --base"),
+    format: optional(stringEnum(["text", "json"]), "[*] Output format (default: text)"),
+    execute: optional(Type.Boolean(), "[execute/retry/promote/rollback/reconcile] Required opt-in. Absent or false performs no build, upload, transfer, or deploy"),
+    plan_sha256: optional(Type.String(), "[execute/retry/promote/rollback] Workspace plan digest that must match a fresh plan"),
+    source_revision: optional(Type.String(), "[execute/retry/promote/rollback] Git commit that must match HEAD"),
+    approval_id: optional(Type.String(), "[promote/rollback/execute production] Server approval id. Local files are not approval"),
+    mutation_id: optional(Type.String(), "[retry/reconcile/rollback] Existing mutation or activation id. Unknown outcomes never receive a new id"),
+    release_id: optional(Type.String(), "[promote/rollback] Exact immutable release. Promotion and rollback do not choose the newest release"),
+    application: optional(Type.String(), "[promote/rollback/retry/execute] One application id when the plan names more than one target"),
+    configuration_id: optional(Type.String(), "[rollback/promote] Immutable configuration revision"),
+    activation_id: optional(Type.String(), "[rollback] Activation id. Retries reuse it"),
+    expected_activation_id: optional(Type.String(), "[rollback] Current activation id, or absent"),
+    source_environment: optional(Type.String(), "[promote] Environment that already has the verified release"),
 };
 
 function isNodeError(error: unknown, code: string): boolean {
@@ -463,6 +477,23 @@ async function git(cwd: string, args: string[]): Promise<string> {
     return stdout;
 }
 
+/** Checked-out commit. This does not accept a caller-supplied revision as its own proof. */
+export async function readWorkspaceHead(root: string): Promise<string> {
+    return (await git(root, ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"])).trim();
+}
+
+/** Read a changed-path list only when it is a regular file inside the workspace. */
+export async function readWorkspaceChangedList(root: string, changed: string): Promise<string[]> {
+    const rootReal = await realpath(resolve(root));
+    const listRelative = relative(rootReal, resolve(rootReal, changed)).replaceAll("\\", "/");
+    if (!safeRelative(listRelative) || await pathKind(rootReal, listRelative) !== "ok") {
+        throw new WorkspacePlanError("invalid-changed-path", "The changed-file list must be a regular file inside the workspace");
+    }
+    const text = await readRegularFile(join(rootReal, listRelative), WORKSPACE_PLAN_LIMITS.configBytes);
+    if (text === null) throw new WorkspacePlanError("invalid-changed-path", "The changed-file list was not found");
+    return parseChangedList(text);
+}
+
 /** Same rename/delete input rule as scripts/workspace: both sides are visible, and a missing baseline is explicit. */
 export async function collectGitChanges(root: string, base: string, head = "HEAD"): Promise<{ files: string[]; fallback: string | null }> {
     if (!validGitRef(base) || !validGitRef(head)) {
@@ -531,7 +562,12 @@ function parseConfigText(text: string): WorkspaceConfig {
         if (!validGlob(pattern)) throw new WorkspacePlanError("invalid-path", "A shared path is absolute, traverses parents, or is not a relative glob");
         sharedPaths.push(pattern);
     }
+    const repository = typeof parsed.repository === "string" ? parsed.repository : null;
+    if (repository !== null && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(repository)) {
+        throw new WorkspacePlanError("invalid-repository", "repository must be a credential-free source identity without a user, scheme, or URL");
+    }
     return {
+        repository,
         applications: applications.sort((left, right) => compareText(left.id, right.id)),
         sharedPaths: uniqueSorted(sharedPaths),
     };
@@ -726,7 +762,7 @@ function blockedPlan(environment: string | null, code: string, message: string, 
         schema: WORKSPACE_PLAN_SCHEMA, status: "blocked", executable: false, effects: "none", environment,
         config_file: WORKSPACE_CONFIG_FILE, config_schema: WORKSPACE_CONFIG_SCHEMA,
         completeness: "manifest-dependency-closure", deployment_verified: false, changed_files: changedFiles,
-        execution: emptyExecution(), applications: [], unresolved: [],
+        execution: emptyExecution(), repository: null, applications: [], unresolved: [],
         diagnostics: [{ code, severity: "error", application_id: null, message }],
         limits: WORKSPACE_PLAN_LIMITS,
     });
@@ -904,7 +940,7 @@ export async function createWorkspacePlan(input: {
             schema: WORKSPACE_PLAN_SCHEMA, status: "blocked", executable: false, effects: "none", environment,
             config_file: WORKSPACE_CONFIG_FILE, config_schema: WORKSPACE_CONFIG_SCHEMA,
             completeness: "manifest-dependency-closure", deployment_verified: false, changed_files: changedFiles,
-            execution: emptyExecution(),
+            execution: emptyExecution(), repository: config.repository,
             applications: applications.map(application => ({ ...application, target: null, tasks: [] })),
             unresolved: unresolved.sort((left, right) => compareText(`${left.code}${left.path}${left.package}`, `${right.code}${right.path}${right.package}`)),
             diagnostics: diagnostics.sort((left, right) => compareText(`${left.code}${left.application_id ?? ""}${left.message}`, `${right.code}${right.application_id ?? ""}${right.message}`)),
@@ -915,7 +951,7 @@ export async function createWorkspacePlan(input: {
         schema: WORKSPACE_PLAN_SCHEMA, status, executable: false, effects: "none", environment,
         config_file: WORKSPACE_CONFIG_FILE, config_schema: WORKSPACE_CONFIG_SCHEMA,
         completeness: "manifest-dependency-closure", deployment_verified: false, changed_files: changedFiles,
-        execution: emptyExecution(), applications,
+        execution: emptyExecution(), repository: config.repository, applications,
         unresolved: unresolved.sort((left, right) => compareText(`${left.code}${left.path ?? ""}${left.package ?? ""}`, `${right.code}${right.path ?? ""}${right.package ?? ""}`)),
         diagnostics: diagnostics.sort((left, right) => compareText(`${left.code}${left.application_id ?? ""}${left.message}`, `${right.code}${right.application_id ?? ""}${right.message}`)),
         limits: WORKSPACE_PLAN_LIMITS,
@@ -971,7 +1007,7 @@ export async function runWorkspacePlan(args: Record<string, unknown>, cwd = proc
     try {
         if (hasChanged) {
             const rootReal = await realpath(root);
-            const listRelative = relative(rootReal, resolve(root, args.changed as string)).replaceAll("\\", "/");
+            const listRelative = relative(rootReal, resolve(rootReal, args.changed as string)).replaceAll("\\", "/");
             const environment = Value.Check(ApplicationIdSchema, args.environment) ? args.environment : null;
             if (!safeRelative(listRelative) || await pathKind(rootReal, listRelative) !== "ok") {
                 return render(blockedPlan(environment, "invalid-changed-path", "The changed-file list must be a regular file inside the workspace"));
@@ -993,12 +1029,29 @@ export async function runWorkspacePlan(args: Record<string, unknown>, cwd = proc
     }
 }
 
-export function registerWorkspaceTools(server: ToolServer, options: { cwd?: string } = {}): void {
+export function registerWorkspaceTools(server: ToolServer, options: { cwd?: string; getHttp?: () => import("../transports/http").HttpTransport | null } = {}): void {
     registerTool(
         server,
         "workspace",
-        "Plan which monorepo applications a change would target. Reads supacloud.workspace.json and does not build or deploy.",
+        "Plan or explicitly execute monorepo delivery. Plan never builds or deploys. Execute, promote, and rollback require --execute and server authorization.",
         workspaceToolSchema,
-        args => runWorkspacePlan(args as Record<string, unknown>, options.cwd ?? process.cwd()),
+        async args => {
+            if (args.action === "plan") return runWorkspacePlan(args as Record<string, unknown>, options.cwd ?? process.cwd());
+            const { runWorkspaceCommand } = await import("./workspace-execute");
+            const { createHttpWorkspaceDeliveryClient, workspaceHttpFromTransport } = await import("./workspace-delivery-http");
+            const http = options.getHttp?.() ?? null;
+            const client = http ? createHttpWorkspaceDeliveryClient(workspaceHttpFromTransport(http), async (input) => {
+                const { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } = await import("@supacloud/compiler");
+                const root = join(input.workspaceRoot, input.root);
+                const loaded = await loadSupacloudConfig(root);
+                const result = await buildDeliveryProject(compileOptionsFromConfig(loaded, root), loaded.delivery);
+                if (!result.ok || !result.manifest) throw new Error("Workspace application build failed");
+                const { canonical, digest } = await import("@supacloud/delivery/files");
+                const output = typeof loaded.delivery === "object" && loaded.delivery && "outDir" in loaded.delivery && typeof loaded.delivery.outDir === "string"
+                    ? loaded.delivery.outDir : "generated/delivery";
+                return { manifestSha256: digest(canonical(result.manifest)), manifestPath: join(root, output, "delivery.manifest.json") };
+            }) : undefined;
+            return runWorkspaceCommand(args as Record<string, unknown>, options.cwd ?? process.cwd(), client);
+        },
     );
 }

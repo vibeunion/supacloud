@@ -811,6 +811,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     authMfaRoutes,
     frontendRoutes,
     applicationRoutes,
+    workspaceReleaseRoutes,
     projectDeploymentRoutes,
     webhookRoutes,
     deployRoutes,
@@ -949,6 +950,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(authMfaRoutes)
       .use(frontendRoutes)
       .use(applicationRoutes)
+      .use(workspaceReleaseRoutes)
       .use(projectDeploymentRoutes)
       .use(webhookRoutes)
       .use(deployRoutes)

@@ -138,6 +138,11 @@ export async function readDeliveryExecutableArchive(manifestPath: string): Promi
   return { manifest, objects };
 }
 export {
+  WORKSPACE_RELEASE_APPROVAL_SCHEMA, WorkspaceReleaseApprovalSchema,
+  parseWorkspaceReleaseApproval, workspaceApprovalId, workspaceRepositoryId,
+} from "./workspace-release-approval";
+export type { WorkspaceReleaseApproval, WorkspaceReleaseApprovalIdentity } from "./workspace-release-approval";
+export {
   RELEASE_CONTRACT_SCHEMA, assertReleaseReceiptTransition, parseReleaseReceipt, parseReleaseScope,
   releaseScopeSha256,
 } from "./release-contract";
