@@ -6,6 +6,7 @@ import {
   type ApplicationDeploymentDependencies,
 } from "./application-deployment";
 import { createApplicationRoutes } from "../routes/applications";
+import { createWorkspaceReleaseRoutes } from "../routes/workspace-releases";
 import { ApplicationDeploymentEvidenceStorage } from "./application-deployment-evidence";
 import { ApplicationDeploymentEvidenceObserver } from "./application-deployment-evidence-observer";
 import { ApplicationActiveStorage } from "./application-active-storage";
@@ -225,5 +226,27 @@ export function createDefaultApplicationRouteComposition(
     previews,
     retirementVerifier: dependencies.retirementVerifier,
   });
-  return { deployment, routes, previews, deploymentOrchestrator };
+  const workspaceReleaseRoutes = createWorkspaceReleaseRoutes({
+    promotionExecutor,
+    promotionReconciler,
+    activate: async input => {
+      const release = await storage.readRelease(input.projectRef, input.applicationId, input.releaseId);
+      const type = input.principal.type === "admin" || input.principal.type === "master" || input.principal.type === "project"
+        ? input.principal.type : "project";
+      const result = await deployment.activateConfigured({
+        runtime: { release, environmentId: input.environmentId, activationId: input.activationId },
+        configurationId: input.configurationId,
+        expectedActivationId: input.expectedActivationId,
+        principal: { type, id: input.principal.id },
+      });
+      return { activation_id: result.activation_id, release_id: input.releaseId };
+    },
+    reconcileActivation: async input => {
+      const type = input.principal.type === "admin" || input.principal.type === "master" || input.principal.type === "project"
+        ? input.principal.type : "project";
+      const result = await deployment.reconcile({ ...input, principal: { type, id: input.principal.id } });
+      return { activation_id: result.activation_id };
+    },
+  });
+  return { deployment, routes, previews, deploymentOrchestrator, workspaceReleaseRoutes };
 }

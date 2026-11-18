@@ -101,7 +101,11 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["apply"],
     },
     dev: { read: ["status"], write: ["sync", "watch", "migrate"] },
-    workspace: { local: ["plan"] },
+    workspace: {
+        local: ["plan"],
+        read: ["status"],
+        write: ["execute", "retry", "promote", "rollback", "reconcile"],
+    },
 };
 
 export interface ExecutionAuthorization {

@@ -96,6 +96,9 @@ supacloud workspace plan --environment staging --base <commit> --format json
 
 `workspace plan` reads the monorepo map and prints affected applications. It
 does not build, deploy, or select a project that the map does not name.
+`workspace execute`, `retry`, `promote`, `rollback`, and `reconcile` are
+separate commands and do nothing unless `--execute` is set. See
+[Monorepo workspace plan](./workspace-monorepo.md).
 
 `deploy init` creates `supacloud.json`, non-secret
 `.env.supacloud.test.example` and `.env.supacloud.production.example` files,

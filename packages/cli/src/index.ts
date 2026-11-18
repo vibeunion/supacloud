@@ -449,6 +449,7 @@ function writeDevProgress(result: { content: Array<{ type: string; text: string 
 
 function createCliTools(context: ResolvedContext, confirmProduction?: string): ToolMap {
     let pushMigrations: ToolInvocation | undefined;
+    let workspaceHttp: HttpTransport | null = null;
     const tools: ToolMap = {
         status: {
             schema: {},
@@ -477,6 +478,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     })));
     Object.assign(tools, captureTools((server) => registerWorkspaceTools(server, {
         cwd: process.cwd(),
+        getHttp: () => workspaceHttp,
     })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
@@ -622,6 +624,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         token: context.apiToken,
         insecureTls: context.insecureTls,
     });
+    workspaceHttp = http;
     const applicationHttp = context.inferredSupabaseUrl && context.inferredServiceRoleKey
         ? new HttpTransport({
             baseUrl: context.inferredSupabaseUrl,

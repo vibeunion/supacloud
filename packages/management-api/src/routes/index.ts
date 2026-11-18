@@ -39,6 +39,7 @@ export { frontendRoutes } from "./frontend";
 export { createApplicationRoutes } from "./applications";
 const defaultApplicationRouteComposition = createDefaultApplicationRouteComposition();
 export const applicationRoutes = defaultApplicationRouteComposition.routes;
+export const workspaceReleaseRoutes = defaultApplicationRouteComposition.workspaceReleaseRoutes;
 export const applicationPreviews = defaultApplicationRouteComposition.previews;
 export const projectDeploymentRoutes = createProjectDeploymentRoutes(defaultApplicationRouteComposition.deploymentOrchestrator);
 export const applicationDeploymentWorker = new ApplicationDeploymentWorker(defaultApplicationRouteComposition.deploymentOrchestrator);
