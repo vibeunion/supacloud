@@ -149,7 +149,11 @@ function mutationState(status: unknown): WorkspaceTargetStatus {
 function receiptOutcome(mutationId: string, data: unknown): ReleaseOutcome {
     const record = data && typeof data === "object" ? data as { mutation?: { status?: unknown }; promotion?: { release_id?: unknown }; release_id?: unknown } : {};
     const release = typeof record.promotion?.release_id === "string" ? record.promotion.release_id : typeof record.release_id === "string" ? record.release_id : null;
-    return { mutationId, status: mutationState(record.mutation?.status), releaseId: release, manifestSha256: null };
+    const status = mutationState(record.mutation?.status);
+    if (status === "succeeded" && release === null) {
+        return { mutationId, status: "unknown", releaseId: null, manifestSha256: null };
+    }
+    return { mutationId, status, releaseId: release, manifestSha256: null };
 }
 
 async function readActivation(http: WorkspaceHttp, input: { projectRef: string; applicationId: string; environmentId: string; mutationId: string }): Promise<ReleaseOutcome> {

@@ -485,7 +485,7 @@ export async function readWorkspaceHead(root: string): Promise<string> {
 /** Read a changed-path list only when it is a regular file inside the workspace. */
 export async function readWorkspaceChangedList(root: string, changed: string): Promise<string[]> {
     const rootReal = await realpath(resolve(root));
-    const listRelative = relative(rootReal, resolve(root, changed)).replaceAll("\\", "/");
+    const listRelative = relative(rootReal, resolve(rootReal, changed)).replaceAll("\\", "/");
     if (!safeRelative(listRelative) || await pathKind(rootReal, listRelative) !== "ok") {
         throw new WorkspacePlanError("invalid-changed-path", "The changed-file list must be a regular file inside the workspace");
     }
@@ -1007,7 +1007,7 @@ export async function runWorkspacePlan(args: Record<string, unknown>, cwd = proc
     try {
         if (hasChanged) {
             const rootReal = await realpath(root);
-            const listRelative = relative(rootReal, resolve(root, args.changed as string)).replaceAll("\\", "/");
+            const listRelative = relative(rootReal, resolve(rootReal, args.changed as string)).replaceAll("\\", "/");
             const environment = Value.Check(ApplicationIdSchema, args.environment) ? args.environment : null;
             if (!safeRelative(listRelative) || await pathKind(rootReal, listRelative) !== "ok") {
                 return render(blockedPlan(environment, "invalid-changed-path", "The changed-file list must be a regular file inside the workspace"));
@@ -1042,7 +1042,7 @@ export function registerWorkspaceTools(server: ToolServer, options: { cwd?: stri
             const http = options.getHttp?.() ?? null;
             const client = http ? createHttpWorkspaceDeliveryClient(workspaceHttpFromTransport(http), async (input) => {
                 const { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } = await import("@supacloud/compiler");
-                const root = join(options.cwd ?? process.cwd(), input.root);
+                const root = join(input.workspaceRoot, input.root);
                 const loaded = await loadSupacloudConfig(root);
                 const result = await buildDeliveryProject(compileOptionsFromConfig(loaded, root), loaded.delivery);
                 if (!result.ok || !result.manifest) throw new Error("Workspace application build failed");

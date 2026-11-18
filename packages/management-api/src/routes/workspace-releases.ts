@@ -45,7 +45,7 @@ export interface WorkspaceActivationRequest {
 export interface WorkspaceReleaseRouteDependencies {
   store?: WorkspaceApprovalStore;
   authorize?: typeof requireProjectOrAdminAuth;
-  principal?: (request: Request) => Promise<{ id: string; type: string; requestId?: string } | null>;
+  principal?: (request: Request) => Promise<{ id: string; type: string; requestId?: string; platformAdmin?: boolean } | null>;
   requireCapability?: typeof requireCapability;
   audit?: (record: Parameters<NonNullable<ConstructorParameters<typeof WorkspaceReleaseApprovals>[0]["audit"]>>[0], audit: WorkspaceApprovalAudit) => Promise<void>;
   promotionExecutor?: Pick<ApplicationPromotionExecutor, "execute">;
@@ -62,8 +62,8 @@ function failure(error: unknown) {
   throw error;
 }
 
-function auditOf(actor: { id: string; type: string; requestId?: string }): WorkspaceApprovalAudit {
-  return { actor: actor.id, actorType: actor.type, requestId: actor.requestId ?? "workspace" };
+function auditOf(actor: { id: string; type: string; requestId?: string; platformAdmin?: boolean }): WorkspaceApprovalAudit {
+  return { actor: actor.id, actorType: actor.type, requestId: actor.requestId ?? "workspace", platformAdmin: actor.platformAdmin === true };
 }
 
 function requestIdOf(actor: object): string {
@@ -80,7 +80,7 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
     store: dependencies.store ?? new SqlWorkspaceApprovalStore(),
     authorize: async (projectRef, audit, capability) => {
       await (dependencies.requireCapability ?? requireCapability)(projectRef, {
-        id: audit.actor, type: audit.actorType, requestId: audit.requestId, platformAdmin: false,
+        id: audit.actor, type: audit.actorType, requestId: audit.requestId, platformAdmin: audit.platformAdmin === true,
       }, capability);
     },
     audit: dependencies.audit ?? (async (record, audit) => {
@@ -100,11 +100,14 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
     }),
   });
   const authorize = dependencies.authorize ?? requireProjectOrAdminAuth;
-  const principal = dependencies.principal ?? getVerifiedRequestPrincipal;
+  const principal = dependencies.principal ?? (async (request: Request) => {
+    const actor = await getVerifiedRequestPrincipal(request);
+    return actor ? { ...actor, platformAdmin: actor.type === "master" || actor.type === "admin" } : null;
+  });
   const manage = dependencies.requireCapability ?? requireCapability;
-  async function requireManage(request: Request, projectRef: string, actor: { id: string; type: string }) {
+  async function requireManage(request: Request, projectRef: string, actor: { id: string; type: string; platformAdmin?: boolean }) {
     await manage(projectRef, {
-      id: actor.id, type: actor.type, requestId: requestIdOf(actor), platformAdmin: false,
+      id: actor.id, type: actor.type, requestId: requestIdOf(actor), platformAdmin: actor.platformAdmin === true,
     }, "applications.manage");
   }
   return new Elysia({ prefix: "/v1/projects/:ref", name: "workspace-releases" })
@@ -211,7 +214,7 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
           projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
           releaseId: body.release_id, configurationId: body.configuration_id,
           activationId: body.activation_id, expectedActivationId: body.expected_activation_id,
-          principal: { ...mutationPrincipal(actor), requestId: requestIdOf(actor), platformAdmin: false },
+          principal: { ...mutationPrincipal(actor), requestId: requestIdOf(actor), platformAdmin: actor.platformAdmin === true },
         });
       } catch (error) { return failure(error); }
     })
@@ -249,7 +252,7 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
       const result = await dependencies.reconcileActivation({
         projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
         activationId: values.activationId,
-        principal: { ...mutationPrincipal(actor), requestId: requestIdOf(actor), platformAdmin: false },
+        principal: { ...mutationPrincipal(actor), requestId: requestIdOf(actor), platformAdmin: actor.platformAdmin === true },
       });
       if (result.activation_id !== values.activationId) {
         return status(503, { code: "WORKSPACE_MUTATION_IDENTITY_CHANGED", error: "Activation reconcile changed the activation id" });

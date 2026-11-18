@@ -48,7 +48,7 @@ export interface WorkspaceApprovalView {
 }
 
 export interface WorkspaceDeliveryClient {
-    build(input: { applicationId: string; root: string; sourceRevision: string; configDigest: string }): Promise<{ manifestSha256: string; manifestPath?: string }>;
+    build(input: { workspaceRoot: string; applicationId: string; root: string; sourceRevision: string; configDigest: string }): Promise<{ manifestSha256: string; manifestPath?: string }>;
     listReleases(projectRef: string, applicationId: string): Promise<ReleaseList>;
     upload(input: { projectRef: string; applicationId: string; root: string; manifestSha256: string }): Promise<WorkspaceArtifact>;
     transfer(input: { projectRef: string; applicationId: string; sourceProjectRef: string; sourceReleaseId: string; manifestSha256: string }): Promise<WorkspaceArtifact & { replayed: boolean }>;
@@ -168,6 +168,12 @@ export async function executeWorkspace(input: {
     }
     if (!plan.repository) return blocked(input.operation, "repository-identity-required", "supacloud.workspace.json repository must name the source without credentials.", plan);
     if (input.operation === "status") return observeWorkspace(input, plan);
+    if (plan.status !== "ready") {
+        return blocked(input.operation, "plan-not-ready", `Workspace plan status is '${plan.status}'. No target was selected.`, plan);
+    }
+    if (input.applicationId && affectedTargets(plan, input.applicationId).length === 0) {
+        return blocked(input.operation, "application-not-affected", "The selected application is not an affected target in this plan. No target was selected.", plan);
+    }
     if (plan.plan_sha256 !== input.planSha256) return blocked(input.operation, "stale-plan", "The plan digest does not match the current workspace. No target was selected.", plan);
     if (!input.sourceRevision || input.sourceRevision !== input.headRevision) {
         return blocked(input.operation, "source-revision-mismatch", "source revision must match the checked-out commit. No target was selected.", plan);
@@ -214,7 +220,7 @@ async function deployWorkspace(input: { root: string; changedFiles: readonly str
         const key = `${application.id}\0${input.sourceRevision}\0${input.configDigest}`;
         let built = builds.get(key);
         if (!built) {
-            const manifest = await input.client.build({ applicationId: application.id, root: application.root, sourceRevision: input.sourceRevision!, configDigest: input.configDigest });
+            const manifest = await input.client.build({ workspaceRoot: input.root, applicationId: application.id, root: application.root, sourceRevision: input.sourceRevision!, configDigest: input.configDigest });
             built = { manifestSha256: manifest.manifestSha256, count: 1 };
             builds.set(key, built);
         }

@@ -347,3 +347,27 @@ test("release inventory failure does not upload and reconcile keeps an unknown r
   expect(calls.some(call => call.includes("/workspace-activations"))).toBe(true);
   expect(calls.some(call => call.includes("/environments/staging/activations"))).toBe(false);
 });
+
+test("blocked plans and explicitly unmatched applications never report a completed execution", async () => {
+  const changed = ["apps/storefront/src/page.ts"];
+  const { root, digest } = await fixture(changed);
+  const blockedPlan = await createWorkspacePlan({ root, environment: "staging", changedFiles: ["README.md"] });
+  const client = fakeClient();
+  const blockedResult = await executeWorkspace({
+    root, operation: "execute", environment: "staging", changedFiles: ["README.md"], execute: true,
+    planSha256: blockedPlan.plan_sha256, sourceRevision: revision, headRevision: revision, configDigest: digest, client,
+  });
+  expect(blockedResult.status).toBe("blocked");
+  expect(blockedResult.diagnostics[0]?.code).toBe("plan-not-ready");
+  expect(client.builds).toEqual([]);
+
+  const readyPlan = await createWorkspacePlan({ root, environment: "staging", changedFiles: changed });
+  const unmatched = await executeWorkspace({
+    root, operation: "execute", environment: "staging", changedFiles: changed, execute: true,
+    planSha256: readyPlan.plan_sha256, sourceRevision: revision, headRevision: revision,
+    applicationId: "admin", configDigest: digest, client,
+  });
+  expect(unmatched.status).toBe("blocked");
+  expect(unmatched.diagnostics[0]?.code).toBe("application-not-affected");
+  expect(client.builds).toEqual([]);
+});

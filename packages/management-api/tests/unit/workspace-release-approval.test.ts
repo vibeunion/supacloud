@@ -225,3 +225,23 @@ test("another manage-capable actor can consume a grant and a concurrent grant do
   expect(consumedBy).toBe("teammate");
   expect(first.approval_id).toBe(workspaceApprovalId(identity));
 });
+
+test("workspace approval routes preserve platform administrator capability", async () => {
+  const seen: boolean[] = [];
+  const routes = createWorkspaceReleaseRoutes({
+    store: new MemoryWorkspaceApprovalStore(),
+    authorize: async () => undefined,
+    audit: async () => undefined,
+    principal: async () => ({ id: "platform-admin", type: "admin", requestId: "req-admin", platformAdmin: true }),
+    requireCapability: async (_ref, actor, capability) => {
+      seen.push(actor.platformAdmin);
+      if (capability !== "applications.manage") throw new Error(capability);
+    },
+  });
+  const { project_ref: _projectRef, ...body } = identity;
+  const response = await routes.handle(new Request("http://localhost/v1/projects/store-prd/workspace-approvals", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }));
+  expect(response.status).toBe(201);
+  expect(seen).toEqual([true]);
+});

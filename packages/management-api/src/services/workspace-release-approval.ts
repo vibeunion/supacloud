@@ -35,6 +35,7 @@ export interface WorkspaceApprovalAudit {
   actor: string;
   actorType: string;
   requestId: string;
+  platformAdmin?: boolean;
 }
 
 export interface WorkspaceApprovalDependencies {
