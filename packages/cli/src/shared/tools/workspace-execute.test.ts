@@ -62,7 +62,10 @@ async function writeTree(root: string, files: Record<string, string>) {
   }
 }
 
-function fakeClient(): WorkspaceDeliveryClient & { builds: string[]; uploads: string[]; deploys: string[]; transfers: string[]; reconciles: string[] } {
+function fakeClient(): WorkspaceDeliveryClient & {
+    builds: string[]; uploads: string[]; deploys: string[]; transfers: string[]; reconciles: string[];
+    fail(projectRef: string, applicationId: string, mutationId: string, status: WorkspaceTargetStatus): void;
+} {
   const releases = new Map<string, WorkspaceArtifact[]>();
   const deployments = new Map<string, WorkspaceTargetStatus>();
   const client = {
