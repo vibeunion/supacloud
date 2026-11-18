@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.8](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.7...management-api-v0.137.8) (2026-11-18)
+
+
+### Bug Fixes
+
+* **storage:** support external S3 environment configuration ([#2689](https://github.com/vibeunion/supacloud/issues/2689)) ([e194b44](https://github.com/vibeunion/supacloud/commit/e194b446824eff7e87bc580a33dd7646cd5a2159))
+
 ## [0.137.7](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.6...management-api-v0.137.7) (2026-11-17)
 
 
