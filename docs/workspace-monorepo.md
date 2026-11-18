@@ -39,10 +39,14 @@ These existing pieces stay in place:
   are shown as the old path and the new path (`--no-renames`), and a baseline
   that cannot be resolved is reported instead of guessed.
 
-`pipeline connect` keeps generating a deploy workflow for a repository that has
-no `supacloud.workspace.json`. When that file is present, the generated push
-workflow runs `workspace plan` only. Existing frontend webhook deploys in the
-Management API are unchanged.
+`pipeline connect` keeps generating a deploy workflow only when
+`supacloud.workspace.json` is absent. A symlink, including a dangling symlink,
+or any non-regular entry is rejected and no deploy workflow is written. A
+regular workspace file selects the plan-only workflow. GitHub replaces
+`supacloud-deploy.yml` with that plan. An existing GitLab `.gitlab-ci.yml` is
+not overwritten: the command fails and tells you the file was left unchanged
+and can still deploy. Remove it before writing the plan-only workflow. Existing
+frontend webhook deploys in the Management API are unchanged.
 
 ## Onboarding
 
@@ -124,14 +128,17 @@ The same inputs produce the same document, including `plan_sha256`.
 
 ## How to read a plan
 
-`status` is `ready`, `unchanged`, or `blocked`.
+`status` is `ready`, `unchanged`, `no-impact`, or `blocked`.
 
 - `ready`: at least one application is affected, every selected binding is valid,
   and the impact closure is known. Affected applications have `target` set to
   that environment's project ref and application id, plus planned `build` and
   `deploy` tasks with `executed: false`. Other applications have no tasks.
-- `unchanged`: no input changed. No tasks. `configured_binding` still shows the
+- `unchanged`: the change set is empty. No tasks. `configured_binding` still shows the
   selected environment so you can see the map. `target` is null.
+- `no-impact`: at least one input changed, and every changed path was classified,
+  but no application is affected. `changed_files` stays populated. No tasks are
+  selected. This is not a claim that the commit was empty.
 - `blocked`: the map is invalid, or some impact could not be resolved. `target`
   is null and there are no tasks, so a commit cannot fall through onto another
   project. `diagnostics` and `unresolved` say what is wrong.
@@ -139,9 +146,15 @@ The same inputs produce the same document, including `plan_sha256`.
 `executable` is always false. `execution.deploy_time_enforcement` is always
 false. `execution.push_webhook` is `not-registered`.
 
-A file under one application root affects that application. A file under a
-shared package affects applications that depend on it, including through other
-shared packages. An unrelated application is `unaffected` and has no task.
+A file under one application root affects that application and every application
+that depends on it, including through other applications. The same reverse
+closure is used for a shared package. A cycle is visited once. An unrelated
+application is `unaffected` and has no task. A shared package with no
+application dependents produces `no-impact`, not `unchanged`.
+
+`build` is stored only when it is a literal intent. Environment assignments
+such as `TOKEN=value`, and command text that names a token, secret, password,
+or API key, are rejected. The rejection does not repeat the command.
 
 These inputs do not silently drop a dependent:
 

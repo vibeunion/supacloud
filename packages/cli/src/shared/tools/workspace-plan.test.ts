@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { executionMode, validateExecutionPolicyCoverage } from "../execution-policy";
 import {
-    createWorkspacePlan, formatWorkspacePlan, runWorkspacePlan, workspaceToolSchema,
+    collectGitChanges, createWorkspacePlan, formatWorkspacePlan, runWorkspacePlan, workspaceToolSchema,
     type WorkspacePlan,
 } from "./workspace-plan";
 
@@ -383,4 +383,83 @@ test("git rename and deletion inputs stay explicit", async () => {
 test("workspace plan is a local command", () => {
     expect(executionMode("workspace", "plan", {})).toBe("local");
     expect(() => validateExecutionPolicyCoverage({ workspace: { schema: workspaceToolSchema } })).not.toThrow();
+});
+
+test("an application edit reaches direct and transitive application dependents", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "apps/storefront/package.json"), packageJson("@acme/storefront", { "@acme/admin": "workspace:*" }));
+    await writeFile(join(root, "apps/admin/package.json"), packageJson("@acme/admin", { "@acme/storefront": "workspace:*", "@acme/jobs": "workspace:*" }));
+    const edited = await createWorkspacePlan({ root, environment: "staging", changedFiles: ["apps/admin/src/page.ts"] });
+    expect(edited.status).toBe("ready");
+    expect(application(edited, "admin").impact).toBe("affected");
+    expect(application(edited, "storefront").impact).toBe("affected");
+    expect(application(edited, "storefront").reasons.some(reason => reason.includes("apps/admin"))).toBe(true);
+    expect(application(edited, "worker")).toMatchObject({ impact: "unaffected", tasks: [] });
+    const shared = await createWorkspacePlan({ root, environment: "staging", changedFiles: ["packages/jobs/src/index.ts"] });
+    expect(application(shared, "admin").impact).toBe("affected");
+    expect(application(shared, "storefront").impact).toBe("affected");
+    expect(application(shared, "worker").impact).toBe("affected");
+});
+
+test("a shared package with no application dependents is no-impact", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "packages/tokens/package.json"), packageJson("@acme/tokens"));
+    await writeFile(join(root, "packages/ui/package.json"), packageJson("@acme/ui"));
+    await writeFile(join(root, "apps/storefront/package.json"), packageJson("@acme/storefront"));
+    await writeFile(join(root, "apps/admin/package.json"), packageJson("@acme/admin"));
+    await writeFile(join(root, "apps/worker/package.json"), packageJson("@acme/worker"));
+    const plan = await createWorkspacePlan({ root, environment: "staging", changedFiles: ["packages/tokens/src/index.ts"] });
+    expect(plan.status).toBe("no-impact");
+    expect(plan.changed_files).toEqual(["packages/tokens/src/index.ts"]);
+    expect(plan.applications.every(entry => entry.impact === "unaffected" && entry.tasks.length === 0 && entry.target === null)).toBe(true);
+});
+
+test("a credential-like build intent is rejected without disclosure", async () => {
+    const root = await fixture();
+    const secret = "embed-secret";
+    await writeFile(join(root, "supacloud.workspace.json"), `${JSON.stringify(workspaceConfig([
+        app("storefront", "apps/storefront", "store-stg", "store-prd", `bun run build TOKEN=${secret}`),
+    ]))}\n`);
+    const plan = await createWorkspacePlan({ root, environment: "staging", changedFiles: ["apps/storefront/src/page.ts"] });
+    expect(plan.status).toBe("blocked");
+    const rendered = `${JSON.stringify(plan)}\n${formatWorkspacePlan(plan)}`;
+    expect(rendered).not.toContain(secret);
+    expect(rendered).not.toContain("TOKEN=");
+});
+
+test("a symlinked application parent is not read", async () => {
+    const root = await fixture();
+    const outside = await mkdtemp(join(tmpdir(), "workspace-outside-"));
+    roots.push(outside);
+    const secret = "symlink-parent-secret";
+    await mkdir(join(outside, "storefront"), { recursive: true });
+    await writeFile(join(outside, "storefront", "supacloud.json"), JSON.stringify({ application: { id: "storefront" }, token: secret }));
+    await rm(join(root, "apps"), { recursive: true, force: true });
+    await symlink(outside, join(root, "apps"));
+    const plan = await createWorkspacePlan({ root, environment: "staging", changedFiles: ["apps/storefront/src/page.ts"] });
+    expect(plan.status).toBe("blocked");
+    expect(plan.diagnostics.some(diagnostic => diagnostic.code === "symlink-rejected")).toBe(true);
+    expect(JSON.stringify(plan)).not.toContain(secret);
+    expect(formatWorkspacePlan(plan)).not.toContain(secret);
+});
+
+test("git change collection does not run core.fsmonitor", async () => {
+    const root = await fixture();
+    const sentinel = join(root, "fsmonitor-sentinel");
+    const hook = join(root, "fsmonitor-hook");
+    await writeFile(hook, `#!/bin/sh\ntouch ${JSON.stringify(sentinel)}\n`);
+    await chmod(hook, 0o755);
+    await exec("git", ["init", "-b", "main"], { cwd: root });
+    await exec("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    await exec("git", ["config", "user.name", "Test"], { cwd: root });
+    await exec("git", ["config", "core.fsmonitor", hook], { cwd: root });
+    await exec("git", ["add", "."], { cwd: root });
+    await exec("git", ["commit", "-m", "initial"], { cwd: root });
+    await rm(sentinel, { force: true });
+    const base = (await exec("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })).stdout.trim();
+    await writeFile(join(root, "apps/storefront/src/page.ts"), "export const page = false;\n");
+    const collected = await collectGitChanges(root, base);
+    expect(collected.fallback).toBeNull();
+    expect(collected.files).toContain("apps/storefront/src/page.ts");
+    await expect(readFile(sentinel, "utf8")).rejects.toThrow();
 });

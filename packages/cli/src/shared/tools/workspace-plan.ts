@@ -96,7 +96,7 @@ export interface WorkspacePlanDiagnostic {
 
 export interface WorkspacePlan {
     schema: typeof WORKSPACE_PLAN_SCHEMA;
-    status: "ready" | "unchanged" | "blocked";
+    status: "ready" | "unchanged" | "no-impact" | "blocked";
     executable: false;
     effects: "none";
     environment: string | null;
@@ -194,7 +194,10 @@ function safeRelative(path: string): boolean {
 }
 
 function safeBuild(command: string): boolean {
-    return BUILD_INTENT_PATTERN.test(command) && !command.includes("..") && !command.includes("://");
+    if (!BUILD_INTENT_PATTERN.test(command) || command.includes("..") || command.includes("://")) return false;
+    // Bare NAME=value is an environment assignment. --flag=value stays allowed.
+    if (/(?:^|[\s;&|])[A-Za-z_][A-Za-z0-9_]*=/.test(command)) return false;
+    return !/token|secret|password|passwd|credential|api[_-]?key/i.test(command);
 }
 
 function inside(root: string, candidate: string): boolean {
@@ -448,8 +451,14 @@ function validGitRef(ref: string): boolean {
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync("git", args, {
-        cwd, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 10_000, shell: false, windowsHide: true,
+    const env: Record<string, string> = { GIT_OPTIONAL_LOCKS: "0" };
+    for (const [key, value] of Object.entries(process.env)) {
+        if (value !== undefined) env[key] = value;
+    }
+    env.GIT_OPTIONAL_LOCKS = "0";
+    // core.fsmonitor can be a repository-configured command. Name-only diffs must not run it or refresh its state.
+    const { stdout } = await execFileAsync("git", ["-c", "core.fsmonitor=", "-c", "core.fsmonitorHookVersion=0", ...args], {
+        cwd, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 10_000, shell: false, windowsHide: true, env,
     });
     return stdout;
 }
@@ -663,7 +672,15 @@ async function loadGraph(rootReal: string, config: WorkspaceConfig): Promise<{ n
 }
 
 async function readApplicationConfig(rootReal: string, application: ConfiguredApplication, environment: string): Promise<WorkspacePlanDiagnostic[]> {
-    const path = join(rootReal, application.root, "supacloud.json");
+    const relativePath = `${application.root}/supacloud.json`;
+    const kind = await pathKind(rootReal, relativePath);
+    if (kind !== "ok") {
+        return [{
+            code: kind === "symlink" ? "symlink-rejected" : "invalid-path", severity: "error", application_id: application.id,
+            message: `supacloud.json for '${application.root}' is not a regular file inside the workspace`,
+        }];
+    }
+    const path = join(rootReal, relativePath);
     const text = await readRegularFile(path, WORKSPACE_PLAN_LIMITS.configBytes);
     if (text === null) return [];
     let parsed: unknown;
@@ -807,10 +824,26 @@ export async function createWorkspacePlan(input: {
             for (const id of applicationIds) mark(id, "affected", "Workspace configuration changed");
             continue;
         }
+        const closeDependents = (start: string) => {
+            const seen = new Set<string>();
+            const queue: Array<{ root: string; chain: string }> = [{ root: start, chain: start }];
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (!current || seen.has(current.root)) continue;
+                seen.add(current.root);
+                const application = applicationByRoot.get(current.root);
+                if (application && current.root === start) mark(application.id, "affected", `Changed input: ${file}`);
+                for (const edge of dependents.get(current.root) ?? []) {
+                    const chain = `${current.chain} -> ${edge.dependent} (${edge.field} ${edge.name})`;
+                    const nextApplication = applicationByRoot.get(edge.dependent);
+                    if (nextApplication) mark(nextApplication.id, "affected", `Changed input ${file} reaches ${nextApplication.id} through ${chain}`);
+                    queue.push({ root: edge.dependent, chain });
+                }
+            }
+        };
         const applicationRoot = ownerRoot(file, config.applications);
         if (applicationRoot) {
-            const application = applicationByRoot.get(applicationRoot);
-            if (application) mark(application.id, "affected", `Changed input: ${file}`);
+            closeDependents(applicationRoot);
             continue;
         }
         const shared = sharedRootFor(file, config.sharedPaths, directories);
@@ -828,21 +861,7 @@ export async function createWorkspacePlan(input: {
             for (const id of applicationIds) mark(id, "unknown", reason);
             continue;
         }
-        const seen = new Set<string>();
-        const queue: Array<{ root: string; chain: string }> = [{ root: shared, chain: shared }];
-        while (queue.length > 0) {
-            const current = queue.shift();
-            if (!current || seen.has(current.root)) continue;
-            seen.add(current.root);
-            const application = applicationByRoot.get(current.root);
-            if (application && current.root === shared) mark(application.id, "affected", `Changed input: ${file}`);
-            for (const edge of dependents.get(current.root) ?? []) {
-                const chain = `${current.chain} -> ${edge.dependent} (${edge.field} ${edge.name})`;
-                const nextApplication = applicationByRoot.get(edge.dependent);
-                if (nextApplication) mark(nextApplication.id, "affected", `Changed input ${file} reaches ${nextApplication.id} through ${chain}`);
-                queue.push({ root: edge.dependent, chain });
-            }
-        }
+        closeDependents(shared);
         for (const edge of loaded.unresolved) {
             if (!edge.ambiguous && edge.name !== node?.name) continue;
             const owner = applicationByRoot.get(edge.dependent);
@@ -854,7 +873,9 @@ export async function createWorkspacePlan(input: {
     const errors = diagnostics.filter(diagnostic => diagnostic.severity === "error");
     const unknown = [...impact.values()].some(entry => entry.impact === "unknown") || unresolved.length > 0 || errors.length > 0;
     const affected = [...impact.values()].some(entry => entry.impact === "affected");
-    const status: WorkspacePlan["status"] = unknown ? "blocked" : affected ? "ready" : "unchanged";
+    const status: WorkspacePlan["status"] = unknown ? "blocked"
+        : affected ? "ready"
+            : changedFiles.length === 0 && !input.fallbackReason ? "unchanged" : "no-impact";
     const applications: WorkspacePlanApplication[] = config.applications.map(application => {
         const state = impact.get(application.id) ?? { impact: "unknown" as const, reasons: ["Impact was not computed"] };
         const binding = application.environments[environment] ?? null;

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
@@ -117,10 +117,26 @@ function workflow(provider: string, preview: boolean): string {
     return `name: SupaCloud deploy\n\non:\n${events}\n\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Deploy to SupaCloud\n        if: \${{ github.event_name == 'push' || github.event.action == '' }}\n        env:\n          SUPACLOUD_API_URL: \${{ secrets.SUPACLOUD_API_URL }}\n          SUPACLOUD_API_TOKEN: \${{ secrets.SUPACLOUD_DEPLOY_TOKEN }}\n          SUPACLOUD_PROJECT_REF: \${{ secrets.SUPACLOUD_PROJECT_REF }}\n        run: npx @supacloud/cli deploy\n${previewSteps}`;
 }
 
+async function workspaceManifest(root: string): Promise<"absent" | "plan" | "unsafe"> {
+    const path = join(root, "supacloud.workspace.json");
+    try {
+        const stat = await lstat(path);
+        if (stat.isSymbolicLink() || !stat.isFile()) return "unsafe";
+        return "plan";
+    } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return "absent";
+        throw error;
+    }
+}
+
 export async function connectPipeline(args: Record<string, unknown>, options: PipelineToolOptions = {}): Promise<ToolResult> {
     const root = resolve(typeof args.root === "string" ? args.root : options.cwd ?? process.cwd());
     const provider = typeof args.provider === "string" ? args.provider : "github";
-    const workspacePlanOnly = existsSync(join(root, "supacloud.workspace.json"));
+    const manifest = await workspaceManifest(root);
+    if (manifest === "unsafe") {
+        throw new Error("supacloud.workspace.json is a symlink or not a regular file. Refusing to generate a deploy workflow.");
+    }
+    const workspacePlanOnly = manifest === "plan";
     const config = await readJson(join(root, "supacloud.json"));
     const frontend = record(config.frontend);
     const packageJson = await readJson(join(root, "package.json"));
@@ -159,7 +175,10 @@ export async function connectPipeline(args: Record<string, unknown>, options: Pi
         "No files were changed. Re-run with --write after reviewing the generated workflow.",
     ].join("\n"));
     if (provider === "gitlab" && existsSync(workflowPath)) {
-        throw new Error(`Refusing to overwrite existing GitLab workflow: ${workflowPath}`);
+        const retained = workspacePlanOnly
+            ? `Existing GitLab workflow was left unchanged and can still deploy: ${workflowPath}. Remove it before writing a plan-only workspace workflow.`
+            : `Refusing to overwrite existing GitLab workflow: ${workflowPath}`;
+        throw new Error(retained);
     }
     await mkdir(resolve(workflowPath, ".."), { recursive: true });
     const body = workspacePlanOnly ? workspacePlanWorkflow(provider) : workflow(provider, args.preview === true);
