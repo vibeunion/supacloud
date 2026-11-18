@@ -1,5 +1,5 @@
 import { Elysia, status, t } from "elysia";
-import { ApplicationPromotionPlanSchema, type ApplicationPromotionPlan } from "@supacloud/delivery";
+import { ApplicationPromotionPlanSchema, parseApplicationPromotionPlan, type ApplicationPromotionPlan } from "@supacloud/delivery";
 import { getVerifiedRequestPrincipal } from "../middleware/auth";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { appendAuditEvent } from "../services/audit.service";
@@ -16,7 +16,7 @@ import { SqlWorkspaceApprovalStore } from "../services/workspace-release-approva
 
 const sha = t.String({ pattern: "^[a-f0-9]{64}$" });
 const revision = t.String({ pattern: "^[a-f0-9]{40}(?:[a-f0-9]{24})?$" });
-const repository = t.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._/@:-]*$" });
+const repository = t.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]*$" });
 const projectParams = t.Object({ ref: t.String({ pattern: "^[a-z0-9-]{1,20}$" }) });
 const environmentParams = t.Object({
   ref: projectParams.properties.ref,
@@ -51,7 +51,7 @@ export interface WorkspaceReleaseRouteDependencies {
   promotionExecutor?: Pick<ApplicationPromotionExecutor, "execute">;
   promotionReconciler?: Pick<ApplicationPromotionReconciler, "reconcile">;
   activate?: (input: WorkspaceActivationRequest) => Promise<{ activation_id: string; release_id: string }>;
-  reconcileActivation?: (input: { projectRef: string; applicationId: string; environmentId: string; activationId: string; principal: TrustedPrincipal }) => Promise<{ activation_id: string }>;
+  reconcileActivation?: (input: { projectRef: string; applicationId: string; environmentId: string; activationId: string; principal: TrustedPrincipal }) => Promise<{ activation_id: string; release_id?: string; mutation?: { status?: string } }>;
 }
 
 function failure(error: unknown) {
@@ -101,6 +101,12 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
   });
   const authorize = dependencies.authorize ?? requireProjectOrAdminAuth;
   const principal = dependencies.principal ?? getVerifiedRequestPrincipal;
+  const manage = dependencies.requireCapability ?? requireCapability;
+  async function requireManage(request: Request, projectRef: string, actor: { id: string; type: string }) {
+    await manage(projectRef, {
+      id: actor.id, type: actor.type, requestId: requestIdOf(actor), platformAdmin: false,
+    }, "applications.manage");
+  }
   return new Elysia({ prefix: "/v1/projects/:ref", name: "workspace-releases" })
     .post("/workspace-approvals", {
       params: projectParams, body: approvalBody,
@@ -146,7 +152,11 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
       if (denied) return status(denied.status, denied.body);
       const actor = await principal(request);
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
-      const plan = body.plan as ApplicationPromotionPlan;
+      try { await requireManage(request, values.ref, actor); }
+      catch (error) { return failure(error); }
+      let plan: ApplicationPromotionPlan;
+      try { plan = parseApplicationPromotionPlan(body.plan); }
+      catch { return status(422, { code: "APPLICATION_PROMOTION_PLAN_INVALID", error: "Application promotion plan was rejected" }); }
       try {
         if (plan.project_ref !== values.ref || plan.application_id !== values.id || plan.environment_id !== values.environmentId
           || plan.manifest_sha256 !== body.manifest_sha256 || plan.source.release_id !== body.source_release_id
@@ -171,10 +181,11 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
     .post("/applications/:id/environments/:environmentId/workspace-activations", {
       params: environmentParams,
       body: t.Object({
-        approval_id: sha, repository, release_id: sha, manifest_sha256: sha,
+        release_id: sha,
         configuration_id: t.String({ format: "uuid" }), activation_id: t.String({ format: "uuid" }),
         expected_activation_id: t.Union([t.String({ format: "uuid" }), t.Null()]),
-        config_digest: sha, source_revision: revision, workspace_plan_sha256: sha,
+        approval_id: t.Optional(sha), repository: t.Optional(repository), manifest_sha256: t.Optional(sha),
+        config_digest: t.Optional(sha), source_revision: t.Optional(revision), workspace_plan_sha256: t.Optional(sha),
       }, { additionalProperties: false }),
       detail: { tags: ["applications"], summary: "Activate an approved immutable release through the existing activation path" },
     }, async ({ params: values, body, request }) => {
@@ -184,12 +195,18 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
       const actor = await principal(request);
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
       try {
-        await approvals.assertMatch(values.ref, body.approval_id, {
-          repository: body.repository, project_ref: values.ref, application_id: values.id,
-          environment_id: values.environmentId, release_id: body.release_id, manifest_sha256: body.manifest_sha256,
-          config_digest: body.config_digest, source_revision: body.source_revision,
-          workspace_plan_sha256: body.workspace_plan_sha256,
-        });
+        await requireManage(request, values.ref, actor);
+        if (values.environmentId === "production") {
+          if (!body.approval_id || !body.repository || !body.manifest_sha256 || !body.config_digest || !body.source_revision || !body.workspace_plan_sha256) {
+            return status(409, { code: "WORKSPACE_APPROVAL_REQUIRED", error: "Production activation requires a matching server approval" });
+          }
+          await approvals.assertMatch(values.ref, body.approval_id, {
+            repository: body.repository, project_ref: values.ref, application_id: values.id,
+            environment_id: values.environmentId, release_id: body.release_id, manifest_sha256: body.manifest_sha256,
+            config_digest: body.config_digest, source_revision: body.source_revision,
+            workspace_plan_sha256: body.workspace_plan_sha256,
+          });
+        }
         return await dependencies.activate({
           projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
           releaseId: body.release_id, configurationId: body.configuration_id,
@@ -208,6 +225,8 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
       if (denied) return status(denied.status, denied.body);
       const actor = await principal(request);
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      try { await requireManage(request, values.ref, actor); }
+      catch (error) { return failure(error); }
       const input: ApplicationPromotionReconcileInput = {
         projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
         mutationId: values.mutationId, principal: mutationPrincipal(actor),
@@ -225,6 +244,8 @@ export function createWorkspaceReleaseRoutes(dependencies: WorkspaceReleaseRoute
       if (denied) return status(denied.status, denied.body);
       const actor = await principal(request);
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      try { await requireManage(request, values.ref, actor); }
+      catch (error) { return failure(error); }
       const result = await dependencies.reconcileActivation({
         projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
         activationId: values.activationId,

@@ -184,7 +184,8 @@ export const workspaceToolSchema: ToolSchema = {
     source_revision: optional(Type.String(), "[execute/retry/promote/rollback] Git commit that must match HEAD"),
     approval_id: optional(Type.String(), "[promote/rollback/execute production] Server approval id. Local files are not approval"),
     mutation_id: optional(Type.String(), "[retry/reconcile/rollback] Existing mutation or activation id. Unknown outcomes never receive a new id"),
-    release_id: optional(Type.String(), "[rollback] Immutable release to activate"),
+    release_id: optional(Type.String(), "[promote/rollback] Exact immutable release. Promotion and rollback do not choose the newest release"),
+    application: optional(Type.String(), "[promote/rollback/retry/execute] One application id when the plan names more than one target"),
     configuration_id: optional(Type.String(), "[rollback/promote] Immutable configuration revision"),
     activation_id: optional(Type.String(), "[rollback] Activation id. Retries reuse it"),
     expected_activation_id: optional(Type.String(), "[rollback] Current activation id, or absent"),
@@ -476,6 +477,23 @@ async function git(cwd: string, args: string[]): Promise<string> {
     return stdout;
 }
 
+/** Checked-out commit. This does not accept a caller-supplied revision as its own proof. */
+export async function readWorkspaceHead(root: string): Promise<string> {
+    return (await git(root, ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"])).trim();
+}
+
+/** Read a changed-path list only when it is a regular file inside the workspace. */
+export async function readWorkspaceChangedList(root: string, changed: string): Promise<string[]> {
+    const rootReal = await realpath(resolve(root));
+    const listRelative = relative(rootReal, resolve(root, changed)).replaceAll("\\", "/");
+    if (!safeRelative(listRelative) || await pathKind(rootReal, listRelative) !== "ok") {
+        throw new WorkspacePlanError("invalid-changed-path", "The changed-file list must be a regular file inside the workspace");
+    }
+    const text = await readRegularFile(join(rootReal, listRelative), WORKSPACE_PLAN_LIMITS.configBytes);
+    if (text === null) throw new WorkspacePlanError("invalid-changed-path", "The changed-file list was not found");
+    return parseChangedList(text);
+}
+
 /** Same rename/delete input rule as scripts/workspace: both sides are visible, and a missing baseline is explicit. */
 export async function collectGitChanges(root: string, base: string, head = "HEAD"): Promise<{ files: string[]; fallback: string | null }> {
     if (!validGitRef(base) || !validGitRef(head)) {
@@ -545,8 +563,8 @@ function parseConfigText(text: string): WorkspaceConfig {
         sharedPaths.push(pattern);
     }
     const repository = typeof parsed.repository === "string" ? parsed.repository : null;
-    if (repository !== null && !/^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,199}$/.test(repository)) {
-        throw new WorkspacePlanError("invalid-repository", "repository must be an explicit source identity without credentials or a URL");
+    if (repository !== null && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(repository)) {
+        throw new WorkspacePlanError("invalid-repository", "repository must be a credential-free source identity without a user, scheme, or URL");
     }
     return {
         repository,

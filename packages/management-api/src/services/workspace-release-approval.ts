@@ -11,19 +11,19 @@ export class WorkspaceReleaseApprovalError extends Error {
 }
 
 export interface WorkspaceApprovalStore {
-  putIfAbsent(record: WorkspaceReleaseApproval): Promise<WorkspaceReleaseApproval>;
+  putIfAbsent(record: WorkspaceReleaseApproval): Promise<{ record: WorkspaceReleaseApproval; inserted: boolean }>;
   get(projectRef: string, approvalId: string): Promise<WorkspaceReleaseApproval | null>;
 }
 
 export class MemoryWorkspaceApprovalStore implements WorkspaceApprovalStore {
   private readonly records = new Map<string, WorkspaceReleaseApproval>();
 
-  async putIfAbsent(record: WorkspaceReleaseApproval): Promise<WorkspaceReleaseApproval> {
+  async putIfAbsent(record: WorkspaceReleaseApproval): Promise<{ record: WorkspaceReleaseApproval; inserted: boolean }> {
     const key = `${record.project_ref}\0${record.approval_id}`;
     const existing = this.records.get(key);
-    if (existing) return structuredClone(existing);
+    if (existing) return { record: structuredClone(existing), inserted: false };
     this.records.set(key, structuredClone(record));
-    return structuredClone(record);
+    return { record: structuredClone(record), inserted: true };
   }
 
   async get(projectRef: string, approvalId: string): Promise<WorkspaceReleaseApproval | null> {
@@ -58,6 +58,7 @@ function identityOf(input: WorkspaceReleaseApprovalIdentity): WorkspaceReleaseAp
   };
 }
 
+/** Grant and consume require applications.manage. The actor is audited and is not part of the approval digest, so another manage-capable principal on the same project may consume the first grant. */
 export class WorkspaceReleaseApprovals {
   constructor(private readonly dependencies: WorkspaceApprovalDependencies) {}
 
@@ -72,9 +73,9 @@ export class WorkspaceReleaseApprovals {
       actor: audit.actor,
       created_at: createdAt,
     });
-    const prior = await this.dependencies.store.get(record.project_ref, record.approval_id);
-    const stored = await this.dependencies.store.putIfAbsent(record);
-    if (!prior) await this.dependencies.audit?.(stored, audit);
+    const outcome = await this.dependencies.store.putIfAbsent(record);
+    const stored = outcome.record;
+    if (outcome.inserted) await this.dependencies.audit?.(stored, audit);
     if (stored.approval_id !== record.approval_id || stored.release_id !== record.release_id
       || stored.manifest_sha256 !== record.manifest_sha256 || stored.project_ref !== record.project_ref
       || stored.application_id !== record.application_id || stored.environment_id !== record.environment_id

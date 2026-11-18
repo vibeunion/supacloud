@@ -245,7 +245,7 @@ export function createDefaultApplicationRouteComposition(
       const type = input.principal.type === "admin" || input.principal.type === "master" || input.principal.type === "project"
         ? input.principal.type : "project";
       const result = await deployment.reconcile({ ...input, principal: { type, id: input.principal.id } });
-      return { activation_id: result.activation_id };
+      return { activation_id: result.activation_id, release_id: result.release_id, mutation: { status: "succeeded" as const } };
     },
   });
   return { deployment, routes, previews, deploymentOrchestrator, workspaceReleaseRoutes };

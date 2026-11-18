@@ -1,6 +1,6 @@
 import { applicationReleaseId } from "@supacloud/delivery";
 import type { HttpTransport } from "../transports/http";
-import type { WorkspaceArtifact, WorkspaceDeliveryClient, WorkspacePromotion, WorkspaceTargetObservation, WorkspaceWrite } from "./workspace-execute";
+import type { ReleaseList, ReleaseOutcome, WorkspaceApprovalView, WorkspaceArtifact, WorkspaceDeliveryClient, WorkspacePromotion, WorkspaceTargetObservation, WorkspaceTargetStatus, WorkspaceWrite } from "./workspace-execute";
 
 export interface WorkspaceHttp {
     get(path: string): Promise<{ ok: boolean; status: number; data: unknown; transportError?: boolean }>;
@@ -25,14 +25,20 @@ export function createHttpWorkspaceDeliveryClient(http: WorkspaceHttp, build: Wo
             manifestPath = built.manifestPath;
             return built;
         },
-        async listReleases(projectRef, applicationId) {
+        async listReleases(projectRef, applicationId): Promise<ReleaseList> {
             const result = await http.get(`/v1/projects/${projectRef}/applications/${encodeURIComponent(applicationId)}/releases?limit=100`);
-            if (!result.ok || !result.data || typeof result.data !== "object" || !("releases" in result.data) || !Array.isArray(result.data.releases)) return [];
-            return result.data.releases.flatMap(value => {
-                if (!value || typeof value !== "object" || !("release_id" in value) || !("manifest_sha256" in value)) return [];
-                const releaseId = value.release_id, manifestSha256 = value.manifest_sha256;
-                return typeof releaseId === "string" && typeof manifestSha256 === "string" ? [{ releaseId, manifestSha256 }] : [];
-            });
+            if (!result.ok) return { availability: result.status === 401 || result.status === 403 ? "unauthorized" : "unavailable" };
+            if (!result.data || typeof result.data !== "object" || !("releases" in result.data) || !Array.isArray(result.data.releases)) {
+                return { availability: "unavailable" };
+            }
+            return {
+                availability: "available",
+                releases: result.data.releases.flatMap(value => {
+                    if (!value || typeof value !== "object" || !("release_id" in value) || !("manifest_sha256" in value)) return [];
+                    const releaseId = value.release_id, manifestSha256 = value.manifest_sha256;
+                    return typeof releaseId === "string" && typeof manifestSha256 === "string" ? [{ releaseId, manifestSha256 }] : [];
+                }),
+            };
         },
         async upload(input) {
             if (!manifestPath || !http.postMultipart) throw new Error("WORKSPACE_UPLOAD_REQUIRES_MANIFEST");
@@ -60,25 +66,20 @@ export function createHttpWorkspaceDeliveryClient(http: WorkspaceHttp, build: Wo
         },
         async deploy(input) {
             if (!input.configurationId) return { mutationId: input.activationId ?? input.mutationId, status: "failed", replayed: false };
-            const path = input.environmentId === "production"
-                ? `/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/workspace-activations`
-                : `/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/activations`;
-            const result = await http.post(path, writeBody(input));
+            const result = await http.post(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/workspace-activations`, writeBody(input));
             if (!result.ok) return { mutationId: input.activationId ?? input.mutationId, status: unknownStatus(result), replayed: false };
             const activationId = result.data && typeof result.data === "object" && "activation_id" in result.data && typeof result.data.activation_id === "string"
                 ? result.data.activation_id : input.activationId ?? input.mutationId;
             if (activationId !== (input.activationId ?? input.mutationId)) return { mutationId: input.activationId ?? input.mutationId, status: "unknown", replayed: false };
             return { mutationId: activationId, status: "accepted", replayed: false };
         },
-        async readDeploy(input) {
-            const result = await http.get(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/promotions/${input.mutationId}`);
-            if (!result.ok) return { mutationId: input.mutationId, status: unknownStatus(result) };
-            return { mutationId: input.mutationId, status: "succeeded" };
+        async readDeploy(input): Promise<ReleaseOutcome> {
+            return input.operation === "promotion" ? readPromotion(http, input) : readActivation(http, input);
         },
-        async reconcileDeploy(input) {
+        async reconcileDeploy(input): Promise<ReleaseOutcome> {
             const result = await http.post(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/workspace-activations/${input.mutationId}/reconcile`, {});
-            if (!result.ok) return { mutationId: input.mutationId, status: unknownStatus(result) };
-            return { mutationId: input.mutationId, status: "succeeded" };
+            if (!result.ok) return { mutationId: input.mutationId, status: "unknown", releaseId: null, manifestSha256: null };
+            return receiptOutcome(input.mutationId, result.data);
         },
         async promote(input: WorkspacePromotion) {
             const query = new URLSearchParams({
@@ -96,10 +97,25 @@ export function createHttpWorkspaceDeliveryClient(http: WorkspaceHttp, build: Wo
             if (!result.ok) return { mutationId: input.mutationId, status: unknownStatus(result), replayed: false };
             return { mutationId: input.mutationId, status: "accepted", replayed: false };
         },
-        async reconcilePromotion(input) {
+        async reconcilePromotion(input): Promise<ReleaseOutcome> {
             const result = await http.post(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/workspace-promotions/${input.mutationId}/reconcile`, {});
-            if (!result.ok) return { mutationId: input.mutationId, status: unknownStatus(result) };
-            return { mutationId: input.mutationId, status: "succeeded" };
+            if (!result.ok) return { mutationId: input.mutationId, status: "unknown", releaseId: null, manifestSha256: null };
+            return receiptOutcome(input.mutationId, result.data);
+        },
+        async readApproval(input): Promise<WorkspaceApprovalView | { availability: "missing" | "unauthorized" | "unavailable" }> {
+            const result = await http.get(`/v1/projects/${input.projectRef}/workspace-approvals/${input.approvalId}`);
+            if (result.status === 404) return { availability: "missing" };
+            if (result.status === 401 || result.status === 403) return { availability: "unauthorized" };
+            if (!result.ok || !result.data || typeof result.data !== "object") return { availability: "unavailable" };
+            const record = result.data;
+            const text = (key: string) => key in record && typeof record[key as keyof typeof record] === "string" ? record[key as keyof typeof record] as string : null;
+            const repository = text("repository"), applicationId = text("application_id"), environmentId = text("environment_id");
+            const projectRef = text("project_ref"), releaseId = text("release_id"), manifestSha256 = text("manifest_sha256");
+            const configDigest = text("config_digest"), sourceRevision = text("source_revision"), workspacePlanSha256 = text("workspace_plan_sha256");
+            if (!repository || !applicationId || !environmentId || !projectRef || !releaseId || !manifestSha256 || !configDigest || !sourceRevision || !workspacePlanSha256) {
+                return { availability: "unavailable" };
+            }
+            return { availability: "available", repository, applicationId, environmentId, projectRef, releaseId, manifestSha256, configDigest, sourceRevision, workspacePlanSha256 };
         },
         async observe(input): Promise<WorkspaceTargetObservation> {
             const result = await http.get(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/runtime`);
@@ -121,6 +137,40 @@ function writeBody(input: WorkspaceWrite): Record<string, unknown> {
         ...activation, approval_id: input.approvalId, repository: input.repository, manifest_sha256: input.manifestSha256,
         config_digest: input.configDigest, source_revision: input.sourceRevision, workspace_plan_sha256: input.workspacePlanSha256,
     };
+}
+
+function mutationState(status: unknown): WorkspaceTargetStatus {
+    if (status === "succeeded") return "succeeded";
+    if (status === "failed" || status === "failed_retryable" || status === "failed_terminal") return "failed";
+    if (status === "absent") return "absent";
+    return "unknown";
+}
+
+function receiptOutcome(mutationId: string, data: unknown): ReleaseOutcome {
+    const record = data && typeof data === "object" ? data as { mutation?: { status?: unknown }; promotion?: { release_id?: unknown }; release_id?: unknown } : {};
+    const release = typeof record.promotion?.release_id === "string" ? record.promotion.release_id : typeof record.release_id === "string" ? record.release_id : null;
+    return { mutationId, status: mutationState(record.mutation?.status), releaseId: release, manifestSha256: null };
+}
+
+async function readActivation(http: WorkspaceHttp, input: { projectRef: string; applicationId: string; environmentId: string; mutationId: string }): Promise<ReleaseOutcome> {
+    const result = await http.get(`/v1/projects/${input.projectRef}/mutations/${input.mutationId}`);
+    if (result.status === 404) return { mutationId: input.mutationId, status: "absent", releaseId: null, manifestSha256: null };
+    if (!result.ok) return { mutationId: input.mutationId, status: "unknown", releaseId: null, manifestSha256: null };
+    const status = mutationState(result.data && typeof result.data === "object" && "status" in result.data ? result.data.status : undefined);
+    if (status !== "succeeded" && status !== "failed") return { mutationId: input.mutationId, status, releaseId: null, manifestSha256: null };
+    const history = await http.get(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/history?limit=100`);
+    const entries = history.ok && history.data && typeof history.data === "object" && "history" in history.data && Array.isArray(history.data.history) ? history.data.history : [];
+    const entry = entries.find(value => value && typeof value === "object" && "activation_id" in value && value.activation_id === input.mutationId);
+    const releaseId = entry && typeof entry === "object" && "release_id" in entry && typeof entry.release_id === "string" ? entry.release_id : null;
+    if (!releaseId) return { mutationId: input.mutationId, status: "unknown", releaseId: null, manifestSha256: null };
+    return { mutationId: input.mutationId, status, releaseId, manifestSha256: null };
+}
+
+async function readPromotion(http: WorkspaceHttp, input: { projectRef: string; applicationId: string; environmentId: string; mutationId: string }): Promise<ReleaseOutcome> {
+    const result = await http.get(`/v1/projects/${input.projectRef}/applications/${encodeURIComponent(input.applicationId)}/environments/${encodeURIComponent(input.environmentId)}/promotions/${input.mutationId}`);
+    if (result.status === 404) return { mutationId: input.mutationId, status: "absent", releaseId: null, manifestSha256: null };
+    if (!result.ok) return { mutationId: input.mutationId, status: "unknown", releaseId: null, manifestSha256: null };
+    return receiptOutcome(input.mutationId, result.data);
 }
 
 export function workspaceHttpFromTransport(http: HttpTransport): WorkspaceHttp {

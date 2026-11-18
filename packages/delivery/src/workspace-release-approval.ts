@@ -9,7 +9,7 @@ export const WORKSPACE_RELEASE_APPROVAL_SCHEMA = "supacloud.workspace-release-ap
 const sha256 = ApplicationReleaseIdSchema;
 const projectRef = Type.String({ pattern: "^[a-z0-9-]{1,20}$" });
 const revision = Type.String({ pattern: "^[a-f0-9]{40}(?:[a-f0-9]{24})?$" });
-const repository = Type.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._/@:-]*$" });
+const repository = Type.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]*$" });
 
 export const WorkspaceReleaseApprovalSchema = Type.Object({
   schema: Type.Literal(WORKSPACE_RELEASE_APPROVAL_SCHEMA),
@@ -33,10 +33,10 @@ export type WorkspaceReleaseApprovalIdentity = Omit<WorkspaceReleaseApproval, "s
   repository: string;
 };
 
-const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,199}$/;
+const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 
 export function workspaceRepositoryId(repositoryName: string): string {
-  if (!REPOSITORY_PATTERN.test(repositoryName) || repositoryName.includes("://")) {
+  if (!REPOSITORY_PATTERN.test(repositoryName)) {
     throw new Error("Invalid workspace repository identity");
   }
   return createHash("sha256").update(repositoryName).digest("hex");

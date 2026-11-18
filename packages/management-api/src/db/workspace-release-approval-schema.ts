@@ -16,7 +16,7 @@ export async function ensureWorkspaceReleaseApprovalSchema(transaction: SQL): Pr
       release_id char(64) NOT NULL,
       manifest_sha256 char(64) NOT NULL,
       config_digest char(64) NOT NULL,
-      source_revision char(64) NOT NULL,
+      source_revision varchar(64) NOT NULL,
       workspace_plan_sha256 char(64) NOT NULL,
       actor varchar(256) NOT NULL,
       created_at timestamptz NOT NULL

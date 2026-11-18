@@ -198,8 +198,10 @@ bind one environment to the same project and the same application id.
   selected environment, because the map itself changed.
 
 `repository` is an explicit source identity such as `github.com/acme/store`.
-It is not a URL, credential, or database connection. Execution refuses to run
-when it is absent. The string is hashed to `repository_id` on the server.
+It is not a URL, a user, a scheme, a credential, or a database connection.
+`user:secret@host` is rejected, and the rejected value is not copied into the
+error. Execution refuses to run when the field is absent. The string is hashed
+to `repository_id` on the server.
 
 ## Execution
 
@@ -218,6 +220,7 @@ supacloud workspace retry --environment staging --base <commit> \
 supacloud workspace promote --environment production --base <commit> \
   --source-environment staging --plan-sha256 <plan-sha256> \
   --source-revision <head-sha> --approval-id <server-approval> \
+  --release-id <source-release> --application <application-id> \
   --configuration-id <uuid> --execute
 
 supacloud workspace rollback --environment production --base <commit> \
@@ -232,22 +235,35 @@ supacloud workspace reconcile --environment production --base <commit> \
 supacloud workspace status --environment staging --changed changed.txt --format json
 ```
 
-`--source-revision` must be the checked-out commit. `--plan-sha256` must match a
-fresh plan. A mismatch selects no project.
+`--source-revision` must equal the commit `git` reads from the checkout. The
+CLI does not treat the flag as its own proof. `--base` and `--head` use the
+same git diff as `workspace plan`. `--changed` must be a regular file inside
+the checkout; a symlink or a path outside the checkout is rejected before it
+is read. `--plan-sha256` must match a fresh plan. A mismatch selects no project.
 
-Affected applications are built once for a source revision and config digest.
-The build uses the existing compiler delivery build. The upload uses the
-existing release archive upload. Another environment receives that manifest
-through the existing release transfer. It is not built again. Unaffected
-applications are not built or deployed.
+Staging `--execute` is the user-authorized build. Affected applications are
+built once for a source revision and config digest, then uploaded through the
+existing release archive route. The release inventory is read first. An
+authentication, network, or server failure is not an empty inventory, and no
+upload follows that failure. Production `--execute` does not build or upload.
+It activates a release that is already stored and already approved. A missing
+or mismatched approval stops before any build or upload. Build the release on
+staging, approve that digest, then deploy production.
 
-Staging activation posts to the existing activation route. Production
-activation and promotion post to workspace routes that require a server
-approval and then call the existing activation or promotion executor. The
-mutation or activation id is deterministic for a plan, application, environment,
-and release. Retry of a failed activation reuses that id and the stored
-release. An unknown or accepted outcome is reconciled on that same id. A
-response that changes the id is rejected and no replacement id is created.
+Promotion and rollback name one application and one release id. They do not
+select the newest release. Retry reads the activation receipt for the existing
+mutation id and reuses that release. It does not select another release from
+the inventory. An unknown, accepted, or absent outcome is reconciled on that
+same id and is not redeployed. Reconcile reads the mutation status in the
+response. `pending`, `accepted`, and `outcome_unknown` stay unknown. A response
+that changes the id is rejected and no replacement id is created.
+
+Workspace activation, promotion, rollback, and reconcile call workspace routes.
+Those routes require project authentication and `applications.manage` before
+the existing executor runs. Staging activation does not require a digest
+approval. Production activation and promotion do. The existing `app deploy`,
+`app promote`, and `/activations` routes are not intercepted. They remain a
+bypass of this approval.
 
 `workspace status` reads runtime for every configured environment binding. Each
 observation is marked `authoritative: false`. The deployment receipt remains
@@ -257,25 +273,31 @@ it is not a repository view.
 ## Approval
 
 Production promotion and production activation require
-`POST /v1/projects/:ref/workspace-approvals`. The caller must pass project
-authentication and `applications.manage`. The record binds repository,
-application, environment, project, release id, manifest digest, config digest,
-source revision, and workspace plan digest. The approval id is the digest of
-that identity. A changed release or target is a different approval. The first
-actor is kept. A local JSON flag is not read and is not approval.
+`POST /v1/projects/:ref/workspace-approvals`. Grant and consume both require
+project authentication and `applications.manage` on that project. Read requires
+`applications.read`. The record binds repository, application, environment,
+project, release id, manifest digest, config digest, source revision, and
+workspace plan digest. The actor is stored and audited, and is not part of the
+approval id. Any later principal with `applications.manage` on the same project
+may consume that grant. A different actor does not create a second approval.
+The first insert wins, including when two grants arrive together. A changed
+release, manifest, project, or plan digest does not match and does not run the
+executor. A local JSON flag is not read and is not approval.
 
 The grant is written to the existing project audit log. The table
-`workspace_release_approvals` stores the approval only. It does not record
-deployment success and it is not a second deployment ledger.
+`workspace_release_approvals` stores the approval only. Platform schema setup
+creates it with the other platform tables. A request does not create the
+table. The table does not record deployment success and it is not a second
+deployment ledger.
 
 Direct `app deploy` and `app promote` are unchanged. They are not intercepted
-by this approval. The workspace production commands are the gated path.
+by this approval. The workspace routes are the gated path.
 
 ## Still not shipped
 
-- A live PostgreSQL run of `workspace_release_approvals` was not executed in
-  this change. The SQL adapter is the production store. Unit tests use an
-  in-memory store and the route with injected dependencies.
+- The approval table is created by platform schema setup. An integration test
+  rolls the table back when a local PostgreSQL server is reachable. That test
+  is skipped, and reported as skipped, when it is not.
 - `workspace promote` loads the existing promotion plan and posts it to the
   gated route. A promotion that the existing planner blocks, including
   migration, backup, smoke, or source-readiness blockers, still does not

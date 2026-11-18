@@ -1,6 +1,5 @@
 import { parseWorkspaceReleaseApproval, type WorkspaceReleaseApproval } from "@supacloud/delivery";
 import { sql } from "../db";
-import { ensureWorkspaceReleaseApprovalSchema } from "../db/workspace-release-approval-schema";
 import type { WorkspaceApprovalStore } from "./workspace-release-approval";
 
 type Row = Record<string, unknown>;
@@ -26,17 +25,9 @@ function rowToApproval(row: Row): WorkspaceReleaseApproval {
 
 /** Durable approval store. It does not record deployment success. */
 export class SqlWorkspaceApprovalStore implements WorkspaceApprovalStore {
-  private ready: Promise<void> | null = null;
-
-  private ensure(): Promise<void> {
-    this.ready ??= ensureWorkspaceReleaseApprovalSchema(sql);
-    return this.ready;
-  }
-
-  async putIfAbsent(record: WorkspaceReleaseApproval): Promise<WorkspaceReleaseApproval> {
-    await this.ensure();
+  async putIfAbsent(record: WorkspaceReleaseApproval): Promise<{ record: WorkspaceReleaseApproval; inserted: boolean }> {
     const parsed = parseWorkspaceReleaseApproval(record);
-    await sql`
+    const inserted = await sql`
       INSERT INTO workspace_release_approvals (
         approval_id, project_ref, repository_id, repository, application_id, environment_id,
         release_id, manifest_sha256, config_digest, source_revision, workspace_plan_sha256, actor, created_at
@@ -47,14 +38,14 @@ export class SqlWorkspaceApprovalStore implements WorkspaceApprovalStore {
         ${parsed.created_at}
       )
       ON CONFLICT (approval_id) DO NOTHING
-    `;
+      RETURNING approval_id
+    ` as Row[];
     const stored = await this.get(parsed.project_ref, parsed.approval_id);
     if (!stored) throw new Error("WORKSPACE_APPROVAL_NOT_STORED");
-    return stored;
+    return { record: stored, inserted: inserted.length > 0 };
   }
 
   async get(projectRef: string, approvalId: string): Promise<WorkspaceReleaseApproval | null> {
-    await this.ensure();
     const rows = await sql`
       SELECT approval_id, project_ref, repository_id, repository, application_id, environment_id,
              release_id, manifest_sha256, config_digest, source_revision, workspace_plan_sha256, actor, created_at
