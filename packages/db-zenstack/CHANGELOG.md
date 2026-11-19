@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.3.1...db-zenstack-v0.3.2) (2026-11-19)
+
+
+### Bug Fixes
+
+* **delivery:** bundle model-command runtime dependencies ([#2693](https://github.com/vibeunion/supacloud/issues/2693)) ([66658c9](https://github.com/vibeunion/supacloud/commit/66658c9f1b61b1315dfa895133ca6493a2037989))
+
 ## [0.3.1](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.3.0...db-zenstack-v0.3.1) (2026-11-14)
 
 

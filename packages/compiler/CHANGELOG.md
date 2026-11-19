@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.8](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.7...compiler-v0.62.8) (2026-11-19)
+
+
+### Bug Fixes
+
+* **delivery:** bundle model-command runtime dependencies ([#2693](https://github.com/vibeunion/supacloud/issues/2693)) ([66658c9](https://github.com/vibeunion/supacloud/commit/66658c9f1b61b1315dfa895133ca6493a2037989))
+
 ## [0.62.7](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.6...compiler-v0.62.7) (2026-11-14)
 
 

@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.124.1](https://github.com/vibeunion/supacloud/compare/cli-v0.124.0...cli-v0.124.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **cli:** run model-command on pooled delivery host ([#2691](https://github.com/vibeunion/supacloud/issues/2691)) ([efd84ec](https://github.com/vibeunion/supacloud/commit/efd84ec84629c7934ef56006692d5ee3cc5013c1))
+* **delivery:** bundle model-command runtime dependencies ([#2693](https://github.com/vibeunion/supacloud/issues/2693)) ([66658c9](https://github.com/vibeunion/supacloud/commit/66658c9f1b61b1315dfa895133ca6493a2037989))
+
 ## [0.124.0](https://github.com/vibeunion/supacloud/compare/cli-v0.123.2...cli-v0.124.0) (2026-11-17)
 
 
