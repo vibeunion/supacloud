@@ -230,7 +230,7 @@ export class OrdersModule {}
 
 const HOST = `import type { SQL } from "bun";
 import { createApplication, ApplicationError, type CompiledModule } from "@supacloud/elysia";
-import { createZenStackDatabase } from "@supacloud/db/zenstack";
+import { createZenStackDatabase } from "@supacloud/db-zenstack";
 import { CommandError, type CommandStore } from "@supacloud/contracts";
 import { schema } from "../../zenstack/generated/schema";
 import { createCompiledModules } from "../../generated/application";
@@ -290,7 +290,7 @@ export async function createModelOrderHost(
     || !("owns_data" in role) || role.owns_data !== false) {
     throw new Error("Use a non-owner application login with model_orders_app membership");
   }
-  const database = requireDatabase(createZenStackDatabase(schema, pool, {}));
+  const database = requireDatabase(createZenStackDatabase(schema, pool, { fixPostgresTimezone: false }));
   const modules = compiledModules;
   const ordersModule = modules.find(module => module.name === "orders");
   const approval = ordersModule?.commands?.find(command => command.name === "orders.approve")?.aspectPipeline;
@@ -481,7 +481,7 @@ function isIdentityAuthority(value: unknown): value is IdentityAuthority {
 }
 
 async function identityAuthority(): Promise<IdentityAuthority> {
-  const loaded: unknown = await import(required("MODEL_IDENTITY_MODULE"));
+  const loaded: unknown = await import(/* @supacloud/runtime-import */ required("MODEL_IDENTITY_MODULE"));
   const authority = loaded && typeof loaded === "object" && "authority" in loaded
     ? loaded.authority : undefined;
   if (!authority || typeof authority !== "object") throw new Error("Missing identity authority");

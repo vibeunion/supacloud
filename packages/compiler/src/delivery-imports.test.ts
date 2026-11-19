@@ -54,6 +54,14 @@ test("does not rewrite shadowed bindings and preserves files without computed im
   expect(output).toContain('load("unrelated")');
 });
 
+test("preserves explicitly marked runtime imports", async () => {
+  const source = 'export async function run(path: string) { return import(/* @supacloud/runtime-import */ path); }';
+  expect(await convert(source)).toBe(source);
+  const requireSource = 'export function run(path: string) { return require(/* @supacloud/runtime-import */ path); }';
+  expect(await convert(requireSource).catch((error: unknown) => error))
+    .toMatchObject({ message: expect.stringContaining("Computed module loading") });
+});
+
 test("literal helper dependencies are bundled and captured before source removal", async () => {
   const project = await mkdtemp(join(tmpdir(), "delivery-imports-"));
   const detached = await mkdtemp(join(tmpdir(), "delivery-imports-detached-"));

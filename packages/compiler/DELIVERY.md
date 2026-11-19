@@ -211,8 +211,11 @@ contracts are references, not secret values. Environment values are not inlined.
 Code doing runtime filesystem reads must use declared assets and the host's
 documented asset-location convention; automatic discovery is not provided.
 Unresolved computed `import()` and direct computed `require()` calls are rejected;
-the literal-only import-helper exception is described below. This is not a sandbox
-for arbitrary JavaScript, eval, or filesystem access.
+the literal-only import-helper exception is described below. A trusted host may
+explicitly retain a runtime-owned module with
+`import(/* @supacloud/runtime-import */ specifier)`; that dependency is outside
+the immutable bundle and must be supplied by the destination runtime. This is
+not a sandbox for arbitrary JavaScript, eval, or filesystem access.
 
 Each target includes its conservative module dependency closure, while route and
 Job descriptors remain exclusive to their owner. Provider pruning is disabled to
@@ -499,10 +502,10 @@ activation, rollback or data recovery. `deploymentReady` remains `false`.
 
 The bundler expands private, single-return import helpers only if every reference
 is a direct call with one literal module specifier. Exported/escaped helpers,
-nonliteral arguments and other computed loads remain rejected. Original source
-bytes stay in the input snapshot. Emitted imports are checked separately from
-input metadata because Bun can mark eliminated re-exports or optional missing
-dependencies as external.
+nonliteral arguments and other computed loads remain rejected, except for the
+explicit runtime-import marker above. Original source bytes stay in the input
+snapshot. Emitted imports are checked separately from input metadata because Bun
+can mark eliminated re-exports or optional missing dependencies as external.
 
 ## Planning Evidence And Limits
 
