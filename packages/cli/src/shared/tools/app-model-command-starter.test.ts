@@ -81,7 +81,7 @@ async function dependencies(root: string) {
   for (const name of ["typebox", "effect", "elysia", "typescript", "@types"]) {
     await symlink(join(repo, "packages/cli/node_modules", name), join(modules, name));
   }
-  await symlink(join(repo, "packages/db-zenstack/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
+  await symlink(join(repo, "packages/cli/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
 }
 
 async function typecheck(root: string, extra: string[] = []) {
@@ -95,6 +95,21 @@ async function typecheck(root: string, extra: string[] = []) {
 
 test("starter receipt schema stays byte-identical to the database package", () => {
   expect(COMMAND_RECEIPT_SQL).toBe(DATABASE_COMMAND_RECEIPT_SQL);
+});
+
+test("model-command emits a platform-managed pooled delivery host", async () => {
+  const root = await temporary();
+  await initializeAppProject({ root, name: "orders", template: "model-command" });
+  const config = await readFile(join(root, "supacloud.config.ts"), "utf8");
+  const deliveryHost = await readFile(join(root, "src/delivery-host.ts"), "utf8");
+  const localHost = await readFile(join(root, "scripts/serve-model.ts"), "utf8");
+  const sources = JSON.parse(await readFile(join(root, "database.sources.json"), "utf8")) as { trustedHosts: string[] };
+  expect(config).toContain('httpApplications: [{ target: "api", source: "delivery-host.ts", database: true }]');
+  expect(deliveryHost).toContain("createDeliveryDatabase");
+  expect(deliveryHost).toContain("lifecycle.deps?.[\"dbClient\"]");
+  expect(deliveryHost).not.toContain("DATABASE_URL");
+  expect(localHost).toContain("createBunSqlHost");
+  expect(sources.trustedHosts).toContain("src/delivery-host.ts");
 });
 
 test("portable and generated command aspects preserve results, failures and continuation lifetime", async () => {
