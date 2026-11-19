@@ -12,12 +12,13 @@ export function renderDeliveryHttpEntry(generatedDirectory: string, hostPath: st
 type DeliveryDatabaseFactory = (
   pool: ReturnType<typeof createDeliverySqlHost>["pool"], lifecycle: { signal: AbortSignal },
 ) => unknown | Promise<unknown>;
-const createDeliveryDatabase = (deliveryHostModule as {
+const createDeliveryDatabaseCandidate = (deliveryHostModule as {
   createDeliveryDatabase?: DeliveryDatabaseFactory;
 }).createDeliveryDatabase;
-if (typeof createDeliveryDatabase !== "function") {
+if (typeof createDeliveryDatabaseCandidate !== "function") {
   throw new Error("Invalid delivery database adapter.");
-}`
+}
+const createDeliveryDatabase: DeliveryDatabaseFactory = createDeliveryDatabaseCandidate;`
     : "";
   const databaseLifecycle = database
     ? `

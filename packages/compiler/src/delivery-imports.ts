@@ -1,5 +1,7 @@
 import * as ts from "@supacloud/db/typescript";
 
+const RUNTIME_IMPORT_MARKER = "@supacloud/runtime-import";
+
 /** Resolve private literal-only import wrappers without permitting an open dependency set. */
 export async function staticDeliveryImports(path: string, contents: Uint8Array): Promise<Uint8Array> {
   if (!/\.[cm]?[jt]sx?$/.test(path)) return contents;
@@ -10,7 +12,10 @@ export async function staticDeliveryImports(path: string, contents: Uint8Array):
     if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
       || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
       const argument = node.arguments[0];
-      if (!argument || (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument))) computed.push(node);
+      const runtimeImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
+        && source.text.slice(node.getStart(source), node.end).includes(RUNTIME_IMPORT_MARKER);
+      if ((!argument || (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument)))
+        && !runtimeImport) computed.push(node);
     }
     ts.forEachChild(node, scan);
   }

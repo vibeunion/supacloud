@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import * as ts from "@supacloud/db/typescript";
 import { initializeAppProject } from "./app-starter";
 import { COMMAND_RECEIPT_SQL } from "./command-receipts";
-import { compileProject, renderApplication, type ApplicationGraph } from "@supacloud/compiler";
+import { buildDeliveryProject, compileProject, renderApplication, type ApplicationGraph } from "@supacloud/compiler";
 import { COMMAND_RECEIPT_SQL as DATABASE_COMMAND_RECEIPT_SQL } from "@supacloud/db";
 import { compileModel } from "@supacloud/db/model";
 import { databaseSources } from "@supacloud/db/source-contracts";
@@ -81,7 +81,8 @@ async function dependencies(root: string) {
   for (const name of ["typebox", "effect", "elysia", "typescript", "@types"]) {
     await symlink(join(repo, "packages/cli/node_modules", name), join(modules, name));
   }
-  await symlink(join(repo, "packages/cli/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
+  await symlink(join(repo, "packages/db-zenstack/node_modules/pg"), join(modules, "pg"));
+  await symlink(join(repo, "packages/db-zenstack/node_modules/@zenstackhq"), join(modules, "@zenstackhq"));
 }
 
 async function typecheck(root: string, extra: string[] = []) {
@@ -250,6 +251,19 @@ test("model-command generates a strictly typed and governed application for HTTP
       rpc: { modelOrders: { boundary: "database", transaction: true, audit: true, idempotency: true } } },
   });
   expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+  const delivery = await buildDeliveryProject({
+    rootDir: join(root, "src"),
+    outDir: join(root, "generated"),
+    strict: true,
+    databaseGovernance: { mode: "check", projectRoot: root, moduleFile: "db/modules.ts" },
+    commandCapabilities: { requirePersistentAdapters: true, permission: true, transaction: true, audit: true, idempotency: true,
+      rpc: { modelOrders: { boundary: "database", transaction: true, audit: true, idempotency: true } } },
+  }, {
+    version: 1,
+    targets: [{ name: "api", kind: "api", modules: ["app"] }],
+    build: { httpApplications: [{ target: "api", source: "delivery-host.ts", database: true }] },
+  });
+  if (!delivery.ok) throw new Error(JSON.stringify(delivery.diagnostics));
   const assertions = join(root, "aspect-types.ts");
   await writeFile(assertions, `import { defineOperationAspect } from "@supacloud/app/core";
 const validate = (input: unknown): { version: number } => {
