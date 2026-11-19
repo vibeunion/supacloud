@@ -49,6 +49,16 @@ decisions. Same-key/different-input requests fail; replay rechecks current acces
 The Worker entry consumes an already verified claim through an application-owned
 identity authority; it does not introduce a queue scheduler or claim loop.
 
+The generated `delivery` configuration is the supported production shape for
+model-command HTTP. `bun run build:delivery` emits an immutable Application
+target whose SupaCloud runtime creates the Bun SQL pool, injects it through
+`createDeliveryDatabase`, and closes it after HTTP drain. The application host
+never parses `DATABASE_URL` or exposes the pool to route modules. Supply the
+application's `MODEL_IDENTITY_MODULE` at runtime; identity verification and
+current access resolution remain application-owned. This is the platform
+managed trusted runtime that replaces a hand-copied `host.js`; it is not an
+Edge Function pool and it does not move business commands into SupaCloud.
+
 Apply its reviewed migrations through the existing database ledger, provision a
 non-owner login with `model_orders_app` membership, and supply `IdentityAuthority`.
 The host rejects superuser, BYPASSRLS and table-owner membership. The role is private
