@@ -41,7 +41,7 @@
     "@supacloud/db-zenstack": "^0.3.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "typescript": "7.1.0-beta"
   },
   "overrides": {

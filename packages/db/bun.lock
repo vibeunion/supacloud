@@ -11,7 +11,7 @@
       },
       "devDependencies": {
         "@sinclair/typebox": "0.34.52",
-        "@types/bun": "^1.4.4",
+        "@types/bun": "^1.4.5",
         "typebox": "1.4.3",
       },
       "peerDependencies": {
@@ -42,13 +42,13 @@
 
     "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
-    "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.4", "typescript": "7.1.0-beta" } }],
+    "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.5", "typescript": "7.1.0-beta" } }],
 
     "@supacloud/db": ["@supacloud/db@0.24.2", "", { "dependencies": { "@supacloud/contracts": "0.16.1", "libpg-query": "18.1.5", "typescript": "7.1.0-beta" }, "peerDependencies": { "@supacloud/db-zenstack": "^0.1.0 || ^0.2.0 || ^0.3.0" }, "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-model": "dist/model-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-rGCJAcpM3JdJItgiDV9peRf5q0mw7zINQLpYCX72/yA4xF+WcGVo0r7cM10NKuZUmfRbXWSti4lWnV2mCJoxPg=="],
 
     "@supacloud/db-zenstack": ["@supacloud/db-zenstack@0.2.1", "", { "dependencies": { "@supacloud/contracts": "0.16.1", "@supacloud/db": "0.24.2", "@zenstackhq/language": "3.10.0", "@zenstackhq/orm": "3.10.0", "@zenstackhq/plugin-policy": "3.10.0", "@zenstackhq/schema": "3.10.0", "@zenstackhq/sdk": "3.10.0", "kysely": "0.29.0" } }, "sha512-A0XTaTholqa44vzGPzvBa+/d/UQtz14sX4ziJqi1J+dg8eRe9x9eWnm61/cfW4P65m4GeriZ4fp8ikwySAQUYw=="],
 
-    "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
+    "@types/bun": ["@types/bun@1.4.5", "", { "dependencies": { "bun-types": "1.4.5" } }, "sha512-DpgwNI9z0L1S0gtb45QLCWgwCUcMLnsHYMJHQvpNj7erGiCGBvpggltAIeARrtobNMKMuy0UP7i56tKKgwFs/Q=="],
 
     "@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
 
@@ -108,7 +108,7 @@
 
     "@zenstackhq/zod": ["@zenstackhq/zod@3.10.0", "", { "dependencies": { "@zenstackhq/schema": "3.10.0", "decimal.js": "^10.4.3" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-oQvMYMYZntO0CctnyT41yZFzeWQmOxLSf59GoH70kuJmL5OODYBxTzoY7A5yshoG8x8rscOAGyU60YZEpHkxUA=="],
 
-    "bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+    "bun-types": ["bun-types@1.4.5", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-ECHn+9dhL3wv0G6u0+7dQvrnaimXiRDxxerYBmhTaLyJEEuvTPWk2Fye3XIf5Y++JIIiHKfQw4Z7V5D8KuiXbg=="],
 
     "call-bind": ["call-bind@1.0.9", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.2", "es-define-property": "^1.0.1", "get-intrinsic": "^1.3.0", "set-function-length": "^1.2.2" } }, "sha512-a/hy+pNsFUTR+Iz8TCJvXudKVLAnz/DyeSUo10I5yvFDQJBFU2s9uqQpoSrJlroHUKoKqzg+epxyP9lqFdzfBQ=="],
 
@@ -204,9 +204,9 @@
 
     "zod-validation-error": ["zod-validation-error@4.0.2", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-Q6/nZLe6jxuU80qb/4uJ4t5v2VEZ44lzQjPDhYJNztRQ4wyWc6VF3D3Kb/fAuPetZQnhS3hnajCf9CsWesghLQ=="],
 
-    "@supacloud/db/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.4", "typescript": "7.1.0-beta" } }],
+    "@supacloud/db/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.5", "typescript": "7.1.0-beta" } }],
 
-    "@supacloud/db-zenstack/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.4", "typescript": "7.1.0-beta" } }],
+    "@supacloud/db-zenstack/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.5", "typescript": "7.1.0-beta" } }],
 
     "@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 

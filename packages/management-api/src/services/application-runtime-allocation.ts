@@ -259,7 +259,7 @@ function normalizedInput(input: ApplicationRuntimeAllocationInput): ApplicationR
   }
   const runtime = {
     release, activationId: input.runtime.activationId, environmentId: input.runtime.environmentId,
-    bunVersion: input.runtime.bunVersion ?? "1.4.4",
+    bunVersion: input.runtime.bunVersion ?? "1.4.5",
   };
   applicationRuntimePlan({
     ...runtime, ports: Object.fromEntries(release.targets.filter(target => target.kind === "http")

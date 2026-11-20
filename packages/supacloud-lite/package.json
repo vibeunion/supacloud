@@ -74,7 +74,7 @@
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/elysia": "file:../elysia",
     "@supabase/supabase-js": "2.118.0",
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "effect": "4.0.5",
     "elysia": "2.0.0-rc.4",
     "jose": "^6.2.13",
@@ -93,7 +93,7 @@
     "prisma": "6.19.3"
   },
   "engines": {
-    "bun": ">=1.4.4"
+    "bun": ">=1.4.5"
   },
   "publishConfig": {
     "access": "public",

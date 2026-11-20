@@ -9,7 +9,7 @@
 | GoTrue | v2.191.0 | v2.197.0 | v2.192 增加 `custom_oauth_providers.custom_claims_allowlist` 数据库迁移；v2.193.1 关闭 refresh token 与 OAuth authorization code 重放问题；v2.194 的 admin users cursor pagination 默认关闭；v2.195 将 SCIM router 置于实验性 feature flag 之后并拒绝已封禁用户的 access token；v2.196 增加 SCIM 元数据端点和规范错误响应、identity link/unlink 审计动作，并修复 email 替换、identity unlink、未支持 JWKS 算法和遗留 email token 处理；v2.197 增加 MFA recovery codes（factor 模型、配置与 verify/regenerate/delete 端点、审计与计量）、OAuth server token 交换计量、`one_time_tokens.expires_at` 列以及 `scim_users`/`scim_tokens` 表（新增数据库迁移文件，由 GoTrue 根命令启动时执行嵌入迁移） | GoTrue 根命令启动时执行嵌入迁移；`supabase_auth_admin` 保留建表/改列权限。cursor pagination、SCIM、首次设置密码时自动创建 email identity 等实验能力保持默认关闭；现有 email/identity 流程需覆盖替换、解绑、token 撤销与 JWKS 混合算法回归 |
 | PostgREST | v14.13 | v16.5 | v16.0 为跨主版本升级：v16.0 移除 PostgreSQL 13 支持（本仓库部署在 PostgreSQL 18，不受影响）；v16.0 启动时拒绝 `db-schemas` 含 `pg_catalog`/`information_schema`（本仓库使用 `public,storage,graphql_public`，不受影响）；`jwt-role-claim-key` 从 JSPath 改为 JSON Path，v16.2 为旧 JSPath 语法补回兼容并发出弃用警告（本仓库不使用该配置，角色提取由 pre-request function 在 SQL 层完成，不受影响）；ARM64 二进制资源从 `ubuntu-aarch64` 改名为 `linux-static-aarch64`；`Prefer: timezone` 不再支持 `handling=lenient`。v16.1 修复 v16.0 的 JWT 校验时间 bug；v16.3 修复偶发的 `PGRST303 JWT issued at future` 错误与长时间空闲后日志时间错误，无配置或 schema 变更 | 已同步 `tenant_runtime.sh` 的 ARM64 资源名为 `linux-static-aarch64`、更新 SHA256 pin 和默认版本；两份 Compose 和 CI workflow 镜像已统一为 v16.5；保持现有 per-tenant `.conf` 配置和健康检查；不需要改变 PostgreSQL 18 schema |
 | Realtime | v2.111.4 | v2.150.0 | 2.112 恢复 pg filters；2.117-2.121 增加 inspector/status、tenant shutdown、Muster 和 fanout 可观测性；2.121.1 更新 pg-delta。v2.120.1 修订既有 `20241019105805_uuid_auto_generation.ex`，先回填 `realtime.messages.uuid` 空值，再设置 default 和 `NOT NULL`。2.130 修复容器内 pg-delta 的 `libpg-query.wasm` 运行时资产，2.132 增加 broadcast persistence，并把 tenant migration 总数提升到 82；v2.138.1 包含 86 个 tenant migrations，新增权限委派迁移和空 selected_columns 修复；2.139-2.150 增加私有频道授权、broadcast 持久化 opt-in、presence/连接指标、RLS 评估实验、Postgres Changes 订阅修复与多项传输稳定性修复。v2.150.0 包含 95 个 tenant migrations 和 26 个导出 schema 文件，manifest 与 schema tree 校验值已更新 | 多租户默认使用 `REGION=us-east-1`、`SEED_SELF_HOST=false`。fresh tenant 由官方 migrator 接管；已有 hybrid tenant 必须先备份，再使用镜像自带 tenant schema/profile 执行 pg-delta plan/apply，二次确认零漂移后才补齐官方 migration ledger 和 `migrations_ran`。不得用顺序迁移强行重放已存在的中间对象。升级后读回 `uuid`、default、`NOT NULL`、schema owner、migration marker、publication 和 replication slot，并完成真实 CDC/broadcast 验收 |
-| Caddy | v2.10.2 | v2.11.7 | 2.11 对 HTTPS upstream 默认重写 `Host`；2.11.7 的路径、rewrite、模板和下划线 header 安全修复可能让依赖旧错误行为的配置失效 | SupaCloud JSON 路由显式设置 `Host`/`X-Forwarded-Host`，并只发送连字符 header；Caddy 自定义 rate-limit 模块已用 v2.11.7 双架构构建验证 |
+| Caddy | v2.10.2 | v2.11.9 | 2.11 对 HTTPS upstream 默认重写 `Host`；2.11.7 的路径、rewrite、模板和下划线 header 安全修复可能让依赖旧错误行为的配置失效 | SupaCloud JSON 路由显式设置 `Host`/`X-Forwarded-Host`，并只发送连字符 header；Caddy 自定义 rate-limit 模块已用 v2.11.9 双架构构建验证 |
 | JuiceFS | 1.2.2 | 1.4.1 | 1.4 是 LTS；启用 storage tiers 时所有客户端必须先到 1.4.0；元数据备份默认清理两年以上备份；1.4 包含 SQL 元数据字段类型调整 | 本平台只使用单一 gateway 和 Postgres metadata；不启用 storage tiers。已有 `juicefs` metadata 在生产升级前必须做 `juicefs dump`/pg_dump 并保留回滚副本 |
 | Docker Compose | v2.29.2 | v5.5.1 | v5 删除内部构建器，`compose build` 改走 Docker Bake，并要求 Docker Buildx >= 0.17；这是唯一需要额外运行时前置条件的主版本更新 | CI 已使用 Docker Buildx；安装器的 Podman 路径只负责 `pull/up`，不把 Compose v5 当作 Podman 的构建器。Podman 用户构建镜像应使用 Podman build/兼容的 Buildx，或先提供已构建镜像 |
 
@@ -69,10 +69,13 @@
 
 ## Caddy 构建工具链
 
-Caddy 保持 v2.11.7，xcaddy 从 v0.4.5 升级至 v0.4.7，Go 编译器统一固定为
+Caddy 升级至 v2.11.9，xcaddy 从 v0.4.5 升级至 v0.4.7，Go 编译器统一固定为
 1.27.1。源码脚本和 Docker builder 显式使用 `GOTOOLCHAIN=go1.27.1`，发布与 CI
-通过 `GO_VERSION` 选择相同版本，不再使用浮动的 `stable`。Docker 基础镜像摘要与
-限流插件提交保持不变；源码安装器始终安装指定 xcaddy，避免复用主机旧版本。
+通过 `GO_VERSION` 选择相同版本，不再使用浮动的 `stable`。Docker 基础镜像摘要随 2.11.9 更新（`caddy:2.11.9`
+`sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b`、
+`caddy:2.11.9-builder`
+`sha256:f9beaa5ddbe7df6f26ebbcf9cbf44e05a1917b9bba464f0c3229038d7e2e6e13`），
+限流与缓存插件提交保持不变；源码安装器始终安装指定 xcaddy，避免复用主机旧版本。
 
 Go 1.21 或更高版本可自动下载该工具链，离线构建需要提前缓存。源码构建可通过
 `GO_VERSION` 显式选择回滚版本；Docker 和发布回滚仍应使用已验证的旧产物，
@@ -100,3 +103,15 @@ SupaCloud 的实际部署、Dockerfile 和 self-host Compose 继续使用 `postg
 - [Caddy v2.11.1](https://github.com/caddyserver/caddy/releases/tag/v2.11.1) / [v2.11.7](https://github.com/caddyserver/caddy/releases/tag/v2.11.7)
 - [JuiceFS v1.4.1](https://github.com/juicedata/juicefs/releases/tag/v1.4.1)
 - [Docker Compose v5.5.1](https://github.com/docker/compose/releases/tag/v5.5.1)
+
+## 2026-11-20 运行时与网关基线
+
+| 组件 | 旧版本 | 当前版本 | 本仓库处理 |
+| --- | --- | --- | --- |
+| Bun | 1.4.4 | 1.4.5 | 安装器、5 个 workflow、6 个 Dockerfile、`packageManager`、`@types/bun` 与锁文件同步到 1.4.5；三个发布验收脚本的 `Bun.version` 断言随之更新 |
+| Caddy | 2.11.7 | 2.11.9 | `docker/self-host/caddy/Dockerfile` 的 builder/runtime 摘要、两份 Compose 镜像标签、`install.sh` 与 `build_supacloud_caddy.sh` 默认版本、CI 镜像校验 job 和版本守护测试同步到 2.11.9 |
+
+Bun 1.4.5 是补丁级运行时更新，没有已知的配置迁移项。Caddy 2.11.8/2.11.9 属于
+2.11 系列的修复版本，未引入新的配置语法；升级后仍应复核自定义 rate-limit/cache
+模块的构建产物，并读取 `go version -m <binary>` 确认 `GOTOOLCHAIN=go1.27.1`
+未变。本节只记录版本与文件同步，没有执行任何主机升级或生产部署。
