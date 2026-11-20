@@ -25,6 +25,9 @@ const runtimeDockerfiles = [
   "packages/edge-runtime/Dockerfile",
   "packages/management-api/Dockerfile",
   "packages/pgredis-runtime/Dockerfile",
+  "podman/self-host/edge-runtime.Containerfile",
+  "podman/self-host/management-api.Containerfile",
+  "podman/self-host/pgredis-runtime.Containerfile",
 ] as const;
 
 describe("Bun runtime version assets", () => {
@@ -42,6 +45,10 @@ describe("Bun runtime version assets", () => {
       expect(workflow).not.toContain("bun-version: canary");
       expect(workflow).not.toContain("1.3.14");
     }
+
+    const generation = readRepoFile(".github/workflows/app-generation.yml");
+    expect(generation).toContain(`bun-version: "${BUN_VERSION}"`);
+    expect(generation).toContain(`-${BUN_VERSION}-app-generation-`);
 
     for (const dockerfilePath of runtimeDockerfiles) {
       const dockerfile = readRepoFile(dockerfilePath);
