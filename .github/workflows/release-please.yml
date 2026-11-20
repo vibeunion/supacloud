@@ -755,25 +755,8 @@ jobs:
         if: ${{ !cancelled() && steps.publish_delivery.outcome == 'success' && steps.publish_compiler.outcome != 'failure' && steps.publish_elysia.outcome != 'failure' && (needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/cli
         run: |
-          # npm packages cannot contain a local `file:` dependency. The CLI
-          # keeps a workspace reference for development, so resolve it to the
-          # published compiler before every release (including CLI-only
-          # releases where the compiler was not released in the same run).
-          compiler_version="$(node -p "require('../compiler/package.json').version")"
-          published=""
-          for attempt in $(seq 1 12); do
-            published="$(npm view "@supacloud/compiler@$compiler_version" version 2>/dev/null || true)"
-            if [[ "$published" == "$compiler_version" ]]; then
-              break
-            fi
-            if [[ "$attempt" -lt 12 ]]; then
-              sleep 5
-            fi
-          done
-          if [[ "$published" != "$compiler_version" ]]; then
-            echo "Published compiler is not visible: @supacloud/compiler@$compiler_version" >&2
-            exit 1
-          fi
+          # Sync the compiler range, then check that its tarball is actually
+          # downloadable before Bun resolves and installs the published graph.
           node "$GITHUB_WORKSPACE/.github/scripts/sync-compiler-dependency.mjs"
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
           bun install --lockfile-only --registry https://registry.npmjs.org

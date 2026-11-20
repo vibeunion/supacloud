@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isRecord, packageVersion, stableVersionPrecedence } from './package-validation.mjs';
-import { NPM_REGISTRY, waitForRegistryVersion } from './npm-registry-visibility.mjs';
+import { NPM_REGISTRY, waitForRegistryTarball, waitForRegistryVersion } from './npm-registry-visibility.mjs';
 import { appPackageSpecifiers, unmetAppSubpaths } from '../../scripts/check-elysia-compatibility.mjs';
 
 export { isNpmNotFoundError } from './npm-registry-visibility.mjs';
@@ -179,6 +179,11 @@ async function prepare(directory = process.cwd()) {
   const siblings = new Map();
   for (const name of directories) siblings.set(packageName(name), await readJson(resolve(root, name, 'package.json')));
   const result = prepareCommandPackage(candidate, siblings);
+  if (candidate['name'] === '@supacloud/cli') {
+    const compiler = '@supacloud/compiler';
+    const version = packageVersion(siblings.get(compiler), compiler);
+    await waitForRegistryTarball(`${compiler}@${version}`, (arguments_) => run('npm', arguments_));
+  }
   await assertPublishedDependencies(result.required);
   if (candidate['name'] === '@supacloud/elysia') await assertElysiaAppPublication(directory, result.package);
   await writeFile(path, `${JSON.stringify(result.package, null, 2)}\n`);

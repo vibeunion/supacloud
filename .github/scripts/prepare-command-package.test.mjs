@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertElysiaAppPublication, assertPublishedDependencies, prepareCommandPackage } from './prepare-command-package.mjs';
-import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
+import { REGISTRY_RETRY_DELAYS_MS, waitForRegistryTarball } from './npm-registry-visibility.mjs';
 import { resolveManagementRecovery } from './recover-management-release.mjs';
 import { publishNpmPackage } from './publish-npm-package.mjs';
 import { isRecord } from './package-validation.mjs';
@@ -416,6 +416,49 @@ test('non-404 registry errors fail immediately', async () => {
     { message: 'EPERM' },
   );
   assert.equal(views, 1);
+});
+
+const compilerSpec = '@supacloud/compiler@0.62.8';
+const compilerDownload404 = Object.assign(new Error('npm pack failed'), {
+  stderr: 'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@supacloud/compiler/-/compiler-0.62.8.tgz',
+});
+
+test('CLI compiler readiness waits for the tarball, not just version metadata', async () => {
+  const responses = [Object.assign(new Error('npm pack failed'), {
+    stderr: 'npm error code ETARGET\nnpm error notarget No matching version found.',
+  }), compilerDownload404];
+  /** @type {number[]} */
+  const sleeps = [];
+  await waitForRegistryTarball(compilerSpec, async (args) => {
+    assert.deepEqual(args, [
+      'pack', compilerSpec, '--dry-run', '--ignore-scripts', '--prefer-online',
+      '--registry=https://registry.npmjs.org',
+    ]);
+    const response = responses.shift();
+    if (response) throw response;
+    return {};
+  }, { delays: [2, 4], sleep: async (ms) => { sleeps.push(ms); } });
+  assert.deepEqual(sleeps, [2, 4]);
+});
+
+test('tarball readiness is bounded and does not retry unrelated errors', async () => {
+  await assert.rejects(
+    waitForRegistryTarball(compilerSpec, async () => { throw compilerDownload404; }, { delays: [] }),
+    { message: `Registry tarball is not yet downloadable: ${compilerSpec}` },
+  );
+  const forbidden = Object.assign(new Error('npm pack failed'), { stderr: 'npm error code E403' });
+  await assert.rejects(
+    waitForRegistryTarball(compilerSpec, async () => { throw forbidden; }, {
+      sleep: async () => assert.fail('Registry authorization failures must not be retried'),
+    }),
+    (error) => error === forbidden,
+  );
+});
+
+test('CLI publication synchronizes and prepares the compiler before installing', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  const cli = workflow.split('- name: Publish cli to NPM\n')[1]?.split('\n      - name:')[0] ?? '';
+  assert.match(cli, /sync-compiler-dependency\.mjs[\s\S]*prepare-command-package\.mjs[\s\S]*bun install --lockfile-only/);
 });
 
 test('lite publication builds sibling command packages before typecheck', () => {

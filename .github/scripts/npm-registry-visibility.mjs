@@ -12,6 +12,7 @@ export const REGISTRY_RETRY_DELAYS_MS = /** @type {readonly number[]} */ ([
 const NPM_NOT_FOUND_PATTERN = /(?:^|\n)npm (?:error|ERR!) (?:(?:code )?E404|404(?: Not Found)?)(?:\s|$)|No match found for version|["']code["']\s*:\s*["']E404["']/i;
 
 /** @typedef {(arguments_: string[]) => Promise<{ stdout?: unknown, stderr?: unknown }>} NpmRunner */
+/** @typedef {{sleep?: (ms: number) => Promise<void>, delays?: readonly number[]}} RegistryRetryOptions */
 
 /** @param {unknown} error */
 export function isNpmNotFoundError(error) {
@@ -52,32 +53,61 @@ export async function viewRegistryVersion(packageSpec, runNpm) {
 }
 
 /**
- * npm view can lag several minutes behind a successful provenance publish.
- * @param {string} packageSpec
- * @param {string} expectedVersion
- * @param {NpmRunner} runNpm
- * @param {{
- *   sleep?: (ms: number) => Promise<void>,
- *   delays?: readonly number[],
- * }} [options]
+ * @param {() => Promise<string | undefined>} read
+ * @param {string} timeoutMessage
+ * @param {RegistryRetryOptions} options
  */
-export async function waitForRegistryVersion(packageSpec, expectedVersion, runNpm, options = {}) {
+async function waitForRegistryRead(read, timeoutMessage, options) {
   const delays = options.delays ?? REGISTRY_RETRY_DELAYS_MS;
   const sleep = options.sleep ?? ((ms) => new Promise((resolve) => {
     setTimeout(resolve, ms);
   }));
-  let attempt = 0;
-  for (;;) {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await read();
+    if (result !== undefined) return result;
+    const delay = delays[attempt];
+    if (delay === undefined) throw new Error(timeoutMessage);
+    await sleep(delay);
+  }
+}
+
+/**
+ * npm view can lag several minutes behind a successful provenance publish.
+ * @param {string} packageSpec
+ * @param {string} expectedVersion
+ * @param {NpmRunner} runNpm
+ * @param {RegistryRetryOptions} [options]
+ */
+export async function waitForRegistryVersion(packageSpec, expectedVersion, runNpm, options = {}) {
+  return waitForRegistryRead(async () => {
     const published = await viewRegistryVersion(packageSpec, runNpm);
-    if (published === expectedVersion) return published;
-    if (published !== undefined) {
+    if (published !== undefined && published !== expectedVersion) {
       throw new Error(`npm returned ${published} for exact package spec ${packageSpec}`);
     }
-    const delay = delays[attempt];
-    if (delay === undefined) {
-      throw new Error(`Registry does not yet list ${packageSpec}`);
+    return published;
+  }, `Registry does not yet list ${packageSpec}`, options);
+}
+
+/**
+ * Version metadata can be visible while the actual tarball still returns 404.
+ * A dry-run pack downloads and checks the tarball without writing a package.
+ * @param {string} packageSpec
+ * @param {NpmRunner} runNpm
+ * @param {RegistryRetryOptions} [options]
+ */
+export async function waitForRegistryTarball(packageSpec, runNpm, options = {}) {
+  await waitForRegistryRead(async () => {
+    try {
+      await runNpm([
+        'pack', packageSpec, '--dry-run', '--ignore-scripts', '--prefer-online', `--registry=${NPM_REGISTRY}`,
+      ]);
+      return packageSpec;
+    } catch (error) {
+      const stderr = isRecord(error) ? error['stderr'] : undefined;
+      if (isNpmNotFoundError(error) || (typeof stderr === 'string' && /^npm (?:error|ERR!) code ETARGET\s*$/m.test(stderr))) {
+        return undefined;
+      }
+      throw error;
     }
-    await sleep(delay);
-    attempt += 1;
-  }
+  }, `Registry tarball is not yet downloadable: ${packageSpec}`, options);
 }
