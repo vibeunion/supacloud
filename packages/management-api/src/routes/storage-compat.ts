@@ -1,4 +1,4 @@
-import { TusStore, SignedStore, startStorageCleanupJob } from "../services/storage-store";
+import { TusChunkError, TusStore, SignedStore, startStorageCleanupJob } from "../services/storage-store";
 /**
  * Supabase-JS SDK Compatible Storage Routes
  * 
@@ -2095,6 +2095,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             contentType,
             totalSize: uploadLength,
             offset: 0,
+            state: "pending",
             createdAt: Date.now(),
             // Reuse the legacy credential column without retaining the bearer token in new sessions.
             auth_token: `${owner}:${upsert ? "upsert" : "insert"}`,
@@ -2111,15 +2112,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .head('/upload/resumable/:uploadId', {
         detail: { tags: ["storage"], summary: "Get TUS upload offset" },
     }, async ({ params, headers, set }) => {
+        set.headers['Tus-Resumable'] = '1.0.0';
+        set.headers['Cache-Control'] = 'no-store';
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
         if (!await authorizeTusSession(ref, upload, headers['authorization'])) return status(404, { message: 'Upload not found' });
 
-        set.headers['Tus-Resumable'] = '1.0.0';
+        if (upload.state === 'writing' || upload.state === 'finalizing') {
+            return status(423, { message: 'Upload is busy' });
+        }
+        // A legacy full offset only proves that the final chunk reached staging.
+        if (upload.state === 'pending' && upload.offset >= upload.totalSize) {
+            return status(410, { message: 'Upload completion could not be verified' });
+        }
         set.headers['Upload-Offset'] = String(upload.offset);
         set.headers['Upload-Length'] = String(upload.totalSize);
-        set.headers['Cache-Control'] = 'no-store';
         return '';
     })
 
@@ -2127,12 +2135,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .patch('/upload/resumable/:uploadId', {
         detail: { tags: ["storage"], summary: "Upload a TUS chunk" },
     }, async ({ params, headers, request, set }) => {
+        set.headers['Tus-Resumable'] = '1.0.0';
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
         const auth = headers['authorization'];
         const session = await authorizeTusSession(ref, upload, auth);
         if (!session) return status(404, { message: 'Upload not found' });
+        if (upload.state === 'writing' || upload.state === 'finalizing') {
+            return status(423, { message: 'Upload is busy' });
+        }
+        if (upload.state === 'complete') return status(409, { message: 'Upload already completed' });
+        if (upload.offset >= upload.totalSize) return status(410, { message: 'Upload completion could not be verified' });
+        if (upload.totalSize > TUS_MAX_SIZE) return status(413, { message: 'Upload exceeded the total size limit' });
         if (!request.body) return status(400, { message: 'Missing upload chunk body' });
 
         const chunkLength = parseContentLength(headers['content-length']);
@@ -2145,21 +2160,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(409, { message: 'Offset mismatch' });
         }
 
-        upload.offset = await TusStore.appendChunk(params.uploadId, upload.offset, request.body);
-        if (upload.offset > upload.totalSize || upload.offset > TUS_MAX_SIZE) {
-            await TusStore.delete(params.uploadId);
-            return status(413, { statusCode: "413", error: 'Payload too large', message: 'Upload exceeded declared size limit' });
+        let chunk;
+        try {
+            chunk = await TusStore.appendChunk(params.uploadId, clientOffset, request.body, TUS_MAX_CHUNK_SIZE, chunkLength);
+        } catch (error) {
+            if (error instanceof TusChunkError) return status(error.status, { message: error.message });
+            throw error;
         }
+        if (!chunk) return status(409, { message: 'Upload state changed' });
 
-        set.headers['Tus-Resumable'] = '1.0.0';
-        set.headers['Upload-Offset'] = String(upload.offset);
-
-        // Upload complete — assemble and store in S3
-        if (upload.offset >= upload.totalSize) {
-            const asm = await TusStore.assembleToStream(params.uploadId);
-
+        if (chunk.finalizing) {
+            let writeStarted = false;
             try {
-                // Transactional RLS Finalization
+                const asm = await TusStore.assembleToStream(params.uploadId);
                 const finalPermitted = await StorageRLS.authorizeAction(
                     upload.ref, 
                     auth,
@@ -2169,30 +2182,28 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl, ...(upload.meta?.contentEncoding ? { contentEncoding: upload.meta.contentEncoding } : {}) },
                     false, session.upsert, undefined, undefined,
                     async () => {
+                        writeStarted = true;
                         const uploaded = await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, asm.stream, upload.contentType);
                         if (!uploaded) throw new Error('PHYSICAL_UPLOAD_FAILED');
-                        await asm.cleanup();
                     }
                 );
-                
-                if (!finalPermitted.permitted) {
-                    await asm.cleanup();
-                    throw new Error(finalPermitted.error || 'Access Denied during finalization');
-                }
+                if (!finalPermitted.permitted) throw new Error(finalPermitted.error || 'Access Denied during finalization');
 
-                await TusStore.delete(params.uploadId);
-                return {
-                    Id: `${upload.bucket}/${upload.objectName}`,
-                    Key: `${upload.bucket}/${upload.objectName}`,
-                    path: upload.objectName,
-                    fullPath: `${upload.bucket}/${upload.objectName}`
-                };
-            } catch (err: unknown) {
-                await TusStore.delete(params.uploadId);
+                await TusStore.complete(params.uploadId);
+                await asm.cleanup();
+            } catch (error) {
+                // Once the object write starts, its outcome may be ambiguous. Never replay it automatically.
+                logger.warn('[StorageCompat] TUS finalization failed', {
+                    uploadId: params.uploadId,
+                    writeStarted,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                if (!writeStarted) await TusStore.reopen(params.uploadId);
                 return status(500, { message: 'Failed to finalize upload', code: '500' });
             }
         }
 
+        set.headers['Upload-Offset'] = String(chunk.offset);
         set.status = 204;
         return '';
     })
@@ -2201,11 +2212,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .delete('/upload/resumable/:uploadId', {
         detail: { tags: ["storage"], summary: "Abort resumable upload" },
     }, async ({ params, headers, set }) => {
+        set.headers['Tus-Resumable'] = '1.0.0';
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (upload && !await authorizeTusSession(ref, upload, headers['authorization'])) return status(404, { message: 'Upload not found' });
-        if (upload) await TusStore.delete(params.uploadId);
-        set.headers['Tus-Resumable'] = '1.0.0';
+        if (upload && !await TusStore.delete(params.uploadId)) return status(423, { message: 'Upload state changed or is busy' });
         set.status = 204;
         return '';
     })

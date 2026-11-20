@@ -28,7 +28,7 @@ beforeEach(() => {
   spyOn(SignedStore, "consume").mockResolvedValue({ ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 });
   spyOn(SignedStore, "delete").mockResolvedValue(undefined);
   spyOn(TusStore, "get").mockResolvedValue(null);
-  spyOn(TusStore, "delete").mockResolvedValue(undefined);
+  spyOn(TusStore, "delete").mockResolvedValue(true);
 
   mockBuckets.set("avatars", {
     id: "avatars",
@@ -1184,14 +1184,25 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(listV2Payload.hasNext).toBe(false);
   });
 
-  test("resumable upload binds the stream to its owner across credential refreshes", async () => {
-    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+  test.each(["success", "uncertain", "before-write"] as const)("TUS final chunk receipt: %s", async (outcome) => {
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<boolean>();
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockImplementation(async () => {
+      writeStarted.resolve();
+      return finishWrite.promise;
+    });
     const setSpy = spyOn(TusStore, "set");
     const appendSpy = spyOn(TusStore, "appendChunk");
     const assembleSpy = spyOn(TusStore, "assembleToStream");
+    const completeSpy = spyOn(TusStore, "complete");
+    const reopenSpy = spyOn(TusStore, "reopen");
 
     let uploadState: TusUpload | null = null;
     let uploadId = "";
+    function fixture() {
+      if (!uploadState) throw new Error("Missing fixture");
+      return uploadState;
+    }
     setSpy.mockImplementation(async (id, upload) => {
       uploadId = id;
       uploadState = { ...upload };
@@ -1202,13 +1213,29 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       expect(typeof chunk.getReader).toBe("function");
       const payload = await new Response(chunk).text();
       expect(payload).toBe("chunk");
-      if (!uploadState) throw new Error("Missing fixture");
-      uploadState.offset = expectedOffset + payload.length;
-      return uploadState.offset;
+      fixture().state = "finalizing";
+      return { offset: expectedOffset + payload.length, finalizing: true };
     });
-    assembleSpy.mockResolvedValue({
-      stream: new Response("chunk").body!,
-      cleanup: async () => {},
+    const cleanup = async () => {
+      expect(fixture().state).toBe("complete");
+    };
+    assembleSpy.mockImplementation(async () => {
+      if (outcome === "before-write") throw new Error("Could not open staged upload");
+      return { stream: new Response("chunk").body!, cleanup };
+    });
+    completeSpy.mockImplementation(async () => {
+      const state = fixture();
+      expect(state.state).toBe("finalizing");
+      state.state = "complete";
+      state.offset = state.totalSize;
+    });
+    reopenSpy.mockImplementation(async () => {
+      fixture().state = "pending";
+    });
+    const deleteSpy = spyOn(TusStore, "delete").mockImplementation(async () => {
+      if (fixture().state === "finalizing") return false;
+      uploadState = null;
+      return true;
     });
 
     const uploadMeta = [
@@ -1246,7 +1273,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       const head = await request(location, { method: "HEAD", headers });
       expect(head.headers.get("Upload-Offset")).toBe("0");
 
-      const patchRes = await request(location, {
+      const patch = () => request(location, {
         method: "PATCH",
         headers: {
           ...headers,
@@ -1257,7 +1284,48 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
         body: "chunk",
       });
 
-      expect(patchRes.status).toBe(200);
+      const pending = patch();
+      if (outcome !== "before-write") {
+        expect(await Promise.race([writeStarted.promise.then(() => "started"), pending.then(response => response.status)])).toBe("started");
+        const busy = await request(location, { method: "HEAD", headers });
+        expect(busy.status).toBe(423);
+        expect(busy.headers.get("Cache-Control")).toBe("no-store");
+        expect(busy.headers.has("Upload-Offset")).toBe(false);
+        expect((await patch()).status).toBe(423);
+        expect((await request(location, { method: "DELETE", headers })).status).toBe(423);
+        finishWrite.resolve(outcome === "success");
+      }
+
+      const patchRes = await pending;
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      const resumed = await request(location, { method: "HEAD", headers });
+      if (outcome === "before-write") {
+        expect(patchRes.status).toBe(500);
+        expect(patchRes.headers.has("Upload-Offset")).toBe(false);
+        expect(resumed.status).toBe(200);
+        expect(resumed.headers.get("Upload-Offset")).toBe("0");
+        expect(reopenSpy).toHaveBeenCalledTimes(1);
+        expect(uploadSpy).not.toHaveBeenCalled();
+        expect(completeSpy).not.toHaveBeenCalled();
+        fixture().offset = fixture().totalSize;
+        expect((await request(location, { method: "HEAD", headers })).status).toBe(410);
+        return;
+      }
+      if (outcome === "success") {
+        expect(patchRes.status).toBe(204);
+        expect(patchRes.headers.get("Upload-Offset")).toBe("5");
+        expect(resumed.status).toBe(200);
+        expect(resumed.headers.get("Upload-Offset")).toBe("5");
+        expect((await patch()).status).toBe(409);
+        expect(completeSpy).toHaveBeenCalledTimes(1);
+      } else {
+        expect(patchRes.status).toBe(500);
+        expect(patchRes.headers.has("Upload-Offset")).toBe(false);
+        expect(resumed.status).toBe(423);
+        expect((await patch()).status).toBe(423);
+        expect(completeSpy).not.toHaveBeenCalled();
+      }
+      expect(reopenSpy).not.toHaveBeenCalled();
       expect(appendSpy).toHaveBeenCalledTimes(1);
       expect(uploadSpy).toHaveBeenCalledTimes(1);
       const finalization = authorizeSpy.mock.calls.at(-1);
@@ -1265,12 +1333,16 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       expect(finalization?.[6]).toBe(false);
       expect(finalization?.[7]).toBe(false);
     } finally {
+      finishWrite.resolve(false);
       authorizeSpy.mockRestore();
       tokenSpy.mockRestore();
       getSpy.mockRestore();
+      deleteSpy.mockRestore();
       setSpy.mockRestore();
       appendSpy.mockRestore();
       assembleSpy.mockRestore();
+      completeSpy.mockRestore();
+      reopenSpy.mockRestore();
       uploadSpy.mockRestore();
     }
   });
