@@ -33,14 +33,15 @@ interface HealthCheckDeps {
 
 // Executes a health probe. Returns whether canonical reconciliation was performed in this round.
 export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boolean> {
-    const reconcileAll = deps?.reconcileAll ?? reconcileCanonicalGatewayRoutes;
     const now = deps?.now?.() ?? Date.now();
     const reconcileIntervalMs = Math.max(0, deps?.reconcileIntervalMs ?? ROUTE_RECONCILE_INTERVAL_MS);
 
     const reconcile = async (reason: "recovered" | "periodic"): Promise<boolean> => {
-        const state = await reconcileAll();
+        const state = await (deps?.reconcileAll
+            ? deps.reconcileAll()
+            : reconcileCanonicalGatewayRoutes({ skipUnchanged: reason === "periodic" }));
         lastRouteReconcileAt = now;
-        logger.info(`[GatewayHealth] Canonical gateway ${reason} reconciliation applied`, {
+        logger.info(`[GatewayHealth] Canonical gateway ${reason} reconciliation completed`, {
             tenants: state.tenants.updated,
             frontends: state.frontends.configured,
         });
@@ -68,8 +69,7 @@ export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boo
 
         // Caddy can stay reachable while its live config is changed out-of-band
         // (for example by a restart hook or an operator patch). Periodically
-        // replay the persisted tenant routes so managed upstreams and headers
-        // cannot remain stale indefinitely.
+        // compare the persisted tenant routes against both live and durable config.
         if (reconcileIntervalMs === 0 || now - lastRouteReconcileAt >= reconcileIntervalMs) {
             return reconcile("periodic");
         }

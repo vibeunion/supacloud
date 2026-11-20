@@ -26,6 +26,8 @@ SupaCloud 的 HTTP 网关基于 **Caddy**，但生产环境从不手改 Caddyfil
 
 因此自定义路由的最终形态是一份 Caddy JSON route，而不是 Caddyfile 片段。下表里每个字段都会在 JSON 里对应到 Caddy 的 `match` / `handle` 结构。
 
+周期对账仍会生成目标配置，但只有磁盘快照和 Caddy 的实时配置都与目标一致时，才跳过完整校验和 `/load`。检测到漂移或无法确认一致性时仍走原来的校验、加载与持久化流程；冷启动和故障恢复不使用这个捷径。
+
 ## 自定义网关路由
 
 自定义路由通过 CRUD 接口管理。实现见 `packages/management-api/src/services/gateway.service.ts` 的 `makeCustomGatewayRoute`，接口定义见 `packages/management-api/src/routes/project-config.ts`。

@@ -233,7 +233,10 @@ export interface CanonicalGatewayReconcileState {
 export interface CanonicalGatewayReconcileDependencies {
     gateway?: GatewayProvider;
     reconcileFrontends?: () => Promise<CanonicalGatewayReconcileState["frontends"]>;
+    skipUnchanged?: boolean;
 }
+
+type GatewayPersistOptions = { skipUnchanged?: boolean };
 
 export interface GatewayProvider {
     readonly name: "caddy";
@@ -255,7 +258,7 @@ export interface GatewayProvider {
     applyConfig(projectRef: string, gatewayConfig: GatewayConfig): Promise<{ success: boolean; message: string }>;
     rebuildAllTenantConfigs(): Promise<{ success: boolean; updated: number; errors: string[] }>;
     prepareCleanRebuild(): Promise<void>;
-    withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush?: (result: T) => boolean): Promise<T>;
+    withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush?: (result: T) => boolean, options?: GatewayPersistOptions): Promise<T>;
     configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }>;
     setupMasterRoutes(): Promise<void>;
     configureStudioDomain(domain: string, port: number): Promise<void>;
@@ -1087,7 +1090,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         throw new CaddyGatewayDurabilityError(message);
     }
 
-    private async writeAndLoadCurrentConfig(): Promise<void> {
+    private async writeAndLoadCurrentConfig(options: GatewayPersistOptions): Promise<void> {
         let next: CaddyConfig;
         try {
             next = this.baseConfig();
@@ -1096,6 +1099,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const context = this.operationContext.getStore();
             if (context?.token === this.operationToken) this.restoreMutableState(context.previousSnapshot);
             throw error;
+        }
+        if (options.skipUnchanged) {
+            const durable = await this.readDurableConfig().catch(() => null);
+            if (durable && stableStringify(durable) === stableStringify(next)
+                && await this.liveCandidateState(next) === "candidate") {
+                return;
+            }
         }
         await fs.mkdir(path.dirname(config.caddyConfigPath), { recursive: true });
         const tmpPath = `${config.caddyConfigPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1134,7 +1144,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
     }
 
-    private async persistAndLoad(): Promise<void> {
+    private async persistAndLoad(options: GatewayPersistOptions = {}): Promise<void> {
         if (this.deferredPersistDepth > 0) {
             this.deferredPersistPending = true;
             return;
@@ -1142,16 +1152,24 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
         await this.repairQuarantinedCandidate();
         const previous = this.persistAndLoadTail.catch(() => undefined);
-        const current = previous.then(() => this.writeAndLoadCurrentConfig());
+        const current = previous.then(() => this.writeAndLoadCurrentConfig(options));
         this.persistAndLoadTail = current.catch(() => undefined);
         await current;
     }
 
-    async withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush: (result: T) => boolean = () => true): Promise<T> {
-        return this.serializeOperation(() => this.withDeferredPersistUnlocked(fn, shouldFlush));
+    async withDeferredPersist<T>(
+        fn: () => Promise<T>,
+        shouldFlush: (result: T) => boolean = () => true,
+        options: GatewayPersistOptions = {},
+    ): Promise<T> {
+        return this.serializeOperation(() => this.withDeferredPersistUnlocked(fn, shouldFlush, options));
     }
 
-    private async withDeferredPersistUnlocked<T>(fn: () => Promise<T>, shouldFlush: (result: T) => boolean): Promise<T> {
+    private async withDeferredPersistUnlocked<T>(
+        fn: () => Promise<T>,
+        shouldFlush: (result: T) => boolean,
+        options: GatewayPersistOptions,
+    ): Promise<T> {
         const snapshot = this.mutableStateSnapshot();
         const pendingAtEntry = this.deferredPersistPending;
         this.deferredPersistDepth++;
@@ -1173,7 +1191,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 this.deferredPersistPending = false;
                 if (flush) {
                     try {
-                        await this.persistAndLoad();
+                        await this.persistAndLoad(options);
                     } catch (error: unknown) {
                         if (!preservesGatewayCandidate(error)) this.restoreMutableState(snapshot);
                         throw error;
@@ -2631,7 +2649,9 @@ export class GatewayService implements GatewayProvider {
     applyConfig(projectRef: string, gatewayConfig: GatewayConfig) { return this.provider.applyConfig(projectRef, gatewayConfig); }
     rebuildAllTenantConfigs() { return this.provider.rebuildAllTenantConfigs(); }
     prepareCleanRebuild() { return this.provider.prepareCleanRebuild(); }
-    withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush?: (result: T) => boolean) { return this.provider.withDeferredPersist(fn, shouldFlush); }
+    withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush?: (result: T) => boolean, options?: GatewayPersistOptions) {
+        return this.provider.withDeferredPersist(fn, shouldFlush, options);
+    }
     configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]) { return this.provider.configureCustomGatewayRoutes(projectRef, routes); }
     setupMasterRoutes() { return this.provider.setupMasterRoutes(); }
     configureStudioDomain(domain: string, port: number) { return this.provider.configureStudioDomain(domain, port); }
@@ -2681,7 +2701,7 @@ export async function reconcileCanonicalGatewayRoutes(
         const hostedAuth = await gateway.setupHostedAuthRoutes();
         const frontends = await reconcileFrontends();
         return { tenants, hostedAuth, frontends };
-    }, canonicalReconcileAccepted);
+    }, canonicalReconcileAccepted, { skipUnchanged: dependencies.skipUnchanged === true });
     if (!canonicalReconcileAccepted(state)) throw canonicalReconcileError(state);
     await gateway.confirmCanonicalState();
     return state;
