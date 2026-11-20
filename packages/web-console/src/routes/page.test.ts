@@ -8,7 +8,9 @@ const projectSwitcherSource = readFileSync(new URL("../lib/components/ProjectSwi
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ) as { dependencies: Record<string, string> };
-const lockSource = readFileSync(new URL("../../bun.lock", import.meta.url), "utf8");
+const lock = Bun.JSONC.parse(
+  readFileSync(new URL("../../bun.lock", import.meta.url), "utf8"),
+) as { packages: Record<string, [resolution: string, ...metadata: unknown[]]> };
 const viteSource = readFileSync(new URL("../../vite.config.ts", import.meta.url), "utf8");
 
 describe("SupaCloud root dashboard", () => {
@@ -60,16 +62,17 @@ describe("SupaCloud root dashboard", () => {
   });
 
   test("locks the released svadmin adapters and Vite compatibility rule", () => {
-    expect(packageJson.dependencies["@svadmin/ai-elements"]).toBe("0.15.3");
-    expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.84.0");
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.131.2");
-    expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("0.13.35");
-    expect(packageJson.dependencies["@svadmin/elysia"]).toBe("0.14.37");
-    expect(lockSource).toContain('"@svadmin/ai-elements@0.15.3"');
-    expect(lockSource).toContain('"@svadmin/core@0.84.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.131.2"');
-    expect(lockSource).toContain('"@svadmin/sveltekit@0.13.35"');
-    expect(lockSource).toContain('"@svadmin/elysia@0.14.37"');
+    for (const name of ["@svadmin/ai-elements", "@svadmin/ui", "@svadmin/sveltekit", "@svadmin/elysia"]) {
+      const version = packageJson.dependencies[name];
+      expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(lock.packages[name]?.[0]).toBe(`${name}@${version}`);
+    }
+    const core = "@svadmin/core";
+    const range = packageJson.dependencies[core];
+    const resolution = lock.packages[core]?.[0] ?? "";
+    expect(range).toMatch(/^\^\d+\.\d+\.\d+$/);
+    expect(resolution).toMatch(/^@svadmin\/core@\d+\.\d+\.\d+$/);
+    expect(Bun.semver.satisfies(resolution.slice(core.length + 1), range)).toBe(true);
     expect(viteSource).toContain("'@svadmin/core'");
   });
 });

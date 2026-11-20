@@ -5,7 +5,7 @@ Requires=supacloud-postgres.service
 After=supacloud-postgres.service
 
 [Container]
-Image=docker.io/postgrest/postgrest:v16.5
+Image=docker.io/postgrest/postgrest:v16.6
 ContainerName=supacloud-postgrest
 Network=supacloud.network
 NetworkAlias=postgrest
