@@ -25,7 +25,8 @@ import re
 import stat
 import sys
 import tempfile
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
+from pathlib import Path
 
 
 AUTHENTICATOR_RULE_MARKER = "SupaCloud tenant authenticator loopback"
@@ -90,6 +91,33 @@ def render_inventory(content: str) -> str | None:
         + updated_content[sections[0].end() :]
     )
     return updated_content
+
+
+def preserve_native_access(content: str, previous: str = "") -> str | None:
+    # Match only the stock supabase template rows, not operator-defined rules.
+    docker_rule = (
+        r"^([ \t]*-[ \t]*\{[ \t]*user:[ \t]*all[ \t]*,[ \t]*"
+        r"db:[ \t]*(?:postgres|_supabase)[ \t]*,[ \t]*addr:[ \t]*)"
+        r"172\.16\.0\.0/12(?=[ \t]*,[ \t]*auth:[ \t]*pwd[ \t]*,[ \t]*"
+        r"title:[ \t]*'allow (?:internal )?access from local docker networks'"
+        r"[ \t]*,[ \t]*order:[ \t]*50[ \t]*\}[ \t]*$)"
+    )
+    updated_content = re.sub(docker_rule, r"\g<1>172.17.0.0/16", content, flags=re.MULTILINE)
+    updated_content = re.sub(
+        r"^([ \t]*-[ \t]*\{[ \t]*name:[ \t]*supabase_etl_admin[ \t]*,"
+        r"[^}\n]*,[ \t]*bypassrls:[ \t]*)true(?=[ \t]*,[^}\n]*\}[ \t]*$)",
+        r"\g<1>false",
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    # Reuse pairing already configured on the host, not on fresh inventories
+    # where the matching PostgreSQL role memberships may not have been granted.
+    if (
+        all(marker in previous for marker, _ in TENANT_HBA_RULES)
+        and render_inventory(previous) is None
+    ):
+        updated_content = render_inventory(updated_content) or updated_content
+    return updated_content if updated_content != content else None
 
 
 def atomic_write(path: str, content: str) -> None:
@@ -211,10 +239,10 @@ def decide_hba(
     return "no-match"
 
 
-def patch_inventory(path: str) -> bool:
+def patch_inventory(path: str, render: Callable[[str], str | None] = render_inventory) -> bool:
     with open(path, "r", encoding="utf-8") as inventory_file:
         content = inventory_file.read()
-    updated_content = render_inventory(content)
+    updated_content = render(content)
     if updated_content is None:
         return False
     atomic_write(path, updated_content)
@@ -222,11 +250,20 @@ def patch_inventory(path: str) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} <pigsty.yml>", file=sys.stderr)
-        return 2
+    args = sys.argv[1:]
     try:
-        patch_inventory(sys.argv[1])
+        if len(args) in (2, 3) and args[0] == "--preserve-native-access":
+            previous = Path(args[2]).read_text(encoding="utf-8") if len(args) == 3 else ""
+            patch_inventory(args[1], lambda content: preserve_native_access(content, previous))
+        elif len(args) == 1:
+            patch_inventory(args[0])
+        else:
+            print(
+                f"usage: {sys.argv[0]} <pigsty.yml> or "
+                f"{sys.argv[0]} --preserve-native-access <pigsty.yml> [previous-inventory]",
+                file=sys.stderr,
+            )
+            return 2
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1

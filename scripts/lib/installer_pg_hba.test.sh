@@ -89,4 +89,9 @@ if PIGSTY_CONFIG="$bad_config" ensure_pigsty_tenant_hba_rule >/dev/null 2>&1; th
     echo "inventory without pg_hba_rules was accepted" >&2
     exit 1
 fi
-! grep -Fq "SupaCloud tenant authenticator loopback" "$bad_config"
+if grep -Fq "SupaCloud tenant authenticator loopback" "$bad_config"; then
+    echo "invalid inventory was modified before rejection" >&2
+    exit 1
+fi
+
+PYTHONDONTWRITEBYTECODE=1 python3 "$SCRIPT_DIR/scripts/lib/patch_pigsty_tenant_hba.test.py"

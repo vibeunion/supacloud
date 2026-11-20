@@ -2325,6 +2325,7 @@ install_pigsty() {
  
     # Modify configuration files
     update_pigsty_config
+    supacloud_preserve_pigsty_native_access "$HOME/pigsty/pigsty.yml"
     
     log_info "Installing Pigsty (this may take 10-20 minutes)..."
     PIGSTY_ENTRYPOINT=""
@@ -2783,7 +2784,7 @@ save_all_credentials() {
         INTERNAL_IP "$INTERNAL_IP" \
         PUBLIC_DOMAIN "$SUPABASE_PUBLIC_DOMAIN" \
         STUDIO_DOMAIN "$SUPABASE_STUDIO_DOMAIN" \
-        PIGSTY_VERSION "${PIGSTY_VERSION:-v4.5.0}" \
+        PIGSTY_VERSION "${PIGSTY_VERSION:-v4.6.0}" \
         PG_VERSION "${PG_VERSION:-18}" \
         DASHBOARD_USERNAME "${DASHBOARD_USERNAME:-supabase}" \
         DASHBOARD_PASSWORD "${DASHBOARD_PASSWORD:-pigsty}" \

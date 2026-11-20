@@ -8,7 +8,7 @@
 
 ## 首要支持组合
 
-第一个稳定平台基线是使用 systemd 的 Linux 原生路径，采用 Pigsty `v4.5.0`、
+第一个稳定平台基线是使用 systemd 的 Linux 原生路径，采用 Pigsty `v4.6.0`、
 PostgreSQL 18、SupaCloud 管理的 Caddy 和已发布且经过验证的制品。首要验收目标是
 Ubuntu 24.04 LTS 与 `amd64`；其他安装路径和 `arm64` 必须单独提供证据。
 

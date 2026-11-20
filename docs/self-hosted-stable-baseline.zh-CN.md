@@ -39,7 +39,7 @@ Supabase 风格项目。
 | 主机 | 使用 systemd 的 Linux |
 | 首要操作系统验收目标 | Ubuntu 24.04 LTS |
 | 首要架构验收目标 | `amd64` |
-| 数据库底座 | Pigsty `v4.5.0`、PostgreSQL 18 |
+| 数据库底座 | Pigsty `v4.6.0`、PostgreSQL 18 |
 | 网关 | SupaCloud 管理的 Caddy systemd 服务，默认启用安全的响应压缩与静态资源缓存策略 |
 | 平台运行时 | Management API、Web Console、项目运行时和 VictoriaLogs |
 | 存储 | PostgreSQL 元数据的 JuiceFS；项目显式绑定受支持的 S3 兼容后端时另行验收 |
@@ -57,7 +57,7 @@ Caddy 与 GoTrue 仍是独立的升级面。
 
 | 范围 | 状态 | 边界与证据 |
 | --- | --- | --- |
-| 原生单机 Full Platform | 稳定基线目标 | Ubuntu 24.04 LTS、`amd64`、systemd、Pigsty `v4.5.0` / PostgreSQL 18、SupaCloud 管理的 Caddy 和已发布且经过验证的制品；在声明生产验收前仍需完成第二至第四道验收门 |
+| 原生单机 Full Platform | 稳定基线目标 | Ubuntu 24.04 LTS、`amd64`、systemd、Pigsty `v4.6.0` / PostgreSQL 18、SupaCloud 管理的 Caddy 和已发布且经过验证的制品；在声明生产验收前仍需完成第二至第四道验收门 |
 | Lite | 独立有边界产品 | 单项目本地优先运行时，有自己的兼容性与恢复证据；不能证明 Full Platform 已就绪 |
 | Podman 单机与其他安装路径 | 特定部署方式支持／需单独验收 | 遵循各自文档边界，不能作为 Pigsty 原生基线的等价证明 |
 | `arm64` 与其他操作系统 | 特定部署方式支持／需单独验收 | 必须针对选定组合提供明确的安装、升级和恢复证据 |

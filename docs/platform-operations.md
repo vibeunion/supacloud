@@ -11,7 +11,7 @@ single-process state, upgrades and snapshots, use the
 ## Primary supported profile
 
 The first stable platform baseline is Linux with systemd, using the native
-Pigsty `v4.5.0` / PostgreSQL 18 path, SupaCloud-managed Caddy, and published
+Pigsty `v4.6.0` / PostgreSQL 18 path, SupaCloud-managed Caddy, and published
 verified artifacts. The primary acceptance target is Ubuntu 24.04 LTS on
 `amd64`; other installer paths and `arm64` require separate evidence.
 

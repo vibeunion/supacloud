@@ -1,5 +1,7 @@
 # Upgrade to Pigsty 4.5
 
+> Historical upgrade guide. SupaCloud now defaults to Pigsty v4.6.0; see [Upgrade to Pigsty 4.6](./upgrade-to-pigsty-4.6.md) for the current version pin, upstream change review, and operational checklist. Keep this page for hosts that still run the 4.5 baseline.
+
 SupaCloud pins **Pigsty v4.5.0** for fresh installations and for the default native-infrastructure upgrade path. The pin is exact and does not follow a moving `latest` reference.
 
 Upstream reference: [Pigsty v4.5.0 tag](https://github.com/pgsty/pigsty/tree/v4.5.0).

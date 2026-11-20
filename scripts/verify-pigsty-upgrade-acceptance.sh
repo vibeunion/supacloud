@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXPECTED_PIGSTY_VERSION="${EXPECTED_PIGSTY_VERSION:-v4.5.0}"
+EXPECTED_PIGSTY_VERSION="${EXPECTED_PIGSTY_VERSION:-v4.6.0}"
 MAX_BACKUP_AGE_SECONDS="${SUPACLOUD_BACKUP_MAX_AGE_SECONDS:-86400}"
 
 fail() {
@@ -10,7 +10,7 @@ fail() {
   exit 1
 }
 
-[[ "$EXPECTED_PIGSTY_VERSION" == "v4.5.0" ]] || fail "This gate only supports the pinned Pigsty v4.5.0 baseline"
+[[ "$EXPECTED_PIGSTY_VERSION" == "v4.6.0" ]] || fail "This gate only supports the pinned Pigsty v4.6.0 baseline"
 command -v bun >/dev/null 2>&1 || fail "bun is required"
 command -v sudo >/dev/null 2>&1 || fail "sudo is required for host checks"
 command -v psql >/dev/null 2>&1 || fail "psql is required for PostgreSQL version read-back"
