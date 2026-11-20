@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.1...management-api-v0.138.2) (2026-11-20)
+
+
+### Miscellaneous Chores
+
+* **pigsty:** pin the v4.6.0 baseline ([#2741](https://github.com/vibeunion/supacloud/issues/2741)) ([bee4963](https://github.com/vibeunion/supacloud/commit/bee4963445631af862afed750d0c8e4a7413885d))
+
 ## [0.138.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.0...management-api-v0.138.1) (2026-11-20)
 
 
