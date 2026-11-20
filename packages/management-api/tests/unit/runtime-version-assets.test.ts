@@ -1379,8 +1379,8 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain("Podman Quadlet single-node provider");
     expect(podmanInstaller).toContain("podman build");
     expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
-    expect(installer).toContain('CADDY_VERSION:-2.11.7');
-    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"');
+    expect(installer).toContain('CADDY_VERSION:-2.11.9');
+    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.9}"');
 
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.6"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
