@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.39.0...edge-runtime-v0.39.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **edge-runtime:** verify and publish binaries from the exact release merge ([#2743](https://github.com/vibeunion/supacloud/issues/2743)) ([04acc80](https://github.com/vibeunion/supacloud/commit/04acc800d97bf5178844a12aa9c476b6d3407870))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.38.7...edge-runtime-v0.39.0) (2026-11-20)
 
 
