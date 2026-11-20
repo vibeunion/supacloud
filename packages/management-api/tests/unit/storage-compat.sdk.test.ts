@@ -5,7 +5,7 @@ import { storageCompatInternals, storageCompatRoutes } from "../../src/routes/st
 import { StorageRLS, mockBuckets, mockObjects } from "../../src/services/storage-rls";
 import * as dbModule from "../../src/db";
 import { StorageService } from "../../src/services/storage.service";
-import { SignedStore, TusStore } from "../../src/services/storage-store";
+import { SignedStore, TusStore, type TusUpload } from "../../src/services/storage-store";
 import { storageVectorInternals } from "../../src/services/storage-vector.service";
 import { createClient } from "@supabase/supabase-js";
 
@@ -28,7 +28,7 @@ beforeEach(() => {
   spyOn(SignedStore, "consume").mockResolvedValue({ ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 });
   spyOn(SignedStore, "delete").mockResolvedValue(undefined);
   spyOn(TusStore, "get").mockResolvedValue(null);
-  spyOn(TusStore, "delete").mockResolvedValue(undefined);
+  spyOn(TusStore, "delete").mockResolvedValue(true);
 
   mockBuckets.set("avatars", {
     id: "avatars",
@@ -1184,30 +1184,58 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(listV2Payload.hasNext).toBe(false);
   });
 
-  test("resumable upload appends streamed chunks without buffering the whole request", async () => {
-    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+  test.each(["success", "uncertain", "before-write"] as const)("TUS final chunk receipt: %s", async (outcome) => {
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<boolean>();
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockImplementation(async () => {
+      writeStarted.resolve();
+      return finishWrite.promise;
+    });
     const setSpy = spyOn(TusStore, "set");
     const appendSpy = spyOn(TusStore, "appendChunk");
     const assembleSpy = spyOn(TusStore, "assembleToStream");
+    const completeSpy = spyOn(TusStore, "complete");
+    const reopenSpy = spyOn(TusStore, "reopen");
 
-    let uploadState: any = null;
+    let uploadState: TusUpload | null = null;
     let uploadId = "";
-    setSpy.mockImplementation(async (id: string, upload: any) => {
+    function fixture() {
+      if (!uploadState) throw new Error("Missing fixture");
+      return uploadState;
+    }
+    setSpy.mockImplementation(async (id, upload) => {
       uploadId = id;
       uploadState = { ...upload };
     });
-    (TusStore.get as any).mockImplementation(async (id: string) => id === uploadId && uploadState ? { ...uploadState } : null);
+    const getSpy = spyOn(TusStore, "get").mockImplementation(async id => id === uploadId && uploadState ? { ...uploadState } : null);
     appendSpy.mockImplementation(async (_id: string, expectedOffset: number, chunk: ReadableStream<Uint8Array>) => {
       expect(expectedOffset).toBe(0);
       expect(typeof chunk.getReader).toBe("function");
       const payload = await new Response(chunk).text();
       expect(payload).toBe("chunk");
-      uploadState.offset = expectedOffset + payload.length;
-      return uploadState.offset;
+      fixture().state = "finalizing";
+      return { offset: expectedOffset + payload.length, finalizing: true };
     });
-    assembleSpy.mockResolvedValue({
-      stream: new Response("chunk").body!,
-      cleanup: async () => {},
+    const cleanup = async () => {
+      expect(fixture().state).toBe("complete");
+    };
+    assembleSpy.mockImplementation(async () => {
+      if (outcome === "before-write") throw new Error("Could not open staged upload");
+      return { stream: new Response("chunk").body!, cleanup };
+    });
+    completeSpy.mockImplementation(async () => {
+      const state = fixture();
+      expect(state.state).toBe("finalizing");
+      state.state = "complete";
+      state.offset = state.totalSize;
+    });
+    reopenSpy.mockImplementation(async () => {
+      fixture().state = "pending";
+    });
+    const deleteSpy = spyOn(TusStore, "delete").mockImplementation(async () => {
+      if (fixture().state === "finalizing") return false;
+      uploadState = null;
+      return true;
     });
 
     const uploadMeta = [
@@ -1216,39 +1244,107 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       `contentType ${Buffer.from("application/octet-stream").toString("base64")}`,
     ].join(",");
 
-    const createRes = await request("/storage/v1/upload/resumable", {
-      method: "POST",
-      headers: {
-        apikey: "test-token",
-        authorization: "Bearer test-token",
-        "upload-length": "5",
-        "upload-metadata": uploadMeta,
-      },
+    const tokenSpy = spyOn(StorageRLS, "verifyToken").mockImplementation(async (_ref, token) => {
+      if (token === "Bearer expired") throw new Error("expired");
+      return { role: "authenticated", iss: "https://issuer.example", sub: token === "Bearer other" ? "other" : "owner", __allow_service_role: false };
     });
+    const authorizeSpy = spyOn(StorageRLS, "authorizeAction");
+    try {
+      const createRes = await request("/storage/v1/upload/resumable", {
+        method: "POST",
+        headers: {
+          apikey: "test-token",
+          authorization: "Bearer test-token",
+          "upload-length": "5",
+          "upload-metadata": uploadMeta,
+          "x-upsert": "false",
+        },
+      });
+      expect(createRes.status).toBe(201);
+      expect(setSpy.mock.calls[0]?.[1].auth_token).toMatch(/^tus-owner-v1:[a-f0-9]{64}:insert$/);
+      const location = createRes.headers.get("Location");
+      if (!location) throw new Error("Missing upload location");
+      for (const authorization of ["Bearer other", "Bearer expired", ""]) {
+        const headers = { apikey: "test-token", authorization };
+        expect((await request(location, { method: "HEAD", headers })).status).toBe(404);
+        expect((await request(location, { method: "DELETE", headers })).status).toBe(404);
+      }
+      const headers = { apikey: "test-token", authorization: "Bearer refreshed" };
+      const head = await request(location, { method: "HEAD", headers });
+      expect(head.headers.get("Upload-Offset")).toBe("0");
 
-    expect(createRes.status).toBe(201);
-    const location = createRes.headers.get("Location");
-    expect(location).toBeTruthy();
+      const patch = () => request(location, {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "upload-offset": "0",
+          "content-type": "application/offset+octet-stream",
+          "content-length": "5",
+        },
+        body: "chunk",
+      });
 
-    const patchRes = await request(location!, {
-      method: "PATCH",
-      headers: {
-        apikey: "test-token",
-        authorization: "Bearer test-token",
-        "upload-offset": "0",
-        "content-type": "application/offset+octet-stream",
-        "content-length": "5",
-      },
-      body: "chunk",
-    });
+      const pending = patch();
+      if (outcome !== "before-write") {
+        expect(await Promise.race([writeStarted.promise.then(() => "started"), pending.then(response => response.status)])).toBe("started");
+        const busy = await request(location, { method: "HEAD", headers });
+        expect(busy.status).toBe(423);
+        expect(busy.headers.get("Cache-Control")).toBe("no-store");
+        expect(busy.headers.has("Upload-Offset")).toBe(false);
+        expect((await patch()).status).toBe(423);
+        expect((await request(location, { method: "DELETE", headers })).status).toBe(423);
+        finishWrite.resolve(outcome === "success");
+      }
 
-    expect(patchRes.status).toBe(200);
-    expect(appendSpy).toHaveBeenCalled();
-    expect(uploadSpy).toHaveBeenCalled();
-    setSpy.mockRestore();
-    appendSpy.mockRestore();
-    assembleSpy.mockRestore();
-    uploadSpy.mockRestore();
+      const patchRes = await pending;
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      const resumed = await request(location, { method: "HEAD", headers });
+      if (outcome === "before-write") {
+        expect(patchRes.status).toBe(500);
+        expect(patchRes.headers.has("Upload-Offset")).toBe(false);
+        expect(resumed.status).toBe(200);
+        expect(resumed.headers.get("Upload-Offset")).toBe("0");
+        expect(reopenSpy).toHaveBeenCalledTimes(1);
+        expect(uploadSpy).not.toHaveBeenCalled();
+        expect(completeSpy).not.toHaveBeenCalled();
+        fixture().offset = fixture().totalSize;
+        expect((await request(location, { method: "HEAD", headers })).status).toBe(410);
+        return;
+      }
+      if (outcome === "success") {
+        expect(patchRes.status).toBe(204);
+        expect(patchRes.headers.get("Upload-Offset")).toBe("5");
+        expect(resumed.status).toBe(200);
+        expect(resumed.headers.get("Upload-Offset")).toBe("5");
+        expect((await patch()).status).toBe(409);
+        expect(completeSpy).toHaveBeenCalledTimes(1);
+      } else {
+        expect(patchRes.status).toBe(500);
+        expect(patchRes.headers.has("Upload-Offset")).toBe(false);
+        expect(resumed.status).toBe(423);
+        expect((await patch()).status).toBe(423);
+        expect(completeSpy).not.toHaveBeenCalled();
+      }
+      expect(reopenSpy).not.toHaveBeenCalled();
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const finalization = authorizeSpy.mock.calls.at(-1);
+      expect(finalization?.[1]).toBe("Bearer refreshed");
+      expect(finalization?.[6]).toBe(false);
+      expect(finalization?.[7]).toBe(false);
+    } finally {
+      finishWrite.resolve(false);
+      authorizeSpy.mockRestore();
+      tokenSpy.mockRestore();
+      getSpy.mockRestore();
+      deleteSpy.mockRestore();
+      setSpy.mockRestore();
+      appendSpy.mockRestore();
+      assembleSpy.mockRestore();
+      completeSpy.mockRestore();
+      reopenSpy.mockRestore();
+      uploadSpy.mockRestore();
+    }
   });
 
   test("serves storage upload and protocol constraints", async () => {

@@ -455,6 +455,11 @@ export async function initDatabase() {
         description: "idx_organization_members_org",
       },
       { statement: 'ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_tus_uploads.auth_token" },
+      {
+        statement: `ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'pending'
+          CHECK (state IN ('pending', 'writing', 'finalizing', 'complete'))`,
+        description: "system_tus_uploads.state",
+      },
       { statement: 'ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_signed_uploads.auth_token" },
       { statement: 'ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()', description: "project_secrets.updated_at" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS db_password_encrypted TEXT', description: "projects.db_password_encrypted" },

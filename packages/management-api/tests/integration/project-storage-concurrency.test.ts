@@ -70,7 +70,13 @@ beforeAll(async () => {
        PRIMARY KEY (project_ref, scope, name)
      )`,
   );
-  await admin.unsafe(`CREATE TABLE ${schema}.system_tus_uploads (ref text)`);
+  await admin.unsafe(
+    `CREATE TABLE ${schema}.system_tus_uploads (
+       ref text,
+       state text NOT NULL DEFAULT 'pending'
+         CHECK (state IN ('pending', 'writing', 'finalizing', 'complete'))
+     )`,
+  );
   await admin.unsafe(`CREATE TABLE ${schema}.system_signed_uploads (ref text)`);
 
   // The registry issues unqualified names, so every pooled connection must
@@ -189,6 +195,23 @@ test.skipIf(!adminUrl)(
     const failure = rejected[0] as PromiseRejectedResult;
     expect(failure.reason).toBeInstanceOf(ProjectStorageError);
     expect((failure.reason as ProjectStorageError).statusCode).toBe(409);
+  },
+  timeout,
+);
+
+test.skipIf(!adminUrl)(
+  "unfinished TUS uploads block first binding but completion receipts do not",
+  async () => {
+    const ref = "projectreceipt";
+    await database`INSERT INTO projects (ref, db_name, status, deleted_at) VALUES (${ref}, 'db_receipt', 'active', NULL)`;
+    await database`INSERT INTO system_tus_uploads (ref) VALUES (${ref})`;
+
+    const configuration = settingsFor("projectreceipt-assets");
+    await expect(hooks.registry.put(ref, configuration, null)).rejects.toThrow("STORAGE_CONFIG_CONFLICT");
+
+    await database`UPDATE system_tus_uploads SET state = 'complete' WHERE ref = ${ref}`;
+    const bound = await hooks.registry.put(ref, configuration, null);
+    expect(bound.configured).toBe(true);
   },
   timeout,
 );
