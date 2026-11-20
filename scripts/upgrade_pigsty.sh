@@ -6,6 +6,8 @@
 set -e
 
 SUPACLOUD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/install_config.sh
+source "${SUPACLOUD_ROOT}/scripts/lib/install_config.sh"
 
 echo "=========================================================="
 PIGSTY_VERSION="${PIGSTY_VERSION:-v4.6.0}"
@@ -94,9 +96,9 @@ if [ -d "$HOME/pigsty" ]; then
             ./configure
         fi
     fi
-
     # Restore SupaCloud-specific patches that configure wiped out
     if [[ -f "$SUPA_BACKUP" ]]; then
+        supacloud_preserve_pigsty_native_access "$PIGSTY_YML" "$SUPA_BACKUP"
         echo "=> Re-applying SupaCloud customizations from backup..."
         # Re-apply nginx_enabled: false
         if ! grep -q 'nginx_enabled: false' "$PIGSTY_YML"; then
@@ -116,6 +118,8 @@ if [ -d "$HOME/pigsty" ]; then
             sed -i "s|STORAGE_BACKEND: .*|STORAGE_BACKEND: local|g" "$PIGSTY_YML" 2>/dev/null || true
         fi
         echo "=> SupaCloud customizations restored"
+    else
+        supacloud_preserve_pigsty_native_access "$PIGSTY_YML"
     fi
     
     echo "=> Applying Pigsty upgrade on this machine..."

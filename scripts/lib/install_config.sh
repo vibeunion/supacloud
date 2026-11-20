@@ -681,6 +681,14 @@ print(base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii"), end="")
 '
 }
 
+supacloud_preserve_pigsty_native_access() {
+    if [[ "${PIGSTY_CONFIG_TEMPLATE:-supabase}" != "supabase" \
+        || "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
+        return 0
+    fi
+    python3 "$(dirname "${BASH_SOURCE[0]}")/patch_pigsty_tenant_hba.py" --preserve-native-access "$@"
+}
+
 supacloud_patch_pigsty_secrets() (
     local target_file="$1"
     shift

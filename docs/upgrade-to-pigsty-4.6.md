@@ -21,11 +21,11 @@ Comparing `conf/supabase.yml` at `v4.5.0` and `v4.6.0`, four changes affect a Su
 | Upstream change | Why it matters |
 | --- | --- |
 | `pg_extensions` catalog and package set move to 625 entries, pgrx **0.19.3**, PostGIS **3.7.0**, pgvector **0.8.7**, TimescaleDB **2.31.0**, DocumentDB **1.0** | Existing tenant databases keep their installed extension versions until an explicit `ALTER EXTENSION ... UPDATE`. Read back `extversion` for `postgis`, `vector`, `pgmq`, `pg_net`, `supautils`, `pgsodium`, `vault`, and `wrappers` after the playbook run. |
-| `supabase_etl_admin` gains `bypassrls: true` | The ETL login role now bypasses row-level security cluster-wide. Review every grant to that role before applying; SupaCloud does not rely on RLS for ETL, and PostgREST/RPC paths must not run as it. |
+| `supabase_etl_admin` gains `bypassrls: true` | The native installer and upgrade keep this role at `bypassrls: false` in the stock `supabase` inventory. Operators applying the legacy template separately must review the grant; PostgREST/RPC paths must not use this role. |
 | The `postgres` database gains `app.settings.jwt_exp: 3600` | Additive GUC used by the legacy Supabase stack. SupaCloud does not read it; keep the Management API's own JWT expiry settings authoritative. |
-| Docker-network `pg_hba` rules widen from `172.17.0.0/16` to `172.16.0.0/12` for `postgres` and `_supabase` | This is the largest trust change in the release. `172.16.0.0/12` covers `172.16`–`172.31`, so password authentication to `postgres` and `_supabase` is now accepted from far more private addresses. If `SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK` is `false` (the default), remove or narrow those two rules before applying, and keep tenant HBA pairing (`ensure_pigsty_tenant_hba_rule`) as the control that actually scopes tenant logins. |
+| Docker-network `pg_hba` rules widen from `172.17.0.0/16` to `172.16.0.0/12` for `postgres` and `_supabase` | The native installer and upgrade keep the two stock rules at `172.17.0.0/16` before Pigsty renders `pg_hba.conf`. Review custom and legacy rules separately. Tenant HBA pairing (`ensure_pigsty_tenant_hba_rule`) still scopes tenant logins independently. |
 
-The template also refreshes its demo JWT material (new `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`, issuer `supabase`, five-year expiry) and adds `API_GW_HTTP_PORT: 8000` for the legacy app. The installer still overwrites all three values from its own generated credentials, but a host that only re-runs `./configure -c supabase` without the SupaCloud patch step would adopt the demo keys. Always upgrade through `scripts/upgrade_pigsty.sh`.
+The template also refreshes its demo JWT material and adds `API_GW_HTTP_PORT: 8000` for the legacy app. Fresh SupaCloud installs replace the demo JWT values with generated credentials. The native infrastructure upgrade does not deploy the legacy Compose app or rotate its credentials. Do not apply the raw legacy app template with its demo keys.
 
 ## PostgreSQL 19 readiness
 
@@ -72,7 +72,7 @@ The default is now `v4.6.0`. To make the target explicit in automation:
 PIGSTY_VERSION=v4.6.0 bash scripts/upgrade_pigsty.sh
 ```
 
-The script downloads the exact Pigsty tag, regenerates the `supabase` template, restores SupaCloud-specific settings, applies Pigsty, and then runs the idempotent Supabase compatibility checks.
+The script downloads the exact Pigsty tag, regenerates the `supabase` template, restores SupaCloud-specific settings, applies Pigsty, and then runs the idempotent Supabase compatibility checks. On the default native path it also carries forward previously configured tenant pairing rules from the saved inventory. It does not add pairing without that evidence: verify the role memberships on older hosts before re-applying the tenant rules.
 
 A persisted `/etc/supabase/install.env` from an older installation may still contain `PIGSTY_VERSION=v4.5.0` or older. That file remains operator-owned and is not silently rewritten during an infrastructure upgrade. Use the explicit command above for an existing host, and update the persisted value only after validating the host.
 

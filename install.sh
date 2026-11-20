@@ -2325,6 +2325,7 @@ install_pigsty() {
  
     # Modify configuration files
     update_pigsty_config
+    supacloud_preserve_pigsty_native_access "$HOME/pigsty/pigsty.yml"
     
     log_info "Installing Pigsty (this may take 10-20 minutes)..."
     PIGSTY_ENTRYPOINT=""
