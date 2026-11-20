@@ -171,6 +171,10 @@ export async function executeWorkspace(input: {
     if (plan.status !== "ready") {
         return blocked(input.operation, "plan-not-ready", `Workspace plan status is '${plan.status}'. No target was selected.`, plan);
     }
+    if (plan.applications.some(entry => entry.target && "frontend_deployment_id" in entry.target
+        && (!input.applicationId || input.applicationId === entry.id))) {
+        return blocked(input.operation, "frontend-use-publish", "Static frontends use workspace publish. Select an executable application explicitly to continue.", plan);
+    }
     if (input.applicationId && affectedTargets(plan, input.applicationId).length === 0) {
         return blocked(input.operation, "application-not-affected", "The selected application is not an affected target in this plan. No target was selected.", plan);
     }
@@ -197,7 +201,7 @@ async function observeWorkspace(input: { root: string; client: WorkspaceDelivery
         const selected = environment === plan.environment ? plan : await createWorkspacePlan({ root: input.root, environment, changedFiles: [] });
         for (const application of selected.applications) {
             const binding = application.configured_binding;
-            if (!binding) continue;
+            if (!binding || !("application_id" in binding)) continue;
             const observed = await input.client.observe({ projectRef: binding.project_ref, applicationId: application.id, environmentId: environment });
             observations.push({ ...observed, authoritative: false });
         }

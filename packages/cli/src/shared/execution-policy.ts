@@ -104,7 +104,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     workspace: {
         local: ["plan"],
         read: ["status"],
-        write: ["execute", "retry", "promote", "rollback", "reconcile"],
+        write: ["publish", "execute", "retry", "promote", "rollback", "reconcile"],
     },
 };
 
