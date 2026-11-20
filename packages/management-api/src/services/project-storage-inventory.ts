@@ -25,7 +25,7 @@ export function createProjectStorageInventory(dependencies: {
         throw new ProjectStorageError("STORAGE_CONFIG_INVALID", 400);
       }
       const [uploads] = await dependencies.database`
-        SELECT EXISTS (SELECT 1 FROM system_tus_uploads WHERE ref = ${ref})
+        SELECT EXISTS (SELECT 1 FROM system_tus_uploads WHERE ref = ${ref} AND state <> 'complete')
           OR EXISTS (SELECT 1 FROM system_signed_uploads WHERE ref = ${ref}) AS occupied
       ` as Array<{ occupied: boolean }>;
       const projectDb = dependencies.getProjectDb(project.db_name);

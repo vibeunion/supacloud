@@ -76,7 +76,7 @@ export function createProjectStorageRegistry(dependencies: ProjectStorageDepende
         OR EXISTS (SELECT 1 FROM storage.s3_multipart_uploads) AS occupied
     ` as Array<{ occupied: boolean }>;
     const [uploads] = await database`
-      SELECT EXISTS (SELECT 1 FROM system_tus_uploads WHERE ref = ${ref})
+      SELECT EXISTS (SELECT 1 FROM system_tus_uploads WHERE ref = ${ref} AND state <> 'complete')
         OR EXISTS (SELECT 1 FROM system_signed_uploads WHERE ref = ${ref}) AS occupied
     ` as Array<{ occupied: boolean }>;
     if (!objects || !uploads || objects.occupied || uploads.occupied) {

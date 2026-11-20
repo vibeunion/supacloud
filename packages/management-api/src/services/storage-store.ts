@@ -6,7 +6,7 @@ import * as fsp from "node:fs/promises";
 
 const TUS_UPLOAD_COLUMNS = [
     "id", "ref", "bucket", "object_name", "content_type", "total_size",
-    "offset_size", "created_at", "updated_at", "auth_token",
+    "offset_size", "created_at", "auth_token", "state",
 ] as const;
 const SIGNED_UPLOAD_COLUMNS = [
     "token", "ref", "bucket", "object_name", "upsert", "expires_at", "created_at", "auth_token",
@@ -21,6 +21,7 @@ export interface TusUpload {
     contentType: string;
     totalSize: number;
     offset: number;
+    state: "pending" | "writing" | "finalizing" | "complete";
     createdAt: number;
     auth_token?: string;
     meta?: Record<string, string>;
@@ -35,6 +36,12 @@ export interface SignedUpload {
     auth_token?: string;
 }
 
+export class TusChunkError extends Error {
+    constructor(readonly status: 400 | 413, message: string) {
+        super(message);
+    }
+}
+
 export class TusStore {
     static getTempFilePath(id: string): string {
         return path.join(os.tmpdir(), `supacloud-tus-${id}.part`);
@@ -44,9 +51,6 @@ export class TusStore {
         await sql`
             INSERT INTO system_tus_uploads (id, ref, bucket, object_name, content_type, total_size, offset_size, auth_token)
             VALUES (${id}, ${upload.ref}, ${upload.bucket}, ${upload.objectName}, ${upload.contentType}, ${upload.totalSize}, ${upload.offset}, ${upload.auth_token || null})
-            ON CONFLICT (id) DO UPDATE SET 
-                offset_size = EXCLUDED.offset_size, 
-                updated_at = NOW()
         `;
     }
 
@@ -60,48 +64,102 @@ export class TusStore {
             contentType: row.content_type,
             totalSize: Number(row.total_size),
             offset: Number(row.offset_size),
+            state: row.state,
             createdAt: new Date(row.created_at).getTime(),
             auth_token: row.auth_token
         };
     }
 
-    static async appendChunk(id: string, expectedOffset: number, chunk: ReadableStream<Uint8Array>): Promise<number> {
+    private static async writeChunk(
+        id: string, expectedOffset: number, chunk: ReadableStream<Uint8Array>, maxBytes: number, contentLength: number | null,
+    ): Promise<number> {
         const tempFile = this.getTempFilePath(id);
-        await fsp.mkdir(path.dirname(tempFile), { recursive: true });
-
-        const existingSize = await fsp.stat(tempFile).then((stat) => stat.size).catch(() => 0);
-        if (existingSize !== expectedOffset) {
-            throw new Error(`Offset mismatch: expected ${expectedOffset}, actual ${existingSize}`);
-        }
-
         const handle = await fsp.open(tempFile, expectedOffset === 0 ? "w" : "r+");
-        let bytesWritten = 0;
         let position = expectedOffset;
 
         try {
+            const { size } = await handle.stat();
+            if (size < expectedOffset) throw new Error("Missing acknowledged TUS data");
+            // A failed request may have written bytes that were never acknowledged.
+            if (size > expectedOffset) await handle.truncate(expectedOffset);
             const reader = chunk.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const data = value instanceof Uint8Array ? value : new Uint8Array(value);
-                if (data.byteLength === 0) continue;
-                await handle.write(data, 0, data.byteLength, position);
-                position += data.byteLength;
-                bytesWritten += data.byteLength;
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (position - expectedOffset + value.byteLength > maxBytes) {
+                        throw new TusChunkError(413, "Upload exceeded the allowed chunk size or remaining length");
+                    }
+                    for (let written = 0; written < value.byteLength;) {
+                        const { bytesWritten } = await handle.write(value, written, value.byteLength - written, position);
+                        if (bytesWritten === 0) throw new Error("TUS staging write did not advance");
+                        written += bytesWritten;
+                        position += bytesWritten;
+                    }
+                }
+            } catch (error) {
+                void reader.cancel().catch(() => {});
+                throw error;
+            } finally {
+                reader.releaseLock();
             }
+            if (contentLength !== null && position - expectedOffset !== contentLength) {
+                throw new TusChunkError(400, "Upload chunk did not match Content-Length");
+            }
+            return position;
         } finally {
             await handle.close();
         }
-
-        const nextOffset = expectedOffset + bytesWritten;
-        await sql`UPDATE system_tus_uploads SET offset_size = ${nextOffset}, updated_at = NOW() WHERE id = ${id}`;
-        return nextOffset;
     }
 
-    static async delete(id: string) {
+    static async appendChunk(
+        id: string, expectedOffset: number, chunk: ReadableStream<Uint8Array>, maxChunkSize: number, contentLength: number | null,
+    ): Promise<{ offset: number; finalizing: boolean } | null> {
+        // Claim with a short update rather than holding a database connection while receiving bytes.
+        const [claim] = await sql`
+            UPDATE system_tus_uploads SET state = 'writing', updated_at = NOW()
+            WHERE id = ${id} AND state = 'pending' AND offset_size = ${expectedOffset} AND offset_size < total_size
+            RETURNING total_size
+        `;
+        if (!claim) return null;
+
+        const totalSize = Number(claim.total_size);
+        let offset: number;
+        try {
+            offset = await this.writeChunk(id, expectedOffset, chunk, Math.min(maxChunkSize, totalSize - expectedOffset), contentLength);
+        } catch (error) {
+            await sql`UPDATE system_tus_uploads SET state = 'pending', updated_at = NOW() WHERE id = ${id} AND state = 'writing'`;
+            throw error;
+        }
+        const finalizing = offset === totalSize;
+        const [acknowledged] = await sql`
+            UPDATE system_tus_uploads
+            SET state = ${finalizing ? "finalizing" : "pending"}, offset_size = ${finalizing ? expectedOffset : offset}, updated_at = NOW()
+            WHERE id = ${id} AND state = 'writing' RETURNING id
+        `;
+        if (!acknowledged) return null;
+        return { offset, finalizing };
+    }
+
+    static async complete(id: string): Promise<void> {
+        const [row] = await sql`
+            UPDATE system_tus_uploads SET state = 'complete', offset_size = total_size, updated_at = NOW()
+            WHERE id = ${id} AND state = 'finalizing' RETURNING id
+        `;
+        if (!row) throw new Error("TUS finalization claim no longer exists");
+    }
+
+    static async reopen(id: string): Promise<void> {
+        await sql`UPDATE system_tus_uploads SET state = 'pending', updated_at = NOW() WHERE id = ${id} AND state = 'finalizing'`;
+    }
+
+    static async delete(id: string): Promise<boolean> {
+        const [row] = await sql`
+            DELETE FROM system_tus_uploads WHERE id = ${id} AND state IN ('pending', 'complete') RETURNING id
+        `;
+        if (!row) return false;
         await fsp.unlink(this.getTempFilePath(id)).catch(() => {});
-        await sql`DELETE FROM system_tus_chunks WHERE upload_id = ${id}`.catch(() => {});
-        await sql`DELETE FROM system_tus_uploads WHERE id = ${id}`;
+        return true;
     }
 
     static async assembleToStream(id: string): Promise<{ stream: ReadableStream, cleanup: () => Promise<void> }> {
@@ -164,12 +222,14 @@ export class SignedStore {
 export function startStorageCleanupJob() {
     setInterval(async () => {
         try {
-            const expiredTusUploads = await sql`SELECT id FROM system_tus_uploads WHERE created_at < NOW() - INTERVAL '1 hour'`;
+            const expiredTusUploads = await sql`
+                DELETE FROM system_tus_uploads
+                WHERE COALESCE(updated_at, created_at) < NOW() - INTERVAL '1 hour'
+                RETURNING id
+            `;
             for (const upload of expiredTusUploads as Array<{ id: string }>) {
                 await fsp.unlink(TusStore.getTempFilePath(upload.id)).catch(() => {});
             }
-            await sql`DELETE FROM system_tus_chunks WHERE upload_id IN (SELECT id FROM system_tus_uploads WHERE created_at < NOW() - INTERVAL '1 hour')`.catch(() => {});
-            await sql`DELETE FROM system_tus_uploads WHERE created_at < NOW() - INTERVAL '1 hour'`;
             await sql`DELETE FROM system_signed_uploads WHERE expires_at < extract(epoch from NOW())`;
         } catch (e) {}
     }, 10 * 60 * 1000);
