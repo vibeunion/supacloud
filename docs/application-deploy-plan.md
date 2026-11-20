@@ -27,6 +27,15 @@ so retries retain the original identity. A pending plan is not permission to ski
 database or provisioning prerequisites. Missing/unhealthy/unverifiable plan
 responses are errors, not a fallback deployment.
 
+For a slow cold start, save a new immutable configuration revision with an
+optional top-level `startup_timeout_seconds` alongside `bun_version` and
+`targets`. It accepts integers from 1 to 300 and defaults to 30 when omitted.
+Use the task-backed deploy path for a longer start. The timeout applies only to
+the wait for the freshly started activation; probe timeouts and subsequent
+readback checks are unchanged. A readiness failure never publishes the candidate
+route or activation authority. This does not change the existing stop/start or
+unknown-outcome reconciliation behavior.
+
 ```gherkin
 Scenario: First deployment
   Given a verified stored release and an environment-bound configuration revision
