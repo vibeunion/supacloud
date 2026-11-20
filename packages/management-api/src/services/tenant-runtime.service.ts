@@ -946,12 +946,18 @@ class TenantRuntimeService {
         await this.installSystemdTemplate("checked");
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
-        const generation = await this.generateTenantConfigUnlocked(
+        const { creds, runtimeUser } = await this.writeTenantRuntimeEnvironmentUnlocked(
             ref,
             pgrstPort,
             gotruePort,
             "checked",
         );
+        const generation = await this.activateRenderedPostgrestGeneration({
+            ref,
+            content: await this.desiredPostgrestConfig(ref, pgrstPort, creds),
+            runtimeUser,
+            runtimeGroupGid: await this.tenantRuntimeGroupId(runtimeUser),
+        });
         return completePostgrestActivation({
             projectRef: ref,
             previousPointerTarget: generation.previousPointerTarget,
@@ -1586,17 +1592,17 @@ class TenantRuntimeService {
         };
     }
 
-    private async generateTenantConfig(
+    private async writeTenantRuntimeEnvironment(
         ref: string,
         pgrstPort: number,
         gotruePort: number,
         systemctlMode: SystemctlExecutionMode = "best-effort",
-    ) {
-        return this.withTenantConfigLock(ref, () =>
-            this.generateTenantConfigUnlocked(ref, pgrstPort, gotruePort, systemctlMode));
+    ): Promise<void> {
+        await this.withTenantConfigLock(ref, () =>
+            this.writeTenantRuntimeEnvironmentUnlocked(ref, pgrstPort, gotruePort, systemctlMode));
     }
 
-    private async generateTenantConfigUnlocked(
+    private async writeTenantRuntimeEnvironmentUnlocked(
         ref: string,
         pgrstPort: number,
         gotruePort: number,
@@ -1604,7 +1610,6 @@ class TenantRuntimeService {
     ) {
         const creds = await this.getTenantCredentials(ref);
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
-        const runtimeGroupGid = await this.tenantRuntimeGroupId(runtimeUser);
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
 
@@ -1675,7 +1680,6 @@ class TenantRuntimeService {
         );
         await this.writePgredisTenantConfig(ref, creds.dbName, creds.dbPassword);
 
-        const pgrstConf = await this.desiredPostgrestConfig(ref, pgrstPort, creds);
         // In shared auth mode, child projects only use primary project GoTrue and do not generate a local auth runtime.
         if (sharedAuthRuntime) {
             const sharedMarkerPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`);
@@ -1692,14 +1696,8 @@ class TenantRuntimeService {
                 await this.gotrueController.stopAndDisable(ref);
             }
             await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
-            const postgrestGeneration = await this.activateRenderedPostgrestGeneration({
-                ref,
-                content: pgrstConf,
-                runtimeUser,
-                runtimeGroupGid,
-            });
-            logger.info(`Config generated for ${ref} with shared GoTrue owner ${config.authRuntimeOwnerRef}`);
-            return postgrestGeneration;
+            logger.info(`Runtime environment written for ${ref} with shared GoTrue owner ${config.authRuntimeOwnerRef}`);
+            return { creds, runtimeUser };
         }
 
         await fs.rm(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`), { force: true });
@@ -1810,15 +1808,8 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
         await this.writeTenantSecretFile(gotrueEnvPath, gotrueEnv, runtimeUser);
         await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
-        const postgrestGeneration = await this.activateRenderedPostgrestGeneration({
-            ref,
-            content: pgrstConf,
-            runtimeUser,
-            runtimeGroupGid,
-        });
-
-        logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
-        return postgrestGeneration;
+        logger.info(`Runtime environment written for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
+        return { creds, runtimeUser };
     }
 
     private async writePgredisTenantConfig(ref: string, database: string, password: string): Promise<void> {
@@ -3067,7 +3058,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
-        await this.generateTenantConfig(ref, pgrstPort, gotruePort, "checked");
+        await this.writeTenantRuntimeEnvironment(ref, pgrstPort, gotruePort, "checked");
 
         const unit = this.gotrueController.unit(ref);
         const active = await this.gotrueController.isActive(ref);
@@ -3362,7 +3353,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                         const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
                         if (!(await Bun.file(gotrueEnvPath).exists())) {
                             const pgrstPort = await this.getTenantPort(ref, "pgrst");
-                            await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+                            await this.writeTenantRuntimeEnvironment(ref, pgrstPort, gotruePort);
                         }
                         // Ensure systemd template is installed
                         await this.installSystemdTemplate();

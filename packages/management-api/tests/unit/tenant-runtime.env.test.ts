@@ -1,7 +1,10 @@
 // @supacloud-test-isolate
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { config } from "../../src/config";
 import { quoteSystemdEnvValue } from "../../src/utils/systemd-env";
 import {
   buildPostgresUri,
@@ -26,7 +29,8 @@ import {
   readAuthSessionPolicy,
 } from "../../src/services/auth-session-policy";
 import { authConfigChangesPostgrestVerifier } from "../../src/services/auth-runtime-impact";
-import { isGoTruePasskeyVersionSupported, resolveTenantAuthUrlSettings } from "../../src/services/tenant-runtime.service";
+import { activatePostgrestGeneration } from "../../src/services/postgrest-generation";
+import { isGoTruePasskeyVersionSupported, resolveTenantAuthUrlSettings, tenantRuntimeService } from "../../src/services/tenant-runtime.service";
 
 describe("TenantRuntimeService safe config serialization", () => {
   const special = `p@:/#?% space '\"\\`;
@@ -496,6 +500,67 @@ describe("Auth config PostgREST verifier impact", () => {
 });
 
 describe("TenantRuntimeService auth-only apply boundary", () => {
+  test("regenerates GoTrue env without replacing the active PostgREST generation", async () => {
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "supacloud-auth-env-")));
+    const ref = config.authRuntimeOwnerRef.trim() || "test-project";
+    const gotruePort = 4272;
+    const activate = (content: string) => activatePostgrestGeneration({
+      tenantDirectory: directory,
+      projectRef: ref,
+      content,
+      controlOwnerUid: process.getuid?.() ?? 0,
+      runtimeGroupGid: process.getgid?.() ?? 0,
+      setControlOwnership: async () => {},
+    });
+    try {
+      const previous = await activate("server-port = 3272\n");
+      const credentials: Awaited<ReturnType<typeof tenantRuntimeService["getTenantCredentials"]>> = {
+        dbPassword: "synthetic-password",
+        jwtSecret: "synthetic-jwt",
+        jwtKeys: "",
+        jwtJwks: "",
+        thirdPartyJwtPolicy: null,
+        localJwtIssuer: null,
+        dbName: "supa_test",
+        apiUrl: "https://api.example.com",
+        authUrl: "https://api.example.com",
+        anonKey: "synthetic-anon-key",
+        serviceRoleKey: "synthetic-service-role-key",
+        publishableKey: "",
+        secretKey: "",
+        postgrestPort: 3272,
+        projectStatus: "active",
+        postgrestDesired: "running",
+        siteUrl: "https://app.example.com",
+        uriAllowList: "",
+        authConfig: { password_min_length: 12 },
+        customPostgrestSchemas: [],
+      };
+      const runtime = Object.create(tenantRuntimeService) as typeof tenantRuntimeService;
+      Object.assign(runtime, {
+        TENANT_CONFIG_DIR: directory,
+        PGREDIS_CONFIG_DIR: join(directory, "pgredis"),
+        PGREDIS_CONFIG_OWNER: "",
+        tenantConfigLocks: new Map<string, Promise<void>>(),
+        getTenantCredentials: async () => credentials,
+        ensureTenantRuntimeUser: async () => "test-runtime",
+        tenantRuntimeGroupId: async () => process.getgid?.() ?? 0,
+        chownTenantPath: async () => {},
+        persistTenantPortConfig: async () => {},
+        desiredPostgrestConfig: async () => "server-port = 3272\ndb-pool = 5\n",
+        activateRenderedPostgrestGeneration: async ({ content }: { content: string }) => activate(content),
+      });
+
+      await runtime["writeTenantRuntimeEnvironment"](ref, 3272, gotruePort);
+
+      const authEnv = await readFile(join(directory, `${ref}_gotrue.d`, "runtime.env"), "utf8");
+      expect(authEnv.includes("GOTRUE_PASSWORD_MIN_LENGTH=12\n")).toBe(true);
+      expect(await readFile(previous.layout.pointerPath, "utf8")).toBe(`${previous.layout.pointerTarget}\n`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("rewrites PostgREST and GoTrue templates with misplaced start limits", () => {
     const source = readFileSync(
       join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
@@ -542,7 +607,7 @@ describe("TenantRuntimeService auth-only apply boundary", () => {
     expect(poolUpdateSection).toContain("restartAndAttest");
     expect(poolUpdateSection).toContain("startOrRestartPostgrestGeneration");
     expect(poolUpdateSection).toContain("withTenantConfigLock");
-    expect(source).toContain("generateTenantConfigUnlocked");
+    expect(source).toContain("writeTenantRuntimeEnvironmentUnlocked");
   });
 
   test("renders a bounded GoTrue database pool", () => {
