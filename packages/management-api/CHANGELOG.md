@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.2...management-api-v0.138.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **management-api:** preserve PostgREST generation on auth env writes ([#2746](https://github.com/vibeunion/supacloud/issues/2746)) ([4fc3eea](https://github.com/vibeunion/supacloud/commit/4fc3eeac4c07c24329cdb439629fe5c5d864f092))
+
 ## [0.138.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.1...management-api-v0.138.2) (2026-11-20)
 
 
