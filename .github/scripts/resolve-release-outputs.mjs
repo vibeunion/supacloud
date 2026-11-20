@@ -6,6 +6,40 @@ import { validateReleaseIdentity } from './validate-release-identity.mjs';
 /** @param {string} command @param {string[]} args */
 const execute = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim();
 
+/** @param {string} revision @param {string} file @param {typeof execute} run */
+const readAt = (revision, file, run) => JSON.parse(run('git', ['show', `${revision}:${file}`]));
+
+/** @param {string} sha @param {typeof execute} run */
+function changedReleasePaths(sha, run) {
+  const current = readAt(sha, '.release-please-manifest.json', run);
+  const previous = readAt(`${sha}^`, '.release-please-manifest.json', run);
+  return Object.keys(current).filter(path => current[path] !== previous[path]);
+}
+
+/** @param {string} repository @param {string} sha @param {typeof execute} run */
+function mergedReleasePrs(repository, sha, run) {
+  /** @type {Array<{ number: number, merged_at?: string, merge_commit_sha?: string,
+   * base?: { ref?: string, repo?: { full_name?: string } },
+   * head?: { ref?: string, repo?: { full_name?: string } } }>} */
+  const prs = JSON.parse(run('gh', ['api', `repos/${repository}/commits/${sha}/pulls`]));
+  return prs.filter(pr => pr.merged_at && pr.merge_commit_sha === sha
+    && pr.base?.ref === 'main' && pr.base?.repo?.full_name === repository
+    && pr.head?.repo?.full_name === repository
+    && pr.head?.ref === 'release-please--branches--main');
+}
+
+/** @param {{ repository: string, event: string, ref: string, sha: string }} input
+ * @param {typeof execute} [run] */
+export function canCreateReleases(input, run = execute) {
+  if (input.repository !== 'vibeunion/supacloud' || input.ref !== 'refs/heads/main'
+    || !['push', 'workflow_dispatch'].includes(input.event)
+    || !/^[a-f0-9]{40}$/.test(input.sha)) {
+    return false;
+  }
+  return changedReleasePaths(input.sha, run).length > 0
+    && mergedReleasePrs(input.repository, input.sha, run).length === 1;
+}
+
 /**
  * @param {{ outcome: string, outputs: Record<string, string>, repository: string,
  *   event: string, ref: string, sha: string }} input
@@ -46,9 +80,8 @@ export function resolveReleaseOutputs(input, run = execute) {
     // Dispatch with no new releases is an intentional npm-only retry. Normal
     // pushes (and dispatches creating releases) must cover every manifest bump.
     if (input.event === 'push' || released.length > 0) {
-      const previous = JSON.parse(run('git', ['show', `${input.sha}^:.release-please-manifest.json`]));
-      for (const [path, version] of Object.entries(current)) {
-        if (previous[path] !== version && !released.includes(path)) {
+      for (const path of changedReleasePaths(input.sha, run)) {
+        if (!released.includes(path)) {
           throw new Error(`Missing changed release output: ${path}`);
         }
       }
@@ -62,14 +95,7 @@ export function resolveReleaseOutputs(input, run = execute) {
   }
   /** @param {string} command @param {string[]} args */
   const json = (command, args) => JSON.parse(run(command, args));
-  /** @type {Array<{ number: number, merged_at?: string, merge_commit_sha?: string,
-   * base?: { ref?: string, repo?: { full_name?: string } },
-   * head?: { ref?: string, repo?: { full_name?: string } } }>} */
-  const prs = json('gh', ['api', `repos/${input.repository}/commits/${input.sha}/pulls`]);
-  const releasePrs = prs.filter(pr => pr.merged_at && pr.merge_commit_sha === input.sha
-    && pr.base?.ref === 'main' && pr.base?.repo?.full_name === input.repository
-    && pr.head?.repo?.full_name === input.repository
-    && pr.head?.ref === 'release-please--branches--main');
+  const releasePrs = mergedReleasePrs(input.repository, input.sha, run);
   if (releasePrs.length !== 1) throw new Error('Expected one merged Release Please PR for the exact commit');
   /** @param {string} revision @param {string} file */
   const read = (revision, file) => json('git', ['show', `${revision}:${file}`]);
@@ -112,14 +138,17 @@ export function resolveReleaseOutputs(input, run = execute) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const outputs = resolveReleaseOutputs({
+  const input = {
     outcome: process.env['RELEASE_ACTION_OUTCOME'] ?? '',
     outputs: JSON.parse(process.env['RELEASE_ACTION_OUTPUTS'] ?? '{}'),
     repository: process.env['GITHUB_REPOSITORY'] ?? '',
     event: process.env['GITHUB_EVENT_NAME'] ?? '',
     ref: process.env['GITHUB_REF'] ?? '',
     sha: process.env['GITHUB_SHA'] ?? '',
-  });
+  };
+  const outputs = process.argv[2] === '--plan'
+    ? { create: String(canCreateReleases(input)) }
+    : resolveReleaseOutputs(input);
   for (const [key, value] of Object.entries(outputs)) {
     const delimiter = `output_${crypto.randomUUID()}`;
     appendFileSync(process.env['GITHUB_OUTPUT'] ?? '', `${key}<<${delimiter}\n${value}\n${delimiter}\n`);

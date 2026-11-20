@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { resolveReleaseOutputs } from './resolve-release-outputs.mjs';
+import { canCreateReleases, resolveReleaseOutputs } from './resolve-release-outputs.mjs';
 
 const sha = 'a'.repeat(40);
 const repository = 'vibeunion/supacloud';
@@ -56,6 +56,20 @@ function successfulOutputs(f) {
       [`${path}--sha`, sha],
     ])) };
 }
+
+test('only the exact merged release PR may create releases', () => {
+  const f = fixture();
+  assert.equal(canCreateReleases(input, f.run), true);
+  assert.equal(canCreateReleases({ ...input, event: 'workflow_dispatch' }, f.run), true);
+  f.prs[0].merge_commit_sha = 'b'.repeat(40);
+  assert.equal(canCreateReleases(input, f.run), false);
+  f.prs[0].merge_commit_sha = sha;
+  f.prs[0].head.ref = 'codex/ordinary-change';
+  assert.equal(canCreateReleases(input, f.run), false);
+  Object.assign(f.previous, f.current);
+  assert.equal(canCreateReleases(input, f.run), false);
+  assert.equal(canCreateReleases({ ...input, ref: 'refs/heads/feature' }, f.run), false);
+});
 
 test('coherent successful action outputs pass without recovery writes', () => {
   const f = fixture();
@@ -160,6 +174,8 @@ test('workflow routes original outputs through the fail-closed resolver', () => 
   assert.match(workflow, /id: release-action\n\s+continue-on-error: true/);
   assert.match(workflow, /id: release\n\s+env:/);
   assert.match(workflow, /RELEASE_ACTION_OUTCOME: \$\{\{ steps\.release-action\.outcome \}\}/);
+  assert.match(workflow, /resolve-release-outputs\.mjs --plan/);
+  assert.match(workflow, /skip-github-release: \$\{\{ steps\.release_plan\.outputs\.create != 'true' \}\}/);
   assert.match(workflow, /git fetch origin --tags/);
   assert.match(workflow, /node .github\/scripts\/resolve-release-outputs.mjs/);
 });
