@@ -104,6 +104,16 @@ expect_incident 200 'PGRST002 could not load the schema cache' 'journal-error|'
 expect_incident 401 'Failed to load the schema cache' 'journal-error|'
 expect_incident 404 'schema "pgmq_public" does not exist' 'journal-error|'
 
+# A later successful load clears the boot-time failure even inside the window.
+boot_error='20/Nov/2026:16:22:40 +0800: Failed to load the schema cache'
+cache_loaded='20/Nov/2026:16:22:47 +0800: Schema cache loaded in 4.3 milliseconds'
+run_watchdog_in "$TMP_DIR/tenants" 200 "$boot_error"$'\n'"$cache_loaded" \
+  || fail 'Recovered schema cache caused a nonzero watchdog exit'
+[[ "$(state_value)" == ok ]] || fail 'Recovered schema cache still reported as an incident'
+expect_incident 200 "$cache_loaded"$'\n'"$boot_error" 'journal-error|'
+expect_incident 200 "$boot_error"$'\nresponse body: Schema cache loaded in 4.3 milliseconds' 'journal-error|'
+expect_incident 503 "$cache_loaded" 'http-503|'
+
 # Repeated incidents are deduplicated and recovery is emitted exactly once.
 rm -f "$TMP_DIR/state/demo.state"
 : > "$TMP_DIR/alert.log"

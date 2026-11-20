@@ -192,9 +192,18 @@ check_tenant() {
     fi
 
     local journal_match
-    journal_match=$(journalctl -u "supacloud-pgrst@${tenant}" --since "$JOURNAL_WINDOW" --no-pager 2>/dev/null \
-        | grep -E 'PGRST002|Failed to load the schema cache|schema "pgmq_public" does not exist' \
-        | tail -n 1 || true)
+    # A completed cache load clears earlier errors, but not later ones.
+    journal_match=$(journalctl -u "supacloud-pgrst@${tenant}" --since "$JOURNAL_WINDOW" --no-pager -o cat 2>/dev/null \
+        | awk '
+            /^([0-9]+\/[[:alpha:]]+\/[0-9]+:[0-9:]+ [+-][0-9]+: )?Schema cache loaded in [0-9]+([.][0-9]+)? milliseconds$/ {
+                last_error = ""
+                next
+            }
+            /PGRST002|Failed to load the schema cache|schema "pgmq_public" does not exist/ {
+                last_error = $0
+            }
+            END { if (last_error != "") print last_error }
+        ' || true)
     if [[ -n "$journal_match" ]]; then
         echo "journal-error|${journal_match}"
         return 0
