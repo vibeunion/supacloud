@@ -1,5 +1,7 @@
 version: 2
 updates:
+  # Review TypeScript upgrades manually so prerelease dev builds cannot replace
+  # the compiler versions pinned for each workspace.
   - package-ecosystem: "bun"
     directory: "/"
     schedule:
@@ -7,7 +9,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/management-api"
@@ -16,7 +17,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/edge-runtime"
@@ -25,7 +25,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/web-console"
@@ -34,7 +33,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/cli"
@@ -43,7 +41,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/admin"
@@ -52,7 +49,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/supacloud"
@@ -61,7 +57,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/function-adapter"
@@ -70,7 +65,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "bun"
     directory: "/packages/supacloud-js"
@@ -79,7 +73,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   # The Lite package ships its own bun.lock; the npm_and_yarn ecosystem cannot
   # update it and Dependabot aborts the whole job with a misconfiguration error.
@@ -90,7 +83,6 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       - dependency-name: "typescript"
-        versions: ["7.1.0-dev.*"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
