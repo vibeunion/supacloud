@@ -82,7 +82,7 @@ export interface ApplicationActivationPorts {
   prepare(runtime: ApplicationRuntimeInput, environment: ApplicationTargetEnvironment): Promise<void>;
   stop(runtime: ApplicationRuntimeInput): Promise<void>;
   start(runtime: ApplicationRuntimeInput): Promise<void>;
-  requireReady(runtime: ApplicationRuntimeInput): Promise<void>;
+  requireReady(runtime: ApplicationRuntimeInput, waitMs?: number): Promise<void>;
   requireStopped(runtime: ApplicationRuntimeInput): Promise<void>;
   route(record: ApplicationActiveRecord, previous: ApplicationActiveRecord | null): Promise<void>;
   verifyRoute(record: ApplicationActiveRecord): Promise<void>;
@@ -344,7 +344,7 @@ export class ApplicationActivationService {
     this.mutations = ports.mutations ?? applicationActivationMutations;
   }
 
-  async activate(input: ActivateApplicationInput): Promise<ApplicationActivationResult> {
+  async activate(input: ActivateApplicationInput, startupTimeoutMs?: number): Promise<ApplicationActivationResult> {
     const environment = structuredClone(input.environment);
     const desired = activeRecord(input.runtime, environment, input.hosts, input.configurationId);
     if (input.expectedActivationId !== null && !isProjectMutationId(input.expectedActivationId)) {
@@ -375,7 +375,7 @@ export class ApplicationActivationService {
       await this.runTransition({ ...input, environment }, desired, transition, {
         save: checkpoint => this.save(lease, checkpoint),
         protect: action => this.mutations.protect(lease, action),
-      });
+      }, startupTimeoutMs);
       await this.mutations.success(lease, result(runtime, false) as unknown as Record<string, unknown>);
       completed = true;
       const stored = await this.mutations.read(runtime.release.project_ref, runtime.activationId);
@@ -394,7 +394,7 @@ export class ApplicationActivationService {
 
   /** 服务端提升入口共用父租约；激活完成后父操作仍需验证 smoke 并自行写最终回执。 */
   async activatePromotion(
-    request: ActivateApplicationInput, owner: ApplicationPromotionOwner, database: SQL = sql,
+    request: ActivateApplicationInput, owner: ApplicationPromotionOwner, database: SQL = sql, startupTimeoutMs?: number,
   ): Promise<ApplicationActivationResult> {
     const input = structuredClone(request);
     if (stableStringify(input.principal) !== stableStringify(owner.principal)) {
@@ -422,7 +422,7 @@ export class ApplicationActivationService {
       await this.runTransition(input, desired, transition, {
         save: checkpoint => journal.checkpoint(this.serializeCheckpoint(checkpoint)),
         protect: action => journal.protect(action),
-      });
+      }, startupTimeoutMs);
       await journal.success();
       completed = true;
       const observed = await journal.begin();
@@ -454,6 +454,7 @@ export class ApplicationActivationService {
       save(checkpoint: ActivationCheckpoint): Promise<void>;
       protect(action: () => Promise<void>): Promise<void>;
     },
+    startupTimeoutMs?: number,
   ): Promise<void> {
     const runtime = desired.runtime;
     let checkpoint: ActivationCheckpoint;
@@ -493,7 +494,7 @@ export class ApplicationActivationService {
     });
     checkpoint = { ...checkpoint, phase: "started" };
     await persistence.save(checkpoint);
-    await persistence.protect(() => this.ports.requireReady(runtime));
+    await persistence.protect(() => this.ports.requireReady(runtime, startupTimeoutMs));
     checkpoint = { ...checkpoint, phase: "healthy" };
     await persistence.save(checkpoint);
     await persistence.protect(async () => {
