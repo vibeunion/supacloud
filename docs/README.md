@@ -61,7 +61,8 @@
 - [Control-plane brief outage](./control-plane-outage.md) - Single-node SLO for authenticated REST, Auth, Storage, and Functions while the Management API listener is down
 - [Platform Component Upgrade Notes](./platform-component-upgrade-notes.md) - Breaking changes, migrations, optional features, and rollback notes for current runtime components
 - [Native Realtime Release](./realtime-native-release.md) - CI-only OTP releases, signed tar.zst bundles, and Solo/Full Platform asset boundaries
-- [Upgrade to Pigsty 4.5](./upgrade-to-pigsty-4.5.md) - Current Pigsty version pin and upgrade validation
+- [Upgrade to Pigsty 4.6](./upgrade-to-pigsty-4.6.md) - Current Pigsty version pin and upgrade validation
+- [Historical Pigsty 4.5 upgrade](./upgrade-to-pigsty-4.5.md) - Previous pin, kept for hosts moving from the 4.5 baseline
 - [Historical Pigsty 4.4 compatibility migration](./upgrade-to-pigsty-4.4.md) - Analytics and Supabase compatibility migration background
 - [PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Historical containerized PostgreSQL compatibility and major-version safety guide
 - [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting

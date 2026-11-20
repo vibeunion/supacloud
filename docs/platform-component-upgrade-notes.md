@@ -117,3 +117,15 @@ Bun 1.4.5 是补丁级运行时更新，没有已知的配置迁移项。Caddy 2
 2.11 系列的修复版本，未引入新的配置语法；升级后仍应复核自定义 rate-limit/cache
 模块的构建产物，并读取 `go version -m <binary>` 确认 `GOTOOLCHAIN=go1.27.1`
 未变。本节只记录版本与文件同步，没有执行任何主机升级或生产部署。
+
+## 2026-11-20 Pigsty 4.6.0 基线
+
+| 组件 | 旧版本 | 当前版本 | 破坏性/迁移关注点 | 本仓库处理 |
+| --- | --- | --- | --- | --- |
+| Pigsty | v4.5.0 | v4.6.0 | 默认 PostgreSQL 18.7、扩展目录 625 项（+52/−2）、pgrx 0.19.3、PostGIS 3.7.0、pgvector 0.8.7、TimescaleDB 2.31.0、DocumentDB 1.0。`conf/supabase.yml` 的变化：`supabase_etl_admin` 增加 `bypassrls: true`；`postgres` 库增加 `app.settings.jwt_exp: 3600`；docker 网段 HBA 由 `172.17.0.0/16` 扩大到 `172.16.0.0/12`（`postgres` 与 `_supabase`）；模板 demo JWT 重新生成并新增 `API_GW_HTTP_PORT` | `config.env`、`install.sh`、`scripts/lib/install_config.sh`、`scripts/upgrade_pigsty.sh`、Management API `install.ts` 与升级验收门默认值统一为 v4.6.0；新增 [Upgrade to Pigsty 4.6](./upgrade-to-pigsty-4.6.md)，4.5 文档降级为历史指南。SupaCloud 仍用自身生成凭据覆盖模板 JWT；未启用 legacy Supabase 栈的主机应删除或收窄扩大后的网段规则，并保持租户 HBA 配对为强控制。租户已有扩展在显式 `ALTER EXTENSION ... UPDATE` 前不会自行升级 |
+
+PostgreSQL 19 不在本次范围内：Pigsty 软件源没有任何 `postgresql-19-*` 包，
+`pg_graphql`（最新 v1.6.3，仅 pg14–pg18）和 `pg_durable`（最新 v0.2.9，仅 pg17/pg18）
+也没有 PG19 制品，且 `pg_durable` 是 `shared_preload_libraries` 扩展，无法绕过。
+`PG_VERSION` 保持 18。本节只记录版本与文档同步，未在任何主机执行升级，也不构成
+第二至第四道验收门的结果。

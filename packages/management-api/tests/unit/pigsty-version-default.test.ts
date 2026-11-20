@@ -9,21 +9,21 @@ function readRepoFile(path: string): string {
 }
 
 describe("Pigsty version defaults", () => {
-  test("pins every installation entrypoint to v4.5.0", () => {
-    expect(readRepoFile("config.env")).toContain('PIGSTY_VERSION="v4.5.0"');
-    expect(readRepoFile("install.sh")).toContain('${PIGSTY_VERSION:-v4.5.0}');
+  test("pins every installation entrypoint to v4.6.0", () => {
+    expect(readRepoFile("config.env")).toContain('PIGSTY_VERSION="v4.6.0"');
+    expect(readRepoFile("install.sh")).toContain('${PIGSTY_VERSION:-v4.6.0}');
     expect(readRepoFile("scripts/lib/install_config.sh")).toContain(
-      '${PIGSTY_VERSION:-v4.5.0}',
+      '${PIGSTY_VERSION:-v4.6.0}',
     );
     expect(readRepoFile("scripts/upgrade_pigsty.sh")).toContain(
-      'PIGSTY_VERSION="${PIGSTY_VERSION:-v4.5.0}"',
+      'PIGSTY_VERSION="${PIGSTY_VERSION:-v4.6.0}"',
     );
     expect(readRepoFile("packages/management-api/src/install.ts")).toContain(
-      'configured.PIGSTY_VERSION || "v4.5.0"',
+      'configured.PIGSTY_VERSION || "v4.6.0"',
     );
 
     for (const path of ["README.md", "README.zh-CN.md", "README.es-ES.md"]) {
-      expect(readRepoFile(path)).toContain("`v4.5.0`");
+      expect(readRepoFile(path)).toContain("`v4.6.0`");
     }
   });
 
@@ -38,12 +38,15 @@ describe("Pigsty version defaults", () => {
 
   test("documents the current pin separately from the historical migration", () => {
     const index = readRepoFile("docs/README.md");
-    const current = readRepoFile("docs/upgrade-to-pigsty-4.5.md");
+    const current = readRepoFile("docs/upgrade-to-pigsty-4.6.md");
+    const previous = readRepoFile("docs/upgrade-to-pigsty-4.5.md");
     const historical = readRepoFile("docs/upgrade-to-pigsty-4.4.md");
 
-    expect(index).toContain("./upgrade-to-pigsty-4.5.md");
-    expect(current).toContain("PIGSTY_VERSION=v4.5.0");
+    expect(index).toContain("./upgrade-to-pigsty-4.6.md");
+    expect(current).toContain("PIGSTY_VERSION=v4.6.0");
     expect(current).toContain("upgrade_pigsty_4_4_compat.sh --check");
+    expect(current).toContain("## PostgreSQL 19 readiness");
+    expect(previous).toContain("Historical upgrade guide");
     expect(historical).toContain("Historical migration guide");
   });
 });

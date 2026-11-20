@@ -8,7 +8,7 @@ set -e
 SUPACLOUD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "=========================================================="
-PIGSTY_VERSION="${PIGSTY_VERSION:-v4.5.0}"
+PIGSTY_VERSION="${PIGSTY_VERSION:-v4.6.0}"
 PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-supabase}"
 SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK="${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}"
 ANALYTICS_WAS_RUNNING=false

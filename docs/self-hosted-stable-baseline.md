@@ -43,7 +43,7 @@ The first stable release should publish one primary deployment profile:
 | Host | Linux with systemd |
 | Primary OS acceptance target | Ubuntu 24.04 LTS |
 | Primary architecture acceptance target | `amd64` |
-| Database substrate | Pigsty `v4.5.0`, PostgreSQL 18 |
+| Database substrate | Pigsty `v4.6.0`, PostgreSQL 18 |
 | Gateway | SupaCloud-managed Caddy systemd service with safe response compression and static-asset cache defaults |
 | Platform runtime | Management API, Web Console, project runtimes, and VictoriaLogs |
 | Storage | JuiceFS with PostgreSQL metadata, unless a project explicitly binds a supported S3-compatible backend |
@@ -65,7 +65,7 @@ equivalent upgrade evidence. Caddy and GoTrue remain separate upgrade surfaces.
 
 | Area | Status | Boundary and evidence |
 | --- | --- | --- |
-| Native single-host Full Platform | Stable baseline target | Ubuntu 24.04 LTS, `amd64`, systemd, Pigsty `v4.5.0` / PostgreSQL 18, SupaCloud-managed Caddy, and published verified artifacts; Gates 2-4 are still required before claiming production acceptance |
+| Native single-host Full Platform | Stable baseline target | Ubuntu 24.04 LTS, `amd64`, systemd, Pigsty `v4.6.0` / PostgreSQL 18, SupaCloud-managed Caddy, and published verified artifacts; Gates 2-4 are still required before claiming production acceptance |
 | Lite | Separate bounded product | Single-project local-first runtime with its own compatibility and recovery evidence; not evidence for Full Platform readiness |
 | Podman single-node and other installer paths | Deployment-specific / separate acceptance | Follow their documented boundaries; do not treat them as equivalent proof of the Pigsty baseline |
 | `arm64` and other operating systems | Deployment-specific / separate acceptance | Require explicit installation, upgrade, and recovery evidence for the selected combination |

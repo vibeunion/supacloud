@@ -52,7 +52,8 @@
 - [pgredis 运行时](./pgredis-runtime.md) - 私有缓存数据面、控制面 API、Web Console 运维与安全边界
 - [平台组件升级说明](./platform-component-upgrade-notes.md) - 破坏性变更、迁移步骤、可选特性与回滚说明
 - [原生 Realtime 发布](./realtime-native-release.md) - CI-only OTP release、签名 tar.zst 与 Solo/Full Platform 资产边界
-- [升级至 Pigsty 4.5](./upgrade-to-pigsty-4.5.md) - 当前 Pigsty 版本锁定与升级验证
+- [升级至 Pigsty 4.6](./upgrade-to-pigsty-4.6.md) - 当前 Pigsty 版本锁定与升级验证
+- [Pigsty 4.5 升级历史](./upgrade-to-pigsty-4.5.md) - 上一版锁定，保留给仍从 4.5 基线迁移的主机
 - [Pigsty 4.4 兼容性迁移历史](./upgrade-to-pigsty-4.4.md) - 分析组件与 Supabase 兼容迁移背景
 - [PostgreSQL 4.4 升级](./upgrade-postgres-docker-4.4.md) - 历史容器化 PostgreSQL 兼容性、备份与大版本安全指南
 - [Podman DNS 故障排查](./troubleshooting-podman-dns.md) - Podman 容器内 DNS 解析问题定位与修复
