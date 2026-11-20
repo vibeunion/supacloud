@@ -194,7 +194,7 @@ export function baseTemplateFiles(name: string, sdkDependencies: StarterSdkDepen
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
-      engines: { bun: ">=1.4.4" },
+      engines: { bun: ">=1.4.5" },
       scripts: {
         compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
         "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
@@ -218,7 +218,7 @@ export function baseTemplateFiles(name: string, sdkDependencies: StarterSdkDepen
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
-        "@types/bun": "^1.4.4",
+        "@types/bun": "^1.4.5",
         typescript: "7.1.0-beta",
       },
     }),
@@ -290,7 +290,7 @@ function supabaseClientTemplate(name: string, sdkDependencies: StarterSdkDepende
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
-      engines: { bun: ">=1.4.4" },
+      engines: { bun: ">=1.4.5" },
       scripts: {
         typecheck: "tsc --noEmit",
         test: "bun test",
@@ -300,7 +300,7 @@ function supabaseClientTemplate(name: string, sdkDependencies: StarterSdkDepende
         "@supabase/supabase-js": sdkDependencies["@supabase/supabase-js"],
       },
       devDependencies: {
-        "@types/bun": "^1.4.4",
+        "@types/bun": "^1.4.5",
         typescript: "7.1.0-beta",
       },
     }),

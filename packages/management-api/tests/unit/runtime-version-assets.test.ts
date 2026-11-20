@@ -1379,10 +1379,10 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain("Podman Quadlet single-node provider");
     expect(podmanInstaller).toContain("podman build");
     expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
-    expect(installer).toContain('CADDY_VERSION:-2.11.7');
-    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"');
+    expect(installer).toContain('CADDY_VERSION:-2.11.9');
+    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.9}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.5"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.6"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.198.0"');
     const realtimeDigest =
       "sha256:2843107437cb746edb925155504558683882e65d119c1321fda40fc43d51d847";
@@ -1416,8 +1416,8 @@ describe("runtime companion version assets", () => {
     }
     expect(podmanUnits[0]).toContain("localhost/supacloud-caddy:local");
     expect(podmanUnits[1]).toContain("supabase/gotrue:v2.198.0");
-    expect(podmanUnits[2]).toContain("postgrest/postgrest:v16.5");
-    expect(workflow).toContain("postgrest/postgrest:v16.5");
+    expect(podmanUnits[2]).toContain("postgrest/postgrest:v16.6");
+    expect(workflow).toContain("postgrest/postgrest:v16.6");
     expect(workflow).toContain("supabase/gotrue:v2.198.0");
     expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");

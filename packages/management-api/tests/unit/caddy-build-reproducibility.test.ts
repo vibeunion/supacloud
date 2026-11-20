@@ -243,8 +243,8 @@ exit 1
 
   test("self-host and development Compose build the pinned custom Caddy image", () => {
     expect(caddyDockerfile.match(/^FROM .+$/gm)).toEqual([
-      "FROM caddy:2.11.7-builder@sha256:b25f47453fa02f7e66c0828b4b1343658808b9000950b6825c4a1cb0c988f5f8 AS builder",
-      "FROM caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772",
+      "FROM caddy:2.11.9-builder@sha256:f9beaa5ddbe7df6f26ebbcf9cbf44e05a1917b9bba464f0c3229038d7e2e6e13 AS builder",
+      "FROM caddy:2.11.9@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b",
     ]);
     expect(caddyDockerfile).toContain("xcaddy/cmd/xcaddy@v0.4.7");
     expect(caddyDockerfile).toContain(
@@ -264,9 +264,9 @@ exit 1
     expect(devCaddy).toContain("context: ../self-host/caddy");
     expect(selfHostCaddy).toContain("context: ./caddy");
     for (const service of [devCaddy, selfHostCaddy]) {
-      expect(service).toContain("image: supacloud-caddy:2.11.7-ratelimit");
+      expect(service).toContain("image: supacloud-caddy:2.11.9-ratelimit");
       expect(service).toContain('entrypoint: ["/usr/local/bin/supacloud-caddy-entrypoint"]');
-      expect(service).not.toContain("image: caddy:2.11.7");
+      expect(service).not.toContain("image: caddy:2.11.9");
     }
     expect(devCaddy).toContain("./caddy/Caddyfile:/etc/caddy/Caddyfile:ro");
     expect(selfHostCaddy).not.toContain("entrypoint.sh:");
@@ -286,7 +286,7 @@ exit 1
     expect(integration).toContain(
       "cache-to: type=gha,scope=caddy-integration,mode=max,ignore-error=true",
     );
-    expect(integration).toContain("supacloud-caddy:2.11.7-ratelimit list-modules");
+    expect(integration).toContain("supacloud-caddy:2.11.9-ratelimit list-modules");
     expect(integration).toContain("grep -Fx http.handlers.rate_limit");
     expect(integration).toContain("grep -Fx http.handlers.cache");
     expect(integration).toContain("grep -Fx storages.cache.simplefs");

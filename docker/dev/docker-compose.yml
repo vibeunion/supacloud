@@ -2,7 +2,7 @@ services:
   caddy:
     build:
       context: ../self-host/caddy
-    image: supacloud-caddy:2.11.7-ratelimit
+    image: supacloud-caddy:2.11.9-ratelimit
     restart: always
     entrypoint: ["/usr/local/bin/supacloud-caddy-entrypoint"]
     ports:
@@ -76,7 +76,7 @@ services:
       - supacloud-dev
 
   postgrest:
-    image: postgrest/postgrest:v16.5
+    image: postgrest/postgrest:v16.6
     restart: always
     environment:
       PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
@@ -146,7 +146,7 @@ services:
       - edge-pgredis
 
   victorialogs:
-    image: victoriametrics/victoria-logs:v1.53.0
+    image: victoriametrics/victoria-logs:v1.54.0
     restart: always
     command:
       - -storageDataPath=/victoria-logs-data
