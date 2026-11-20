@@ -96,7 +96,7 @@ framework = "elysia"   # fetch（默认）| elysia | hono
 
 注意：浏览器预检（OPTIONS）会转发给框架应用，框架函数应自行挂载 CORS（如 `@elysiajs/cors`），与生产 Edge Runtime 行为一致。
 
-函数的依赖由 `Bun.build` 在加载时打包：相对导入与 `npm:` 说明符从项目 `node_modules` 解析，`https://` URL 导入在首次加载时抓取并缓存到临时目录。`npm:` 不再经 CDN 拉取，缺少依赖时打包会失败并提示 `bun add <包名>`，而不是在每次启动时访问第三方 registry。
+函数的依赖由 `Bun.build` 在加载时打包：相对导入以导入文件为基准；本地函数代码中的裸包名与 `npm:` 说明符从项目的 `node_modules` 解析（如 `npm:@scope/pkg@1.2.3/subpath`）。显式版本必须是匹配已安装包的 semver 版本或范围；使用 dist-tag 时通过 `bun add <包名>@<tag>` 安装，再使用不带版本的导入。缺少依赖时打包会报错，不会经 CDN 下载 npm 包。`https://` URL 导入仍在首次加载时抓取并缓存到临时目录。
 
 #### Function 限制与能力声明
 
