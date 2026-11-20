@@ -5,7 +5,7 @@ Requires=supacloud-postgres.service
 After=supacloud-postgres.service
 
 [Container]
-Image=docker.io/supabase/gotrue:v2.197.0
+Image=docker.io/supabase/gotrue:v2.198.0
 ContainerName=supacloud-gotrue
 Network=supacloud.network
 NetworkAlias=gotrue

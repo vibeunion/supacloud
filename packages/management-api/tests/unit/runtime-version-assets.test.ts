@@ -1280,7 +1280,7 @@ describe("runtime companion version assets", () => {
     const installer = readRepoFile("install.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.197.0");
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.198.0");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
       'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
@@ -1291,8 +1291,8 @@ describe("runtime companion version assets", () => {
     expect(upgrade).toContain(
       'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
     );
-    expect(upgrade).toContain("b5c2991d1df760c9b099c1c2395a94bd1c2f83ed58901934921997179dc9f7ea");
-    expect(upgrade).toContain("a9da2e668137cb280c830d900df4081b3fdd42a289469485634426a7587f9f76");
+    expect(upgrade).toContain("4abe9134d7615faa9149cab514acada8e7133cd69d2ccd96fdcef0d795c05171");
+    expect(upgrade).toContain("bfc0032688df320be7c6e7bfd00b319ba757eca41763ea012095948929441c34");
     expect(upgrade).toContain("supacloud_download_url");
     expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(upgrade).not.toContain(".tar.gz");
@@ -1383,7 +1383,7 @@ describe("runtime companion version assets", () => {
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"');
 
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.5"');
-    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.198.0"');
     const realtimeDigest =
       "sha256:2843107437cb746edb925155504558683882e65d119c1321fda40fc43d51d847";
     expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.150.0"');
@@ -1415,10 +1415,10 @@ describe("runtime companion version assets", () => {
       expect(unit).toContain("Image=");
     }
     expect(podmanUnits[0]).toContain("localhost/supacloud-caddy:local");
-    expect(podmanUnits[1]).toContain("supabase/gotrue:v2.197.0");
+    expect(podmanUnits[1]).toContain("supabase/gotrue:v2.198.0");
     expect(podmanUnits[2]).toContain("postgrest/postgrest:v16.5");
     expect(workflow).toContain("postgrest/postgrest:v16.5");
-    expect(workflow).toContain("supabase/gotrue:v2.197.0");
+    expect(workflow).toContain("supabase/gotrue:v2.198.0");
     expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
     expect(workflow).toContain("image: supabase/postgres:17.11.0.011");
