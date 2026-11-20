@@ -5,7 +5,7 @@ Wants=supacloud-network.service
 After=supacloud-network.service
 
 [Container]
-Image=docker.io/victoriametrics/victoria-logs:v1.53.0
+Image=docker.io/victoriametrics/victoria-logs:v1.54.0
 ContainerName=supacloud-victorialogs
 Network=supacloud.network
 NetworkAlias=victorialogs
