@@ -448,7 +448,7 @@ async function tusOwner(ref: string, token: string | undefined): Promise<string 
     } else {
         try {
             const claims = await StorageRLS.verifyToken(ref, token);
-            identity = claims.role === "authenticated" && typeof claims.sub === "string" && claims.sub
+            identity = "role" in claims && claims.role === "authenticated" && typeof claims.sub === "string" && claims.sub
                 ? ["authenticated", typeof claims.iss === "string" ? claims.iss : "", claims.sub]
                 : ["credential", token.replace(/^Bearer\s+/i, "")];
         } catch {
