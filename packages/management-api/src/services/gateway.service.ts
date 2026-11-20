@@ -1265,7 +1265,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     stale: `${staleSeconds}s`,
                     badger: {
                         found: true,
-                        path: path.join(config.caddyStateDir, "http-cache"),
+                        // Use a fresh directory so a hot reload opens the cache with the new options.
+                        path: path.join(config.caddyStateDir, "http-cache-v2"),
+                        configuration: { MemTableSize: 64 * 1024 * 1024 },
                     },
                     key: {
                         headers: ["Accept", "Accept-Encoding", "X-SupaCloud-Frontend-Release"],

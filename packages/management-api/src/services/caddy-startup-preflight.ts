@@ -37,10 +37,11 @@ function recordOf(candidateValue: unknown): Record<string, unknown> | undefined 
  * Caddy's Badger-backed cache opens an exclusive directory lock. Validation
  * and isolated startup checks must never point at the live gateway cache,
  * because the production Caddy process may be holding that lock.
+ * Routes sharing a live cache must also share one isolated cache.
  */
 export function isolateCaddyCachePaths(candidateConfig: unknown, cacheRoot: string): Record<string, unknown> {
     const isolatedConfig = structuredClone(candidateConfig) as Record<string, unknown>;
-    let cacheIndex = 0;
+    const isolatedPaths = new Map<string, string>();
     const visit = (value: unknown): void => {
         if (Array.isArray(value)) {
             value.forEach((entry) => visit(entry));
@@ -50,8 +51,9 @@ export function isolateCaddyCachePaths(candidateConfig: unknown, cacheRoot: stri
         if (!record) return;
         for (const [childKey, childValue] of Object.entries(record)) {
             if (childKey === "path" && typeof childValue === "string" && childValue.includes("http-cache")) {
-                record[childKey] = join(cacheRoot, String(cacheIndex));
-                cacheIndex += 1;
+                const isolatedPath = isolatedPaths.get(childValue) ?? join(cacheRoot, String(isolatedPaths.size));
+                isolatedPaths.set(childValue, isolatedPath);
+                record[childKey] = isolatedPath;
             } else {
                 visit(childValue);
             }

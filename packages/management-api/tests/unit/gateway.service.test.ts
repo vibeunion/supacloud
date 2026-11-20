@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { config } from "../../src/config";
+import { isolateCaddyCachePaths } from "../../src/services/caddy-startup-preflight";
 import {
     makeCorsHeaderHandler,
     makeCorsSubroute,
@@ -1137,8 +1138,28 @@ describe("CaddyGatewayProvider", () => {
         expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.cache_name).toBe("supacloud-static");
         expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.badger).toEqual({
             found: true,
-            path: expect.stringContaining("http-cache"),
+            path: resolve(config.caddyStateDir, "http-cache-v2"),
+            configuration: { MemTableSize: 64 * 1024 * 1024 },
         });
+        const isolated = isolateCaddyCachePaths({
+            asset: assetRoute,
+            avif: avifRoute,
+            webp: webpRoute,
+            previous: { path: resolve(config.caddyStateDir, "http-cache") },
+        }, "/tmp/isolated-http-cache");
+        for (const cacheRoute of [isolated.asset, isolated.avif, isolated.webp]) {
+            expect(findHandlerDeep(cacheRoute, "cache")).toMatchObject({
+                Configuration: {
+                    DefaultCache: {
+                        badger: {
+                            path: "/tmp/isolated-http-cache/0",
+                            configuration: { MemTableSize: 64 * 1024 * 1024 },
+                        },
+                    },
+                },
+            });
+        }
+        expect(isolated.previous).toEqual({ path: "/tmp/isolated-http-cache/1" });
         expect(assetRoute?.handle?.[0]?.Configuration?.DefaultCache?.key?.headers).toContain(
             "X-SupaCloud-Frontend-Release",
         );
