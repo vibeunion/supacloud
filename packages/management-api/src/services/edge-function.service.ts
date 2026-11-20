@@ -5,6 +5,7 @@ import { mapWithConcurrency } from "../utils/concurrency";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { normalizeEdgeRuntimeBundle } from "./edge-runtime-bundle";
+import { denoRuntimeUsageError } from "./edge-runtime-deno-usage";
 import path from "path";
 import fs from "fs/promises";
 import type { Dirent } from "node:fs";
@@ -930,7 +931,8 @@ async function assertExpectedActivationIdentity(
 }
 
 /**
- * Validate that function code is non-empty and has some meaningful content.
+ * Validate that function code is non-empty, has some meaningful content and no
+ * longer depends on the removed Deno compatibility layer.
  * Syntax validation is delegated to Bun.build().
  */
 function validateFunctionCode(code: string): {
@@ -942,6 +944,11 @@ function validateFunctionCode(code: string): {
   }
   if (code.trim().length < 10) {
     return { valid: false, error: "Function code is too short to be valid" };
+  }
+  // Deno-era sources load but fail on the first request; reject them at deploy time.
+  const denoUsageError = denoRuntimeUsageError(code);
+  if (denoUsageError) {
+    return { valid: false, error: denoUsageError };
   }
   // Keep syntax validation mode-specific so prebundled artifacts never pass through Bun.build().
   return { valid: true };

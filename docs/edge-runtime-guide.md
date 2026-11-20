@@ -484,6 +484,11 @@ objects. Functions should export one of the following:
 | Default `handle()` object | Elysia-style router |
 | Default `fetch()` object | Hono-style router |
 
+Deployment rejects a source that still calls `Deno.serve()`, `Deno.env`,
+`Deno.readTextFile()` and friends, or imports `https://deno.land/...` / `jsr:`
+modules. The error names the offending line and the replacement, so the fix
+lands at deploy time instead of on the first request.
+
 ## Service Management
 
 ```bash
