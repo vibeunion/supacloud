@@ -26,6 +26,9 @@ interface ConfigurationRow {
 function summary(configuration: ApplicationConfiguration) {
   return {
     bun_version: configuration.bun_version,
+    ...(configuration.startup_timeout_seconds === undefined ? {} : {
+      startup_timeout_seconds: configuration.startup_timeout_seconds,
+    }),
     targets: configuration.targets.map(target => ({
       name: target.name, kind: target.kind, hosts: target.hosts,
       environment_names: Object.keys(target.environment).sort(),
@@ -148,6 +151,9 @@ export class ApplicationConfigurations {
     }
     return {
       bunVersion: input.configuration.bun_version,
+      ...(input.configuration.startup_timeout_seconds === undefined ? {} : {
+        startupTimeoutMs: input.configuration.startup_timeout_seconds * 1000,
+      }),
       environment: Object.fromEntries(input.configuration.targets.map(target => [target.name, target.environment])),
       hosts: Object.fromEntries(input.configuration.targets.filter(target => target.kind === "http")
         .map(target => [target.name, target.hosts])),
