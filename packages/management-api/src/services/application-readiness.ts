@@ -205,7 +205,7 @@ export class ApplicationReadiness {
   }
 
   async requireReady(input: ApplicationRuntimeInput, waitMs = 30_000): Promise<ApplicationReadinessReport> {
-    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 120_000) throw new Error("Invalid readiness wait budget");
+    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 300_000) throw new Error("Invalid readiness wait budget");
     const deadline = Date.now() + waitMs;
     for (;;) {
       const probeBudget = waitMs === 0 ? 5000 : Math.min(5000, Math.max(1, deadline - Date.now()));
