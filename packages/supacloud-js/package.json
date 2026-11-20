@@ -121,12 +121,12 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "@supabase/supabase-js": "^2.118.0",
     "typescript": "7.1.0-beta",
     "@tanstack/query-core": "5.107.1",
     "@tanstack/svelte-query": "6.4.1",
-    "typebox": "1.4.6",
+    "typebox": "1.4.7",
     "svelte": "5.57.3"
   },
   "engines": {
