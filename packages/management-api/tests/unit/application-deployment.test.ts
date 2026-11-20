@@ -14,6 +14,7 @@ import { runtimeInput } from "../helpers/application-runtime";
 import { activationJournal } from "../helpers/application-activation-journal";
 import type { ApplicationRuntimeAllocation } from "../../src/services/application-runtime-allocation";
 import { createApplicationRoutes } from "../../src/routes/applications";
+import { parseApplicationConfigurationWrite, type ApplicationConfigurationWrite } from "@supacloud/delivery";
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "application-deployment-")); });
@@ -26,6 +27,7 @@ function fixture() {
   };
   const { journal, states } = activationJournal();
   const calls: string[] = [];
+  const readinessBudgets: Array<number | undefined> = [];
   let routed: ApplicationGatewayInput | null = null;
   const active = new ApplicationActiveStorage(join(root, "active"));
   const storage = new class extends ApplicationReleaseStorage {
@@ -50,8 +52,9 @@ function fixture() {
       stop: async () => { calls.push("stop"); return []; },
       requireStopped: async () => { calls.push("stopped"); return []; },
     },
-    readiness: { requireReady: async runtime => {
+    readiness: { requireReady: async (runtime, waitMs) => {
       calls.push("ready");
+      readinessBudgets.push(waitMs);
       return {
         project_ref: runtime.release.project_ref, application_id: runtime.release.application_id,
         environment_id: runtime.environmentId, release_id: runtime.release.release_id,
@@ -70,13 +73,14 @@ function fixture() {
       },
     },
   };
-  return { input, dependencies, active, states, calls, journal, service: new ApplicationDeploymentService(dependencies) };
+  return { input, dependencies, active, states, calls, readinessBudgets, journal, service: new ApplicationDeploymentService(dependencies) };
 }
 
 test("deployment composes prepare, install, readiness, traffic and durable authority in order", async () => {
   const f = fixture();
   await f.service.activate(f.input);
   expect(f.calls).toEqual(["compatibility", "files", "install", "start", "ready", "route", "verify", "ready", "verify"]);
+  expect(f.readinessBudgets).toEqual([undefined, undefined]);
   expect((await f.active.read(f.input.runtime))?.hosts).toEqual(f.input.hosts);
   f.calls.length = 0;
   expect((await f.service.activate(f.input)).replayed).toBe(true);
@@ -119,7 +123,10 @@ test("configured activation resolves an explicit scope-bound revision before mut
       expect(id).toBe(configurationId);
       expect(release).toEqual(f.input.runtime.release);
       expect(f.states.size).toBe(0);
-      return { bunVersion: "1.4.3", environment: savedEnvironment, hosts: { api: ["configured.example.test"] } };
+      return {
+        bunVersion: "1.4.3", environment: savedEnvironment, hosts: { api: ["configured.example.test"] },
+        startupTimeoutMs: 180_000,
+      };
     } },
     allocations: { allocate: async input => {
       expect(input.configurationId).toBe(configurationId);
@@ -140,10 +147,31 @@ test("configured activation resolves an explicit scope-bound revision before mut
   await service.activateConfigured({
     runtime: f.input.runtime, configurationId, expectedActivationId: null, principal: f.input.principal,
   });
+  expect(f.readinessBudgets).toEqual([180_000, undefined]);
   expect((await f.active.read(f.input.runtime))?.hosts).toEqual({ api: ["configured.example.test"] });
   expect((await f.active.read(f.input.runtime))?.configurationId).toBe(configurationId);
   expect((await f.active.read(f.input.runtime))?.runtime.ports).toEqual({ api: 21000 });
   expect(JSON.stringify(f.states.get(f.input.runtime.activationId))).not.toContain("revision-config-fixture");
+});
+
+test("startup timeout configuration accepts only bounded integer seconds and leaves legacy revisions unchanged", () => {
+  const revision: ApplicationConfigurationWrite = {
+    configuration_id: "91234567-89ab-4def-8123-456789abcdef",
+    expected_configuration_id: null,
+    configuration: {
+      bun_version: "1.4.4",
+      targets: [{ name: "api", kind: "http", hosts: ["configured.example.test"], environment: {} }],
+    },
+  };
+  expect(parseApplicationConfigurationWrite(revision)).toEqual(revision);
+  for (const value of [1, 180, 300]) {
+    const candidate = { ...revision, configuration: { ...revision.configuration, startup_timeout_seconds: value } };
+    expect(parseApplicationConfigurationWrite(candidate)).toEqual(candidate);
+  }
+  for (const value of [0, 301, 1.2, "180"]) {
+    const candidate = { ...revision, configuration: { ...revision.configuration, startup_timeout_seconds: value } };
+    expect(() => parseApplicationConfigurationWrite(candidate)).toThrow("Invalid application configuration");
+  }
 });
 
 test("configured deployment cannot allocate a forged release or activate a foreign allocation", async () => {
