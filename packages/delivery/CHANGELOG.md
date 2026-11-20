@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.29.0...delivery-v0.30.0) (2026-11-20)
+
+
+### Features
+
+* **compiler:** bind model commands directly to Functions ([#2748](https://github.com/vibeunion/supacloud/issues/2748)) ([b025da6](https://github.com/vibeunion/supacloud/commit/b025da66ce026b0baa85cb351ec8a1ddba3253a7))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.28.0...delivery-v0.29.0) (2026-11-20)
 
 
