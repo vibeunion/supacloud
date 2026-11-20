@@ -104,6 +104,13 @@ jobs:
           RELEASE_TAG: ${{ inputs.recover_edge_runtime_tag }}
         run: node .github/scripts/recover-edge-runtime-release.mjs
 
+      - name: Check whether this is the exact release merge
+        if: ${{ inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && inputs.recover_elysia != true && inputs.recover_query != true }}
+        id: release_plan
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: node .github/scripts/resolve-release-outputs.mjs --plan
+
       - uses: googleapis/release-please-action@v5
         if: ${{ inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && inputs.recover_elysia != true && inputs.recover_query != true }}
         id: release-action
@@ -112,6 +119,9 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Ordinary pushes may update the release PR, but must not tag an
+          # earlier merge that this run cannot attest as its source.
+          skip-github-release: ${{ steps.release_plan.outputs.create != 'true' }}
 
       - name: Resolve release outputs after partial creation
         if: ${{ !cancelled() && steps.release-action.outcome != 'skipped' }}
@@ -292,31 +302,7 @@ jobs:
 
       - name: Smoke edge-runtime Linux amd64 binary
         working-directory: packages/edge-runtime
-        run: |
-          tmp_functions="$(mktemp -d)"
-          EDGE_RUNTIME_HOST=127.0.0.1 PORT=19090 \
-            EDGE_FUNCTIONS_DIR="$tmp_functions" \
-            EDGE_FUNCTIONS_BASE_DIR="$tmp_functions" \
-            ./dist/supacloud-edge-runtime-linux-amd64 > /tmp/supacloud-edge-runtime-smoke.log 2>&1 &
-          pid=$!
-          cleanup() {
-            kill "$pid" 2>/dev/null || true
-            rm -rf "$tmp_functions"
-          }
-          trap cleanup EXIT
-          for _ in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:19090/health >/tmp/supacloud-edge-runtime-health.json; then
-              cat /tmp/supacloud-edge-runtime-health.json
-              exit 0
-            fi
-            if ! kill -0 "$pid" 2>/dev/null; then
-              cat /tmp/supacloud-edge-runtime-smoke.log
-              exit 1
-            fi
-            sleep 0.5
-          done
-          cat /tmp/supacloud-edge-runtime-smoke.log
-          exit 1
+        run: bash scripts/smoke-release.sh ./dist/supacloud-edge-runtime-linux-amd64
 
       - name: Generate SHA256SUMS
         working-directory: packages/edge-runtime/dist
@@ -340,8 +326,7 @@ jobs:
           ATTESTATION_BUNDLE: ${{ steps.attest-edge-runtime-release.outputs.bundle-path }}
         run: install -m 0600 "$ATTESTATION_BUNDLE" packages/edge-runtime/dist/SUPACLOUD-RELEASE.attestation.jsonl
 
-      - name: Verify recovered assets against the offline upgrade policy
-        if: ${{ inputs.recover_edge_runtime_tag != '' }}
+      - name: Verify Edge Runtime assets against the offline upgrade policy
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
