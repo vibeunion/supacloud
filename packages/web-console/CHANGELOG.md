@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.59.4](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.3...web-console-v0.59.4) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump jsdom from 31.0.0 to 31.0.1 in /packages/web-console ([#2715](https://github.com/vibeunion/supacloud/issues/2715)) ([3b9ffe4](https://github.com/vibeunion/supacloud/commit/3b9ffe4902c7896afab8557b706ed590d1e462fa))
+* **deps-dev:** bump postcss in /packages/web-console ([#2713](https://github.com/vibeunion/supacloud/issues/2713)) ([d678e9f](https://github.com/vibeunion/supacloud/commit/d678e9f1b88e13dc5ba3b9ecfea718850e49e7e3))
+* **deps-dev:** bump tailwind-variants in /packages/web-console ([#2714](https://github.com/vibeunion/supacloud/issues/2714)) ([783a14a](https://github.com/vibeunion/supacloud/commit/783a14abbabaa24514b4f3276f5be2a67cb3a858))
+* **deps:** bump @svadmin/ai-elements from 0.15.3 to 0.15.5 in /packages/web-console ([#2711](https://github.com/vibeunion/supacloud/issues/2711)) ([7b97240](https://github.com/vibeunion/supacloud/commit/7b97240a0b3e26e2634b606d1d460e5910483c23))
+* **deps:** bump @svadmin/sveltekit from 0.13.35 to 0.13.37 in /packages/web-console ([#2712](https://github.com/vibeunion/supacloud/issues/2712)) ([a5bbb87](https://github.com/vibeunion/supacloud/commit/a5bbb87a8189fbe7a19adec4b18cda5bc0303144))
+
 ## [0.59.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.2...web-console-v0.59.3) (2026-11-16)
 
 

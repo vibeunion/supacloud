@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.28.0...delivery-v0.29.0) (2026-11-20)
+
+
+### Features
+
+* **app:** configure activation startup readiness timeout ([#2698](https://github.com/vibeunion/supacloud/issues/2698)) ([d54aee8](https://github.com/vibeunion/supacloud/commit/d54aee8be108d5e9ad8324653e26bd6717dc70bc))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.28.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.27.0...delivery-v0.28.0) (2026-11-11)
 
 

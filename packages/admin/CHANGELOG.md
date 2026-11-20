@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/admin-v0.33.0...admin-v0.34.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **edge-runtime:** Edge functions that rely on `Deno.serve()`, `Deno.env`, `Deno.readTextFile()` or `import "https://deno.land/std/..."` no longer run. Author them as a default-exported handler and use `ctx.env`/`process.env`, Bun/Node APIs and npm specifiers instead. Stored function configs and version metadata that still carry `import_map` keep loading; the key is ignored.
+
+### Elegance & Refactoring
+
+* **edge-runtime:** remove the Deno compatibility layer ([#2699](https://github.com/vibeunion/supacloud/issues/2699)) ([7db92d5](https://github.com/vibeunion/supacloud/commit/7db92d5dd630b644f8480674f46098616ca93f89))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.33.0](https://github.com/vibeunion/supacloud/compare/admin-v0.32.0...admin-v0.33.0) (2026-11-14)
 
 

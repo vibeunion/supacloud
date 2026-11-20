@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.42.6](https://github.com/vibeunion/supacloud/compare/elysia-v0.42.5...elysia-v0.42.6) (2026-11-20)
+
+
+### Bug Fixes
+
+* **elysia:** align conformance matrix with Bun 1.4.5 ([#2732](https://github.com/vibeunion/supacloud/issues/2732)) ([7ffc241](https://github.com/vibeunion/supacloud/commit/7ffc2412a2e0cde9a8a6debd211ca3553b19bc9a))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.42.5](https://github.com/vibeunion/supacloud/compare/elysia-v0.42.4...elysia-v0.42.5) (2026-11-14)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/model-tooling",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SupaCloud model adoption and migration tooling.",
   "type": "module",
   "main": "./dist/index.js",
