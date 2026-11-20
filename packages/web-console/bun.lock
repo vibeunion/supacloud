@@ -8,7 +8,7 @@
         "@supacloud/delivery": "file:../delivery",
         "@svadmin/ai-elements": "0.15.5",
         "@svadmin/core": "^0.84.2",
-        "@svadmin/elysia": "0.14.37",
+        "@svadmin/elysia": "0.14.39",
         "@svadmin/sveltekit": "0.13.37",
         "@svadmin/ui": "0.131.2",
         "@tanstack/svelte-query": "^6.4.1",
@@ -264,7 +264,7 @@
 
     "@svadmin/devtools-contract": ["@svadmin/devtools-contract@0.3.3", "", { "dependencies": { "@vibeunion/devtools-protocol": "^0.1.2" } }, "sha512-yfryeQbhGm3bu0kDONmDe94Mw9ZBpRQf5OevEPig6BcNxgF0ytVVP86muUHcoM/58c6k5ReAvUi1/jtEBTKz5w=="],
 
-    "@svadmin/elysia": ["@svadmin/elysia@0.14.37", "", { "peerDependencies": { "@elysiajs/eden": ">=1.4.9", "@svadmin/core": "^0.84.0", "elysia": "^1.4.31" }, "optionalPeers": ["@elysiajs/eden", "@svadmin/core", "elysia"] }, "sha512-t4NT+MCNncje2jL+eSOZ/O92JTB6BN4IGdYwLzKSRWYcaXrwG8oAiDIIM6mNaBS1zV4pljd1GAIsn7sE8hJk3A=="],
+    "@svadmin/elysia": ["@svadmin/elysia@0.14.39", "", { "peerDependencies": { "@elysiajs/eden": ">=1.4.9", "@svadmin/core": "^0.84.2", "elysia": "^1.4.31" }, "optionalPeers": ["@elysiajs/eden", "@svadmin/core", "elysia"] }, "sha512-rR+hYT8tP1OJqDGafBOAGc/EUxMskpub9MZb2gbdVv5Z89Ct3723iWzjIUuXXvINRIM3EUKyUxBYNjOsdENXjA=="],
 
     "@svadmin/sveltekit": ["@svadmin/sveltekit@0.13.37", "", { "peerDependencies": { "@svadmin/core": ">=0.32.2 <0.85.0", "@sveltejs/kit": "^3.0.0", "svelte": "^5.57.1" }, "optionalPeers": ["@svadmin/core", "@sveltejs/kit", "svelte"] }, "sha512-eZaBSGcf53nLy3ThBwB3NATLI2LCFBbPaNdFYdZMtdzHAZBe7ovzbZq5+SNDF1oK5zDf6gGKLJu+CSdiOwTAiw=="],
 
