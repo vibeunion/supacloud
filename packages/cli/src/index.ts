@@ -265,6 +265,7 @@ USAGE
   ${preferredCommand} config <doctor|explain>
   ${preferredCommand} pipeline connect [--write] [--preview]
   ${preferredCommand} workspace plan --environment <name> (--base <commit> | --changed <file>)
+  ${preferredCommand} workspace publish --environment <name> --application <id> --base <commit> --plan-sha256 <hash> --source-revision <commit> --execute
   ${preferredCommand} env <list|check> [--root <directory>]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
@@ -479,6 +480,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     Object.assign(tools, captureTools((server) => registerWorkspaceTools(server, {
         cwd: process.cwd(),
         getHttp: () => workspaceHttp,
+        context,
     })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {

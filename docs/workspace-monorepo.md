@@ -1,9 +1,9 @@
 # Monorepo workspace plan
 
-Status: **P0 plan, plus explicit P1 delivery and P2 approval/promotion**.
+Status: **Read-only planning, explicit static publishing, and executable application delivery**.
 `workspace plan` does not build or deploy. Delivery commands require
-`--execute`. A ready plan is not an activation token. Production workspace
-writes require a server approval. Deployment receipts remain the success record.
+`--execute`. A ready plan is not an activation token. Production executable
+application writes require a server approval. Deployment receipts remain the success record.
 
 ## Terms
 
@@ -15,7 +15,8 @@ writes require a server approval. Deployment receipts remain the success record.
 | SupaCloud project | The runtime and data isolation boundary. One database per project. |
 
 One repository may contain many applications. Each application declares an
-explicit binding from an environment to one project ref and one application id.
+explicit binding from an environment to one project ref and either an executable
+application ID or an existing static frontend deployment ID.
 The planner never infers a project from a directory name, a git remote, or
 another environment.
 
@@ -29,6 +30,8 @@ These existing pieces stay in place:
   environment you pass to `workspace plan`. It is not a project target.
 - `app deploy-plan` still observes one stored release in one project. The
   workspace plan does not call it and does not replace it.
+- `workspace publish` sends static assets through the same frontend release
+  upload, activation and readback used by `deploy --assets_only`.
 - Release upload, artifact transfer, promotion, and deployment receipts stay the
   authority for anything that actually ships. This plan does not write those
   ledgers and does not add a second one.
@@ -133,7 +136,7 @@ The same inputs produce the same document, including `plan_sha256`.
 
 - `ready`: at least one application is affected, every selected binding is valid,
   and the impact closure is known. Affected applications have `target` set to
-  that environment's project ref and application id, plus planned `build` and
+  that environment's project ref and application or frontend deployment ID, plus planned `build` and
   `deploy` tasks with `executed: false`. Other applications have no tasks.
 - `unchanged`: the change set is empty. No tasks. `configured_binding` still shows the
   selected environment so you can see the map. `target` is null.
@@ -200,10 +203,58 @@ bind one environment to the same project and the same application id.
 `repository` is an explicit source identity such as `github.com/acme/store`.
 It is not a URL, a user, a scheme, a credential, or a database connection.
 `user:secret@host` is rejected, and the rejected value is not copied into the
-error. Execution refuses to run when the field is absent. The string is hashed
+error. Executable application delivery refuses to run when the field is absent. The string is hashed
 to `repository_id` on the server.
 
 ## Execution
+
+### Static frontends
+
+In `applications`, use `frontend_deployment_id` instead of `application_id`
+for a static site. The workspace ID still names the directory in plans and
+commands:
+
+```json
+{
+  "id": "official",
+  "root": "web",
+  "build": "bun run build",
+  "environments": {
+    "production": { "project_ref": "store-prd", "frontend_deployment_id": "a18c2f0b" }
+  }
+}
+```
+
+A workspace entry cannot mix static and executable bindings. Two static
+bindings cannot share a project and deployment ID, even across environments.
+Keep each site's `supacloud.json` in its own root with one `frontend` block
+and no `targets`, `defaultTarget` or `application` block. Configured `frontend.id`
+and `frontend.buildCommand` must agree with the plan. Omit the local ID if
+the site has different deployment IDs per environment; publishing never
+infers an ID from a name, a linked project, or the deployment list.
+
+```bash
+supacloud workspace plan --environment production --base "$BASE" --format json
+supacloud --env production workspace publish --environment production \
+  --application official --base "$BASE" --plan-sha256 "$PLAN_SHA" \
+  --source-revision "$(git rev-parse HEAD)" --execute --confirm-production store-prd
+```
+
+Publish requires one affected static site, a clean checkout at the Git root,
+tracked workspace and site configurations, and a plan for the checked-out
+commit (`--base` only). The Management API profile must
+match the planned project and environment. Production confirmation and
+read-only controls are the same as for static `deploy`. `--skip-build` uses
+the site's prepared output; use it when compatibility with cached HTML
+requires carrying forward hashed assets from a previous release. The command
+does not retain those assets automatically. The returned receipt identifies
+the activated frontend release; publishing does not promote a backend, change
+domains, or use the executable application approval journal.
+
+### Executable applications
+
+Use `execute` and `promote` for executable applications. If the plan also
+selects static sites, select the executable application explicitly.
 
 `workspace plan` stays read-only. Delivery commands do nothing until `--execute`
 is present. Push workflows generated by `pipeline connect` stay plan-only.
@@ -265,8 +316,9 @@ approval. Production activation and promotion do. The existing `app deploy`,
 `app promote`, and `/activations` routes are not intercepted. They remain a
 bypass of this approval.
 
-`workspace status` reads runtime for every configured environment binding. Each
-observation is marked `authoritative: false`. The deployment receipt remains
+`workspace status` reads runtime for every configured executable binding.
+Each observation is marked `authoritative: false`. For a static site, read
+its active release with `frontend get_active_release`. The deployment receipt remains
 the record of success. The Web Console application page stays single-project;
 it is not a repository view.
 

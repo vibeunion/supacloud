@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { createWorkspacePlan, readWorkspaceHead } from "./workspace-plan";
 import { createHttpWorkspaceDeliveryClient, type WorkspaceHttp } from "./workspace-delivery-http";
 import { executeWorkspace, runWorkspaceCommand, workspaceMutationId, type ReleaseOutcome, type WorkspaceApprovalView, type WorkspaceArtifact, type WorkspaceDeliveryClient, type WorkspaceTargetStatus } from "./workspace-execute";
+import { createFrontendArchive } from "./deploy-tools";
 
 const git = promisify(execFile);
 
@@ -142,6 +144,191 @@ async function ready(root: string, environment: string, changed: string[]) {
   const plan = await createWorkspacePlan({ root, environment, changedFiles: changed });
   return plan;
 }
+
+const staticWorkspace = {
+  schema: "supacloud.workspace.v1",
+  repository: "github.com/acme/sites",
+  shared_paths: [],
+  applications: ["official", "landing"].map(id => ({
+    id, root: id, build: "bun run build",
+    environments: { production: { project_ref: "sites", frontend_deployment_id: `${id}-web` } },
+  })),
+};
+
+async function staticFixture() {
+  const root = await mkdtemp(join(tmpdir(), "workspace-static-"));
+  roots.push(root);
+  await writeTree(root, {
+    "supacloud.workspace.json": JSON.stringify(staticWorkspace),
+    ".gitignore": "dist/\n",
+    "official/index.html": "<h1>Old</h1>",
+    "landing/index.html": "<h1>Landing</h1>",
+    "official/supacloud.json": JSON.stringify({ frontend: { id: "official-web", outputDirectory: "dist" } }),
+    "landing/supacloud.json": JSON.stringify({ frontend: { id: "landing-web", outputDirectory: "dist" } }),
+  });
+  await git("git", ["init", "-q"], { cwd: root });
+  async function commit() {
+    await git("git", ["add", "."], { cwd: root });
+    await git("git", ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+    return readWorkspaceHead(root);
+  }
+  const base = await commit();
+  await writeTree(root, {
+    "official/index.html": "<h1>Official</h1>",
+    "official/dist/index.html": "<h1>Official</h1>",
+    "landing/dist/index.html": "<h1>Landing</h1>",
+  });
+  const head = await commit();
+  return { root, base, head, commit };
+}
+
+test("one affected frontend publishes and reads back only its bound deployment", async () => {
+  const { root, base, head, commit } = await staticFixture();
+  const home = await mkdtemp(join(tmpdir(), "workspace-static-home-"));
+  roots.push(home);
+  const plan = await ready(root, "production", ["official/index.html"]);
+  expect(plan.applications.map(site => site.target)).toEqual([null, { project_ref: "sites", frontend_deployment_id: "official-web" }]);
+  const client = fakeClient();
+  const appExecution = await executeWorkspace({
+    root, operation: "execute", environment: "production", changedFiles: ["official/index.html"],
+    execute: true, planSha256: plan.plan_sha256, sourceRevision: head, headRevision: head, configDigest: "unused", client,
+  });
+  expect(appExecution.diagnostics[0]?.code).toBe("frontend-use-publish");
+  expect(client.deploys).toEqual([]);
+
+  const artifact = await createFrontendArchive(join(root, "official", "dist"));
+  await artifact.cleanup();
+  const prefix = "/v1/projects/sites";
+  const frontend = `${prefix}/frontend/deployments`;
+  const deployment = `${frontend}/official-web`;
+  const receiptScope = { project_ref: "sites", deployment_id: "official-web" };
+  const release = {
+    ...receiptScope, schema: "supacloud.frontend-release.v2", release_id: artifact.sha256, sha256: artifact.sha256,
+    tree_sha256: artifact.treeSha256, kind: "prebuilt_static", archive_format: "tar.zst",
+    size_bytes: artifact.archiveBytes, file_count: 1, created_at: "2026-11-20T00:00:00.000Z",
+  };
+  const requests: string[] = [];
+  let active: string | null = null;
+  const server = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      requests.push(`${request.method} ${path}`);
+      if (path.endsWith("/deployments/protocol")) return Response.json({
+        protocol: "supacloud.project-deployment.v1", project_ref: "sites", environment_id: "production",
+      });
+      if (path === frontend) return Response.json([{ id: "landing-web" }, { id: "official-web" }]);
+      if (path === `${deployment}/active-release`) return Response.json({
+        ...receiptScope, active_release_id: active ? release.release_id : null, active_activation_id: active,
+        releases: active ? [release] : [], next_cursor: null,
+      });
+      if (request.method === "POST" && path === `${deployment}/releases`) {
+        const digest = createHash("sha256").update(Buffer.from(await request.arrayBuffer())).digest("hex");
+        if (digest !== release.release_id) return new Response(null, { status: 400 });
+        return Response.json({ ...receiptScope, release }, { status: 201 });
+      }
+      if (request.method === "POST" && path === `${deployment}/releases/${release.release_id}/activate`) {
+        const body = await request.json() as Record<string, unknown>;
+        if (body.expected_active_release_id !== "absent" || body.expected_activation_id !== "absent"
+          || typeof body.mutation_id !== "string") return new Response(null, { status: 400 });
+        active = body.mutation_id;
+        return Response.json({
+          ...receiptScope, active_release_id: release.release_id, activation_id: active, release,
+          mutation: { mutation_id: active, status: "succeeded", replayed: false },
+        });
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  const entry = fileURLToPath(new URL("../../index.ts", import.meta.url));
+  async function publish({ execute = true, confirm = true, site = "official", hash = plan.plan_sha256, project = "sites",
+    profile = "production", readOnly = false, revision = head }: {
+    execute?: boolean; confirm?: boolean; site?: string; hash?: string; project?: string; profile?: string; readOnly?: boolean; revision?: string;
+  } = {}) {
+    const subprocess = Bun.spawn([process.execPath, entry, "workspace", "publish",
+      "--environment", "production", "--base", base, "--source-revision", revision,
+      "--plan-sha256", hash, "--application", site, "--skip-build", "--format", "json",
+      ...(execute ? ["--execute"] : []),
+      ...(confirm ? ["--confirm-production", project] : []),
+    ], { cwd: root, env: {
+      PATH: process.env.PATH, HOME: home, SUPACLOUD_ENV: profile, SUPACLOUD_API_URL: server.url.origin,
+      SUPACLOUD_API_TOKEN: "fixture", SUPACLOUD_PROJECT_REF: project, SUPACLOUD_READ_ONLY: String(readOnly),
+    }, stdout: "pipe", stderr: "pipe" });
+    const [exit, stdout, stderr] = await Promise.all([
+      subprocess.exited, new Response(subprocess.stdout).text(), new Response(subprocess.stderr).text(),
+    ]);
+    return { exit, stdout, stderr };
+  }
+  try {
+    for (const [input, message] of [
+      [{ execute: false }, /Pass --execute/],
+      [{ confirm: false }, /confirm-production/],
+      [{ readOnly: true }, /read-only/],
+      [{ site: "landing" }, /not an affected static frontend/],
+      [{ profile: "staging" }, /match the active Management API profile/],
+      [{ project: "other" }, /project ref does not match/],
+      [{ hash: "a".repeat(64) }, /plan digest does not match/],
+      [{ revision: "b".repeat(40) }, /source-revision to match HEAD/],
+    ] as const) {
+      const result = await publish(input);
+      expect(result.exit).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(message);
+    }
+    expect(requests).toEqual([]);
+    const result = await publish();
+    expect(result.exit, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ...receiptScope, active_release_id: release.release_id });
+    expect(requests).toEqual([
+      `GET ${prefix}/environments/production/deployments/protocol`,
+      `GET ${frontend}`,
+      `GET ${deployment}/active-release`,
+      `POST ${deployment}/releases`,
+      `POST ${deployment}/releases/${release.release_id}/activate`,
+      `GET ${deployment}/active-release`,
+    ]);
+
+    requests.length = 0;
+    await writeFile(join(root, "official", "supacloud.json"), JSON.stringify({ frontend: { id: "landing-web" } }));
+    const dirty = await publish();
+    expect(dirty.exit).toBe(1);
+    expect(`${dirty.stdout}\n${dirty.stderr}`).toContain("requires a clean workspace");
+    const revision = await commit();
+    const mismatched = await ready(root, "production", ["official/index.html", "official/supacloud.json"]);
+    const wrongId = await publish({ revision, hash: mismatched.plan_sha256 });
+    expect(wrongId.exit).toBe(1);
+    expect(`${wrongId.stdout}\n${wrongId.stderr}`).toContain("frontend.id does not match");
+    expect(requests).toEqual([]);
+
+    await writeTree(root, {
+      "official/supacloud.json": JSON.stringify({ frontend: { outputDirectory: "dist/link/nested" } }),
+      "landing/dist/nested/index.html": "<h1>Landing</h1>",
+    });
+    await symlink(join(root, "landing", "dist"), join(root, "official", "dist", "link"), "dir");
+    const linkedRevision = await commit();
+    const linkedPlan = await ready(root, "production", ["official/index.html", "official/supacloud.json"]);
+    const wrongOutput = await publish({ revision: linkedRevision, hash: linkedPlan.plan_sha256 });
+    expect(wrongOutput.exit).toBe(1);
+    expect(`${wrongOutput.stdout}\n${wrongOutput.stderr}`).toContain("output directory must stay inside");
+    expect(requests).toEqual([`GET ${prefix}/environments/production/deployments/protocol`, `GET ${frontend}`]);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("static bindings cannot alias the same frontend across environments", async () => {
+  const { root } = await staticFixture();
+  const [official, landing] = staticWorkspace.applications;
+  await writeFile(join(root, "supacloud.workspace.json"), JSON.stringify({
+    ...staticWorkspace,
+    applications: [official, { ...landing, environments: {
+      ...landing!.environments, staging: official!.environments.production,
+    } }],
+  }));
+  const plan = await ready(root, "production", ["official/index.html"]);
+  expect(plan.status).toBe("blocked");
+  expect(plan.diagnostics[0]?.code).toBe("ambiguous-frontend-target");
+  expect(plan.applications.every(site => !site.target)).toBe(true);
+});
 
 test("an application change builds and deploys only that staging project", async () => {
   const { root, digest } = await fixture(["apps/storefront/src/page.ts"]);

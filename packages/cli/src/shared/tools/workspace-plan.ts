@@ -56,10 +56,9 @@ export class WorkspacePlanError extends Error {
     }
 }
 
-export interface WorkspaceBinding {
-    project_ref: string;
-    application_id: string;
-}
+export type WorkspaceBinding =
+    | { project_ref: string; application_id: string }
+    | { project_ref: string; frontend_deployment_id: string };
 
 export interface WorkspacePlanTask {
     kind: "build" | "deploy";
@@ -162,30 +161,34 @@ const configSchema = Type.Object({
         id: ApplicationIdSchema,
         root: Type.String({ minLength: 1, maxLength: 256 }),
         build: Type.String({ minLength: 1, maxLength: 256 }),
-        environments: Type.Record(Type.String(), Type.Object({
-            project_ref: Type.String(),
-            application_id: ApplicationIdSchema,
-        }, { additionalProperties: false })),
+        environments: Type.Record(Type.String(), Type.Union([
+            Type.Object({ project_ref: Type.String(), application_id: ApplicationIdSchema }, { additionalProperties: false }),
+            Type.Object({
+                project_ref: Type.String(),
+                frontend_deployment_id: Type.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }),
+            }, { additionalProperties: false }),
+        ])),
     }, { additionalProperties: false }), { minItems: 1, maxItems: WORKSPACE_PLAN_LIMITS.applications }),
     shared_paths: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: WORKSPACE_PLAN_LIMITS.sharedPaths }),
     repository: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 }, { additionalProperties: false });
 
 export const workspaceToolSchema: ToolSchema = {
-    action: withDescription(stringEnum(["plan", "execute", "retry", "promote", "rollback", "reconcile", "status"]), "Workspace action"),
-    root: optional(Type.String(), "[plan/execute/retry/promote/rollback/reconcile/status] Repository root (default: current directory)"),
-    environment: optional(Type.String(), "[plan/execute/retry/promote/rollback/reconcile/status] Required environment name. Selects that binding only"),
-    base: optional(Type.String(), "[plan/execute/retry/status] Git baseline commit. Mutually exclusive with --changed"),
+    action: withDescription(stringEnum(["plan", "publish", "execute", "retry", "promote", "rollback", "reconcile", "status"]), "Workspace action"),
+    root: optional(Type.String(), "[*] Repository root (default: current directory)"),
+    environment: optional(Type.String(), "[*] Required environment name. Selects that binding only"),
+    base: optional(Type.String(), "[plan/publish/execute/retry/status] Git baseline commit. Mutually exclusive with --changed"),
     head: optional(Type.String(), "[plan/execute/retry/status] Git head (default: HEAD). Requires --base"),
     changed: optional(Type.String(), "[plan/execute/retry/status] In-repo file of relative paths, one per line. Mutually exclusive with --base"),
     format: optional(stringEnum(["text", "json"]), "[*] Output format (default: text)"),
-    execute: optional(Type.Boolean(), "[execute/retry/promote/rollback/reconcile] Required opt-in. Absent or false performs no build, upload, transfer, or deploy"),
-    plan_sha256: optional(Type.String(), "[execute/retry/promote/rollback] Workspace plan digest that must match a fresh plan"),
-    source_revision: optional(Type.String(), "[execute/retry/promote/rollback] Git commit that must match HEAD"),
+    execute: optional(Type.Boolean(), "[publish/execute/retry/promote/rollback/reconcile] Required opt-in. Absent or false performs no build, upload, transfer, or deploy"),
+    plan_sha256: optional(Type.String(), "[publish/execute/retry/promote/rollback] Workspace plan digest that must match a fresh plan"),
+    source_revision: optional(Type.String(), "[publish/execute/retry/promote/rollback] Git commit that must match HEAD"),
+    skip_build: optional(Type.Boolean(), "[publish] Use prepared static output instead of running the build"),
     approval_id: optional(Type.String(), "[promote/rollback/execute production] Server approval id. Local files are not approval"),
     mutation_id: optional(Type.String(), "[retry/reconcile/rollback] Existing mutation or activation id. Unknown outcomes never receive a new id"),
     release_id: optional(Type.String(), "[promote/rollback] Exact immutable release. Promotion and rollback do not choose the newest release"),
-    application: optional(Type.String(), "[promote/rollback/retry/execute] One application id when the plan names more than one target"),
+    application: optional(Type.String(), "[publish/promote/rollback/retry/execute] Select one workspace application by id (required for publish)"),
     configuration_id: optional(Type.String(), "[rollback/promote] Immutable configuration revision"),
     activation_id: optional(Type.String(), "[rollback] Activation id. Retries reuse it"),
     expected_activation_id: optional(Type.String(), "[rollback] Current activation id, or absent"),
@@ -482,6 +485,15 @@ export async function readWorkspaceHead(root: string): Promise<string> {
     return (await git(root, ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"])).trim();
 }
 
+export async function workspaceCheckoutClean(root: string): Promise<boolean> {
+    return (await git(root, ["rev-parse", "--show-prefix"])).trim() === ""
+        && (await git(root, ["status", "--porcelain=v1", "--untracked-files=all"])) === "";
+}
+
+export async function workspaceTracksFile(root: string, path: string): Promise<boolean> {
+    return (await git(root, ["cat-file", "-t", `HEAD:${path}`]).catch(() => "")).trim() === "blob";
+}
+
 /** Read a changed-path list only when it is a regular file inside the workspace. */
 export async function readWorkspaceChangedList(root: string, changed: string): Promise<string[]> {
     const rootReal = await realpath(resolve(root));
@@ -530,6 +542,7 @@ function parseConfigText(text: string): WorkspaceConfig {
     const seenIds = new Set<string>();
     const seenRoots = new Set<string>();
     const seenTargets = new Set<string>();
+    const seenFrontendTargets = new Set<string>();
     for (const application of parsed.applications) {
         if (!safeRelative(application.root) || !safeBuild(application.build)) {
             throw new WorkspacePlanError("invalid-path", "An application root or build intent is unsafe");
@@ -541,19 +554,34 @@ function parseConfigText(text: string): WorkspaceConfig {
         seenIds.add(application.id);
         seenRoots.add(application.root);
         const environments: Record<string, WorkspaceBinding> = Object.create(null) as Record<string, WorkspaceBinding>;
+        let bindingKind: "frontend" | "application" | undefined;
         for (const [name, binding] of Object.entries(application.environments).sort(([left], [right]) => compareText(left, right))) {
             if (!Value.Check(ApplicationIdSchema, name) || !PROJECT_REF_PATTERN.test(binding.project_ref)) {
                 throw new WorkspacePlanError("invalid-binding", "An environment binding is not a platform environment id or project ref");
             }
-            if (binding.application_id !== application.id) {
-                throw new WorkspacePlanError("application-binding-mismatch", `Application '${application.id}' must bind to the same application id`);
+            const kind = "frontend_deployment_id" in binding ? "frontend" : "application";
+            if (bindingKind && bindingKind !== kind) {
+                throw new WorkspacePlanError("mixed-binding-kinds", `Application '${application.id}' cannot mix frontend and executable bindings`);
             }
-            const targetKey = `${name}\0${binding.project_ref}\0${binding.application_id}`;
-            if (seenTargets.has(targetKey)) {
-                throw new WorkspacePlanError("ambiguous-target", "Two applications bind one environment to the same project and application");
+            bindingKind = kind;
+            if ("frontend_deployment_id" in binding) {
+                // Frontend deployment IDs are project-scoped, not environment-scoped.
+                const targetKey = `${binding.project_ref}\0${binding.frontend_deployment_id}`;
+                if (seenFrontendTargets.has(targetKey)) {
+                    throw new WorkspacePlanError("ambiguous-frontend-target", "Multiple bindings select the same project and frontend deployment");
+                }
+                seenFrontendTargets.add(targetKey);
+            } else {
+                if (binding.application_id !== application.id) {
+                    throw new WorkspacePlanError("application-binding-mismatch", `Application '${application.id}' must bind to the same application id`);
+                }
+                const targetKey = `${name}\0${binding.project_ref}\0${binding.application_id}`;
+                if (seenTargets.has(targetKey)) {
+                    throw new WorkspacePlanError("ambiguous-target", "Two applications bind one environment to the same project and application");
+                }
+                seenTargets.add(targetKey);
             }
-            seenTargets.add(targetKey);
-            environments[name] = { project_ref: binding.project_ref, application_id: binding.application_id };
+            environments[name] = binding;
         }
         applications.push({ id: application.id, root: application.root, build: application.build, environments });
     }
@@ -972,7 +1000,8 @@ export function formatWorkspacePlan(plan: WorkspacePlan): string {
     for (const file of plan.changed_files) lines.push(`changed: ${file}`);
     for (const application of plan.applications) {
         const target = application.target
-            ? `target=${application.target.project_ref} application=${application.target.application_id}`
+            ? `target=${application.target.project_ref} ${"frontend_deployment_id" in application.target
+                ? `frontend=${application.target.frontend_deployment_id}` : `application=${application.target.application_id}`}`
             : "target=(none)";
         lines.push(`${application.id}  ${application.impact}  ${target}`);
         for (const reason of application.reasons) lines.push(`  why: ${reason}`);
@@ -1029,17 +1058,25 @@ export async function runWorkspacePlan(args: Record<string, unknown>, cwd = proc
     }
 }
 
-export function registerWorkspaceTools(server: ToolServer, options: { cwd?: string; getHttp?: () => import("../transports/http").HttpTransport | null } = {}): void {
+export function registerWorkspaceTools(server: ToolServer, options: {
+    cwd?: string;
+    getHttp?: () => import("../transports/http").HttpTransport | null;
+    context?: Pick<import("../context").ResolvedContext, "projectRef" | "environment" | "environmentVariables">;
+} = {}): void {
     registerTool(
         server,
         "workspace",
-        "Plan or explicitly execute monorepo delivery. Plan never builds or deploys. Execute, promote, and rollback require --execute and server authorization.",
+        "Plan or explicitly deliver monorepo releases. Plan never builds or deploys. Publish targets one static frontend; executable applications use execute or promote.",
         workspaceToolSchema,
         async args => {
             if (args.action === "plan") return runWorkspacePlan(args as Record<string, unknown>, options.cwd ?? process.cwd());
+            const http = options.getHttp?.() ?? null;
+            if (args.action === "publish") {
+                const { runWorkspacePublish } = await import("./workspace-publish");
+                return runWorkspacePublish(args, options.cwd ?? process.cwd(), http, options.context);
+            }
             const { runWorkspaceCommand } = await import("./workspace-execute");
             const { createHttpWorkspaceDeliveryClient, workspaceHttpFromTransport } = await import("./workspace-delivery-http");
-            const http = options.getHttp?.() ?? null;
             const client = http ? createHttpWorkspaceDeliveryClient(workspaceHttpFromTransport(http), async (input) => {
                 const { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } = await import("@supacloud/compiler");
                 const root = join(input.workspaceRoot, input.root);

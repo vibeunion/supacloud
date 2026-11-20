@@ -1,4 +1,4 @@
-import { access, lstat, mkdtemp, opendir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdtemp, opendir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -560,12 +560,11 @@ async function publishConfiguredFrontend(
     http: HttpTransport,
     projectRef: string,
     configRoot: string,
+    target: SelectedTarget,
     skipBuild: boolean,
     json: boolean,
     environmentVariables?: Readonly<Record<string, string>>,
-): Promise<ToolResponse | null> {
-    const target = selectFrontendTarget(configRoot, await readDeployConfig(configRoot));
-    if (!target) return null;
+): Promise<ToolResponse> {
     const projectDirectory = target.root;
     const targetState = await lstat(projectDirectory).catch(() => null);
     if (!targetState?.isDirectory() || targetState.isSymbolicLink()) {
@@ -591,11 +590,41 @@ async function publishConfiguredFrontend(
         await runBuild(buildCommand, projectDirectory, build.env, json);
     }
 
+    const actualOutput = await realpath(outputDirectory).catch(() => null);
+    if (actualOutput !== null) resolveInsideProject(await realpath(projectDirectory), actualOutput);
     const collected = await collectArchiveFiles(outputDirectory);
     return publishFrontendRelease(
         http, projectRef, selected.id,
         () => createCollectedFrontendArchive(outputDirectory, collected), collected.treeSha256,
     );
+}
+
+export async function publishWorkspaceFrontend(http: HttpTransport, input: {
+    projectRef: string;
+    environment: string;
+    deploymentId: string;
+    root: string;
+    buildCommand: string;
+    skipBuild: boolean;
+    json: boolean;
+    environmentVariables: Readonly<Record<string, string>>;
+}): Promise<ToolResponse> {
+    const { frontend, targets, application, defaultTarget } = await readDeployConfig(input.root);
+    if (!frontend || targets || application || defaultTarget || (frontend.root && frontend.root !== ".")) {
+        throw new Error("Workspace publish requires a site-local supacloud.json with a single frontend rooted in that directory");
+    }
+    if (frontend.id && frontend.id !== input.deploymentId) {
+        throw new Error("Site-local frontend.id does not match the planned frontend deployment");
+    }
+    if (frontend.buildCommand && frontend.buildCommand !== input.buildCommand) {
+        throw new Error("Site-local frontend.buildCommand does not match the workspace build");
+    }
+    await requireProjectDeploymentProtocol(http, input.projectRef, input.environment);
+    return publishConfiguredFrontend(http, input.projectRef, input.root, {
+        name: "frontend",
+        root: input.root,
+        config: { ...frontend, type: "frontend", id: input.deploymentId, buildCommand: input.buildCommand },
+    }, input.skipBuild, input.json, input.environmentVariables);
 }
 
 export function registerDeployTools(
@@ -633,10 +662,10 @@ export function registerDeployTools(
                     ...config.application, environmentId: options.environment || config.application.environmentId,
                 } : undefined;
             const legacyManifest = await hasProjectReleaseManifest(configRoot);
-            const assetsOnly = args.assets_only === true
-                || (args.backend !== true && selectFrontendTarget(configRoot, config) !== null);
+            const target = args.backend === true ? null : selectFrontendTarget(configRoot, config);
+            const assetsOnly = args.assets_only === true || target !== null;
             if (assetsOnly) {
-                if (!selectFrontendTarget(configRoot, config)) {
+                if (!target) {
                     throw new Error("Static asset deployment requires a frontend configuration in supacloud.json");
                 }
                 const environmentId = options.environment?.trim() || application?.environmentId?.trim();
@@ -644,12 +673,10 @@ export function registerDeployTools(
                     throw new Error("Static asset deployment requires SUPACLOUD_ENV");
                 }
                 await requireProjectDeploymentProtocol(http, projectRef, environmentId);
-                const result = await publishConfiguredFrontend(
-                    http, projectRef, configRoot,
+                return publishConfiguredFrontend(
+                    http, projectRef, configRoot, target,
                     args.skip_build === true, args.format === "json", options.environmentVariables,
                 );
-                if (!result) throw new Error("Static asset deployment did not produce a receipt");
-                return result;
             }
             if (legacyManifest) {
                 throw new Error(`${DEPLOYMENT_UPGRADE} Replace deploy-manifest.json with the current application delivery configuration; no remote mutation was performed.`);
