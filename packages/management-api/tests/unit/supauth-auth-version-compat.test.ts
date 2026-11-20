@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Configuration coverage only; live SupAuth/GoTrue acceptance is a separate gate.
-const GOTRUE_COMPATIBILITY_VERSION = "v2.197.0";
+const GOTRUE_COMPATIBILITY_VERSION = "v2.198.0";
 const root = resolve(import.meta.dir, "../../../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
