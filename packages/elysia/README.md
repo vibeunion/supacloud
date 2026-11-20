@@ -51,13 +51,12 @@ not inferred from application declarations.
 The Elysia peer and development dependency are pinned to `2.0.0-rc.4`.
 The runtime adapter pins Effect `4.0.5` and consumes its `Exit`-based
 execution boundary.
-`compatibility.json` records the acceptance target: Bun 1.4.4, Elysia
+`compatibility.json` records the acceptance target: Bun 1.4.5, Elysia
 2.0.0-rc.4, Effect 4.0.5, `typebox` 1.4.3, `exact-mirror` 1.2.7,
-TypeScript CLI 7.0.2 and the compiler's separate TypeScript 6 semantic API 6.0.2.
-The matrix is a
-required target, not proof of an execution. See the dated, commit-specific
+and TypeScript 7.1.0-beta. The matrix is a required target, not proof of an
+execution. See the dated, commit-specific
 [framework acceptance record](../../docs/framework-acceptance.md) for actual
-results. The contract-upgrade gate checks both TypeScript engines. These tests
+results. The contract-upgrade gate checks the TypeScript CLI and API. These tests
 do not establish a wider RC version matrix or Node.js runtime compatibility.
 
 Keep the exact Elysia peer until additional versions have their own acceptance
