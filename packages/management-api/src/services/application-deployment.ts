@@ -167,8 +167,8 @@ export class ApplicationDeploymentService {
       prepare: async (input, environment) => { await files.prepare(input, environment); await runtime.install(input); },
       start: async input => { await runtime.start(input); },
       stop: async input => { await runtime.stop(input); },
-      requireReady: async input => {
-        const report = parseApplicationReadinessReport(await readiness.requireReady(input));
+      requireReady: async (input, waitMs) => {
+        const report = parseApplicationReadinessReport(await readiness.requireReady(input, waitMs));
         const plan = applicationRuntimePlan(input);
         if (!report.ready || report.project_ref !== plan.projectRef || report.application_id !== plan.applicationId
           || report.environment_id !== plan.environmentId || report.release_id !== plan.releaseId
@@ -263,7 +263,7 @@ export class ApplicationDeploymentService {
       environment: configuration.environment, hosts: configuration.hosts,
       expectedActivationId: request.expectedActivationId, principal: request.principal,
       configurationId: request.configurationId,
-    }, request.owner, this.promotionDatabase);
+    }, request.owner, this.promotionDatabase, configuration.startupTimeoutMs);
   }
 
   observePromotion(state: ProjectMutationState, desired: ApplicationActiveRecord) {
@@ -501,6 +501,6 @@ export class ApplicationDeploymentService {
       environment: configuration.environment, hosts: configuration.hosts,
       expectedActivationId: request.expectedActivationId, principal: request.principal,
       configurationId: request.configurationId,
-    });
+    }, configuration.startupTimeoutMs);
   }
 }

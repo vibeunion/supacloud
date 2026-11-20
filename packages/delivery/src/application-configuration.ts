@@ -10,8 +10,10 @@ const variableName = Type.String({ pattern: "^[A-Z][A-Z0-9_]{0,127}$" });
 const kind = Type.Union([Type.Literal("http"), Type.Literal("worker")]);
 const hosts = Type.Array(Type.String({ minLength: 1, maxLength: 253 }), { maxItems: 32, uniqueItems: true });
 const bunVersion = Type.String({ pattern: "^\\d+\\.\\d+\\.\\d+$", maxLength: 32 });
+const startupTimeout = Type.Optional(Type.Integer({ minimum: 1, maximum: 300 }));
 export const ApplicationConfigurationSchema = Type.Object({
   bun_version: bunVersion,
+  startup_timeout_seconds: startupTimeout,
   targets: Type.Array(Type.Object({
     name: targetName, kind, hosts,
     environment: Type.Record(variableName, Type.String({ maxLength: 16_384 }), {
@@ -30,6 +32,7 @@ export const ApplicationConfigurationViewSchema = Type.Object({
   application_id: ApplicationIdSchema, environment_id: ApplicationIdSchema,
   configuration_id: ApplicationConfigurationIdSchema, created_at: Type.String(),
   bun_version: bunVersion,
+  startup_timeout_seconds: startupTimeout,
   targets: Type.Array(Type.Object({
     name: targetName, kind, hosts,
     environment_names: Type.Array(variableName, { maxItems: 128, uniqueItems: true }),
