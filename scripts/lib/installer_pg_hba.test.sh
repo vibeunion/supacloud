@@ -90,3 +90,5 @@ if PIGSTY_CONFIG="$bad_config" ensure_pigsty_tenant_hba_rule >/dev/null 2>&1; th
     exit 1
 fi
 ! grep -Fq "SupaCloud tenant authenticator loopback" "$bad_config"
+
+PYTHONDONTWRITEBYTECODE=1 python3 "$SCRIPT_DIR/scripts/lib/patch_pigsty_tenant_hba.test.py"
