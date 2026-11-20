@@ -791,6 +791,8 @@ jobs:
           node --test .github/scripts/sync-supacloud-dependencies.test.mjs
           node --check .github/scripts/recover-edge-runtime-release.mjs
           node --test .github/scripts/recover-edge-runtime-release.test.mjs
+          node --check .github/scripts/release-publish-plan.mjs
+          node --test .github/scripts/release-publish-plan.test.mjs
 
   unit-test:
     name: Unit Tests

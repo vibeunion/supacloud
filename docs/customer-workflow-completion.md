@@ -550,7 +550,10 @@ prove that a skipped CLI step published it.
 The workflow now publishes Elysia before installing/building/publishing the CLI.
 An Elysia publication failure blocks the CLI step; an intentionally skipped
 adapter step still permits CLI-only releases using existing published packages.
-The single `release-publish-gating.test.mjs` file passed all nine checks.
+`release-publish-plan.test.mjs` compared the workflow with the declared graph in
+`.github/release/publish-plan.json` and passed all thirteen checks, including the
+negative cases for a dropped gate, a token on an OIDC step, `continue-on-error`,
+a silent provenance drop, an undeclared dependency and a stale plan order.
 No publication or deployment was triggered. Normal protected integration,
 publication recovery and a fresh exact-version consumer run remain necessary.
 

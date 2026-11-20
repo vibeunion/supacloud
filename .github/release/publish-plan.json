@@ -1,0 +1,152 @@
+{
+  "$comment": "Ordered npm publish graph for .github/workflows/release-please.yml. release-publish-plan.mjs checks the workflow against this file; edit both together. `gate` is the release-please output that makes the step run, `auth` is how npm authenticates, `requires` are the earlier publish steps whose failure must skip this one.",
+  "workflow": ".github/workflows/release-please.yml",
+  "job": "publish-npm",
+  "outputsJob": "release-please",
+  "steps": [
+    {
+      "name": "Publish delivery contracts to NPM",
+      "packageDir": "packages/delivery",
+      "gate": "releases_created",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish command contracts to NPM",
+      "packageDir": "packages/contracts",
+      "gate": "releases_created",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish Query adapter to NPM",
+      "packageDir": "packages/query",
+      "gate": "query_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish supacloud-js to NPM",
+      "packageDir": "packages/supacloud-js",
+      "gate": "supacloud_js_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish function adapter to NPM",
+      "packageDir": "packages/function-adapter",
+      "gate": "function_adapter_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish supacloud (umbrella) to NPM",
+      "packageDir": "packages/supacloud",
+      "gate": "supacloud_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish durable commands to NPM",
+      "packageDir": "packages/commands",
+      "gate": "commands_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish database governance to NPM",
+      "packageDir": "packages/db",
+      "gate": "db_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish database ZenStack adapter to NPM",
+      "packageDir": "packages/db-zenstack",
+      "gate": "db_zenstack_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish model tooling to NPM",
+      "packageDir": "packages/model-tooling",
+      "gate": "model_tooling_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish SupaCloud Lite to NPM",
+      "packageDir": "packages/supacloud-lite",
+      "gate": "supacloud_lite_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish app framework metadata to NPM",
+      "packageDir": "packages/app",
+      "gate": "app_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish Svelte lifecycle binding to NPM",
+      "packageDir": "packages/app-svelte",
+      "gate": "app_svelte_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish app compiler to NPM",
+      "packageDir": "packages/compiler",
+      "gate": "compiler_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": ["publish_delivery"]
+    },
+    {
+      "name": "Publish elysia adapter to NPM",
+      "packageDir": "packages/elysia",
+      "gate": "elysia_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    },
+    {
+      "name": "Publish cli to NPM",
+      "packageDir": "packages/cli",
+      "gate": "cli_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": ["publish_delivery", "publish_compiler", "publish_elysia"]
+    },
+    {
+      "name": "Publish admin to NPM",
+      "packageDir": "packages/admin",
+      "gate": "admin_released",
+      "auth": "oidc",
+      "provenance": true,
+      "requires": ["publish_delivery", "publish_compiler", "publish_cli"]
+    },
+    {
+      "name": "Publish testing utilities to NPM",
+      "packageDir": "packages/testing",
+      "gate": "testing_released",
+      "auth": "bootstrap-token",
+      "provenance": true,
+      "requires": []
+    }
+  ]
+}
