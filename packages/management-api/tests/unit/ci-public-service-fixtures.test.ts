@@ -18,7 +18,7 @@ test("public integration fixtures initialize without unavailable fork PR secrets
   for (const [name, image] of [
     ["postgres", "supabase/postgres:17.11.0.011"],
     ["postgrest", "postgrest/postgrest:v16.6"],
-    ["gotrue", "supabase/gotrue:v2.197.0"],
+    ["gotrue", "supabase/gotrue:v2.198.0"],
   ]) {
     const service = object(services[name!]);
     expect(service.image).toBe(image);
