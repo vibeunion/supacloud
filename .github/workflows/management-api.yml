@@ -59,7 +59,7 @@ concurrency:
 # gitleaks:allow
 env:
   NODE_VERSION: "24.x"
-  BUN_VERSION: "1.4.4"
+  BUN_VERSION: "1.4.5"
   GO_VERSION: "1.27.1"
   XCADDY_VERSION: "v0.4.7"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -1023,7 +1023,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgrest:
-        image: postgrest/postgrest:v16.5
+        image: postgrest/postgrest:v16.6
         ports:
           - 3000:3000
         env:
@@ -1120,7 +1120,7 @@ jobs:
           context: docker/self-host/caddy
           load: true
           push: false
-          tags: supacloud-caddy:2.11.7-ratelimit
+          tags: supacloud-caddy:2.11.9-ratelimit
           cache-from: type=gha,scope=caddy-integration
           cache-to: type=gha,scope=caddy-integration,mode=max,ignore-error=true
 
@@ -1141,7 +1141,7 @@ jobs:
       # data plane stays inside the container network, unreachable from outside.
       - name: Start Caddy fixture
         run: |
-          caddy_modules="$(docker run --rm --entrypoint caddy supacloud-caddy:2.11.7-ratelimit list-modules)"
+          caddy_modules="$(docker run --rm --entrypoint caddy supacloud-caddy:2.11.9-ratelimit list-modules)"
           grep -Fx http.handlers.rate_limit <<<"${caddy_modules}"
           grep -Fx http.handlers.cache <<<"${caddy_modules}"
           grep -Fx storages.cache.simplefs <<<"${caddy_modules}"
@@ -1152,7 +1152,7 @@ jobs:
             --name supacloud-ci-caddy \
             --publish 127.0.0.1:2019:2019 \
             --volume "$RUNNER_TEMP/caddy-ci.json:/etc/supacloud/caddy/config.json:ro" \
-            supacloud-caddy:2.11.7-ratelimit
+            supacloud-caddy:2.11.9-ratelimit
 
       - name: Show runtime versions
         run: |
