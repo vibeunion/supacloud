@@ -3173,6 +3173,50 @@ describe("CaddyGatewayProvider ensureGatewayReady", () => {
 describe("canonical gateway reconciliation", () => {
     afterEach(cleanCaddyTmp);
 
+    test("skips loading unchanged canonical config but repairs live and durable drift", async () => {
+        const originalFetch = globalThis.fetch;
+        let liveConfig: unknown = {};
+        let loads = 0;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && typeof init?.body === "string") {
+                liveConfig = JSON.parse(init.body);
+                loads++;
+                return Promise.resolve(Response.json({}));
+            }
+            return Promise.resolve(Response.json(liveConfig));
+        }) as unknown as typeof fetch;
+        class TestGateway extends CaddyGatewayProvider {
+            override async rebuildAllTenantConfigs() { return { success: true, updated: 0, errors: [] }; }
+            override async setupHostedAuthRoutes() { return { success: true }; }
+        }
+        const gateway = new TestGateway();
+        const reconcile = () => reconcileCanonicalGatewayRoutes({
+            gateway,
+            reconcileFrontends: async () => ({ total: 0, configured: 0, skipped: 0, errors: [] }),
+        });
+        try {
+            await reconcile();
+            expect(loads).toBe(1);
+            const canonical = await readFile(config.caddyConfigPath, "utf8");
+
+            await reconcile();
+            expect(loads).toBe(1);
+
+            liveConfig = {};
+            await reconcile();
+            expect(loads).toBe(2);
+            expect(liveConfig).toEqual(JSON.parse(canonical));
+
+            await writeFile(config.caddyConfigPath, JSON.stringify({ ...JSON.parse(canonical), admin: { listen: ":2020" } }));
+            await reconcile();
+            expect(loads).toBe(3);
+            expect(await readFile(config.caddyConfigPath, "utf8")).toBe(canonical);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     test("builds every route family once and confirms the live durable candidate", async () => {
         const events: string[] = [];
         const state = {
