@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.0...management-api-v0.138.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **storage:** bind resumable upload sessions to their owner ([#2728](https://github.com/vibeunion/supacloud/issues/2728)) ([bc260e8](https://github.com/vibeunion/supacloud/commit/bc260e85d936b8b53b705588daa5675115bae64b))
+
 ## [0.138.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.8...management-api-v0.138.0) (2026-11-20)
 
 
