@@ -41,7 +41,7 @@ application/
 │     │  ├─ platform/         # Clients for Supabase/SupaCloud services
 │     │  ├─ http/             # Authentication, error mapping, tracing
 │     │  └─ observability/    # Logging and metrics helpers
-│     ├─ app-api/             # Synchronous application API entrypoint
+│     ├─ app-api/             # Optional stateless Function entrypoint
 │     ├─ app-worker/          # Durable command, workflow, and queue consumers
 │     ├─ app-webhooks/        # Third-party callback boundary
 │     └─ app-scheduled/       # Scheduled dispatch and maintenance, when needed
@@ -86,8 +86,8 @@ Elysia boundary:
 browser or mobile client
   -> selected web/admin frontend
   -> user-scoped SupaCloud API for ordinary reads
-  -> app-api Function or trusted Elysia service for governed commands
-  -> Elysia domain modules
+  -> trusted application API for pooled model-backed commands
+  -> Elysia domain modules (in-process command calls)
   -> PostgreSQL / Storage / Realtime / queues
 
 app-worker Function
@@ -95,13 +95,60 @@ app-worker Function
   -> durable command or workflow side effects
 ```
 
-For the default deployment, place Elysia application and worker modules inside
-the corresponding SupaCloud Functions. Use a separately deployed Elysia
-service only when the application needs a long-lived process, custom HTTP
-lifecycle, or runtime isolation that an Edge Function does not provide.
-Framework-specific server handlers may adapt requests or perform SSR, but must
-not become a second owner of domain authorization, transactions, or audit
-behavior.
+For pooled model-backed commands, deliver the synchronous API, identity
+adapter and commands together as one versioned release. If the API is already
+a Function and its projects share an operator trust domain, keep the Function:
+the [model-command recipe](application-starter.md#start) can build a single
+Function with a request-scoped PostgreSQL binding. No application listener,
+proxy Function or command-only service is needed. A standalone HTTP artifact
+is also supported when a dedicated process is appropriate; managed Application
+delivery is optional in that case.
+
+The `model-command` delivery profile rejects more than one synchronous target
+or a target without its own database binding. Durable jobs may remain
+independent. `function-data-plane` is the optional Function-only profile for
+PostgREST and governed RPC; those paths do not need a direct database login or
+a model migration. Ordinary Auth, Storage, and external system calls are
+unaffected. The planner checks declared targets and bindings, not the intent
+of arbitrary network calls or configurations outside the compiler plan.
+
+For a direct binding, use a reviewed least-privileged database login and keep
+the raw pool at the trusted composition root. Application code still owns
+authorization and uses the existing transaction, receipt and audit adapters.
+A database secret does not turn a shared Worker into a hard security boundary.
+
+Stateless hooks, schedules, and independent integrations can remain Functions.
+Framework-specific server handlers may adapt requests or perform SSR, but
+must not become a second owner of domain authorization, transactions or audit.
+Keep a separate runtime only for an actual independent scaling, security or
+lifecycle boundary, and explicitly define compatibility and rollback across it.
+
+For an existing `Function -> command host` application, bind its existing
+durable command port in the Function and keep the same public Function slug.
+Do not restore retired RPCs or add another ledger. Preserve Auth, PostgREST,
+Storage and independently owned Functions. Keep any older release dependencies
+only for an explicit rollback window.
+
+```gherkin
+Scenario: A model-backed Function needs only its database binding
+  Given one Function release with verified identity and a low-privilege database login
+  When the Function executes a command without a separate HTTP service
+  Then the authenticated write commits once
+  And replay returns the same receipt without another audit entry
+
+Scenario: A missing capability does not introduce a fallback
+  Given a Function with a declared database binding
+  When the named project secret is absent
+  Then the invocation fails without borrowing a default database URL
+
+Scenario: A synchronous split is rejected before packaging
+  Given a model-command plan that declares a Function and a separate HTTP target
+  When planning or building delivery
+  Then the compiler rejects the plan and writes no new release
+```
+
+Validate these scenarios in staging before retiring any prior dependency.
+Function rollback restores compatible code and configuration, not business data.
 
 The boundary has three practical rules:
 
@@ -146,7 +193,8 @@ Use a private domain outbox when an accepted transaction must cause asynchronous
 
 Use a small number of externally addressable Functions with clear trust boundaries:
 
-- `app-api` accepts synchronous application requests and routes to domain modules.
+- A stateless `app-api` can serve Function-native endpoints. Choose a trusted
+  runtime that meets the database and lifecycle requirements for a pooled API.
 - `app-worker` claims and dispatches durable commands, workflow steps, or queue messages.
 - `app-webhooks` verifies and accepts third-party callbacks separately from user-facing APIs.
 - `app-scheduled` starts periodic work only when a scheduled boundary is genuinely needed.

@@ -1,13 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
 import { SQL } from "bun";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as ts from "@supacloud/db/typescript";
 import { initializeAppProject } from "./app-starter";
 import { COMMAND_RECEIPT_SQL } from "./command-receipts";
-import { buildDeliveryProject, compileProject, renderApplication, type ApplicationGraph } from "@supacloud/compiler";
+import {
+  buildDeliveryProject, compileOptionsFromConfig, compileProject, loadSupacloudConfig,
+  createDeliveryPlan, parseDeliveryOptions, renderApplication, type ApplicationGraph,
+} from "@supacloud/compiler";
 import { COMMAND_RECEIPT_SQL as DATABASE_COMMAND_RECEIPT_SQL } from "@supacloud/db";
 import { compileModel } from "@supacloud/db/model";
 import { databaseSources } from "@supacloud/db/source-contracts";
@@ -67,6 +70,18 @@ async function startStarterPostgres(bin: string): Promise<StarterPostgres> {
     pathToFileURL(join(repo, "scripts/lib/starter-postgres.ts")).href);
   return helper.startStarterPostgres(bin);
 }
+interface FunctionRunner {
+  dispatch(input: {
+    functionId: string; projectRef: string; functionPath: string; projectRoot: string;
+    env: Record<string, string>; request: Request;
+  }): Promise<Response>;
+  shutdown(): Promise<void>;
+}
+async function startFunctionRunner(): Promise<FunctionRunner> {
+  const runtime: { WorkerPool: new (options: { size: number; requestTimeout: number }) => FunctionRunner } =
+    await import(pathToFileURL(join(repo, "packages/edge-runtime/worker-pool.ts")).href);
+  return new runtime.WorkerPool({ size: 1, requestTimeout: 10_000 });
+}
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function temporary() {
@@ -94,22 +109,53 @@ async function typecheck(root: string, extra: string[] = []) {
     `${item.file?.fileName ?? "config"}: ${ts.flattenDiagnosticMessageText(item.messageText, "\n")}`);
 }
 
+async function buildStandaloneHttp(root: string): Promise<string> {
+  const config = await loadSupacloudConfig(root);
+  const options = compileOptionsFromConfig(config, root);
+  const delivery = await buildDeliveryProject(options, config.delivery);
+  if (!delivery.ok) throw new Error(JSON.stringify(delivery.diagnostics));
+  const [api] = delivery.manifest.objects;
+  expect(delivery.manifest.objects).toHaveLength(1);
+  if (api?.name !== "api" || api.entryKind !== "bun-http-application") {
+    throw new Error("Expected a single standalone HTTP artifact");
+  }
+  return join(options.outDir, "delivery", "objects", api.objectId, "bundle");
+}
+
 test("starter receipt schema stays byte-identical to the database package", () => {
   expect(COMMAND_RECEIPT_SQL).toBe(DATABASE_COMMAND_RECEIPT_SQL);
 });
 
-test("model-command emits a platform-managed pooled delivery host", async () => {
+test("model-command configures one pooled HTTP release with a delivery check", async () => {
   const root = await temporary();
   await initializeAppProject({ root, name: "orders", template: "model-command" });
   const config = await readFile(join(root, "supacloud.config.ts"), "utf8");
   const deliveryHost = await readFile(join(root, "src/delivery-host.ts"), "utf8");
   const localHost = await readFile(join(root, "scripts/serve-model.ts"), "utf8");
+  const identity = await readFile(join(root, "src/host/identity.ts"), "utf8");
+  const functionOptions: unknown = JSON.parse(await readFile(join(root, "delivery.function.json"), "utf8"));
+  const manifest: unknown = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const sources = JSON.parse(await readFile(join(root, "database.sources.json"), "utf8")) as { trustedHosts: string[] };
+  expect(config).toContain('httpProfile: "model-command"');
+  expect(functionOptions).toMatchObject({
+    httpProfile: "model-command",
+    functions: [{ entrypoint: "delivery-host.ts", databaseSecret: "APP_ORDERS_DATABASE_URL" }],
+  });
   expect(config).toContain('httpApplications: [{ target: "api", source: "delivery-host.ts", database: true }]');
   expect(deliveryHost).toContain("createDeliveryDatabase");
   expect(deliveryHost).toContain("lifecycle.deps?.[\"dbClient\"]");
   expect(deliveryHost).not.toContain("DATABASE_URL");
+  expect(deliveryHost).not.toContain("MODEL_IDENTITY_MODULE");
+  expect(deliveryHost).toContain('from "./host/identity"');
+  expect(localHost).toContain('from "../src/host/identity"');
+  expect(identity).toContain("throw new Error");
   expect(localHost).toContain("createBunSqlHost");
+  expect(manifest).toMatchObject({
+    scripts: {
+      check: expect.stringContaining("bun run check:delivery"), "check:delivery": "supacloud-compiler plan",
+      build: expect.stringContaining("supacloud-compiler build-delivery"), "build:delivery": "bun run build",
+    },
+  });
   expect(sources.trustedHosts).toContain("src/delivery-host.ts");
 });
 
@@ -251,19 +297,12 @@ test("model-command generates a strictly typed and governed application for HTTP
       rpc: { modelOrders: { boundary: "database", transaction: true, audit: true, idempotency: true } } },
   });
   expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
-  const delivery = await buildDeliveryProject({
-    rootDir: join(root, "src"),
-    outDir: join(root, "generated"),
-    strict: true,
-    databaseGovernance: { mode: "check", projectRoot: root, moduleFile: "db/modules.ts" },
-    commandCapabilities: { requirePersistentAdapters: true, permission: true, transaction: true, audit: true, idempotency: true,
-      rpc: { modelOrders: { boundary: "database", transaction: true, audit: true, idempotency: true } } },
-  }, {
-    version: 1,
-    targets: [{ name: "api", kind: "api", modules: ["app"] }],
-    build: { httpApplications: [{ target: "api", source: "delivery-host.ts", database: true }] },
+  const bundle = await buildStandaloneHttp(root);
+  const unconfigured = Bun.spawnSync([process.execPath, "--no-env-file", join(bundle, "index.js")], {
+    cwd: bundle, env: { DATABASE_URL: "postgresql://test@127.0.0.1:1/test", PORT: "0" }, timeout: 10_000,
   });
-  if (!delivery.ok) throw new Error(JSON.stringify(delivery.diagnostics));
+  expect(unconfigured.exitCode).toBe(1);
+  expect(unconfigured.stderr.toString()).toContain("Delivery HTTP startup failed.");
   const assertions = join(root, "aspect-types.ts");
   await writeFile(assertions, `import { defineOperationAspect } from "@supacloud/app/core";
 const validate = (input: unknown): { version: number } => {
@@ -290,7 +329,7 @@ defineOperationAspect({ kind: "command", name: "typed", input: validate, result:
 interface Principal { id: string; tenantId: string; canCreate: boolean; canApprove: boolean }
 interface Claim { actor: { id: string; tenantId: string }; operationId: string; input: { id: string; expectedVersion: number } }
 interface IdentityAuthority {
-  verifyHttp(request: Request): Promise<{ id: string; tenantId: string }>;
+  verifyHttp(request: Request): Promise<{ id: string; tenantId: string } | null>;
   verifyWorker(value: unknown): Promise<Claim>;
   resolve(actor: { id: string; tenantId: string }): Promise<Principal | null>;
 }
@@ -304,6 +343,175 @@ function isHostModule(value: unknown): value is HostModule {
   return !!value && typeof value === "object" && "createModelOrderHost" in value && typeof value.createModelOrderHost === "function";
 }
 const postgres = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
+
+async function applyModelMigrations(database: StarterPostgres, migrations: readonly string[]) {
+  await database.exec("CREATE SCHEMA auth");
+  await database.exec(await readFile(join(repo, "packages/management-api/src/db/sql-modules/auth-jwt-helpers.sql"), "utf8"));
+  for (const sql of migrations) await database.exec(sql);
+}
+
+function readModelMigrations(root: string) {
+  return Promise.all(["001-command-receipts.sql", "002-model-orders.sql"]
+    .map(file => readFile(join(root, "migrations", file), "utf8")));
+}
+
+test.skipIf(!postgres)("standalone HTTP and Edge Function artifacts execute model commands without a command service", async () => {
+  const root = await temporary();
+  const detached = await temporary();
+  const detachedFunction = await temporary();
+  await initializeAppProject({ root, name: "orders", template: "model-command" });
+  await dependencies(root);
+  await writeFile(join(root, "src/host/identity.ts"), `
+import type { IdentityAuthority } from "./model-orders";
+export function createIdentityAuthority(): IdentityAuthority {
+  return {
+    async verifyHttp(request) {
+      if (request.headers.get("authorization") !== "Bearer test-owner") return null;
+      return { id: "owner", tenantId: "starter" };
+    },
+    async verifyWorker() { throw new Error("No worker claims in this fixture"); },
+    async resolve(actor) { return { ...actor, canCreate: true, canApprove: false }; },
+  };
+}
+`);
+  await compileModel(join(root, "zenstack/schema.zmodel"), join(root, "zenstack/generated"));
+  expect((await databaseSources(root, "generate")).findings).toEqual([]);
+  const config = await loadSupacloudConfig(root);
+  const options = compileOptionsFromConfig(config, root);
+  const compiled = await compileProject(options);
+  expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+  await cp(await buildStandaloneHttp(root), detached, { recursive: true });
+  const split = await buildDeliveryProject(options, {
+    ...config.delivery,
+    targets: [...config.delivery?.targets ?? [], {
+      name: "forwarder", kind: "function",
+      function: { slug: "forwarder", entrypoint: "delivery-host.ts", verifyJwt: true },
+    }],
+  });
+  expect(split).toMatchObject({ ok: false, written: [], bundledTargets: [], diagnostics: expect.arrayContaining([
+    expect.objectContaining({ code: "delivery-model-command-split" }),
+  ]) });
+  const functionOptions = parseDeliveryOptions(JSON.parse(await readFile(join(root, "delivery.function.json"), "utf8")));
+  const { httpProfile: _profile, ...implicitProfile } = functionOptions;
+  const splitFunction = createDeliveryPlan(compiled.graph, {
+    ...implicitProfile,
+    targets: [...implicitProfile.targets ?? [], {
+      name: "forwarder", kind: "function",
+      function: { slug: "forwarder", entrypoint: "delivery-host.ts", verifyJwt: true },
+    }],
+  }, options);
+  expect(splitFunction.diagnostics.map(({ code }) => code)).toContain("delivery-model-command-split");
+  const functionBuildOptions = { ...options, outDir: join(root, "output/function") };
+  const functionRelease = await buildDeliveryProject(functionBuildOptions, functionOptions);
+  if (!functionRelease.ok) throw new Error(JSON.stringify(functionRelease.diagnostics));
+  const [edge] = functionRelease.manifest.objects;
+  expect(functionRelease.manifest.objects).toHaveLength(1);
+  if (edge?.entryKind !== "bun-function-application") throw new Error("Expected one Function artifact");
+  await cp(join(functionBuildOptions.outDir, "delivery", "objects", edge.objectId, "bundle"), detachedFunction, { recursive: true });
+  const migrations = await readModelMigrations(root);
+  await rm(root, { recursive: true, force: true });
+
+  const database = await startStarterPostgres(postgres!);
+  try {
+    await applyModelMigrations(database, migrations);
+    const password = crypto.randomUUID();
+    await database.exec(`ALTER ROLE model_orders_app LOGIN PASSWORD '${password}'`);
+    await database.withConnection(async connection => {
+      const url = new URL(connection);
+      url.username = "model_orders_app";
+      url.password = password;
+      const child = Bun.spawn([process.execPath, "--no-env-file", join(detached, "index.js")], {
+        cwd: detached,
+        env: { DATABASE_URL: url.href, HOST: "127.0.0.1", PORT: "0" },
+        stdout: "pipe", stderr: "pipe",
+      });
+      const reader = child.stdout.getReader();
+      const errors = new Response(child.stderr).text();
+      const deadline = setTimeout(() => child.kill("SIGKILL"), 20_000);
+      try {
+        const decoder = new TextDecoder();
+        let output = "";
+        while (!output.includes("\n")) {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error(`Standalone HTTP did not start: ${await errors}`);
+          output += decoder.decode(chunk.value, { stream: true });
+        }
+        const event: unknown = JSON.parse(output.split("\n", 1)[0] ?? "");
+        if (!event || typeof event !== "object" || !("url" in event) || typeof event.url !== "string") {
+          throw new Error("Missing managed API listener receipt");
+        }
+        const orders = new URL("/orders", event.url);
+        const send = (key: string, authorization: string) => fetch(orders, {
+          method: "POST",
+          headers: { authorization, "idempotency-key": key, "content-type": "application/json" },
+          body: JSON.stringify({ id: "managed", title: "Managed order" }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        expect((await send("denied", "Bearer unverified")).status).toBe(401);
+        const created = await send("managed-1", "Bearer test-owner");
+        expect(created.status).toBe(200);
+        const receipt: unknown = await created.json();
+        expect(receipt).toMatchObject({ status: "confirmed", audit: "complete", result: { outcome: "applied" } });
+        const replay = await send("managed-1", "Bearer test-owner");
+        expect(replay.status).toBe(200);
+        expect(await replay.json()).toEqual(receipt);
+        const pool = new SQL(url.href, { max: 1 });
+        try {
+          expect(await pool`SELECT id FROM public.model_orders`).toEqual([{ id: "managed" }]);
+          expect(await pool`SELECT operation_key FROM supacloud_commands.execution_receipts`)
+            .toEqual([{ operation_key: "managed-1" }]);
+          expect(await pool`SELECT operation_key FROM supacloud_commands.execution_audit`)
+            .toEqual([{ operation_key: "managed-1" }]);
+        } finally { await pool.close(); }
+        child.kill("SIGTERM");
+        expect(await child.exited).toBe(0);
+      } finally {
+        reader.releaseLock();
+        clearTimeout(deadline);
+        if (child.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+        await errors;
+      }
+
+      const runner = await startFunctionRunner();
+      try {
+        const send = (env: Record<string, string>, key: string, token = "test-owner") => runner.dispatch({
+          functionId: "starter-model-orders", projectRef: "starter-project", projectRoot: detachedFunction,
+          functionPath: join(detachedFunction, "index.js"), env,
+          request: new Request("http://edge.test/functions/v1/model-orders/orders", {
+            method: "POST", headers: {
+              authorization: `Bearer ${token}`, "idempotency-key": key, "content-type": "application/json",
+            },
+            body: JSON.stringify({ id: "function", title: "Function order" }),
+          }),
+        });
+        const env = { APP_ORDERS_DATABASE_URL: url.href };
+        const denied = await send(env, "denied", "unverified");
+        expect({ status: denied.status, body: await denied.text() }).toMatchObject({ status: 401 });
+        const created = await send(env, "function-1");
+        const receipt: unknown = await created.json();
+        expect({ status: created.status, receipt }).toMatchObject({
+          status: 200, receipt: { status: "confirmed", audit: "complete", result: { outcome: "applied" } },
+        });
+        const replay = await send(env, "function-1");
+        expect(replay.status).toBe(200);
+        expect(await replay.json()).toEqual(receipt);
+        const missing = await send({ DATABASE_URL: url.href }, "missing");
+        expect(missing.status).toBe(503);
+        expect(await missing.text()).toBe("Function database binding is not configured.");
+        const observer = new SQL(connection, { max: 1 });
+        try {
+          expect(await observer`SELECT id FROM public.model_orders WHERE id = 'function'`).toEqual([{ id: "function" }]);
+          expect(await observer`SELECT operation_key FROM supacloud_commands.execution_receipts WHERE operation_key = 'function-1'`)
+            .toEqual([{ operation_key: "function-1" }]);
+          expect(await observer`SELECT operation_key FROM supacloud_commands.execution_audit WHERE operation_key = 'function-1'`)
+            .toEqual([{ operation_key: "function-1" }]);
+          expect(await observer`SELECT pid FROM pg_stat_activity WHERE usename = 'model_orders_app'`).toEqual([]);
+        } finally { await observer.close(); }
+      } finally { await runner.shutdown(); }
+    });
+  } finally { await database.close(); }
+}, 120_000);
+
 test.skipIf(!postgres)("real model HTTP/worker flow isolates tenants, replays receipts, rejects revocation and rolls back failed audit", async () => {
   const root = await temporary();
   await initializeAppProject({ root, name: "orders", template: "model-command" });
@@ -318,8 +526,7 @@ test.skipIf(!postgres)("real model HTTP/worker flow isolates tenants, replays re
   if (!isHostModule(loaded)) throw new Error("Missing model host");
   const server = await startStarterPostgres(postgres!);
   try {
-    await server.exec(await readFile(join(root, "migrations/001-command-receipts.sql"), "utf8"));
-    await server.exec(await readFile(join(root, "migrations/002-model-orders.sql"), "utf8"));
+    await applyModelMigrations(server, await readModelMigrations(root));
     await server.withConnection(async connection => {
       const governance = new SQL(connection, { max: 1 });
       try { await governance.unsafe(await readFile(join(root, "tests/database-governance.sql"), "utf8")); }
@@ -340,7 +547,7 @@ test.skipIf(!postgres)("real model HTTP/worker flow isolates tenants, replays re
       const authority: IdentityAuthority = {
         verifyHttp: async request => {
           const key = request.headers.get("authorization") ?? "";
-          const principal = principals[key]; if (!principal) throw new Error("Unverified token");
+          const principal = principals[key]; if (!principal) return null;
           return { id: principal.id, tenantId: principal.tenantId };
         },
         verifyWorker: async value => {

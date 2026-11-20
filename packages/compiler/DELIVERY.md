@@ -127,6 +127,49 @@ It replaces, rather than merges with, `config.delivery`. The executable project
 config is still loaded normally. Invalid configuration is rejected, not echoed.
 `--write` and unknown plan arguments fail. Successful output exits 0; failures exit 1.
 
+## Synchronous Application Profiles
+
+Set `delivery.httpProfile: "model-command"` for one application containing
+transactional model commands. `plan` and `build-delivery` reject multiple
+synchronous targets, including stand-alone forwarding Functions. A separate
+durable Jobs target is allowed. A standalone HTTP target needs a matching
+`build.httpApplications` entry with `database: true`. To keep the API inside an
+Edge Function instead, use:
+
+```ts
+delivery: {
+  version: 1,
+  httpProfile: "model-command",
+  functions: [{
+    slug: "orders",
+    modules: ["orders"],
+    entrypoint: "delivery-host.ts",
+    verifyJwt: true,
+    databaseSecret: "APP_ORDERS_DATABASE_URL",
+  }],
+}
+```
+
+`databaseSecret` names a Function secret, not its value. It is only supported
+on module-backed Functions and selects the model-command topology rule even
+when `httpProfile` is omitted. The composition module exports the same
+`createDeliveryDatabase(pool, { signal })` and
+`createDeliveryApplication(modules, { signal, deps: { dbClient } })` adapters as
+the HTTP profile; its returned `close()` releases app-owned state. The wrapper
+owns one connection per invocation, forwards the request signal and closes
+the app and pool before returning. It does not bind a listener or provision a
+database login. An abort, cleanup failure or lost response does not prove
+rollback; reconcile with the existing operation key.
+
+Use a scoped login, allow-list the named secret on the Function release, and
+use this profile only in a trusted runtime. The shared Edge Worker is not
+hard tenant isolation. Do not retain the database or use it for response-body
+streams or post-response work. `httpProfile: "function-data-plane"` checks for
+Function-only HTTP targets without declared direct DB bindings for projects
+using PostgREST/governed RPC. Existing plans without either profile and without
+a Function binding keep their behavior. These checks validate declared topology;
+they do not infer arbitrary outbound dependencies or verify live trust or grants.
+
 ## Programmatic Contract
 
 ```ts

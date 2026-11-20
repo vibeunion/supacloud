@@ -8,8 +8,73 @@ interface DeliveryFunctionHost {
  * Wrap a module-backed Function target in the host-owned application factory.
  * The generated application is already in scope as `createCompiledModules`.
  */
-export function renderDeliveryFunctionEntry(generatedDirectory: string, hostPath: string): string {
+export function renderDeliveryFunctionEntry(generatedDirectory: string, hostPath: string, databaseSecret?: string): string {
   const specifier = relativeImportPath(generatedDirectory, hostPath);
+  if (databaseSecret !== undefined) {
+    return `
+import * as deliveryFunctionHostModule from ${JSON.stringify(specifier)};
+import { createBunSqlHost as createDeliverySqlHost } from "@supacloud/db/bun";
+
+type BoundFunctionHost = {
+  fetch(request: Request): Response | Promise<Response>;
+  close(): void | Promise<void>;
+};
+const { createDeliveryApplication, createDeliveryDatabase } = deliveryFunctionHostModule as {
+  createDeliveryApplication?: (
+    modules: ReturnType<typeof createCompiledModules>,
+    lifecycle: { signal: AbortSignal; deps: { dbClient: unknown } },
+  ) => BoundFunctionHost | Promise<BoundFunctionHost>;
+  createDeliveryDatabase?: (
+    pool: ReturnType<typeof createDeliverySqlHost>["pool"], lifecycle: { signal: AbortSignal },
+  ) => unknown | Promise<unknown>;
+};
+if (typeof createDeliveryApplication !== "function" || typeof createDeliveryDatabase !== "function") {
+  throw new Error("Invalid Function database adapter; export createDeliveryApplication and createDeliveryDatabase.");
+}
+const createBoundApplication = createDeliveryApplication;
+const createBoundDatabase = createDeliveryDatabase;
+
+export default {
+  __supacloud: { routeAware: true },
+  async fetch(request: Request): Promise<Response> {
+    const { signal } = request;
+    signal.throwIfAborted();
+    const url = process.env[${JSON.stringify(databaseSecret)}];
+    if (!url) return new Response("Function database binding is not configured.", { status: 503 });
+
+    // Every invocation owns at most one PostgreSQL connection; no Worker singleton retains credentials.
+    let database: ReturnType<typeof createDeliverySqlHost> | undefined;
+    let host: BoundFunctionHost | undefined;
+    try {
+      database = createDeliverySqlHost({ env: { DATABASE_URL: url }, max: 1, closeTimeout: 1 });
+      const dbClient = await createBoundDatabase(database.pool, { signal });
+      signal.throwIfAborted();
+      host = await createBoundApplication(createCompiledModules(), { signal, deps: { dbClient } });
+      if (typeof host?.fetch !== "function" || typeof host.close !== "function") {
+        throw new Error("Invalid Function application adapter.");
+      }
+      signal.throwIfAborted();
+      const response = await host.fetch(request);
+      signal.throwIfAborted();
+      return response;
+    } catch {
+      signal.throwIfAborted();
+      return new Response("Function database application failed.", { status: 503 });
+    } finally {
+      try {
+        try {
+          if (typeof host?.close === "function") await host.close();
+        } finally {
+          await database?.close();
+        }
+      } catch {
+        throw new Error("Function database cleanup failed.");
+      }
+    }
+  },
+};
+`;
+  }
   return `
 import * as deliveryFunctionHostModule from ${JSON.stringify(specifier)};
 

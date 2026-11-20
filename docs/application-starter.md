@@ -49,30 +49,69 @@ decisions. Same-key/different-input requests fail; replay rechecks current acces
 The Worker entry consumes an already verified claim through an application-owned
 identity authority; it does not introduce a queue scheduler or claim loop.
 
-The generated `delivery` configuration is the supported production shape for
-model-command HTTP. `bun run build:delivery` emits an immutable Application
-target whose SupaCloud runtime creates the Bun SQL pool, injects it through
-`createDeliveryDatabase`, and closes it after HTTP drain. The application host
-never parses `DATABASE_URL` or exposes the pool to route modules. Supply the
-application's `MODEL_IDENTITY_MODULE` at runtime; identity verification and
-current access resolution remain application-owned. This is the platform
-managed trusted runtime that replaces a hand-copied `host.js`; it is not an
-Edge Function pool and it does not move business commands into SupaCloud.
+For an existing Edge Function in a shared operator trust domain, use
+`bun run check:function` and `bun run build:function`. The starter's
+`delivery.function.json` selects one module-backed Function and declares
+`databaseSecret: "APP_ORDERS_DATABASE_URL"`. The Function release manifest
+is `output/function/delivery/delivery.manifest.json`.
+Publish the object's `bundle/index.js` through the [existing CLI](cli-guide.md)
+using `edge_functions deploy --prebundled-path` and the approved digest.
+Set the named project secret to a least-privileged PostgreSQL URL, allow-list it
+in `capabilities.secrets` along with any identity settings needed by the app,
+and set `capabilities.background: false` for this transactional API. The generated
+handler opens at most one connection per invocation, closes it before returning,
+and never falls back to a platform database URL. Pick a role connection limit
+and server-side timeouts for the aggregate Worker concurrency. Business database
+work must finish before returning the response, not in streaming callbacks
+or `waitUntil`.
 
-Apply its reviewed migrations through the existing database ledger, provision a
-non-owner login with `model_orders_app` membership, and supply `IdentityAuthority`.
+For a standalone HTTP process, `bun run build` emits an HTTP artifact and its release
+manifest at `generated/delivery/delivery.manifest.json`. `build:delivery` is
+an alias; neither command deploys anything. The API, durable commands and identity adapter ship in one
+immutable target. The compiler-generated runtime creates the Bun SQL pool
+from the selected environment's runtime configuration, injects it into the
+trusted adapter, and closes it after HTTP drain. Application hosts do not
+parse `DATABASE_URL` or expose the pool to route modules.
+
+Implement `src/host/identity.ts` for verified HTTP tokens, worker claims and
+current application access. Until implemented, the application fails closed. Ship
+this code with the release; give the environment only data such as issuer
+settings and secrets, never a path to an executable identity module.
+Return `null` for invalid HTTP credentials so the API responds with 401;
+do not return `null` for verifier outages.
+Existing starters using `MODEL_IDENTITY_MODULE` can move the actual adapter
+into this source file and remove the runtime path in the same release.
+
+Apply its reviewed migrations through the existing database ledger and provision a
+non-owner login with `model_orders_app` membership.
 The host rejects superuser, BYPASSRLS and table-owner membership. The role is private
 to the trusted host: ZenStack enforces tenant/owner filtering, while the SQL policy
 restricts access to that role. It must not be granted to browser/PostgREST users.
-Set an explicit loopback `SUPACLOUD_MODEL_DATABASE_URL` and `MODEL_IDENTITY_MODULE`
-before `bun run dev`. This recipe starts the compiled model host; recompile after
-source changes. Startup never migrates or supplies a default identity provider.
+Set an explicit loopback `SUPACLOUD_MODEL_DATABASE_URL` before `bun run dev`;
+local execution uses the same identity source. Recompile after source changes.
+Use a local project database with its normal Auth helpers (the example RLS
+policies call `auth.jwt()`). Startup never migrates or supplies a default
+identity provider.
+
+For self-deployment, take the `api` object from the manifest and run
+`bun --no-env-file bundle/index.js` from its staged object directory
+(`generated/delivery/objects/<objectId>`). Inject `DATABASE_URL`, `HOST` and
+`PORT` through your supervisor, and retain the previous object for rollback.
+Use a trusted application runtime; do not put the login in the browser, the
+artifact or a shared untrusted Function environment.
+Alternatively, use [Application delivery](deploy-experience.md#one-command-application-release)
+to configure the hostname and login and release the same artifact to staging.
+Neither path provisions the login or implements application identity. A local
+manifest or queued release is not evidence of activation.
 
 The [focused model starter regression](../packages/cli/src/shared/tools/app-model-command-starter.test.ts)
-compiles and typechecks emitted files and exercises HTTP/Worker behavior against
-disposable PostgreSQL when `SUPACLOUD_STARTER_POSTGRES_BIN` is set. Queue delivery,
-publication and deployment require their own acceptance. The existing `command`
-recipe remains the native-SQL/RLS reference for more complex workflows.
+compiles and typechecks emitted files. With `SUPACLOUD_STARTER_POSTGRES_BIN` set,
+it also runs the packaged HTTP API and the Function in a real Edge Worker
+without their source tree or a separate command service, against disposable
+PostgreSQL. Queue delivery, official Linux activation and deployment require
+their own acceptance.
+The existing `command` recipe remains the native-SQL/RLS reference for more
+complex workflows.
 
 After the CLI release containing this command is published:
 
@@ -283,7 +322,8 @@ Use `onExecution` for metadata-only execution traces and compiler `context`/`exp
 for static plans. Real SupAuth sessions and durable database integration remain
 deployment acceptance gates, not properties established by the memory demo.
 
-`bun run build` produces `output/supacloud/application.js`, not a deployed service. Its
+For the `minimal` and `command` starters, `bun run build` produces
+`output/supacloud/application.js`, not a deployed service. Its
 `createApp(adapters)` factory requires trusted request identity, a persistent
 repository and command governance. The compiler and demo entry are not part of
 this production entry. The memory server refuses staging and production.
@@ -303,6 +343,7 @@ Keep these outputs disjoint, including when customizing frontend paths:
 | --- | --- | --- |
 | Generated TypeScript/contracts | `generated/` | SupaCloud compiler |
 | Application factory bundle | `output/supacloud/application.js` | Starter `build` script |
+| Self-deployable or managed HTTP release | `generated/delivery/` | Compiler delivery build |
 | Separately bundled Edge Functions | e.g. `output/supacloud/functions/<name>/index.js` | Application's explicit Function build |
 | Static frontend assets | e.g. `dist/` | Frontend build tool |
 
