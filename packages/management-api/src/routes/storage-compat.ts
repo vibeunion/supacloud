@@ -94,7 +94,7 @@ function isBucketNotEmpty(error: unknown): error is Error {
     return error instanceof Error && error.message === "Bucket is not empty";
 }
 
-import { createHmac, randomUUID } from "crypto";
+import { createHash, createHmac, randomUUID } from "crypto";
 
 async function mapWithConcurrency<T, R>(
     items: T[],
@@ -438,6 +438,40 @@ const STORAGE_CORS_EXPOSE_HEADERS = [
     "Tus-Resumable", "Tus-Version", "Tus-Extension", "Tus-Max-Size",
     "Upload-Offset", "Upload-Length", "Location",
 ].join(", ");
+
+const TUS_OWNER_PREFIX = "tus-owner-v1:";
+
+async function tusOwner(ref: string, token: string | undefined): Promise<string | null> {
+    let identity: string[];
+    if (!token) {
+        identity = ["anonymous"];
+    } else {
+        try {
+            const claims = await StorageRLS.verifyToken(ref, token);
+            identity = claims.role === "authenticated" && typeof claims.sub === "string" && claims.sub
+                ? ["authenticated", typeof claims.iss === "string" ? claims.iss : "", claims.sub]
+                : ["credential", token.replace(/^Bearer\s+/i, "")];
+        } catch {
+            return null;
+        }
+    }
+    return TUS_OWNER_PREFIX + createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+}
+
+async function authorizeTusSession(
+    ref: string,
+    upload: { ref: string; auth_token?: string },
+    token: string | undefined,
+): Promise<{ upsert: boolean } | null> {
+    if (upload.ref !== ref) return null;
+    const owner = await tusOwner(ref, token);
+    if (!owner) return null;
+    const stored = upload.auth_token || "";
+    if (stored === `${owner}:insert`) return { upsert: false };
+    if (stored === `${owner}:upsert`) return { upsert: true };
+    // In-flight uploads created by older releases can continue with the original credential.
+    return !stored.startsWith(TUS_OWNER_PREFIX) && stored === (token || "") ? { upsert: true } : null;
+}
 
 export const storageCompatRoutes = new Elysia({ prefix: "" })
 
@@ -1998,7 +2032,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const uploadLength = Number(headers['upload-length'] || 0);
 
         // Reject zero-byte uploads (must have a positive Upload-Length)
-        if (!uploadLength || uploadLength <= 0) {
+        if (!Number.isSafeInteger(uploadLength) || uploadLength <= 0) {
             return status(400, { statusCode: "400", error: 'Bad Request', message: 'Upload-Length must be greater than 0' });
         }
 
@@ -2038,8 +2072,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // TUS Authorization Gate (DryRun only — we don't materialize until complete)
         const auth = headers['authorization'];
+        const owner = await tusOwner(ref, auth);
+        if (!owner) return status(403, { statusCode: "403", error: "Forbidden", message: "Access Denied." });
+        const upsert = headers['x-upsert']?.toLowerCase() !== "false";
         const metadata = { mimetype: contentType, size: uploadLength, cacheControl: meta.cacheControl, userMetadata: meta };
-        const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', bucket, objectName, metadata, true);
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', bucket, objectName, metadata, true, upsert);
         if (!permitted.permitted) {
             return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { 
                 statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', 
@@ -2059,7 +2096,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             totalSize: uploadLength,
             offset: 0,
             createdAt: Date.now(),
-            auth_token: auth || '',
+            // Reuse the legacy credential column without retaining the bearer token in new sessions.
+            auth_token: `${owner}:${upsert ? "upsert" : "insert"}`,
             meta: meta
         });
 
@@ -2076,7 +2114,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
-        if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
+        if (!await authorizeTusSession(ref, upload, headers['authorization'])) return status(404, { message: 'Upload not found' });
 
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Upload-Offset'] = String(upload.offset);
@@ -2092,7 +2130,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
-        if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
+        const auth = headers['authorization'];
+        const session = await authorizeTusSession(ref, upload, auth);
+        if (!session) return status(404, { message: 'Upload not found' });
         if (!request.body) return status(400, { message: 'Missing upload chunk body' });
 
         const chunkLength = parseContentLength(headers['content-length']);
@@ -2122,12 +2162,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 // Transactional RLS Finalization
                 const finalPermitted = await StorageRLS.authorizeAction(
                     upload.ref, 
-                    upload.auth_token, 
+                    auth,
                     'upload', 
                     upload.bucket, 
                     upload.objectName, 
                     { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl, ...(upload.meta?.contentEncoding ? { contentEncoding: upload.meta.contentEncoding } : {}) },
-                    false, true, undefined, undefined,
+                    false, session.upsert, undefined, undefined,
                     async () => {
                         const uploaded = await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, asm.stream, upload.contentType);
                         if (!uploaded) throw new Error('PHYSICAL_UPLOAD_FAILED');
@@ -2163,8 +2203,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     }, async ({ params, headers, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
-        if (upload && upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
-        await TusStore.delete(params.uploadId);
+        if (upload && !await authorizeTusSession(ref, upload, headers['authorization'])) return status(404, { message: 'Upload not found' });
+        if (upload) await TusStore.delete(params.uploadId);
         set.headers['Tus-Resumable'] = '1.0.0';
         set.status = 204;
         return '';
