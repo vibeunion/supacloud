@@ -240,7 +240,8 @@ import { decodeApprove, decodeCreate, decodeOrder, decodeReceipt, type ApproveIn
 export interface ActorBinding { readonly id: string; readonly tenantId: string }
 export interface VerifiedClaim { readonly actor: ActorBinding; readonly operationId: string; readonly input: ApproveInput }
 export interface IdentityAuthority {
-  verifyHttp(request: Request): Promise<ActorBinding>;
+  // Return null for a missing or invalid credential. Do not mask verifier outages as invalid credentials.
+  verifyHttp(request: Request): Promise<ActorBinding | null>;
   // Verify a claimed job's issuer/project/actor and original operation key; do not trust its JSON fields.
   verifyWorker(claim: unknown): Promise<VerifiedClaim>;
   // Resolve current access for every HTTP or worker invocation, including receipt replay.
@@ -296,7 +297,7 @@ export async function createModelOrderHost(
   const approval = ordersModule?.commands?.find(command => command.name === "orders.approve")?.aspectPipeline;
   if (!approval) { await database.dispose(); throw new Error("Compile the orders command and its aspect first"); }
   const bindings = new WeakMap<object, { actor: ActorBinding; signal: AbortSignal | undefined }>();
-  const issue = (actor: ActorBinding, signal?: AbortSignal): object => {
+  const issue = (actor: ActorBinding | null, signal?: AbortSignal): object => {
     if (!actor || typeof actor.id !== "string" || !actor.id || typeof actor.tenantId !== "string" || !actor.tenantId) {
       throw new ApplicationError("Verified actor required", { status: 401, code: "IDENTITY_REQUIRED" });
     }
@@ -391,15 +392,19 @@ export function modelCommandTemplateFiles(name: string, sdk: StarterSdkDependenc
   return {
     ...files,
     ...receiptFunctions,
+    ".gitignore": files[".gitignore"] + "generated/delivery/\n",
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module", engines: { bun: ">=1.4.5" },
       scripts: {
         "db:generate": "supacloud-model generate && supacloud-db generate", "db:check": "supacloud-model check && supacloud-db check",
         "db:diff": "supacloud db plan --dir migrations", "db:plan": "supacloud db plan --dir migrations", "db:apply": "supacloud db apply --dir migrations", "db:pull": "supacloud-model pull",
         compile: "supacloud-compiler compile", "check:generated": "supacloud-compiler check", typecheck: "tsc --noEmit",
-        check: "bun run db:check && bun run check:generated && bun run typecheck", test: "bun test",
-        "build:delivery": "bun run db:check && bun run compile && supacloud-compiler build-delivery",
-        build: "bun run db:check && bun run compile && bun run typecheck && bun build src/application.ts --target bun --outdir output/supacloud",
+        "check:delivery": "supacloud-compiler plan",
+        "check:function": "supacloud-compiler plan --delivery delivery.function.json --out output/function",
+        check: "bun run db:check && bun run check:generated && bun run check:delivery && bun run typecheck", test: "bun test",
+        build: "bun run db:check && bun run compile && supacloud-compiler build-delivery",
+        "build:delivery": "bun run build",
+        "build:function": "bun run db:check && bun run compile && supacloud-compiler build-delivery --delivery delivery.function.json --out output/function",
         dev: "bun --no-env-file scripts/environment.ts development bun scripts/serve-model.ts",
       },
       dependencies: { "@supacloud/app": "^" + app.version, "@supacloud/elysia": "^" + elysia.version,
@@ -415,11 +420,19 @@ export default defineSupacloudConfig({
     rpc: { modelOrders: { boundary: "database", transaction: true, audit: true, idempotency: true } } },
   delivery: {
     version: 1,
+    httpProfile: "model-command",
     targets: [{ name: "api", kind: "api", modules: ["app"] }],
     build: { httpApplications: [{ target: "api", source: "delivery-host.ts", database: true }] },
   },
 });
 `,
+    "delivery.function.json": json({
+      version: 1, httpProfile: "model-command",
+      functions: [{
+        slug: "model-orders", modules: ["app", "orders"], entrypoint: "delivery-host.ts",
+        verifyJwt: true, databaseSecret: "APP_ORDERS_DATABASE_URL",
+      }],
+    }),
     "database.sources.json": json({ version: 1, schema: ["zenstack/schema.zmodel", "zenstack/generated/schema.ts"], functions: "db/functions", migrations: "migrations", contracts: "db/contracts", audit: "output/database-audit", consumers: ["src", "scripts", "tests"], auditConsumers: [], trustedHosts: ["src/host", "src/application.ts", "src/delivery-host.ts"], role: "model_orders_app" }),
     "zenstack/schema.zmodel": MODEL,
     "migrations/001-command-receipts.sql": COMMAND_RECEIPT_SQL,
@@ -459,34 +472,22 @@ import { OrdersModule } from "./features/orders/orders";
 export class AppModule {}
 `,
     "src/host/model-orders.ts": HOST,
+    "src/host/identity.ts": `import type { IdentityAuthority } from "./model-orders";
+
+// Verify tokens and claims and resolve current access here. Never trust caller-supplied actor data.
+export function createIdentityAuthority(): IdentityAuthority | Promise<IdentityAuthority> {
+  throw new Error("Configure the application identity authority in src/host/identity.ts");
+}
+`,
     "src/application.ts": 'export { createModelOrderHost } from "./host/model-orders";\nexport type { IdentityAuthority, ActorBinding, VerifiedClaim } from "./host/model-orders";\n',
     "src/delivery-host.ts": `import type { SQL } from "bun";
 import type { CompiledModule } from "@supacloud/elysia";
-import { createModelOrderHost, type IdentityAuthority } from "./application";
-
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value?.trim()) throw new Error("Missing required host setting: " + name);
-  return value;
-}
+import { createModelOrderHost } from "./application";
+import { createIdentityAuthority } from "./host/identity";
 
 function isSqlPool(value: unknown): value is SQL {
   return ((typeof value === "object" && value !== null) || typeof value === "function")
     && typeof Reflect.get(value, "begin") === "function";
-}
-
-function isIdentityAuthority(value: unknown): value is IdentityAuthority {
-  return value !== null && typeof value === "object"
-    && ["verifyHttp", "verifyWorker", "resolve"].every(key => typeof Reflect.get(value, key) === "function");
-}
-
-async function identityAuthority(): Promise<IdentityAuthority> {
-  const loaded: unknown = await import(/* @supacloud/runtime-import */ required("MODEL_IDENTITY_MODULE"));
-  const authority = loaded && typeof loaded === "object" && "authority" in loaded
-    ? loaded.authority : undefined;
-  if (!authority || typeof authority !== "object") throw new Error("Missing identity authority");
-  if (!isIdentityAuthority(authority)) throw new Error("Incomplete identity authority");
-  return authority;
 }
 
 /** The compiler owns pool creation and shutdown; this adapter only receives it. */
@@ -503,7 +504,7 @@ export async function createDeliveryApplication(
   const candidate = lifecycle.deps?.["dbClient"];
   if (!isSqlPool(candidate)) throw new Error("Platform database pool is unavailable");
   const pool = candidate;
-  const host = await createModelOrderHost(pool, await identityAuthority(), modules);
+  const host = await createModelOrderHost(pool, await createIdentityAuthority(), modules);
   return {
     fetch: (request: Request) => host.app.handle(request),
     close: () => host.dispose(),
@@ -511,24 +512,18 @@ export async function createDeliveryApplication(
 }
 `,
     "scripts/serve-model.ts": `import { createBunSqlHost } from "@supacloud/db/bun";
-import { createModelOrderHost, type IdentityAuthority } from "../src/application";
-// Local bootstrap accepts an explicitly supplied identity authority, never a built-in production login.
+import { createModelOrderHost } from "../src/application";
+import { createIdentityAuthority } from "../src/host/identity";
 if (process.env["APP_ENV"] !== "development") throw new Error("Development entry only");
 const raw = process.env["SUPACLOUD_MODEL_DATABASE_URL"];
-const authorityModule = process.env["MODEL_IDENTITY_MODULE"];
-if (!raw || !authorityModule) throw new Error("Set a local SUPACLOUD_MODEL_DATABASE_URL and MODEL_IDENTITY_MODULE exporting authority");
+if (!raw) throw new Error("Set an explicit local SUPACLOUD_MODEL_DATABASE_URL");
 const url = new URL(raw);
 if (!["postgres:", "postgresql:"].includes(url.protocol) || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.search || url.hash) throw new Error("Explicit loopback database required");
-const loaded: unknown = await import(authorityModule);
-if (!loaded || typeof loaded !== "object" || !("authority" in loaded) || !loaded.authority || typeof loaded.authority !== "object") throw new Error("Missing identity authority");
-const authority = loaded.authority;
-for (const key of ["verifyHttp", "verifyWorker", "resolve"] as const) {
-  if (!(key in authority) || typeof Reflect.get(authority, key) !== "function") throw new Error("Incomplete identity authority");
-}
+const authority = await createIdentityAuthority();
 const databaseHost = createBunSqlHost({ env: { DATABASE_URL: raw } });
 let host: Awaited<ReturnType<typeof createModelOrderHost>>;
 try {
-  host = await createModelOrderHost(databaseHost.pool, authority as IdentityAuthority);
+  host = await createModelOrderHost(databaseHost.pool, authority);
 } catch (error) {
   await databaseHost.close();
   throw error;
@@ -539,7 +534,7 @@ process.once("SIGINT", () => { void stop(); });
 process.once("SIGTERM", () => { void stop(); });
 console.log("Model orders: " + server.url);
 `,
-    "AGENTS.md": "# Model command development\n\nMaintain ZModel and TypeBox contracts. Regenerate and commit model/source/compiled artifacts together. Business writes use transaction.db inside the durable command. HTTP and worker use the same facade and original operation key. Bind trusted identity at src/host; resolve current access on every call. The dedicated database role is private to this host, never a browser/PostgREST role. Keep the compiled approval aspect inside the command transaction. Do not fake capabilities, replace results, retry writes in aspects, or add another receipt/audit store. The platform delivery wrapper owns the SQL pool; application hosts must receive it through createDeliveryDatabase and must not parse DATABASE_URL. Daily changes run one related test file and git diff --check.\n",
+    "AGENTS.md": "# Model command development\n\nMaintain ZModel and TypeBox contracts. Regenerate and commit model/source/compiled artifacts together. Business writes use transaction.db inside the durable command. HTTP and worker use the same facade and original operation key. Bind trusted identity at src/host; resolve current access on every call. The dedicated database role is private to this host, never a browser/PostgREST role. Keep the compiled approval aspect inside the command transaction. Do not fake capabilities, replace results, retry writes in aspects, or add another receipt/audit store. Keep delivery.httpProfile set to model-command and ship the API, identity adapter and synchronous commands in one target. The generated runtime owns the SQL pool; application hosts receive it through createDeliveryDatabase and do not parse DATABASE_URL. Existing standard Functions can keep PostgREST and governed database RPC instead of adding a command service. Daily changes run one related test file and git diff --check.\n",
     "README.md": `# ${name}
 
 Model-backed order creation and approval use ZenStack + Bun SQL. HTTP and the worker handler share the same durable Command, compiled approval aspect, identity policy, receipt and transaction.
@@ -547,8 +542,12 @@ Model-backed order creation and approval use ZenStack + Bun SQL. HTTP and the wo
 1. Install matching published package versions: bun install.
 2. Run bun run db:generate, bun run compile, then bun run check. Commit generated artifacts.
 3. Review migrations/ and apply through the existing SupaCloud db plan/apply flow to an explicitly selected local/shadow database. Startup never migrates. Provision a non-owner login with model_orders_app membership separately.
-4. Supply IdentityAuthority.verifyHttp (trusted token verification), verifyWorker (claimed job verification including actor/project and original operation key), and resolve (current access). createModelOrderHost rejects privileged database roles and has no default anonymous or memory identity.
-5. For local serving, set SUPACLOUD_MODEL_DATABASE_URL and MODEL_IDENTITY_MODULE (exports authority), then bun run dev. The script binds loopback only. For platform delivery, run bun run build:delivery; SupaCloud creates and closes the SQL pool through the generated HTTP runtime wrapper, while this project supplies MODEL_IDENTITY_MODULE and the identity authority.
+4. Implement src/host/identity.ts to verify HTTP tokens and worker claims and resolve current access. Until it is implemented, startup fails closed. The identity adapter ships with the API and commands; only settings and secrets vary by environment.
+5. For local serving, set SUPACLOUD_MODEL_DATABASE_URL and run bun run dev. The development listener binds loopback.
+6. For an Edge Function, run bun run build:function for output/function/delivery/delivery.manifest.json. Deploy the model-orders object's prebundled bundle/index.js through the existing Function release flow. Add the APP_ORDERS_DATABASE_URL project secret and allow-list it for this Function. Use the scoped model_orders_app login, not a general platform credential. The build owns one connection per invocation, closes it before returning and starts no listener. Use a shared runtime only for projects in the same trust domain. Disable Function background work for this HTTP API; durable workers have their own entry.
+7. Alternatively, bun run build emits an HTTP executable in generated/delivery. Run its bundle/index.js under your own supervisor with DATABASE_URL, HOST and PORT, or use managed Application delivery. Both build profiles package the API, identity and commands together. Do not deploy a separate command service.
+
+Existing Function paths that use PostgREST or governed RPC can stay on that data plane; model-command is not a mandatory migration.
 
 POST /orders accepts { id, title }. POST /orders/:id/approve accepts { expectedVersion }. Both require Idempotency-Key and return a durable receipt; result.outcome is applied or conflict. A stale version is a persisted conflict decision; use a new operation key only for a genuinely new, reviewed attempt. GET /orders/:id returns a policy-filtered order or null. Tenant and owner are never accepted from request bodies.
 

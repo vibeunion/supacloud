@@ -190,7 +190,7 @@ export async function buildDeliveryProject(
         applicationCode = rendered!.applicationCode
           + (host?.kind === "http" ? renderDeliveryHttpEntry(generatedDirectory, host.path, host.database)
             : host?.kind === "worker" ? renderDeliveryWorkerEntry(generatedDirectory, host.path, host.database)
-              : host?.kind === "function" ? renderDeliveryFunctionEntry(generatedDirectory, host.path) : "");
+              : host?.kind === "function" ? renderDeliveryFunctionEntry(generatedDirectory, host.path, target.function?.databaseSecret) : "");
         generated = {
           "application.ts": applicationCode,
           ...(rendered!.clientCode === undefined ? {} : { "client.ts": rendered!.clientCode }),

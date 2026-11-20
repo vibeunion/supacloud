@@ -10,6 +10,7 @@ const isolation = Type.Union([Type.Literal("shared"), Type.Literal("process")]);
 const targetName = Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" });
 const functionSlug = Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" });
 const mode = Type.Union([Type.Literal("required"), Type.Literal("none")]);
+const functionDatabaseSecret = Type.String({ maxLength: 64, pattern: "^APP_[A-Z][A-Z0-9_]*_DATABASE_URL$" });
 export const DeliveryFilePathSchema = Type.String({
   maxLength: 512,
   pattern: "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$",
@@ -19,6 +20,7 @@ const functionTarget = Type.Object({
   slug: functionSlug,
   entrypoint: DeliveryFilePathSchema,
   verifyJwt: Type.Boolean(),
+  databaseSecret: Type.Optional(functionDatabaseSecret),
 }, objectOptions);
 
 /** Convenience declaration expanded into a module-owned Function target. */
@@ -28,10 +30,15 @@ const automaticFunction = Type.Object({
   modules: Type.Array(reference, { minItems: 1, uniqueItems: true }),
   entrypoint: DeliveryFilePathSchema,
   verifyJwt: Type.Boolean(),
+  databaseSecret: Type.Optional(functionDatabaseSecret),
 }, objectOptions);
 
 export const DeliveryOptionsSchema = Type.Object({
   version: Type.Literal(1),
+  httpProfile: Type.Optional(Type.Union([
+    Type.Literal("function-data-plane"),
+    Type.Literal("model-command"),
+  ])),
   execution: Type.Optional(WorkerExecutionSchema),
   targets: Type.Optional(Type.Array(Type.Object({
     name: targetName,
@@ -169,7 +176,7 @@ export class DeliveryConfigurationError extends Error {
 
   constructor() {
     // Never include rejected values: configuration may accidentally contain secrets.
-    super("Invalid delivery configuration. Expected version: 1, optional targets, runtime and build; unknown keys and invalid references are rejected.");
+    super("Invalid delivery configuration. Expected version: 1 and supported delivery options (including httpProfile, targets, runtime and build); unknown keys and invalid references are rejected.");
     this.name = "DeliveryConfigurationError";
   }
 }
@@ -185,6 +192,7 @@ export function parseDeliveryOptions(value: unknown): DeliveryOptions {
     // modules whose HTTP routes are projected into that Function.
     const invalidShape = target.kind === "function"
       ? target.function === undefined || target.compute !== undefined
+        || (target.function.databaseSecret !== undefined && target.modules === undefined)
       : target.modules === undefined || target.function !== undefined;
     if (invalidShape) throw new DeliveryConfigurationError();
   }
@@ -224,6 +232,7 @@ export function parseDeliveryOptions(value: unknown): DeliveryOptions {
         slug: declared.slug,
         entrypoint: declared.entrypoint,
         verifyJwt: declared.verifyJwt,
+        ...(declared.databaseSecret === undefined ? {} : { databaseSecret: declared.databaseSecret }),
       },
     });
   }

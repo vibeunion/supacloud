@@ -167,6 +167,31 @@ export function createDeliveryPlan(
   }
   if (targets.size === 0 && declarations.size === 0) getTarget("api", "api");
 
+  const httpTargets = [...targets.values()].filter((target) => target.kind !== "jobs");
+  const httpApplications = options.build?.httpApplications ?? [];
+  const hasFunctionDatabase = httpTargets.some((target) => target.function?.databaseSecret !== undefined);
+  const httpProfile = options.httpProfile ?? (hasFunctionDatabase ? "model-command" : undefined);
+  if (httpProfile === "model-command") {
+    const [target] = httpTargets;
+    if (httpTargets.length !== 1 || !target) {
+      fail("delivery-model-command-split",
+        `The model-command HTTP profile requires one synchronous release target; found ${httpTargets.map(({ name }) => `"${name}"`).join(", ") || "none"}.`,
+        "Package the API, trusted identity adapter and synchronous commands in one HTTP target. Declare independently owned components in a separate delivery plan.");
+    } else if (target.kind === "function" ? !target.function?.databaseSecret || httpApplications.length > 0
+      : httpApplications.length !== 1 || !httpApplications.some((app) => app.target === target.name && app.database === true)) {
+      fail("delivery-model-command-database-required",
+        `Target "${target.name}" cannot satisfy the model-command HTTP profile without a transactional database host.`,
+        "Bind this target's Function databaseSecret or set database: true on its build.httpApplications entry. Do not forward to a command-only target.");
+    }
+  } else if (httpProfile === "function-data-plane") {
+    const incompatible = httpTargets.filter((target) => target.kind !== "function" || target.function?.databaseSecret !== undefined);
+    if (httpTargets.length === 0 || incompatible.length > 0 || httpApplications.length > 0) {
+      fail("delivery-function-data-plane-target-required",
+        `The function-data-plane HTTP profile requires Function targets without direct database bindings or a separate HTTP application${incompatible.length ? `; check ${incompatible.map(({ name }) => `"${name}"`).join(", ")}` : ""}.`,
+        "Use PostgREST or governed RPC, or select model-command for a Function with a transactional database binding.");
+    }
+  }
+
   for (const target of targets.values()) {
     target.roots = sorted(target.roots);
     // Module-granularity closure is deliberately conservative; no provider-level pruning.
