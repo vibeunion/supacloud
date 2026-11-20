@@ -560,6 +560,25 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("absent");
   });
 
+  test("rejects a source that still uses the removed Deno compatibility layer", async () => {
+    const ref = "proj_deno_layer_removed";
+    const slug = "legacy-serve";
+    globalThis.fetch = runtimeSuccessFetch(async () => Response.json({ success: true, version: "1" }));
+
+    const deployed = await deployConditionalRelease({
+      ref,
+      slug,
+      code: `Deno.serve(() => new Response("legacy"));
+`,
+    });
+
+    expect(deployed.success).toBe(false);
+    expect(deployed.error).toContain("Deno compatibility layer");
+    expect(deployed.error).toContain("line 1: Deno.serve()");
+    expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({});
+    expect(await edgeFunctionService.list(ref)).toEqual([]);
+  });
+
   test("propagates corrupt candidate config without hiding valid active functions", async () => {
     const ref = "proj_list_corrupt_config";
     const projectDir = join(functionsRoot, ref);
