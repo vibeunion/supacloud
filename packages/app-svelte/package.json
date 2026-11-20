@@ -35,7 +35,7 @@
     "svelte": "^5.0.0"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "typescript": "6.0.3",
     "svelte": "5.57.3",
     "svelte-check": "4.7.8",

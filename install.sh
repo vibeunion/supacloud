@@ -62,7 +62,7 @@ EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
 PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
-BUN_VERSION="${BUN_VERSION:-1.4.4}"
+BUN_VERSION="${BUN_VERSION:-1.4.5}"
 GO_VERSION="${GO_VERSION:-1.27.1}"
 XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 
@@ -215,7 +215,7 @@ supacloud_resolve_artifact_policy() {
 }
 
 ensure_bun_version() {
-    local required_version="${BUN_VERSION:-1.4.4}"
+    local required_version="${BUN_VERSION:-1.4.5}"
     local current_version=""
 
     if command -v bun &> /dev/null; then
@@ -2020,7 +2020,7 @@ install_caddy_gateway() {
         rm -rf /tmp/supacloud-caddy-build
     elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then
         log_warn "Installing stock Caddy fallback without SupaCloud rate-limit/cache modules. Do not use this for production delivery optimization."
-        local caddy_version="${CADDY_VERSION:-2.11.7}"
+        local caddy_version="${CADDY_VERSION:-2.11.9}"
         local caddy_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_${arch}.tar.gz"
         mkdir -p /tmp/supacloud-caddy
         supacloud_download_url "$caddy_url" /tmp/supacloud-caddy/caddy.tar.gz
