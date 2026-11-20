@@ -64,7 +64,7 @@
     "@electric-sql/pglite-postgis": "0.2.16",
     "@supacloud/db": "file:../db",
     "exact-mirror": "1.2.7",
-    "fast-xml-parser": "5.12.0",
+    "fast-xml-parser": "5.12.1",
     "tar": "^7.5.22",
     "typebox": "1.4.3"
   },
