@@ -3194,6 +3194,64 @@ describe("CaddyGatewayProvider ensureGatewayReady", () => {
 describe("canonical gateway reconciliation", () => {
     afterEach(cleanCaddyTmp);
 
+    test.each(["unchanged", "live drift", "durable drift", "unreadable live", "recovery"] as const)(
+        "periodic config comparison handles %s",
+        async (scenario) => {
+            const originalFetch = globalThis.fetch;
+            let liveConfig: Record<string, unknown> = {};
+            let loadCount = 0;
+            let durableWrites = 0;
+            let readUnavailable = false;
+            globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+                const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+                if (url.endsWith("/load") && init?.method === "POST" && typeof init.body === "string") {
+                    liveConfig = JSON.parse(init.body);
+                    loadCount++;
+                    readUnavailable = false;
+                    return Promise.resolve(new Response());
+                }
+                if (url.endsWith("/config/")) {
+                    return Promise.resolve(readUnavailable ? new Response(null, { status: 503 }) : Response.json(liveConfig));
+                }
+                return Promise.reject(new Error(`Unexpected request: ${url}`));
+            }) as unknown as typeof fetch;
+
+            class TestGateway extends CaddyGatewayProvider {
+                override async rebuildAllTenantConfigs() {
+                    return { success: true, updated: 0, errors: [] };
+                }
+            }
+            const gateway = new TestGateway({
+                beforeDurabilityStage: async (stage) => {
+                    if (stage === "candidate_rename") durableWrites++;
+                },
+            });
+            const dependencies = {
+                gateway,
+                reconcileFrontends: async () => ({ total: 0, configured: 0, skipped: 0, errors: [] }),
+            };
+            try {
+                await reconcileCanonicalGatewayRoutes(dependencies);
+                expect(loadCount).toBe(1);
+                expect(durableWrites).toBe(1);
+                const canonical = liveConfig;
+                const drifted = { ...canonical, admin: { listen: "127.0.0.1:2020" } };
+                if (scenario === "live drift") liveConfig = drifted;
+                if (scenario === "durable drift") await writeFile(config.caddyConfigPath, JSON.stringify(drifted));
+                if (scenario === "unreadable live") readUnavailable = true;
+
+                await reconcileCanonicalGatewayRoutes({ ...dependencies, skipUnchanged: scenario !== "recovery" });
+
+                expect(loadCount).toBe(scenario === "unchanged" ? 1 : 2);
+                expect(durableWrites).toBe(loadCount);
+                expect(liveConfig).toEqual(canonical);
+                expect(JSON.parse(await readFile(config.caddyConfigPath, "utf8"))).toEqual(canonical);
+            } finally {
+                globalThis.fetch = originalFetch;
+            }
+        },
+    );
+
     test("builds every route family once and confirms the live durable candidate", async () => {
         const events: string[] = [];
         const state = {
