@@ -14,6 +14,27 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.125.0](https://github.com/vibeunion/supacloud/compare/cli-v0.124.1...cli-v0.125.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **edge-runtime:** Edge functions that rely on `Deno.serve()`, `Deno.env`, `Deno.readTextFile()` or `import "https://deno.land/std/..."` no longer run. Author them as a default-exported handler and use `ctx.env`/`process.env`, Bun/Node APIs and npm specifiers instead. Stored function configs and version metadata that still carry `import_map` keep loading; the key is ignored.
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2695](https://github.com/vibeunion/supacloud/issues/2695)) ([8944404](https://github.com/vibeunion/supacloud/commit/89444044eff896a6f62b527d30faec0624947bf8))
+
+
+### Elegance & Refactoring
+
+* **edge-runtime:** remove the Deno compatibility layer ([#2699](https://github.com/vibeunion/supacloud/issues/2699)) ([7db92d5](https://github.com/vibeunion/supacloud/commit/7db92d5dd630b644f8480674f46098616ca93f89))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.124.1](https://github.com/vibeunion/supacloud/compare/cli-v0.124.0...cli-v0.124.1) (2026-11-19)
 
 

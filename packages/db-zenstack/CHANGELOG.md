@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.3.2...db-zenstack-v0.3.3) (2026-11-20)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.3.2](https://github.com/vibeunion/supacloud/compare/db-zenstack-v0.3.1...db-zenstack-v0.3.2) (2026-11-19)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.19](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.18...supacloud-v0.19.19) (2026-11-20)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#2694](https://github.com/vibeunion/supacloud/issues/2694)) ([ba2e937](https://github.com/vibeunion/supacloud/commit/ba2e937d11b6fdabf8608a47ae39bc7bd0b77304))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.19.18](https://github.com/vibeunion/supacloud/compare/supacloud-v0.19.17...supacloud-v0.19.18) (2026-11-17)
 
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.9.3...function-adapter-v0.10.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **edge-runtime:** Edge functions that rely on `Deno.serve()`, `Deno.env`, `Deno.readTextFile()` or `import "https://deno.land/std/..."` no longer run. Author them as a default-exported handler and use `ctx.env`/`process.env`, Bun/Node APIs and npm specifiers instead. Stored function configs and version metadata that still carry `import_map` keep loading; the key is ignored.
+
+### Bug Fixes
+
+* **deps-dev:** bump @sveltejs/kit in /packages/function-adapter ([#2717](https://github.com/vibeunion/supacloud/issues/2717)) ([06c7e02](https://github.com/vibeunion/supacloud/commit/06c7e02f9c432809940616487d0fc59140e7aaed))
+* **deps-dev:** bump vite in /packages/function-adapter ([#2719](https://github.com/vibeunion/supacloud/issues/2719)) ([9dd0680](https://github.com/vibeunion/supacloud/commit/9dd0680b7265d455010b4bc8dcd755b7e8db3546))
+
+
+### Elegance & Refactoring
+
+* **edge-runtime:** remove the Deno compatibility layer ([#2699](https://github.com/vibeunion/supacloud/issues/2699)) ([7db92d5](https://github.com/vibeunion/supacloud/commit/7db92d5dd630b644f8480674f46098616ca93f89))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.9.3](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.9.2...function-adapter-v0.9.3) (2026-11-15)
 
 

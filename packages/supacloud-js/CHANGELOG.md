@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.48.5](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.4...supacloud-js-v0.48.5) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump typebox in /packages/supacloud-js ([#2710](https://github.com/vibeunion/supacloud/issues/2710)) ([db3b3f5](https://github.com/vibeunion/supacloud/commit/db3b3f580f6ea7c6a1ae8ecb9445d3d6cd505abf))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.48.4](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.3...supacloud-js-v0.48.4) (2026-11-15)
 
 

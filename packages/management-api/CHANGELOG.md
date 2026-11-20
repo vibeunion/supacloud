@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.138.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.8...management-api-v0.138.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **edge-runtime:** Edge functions that rely on `Deno.serve()`, `Deno.env`, `Deno.readTextFile()` or `import "https://deno.land/std/..."` no longer run. Author them as a default-exported handler and use `ctx.env`/`process.env`, Bun/Node APIs and npm specifiers instead. Stored function configs and version metadata that still carry `import_map` keep loading; the key is ignored.
+
+### Features
+
+* **app:** configure activation startup readiness timeout ([#2698](https://github.com/vibeunion/supacloud/issues/2698)) ([d54aee8](https://github.com/vibeunion/supacloud/commit/d54aee8be108d5e9ad8324653e26bd6717dc70bc))
+* **management-api:** reject Deno-era function sources at deploy time ([#2701](https://github.com/vibeunion/supacloud/issues/2701)) ([e0d83f6](https://github.com/vibeunion/supacloud/commit/e0d83f63d1d32a3a02c6387e388255acb56270ad))
+
+
+### Bug Fixes
+
+* **deps:** bump postgrest/postgrest from v16.5 to v16.6 in /docker/dev ([#2703](https://github.com/vibeunion/supacloud/issues/2703)) ([7e5efa9](https://github.com/vibeunion/supacloud/commit/7e5efa96f043bacc934540fda8aa9c0cbd0c20cf))
+* **deps:** bump supabase/gotrue from v2.197.0 to v2.198.0 in /docker/dev ([#2706](https://github.com/vibeunion/supacloud/issues/2706)) ([271c120](https://github.com/vibeunion/supacloud/commit/271c1204479f5f020b65f05d5ad2aa762a0799cd))
+
+
+### Elegance & Refactoring
+
+* **edge-runtime:** remove the Deno compatibility layer ([#2699](https://github.com/vibeunion/supacloud/issues/2699)) ([7db92d5](https://github.com/vibeunion/supacloud/commit/7db92d5dd630b644f8480674f46098616ca93f89))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.137.8](https://github.com/vibeunion/supacloud/compare/management-api-v0.137.7...management-api-v0.137.8) (2026-11-18)
 
 

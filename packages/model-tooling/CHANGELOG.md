@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/vibeunion/supacloud/compare/model-tooling-v0.1.1...model-tooling-v0.1.2) (2026-11-20)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun to 1.4.5 and Caddy to 2.11.9 ([#2726](https://github.com/vibeunion/supacloud/issues/2726)) ([e755c41](https://github.com/vibeunion/supacloud/commit/e755c41d512efed7b377aafc613683be8bb3b84c))
+
 ## [0.1.1](https://github.com/vibeunion/supacloud/compare/model-tooling-v0.1.0...model-tooling-v0.1.1) (2026-11-14)
 
 
