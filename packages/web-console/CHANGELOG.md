@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.59.5](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.4...web-console-v0.59.5) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @sveltejs/kit in /packages/web-console ([#2736](https://github.com/vibeunion/supacloud/issues/2736)) ([39180e6](https://github.com/vibeunion/supacloud/commit/39180e65aab4b933ec6d310b73bd9293d9cfce6d))
+* **deps-dev:** bump @tailwindcss/vite in /packages/web-console ([#2734](https://github.com/vibeunion/supacloud/issues/2734)) ([608649b](https://github.com/vibeunion/supacloud/commit/608649bcc7b8186cfbe99d3488615d1b59990df1))
+* **deps-dev:** bump bits-ui in /packages/web-console ([#2738](https://github.com/vibeunion/supacloud/issues/2738)) ([f825490](https://github.com/vibeunion/supacloud/commit/f825490c74ac90e948951cb7540eb4491d66f352))
+* **deps:** bump @svadmin/elysia in /packages/web-console ([#2735](https://github.com/vibeunion/supacloud/issues/2735)) ([18a8842](https://github.com/vibeunion/supacloud/commit/18a8842a51f1212e61205b13c2edb610070bae8a))
+* **deps:** bump @tanstack/svelte-query in /packages/web-console ([#2737](https://github.com/vibeunion/supacloud/issues/2737)) ([123fb14](https://github.com/vibeunion/supacloud/commit/123fb14c0c162479d75041d53a05cfa05473edac))
+
 ## [0.59.4](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.3...web-console-v0.59.4) (2026-11-20)
 
 
