@@ -96,6 +96,8 @@ framework = "elysia"   # fetch（默认）| elysia | hono
 
 注意：浏览器预检（OPTIONS）会转发给框架应用，框架函数应自行挂载 CORS（如 `@elysiajs/cors`），与生产 Edge Runtime 行为一致。
 
+函数的依赖由 `Bun.build` 在加载时打包：相对导入与 `npm:` 说明符从项目 `node_modules` 解析，`https://` URL 导入在首次加载时抓取并缓存到临时目录。`npm:` 不再经 CDN 拉取，缺少依赖时打包会失败并提示 `bun add <包名>`，而不是在每次启动时访问第三方 registry。
+
 #### Function 限制与能力声明
 
 `[functions.<name>]` 可声明运行限制（limits）与能力（capabilities），字段与生产 Edge Runtime Manifest v2 一一对应：

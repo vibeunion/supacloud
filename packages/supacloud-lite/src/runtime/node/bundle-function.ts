@@ -1,11 +1,13 @@
 /**
  * Bundle an edge function with Bun.build so TypeScript and dependency imports
- * resolve before the function is loaded. This resolves what a plain `import()` can't:
+ * resolve before the function is loaded:
  *   - TypeScript and multi-file functions (relative imports)
- *   - `npm:` specifiers  → rewritten to esm.sh and fetched
- *   - `https://` URL imports       → fetched (and their transitive deps)
+ *   - `npm:` specifiers     → Bun's own resolution from project `node_modules`
+ *   - `https://` URL imports → fetched at bundle time and disk-cached
  *
- * Remote modules are fetched at bundle time (first run) and disk-cached.
+ * npm packages are not fetched from a CDN during load: a function that imports
+ * `npm:x` needs `x` installed in the project, and the resulting bundle error
+ * says so instead of reaching a third-party registry on every boot.
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -13,10 +15,19 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-/** Map an npm specifier to a fetchable URL. Pure - unit tested. */
-export function rewriteRemoteSpecifier(spec: string): string {
-  if (spec.startsWith('npm:')) return `https://esm.sh/${spec.slice(4)}`
-  return spec // already an http(s) URL
+/** The URL Bun must fetch itself; every other specifier resolves locally. Pure. */
+export function remoteUrlSpecifier(spec: string): string | null {
+  return /^https?:\/\//.test(spec) ? spec : null
+}
+
+const NPM_SPECIFIER = /npm:([@A-Za-z0-9._/-]+)/
+
+/** Explain an unresolved `npm:` import instead of surfacing a bare Bun error. */
+function missingPackageHint(details: string): string {
+  if (!/could not resolve/i.test(details)) return ''
+  const specifier = NPM_SPECIFIER.exec(details)?.[1]
+  if (!specifier) return ''
+  return `\nInstall it in the project (\`bun add ${specifier}\`): npm: specifiers resolve from node_modules and are no longer fetched from a CDN at load time.`
 }
 
 const HTTP_CACHE = join(tmpdir(), 'supacloud-lite-fn-http')
@@ -33,13 +44,13 @@ async function fetchModule(url: string): Promise<string> {
   return body
 }
 
-/** Bun plugin: resolve npm:/https imports by fetching from esm.sh. */
+/** Bun plugin: fetch only `https://` imports; `npm:` stays with Bun. */
 function remotePlugin(): Bun.BunPlugin {
   return {
     name: 'supacloud-lite-remote',
     setup(build: Bun.PluginBuilder) {
-      build.onResolve({ filter: /^(npm:|https?:\/\/)/ }, (args: { path: string }) => ({
-        path: rewriteRemoteSpecifier(args.path),
+      build.onResolve({ filter: /^https?:\/\// }, (args: { path: string }) => ({
+        path: remoteUrlSpecifier(args.path) ?? args.path,
         namespace: 'http-url',
       }))
       // imports *inside* a fetched module resolve relative to its URL
@@ -83,11 +94,12 @@ export async function bundleFunction(entryPath: string, name: string): Promise<s
     } catch (cleanupError) {
       throw new AggregateError([buildThrow, cleanupError], `failed to clean function bundle directory ${outDir}`)
     }
-    throw new Error(`failed to bundle ${entryPath}\n${details}`, { cause: buildThrow })
+    throw new Error(`failed to bundle ${entryPath}\n${details}${missingPackageHint(details)}`, { cause: buildThrow })
   }
   try {
     if (!buildOutput.success || buildOutput.outputs.length === 0) {
-      throw new Error(buildOutput.logs.map((item) => item.message).join('\n') || `failed to bundle ${entryPath}`)
+      const details = buildOutput.logs.map((item) => item.message).join('\n')
+      throw new Error(`failed to bundle ${entryPath}\n${details}${missingPackageHint(details)}`)
     }
     const output = buildOutput.outputs[0]
     if (!output) throw new Error(`bundle produced no output for ${entryPath}`)
