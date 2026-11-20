@@ -10,7 +10,6 @@
  * modules that `export default` a handler.
  */
 import type { RequestContext } from '../types.js'
-import { runWithDenoEnv } from './deno-shim.js'
 import { runWithBackgroundTasks } from './edge-runtime-shim.js'
 import { runWithFetchPolicy } from './fetch-policy.js'
 import { type PgredisCache, runWithPgredisCache } from './pgredis.js'
@@ -237,13 +236,10 @@ export class FunctionsHandler {
     if (abort) request = withSignal(request, abort.signal)
     try {
       // 4. Secrets allowlist: the function sees the SUPABASE_* base trio plus
-      // only the declared secret keys - both via Deno.env and ctx.env.
+      // only the declared secret keys through its FunctionContext.
       const env = capabilities?.secrets ? filterSecretsEnv(this.env, capabilities.secrets) : this.env
-      // Bind Deno.env to this backend's function env for the call so a
-      // Deno.serve/Deno.env-style function reads its own secrets, not another
-      // backend's or the host process.env.
       const invoke = () => this.invoke(entry.handler, request, ctx, env)
-      const inner = () => runWithDenoEnv(env, () => runWithPgredisCache(this.pgredis, invoke))
+      const inner = () => runWithPgredisCache(this.pgredis, invoke)
       // 3. Outbound host allowlist; undeclared means fetch is not wrapped at all.
       const outboundHosts = capabilities?.outboundHosts
       const run = outboundHosts

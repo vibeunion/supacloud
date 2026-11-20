@@ -76,7 +76,7 @@ supabase/
 
 #### Function 框架契约（Elysia / Hono）
 
-Function 默认导出除 fetch 函数与 `Deno.serve()` 外，也支持框架路由器对象——Elysia 实例（`handle()`）与 Hono 应用（`fetch()`），与 SupaCloud Edge Runtime 的契约一致：
+Function 默认导出 fetch 函数，也支持框架路由器对象——Elysia 实例（`handle()`）与 Hono 应用（`fetch()`），与 SupaCloud Edge Runtime 的契约一致：
 
 ```ts
 // functions/api/index.ts
@@ -120,7 +120,7 @@ background = true                         # capabilities.background
 | `wait_until_timeout_ms` | integer | 响应返回后等待 `EdgeRuntime.waitUntil` 后台任务的最长时间；超时不再等待（任务继续运行，记录警告） | `limits.wait_until_timeout_ms` |
 | `max_heap_bytes` | integer | 1 字节到 512 MiB。strict 模式拒绝非法值。Lite 没有 Worker 隔离，不会按该值采样堆或回收进程 | `limits.max_heap_bytes` |
 | `outbound_hosts` | string[] | `fetch` 出站 host 白名单（精确匹配，不含端口）；loopback（localhost/127.0.0.1/::1）始终放行，未声明的 host 直接抛错 | `capabilities.outbound_hosts` |
-| `secrets` | string[] | 函数可见的环境变量白名单：基础三键（`SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`）+ 声明的 key，同时约束 `Deno.env` 与 `ctx.env` | `capabilities.secrets` |
+| `secrets` | string[] | 函数可见的环境变量白名单：基础三键（`SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`）+ 声明的 key，通过 `ctx.env` 提供 | `capabilities.secrets` |
 | `background` | boolean | 是否允许 `EdgeRuntime.waitUntil`；设为 `false` 时调用抛出与生产一致的错误 | `capabilities.background` |
 
 `EdgeRuntime.waitUntil(promise)` 注册跨响应的后台任务：响应照常返回，任务在响应后等待 allSettled（上限 `wait_until_timeout_ms`），任务中再次调用 `waitUntil` 的嵌套任务同样被追踪。Lite 面向本地开发默认**允许** `waitUntil`（向后兼容）；生产 Edge Runtime 需要声明 `background` capability。`backend.close()` 不等待仍在漂移的后台任务。
@@ -403,7 +403,7 @@ S3 对象和 multipart 完成后的总大小上限为 64 MiB，同时遵守 buck
 | `supabase.auth` | 已验证核心 | 由内置 Auth 实现而非独立 GoTrue 进程提供；自动测试覆盖邮箱密码、会话和 bcrypt；OTP/Magic Link、匿名用户、OAuth、MFA 属于实验性兼容 |
 | `supabase.storage` | 已验证核心 | 覆盖上传下载、列表、删除、TUS/RLS、远端 S3 驱动，以及 Bun.Image 的 `contain`/`fill`、格式和质量变换子集；`cover` 明确不支持 |
 | `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes`、DELETE RLS 隔离和事件快照校验；Broadcast、Presence 属于实验性兼容 |
-| `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |
+| `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、默认 handler、公开函数和同进程重启 |
 | Supabase Queues / PGMQ | 已验证核心 | 提供 `pgmq_public` 的 `send`、`send_batch`、`read`、`pop`、`archive`、`delete` RPC；队列数据持久化在项目数据库（PGlite 或 native PostgreSQL）中 |
 | Edge Functions `SupaCloud.pgredis` | 已验证核心 | 提供单项目持久 KV、TTL、原子 `getset`/`getdel`；绑定只在当前函数请求内可用 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
@@ -1004,7 +1004,7 @@ The first version deliberately excludes virtual-hosted-style addressing, S3 ACL/
 | `supabase.auth` | Verified core | Provided by the built-in Auth implementation rather than a standalone GoTrue process; automated tests cover email/password, sessions, and bcrypt; OTP/Magic Link, anonymous users, OAuth, and MFA are experimentally compatible |
 | `supabase.storage` | Verified core | Covers upload/download, list, delete, TUS/RLS, remote S3 driver, and a subset of Bun.Image `contain`/`fill`, format, and quality transforms; `cover` is explicitly unsupported |
 | `supabase.channel()` | Verified core | Automated tests cover `postgres_changes`, DELETE RLS isolation, and event snapshot validation; Broadcast and Presence are experimentally compatible |
-| `supabase.functions.invoke()` | Verified core | Automated tests cover Bun.build, `Deno.serve()`, public functions, and in-process restart |
+| `supabase.functions.invoke()` | Verified core | Automated tests cover Bun.build, default handlers, public functions, and in-process restart |
 | Supabase Queues / PGMQ | Verified core | Provides `send`, `send_batch`, `read`, `pop`, `archive`, and `delete` RPCs for `pgmq_public`; queue data is persisted in the project database (PGlite or native PostgreSQL) |
 | Edge Functions `SupaCloud.pgredis` | Verified core | Provides single-project persistent KV, TTL, and atomic `getset`/`getdel`; the binding is only available within the current function request |
 | Supabase migrations | Supported | Sorted by filename, recorded in `supabase_migrations` |

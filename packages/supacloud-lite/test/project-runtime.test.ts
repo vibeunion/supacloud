@@ -50,15 +50,15 @@ describe('project runtime', () => {
     await mkdir(join(projectDir, 'supabase', 'functions', 'env'), { recursive: true })
     await writeFile(
       join(projectDir, 'supabase', 'functions', 'env', 'index.ts'),
-      `export default () => Response.json({
-        projectRef: Deno.env.get('SUPACLOUD_PROJECT_REF'),
-        headerProjectRef: Deno.env.get('X_PROJECT_REF'),
-        runtimeMode: Deno.env.get('SUPACLOUD_RUNTIME_MODE'),
-        internalSupabase: Deno.env.get('SUPACLOUD_INTERNAL_SUPABASE_URL'),
-        internalAuth: Deno.env.get('SUPACLOUD_INTERNAL_AUTH_URL'),
-        internalRest: Deno.env.get('SUPACLOUD_INTERNAL_REST_URL'),
-        supabaseUrl: Deno.env.get('SUPABASE_URL'),
-        customSecret: Deno.env.get('CUSTOM_SECRET'),
+      `export default (_request, { env }) => Response.json({
+        projectRef: env.SUPACLOUD_PROJECT_REF,
+        headerProjectRef: env.X_PROJECT_REF,
+        runtimeMode: env.SUPACLOUD_RUNTIME_MODE,
+        internalSupabase: env.SUPACLOUD_INTERNAL_SUPABASE_URL,
+        internalAuth: env.SUPACLOUD_INTERNAL_AUTH_URL,
+        internalRest: env.SUPACLOUD_INTERNAL_REST_URL,
+        supabaseUrl: env.SUPABASE_URL,
+        customSecret: env.CUSTOM_SECRET,
       })`
     )
     await writeFile(

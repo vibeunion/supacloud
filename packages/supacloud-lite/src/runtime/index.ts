@@ -14,7 +14,6 @@ import { SmsInbox } from './auth/sms-inbox.js'
 import { loadAuthSettings } from './auth/settings.js'
 import { LogBuffer } from './log-buffer.js'
 import { FunctionsHandler, type FunctionRegistryValue } from './functions/handler.js'
-import { installDenoShim } from './functions/deno-shim.js'
 import { installPgredisShim, PgredisCache } from './functions/pgredis.js'
 import { Database } from './db/database.js'
 import { mintProjectApiKeys, verifyJwt } from './jwt.js'
@@ -60,7 +59,6 @@ export {
 } from './functions/handler.js'
 export { type PgredisCacheBinding } from './functions/pgredis.js'
 export { generateTypes } from './gen-types.js'
-export { installDenoShim } from './functions/deno-shim.js'
 export { installEdgeRuntimeShim } from './functions/edge-runtime-shim.js'
 export { WebhooksService, type WebhookConfig, type WebhookDelivery } from './webhooks/service.js'
 export { CronService, cronMatches } from './cron/service.js'
@@ -308,10 +306,6 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     SUPACLOUD_RUNTIME_MODE: 'lite',
   }
 
-  // install the Deno global once per process; the shim's Deno.env is bound to
-  // this backend's fnEnv per-invocation by FunctionsHandler (so backends don't
-  // share env through the global).
-  installDenoShim()
   try {
     installPgredisShim()
   } catch (error) {

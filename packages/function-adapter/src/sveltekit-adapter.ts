@@ -54,7 +54,7 @@ let initialized;
 
 async function fetch(request) {
   initialized ??= server.init({
-    env: typeof Deno !== "undefined" && Deno.env?.toObject ? Deno.env.toObject() : {},
+    env: process.env,
   });
   await initialized;
   return server.respond(request, {

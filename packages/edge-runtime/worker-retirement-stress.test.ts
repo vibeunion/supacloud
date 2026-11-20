@@ -14,7 +14,6 @@ describe("WorkerPool process-level cooperative retirement", () => {
   test("reads the report when asynchronous trace spans follow it", () => {
     const report = { survived: true, retirements: 0 };
     const stdout = [
-      "[Deno Compat] Loaded Deno API compatibility shim",
       `${REPORT_PREFIX}${JSON.stringify(report)}`,
       JSON.stringify({ schema: "supacloud.trace-span.v1", status: 200 }),
       "",

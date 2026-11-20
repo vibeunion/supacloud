@@ -38,7 +38,6 @@ export interface EdgeFunctionConfig {
   bytecode?: "off" | "auto" | "required";
   /** Runtime adapter profile. `fetch` preserves legacy functions. */
   framework?: EdgeFunctionFramework;
-  import_map?: string;
   entrypoint?: string;
   version?: string;
   background_routes?: string[];
@@ -102,7 +101,6 @@ export interface EdgeFunctionDeployResult {
   version?: string;
   bundled?: boolean;
   files?: number;
-  import_map?: string | null;
   bundle_hash?: string;
   bundle_size_bytes?: number;
   import_count?: number;
@@ -274,7 +272,6 @@ type BundleFunctionRequest = {
   entrypoint: string;
   outdir: string;
   minify: boolean;
-  importMapPath?: string;
 };
 
 type RuntimeControlStatus = {
@@ -699,7 +696,11 @@ async function readOptionalFunctionFile(filePath: string): Promise<string | null
 function validatedFunctionConfig(
   configRecord: Record<string, unknown>,
 ): EdgeFunctionConfig {
-  const functionConfig = { ...DEFAULT_FUNCTION_CONFIG, ...configRecord } as EdgeFunctionConfig;
+  // `import_map` went away with the Deno compatibility layer. Stored rows may
+  // still carry the key, so drop it before the config is validated.
+  const nativeConfig = { ...configRecord };
+  delete nativeConfig['import_map'];
+  const functionConfig = { ...DEFAULT_FUNCTION_CONFIG, ...nativeConfig } as EdgeFunctionConfig;
   if (functionConfig.framework !== undefined
     && !EDGE_FUNCTION_FRAMEWORKS.includes(functionConfig.framework)) {
     throw new Error("Function config contains an unsupported framework");
@@ -952,7 +953,7 @@ export function isCanonicalEdgeFunctionSha256(candidate: string): boolean {
 
 // Build and final artifact policy failures must escape before a version can be written or preheated.
 async function buildFunctionCode(request: BundleFunctionRequest): Promise<string> {
-  const buildOptions: Parameters<typeof Bun.build>[0] & { importMap?: string; macros: false } = {
+  const buildOptions: Parameters<typeof Bun.build>[0] & { macros: false } = {
     // Tenant macros run with management-process privileges during bundling, before
     // runtime capability checks. Disable them for the entire dependency graph.
     macros: false,
@@ -963,7 +964,6 @@ async function buildFunctionCode(request: BundleFunctionRequest): Promise<string
     minify: request.minify,
     external: resolveExternalPackages(),
   };
-  if (request.importMapPath) buildOptions.importMap = request.importMapPath;
   const buildResult = await Bun.build(buildOptions);
   if (!buildResult.success) {
     const messages = buildResult.logs
@@ -1023,7 +1023,6 @@ type PreparedFunctionVersion = {
   bundled: boolean;
   files?: number;
   entrypoint: string | null;
-  importMap: string | null;
   bundleHash: string;
   artifactSha256: string;
   bundleSizeBytes: number;
@@ -1037,7 +1036,6 @@ type FunctionVersionMetadata = {
   bytecode?: "off" | "auto" | "required";
   artifact_sha256: string | null;
   background_routes: string[];
-  import_map: string | null;
   entrypoint: string | null;
   framework: EdgeFunctionFramework;
   capabilities?: EdgeFunctionCapabilities;
@@ -1160,7 +1158,6 @@ async function prepareSingleFunctionVersion(
     version,
     bundled: true,
     entrypoint: null,
-    importMap: null,
     importCount: bundle.importCount,
     ...artifact,
   };
@@ -1188,7 +1185,6 @@ async function preparePrebundledFunctionVersion(
     version,
     bundled: true,
     entrypoint: null,
-    importMap: null,
     importCount: normalization.importCount,
     ...artifact,
   };
@@ -1214,13 +1210,6 @@ async function validatedPrebundledBundle(
     throw new Error("Prebundled function would be modified by Edge Runtime normalization");
   }
   return normalization;
-}
-
-async function detectedImportMap(sourceDir: string): Promise<string | null> {
-  for (const candidate of ["import_map.json", "import_map", "deno.json", "deno.jsonc"]) {
-    if (await fileExists(resolveInside(sourceDir, candidate))) return candidate;
-  }
-  return null;
 }
 
 function validatedBundleEntrypoint(
@@ -1261,13 +1250,11 @@ async function prepareBundleFunctionVersion(
   const entrypoint = validatedBundleEntrypoint(request);
   const sourceDir = path.join(stageDir, "src");
   await writeBundleSources(sourceDir, request.files);
-  const importMap = await detectedImportMap(sourceDir);
   const buildDir = path.join(stageDir, ".build");
   const bundle = await bundleFunction({
     entrypoint: resolveInside(sourceDir, entrypoint),
     outdir: buildDir,
     minify: request.minify ?? false,
-    ...(importMap === null ? {} : { importMapPath: resolveInside(sourceDir, importMap) }),
   });
   const artifact = await writePreparedReleaseBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
@@ -1276,7 +1263,6 @@ async function prepareBundleFunctionVersion(
     bundled: true,
     files: Object.keys(request.files).length,
     entrypoint,
-    importMap,
     importCount: bundle.importCount,
     ...artifact,
   };
@@ -1304,7 +1290,6 @@ function functionVersionMetadata(
     bytecode: validatedFunctionBytecode(functionConfig.bytecode),
     artifact_sha256: artifactSha256,
     background_routes: backgroundRoutes,
-    import_map: functionConfig.import_map ?? null,
     entrypoint: functionConfig.entrypoint ?? null,
     framework,
     ...(functionConfig.capabilities ? { capabilities: functionConfig.capabilities } : {}),
@@ -1356,7 +1341,7 @@ async function replaceFunctionVersionMetadata(
 
 function nullableMetadataPath(
   metadataRecord: Record<string, unknown>,
-  field: "import_map" | "entrypoint",
+  field: "entrypoint",
 ): string | null {
   const metadataPath = metadataRecord[field];
   if (metadataPath === null) return null;
@@ -1371,17 +1356,11 @@ async function validateFunctionVersionMetadataPaths(
   metadata: FunctionVersionMetadata,
 ): Promise<void> {
   if (metadata.entrypoint === null) {
-    if (metadata.import_map !== null) {
-      throw new Error("Single-file function version metadata cannot define an import map");
-    }
     return;
   }
   const sourceDir = path.join(versionDir, "src");
   if (!(await fileExists(resolveInside(sourceDir, metadata.entrypoint)))) {
     throw new Error("Function version metadata references a missing entrypoint");
-  }
-  if (metadata.import_map && !(await fileExists(resolveInside(sourceDir, metadata.import_map)))) {
-    throw new Error("Function version metadata references a missing import map");
   }
 }
 
@@ -1417,7 +1396,6 @@ async function readFunctionVersionMetadata(
       ? metadataRecord["artifact_sha256"]
       : null,
     background_routes: metadataRecord["background_routes"] as string[],
-    import_map: nullableMetadataPath(metadataRecord, "import_map"),
     entrypoint: nullableMetadataPath(metadataRecord, "entrypoint"),
     framework: metadataRecord["framework"] === undefined ? "fetch" : metadataRecord["framework"] as EdgeFunctionFramework,
     ...(metadataRecord["capabilities"] === undefined
@@ -1457,20 +1435,15 @@ async function sourceMetadataConfig(
   const versionConfig = { ...functionConfig, version };
   if (await fileExists(path.join(versionDir, "index.src.ts"))) {
     delete versionConfig.entrypoint;
-    delete versionConfig.import_map;
     return versionConfig;
   }
   const sourceDir = path.join(versionDir, "src");
   const entrypoint = await inferredVersionEntrypoint(sourceDir, functionConfig.entrypoint);
   if (entrypoint === null) {
     delete versionConfig.entrypoint;
-    delete versionConfig.import_map;
     return versionConfig;
   }
   versionConfig.entrypoint = entrypoint;
-  const importMap = await detectedImportMap(sourceDir);
-  if (importMap === null) delete versionConfig.import_map;
-  else versionConfig.import_map = importMap;
   return versionConfig;
 }
 
@@ -2528,8 +2501,6 @@ function activatedFunctionConfig(
   prepared: PreparedFunctionVersion,
 ): EdgeFunctionConfig {
   const next = { ...current, ...configPatch, version: prepared.version };
-  if (prepared.importMap === null) delete next.import_map;
-  else next.import_map = prepared.importMap;
   if (prepared.entrypoint === null) delete next.entrypoint;
   else next.entrypoint = prepared.entrypoint;
   return next;
@@ -2549,8 +2520,6 @@ function restoredFunctionConfig(
   };
   if (metadata.capabilities) restored.capabilities = metadata.capabilities;
   if (metadata.limits) restored.limits = metadata.limits;
-  if (metadata.import_map === null) delete restored.import_map;
-  else restored.import_map = metadata.import_map;
   if (metadata.entrypoint === null) delete restored.entrypoint;
   else restored.entrypoint = metadata.entrypoint;
   return restored;
@@ -2788,7 +2757,6 @@ function releaseResult(
     version: prepared.version,
     bundled: prepared.bundled,
     ...(prepared.files === undefined ? {} : { files: prepared.files }),
-    import_map: prepared.importMap,
     bundle_hash: prepared.bundleHash,
     bundle_size_bytes: prepared.bundleSizeBytes,
     import_count: prepared.importCount,

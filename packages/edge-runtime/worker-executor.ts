@@ -10,20 +10,16 @@ import {
 import {
   assertPathInProject,
   assertRuntimeDependencyPath,
-  clearCapturedServeHandler,
   DYNAMIC_CODE_DISABLED_MESSAGE,
   guardDynamicCodeApis,
   disableSubprocessApis,
-  envWriteLog,
   FILESYSTEM_DISABLED_MESSAGE,
-  getCapturedServeHandler,
   initializeProjectRootControl,
   isKnownRuntimeBuiltinSpecifier,
   NATIVE_LOADER_DISABLED_MESSAGE,
-  setInjectedEnv,
   SUBPROCESS_DISABLED_MESSAGE,
   tenantBuiltinSpecifier,
-} from "./deno-compat";
+} from "./runtime-sandbox";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import { createFunctionTrace, installFunctionTracingFetch, runFunctionTrace, traceHeaders } from "./tracing";
 
@@ -222,17 +218,10 @@ function invalidateCachedModules(predicate: (entry: ModuleCacheEntry) => boolean
 }
 
 async function importModuleHandler(importUrl: string): Promise<unknown> {
-  clearCapturedServeHandler();
-  try {
-    const moduleNamespace = await import(importUrl) as Record<string, unknown>;
-    const serveHandler = getCapturedServeHandler();
-    return moduleNamespace.default
-      || moduleNamespace.handler
-      || serveHandler
-      || moduleNamespace;
-  } finally {
-    clearCapturedServeHandler();
-  }
+  const moduleNamespace = await import(importUrl) as Record<string, unknown>;
+  return moduleNamespace.default
+    || moduleNamespace.handler
+    || moduleNamespace;
 }
 
 async function assertAttestedArtifact(
@@ -282,10 +271,6 @@ const RUNTIME_RESOLVED_MODULE_PREFIXES = [
   "node:",
   "bun:",
   "npm:",
-  "jsr:",
-  "https://deno.land/std",
-  "https://esm.sh/",
-  "https://cdn.skypack.dev/",
 ];
 
 function moduleLoader(filePath: string): "js" | "jsx" | "ts" | "tsx" | null {
@@ -435,7 +420,6 @@ function restoreEnv() {
       bunRuntime.env[key] = value;
     }
   }
-  envWriteLog.clear();
   currentInjectedEnv = {};
   envSnapshotActive = false;
 }
@@ -628,8 +612,7 @@ async function executeFunction(handler: unknown, request: Request): Promise<Resp
   }
 
   throw new Error(
-    "Function must export a default function, an object with handle()/fetch(), " +
-    "or register a handler with Deno.serve().",
+    "Function must export a default function or an object with handle()/fetch().",
   );
 }
 
@@ -778,7 +761,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
       const env = msg.env || {};
       setProjectRoot(msg.projectRoot || path.dirname(msg.functionPath));
       injectEnv(env);
-      setInjectedEnv(env);
       const restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
         await resolveMessageTlsPolicy(msg.tlsPolicy),
       );
@@ -818,7 +800,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
     } finally {
       restoreEnv();
       setProjectRoot(null);
-      setInjectedEnv({});
     }
     return;
   }
@@ -845,7 +826,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
     try {
       setProjectRoot(projectRoot || path.dirname(functionPath));
       injectEnv(env);
-      setInjectedEnv(env);
       setupConsoleCapture(functionId);
       setupEdgeRuntimeCompat(msg.capabilities?.background !== false);
       restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
@@ -961,7 +941,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
       runCleanup(restoreEnv);
       runCleanup(restoreConsole);
       runCleanup(() => setProjectRoot(null));
-      runCleanup(() => setInjectedEnv({}));
       postToParent({ type: "execution_complete", ...memorySnapshot(false, msg.maxHeapBytes) });
     }
   });

@@ -3,14 +3,13 @@ import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { EdgeFunction, FrameworkObjectHandler, FunctionFramework, LoadedFunction } from '../functions/handler.js'
-import { installDenoShim, resetCapturedHandler, takeCapturedHandler } from '../functions/deno-shim.js'
 import { bundleFunction } from './bundle-function.js'
 import type { RuntimeMode } from '../functions/profile.js'
 import { errorProperty } from '../validation.js'
 
 /**
  * Load edge-function secrets from supabase/functions/.env (KEY=VALUE lines,
- * `#` comments). These are exposed to functions via Deno.env and ctx.env -
+ * `#` comments). These are exposed to functions through FunctionContext.env -
  * the local equivalent of `supabase functions serve --env-file`.
  */
 export async function loadFunctionEnv(projectDir: string): Promise<Record<string, string>> {
@@ -77,10 +76,9 @@ let loadQueue: Promise<void> = Promise.resolve()
 /**
  * Discover and load every edge function under supabase/functions/, keyed by
  * directory name. Dirs starting with `_` or `.` are skipped (shared code), as
- * are functions disabled in config.toml. Each function is bundled with esbuild
- * when available (falling back to a plain import), then its handler is taken
- * from a default function export, a default `{ fetch() }` / `{ handle() }`
- * object export (Elysia/Hono routers), or a captured `Deno.serve()` call.
+ * are functions disabled in config.toml. Each function is bundled with Bun,
+ * then its handler is taken from a default function export or a default
+ * `{ fetch() }` / `{ handle() }` object export (Elysia/Hono routers).
  * Load failures warn and skip rather than throwing, so one broken function
  * can't block startup.
  */
@@ -121,9 +119,6 @@ async function loadFunctionsUnlocked(
     return functions
   }
 
-  // so Supabase-style `Deno.serve(handler)` functions run unchanged
-  installDenoShim()
-
   for (const name of entries) {
     if (name.startsWith('_') || name.startsWith('.')) continue
     if (options[name]?.enabled === false) continue // disabled in config.toml
@@ -142,9 +137,8 @@ async function loadFunctionsUnlocked(
       }
       let bundledPath: string | undefined
       try {
-        // Bundle with esbuild so TS, relative imports, and npm:/jsr:/URL
-        // specifiers resolve. If esbuild isn't installed, import the file
-        // directly (Web-API / Deno.serve functions still work).
+        // Bundle with Bun so TS, relative imports, npm:, and URL specifiers
+        // resolve. If Bun cannot bundle, import the source directly.
         let importUrl: string
         try {
           bundledPath = await realpath(await bundleFunction(path, `${name}-${crypto.randomUUID()}`))
@@ -153,11 +147,9 @@ async function loadFunctionsUnlocked(
           if ((e as Error).message !== 'esbuild-not-available') throw e
           importUrl = pathToFileURL(path).href
         }
-        resetCapturedHandler()
         const mod = (await import(importUrl)) as {
           default?: EdgeFunction | FrameworkObjectHandler
         }
-        const denoHandler = takeCapturedHandler()
         const defaultExport = mod.default
         const handler: EdgeFunction | FrameworkObjectHandler | undefined =
           typeof defaultExport === 'function'
@@ -165,9 +157,7 @@ async function loadFunctionsUnlocked(
             : defaultExport &&
                 (typeof defaultExport.handle === 'function' || typeof defaultExport.fetch === 'function')
               ? defaultExport
-              : denoHandler
-                ? (req: Request) => denoHandler(req)
-                : undefined
+              : undefined
         if (handler) {
           const opts = options[name]
           const limits =
@@ -201,7 +191,7 @@ async function loadFunctionsUnlocked(
           })
         } else {
           if (mode === 'strict') throw new Error(`function "${name}" has no handler`)
-          console.warn(`  warning: function "${name}" has no default function, handle/fetch object, or Deno.serve() handler, skipped`)
+          console.warn(`  warning: function "${name}" has no default function or handle/fetch object, skipped`)
         }
       } catch (e) {
         if (mode === 'strict') throw new Error(`failed to load strict function "${name}"`, { cause: e })

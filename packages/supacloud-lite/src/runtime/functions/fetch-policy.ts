@@ -5,7 +5,7 @@
  * always allowed so a function can call back into the local API. Mirrors the
  * SupaCloud Edge Runtime Manifest v2 capabilities.outbound_hosts semantics.
  *
- * Like the Deno/pgredis shims, the wrapped fetch is installed once per process
+ * Like the pgredis shim, the wrapped fetch is installed once per process
  * and the allowlist lives in an AsyncLocalStorage store, so concurrent
  * invocations of functions with different policies each enforce their own list
  * (a naive global swap + finally-restore would race across interleaved awaits).

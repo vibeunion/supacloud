@@ -85,16 +85,16 @@ create function public.rename_todos(target_title text, next_title text)
 `
 
 const functionSource = `
-Deno.serve(async (request) => {
+export default async (request, { env }) => {
   const body = await request.json()
   return new Response(JSON.stringify({
     ok: true,
     name: body.name,
-    secret: Deno.env.get('FUNCTION_SECRET')
+    secret: env.FUNCTION_SECRET
   }), {
     headers: { 'content-type': 'application/json' }
   })
-})
+}
 `
 
 let rootDir: string

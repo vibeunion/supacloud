@@ -11,7 +11,6 @@ describe("china auth edge function generators", () => {
     );
 
     expect(functionCode).toContain("export default async function handler(req: Request)");
-    expect(functionCode).not.toContain("Deno.serve");
     expect(functionCode).toContain("Bun.env[\"SUPABASE_URL\"]");
     expect(functionCode).toContain("JSON.stringify(finalSession)");
     expect(functionCode).not.toContain("as any");

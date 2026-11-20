@@ -141,17 +141,14 @@ test('outboundHosts allows loopback and rejects undeclared hosts', async () => {
   }
 })
 
-test('secrets allowlist limits Deno.env and ctx.env to the base trio + declared keys', async () => {
-  const deno = () => (globalThis as unknown as { Deno: { env: { get(k: string): string | undefined } } }).Deno
+test('secrets allowlist limits FunctionContext.env to the base trio + declared keys', async () => {
   const entry: LoadedFunction = {
-    capabilities: { secrets: ['MY_KEY'] },
+      capabilities: { secrets: ['MY_KEY'] },
     handler: (_req, ctx) =>
       Response.json({
-        denoMyKey: deno().env.get('MY_KEY'),
-        denoOther: deno().env.get('OTHER') ?? null,
-        denoSupabaseUrl: deno().env.get('SUPABASE_URL'),
         ctxMyKey: ctx.env.MY_KEY,
         ctxOther: ctx.env.OTHER ?? null,
+        ctxSupabaseUrl: ctx.env.SUPABASE_URL,
       }),
   }
   await withBackend(
@@ -160,21 +157,18 @@ test('secrets allowlist limits Deno.env and ctx.env to the base trio + declared 
       const res = await invoke(backend, '/scoped')
       expect(res.status).toBe(200)
       const body = await res.json()
-      expect(body.denoMyKey).toBe('x')
-      expect(body.denoOther).toBeNull()
-      expect(body.denoSupabaseUrl).toBeTruthy()
       expect(body.ctxMyKey).toBe('x')
       expect(body.ctxOther).toBeNull()
+      expect(body.ctxSupabaseUrl).toBeTruthy()
     },
     { functionEnv: { MY_KEY: 'x', OTHER: 'y' } }
   )
 })
 
 test('functions without limits/capabilities keep the previous behavior', async () => {
-  const deno = () => (globalThis as unknown as { Deno: { env: { get(k: string): string | undefined } } }).Deno
-  const plain = async (req: Request) => {
+  const plain = async (req: Request, ctx: { env: Record<string, string> }) => {
     await sleep(100) // no timeout declared: slow is fine
-    return Response.json({ body: await req.text(), other: deno().env.get('OTHER') ?? null })
+    return Response.json({ body: await req.text(), other: ctx.env.OTHER ?? null })
   }
   await withBackend(
     new Map([['plain', plain]]),

@@ -5,7 +5,7 @@
  *
  *   EdgeRuntime.waitUntil(promise)   // runs past the response
  *
- * Like the Deno/fetch-policy shims, the global is installed once per process
+ * Like the fetch-policy shim, the global is installed once per process
  * and the per-invocation task list lives in an AsyncLocalStorage store, so
  * concurrent invocations each track their own tasks. waitUntil is scoped to
  * the invocation: tasks scheduled while a function runs are flushed after its

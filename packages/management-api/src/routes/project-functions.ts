@@ -122,7 +122,6 @@ function functionConfigProjection(config: EdgeFunctionConfigSnapshot) {
     framework: config.framework ?? "fetch",
     background_routes: config.background_routes ?? [],
     ...(config.version === undefined ? {} : { version: config.version }),
-    ...(config.import_map === undefined ? {} : { import_map: config.import_map }),
     ...(config.entrypoint === undefined ? {} : { entrypoint: config.entrypoint }),
     ...(config.capabilities === undefined ? {} : { capabilities: config.capabilities }),
     ...(config.limits === undefined ? {} : { limits: config.limits }),
@@ -351,7 +350,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       // Parse metadata JSON string
       const metadata: {
         entrypoint_path?: string;
-        import_map_path?: string;
         verify_jwt?: boolean;
         background_routes?: string[];
         framework?: EdgeFunctionFramework;
@@ -455,8 +453,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         capabilities: funcConfig.capabilities ?? {},
         limits: funcConfig.limits ?? {},
         entrypoint_path: entrypoint,
-        import_map: deployment.import_map != null || !!metadata.import_map_path,
-        import_map_path: deployment.import_map ?? metadata.import_map_path ?? null,
         bundle_hash: deployment.bundle_hash ?? null,
         bundle_size_bytes: deployment.bundle_size_bytes ?? null,
         import_count: deployment.import_count ?? null,
@@ -478,7 +474,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           name: t.Optional(t.String()),
           verify_jwt: t.Optional(t.String()),
           entrypoint_path: t.Optional(t.String()),
-          import_map_path: t.Optional(t.String()),
           background_routes: t.Optional(t.Array(t.String())),
           framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
           capabilities: t.Optional(functionCapabilitiesSchema),
@@ -600,8 +595,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         updated_at: now,
         entrypoint_path:
           (query as Record<string, string>).entrypoint_path || "index.ts",
-        import_map: false,
-        import_map_path: null,
         bundle_hash: deployResult?.bundle_hash ?? null,
         bundle_size_bytes: deployResult?.bundle_size_bytes ?? null,
         import_count: deployResult?.import_count ?? null,
@@ -743,8 +736,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         background_routes: funcConfig.background_routes || [],
         activation_id: funcConfig.activation_id,
         entrypoint_path: `${params.slug}/index.ts`,
-        import_map: false,
-        import_map_path: null,
         created_at: now,
         updated_at: now,
         code,
@@ -1201,7 +1192,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         active_version: deployment.active_version,
         expected_activation_id: expectedId,
         activation_id: deployment.activation_id ?? config?.activation_id,
-        import_map: deployment.import_map ?? null,
         bundle_hash: deployment.bundle_hash ?? null,
         bundle_size_bytes: deployment.bundle_size_bytes ?? null,
         import_count: deployment.import_count ?? null,

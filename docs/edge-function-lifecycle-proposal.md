@@ -47,8 +47,8 @@ export default (request: Request) => app.handle(request);
 
 The explicit closures preserve the receiver and make resource ownership visible.
 Do not inspect arbitrary handlers for `close`, `stop`, `dispose` or `destroy`.
-Legacy function, `handle`, `fetch` and captured `Deno.serve` handlers keep their
-existing behavior when the named export is absent. A present but malformed export
+Default function, `handle`, and `fetch` handlers keep their existing behavior
+when the named export is absent. A present but malformed export
 must fail loading, not silently degrade to a lifecycle-free function.
 
 The host owns invocation ordering. The application continues to own DI ordering,

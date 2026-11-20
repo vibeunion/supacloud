@@ -562,7 +562,7 @@ select pgmq.create('standalone_jobs');
 `
 
 const cacheProbeFunction = `
-Deno.serve(async (request) => {
+export default async (request) => {
   const command = await request.json()
   const cache = globalThis.SupaCloud.pgredis
   if (command.operation === 'set') {
@@ -582,7 +582,7 @@ Deno.serve(async (request) => {
     return Response.json({ cacheValue: await cache.getdel(command.key) })
   }
   return Response.json({ error: 'unsupported cache operation' }, { status: 400 })
-})
+}
 `
 
 await main()

@@ -24,11 +24,11 @@ Or when making external requests inside functions:
 }
 ```
 
-This option puts podman's built-in DNS service (`aardvark-dns`) in isolated mode, **only resolving internal names between containers, not forwarding any external domain queries** (like `esm.sh` and other compatibility import hosts).
+This option puts podman's built-in DNS service (`aardvark-dns`) in isolated mode, **only resolving internal names between containers, not forwarding any external domain queries**.
 
-Therefore, the Edge Functions environment cannot resolve external compatibility imports on first load, causing startup failure. This primarily affects URL-style imports (`esm.sh`, `deno.land/std`) that the compatibility shim needs to fetch at boot time.
+Therefore, the Edge Functions environment cannot resolve external package imports on first load, causing startup failure.
 
-> **Note**: If restarting an environment that already has cached compatibility imports, this issue may not trigger. The issue is easiest to reproduce after the runtime environment is recreated from scratch.
+> **Note**: If restarting an environment that already has cached external package imports, this issue may not trigger. The issue is easiest to reproduce after the runtime environment is recreated from scratch.
 
 ## Fix Steps
 
@@ -75,7 +75,7 @@ docker compose up -d --force-recreate functions
 
 ```bash
 # Should return DNS resolution result (not NXDOMAIN or timeout)
-nslookup esm.sh 10.89.0.1
+nslookup registry.npmjs.org 10.89.0.1
 ```
 
 ## Ongoing Maintenance

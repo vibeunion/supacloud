@@ -106,7 +106,6 @@ function preflight(
 ): void {
   if (
     typeof process === "undefined" ||
-    "Deno" in globalThis ||
     "EdgeRuntime" in globalThis
   ) {
     throw new Error("WORKER_REQUIRES_DEDICATED_PROCESS");

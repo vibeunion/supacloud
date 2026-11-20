@@ -7,7 +7,6 @@ import { wechatAuthInternals } from "../../src/routes/auth-wechat";
 
 function expectWechatLoginResponseContract(functionCode: string) {
   expect(functionCode).toContain("export default async function handler(req: Request)");
-  expect(functionCode).not.toContain("Deno.serve");
   expect(functionCode).toContain("const responseUser = finalSession.user ?? null");
   expect(functionCode).toContain("JSON.stringify({ data: { session: finalSession, user: responseUser } })");
   expect(functionCode).toContain("JSON.stringify({ data: { session: null, user: null }, error:");
