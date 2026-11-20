@@ -76,7 +76,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.118.0",
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "@zenstackhq/schema": "3.10.0",
     "@zenstackhq/orm": "3.10.0"
   }

@@ -28,7 +28,7 @@ jobs:
           node-version: '24.x'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.4'
+          bun-version: '1.4.5'
       # copyfile: Bun 1.4.4 hardlinks workspace manifests into node_modules, which starter sync rejects.
       - name: Install root tooling lock
         run: bun install --ignore-scripts --frozen-lockfile --backend=copyfile

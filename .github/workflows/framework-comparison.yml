@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
-      BUN_VERSION: "1.4.4"
+      BUN_VERSION: "1.4.5"
       REQUESTS: ${{ inputs.requests || '10000' }}
       ROUNDS: ${{ inputs.rounds || '5' }}
       CONCURRENCY: ${{ inputs.concurrency || '32' }}
