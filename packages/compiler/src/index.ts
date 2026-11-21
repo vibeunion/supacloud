@@ -1,6 +1,7 @@
 export { analyzeProject } from "./analyze";
 export { createDeliveryPlan, planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
 export { buildDeliveryProject } from "./delivery-build";
+export { renderDeliveryFunctionEntry } from "./delivery-function";
 export { readDeliveryMigrationArchive } from "./delivery-migration-archive";
 export type { DeliveryMigrationArchive } from "./delivery-migration-archive";
 export { DeliveryBuildManifestSchema, DeliveryBuildResultSchema, parseDeliveryBuildManifest, parseDeliveryBuildResult } from "./delivery-build-schema";

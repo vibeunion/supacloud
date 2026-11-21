@@ -42,6 +42,7 @@ import {
   attestedFunctionArtifactPath,
 } from "./function-source";
 import { functionBytecodeMode } from "./function-bytecode-contract";
+import { projectFunctionEnvironment } from "./function-environment";
 import { functionBytecodeCache } from "./function-bytecode";
 import { readFunctionFile, readFunctionFileBytes, readFunctionFileDigest, type TrustedFunctionFileDigest } from "./trusted-function-files";
 import {
@@ -630,13 +631,7 @@ async function dispatchFunction(
     const targetPool = opts?.background ? backgroundPool : pool;
     const tenantEnvLoad = opts?.tenantEnvLoad || await loadTenantRuntimeEnv(projectRef);
     const completeDispatchEnv = opts?.tenantEnv || tenantEnvLoad.env;
-    const dispatchEnv = activation.capabilities.secrets === undefined
-      ? completeDispatchEnv
-      : Object.fromEntries(
-          activation.capabilities.secrets
-            .filter((name) => Object.hasOwn(completeDispatchEnv, name))
-            .map((name) => [name, completeDispatchEnv[name]]),
-        );
+    const dispatchEnv = projectFunctionEnvironment(completeDispatchEnv, activation.capabilities);
     const executionProfile = opts?.background ? "background" : "foreground";
     const moduleEnvProof = tenantEnvModuleProof(
       projectRef,
@@ -1545,6 +1540,7 @@ const app = new Elysia()
       const moduleEpoch = getProjectModuleEpoch(ref);
       const requests = await Promise.all(functions.map(async entry => {
         const activation = await preheatActivationSnapshot(ref, entry.slug, entry.version, null);
+        const functionEnv = projectFunctionEnvironment(tenantEnvLoad.env, activation.capabilities);
         const requestFor = (profile: TenantEnvExecutionProfile) => {
           const proof = tenantEnvModuleProof(ref, tenantEnvLoad.env, tenantEnvLoad, profile);
           const attestation = runtimePreheatIdentity({
@@ -1555,7 +1551,7 @@ const app = new Elysia()
           return {
             functionId: `${ref}_${entry.slug}_v${entry.version}`,
             functionPath: activation.functionPath, projectRoot: activation.projectRoot,
-            projectRef: ref, moduleVersion: activation.moduleVersion, env: tenantEnvLoad.env,
+            projectRef: ref, moduleVersion: activation.moduleVersion, env: functionEnv,
             envProof: proof, attestation,
             bytecode: activation.bytecode,
             limits: activation.limits,
@@ -1798,6 +1794,7 @@ const app = new Elysia()
         throw new Error("Runtime environment changed during preheat");
       }
       const tenantEnv = tenantEnvLoad.env;
+      const functionEnv = projectFunctionEnvironment(tenantEnv, activation.capabilities);
       const foregroundModuleEnvProof = tenantEnvModuleProof(
         c.params.ref,
         tenantEnv,
@@ -1834,7 +1831,7 @@ const app = new Elysia()
               functionId,
               functionPath,
               projectRoot,
-              env: tenantEnv,
+              env: functionEnv,
               projectRef: c.params.ref,
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
@@ -1846,7 +1843,7 @@ const app = new Elysia()
               functionId,
               functionPath,
               projectRoot,
-              env: tenantEnv,
+              env: functionEnv,
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
@@ -1857,7 +1854,7 @@ const app = new Elysia()
             }),
           ])
         : await Promise.all([
-            pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
+            pool.preheatIdleWorkers(functionId, functionPath, projectRoot, functionEnv, {
               projectRef: c.params.ref,
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
@@ -1865,7 +1862,7 @@ const app = new Elysia()
               bytecode: activation.bytecode,
               limits: activation.limits,
             }),
-            backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
+            backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, functionEnv, {
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,

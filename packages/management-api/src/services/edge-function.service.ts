@@ -2526,6 +2526,7 @@ function restoredFunctionConfig(
     bytecode: validatedFunctionBytecode(metadata.bytecode),
   };
   if (metadata.capabilities) restored.capabilities = metadata.capabilities;
+  else delete restored.capabilities;
   if (metadata.limits) restored.limits = metadata.limits;
   if (metadata.entrypoint === null) delete restored.entrypoint;
   else restored.entrypoint = metadata.entrypoint;
