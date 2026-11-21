@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.63.0...compiler-v0.63.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **edge-runtime:** scope Function database bindings across activation paths ([#2754](https://github.com/vibeunion/supacloud/issues/2754)) ([c7c4c11](https://github.com/vibeunion/supacloud/commit/c7c4c11f88022eaed1b1840bd613c4127c5563cc))
+
 ## [0.63.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.62.9...compiler-v0.63.0) (2026-11-20)
 
 
