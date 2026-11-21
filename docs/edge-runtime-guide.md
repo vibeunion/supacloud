@@ -239,10 +239,16 @@ after execution; a preheat over budget fails with a structured
 would be discarded immediately. It is a soft completion-time control, not a
 hard allocation sandbox, and does not change the aggregate host cgroup limit.
 
-`secrets` is an allow-list for injected tenant secrets. When it is omitted,
-legacy injection behavior is retained; when present, only named secrets are
-injected. `outbound_hosts` restricts HTTPS and HTTP `fetch()` destinations by
-hostname. `bindings` controls optional host bindings such as `pgredis`.
+`secrets` is an allow-list for injected tenant secrets. Legacy injection
+otherwise continues, but `APP_*_DATABASE_URL` belongs to the Function that names
+it in `secrets`; an undeclared connection string is not injected during
+preheat or execution. Trusted Functions that also need the project data plane
+can declare `bindings: ["project_api"]` to receive the project URL, anon key,
+service-role key and configured internal REST/image endpoints without inheriting
+control-plane or JWT signing secrets. A service-role key bypasses project RLS;
+do not grant this binding to untrusted Functions. `outbound_hosts` restricts
+HTTPS and HTTP `fetch()` destinations by hostname. `pgredis` is separately
+enabled through `bindings`.
 `bytecode` is `off` by default. In `auto` mode, the Edge Runtime generates a
 paired `index.js`/`index.js.jsc` artifact during preheat and falls back to the
 published JavaScript when Bun bytecode generation is unsupported. In

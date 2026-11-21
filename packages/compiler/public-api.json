@@ -1109,6 +1109,11 @@
       "signature": "export declare function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string;"
     },
     {
+      "name": "renderDeliveryFunctionEntry",
+      "kind": "value",
+      "signature": "export declare function renderDeliveryFunctionEntry(generatedDirectory: string, hostPath: string, databaseSecret?: string): string;"
+    },
+    {
       "name": "RenderedArtifacts",
       "kind": "type",
       "signature": "export interface RenderedArtifacts {\n    applicationCode: string;\n    manifestJson: string;\n    executionPlan: CompiledExecutionManifest;\n    contractsManifestJson: string;\n    clientCode?: string;\n    openApiCode?: string;\n    permissionsCode?: string;\n}"
