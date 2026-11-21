@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.39.1...edge-runtime-v0.39.2) (2026-11-21)
+
+
+### Bug Fixes
+
+* **edge-runtime:** scope Function database bindings across activation paths ([#2754](https://github.com/vibeunion/supacloud/issues/2754)) ([c7c4c11](https://github.com/vibeunion/supacloud/commit/c7c4c11f88022eaed1b1840bd613c4127c5563cc))
+
 ## [0.39.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.39.0...edge-runtime-v0.39.1) (2026-11-20)
 
 
