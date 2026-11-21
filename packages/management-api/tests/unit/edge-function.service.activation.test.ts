@@ -312,6 +312,22 @@ async function deployVersion(
   });
 }
 
+test("rolling back a scoped Function restores the earlier legacy environment policy", async () => {
+  const runtime = new FakeActivationRuntime();
+  const ref = "proj_function_secret_rollback";
+  const slug = "api";
+  expect((await deployVersion(runtime, ref, slug, "legacy")).success).toBe(true);
+  const deployed = await deployConditionalRelease({
+    ref, slug,
+    code: "export default { fetch: () => new Response('bound') };",
+    config: { capabilities: { secrets: ["APP_FA_DATABASE_URL"], bindings: ["project_api"], background: false } },
+  });
+  expect(deployed).toMatchObject({ success: true, config: { capabilities: { secrets: ["APP_FA_DATABASE_URL"] } } });
+  const rollback = await activateConditionalVersion(ref, slug, "1");
+  expect(rollback?.active_version).toBe("1");
+  expect(rollback?.config?.capabilities).toBeUndefined();
+});
+
 type RedirectControlPath = "activation" | "preheat";
 type RedirectScope = "same-origin" | "cross-origin";
 type RedirectCapture = {

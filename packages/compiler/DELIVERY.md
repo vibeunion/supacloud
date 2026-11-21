@@ -161,14 +161,23 @@ the app and pool before returning. It does not bind a listener or provision a
 database login. An abort, cleanup failure or lost response does not prove
 rollback; reconcile with the existing operation key.
 
-Use a scoped login, allow-list the named secret on the Function release, and
-use this profile only in a trusted runtime. The shared Edge Worker is not
+Use a scoped login and allow-list the named secret in `capabilities.secrets`
+on the Function release. Deploy on an Edge Runtime that restricts application
+database secrets to explicitly bound Functions, including during preheat.
+If the same Function also uses the project data plane, request `project_api`
+in `capabilities.bindings` for the existing project URL and API keys. Use this
+profile only in a trusted runtime. The shared Edge Worker is not
 hard tenant isolation. Do not retain the database or use it for response-body
 streams or post-response work. `httpProfile: "function-data-plane"` checks for
 Function-only HTTP targets without declared direct DB bindings for projects
 using PostgREST/governed RPC. Existing plans without either profile and without
 a Function binding keep their behavior. These checks validate declared topology;
 they do not infer arbitrary outbound dependencies or verify live trust or grants.
+
+Custom bundlers (for example, a bundler using an Elysia AOT plugin) can reuse
+`renderDeliveryFunctionEntry(generatedDirectory, hostPath, databaseSecret)`
+with a validated delivery target. Import `createCompiledModules` into the entry
+from the compiled application before appending the rendered adapter.
 
 ## Programmatic Contract
 
