@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.4...management-api-v0.138.5) (2026-11-21)
+
+
+### Bug Fixes
+
+* **pigsty:** catch the PGDATA ownership trap before certifying a backup host ([#2759](https://github.com/vibeunion/supacloud/issues/2759)) ([a3fe95e](https://github.com/vibeunion/supacloud/commit/a3fe95ea2ce04bdde8576b137ad8463192212997))
+
 ## [0.138.4](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.3...management-api-v0.138.4) (2026-11-21)
 
 
