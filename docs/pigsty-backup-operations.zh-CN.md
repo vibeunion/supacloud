@@ -35,6 +35,41 @@ SUPACLOUD_PITR_ENABLED=true
 
 上述配置必须指向 Pigsty 管理的仓库。本地 PostgreSQL 进程正常运行并不代表备份仓库可用。
 
+## 仓库传输方式与 PGDATA 前置条件
+
+下面两个宿主机层面的错误会让备份“照常定时执行”却一条都不成功，必须在采信就绪度结论前先核对。
+
+**仓库端点必须与实际传输方式一致。** 带 `repo1-storage-ca-file` 的 `s3` 仓库会对端点发起 TLS 连接。如果 `9000` 端口已经变成只提供 HTTP 的 S3 网关（例如与对象存储共用 `sss.pigsty:9000` 的 JuiceFS/Silo 网关），那么每次归档和备份都会以 `[ServiceError] TLS error ... packet length too long` 失败，而 `pgbackrest info` 只会显示 `stanza: [invalid]`。先用下面的命令确认传输方式：
+
+```bash
+ss -ltnp '( sport = :9000 )'
+curl -s -o /dev/null -w '%{http_code}\n' http://sss.pigsty:9000/minio/health/live
+openssl s_client -connect sss.pigsty:9000 -verify_return_error </dev/null
+```
+
+宿主机上没有提供 TLS 的对象存储时，应改用本地仓库，而不是借用对象存储端口：
+
+```yaml
+pgbackrest_method: local
+pgbackrest_repo:
+  local:
+    path: /home/pgbackrest      # 独立卷，不要放在 PGDATA 所在文件系统
+```
+
+随后重新渲染并重建 stanza：`ansible-playbook -i pigsty.yml pgsql.yml -l
+pg-meta -t pgbackrest`，再执行 `pgbackrest --stanza=<stanza> stanza-create`、
+`check` 和一次 full backup。`archive_mode` 保持 `on`，`archive_command` 仍指向
+`pgbackrest ... archive-push %p`，仓库可用后积压的 WAL 会自动补齐。
+
+**PGDATA 内的每个路径都必须属于 PostgreSQL 系统用户。** pgBackRest 以该用户读取数据目录，只要残留一个 root 属主文件（`pg_hba.conf.bak.*` 副本、锁文件、journal），备份就会以 `[041] ... Permission denied` 中止。备份窗口前先检查：
+
+```bash
+pgdata="$(sudo -u postgres psql -Atqc 'show data_directory')"
+sudo find "$(readlink -f "$pgdata")" ! -user postgres -printf '%u:%g %m %p\n'
+```
+
+这些文件要移出 PGDATA，而不是随手 chown 成运行用户。只要仍存在，`scripts/verify-pigsty-upgrade-acceptance.sh` 就会直接判定失败。
+
 ## 就绪度检查
 
 在管理宿主机上执行：
