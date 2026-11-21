@@ -26,6 +26,15 @@ done
 server_version_num="$(sudo -u postgres psql -Atqc 'show server_version_num')"
 [[ "$server_version_num" =~ ^18[0-9]+$ ]] || fail "PostgreSQL 18 is required; read back ${server_version_num:-unknown}"
 
+# pgBackRest runs as the PostgreSQL system user. A single root-owned copy,
+# journal or backup file inside PGDATA makes the full backup fail with
+# [041] Permission denied, so refuse to certify the host first.
+pgdata="$(sudo -u postgres psql -Atqc 'show data_directory')"
+pgdata_real="$(readlink -f "$pgdata" 2>/dev/null || true)"
+[[ -n "$pgdata_real" && -d "$pgdata_real" ]] || fail "Cannot resolve the PostgreSQL data directory (read back '${pgdata:-unknown}')"
+foreign_paths="$(sudo find "$pgdata_real" ! -user postgres -printf '%u:%g %p\n' 2>/dev/null | head -20 || true)"
+[[ -z "$foreign_paths" ]] || fail "PGDATA contains paths not owned by postgres; pgBackRest cannot read them and backups will fail:\n${foreign_paths}"
+
 if [[ -f "$ROOT/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
   sudo bash "$ROOT/scripts/upgrade_pigsty_4_4_compat.sh" --check
 fi

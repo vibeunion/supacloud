@@ -96,7 +96,18 @@ systemctl --failed
 sudo -u postgres psql -Atqc 'select version();'
 sudo -u postgres psql -Atqc "select extname, extversion from pg_extension order by 1;"
 sudo -u postgres psql -Atqc "select distinct datname from pg_database where datname like 'supa\_%';"
+
+# Backup repository transport and PGDATA ownership
+sudo -u postgres pgbackrest info
+pgdata="$(sudo -u postgres psql -Atqc 'show data_directory')"
+sudo find "$(readlink -f "$pgdata")" ! -user postgres -printf '%u:%g %m %p\n'
 ```
+
+The upgrade gate fails before certifying the host when PGDATA contains a path
+that is not owned by `postgres`, because pgBackRest runs as that user and one
+root-owned leftover aborts the full backup with `[041] Permission denied`. See
+[Pigsty Backup Operations](./pigsty-backup-operations.md#repository-transport-and-pgdata-prerequisites)
+for the repository transport checks that also belong to this step.
 
 Also verify the Management API, project PostgREST/GoTrue services, Caddy routes, Grafana, backups, and at least one project SDK request. Re-check `pg_hba.conf` for leftover `172.16.0.0/12` rules and for the re-applied tenant `samerole` + reject pairing.
 

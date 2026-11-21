@@ -39,6 +39,53 @@ SUPACLOUD_PITR_ENABLED=true
 The configuration must point to the Pigsty-managed repository. A successful
 local PostgreSQL process is not evidence that a backup repository is usable.
 
+## Repository Transport And PGDATA Prerequisites
+
+Two host-level mistakes silently disable every backup while `pgbackrest` "runs"
+on schedule. Check both before trusting a readiness result.
+
+**The repository endpoint must speak the transport the configuration assumes.**
+An `s3` repository with `repo1-storage-ca-file` opens TLS to the endpoint. If
+port `9000` now belongs to an HTTP-only S3 gateway (for example the JuiceFS/Silo
+gateway that shares `sss.pigsty:9000` with object storage), every archive and
+backup fails with `[ServiceError] TLS error ... packet length too long` while
+`pgbackrest info` reports `stanza: [invalid]`. Confirm the transport first:
+
+```bash
+ss -ltnp '( sport = :9000 )'
+curl -s -o /dev/null -w '%{http_code}\n' http://sss.pigsty:9000/minio/health/live
+openssl s_client -connect sss.pigsty:9000 -verify_return_error </dev/null
+```
+
+When the host has no TLS-terminating object store, use a local repository
+instead of borrowing the object-storage port:
+
+```yaml
+pgbackrest_method: local
+pgbackrest_repo:
+  local:
+    path: /home/pgbackrest      # a separate volume, not the PGDATA filesystem
+```
+
+Then re-render and rebuild the stanza: `ansible-playbook -i pigsty.yml
+pgsql.yml -l pg-meta -t pgbackrest`, followed by `pgbackrest --stanza=<stanza>
+stanza-create`, `check`, and a full backup. `archive_mode` stays `on` and
+`archive_command` keeps pointing at `pgbackrest ... archive-push %p`; the
+backlog drains as soon as the repository is usable.
+
+**Every path inside PGDATA must belong to the PostgreSQL system user.**
+pgBackRest reads the data directory as that user, so one root-owned leftover (a
+`pg_hba.conf.bak.*` copy, a lock file, a journal) aborts the backup with
+`[041] ... Permission denied`. Check and clear it before a backup window:
+
+```bash
+pgdata="$(sudo -u postgres psql -Atqc 'show data_directory')"
+sudo find "$(readlink -f "$pgdata")" ! -user postgres -printf '%u:%g %m %p\n'
+```
+
+Move those files out of PGDATA rather than chowning arbitrary artifacts into
+place. `scripts/verify-pigsty-upgrade-acceptance.sh` fails when any remain.
+
 ## Readiness Check
 
 Run on the management host:
