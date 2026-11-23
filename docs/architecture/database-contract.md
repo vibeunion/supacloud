@@ -62,6 +62,16 @@ checker 能跑时层是 `source`，checker 起不来时层仍是 `runtime`。它
 | `governed-sql` | 不能安全重写的稳定 SQL 投影、领域函数或生成 RPC | 只能通过受审查的函数/读 contract，禁止裸 SQL；允许由代码或工具生成，但必须进入 registry/catalog |
 | `legacy-rpc` | 存量 RPC 迁移桥 | 保留退出条件；新增 RPC 应进入 governed-sql，并保留来源和契约 |
 
+数据库模块用 `operationOwnership` 为每个 schema-qualified 表操作显式指定上述入口之一
+（`postgrest-data-api` / `durable-command` / `governed-sql-rpc` / `legacy-rpc`）。
+同一 `table + operation` 出现不同 owner 时，compiler 以
+`database-operation-ownership` 拒绝；声明只复用现有模块与 Manifest，不是第二套治理管线。
+可选的 `databaseGovernance.ownership: "assist"` 会根据已有 `anon` /
+`authenticated` grants 输出确定性 evidence；它只把 `SELECT` grant 视为高置信度
+PostgREST 建议，写 grant 保持 ambiguous，不会猜测 Command。`"enforce"` 要求
+ambiguous/unknown 操作补齐显式归属。
+详见 [Database Governance](../database-governance.md#操作所有权operation-ownership)。
+
 Command 只是编译器应用车道的写入边界，不是全平台唯一业务写入路径。在该车道内，
 Command 决定“能否执行业务动作”，模型 policy 决定“能访问哪些记录”，RLS 和 grants
 保护数据库入口，约束保证数据不变量。任何一层都不能替代另外一层。PostgREST 与

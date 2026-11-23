@@ -15,14 +15,16 @@ export function assertDatabaseGovernance(value: unknown): asserts value is Datab
       typeof path === "string" && path.trim() !== "" && !path.includes("\\") && !path.startsWith("/"))
   );
   if ((entry["mode"] !== "off" && entry["mode"] !== "check" && entry["mode"] !== "enforce")
-    || Object.keys(entry).some(key => !["mode", "projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv", "schemas", "rpcBoundary"].includes(key))
+    || (entry["ownership"] !== undefined && entry["ownership"] !== "off"
+      && entry["ownership"] !== "assist" && entry["ownership"] !== "enforce")
+    || Object.keys(entry).some(key => !["mode", "ownership", "projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv", "schemas", "rpcBoundary"].includes(key))
     || ["projectRoot", "moduleFile", "databaseUrl", "databaseUrlEnv"].some(key =>
       entry[key] !== undefined && (typeof entry[key] !== "string" || !entry[key].trim()))
     || (entry["databaseUrlEnv"] !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(entry["databaseUrlEnv"])))
     || (entry["schemas"] !== undefined && (!Array.isArray(entry["schemas"]) || !entry["schemas"].length
       || !entry["schemas"].every(schema => typeof schema === "string" && schema.trim())))
     || !validRpcBoundary) {
-    throw new Error("Invalid databaseGovernance mode, paths, connection or schemas.");
+    throw new Error("Invalid databaseGovernance mode, ownership, paths, connection or schemas.");
   }
 }
 
@@ -57,7 +59,39 @@ export async function checkDatabaseGovernance(
       if (!item || typeof item !== "object" || !("code" in item) || typeof item.code !== "string"
         || !item.code.startsWith("database-") || !("message" in item) || typeof item.message !== "string"
         || !("severity" in item) || (item.severity !== "error" && item.severity !== "warn")) return failure();
-      diagnostics.push({ severity: item.severity, code: item.code, message: item.message });
+      const diagnostic: Diagnostic = { severity: item.severity, code: item.code, message: item.message };
+      if ("suggestion" in item && item.suggestion !== undefined) {
+        if (typeof item.suggestion !== "string") return failure();
+        diagnostic.suggestion = item.suggestion;
+      }
+      if ("evidence" in item && item.evidence !== undefined) {
+        if (!Array.isArray(item.evidence)) return failure();
+        const evidence: NonNullable<Diagnostic["evidence"]> = [];
+        for (const entry of item.evidence as unknown[]) {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return failure();
+          const value = entry as Record<string, unknown>;
+          if (typeof value["kind"] !== "string" || typeof value["detail"] !== "string") return failure();
+          const normalized: NonNullable<Diagnostic["evidence"]>[number] = {
+            kind: value["kind"] as NonNullable<Diagnostic["evidence"]>[number]["kind"],
+            detail: value["detail"],
+          };
+          if (!["declaration", "grant", "missing-grant", "suggestion"].includes(normalized.kind)) return failure();
+          for (const key of ["role", "privilege", "source", "owner"] as const) {
+            const item = value[key];
+            if (item === undefined) continue;
+            if (typeof item !== "string") return failure();
+            normalized[key] = item;
+          }
+          const candidates = value["candidates"];
+          if (candidates !== undefined) {
+            if (!Array.isArray(candidates) || !candidates.every(candidate => typeof candidate === "string")) return failure();
+            normalized.candidates = candidates as string[];
+          }
+          evidence.push(normalized);
+        }
+        diagnostic.evidence = evidence;
+      }
+      diagnostics.push(diagnostic);
     }
     return diagnostics;
   } catch {

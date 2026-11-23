@@ -7,6 +7,7 @@ import type {
   DatabaseModule,
   FunctionDecl,
   GrantDecl,
+  OperationOwnershipDecl,
   PolicyDecl,
   TriggerDecl,
 } from './module.js';
@@ -18,6 +19,7 @@ export interface DatabaseManifestModule {
   functions: FunctionDecl[];
   triggers: TriggerDecl[];
   grants: GrantDecl[];
+  operationOwnership: OperationOwnershipDecl[];
 }
 
 export interface DatabaseManifest {
@@ -35,6 +37,7 @@ export function buildDatabaseManifest(modules: DatabaseModule[]): DatabaseManife
       functions: module.functions,
       triggers: module.triggers,
       grants: module.grants,
+      operationOwnership: module.operationOwnership ?? [],
     })),
   };
 }
@@ -79,6 +82,24 @@ function describeTrigger(moduleName: string, trigger: TriggerDecl): string {
   ].join('\n');
 }
 
+function describeOperationOwnership(moduleName: string, declaration: OperationOwnershipDecl): string {
+  return [
+    `对象: ${declaration.table}.${declaration.operation}`,
+    '类型: 操作所有权 (operation ownership)',
+    `所属模块: ${moduleName}`,
+    `表: ${declaration.table}`,
+    `操作: ${declaration.operation}`,
+    `归属: ${declaration.owner}`,
+  ].join('\n');
+}
+
+function ownershipLines(module: DatabaseManifestModule, table: string): string[] {
+  return (module.operationOwnership ?? [])
+    .filter((declaration) => declaration.table === table)
+    .sort((left, right) => left.operation.localeCompare(right.operation))
+    .map((declaration) => `${declaration.operation}=${declaration.owner}`);
+}
+
 function describeGrant(moduleName: string, grant: GrantDecl): string {
   return [
     `对象: ${grant.object}`,
@@ -109,12 +130,19 @@ export function explainObject(manifest: DatabaseManifest, name: string): string 
         return describeTrigger(module.name, trigger);
       }
     }
+    for (const declaration of module.operationOwnership ?? []) {
+      if (`${declaration.table}.${declaration.operation}` === name) {
+        return describeOperationOwnership(module.name, declaration);
+      }
+    }
     for (const table of module.tables) {
       if (table === name) {
+        const ownership = ownershipLines(module, table);
         return [
           `对象: ${table}`,
           '类型: 表 (table)',
           `所属模块: ${module.name}`,
+          ...(ownership.length > 0 ? [`操作所有权: ${ownership.join(', ')}`] : []),
         ].join('\n');
       }
     }
