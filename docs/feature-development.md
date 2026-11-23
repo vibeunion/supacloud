@@ -93,7 +93,7 @@ migrations/            # 只追加的已审查迁移
 ## 三份执行契约
 
 **编译契约。** 保持严格编译默认值、持久化适配器要求以及模型应用的
-`databaseGovernance: { mode: "check" }`。`commandCapabilities` 声明的是实际
+`databaseGovernance: { mode: "check", ownership: "assist" }`。`commandCapabilities` 声明的是实际
 已绑定端口的能力，不是通过填写 `true` 获得持久化。普通编译不连接数据库；
 live Catalog `enforce` 由 SupaCloud Management API 使用项目 context 完成对账；
 项目配置不声明数据库连接串。平台内部集成测试才使用显式 loopback 连接。

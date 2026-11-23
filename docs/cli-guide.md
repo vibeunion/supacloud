@@ -51,6 +51,7 @@ supacloud onboard --profile solo --domain api.example.com
 supacloud onboard --profile solo --domain api.example.com --write
 supacloud config doctor --format json
 supacloud config explain --key SUPACLOUD_API_URL
+supacloud app infer --format json
 supacloud app doctor --format json
 ```
 
@@ -60,6 +61,11 @@ PostgreSQL process and never prints credentials. `config doctor` reports each
 value as a profile input, a derived default, a secret, or a local override.
 After `env sync`, `app doctor` also reports missing named secrets without
 including their values.
+
+`app infer` is the read-only structural inference report used by generators,
+`doctor` and AI context. It can identify a unique application root and
+unambiguous route bindings, but never invents permissions, tenant/RLS policy,
+database ownership or production migration decisions.
 
 After `project bootstrap` or an existing project binding, `env sync` stores
 non-secret environment metadata in `supacloud.json`. It writes only a reduced
@@ -358,6 +364,11 @@ supacloud db context --root . --module_file db/modules.ts --target public.case_c
 supacloud db lint --module_file db/modules.ts
 supacloud db explain --target public.case_create
 
+# classify table operations before switching ownership enforcement on
+supacloud db operation-ownership suggest --module cases
+supacloud db operation-ownership adopt --module cases
+supacloud db operation-ownership adopt --module cases --write
+
 # read-only catalog reconcile against a live database
 supacloud db module_check --module_file db/modules.ts --database_url "$DATABASE_URL"
 
@@ -407,6 +418,13 @@ returns only the selected database modules or object and includes each
 maintained source/test path, the ZModel-versus-SQL ownership boundary,
 protected/generated paths, and focused verification commands. It does not
 read or rewrite the historical migration directory.
+
+`db operation-ownership suggest` emits deterministic ownership evidence without
+opening a database connection. `adopt` previews source edits by default and
+`--write` applies only high-confidence suggestions; ambiguous writes require
+`--target`, `--operation` and an explicit `--owner`. Once ambiguous and unknown
+counts reach zero, set `databaseGovernance.ownership` to `"enforce"` to make
+remaining unclassified operations compile errors.
 
 ### AI/Agent Skill
 

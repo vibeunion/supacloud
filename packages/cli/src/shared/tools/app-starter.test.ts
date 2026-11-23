@@ -96,7 +96,7 @@ test("command starter defaults to PostgREST and does not silently enable GraphQL
 
 test("the database starter registers live Catalog governance while default check stays offline", () => {
     expect(appStarterFiles("governed")["supacloud.config.ts"])
-        .toContain('databaseGovernance: { mode: "check" }');
+        .toContain('databaseGovernance: { mode: "check", ownership: "assist" }');
     expect(appStarterFiles("governed")["db/modules.ts"]).toContain('name: "starter"');
     expect(appStarterFiles("governed")["scripts/dev.ts"])
         .toContain('const governanceMode = profile === "integration" ? "enforce" as const : "check" as const;');

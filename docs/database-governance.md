@@ -159,6 +159,28 @@ export const caseDb = defineDatabaseModule({
   `ownership: "enforce"` 会把 ambiguous/unknown 变成 error。未开启 ownership
   时，`check` 仍保持离线且不导入可执行模块；`enforce` 始终在 Catalog 对账前读取模块。
 
+渐进迁移建议先在新项目和存量项目的 CI 中启用 `ownership: "assist"`，再用 CLI
+审阅并采纳高置信度建议：
+
+```bash
+supacloud db operation-ownership suggest --module cases
+supacloud db operation-ownership adopt --module cases
+supacloud db operation-ownership adopt --module cases --write
+```
+
+`adopt` 默认只预览；它只会自动写入带明确证据的 `suggested` 条目（当前是
+匿名/登录用户的 `SELECT` grant -> `postgrest-data-api`）。写操作的 grant 不能
+区分 PostgREST 与 durable Command，因此必须显式决定：
+
+```bash
+supacloud db operation-ownership adopt \
+  --target public.cases --operation insert --owner durable-command --write
+```
+
+当 `suggest` 的 `ambiguous` 和 `unknown` 数量归零后，再把配置从
+`ownership: "assist"` 切换为 `ownership: "enforce"`；强制模式会把未分类操作
+作为编译错误，而不是兼容性 warning。
+
 `buildDatabaseManifest` 会序列化 `operationOwnership`；`explainObject` 支持
 `public.cases.select` 形式的对象名，表的解释里也会列出已声明的操作归属。
 

@@ -184,15 +184,28 @@ export async function runCli(
     }
     
     let startIdx: number = 1;
+    let nestedAction: string | undefined;
 
     // Check if there is an action argument (assuming index 1 is action if not starting with '--')
     if (args.length > 1 && !args[1].startsWith("--")) {
         startIdx = 2;
+        // Database ownership commands intentionally keep a small nested command
+        // surface so the ergonomic CLI reads `db operation-ownership suggest`.
+        if (toolName === "db" && args[1] === "operation-ownership"
+            && args[2] !== undefined && !args[2].startsWith("--")) {
+            nestedAction = args[2];
+            startIdx = 3;
+        }
     }
 
     try {
         const parsedArgs = parseCliFlags(args, startIdx, tool.schema);
-        if (startIdx === 2) parsedArgs.action = args[1];
+        if (nestedAction !== undefined) {
+            parsedArgs.action = args[1];
+            parsedArgs.operation_action = nestedAction;
+        } else if (startIdx === 2) {
+            parsedArgs.action = args[1];
+        }
         assertCurrentDeploymentInput(args[0], parsedArgs);
         validateToolArguments(tool.schema, parsedArgs);
 
