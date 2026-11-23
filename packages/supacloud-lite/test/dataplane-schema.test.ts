@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from '../src/runtime/db/database.js'
 import { createDataPlane, type DataPlane } from '../src/dataplane.js'
 import { mintProjectApiKeys } from '../src/runtime/jwt.js'
+import { buildRestOpenApiDocument } from '../src/runtime/rest/openapi.js'
 
 const jwtSecret = 'data-plane-schema-secret'
 
@@ -140,16 +141,30 @@ describe('root OpenAPI document', () => {
       grant execute on function public.dp_overload(integer) to service_role;
     `)
 
-    const executable = await db.listFunctions('public', { role: 'anon' })
-    expect(executable.map((fn) => fn.name)).not.toContain('dp_overload')
+    // Reload so the cached documents are rebuilt from the new privileges, then
+    // assert on the served document, not just on the database helper.
+    await db.exec("notify supacloud_schema_reload, 'public'")
+    await waitFor(async () => {
+      const body = await (await request('/rest/v1/')).json() as { paths: Record<string, unknown> }
+      return Object.keys(body.paths).includes('/rpc/dp_overload')
+    })
 
-    const serviceFunctions = await db.listFunctions('public', { role: 'service_role' })
-    expect(serviceFunctions.filter((fn) => fn.name === 'dp_overload')).toHaveLength(1)
+    const anonDocument = await (await request('/rest/v1/', { key: anonKey })).json() as { paths: Record<string, unknown> }
+    expect(Object.keys(anonDocument.paths)).not.toContain('/rpc/dp_overload')
   })
 
   test('fails closed to an empty document for a role that does not exist', async () => {
     expect(await db.listAccessibleRelations('public', 'role_that_does_not_exist')).toEqual(new Set())
     expect(await db.listFunctions('public', { role: 'role_that_does_not_exist' })).toEqual([])
+
+    const document = await buildRestOpenApiDocument(db, {
+      schema: 'public',
+      role: 'role_that_does_not_exist',
+      exposedSchemas: ['public'],
+      version: 'test',
+    }) as { paths: Record<string, unknown>; components: { schemas: Record<string, unknown> } }
+    expect(document.paths).toEqual({})
+    expect(document.components.schemas).toEqual({})
   })
 
   test('is scoped to the requested profile', async () => {

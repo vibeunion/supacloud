@@ -30,6 +30,8 @@ const stop = mock(async () => ({
   updated_at: null,
   enabled: true,
 }));
+// Captured before the spy replaces it, so one test can exercise the real gate.
+const realStart = dataPlaneModule.dataPlaneRuntimeService.start;
 const start = mock(async (): Promise<never> => {
   throw new dataPlaneModule.DataPlaneUnavailableError(
     "DATA_PLANE_DISABLED",
@@ -115,6 +117,20 @@ describe("project data plane service routes", () => {
       message: expect.stringContaining("PostgREST remains"),
     });
     expect(stop).not.toHaveBeenCalled();
+  });
+
+  test("an enabled data plane surfaces its own 409 code over HTTP", async () => {
+    const { config } = await import("../../src/config");
+    const previous = config.dataPlaneEnabled;
+    config.dataPlaneEnabled = true;
+    start.mockImplementationOnce(realStart);
+    try {
+      const response = await call("/v1/projects/proj_1/services/dataplane/start", "POST");
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "DATA_PLANE_NOT_PROVISIONED" });
+    } finally {
+      config.dataPlaneEnabled = previous;
+    }
   });
 
   test("status action through the service-control route reads without mutating", async () => {

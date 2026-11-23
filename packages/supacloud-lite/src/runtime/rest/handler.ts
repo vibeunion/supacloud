@@ -467,13 +467,15 @@ export class RestHandler {
     const q = parseQuery(searchParams)
     if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
 
-    // A VOLATILE function may have run DDL (create/alter/drop), so drop the
-    // schema/function caches afterwards - otherwise REST keeps serving a stale
-    // shape until the next migration.
+    // A VOLATILE function may have run DDL (create/alter/drop, including grants),
+    // so drop the schema/function caches *and* the cached root document
+    // afterwards - otherwise REST keeps serving a stale shape, and the document
+    // keeps advertising objects whose privileges just changed.
     if (fn.volatility === 'v') {
-      return await this.runRpc(ctx, fn, call, q, prefer, wantsObject, wantsCsv, schema, method).finally(() =>
+      return await this.runRpc(ctx, fn, call, q, prefer, wantsObject, wantsCsv, schema, method).finally(() => {
         this.db.invalidateSchemaCache()
-      )
+        this.invalidateOpenApiCache()
+      })
     }
     return await this.runRpc(ctx, fn, call, q, prefer, wantsObject, wantsCsv, schema, method)
   }
