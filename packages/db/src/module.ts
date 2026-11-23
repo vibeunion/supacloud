@@ -98,7 +98,8 @@ export interface DatabaseModule {
   functions: FunctionDecl[];
   triggers: TriggerDecl[];
   grants: GrantDecl[];
-  operationOwnership: OperationOwnershipDecl[];
+  /** Explicit ownership declarations; legacy hand-written modules may omit it. */
+  operationOwnership?: OperationOwnershipDecl[];
 }
 
 function normalizeTable(ref: TableRef): string {
