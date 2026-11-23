@@ -149,6 +149,7 @@ export class RestHandler {
       if (rest === '') {
         return jsonResponse(200, await buildRestOpenApiDocument(this.db, {
           schema,
+          role: ctx.role,
           exposedSchemas: this.exposedSchemas,
           version: SUPACLOUD_LITE_VERSION,
           serverUrl: url.origin,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createBunSqlEngine, type BunSqlConnection, type BunSqlPool, type BunSqlRows } from '../src/runtime/db/bun-sql-engine.js'
-import { readDataPlaneConfig } from '../src/dataplane.js'
+import { createDataPlane, readDataPlaneConfig } from '../src/dataplane.js'
 
 /** Rows array shaped like Bun's `SQL.unsafe` result, including write metadata. */
 function rows(command: string, values: unknown[] = [], count?: number): BunSqlRows {
@@ -82,6 +82,22 @@ describe('bun sql engine', () => {
     const { pool } = fakePool()
     const engine = createBunSqlEngine({ pool })
     await expect(engine.listen('realtime', () => {})).rejects.toThrow('LISTEN is not supported')
+  })
+
+  test('a data plane can leave a shared engine open', async () => {
+    const shared = fakePool()
+    const engine = createBunSqlEngine({ pool: shared.pool })
+    const plane = await createDataPlane({
+      engine,
+      jwtSecret: 'shared-engine-secret',
+      schemaReloadChannels: [],
+      closeEngine: false,
+    })
+    await plane.close()
+    expect(shared.stats().closed).toBe(0)
+    expect(plane.schemaReload).toBe('disabled')
+    await engine.close()
+    expect(shared.stats().closed).toBe(1)
   })
 
   test('closes the pool unless it is shared', async () => {

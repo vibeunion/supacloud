@@ -7,18 +7,25 @@ const jwtSecret = 'data-plane-schema-secret'
 
 let db: Database
 let plane: DataPlane
+let anonKey: string
 let serviceRoleKey: string
 
-function request(path: string, init: RequestInit = {}): Promise<Response> {
+function request(
+  path: string,
+  init: RequestInit & { key?: string } = {},
+): Promise<Response> {
+  const key = init.key ?? serviceRoleKey
   const headers = new Headers(init.headers)
-  headers.set('apikey', serviceRoleKey)
-  headers.set('authorization', `Bearer ${serviceRoleKey}`)
+  headers.set('apikey', key)
+  headers.set('authorization', `Bearer ${key}`)
   return plane.fetch(new Request(`http://data-plane.local${path}`, { ...init, headers }))
 }
 
 beforeAll(async () => {
   db = await Database.create()
-  serviceRoleKey = (await mintProjectApiKeys(jwtSecret)).serviceRoleKey
+  const keys = await mintProjectApiKeys(jwtSecret)
+  anonKey = keys.anonKey
+  serviceRoleKey = keys.serviceRoleKey
   await db.exec(`
     create table public.dp_order (
       id bigint generated always as identity primary key,
@@ -75,6 +82,39 @@ describe('root OpenAPI document', () => {
     const first = await (await request('/rest/v1/')).text()
     const second = await (await request('/rest/v1/')).text()
     expect(first).toBe(second)
+  })
+
+  test('mirrors PostgREST by answering the document on the root path too', async () => {
+    const response = await request('/')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ openapi: '3.0.3' })
+  })
+
+  test('requires an API key on the root path, like every other data request', async () => {
+    const response = await plane.fetch(new Request('http://data-plane.local/'))
+    expect(response.status).toBe(401)
+  })
+
+  test('advertises only what the caller role can reach', async () => {
+    // Bootstrap grants default privileges in `public`, so revoke explicitly:
+    // the document follows privileges, not existence.
+    await db.exec(`
+      revoke all on public.dp_order from anon;
+      revoke all on function public.dp_order_total(numeric) from anon;
+      -- Functions also carry a default EXECUTE grant to PUBLIC; revoke that too,
+      -- otherwise has_function_privilege stays true.
+      revoke all on function public.dp_order_total(numeric) from public;
+    `)
+
+    const anonResponse = await request('/rest/v1/', { key: anonKey })
+    expect(anonResponse.status).toBe(200)
+    const anonDocument = await anonResponse.json() as { paths: Record<string, unknown>; info: Record<string, unknown> }
+    expect(anonDocument.info['x-role']).toBe('anon')
+    expect(Object.keys(anonDocument.paths)).not.toContain('/dp_order')
+    expect(Object.keys(anonDocument.paths)).not.toContain('/rpc/dp_order_total')
+
+    const serviceDocument = await (await request('/rest/v1/')).json() as { paths: Record<string, unknown> }
+    expect(Object.keys(serviceDocument.paths)).toContain('/dp_order')
   })
 
   test('is scoped to the requested profile', async () => {

@@ -75,6 +75,12 @@ export interface DataPlaneOptions {
   schemaReloadChannels?: readonly string[]
   /** Operator-visible log sink. */
   log?: (message: string) => void
+  /**
+   * Close the engine on `close()`. Defaults to `true`, which is right when this
+   * data plane owns the engine. Pass `false` when the engine (or its pool) is
+   * shared with another component such as a ZenStack adapter.
+   */
+  closeEngine?: boolean
 }
 
 /** Whether cross-process schema reload is actually wired. */
@@ -123,6 +129,7 @@ async function resolveContext(
  */
 export async function createDataPlane(options: DataPlaneOptions): Promise<DataPlane> {
   const { engine, jwtSecret } = options
+  const closeEngine = options.closeEngine !== false
   const log = options.log ?? (() => {})
   const database = Database.attach(engine)
   const rest = new RestHandler(database, {
@@ -157,7 +164,7 @@ export async function createDataPlane(options: DataPlaneOptions): Promise<DataPl
       return withCors(new Response(null, { status: 204, headers: corsHeaders }))
     }
 
-    if (path === '/health' || path === '/') {
+    if (path === '/health') {
       try {
         await engine.query('select 1')
       } catch (error) {
@@ -181,7 +188,11 @@ export async function createDataPlane(options: DataPlaneOptions): Promise<DataPl
       })
     }
 
-    if (!path.startsWith('/rest/v1')) {
+    // PostgREST answers its OpenAPI document on the root path, and clients rely
+    // on that; `/` is aliased to `/rest/v1/` instead of serving health, which
+    // would silently change what a PostgREST client receives.
+    const isRootAlias = path === '/'
+    if (!isRootAlias && !path.startsWith('/rest/v1')) {
       // Auth, storage, functions and realtime are separate processes. Answering
       // them here would silently create a second runtime.
       return json(404, {
@@ -193,6 +204,11 @@ export async function createDataPlane(options: DataPlaneOptions): Promise<DataPl
     const context = await resolveContext(request, url, jwtSecret)
     if (context instanceof Response) return context
 
+    if (isRootAlias) {
+      const target = new URL(url.toString())
+      target.pathname = '/rest/v1/'
+      return withCors(await rest.handle(request, context, target))
+    }
     return withCors(await rest.handle(request, context, url))
   }
 
@@ -215,7 +231,7 @@ export async function createDataPlane(options: DataPlaneOptions): Promise<DataPl
           log(`schema reload unsubscribe failed: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
-      await engine.close()
+      if (closeEngine) await engine.close()
     },
     get schemaReload(): SchemaReloadState {
       return schemaReload

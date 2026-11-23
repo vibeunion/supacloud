@@ -12,6 +12,12 @@ import type { Database, FunctionInfo, SchemaInfo, TableInfo } from '../db/databa
 export interface OpenApiOptions {
   /** Schema the request negotiated through `Accept-Profile`. */
   schema: string
+  /**
+   * Role the verified JWT selected. The document lists only objects that role
+   * may reach, matching PostgREST: an `anon` caller must not learn the shape of
+   * tables it cannot read.
+   */
+  role: string
   /** Schemas advertised under `info` for operator visibility. */
   exposedSchemas: readonly string[]
   /** Runtime version reported in `info.version`. */
@@ -211,17 +217,23 @@ export async function buildRestOpenApiDocument(
   options: OpenApiOptions,
 ): Promise<Record<string, unknown>> {
   const info: SchemaInfo = await db.getSchemaInfo(options.schema)
-  const functions = await db.listFunctions(options.schema)
+  const [functions, accessibleRelations, accessibleFunctions] = await Promise.all([
+    db.listFunctions(options.schema),
+    db.listAccessibleRelations(options.schema, options.role),
+    db.listAccessibleFunctions(options.schema, options.role),
+  ])
 
   const schemas: Record<string, JsonSchema> = {}
   const paths: Record<string, JsonSchema> = {}
   // Stable ordering keeps the document byte-identical across requests, which
   // matters for generated-client drift checks.
   for (const table of [...info.tables.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (!accessibleRelations.has(table.name)) continue
     schemas[table.name] = tableSchema(table)
     Object.assign(paths, tablePaths(table))
   }
   for (const fn of [...functions].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (!accessibleFunctions.has(fn.name)) continue
     Object.assign(paths, functionPaths(fn))
   }
 
@@ -232,6 +244,7 @@ export async function buildRestOpenApiDocument(
       version: options.version,
       description: `PostgREST-compatible Data API for schema "${options.schema}"`,
       'x-exposed-schemas': [...options.exposedSchemas],
+      'x-role': options.role,
     },
     ...(options.serverUrl ? { servers: [{ url: options.serverUrl }] } : {}),
     paths,

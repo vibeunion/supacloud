@@ -492,6 +492,40 @@ export class Database {
   }
 
   /**
+   * Relations in `schema` the given role may `SELECT`.
+   *
+   * Used by the OpenAPI root document: PostgREST advertises what the caller's
+   * role can reach, not what merely exists, so an `anon` key must not learn the
+   * shape of tables it cannot read. The role arrives validated and is bound,
+   * never interpolated.
+   */
+  async listAccessibleRelations(schema: string, role: string): Promise<Set<string>> {
+    const res = await this.engine.query<{ name: string }>(
+      `select c.relname as name
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = $1
+         and c.relkind in ('r', 'v', 'm', 'p', 'f')
+         and has_table_privilege($2, c.oid, 'SELECT')`,
+      [schema, role]
+    )
+    return new Set(res.rows.map((row) => row.name))
+  }
+
+  /** Functions in `schema` the given role may `EXECUTE`. */
+  async listAccessibleFunctions(schema: string, role: string): Promise<Set<string>> {
+    const res = await this.engine.query<{ name: string }>(
+      `select distinct p.proname as name
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = $1
+         and has_function_privilege($2, p.oid, 'EXECUTE')`,
+      [schema, role]
+    )
+    return new Set(res.rows.map((row) => row.name))
+  }
+
+  /**
    * Every function in a schema, with overloads flattened. Used by schema
    * introspection surfaces (OpenAPI) that must list callable RPC entry points.
    */

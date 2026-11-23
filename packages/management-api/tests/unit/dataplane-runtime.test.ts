@@ -4,6 +4,7 @@ import {
   composeDataPlaneRuntimeStatus,
   dataPlaneDesiredState,
   dataPlaneUnit,
+  mapSystemdUnitState,
   type ProjectDataPlaneRow,
 } from "../../src/services/dataplane-runtime.service";
 import { renderDataPlaneSystemdTemplate } from "../../src/services/dataplane-systemd-template";
@@ -27,6 +28,20 @@ describe("data plane desired state", () => {
 
   test("only an explicit running desired state counts as running", () => {
     expect(dataPlaneDesiredState(row)).toBe("running");
+  });
+});
+
+describe("systemd unit state mapping", () => {
+  test("keeps a crashed unit visible as an error", () => {
+    expect(mapSystemdUnitState("failed\n")).toBe("error");
+  });
+
+  test("distinguishes running, starting and stopped", () => {
+    expect(mapSystemdUnitState("active")).toBe("running");
+    expect(mapSystemdUnitState("activating")).toBe("starting");
+    expect(mapSystemdUnitState("reloading")).toBe("starting");
+    expect(mapSystemdUnitState("inactive")).toBe("stopped");
+    expect(mapSystemdUnitState("unknown")).toBe("stopped");
   });
 });
 

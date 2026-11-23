@@ -103,12 +103,29 @@ export function composeDataPlaneRuntimeStatus(
   };
 }
 
+/**
+ * Map a `systemctl is-active` token onto a runtime state.
+ *
+ * `failed` must not collapse into `stopped`: a unit that crashed on startup is
+ * an error an operator has to see, not a clean shutdown.
+ */
+export function mapSystemdUnitState(state: string): DataPlaneActualState {
+  switch (state.trim()) {
+    case "active":
+      return "running";
+    case "activating":
+    case "reloading":
+      return "starting";
+    case "failed":
+      return "error";
+    default:
+      return "stopped";
+  }
+}
+
 async function observeUnit(unit: string): Promise<DataPlaneActualState> {
   const result = await $`systemctl is-active ${unit}`.nothrow().quiet();
-  const state = result.stdout.toString().trim();
-  if (state === "active") return "running";
-  if (state === "activating" || state === "reloading") return "starting";
-  return "stopped";
+  return mapSystemdUnitState(result.stdout.toString());
 }
 
 async function probeHealth(port: number | null): Promise<"healthy" | "unhealthy" | "unknown"> {
