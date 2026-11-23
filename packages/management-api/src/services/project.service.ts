@@ -162,6 +162,19 @@ export interface LogEntryResponse {
   metadata: Record<string, unknown>;
 }
 
+/** list 端点重试窗口：覆盖 activation 提交与 reconcile 的瞬时不一致。 */
+const FUNCTION_LIST_RETRY_DELAY_MS = 75;
+
+/** 只把「枚举期间状态翻转/制品短暂缺失」视为可重试，其余错误照旧上抛。 */
+export function isTransientFunctionListError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === "ENOENT") return true;
+  const message = error instanceof Error ? error.message : "";
+  return message === "Function became inactive while listing"
+    || message === EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE
+    || message === "Function version metadata is missing its artifact digest";
+}
+
 export class ProjectService {
   private readonly defaultBackgroundTaskSettings: BackgroundTaskSettings = { ...DEFAULT_BACKGROUND_TASK_SETTINGS };
 
@@ -840,6 +853,24 @@ export class ProjectService {
   }
 
   async listFunctions(ref: string): Promise<FunctionResponse[]> {
+    // Issue: list 端点在 activation/reconcile 的瞬时窗口里会整体 500。
+    // 单次读取仍保持 fail closed，但枚举期间遇到「刚被激活/回收」造成的瞬时不一致时
+    // 先重试一次；只有重试仍不一致才向上抛错。
+    try {
+      return await this.readFunctionList(ref);
+    } catch (error: unknown) {
+      if (!isTransientFunctionListError(error)) throw error;
+      logger.warn("[Functions] list read hit a transient activation race, retrying once", {
+        ref,
+        code: (error as NodeJS.ErrnoException).code,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      await new Promise((resolve) => setTimeout(resolve, FUNCTION_LIST_RETRY_DELAY_MS));
+      return await this.readFunctionList(ref);
+    }
+  }
+
+  private async readFunctionList(ref: string): Promise<FunctionResponse[]> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 
