@@ -1,14 +1,33 @@
 export {
   defineDatabaseModule,
+  findOperationOwnershipConflicts,
+  normalizeOperationOwnership,
+  OPERATION_OWNERS,
+  TABLE_OPERATIONS,
   type DatabaseModule,
   type DatabaseModuleOptions,
   type FunctionDecl,
   type GrantDecl,
+  type OperationOwner,
+  type OperationOwnershipConflict,
+  type OperationOwnershipDecl,
   type PolicyDecl,
   type PolicyOperation,
+  type TableOperation,
   type TableRef,
   type TriggerDecl,
 } from './module.js';
+
+export {
+  CLIENT_DATA_API_ROLES,
+  suggestOperationOwnership,
+  WRITE_GRANT_CANDIDATES,
+  type OperationOwnershipSuggestion,
+  type OwnershipConfidence,
+  type OwnershipEvidence,
+  type OwnershipReason,
+  type OwnershipStatus,
+} from './ownership-suggestion.js';
 
 export {
   extractSearchPath,

@@ -36,6 +36,12 @@ const casesModule = defineDatabaseModule({
       source: 'db/grants/cases.sql',
     },
   ],
+  operationOwnership: [
+    { table: 'public.cases', operation: 'select', owner: 'postgrest-data-api' },
+    { table: 'public.cases', operation: 'insert', owner: 'durable-command' },
+    { table: 'public.cases', operation: 'update', owner: 'governed-sql-rpc' },
+    { table: 'public.cases', operation: 'delete', owner: 'legacy-rpc' },
+  ],
 });
 
 const iamModule = defineDatabaseModule({
@@ -54,6 +60,8 @@ describe('buildDatabaseManifest', () => {
     expect(manifest.modules[0].functions).toHaveLength(1);
     expect(manifest.modules[0].triggers).toHaveLength(1);
     expect(manifest.modules[0].grants).toHaveLength(1);
+    expect(manifest.modules[0].operationOwnership).toHaveLength(4);
+    expect(manifest.modules[1].operationOwnership).toEqual([]);
     expect(manifest.modules[1].name).toBe('iam');
   });
 
@@ -85,6 +93,17 @@ describe('explainObject', () => {
       expect(text).toContain('db/policies/cases_select.sql');
       expect(text).toContain('authenticated');
     }
+  });
+
+  test('操作所有权按 table.operation 解释，表输出带归属摘要', () => {
+    const ownership = explainObject(manifest, 'public.cases.select');
+    expect(ownership).toContain('操作所有权');
+    expect(ownership).toContain('public.cases');
+    expect(ownership).toContain('select');
+    expect(ownership).toContain('postgrest-data-api');
+    const table = explainObject(manifest, 'public.cases');
+    expect(table).toContain('操作所有权: delete=legacy-rpc, insert=durable-command, select=postgrest-data-api, update=governed-sql-rpc');
+    expect(explainObject(manifest, 'public.cases.select')).not.toContain('未找到');
   });
 
   test('表、触发器、授权均可解释', () => {

@@ -2,6 +2,7 @@ import type { SQL } from "bun";
 import {
   readCatalog,
   reconcileModule,
+  normalizeOperationOwnership,
   type DatabaseModule,
   type PolicyOperation,
   type QueryExecutor,
@@ -123,10 +124,17 @@ function normalizeModule(value: unknown, index: number): DatabaseModule {
       source: "management-api",
     };
   });
+  const operationOwnership = (() => {
+    try {
+      return normalizeOperationOwnership(entry["operationOwnership"], tables);
+    } catch (error) {
+      return fail(`${label}.operationOwnership is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  })();
   if (tables.length === 0 && functions.length === 0) {
     fail(`${label} must declare at least one table or function`);
   }
-  return { name, tables, policies, functions, triggers, grants };
+  return { name, tables, policies, functions, triggers, grants, operationOwnership };
 }
 
 /** Validate the JSON-safe module subset accepted by the remote Catalog check. */
