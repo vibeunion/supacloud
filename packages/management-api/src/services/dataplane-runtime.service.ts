@@ -217,11 +217,17 @@ export const dataPlaneRuntimeService = {
    * switch gate exist. The error codes are stable so routes can map them.
    */
   async start(_projectRef: string): Promise<never> {
+    if (!config.dataPlaneEnabled) {
+      throw new DataPlaneUnavailableError(
+        "DATA_PLANE_DISABLED",
+        "Data plane is disabled (DATA_PLANE_ENABLED=false); PostgREST remains the project REST data plane",
+      );
+    }
+    // Enabled but unprovisioned is a different operator problem than disabled,
+    // and conflating them sends operators to the wrong setting.
     throw new DataPlaneUnavailableError(
-      "DATA_PLANE_DISABLED",
-      config.dataPlaneEnabled
-        ? "Data plane start is not provisioned yet: configuration generation and port persistence land with the control-plane switch"
-        : "Data plane is disabled (DATA_PLANE_ENABLED=false); PostgREST remains the project REST data plane",
+      "DATA_PLANE_NOT_PROVISIONED",
+      "Data plane start is not provisioned yet: configuration generation and port persistence land with the control-plane switch",
     );
   },
 };

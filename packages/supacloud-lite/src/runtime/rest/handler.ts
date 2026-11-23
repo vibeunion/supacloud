@@ -111,6 +111,15 @@ export class RestHandler {
   private exposedSchemas: string[]
   /** Max rows a read returns (PostgREST db-max-rows). Undefined = unlimited. */
   private maxRows?: number
+  /**
+   * Root documents keyed by `schema|role`.
+   *
+   * Introspection is three catalog queries plus a privilege join; serving that
+   * on every introspection request would put avoidable load on a tenant
+   * database. There is no TTL, matching PostgREST: an explicit schema reload is
+   * what invalidates it, so ACL changes need the same signal as DDL changes.
+   */
+  private openApiCache = new Map<string, Record<string, unknown>>()
 
   constructor(
     private db: Database,
@@ -118,6 +127,11 @@ export class RestHandler {
   ) {
     this.exposedSchemas = opts?.exposedSchemas ?? ['public']
     this.maxRows = opts?.maxRows
+  }
+
+  /** Drop cached root documents; call it when the schema or its privileges change. */
+  invalidateOpenApiCache(): void {
+    this.openApiCache.clear()
   }
 
   /** Entry point: resolve the profile schema, enforce schema exposure, route to table/rpc. */
@@ -147,13 +161,18 @@ export class RestHandler {
       // The root document is per-schema in PostgREST: it describes the schema
       // the request negotiated, not every exposed schema at once.
       if (rest === '') {
-        return jsonResponse(200, await buildRestOpenApiDocument(this.db, {
+        const cacheKey = `${schema}|${ctx.role}`
+        const cached = this.openApiCache.get(cacheKey)
+        if (cached) return jsonResponse(200, cached)
+        const document = await buildRestOpenApiDocument(this.db, {
           schema,
           role: ctx.role,
           exposedSchemas: this.exposedSchemas,
           version: SUPACLOUD_LITE_VERSION,
           serverUrl: url.origin,
-        }))
+        })
+        this.openApiCache.set(cacheKey, document)
+        return jsonResponse(200, document)
       }
 
       if (rest.startsWith('rpc/')) {

@@ -148,6 +148,7 @@ export async function createDataPlane(options: DataPlaneOptions): Promise<DataPl
         // only for logging. Clearing every cache matches that behaviour and can
         // never leave one schema stale.
         database.invalidateSchemaCache()
+        rest.invalidateOpenApiCache()
         log(`schema cache invalidated via ${channel}`)
       }))
       schemaReload = 'active'
@@ -192,6 +193,14 @@ export async function createDataPlane(options: DataPlaneOptions): Promise<DataPl
     // on that; `/` is aliased to `/rest/v1/` instead of serving health, which
     // would silently change what a PostgREST client receives.
     const isRootAlias = path === '/'
+    if (isRootAlias && !['GET', 'HEAD'].includes(request.method.toUpperCase())) {
+      // The root path is an introspection document, not a second write surface.
+      const response = json(405, {
+        message: `Method ${request.method.toUpperCase()} is not allowed on the data plane root`,
+      })
+      response.headers.set('allow', 'GET, HEAD')
+      return response
+    }
     if (!isRootAlias && !path.startsWith('/rest/v1')) {
       // Auth, storage, functions and realtime are separate processes. Answering
       // them here would silently create a second runtime.

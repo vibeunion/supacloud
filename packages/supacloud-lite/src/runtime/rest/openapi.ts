@@ -217,10 +217,11 @@ export async function buildRestOpenApiDocument(
   options: OpenApiOptions,
 ): Promise<Record<string, unknown>> {
   const info: SchemaInfo = await db.getSchemaInfo(options.schema)
-  const [functions, accessibleRelations, accessibleFunctions] = await Promise.all([
-    db.listFunctions(options.schema),
+  const [functions, accessibleRelations] = await Promise.all([
+    // Privilege filtering happens per overload, inside the query: filtering by
+    // function name would keep the name and leak a sibling overload's shape.
+    db.listFunctions(options.schema, { role: options.role }),
     db.listAccessibleRelations(options.schema, options.role),
-    db.listAccessibleFunctions(options.schema, options.role),
   ])
 
   const schemas: Record<string, JsonSchema> = {}
@@ -233,7 +234,9 @@ export async function buildRestOpenApiDocument(
     Object.assign(paths, tablePaths(table))
   }
   for (const fn of [...functions].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-    if (!accessibleFunctions.has(fn.name)) continue
+    // One path per name: OpenAPI 3.0 cannot express PostgreSQL overloads, so the
+    // first overload wins instead of the last one overwriting it arbitrarily.
+    if (`/rpc/${fn.name}` in paths) continue
     Object.assign(paths, functionPaths(fn))
   }
 

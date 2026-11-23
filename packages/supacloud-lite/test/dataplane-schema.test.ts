@@ -90,6 +90,14 @@ describe('root OpenAPI document', () => {
     expect(await response.json()).toMatchObject({ openapi: '3.0.3' })
   })
 
+  test('does not let the root path become a write surface', async () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const response = await request('/', { method })
+      expect(response.status).toBe(405)
+      expect(response.headers.get('allow')).toBe('GET, HEAD')
+    }
+  })
+
   test('requires an API key on the root path, like every other data request', async () => {
     const response = await plane.fetch(new Request('http://data-plane.local/'))
     expect(response.status).toBe(401)
@@ -115,6 +123,33 @@ describe('root OpenAPI document', () => {
 
     const serviceDocument = await (await request('/rest/v1/')).json() as { paths: Record<string, unknown> }
     expect(Object.keys(serviceDocument.paths)).toContain('/dp_order')
+  })
+
+  test('keeps every overload out of the document when none is executable', async () => {
+    await db.exec(`
+      create function public.dp_overload(value integer) returns integer
+        language sql stable as $$ select value $$;
+      create function public.dp_overload(value text) returns text
+        language sql stable as $$ select value $$;
+      -- CREATE FUNCTION grants EXECUTE to PUBLIC, so every role starts able to
+      -- call both overloads; revoke that before granting a single overload.
+      revoke all on function public.dp_overload(integer) from public;
+      revoke all on function public.dp_overload(text) from public;
+      revoke all on function public.dp_overload(integer) from anon;
+      revoke all on function public.dp_overload(text) from anon;
+      grant execute on function public.dp_overload(integer) to service_role;
+    `)
+
+    const executable = await db.listFunctions('public', { role: 'anon' })
+    expect(executable.map((fn) => fn.name)).not.toContain('dp_overload')
+
+    const serviceFunctions = await db.listFunctions('public', { role: 'service_role' })
+    expect(serviceFunctions.filter((fn) => fn.name === 'dp_overload')).toHaveLength(1)
+  })
+
+  test('fails closed to an empty document for a role that does not exist', async () => {
+    expect(await db.listAccessibleRelations('public', 'role_that_does_not_exist')).toEqual(new Set())
+    expect(await db.listFunctions('public', { role: 'role_that_does_not_exist' })).toEqual([])
   })
 
   test('is scoped to the requested profile', async () => {
@@ -147,6 +182,21 @@ describe('schema reload', () => {
 
     await db.exec("notify supacloud_schema_reload, 'public'")
     await waitFor(async () => (await request('/rest/v1/dp_note')).status === 200)
+  }, 20_000)
+
+  test('NOTIFY also drops the cached root document', async () => {
+    // Prime the document cache before introducing a new relation.
+    expect((await request('/rest/v1/')).status).toBe(200)
+
+    await db.exec('create table public.dp_note_archived (id integer primary key)')
+    expect(Object.keys((await (await request('/rest/v1/')).json() as { paths: Record<string, unknown> }).paths))
+      .not.toContain('/dp_note_archived')
+
+    await db.exec("notify supacloud_schema_reload, 'public'")
+    await waitFor(async () => {
+      const body = await (await request('/rest/v1/')).json() as { paths: Record<string, unknown> }
+      return Object.keys(body.paths).includes('/dp_note_archived')
+    })
   }, 20_000)
 })
 
