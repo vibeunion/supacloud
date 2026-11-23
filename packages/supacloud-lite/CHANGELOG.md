@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.42.2...supacloud-lite-v0.43.0) (2026-11-23)
+
+
+### Features
+
+* **dataplane:** unify the REST data plane and retire per-project PostgREST ([#2766](https://github.com/vibeunion/supacloud/issues/2766)) ([e4217b6](https://github.com/vibeunion/supacloud/commit/e4217b6907b44d6edaee58f6fa1ec8daf3f4c5c0))
+
 ## [0.42.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.42.1...supacloud-lite-v0.42.2) (2026-11-21)
 
 
