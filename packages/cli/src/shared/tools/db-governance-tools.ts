@@ -1,5 +1,8 @@
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { lstat, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import * as ts from "@supacloud/db/typescript";
 import { Type } from "typebox";
 import {
     buildDatabaseManifest,
@@ -8,8 +11,10 @@ import {
     normalizeOperationOwnership,
     readCatalog,
     reconcileModule,
+  suggestOperationOwnership,
     type DatabaseModule,
     type LintIssue,
+  type OperationOwnershipSuggestion,
     type OperationOwner,
     type QueryExecutor,
     type ReconcileReport,
@@ -22,11 +27,16 @@ import type { ToolSchema } from "../schema";
 import { registerTool, type ToolServer, type ToolResult } from "../tool-server";
 
 export interface DbToolArguments {
-    action: "context" | "lint" | "check" | "explain" | "module_check" | DbWorkflowAction;
+    action: "context" | "lint" | "check" | "explain" | "module_check" | "operation-ownership" | DbWorkflowAction;
+    /** Nested action for `db operation-ownership suggest|adopt`. */
+    operation_action?: "suggest" | "adopt";
     module?: string;
     root?: string;
     module_file?: string;
     target?: string;
+    operation?: TableOperation;
+    owner?: OperationOwner;
+    write?: boolean;
     database_url?: string;
     schema?: string;
     lite?: boolean;
@@ -258,6 +268,338 @@ export async function runModuleCheck(
 function parseSchemas(schema: string | undefined): string[] {
     const schemas = schema?.split(",").map((entry) => entry.trim()).filter(Boolean);
     return schemas && schemas.length > 0 ? schemas : ["public"];
+}
+
+interface OwnershipSuggestionRecord extends OperationOwnershipSuggestion {
+    module: string | null;
+}
+
+interface OwnershipSuggestionReport {
+    version: 1;
+    scope: "operation-ownership";
+    action: "suggest";
+    modules: string[];
+    suggestions: OwnershipSuggestionRecord[];
+    summary: {
+        declared: number;
+        suggested: number;
+        ambiguous: number;
+        unknown: number;
+        adoptable: number;
+    };
+}
+
+interface OwnershipAdoptionEntry {
+    module: string;
+    table: string;
+    operation: TableOperation;
+    owner: OperationOwner;
+    source: "suggested" | "explicit";
+    evidence: OperationOwnershipSuggestion["evidence"];
+}
+
+interface OwnershipAdoptionReport {
+    version: 1;
+    scope: "operation-ownership";
+    action: "adopt";
+    mode: "preview" | "write";
+    moduleFile: string;
+    sourceHash: string;
+    changes: OwnershipAdoptionEntry[];
+    skipped: Array<{
+        table: string;
+        operation: TableOperation;
+        reason: string;
+    }>;
+}
+
+function moduleForTable(modules: readonly DatabaseModule[], table: string): DatabaseModule | null {
+    const owners = modules.filter((module) => module.tables.includes(table));
+    return owners.length === 1 ? owners[0] ?? null : null;
+}
+
+function ownershipSuggestionReport(
+    modules: readonly DatabaseModule[],
+    selected: readonly DatabaseModule[],
+): OwnershipSuggestionReport {
+    const selectedNames = new Set(selected.map((module) => module.name));
+    const suggestions = suggestOperationOwnership(modules)
+        .filter((suggestion) => {
+            const owners = modules.filter((module) => module.tables.includes(suggestion.table));
+            return owners.some((module) => selectedNames.has(module.name));
+        })
+        .map((suggestion) => ({
+            ...suggestion,
+            module: moduleForTable(modules, suggestion.table)?.name ?? null,
+        }));
+    return {
+        version: 1,
+        scope: "operation-ownership",
+        action: "suggest",
+        modules: selected.map((module) => module.name),
+        suggestions,
+        summary: {
+            declared: suggestions.filter((suggestion) => suggestion.status === "declared").length,
+            suggested: suggestions.filter((suggestion) => suggestion.status === "suggested").length,
+            ambiguous: suggestions.filter((suggestion) => suggestion.status === "ambiguous").length,
+            unknown: suggestions.filter((suggestion) => suggestion.status === "unknown").length,
+            adoptable: suggestions.filter((suggestion) =>
+                suggestion.status === "suggested" && suggestion.owner !== null && suggestion.module !== null,
+            ).length,
+        },
+    };
+}
+
+async function selectedDatabaseModules(
+    args: DbToolArguments,
+    root: string,
+): Promise<{ modules: DatabaseModule[]; selected: DatabaseModule[]; modulePath: string }> {
+    const modules = await loadDatabaseModules(root, args.module_file);
+    const selected = args.module ? modules.filter((module) => module.name === args.module) : modules;
+    if (args.module && selected.length === 0) {
+        throw new Error(`未找到数据库模块: ${args.module}（可用: ${modules.map((module) => module.name).join(", ") || "none"}）`);
+    }
+    return {
+        modules,
+        selected,
+        modulePath: resolve(root, args.module_file ?? "db/modules.ts"),
+    };
+}
+
+function requireOwnershipAction(args: DbToolArguments): "suggest" | "adopt" {
+    const action = args.operation_action;
+    if (action !== "suggest" && action !== "adopt") {
+        throw new Error("db operation-ownership requires suggest or adopt");
+    }
+    return action;
+}
+
+function explicitAdoption(
+    args: DbToolArguments,
+    modules: readonly DatabaseModule[],
+): OwnershipAdoptionEntry | null {
+    const hasExplicitOwner = args.owner !== undefined || args.operation !== undefined || args.target !== undefined;
+    if (!hasExplicitOwner) return null;
+    if (args.owner === undefined || args.operation === undefined || !args.target?.trim()) {
+        throw new Error("显式 adopt 需要同时提供 --target、--operation 和 --owner");
+    }
+    const module = moduleForTable(modules, args.target.trim());
+    if (module === null) {
+        throw new Error(`无法唯一确定表所属模块: ${args.target.trim()}（表必须只由一个模块声明）`);
+    }
+    if ((module.operationOwnership ?? []).some((entry) =>
+        entry.table === args.target!.trim() && entry.operation === args.operation,
+    )) {
+        throw new Error(`已存在 operation ownership: ${args.target.trim()}.${args.operation}`);
+    }
+    return {
+        module: module.name,
+        table: args.target.trim(),
+        operation: args.operation,
+        owner: args.owner,
+        source: "explicit",
+        evidence: [{
+            kind: "declaration",
+            detail: `explicit adopt: ${args.target.trim()}.${args.operation} = ${args.owner}`,
+        }],
+    };
+}
+
+function adoptionEntries(
+    args: DbToolArguments,
+    modules: readonly DatabaseModule[],
+    selected: readonly DatabaseModule[],
+): { changes: OwnershipAdoptionEntry[]; skipped: OwnershipAdoptionReport["skipped"] } {
+    const explicit = explicitAdoption(args, modules);
+    if (explicit !== null) {
+        if (!selected.some((module) => module.name === explicit.module)) {
+            throw new Error(`模块 ${explicit.module} 不在当前 --module 范围内`);
+        }
+        return { changes: [explicit], skipped: [] };
+    }
+    const selectedNames = new Set(selected.map((module) => module.name));
+    const changes: OwnershipAdoptionEntry[] = [];
+    const skipped: OwnershipAdoptionReport["skipped"] = [];
+    for (const suggestion of suggestOperationOwnership(modules)) {
+        const module = moduleForTable(modules, suggestion.table);
+        const owners = modules.filter((candidate) => candidate.tables.includes(suggestion.table));
+        if (module === null) {
+            if (owners.some((candidate) => selectedNames.has(candidate.name))) {
+                skipped.push({
+                    table: suggestion.table,
+                    operation: suggestion.operation,
+                    reason: "table is declared by multiple modules; resolve module ownership first",
+                });
+            }
+            continue;
+        }
+        if (!selectedNames.has(module.name)) continue;
+        if (suggestion.status === "suggested" && suggestion.owner !== null) {
+            changes.push({
+                module: module.name,
+                table: suggestion.table,
+                operation: suggestion.operation,
+                owner: suggestion.owner,
+                source: "suggested",
+                evidence: suggestion.evidence,
+            });
+            continue;
+        }
+        if (suggestion.status !== "declared") {
+            skipped.push({
+                table: suggestion.table,
+                operation: suggestion.operation,
+                reason: suggestion.status === "ambiguous"
+                    ? "ambiguous evidence; choose --owner explicitly"
+                    : "no ownership evidence; choose --owner explicitly",
+            });
+        }
+    }
+    return { changes, skipped };
+}
+
+interface ModuleObjectNode {
+    name: string;
+    object: ts.ObjectLiteralExpression;
+}
+
+function staticProperty(object: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment | undefined {
+    const properties = object.properties.filter((property): property is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(property)
+        && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+        && property.name.text === name,
+    );
+    if (properties.length > 1) throw new Error(`数据库模块存在重复 '${name}' 属性`);
+    return properties[0];
+}
+
+async function parseSource(file: string, content: string): Promise<ts.SourceFile> {
+    const source = await ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const diagnostics = await ts.transpileModule(content, {
+        fileName: file,
+        reportDiagnostics: true,
+        compilerOptions: { target: ts.ScriptTarget.ESNext },
+    });
+    if (diagnostics.diagnostics?.some((item) => item.category === ts.DiagnosticCategory.Error)) {
+        throw new Error(`数据库模块源文件语法无效: ${file}`);
+    }
+    return source;
+}
+
+async function findModuleObjects(file: string, content: string): Promise<ModuleObjectNode[]> {
+    const source = await parseSource(file, content);
+    const result: ModuleObjectNode[] = [];
+    const visit = (node: ts.Node): void => {
+        if (ts.isObjectLiteralExpression(node)) {
+            const name = staticProperty(node, "name")?.initializer;
+            const tables = staticProperty(node, "tables");
+            if (name && ts.isStringLiteral(name) && tables && ts.isArrayLiteralExpression(tables.initializer)) {
+                result.push({ name: name.text, object: node });
+            }
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return result;
+}
+
+function lineIndent(source: string, position: number): string {
+    const lineStart = source.lastIndexOf("\n", position - 1) + 1;
+    return source.slice(lineStart, position).match(/^[ \t]*/)?.[0] ?? "";
+}
+
+function entryText(entry: OwnershipAdoptionEntry): string {
+    return `{ table: ${JSON.stringify(entry.table)}, operation: ${JSON.stringify(entry.operation)}, owner: ${JSON.stringify(entry.owner)} }`;
+}
+
+async function editOperationOwnershipSource(
+    file: string,
+    original: string,
+    changes: readonly OwnershipAdoptionEntry[],
+): Promise<string> {
+    const modules = await findModuleObjects(file, original);
+    const edits: Array<{ start: number; end: number; text: string }> = [];
+    for (const group of new Set(changes.map((change) => change.module))) {
+        const moduleChanges = changes.filter((change) => change.module === group);
+        const moduleNode = modules.find((module) => module.name === group);
+        if (!moduleNode) throw new Error(`源文件中找不到数据库模块: ${group}`);
+        const ownership = staticProperty(moduleNode.object, "operationOwnership");
+        const objectIndent = lineIndent(original, moduleNode.object.getStart());
+        const propertyIndent = `${objectIndent}  `;
+        const values = moduleChanges.map(entryText);
+        if (ownership) {
+            if (!ts.isArrayLiteralExpression(ownership.initializer)) {
+                throw new Error(`模块 ${group} 的 operationOwnership 必须是静态数组`);
+            }
+            const arrayIndent = lineIndent(original, ownership.getStart());
+            const entryIndent = `${arrayIndent}  `;
+            const existing = ownership.initializer.elements.map((element) =>
+                original.slice(element.getStart(), element.end).trim(),
+            );
+            const all = [...existing, ...values];
+            const replacement = `[\n${all.map((value) => `${entryIndent}${value}`).join(",\n")}\n${arrayIndent}]`;
+            edits.push({
+                start: ownership.initializer.getStart(),
+                end: ownership.initializer.end,
+                text: replacement,
+            });
+            continue;
+        }
+        const hasProperties = moduleNode.object.properties.length > 0;
+        const separator = hasProperties && !moduleNode.object.properties.hasTrailingComma ? "," : "";
+        const replacement = `${separator}\n${propertyIndent}operationOwnership: [\n${values
+            .map((value) => `${propertyIndent}  ${value}`)
+            .join(",\n")}\n${propertyIndent}]\n${objectIndent}`;
+        edits.push({
+            start: moduleNode.object.end - 1,
+            end: moduleNode.object.end - 1,
+            text: replacement,
+        });
+    }
+    return edits
+        .sort((left, right) => right.start - left.start)
+        .reduce((content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end), original);
+}
+
+async function runOperationOwnershipSuggest(args: DbToolArguments, root: string): Promise<ToolResult> {
+    const { modules, selected } = await selectedDatabaseModules(args, root);
+    return textResult(JSON.stringify(ownershipSuggestionReport(modules, selected), null, 2));
+}
+
+async function runOperationOwnershipAdopt(args: DbToolArguments, root: string): Promise<ToolResult> {
+    const { modules, selected, modulePath } = await selectedDatabaseModules(args, root);
+    const { changes, skipped } = adoptionEntries(args, modules, selected);
+    const stat = await lstat(modulePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`模块文件必须是普通文件: ${modulePath}`);
+    const original = await readFile(modulePath, "utf8");
+    const sourceHash = createHash("sha256").update(original).digest("hex");
+    const updated = changes.length > 0
+        ? await editOperationOwnershipSource(modulePath, original, changes)
+        : original;
+    const mode = args.write === true ? "write" : "preview";
+    if (args.write === true && updated !== original) {
+        if (await readFile(modulePath, "utf8") !== original) {
+            throw new Error("模块文件在 adopt 期间发生变化，请重新执行 suggest");
+        }
+        const temporary = `${modulePath}.supacloud-ownership-${randomUUID()}`;
+        try {
+            await writeFile(temporary, updated, { encoding: "utf8", flag: "wx", mode: stat.mode });
+            await rename(temporary, modulePath);
+        } finally {
+            await unlink(temporary).catch(() => {});
+        }
+    }
+    const report: OwnershipAdoptionReport = {
+        version: 1,
+        scope: "operation-ownership",
+        action: "adopt",
+        mode,
+        moduleFile: modulePath,
+        sourceHash,
+        changes,
+        skipped,
+    };
+    return textResult(JSON.stringify(report, null, 2), changes.length === 0 && skipped.length > 0 ? false : undefined);
 }
 
 async function collectLintIssues(
@@ -541,13 +883,17 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
     const liteSpawn = options.liteSpawn || defaultLiteSpawn;
     registerTool(server,
         "db",
-        "Database governance (@supacloud/db): inspect, reverse-adopt, diff, plan and apply through explicit source and migration boundaries. Actions: context, lint, explain, module_check, reverse, diff, plan, apply, role_check, role_sql",
+        "Database governance (@supacloud/db): inspect, reverse-adopt, diff, plan and apply through explicit source and migration boundaries. Actions: context, lint, check, explain, module_check, operation-ownership suggest|adopt, reverse, diff, plan, apply, role_check, role_sql",
         {
-            action: withDescription(stringEnum(["context", "lint", "check", "explain", "module_check", "reverse", "diff", "plan", "apply", "role_check", "role_sql"]), "Database governance action"),
+            action: withDescription(stringEnum(["context", "lint", "check", "explain", "module_check", "operation-ownership", "reverse", "diff", "plan", "apply", "role_check", "role_sql"]), "Database governance action"),
+            operation_action: optional(stringEnum(["suggest", "adopt"]), "[operation-ownership] Nested action"),
             module: optional(Type.String(), "[context/lint] Only select this manifest module (default: all)"),
             root: optional(Type.String(), "[*] Project root (default: current directory)"),
             module_file: optional(Type.String(), "[*] File exporting defineDatabaseModule(...) (default: <root>/db/modules.ts)"),
-            target: optional(Type.String(), "[context/explain] Policy / function / table name to explain"),
+            target: optional(Type.String(), "[context/explain/operation-ownership] Policy / function / table name; adopt uses a table"),
+            operation: optional(stringEnum(["select", "insert", "update", "delete"]), "[operation-ownership adopt] Table operation for explicit adoption"),
+            owner: optional(stringEnum(["postgrest-data-api", "durable-command", "governed-sql-rpc", "legacy-rpc"]), "[operation-ownership adopt] Explicit owner; required for ambiguous/unknown operations"),
+            write: optional(Type.Boolean(), "[operation-ownership adopt] Write the previewed ownership declarations (default: preview only)"),
             database_url: optional(Type.String(), "[module_check] Postgres connection URL (default: DATABASE_URL)"),
             schema: optional(Type.String(), "[module_check] Comma-separated schemas to inspect (default: public)"),
             lite: optional(Type.Boolean(), "[module_check] Reconcile against a local SupaCloud Lite project (runs supacloud-lite db check)"),
@@ -571,6 +917,12 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
                 case "check": return runCheck(request, root, environment, liteSpawn, options.liteBinary, options);
                 case "explain": return runExplain(request, root);
                 case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary, options);
+                case "operation-ownership": {
+                    const operationAction = requireOwnershipAction(request);
+                    return operationAction === "suggest"
+                        ? runOperationOwnershipSuggest(request, root)
+                        : runOperationOwnershipAdopt(request, root);
+                }
                 case "role_check":
                     if (request.remote) return runRoleCheckRemote(request, options);
                     return runDbWorkflow({ ...request, action: request.action }, root, {

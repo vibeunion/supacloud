@@ -105,7 +105,7 @@ export function appStarterFiles(name: string): Record<string, string> {
         "supacloud.config.ts": `import { defineSupacloudConfig } from "@supacloud/compiler";
 
 export default defineSupacloudConfig({
-  databaseGovernance: { mode: "check" },
+  databaseGovernance: { mode: "check", ownership: "assist" },
   delivery: {
     version: 1,
     build: {

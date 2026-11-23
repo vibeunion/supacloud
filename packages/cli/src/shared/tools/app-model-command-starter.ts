@@ -415,7 +415,7 @@ export function modelCommandTemplateFiles(name: string, sdk: StarterSdkDependenc
     }),
     "supacloud.config.ts": `import { defineSupacloudConfig } from "@supacloud/compiler";
 export default defineSupacloudConfig({
-  databaseGovernance: { mode: "check" },
+  databaseGovernance: { mode: "check", ownership: "assist" },
   commandCapabilities: { requirePersistentAdapters: true, permission: true, audit: true, idempotency: true, transaction: true,
     rpc: { modelOrders: { boundary: "database", transaction: true, audit: true, idempotency: true } } },
   delivery: {

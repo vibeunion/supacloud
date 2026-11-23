@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DatabaseModule, QueryExecutor } from "@supacloud/db";
@@ -139,6 +139,7 @@ const CASES_MODULE: DatabaseModule = {
     }],
     triggers: [],
     grants: [{ object: "public.cases", privilege: "select", role: "authenticated", source: "db/grants/cases.sql" }],
+    operationOwnership: [],
 };
 
 describe("db governance tools", () => {
@@ -263,6 +264,115 @@ describe("db governance tools", () => {
         expect(context.selectedModules).toEqual(["clean"]);
         expect(context.objects.map((object) => object.name)).toEqual(["public.clean", "clean_select"]);
         expect(executionMode("db", "context", {})).toBe("local");
+    });
+
+    test("operation-ownership suggest is read-only and reports adoptable evidence", async () => {
+        const moduleFile = join(root, "db/ownership-suggest.ts");
+        writeFileSync(moduleFile, `export default {
+  name: "suggested",
+  tables: ["public.suggested"],
+  policies: [], functions: [], triggers: [],
+  grants: [{ object: "public.suggested", privilege: "select", role: "authenticated", source: "db/grants/suggested.sql" }],
+};
+`, "utf8");
+        const before = readFileSync(moduleFile, "utf8");
+        const result = await db({
+            action: "operation-ownership",
+            operation_action: "suggest",
+            root,
+            module_file: "db/ownership-suggest.ts",
+        });
+        const report = JSON.parse(result.content[0].text);
+        expect(result.isError).toBe(false);
+        expect(report).toMatchObject({
+            version: 1,
+            scope: "operation-ownership",
+            action: "suggest",
+            modules: ["suggested"],
+            summary: { declared: 0, suggested: 1, ambiguous: 0, unknown: 3, adoptable: 1 },
+        });
+        expect(report.suggestions.find((entry: { operation: string }) => entry.operation === "select"))
+            .toMatchObject({ module: "suggested", status: "suggested", owner: "postgrest-data-api" });
+        expect(readFileSync(moduleFile, "utf8")).toBe(before);
+    });
+
+    test("operation-ownership adopt previews by default and writes only high-confidence entries", async () => {
+        const moduleFile = join(root, "db/ownership-adopt.ts");
+        writeFileSync(moduleFile, `export default {
+  name: "adopt",
+  tables: ["public.adopt"],
+  policies: [], functions: [], triggers: [],
+  grants: [
+    { object: "public.adopt", privilege: "select", role: "authenticated", source: "db/grants/adopt.sql" },
+    { object: "public.adopt", privilege: "insert", role: "authenticated", source: "db/grants/adopt.sql" },
+  ],
+};
+`, "utf8");
+        const preview = await db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: "db/ownership-adopt.ts",
+        });
+        const previewReport = JSON.parse(preview.content[0].text);
+        expect(previewReport.mode).toBe("preview");
+        expect(previewReport.changes).toEqual([
+            expect.objectContaining({
+                table: "public.adopt",
+                operation: "select",
+                owner: "postgrest-data-api",
+                source: "suggested",
+            }),
+        ]);
+        expect(previewReport.skipped).toEqual([
+            expect.objectContaining({ table: "public.adopt", operation: "insert" }),
+            expect.objectContaining({ table: "public.adopt", operation: "update" }),
+            expect.objectContaining({ table: "public.adopt", operation: "delete" }),
+        ]);
+        expect(readFileSync(moduleFile, "utf8")).not.toContain("operationOwnership");
+
+        const written = await db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: "db/ownership-adopt.ts",
+            write: true,
+        });
+        expect(JSON.parse(written.content[0].text).mode).toBe("write");
+        const source = readFileSync(moduleFile, "utf8");
+        expect(source).toContain('operationOwnership: [');
+        expect(source).toContain('owner: "postgrest-data-api"');
+        expect(source).not.toContain('operation: "insert"');
+    });
+
+    test("operation-ownership adopt requires an explicit owner for unknown operations", async () => {
+        const moduleFile = join(root, "db/ownership-explicit.ts");
+        writeFileSync(moduleFile, `export default {
+  name: "explicit",
+  tables: ["public.explicit"],
+  policies: [], functions: [], triggers: [], grants: [],
+};
+`, "utf8");
+        await expect(db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: "db/ownership-explicit.ts",
+            target: "public.explicit",
+            operation: "insert",
+        })).rejects.toThrow("同时提供 --target、--operation 和 --owner");
+        const result = await db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: "db/ownership-explicit.ts",
+            target: "public.explicit",
+            operation: "insert",
+            owner: "durable-command",
+        });
+        expect(JSON.parse(result.content[0].text).changes).toEqual([
+            expect.objectContaining({ operation: "insert", owner: "durable-command", source: "explicit" }),
+        ]);
     });
 
     test("runModuleCheck reconciles declared state against a mocked catalog", async () => {
@@ -444,5 +554,6 @@ describe("db governance tools", () => {
         expect(executionMode("db", "check", {})).toBe("read");
         expect(executionMode("db", "module_check", {})).toBe("read");
         expect(executionMode("db", "role_check", {})).toBe("read");
+        expect(executionMode("db", "operation-ownership", {})).toBe("local");
     });
 });

@@ -56,3 +56,22 @@ test("an exact hyphenated schema field keeps its declared name", async () => {
     await runCli(tools, ["demo", "deploy", "--expected-active-version", "3"]);
     expect(calls).toEqual([{ action: "deploy", "expected-active-version": "3" }]);
 });
+
+test("database operation ownership accepts a nested suggest/adopt action", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const tools = {
+        db: {
+            schema: {
+                action: Type.Enum(["operation-ownership", "context"]),
+                operation_action: Type.Optional(Type.Enum(["suggest", "adopt"])),
+                write: Type.Optional(Type.Boolean()),
+            },
+            callback: async (args: unknown): Promise<ToolResult> => {
+                calls.push(args as Record<string, unknown>);
+                return { content: [{ type: "text", text: "ok" }] };
+            },
+        },
+    };
+    await runCli(tools, ["db", "operation-ownership", "suggest"]);
+    expect(calls).toEqual([{ action: "operation-ownership", operation_action: "suggest" }]);
+});

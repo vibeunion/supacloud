@@ -96,7 +96,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["release", "upload", "configure", "transfer", "promote", "promote-reconcile", "deploy", "rollback", "reconcile", "retire", "preview", "preview-create", "preview-reconcile", "preview-cleanup", "preview-pr"],
     },
     db: {
-        local: ["context", "lint", "explain", "diff", "role_sql"],
+        local: ["context", "lint", "explain", "operation-ownership", "diff", "role_sql"],
         read: ["check", "module_check", "reverse", "plan", "role_check"],
         write: ["apply"],
     },
