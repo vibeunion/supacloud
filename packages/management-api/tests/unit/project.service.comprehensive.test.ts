@@ -890,9 +890,9 @@ describe("ProjectService - Comprehensive", () => {
     const projectFunctionsDir = join(config.edgeFunctionsDir, "test123abc");
     await fs.mkdir(projectFunctionsDir, { recursive: true });
     await Bun.write(join(projectFunctionsDir, "upgraded-hook.js"), "stale legacy artifact");
-    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
-    edgeFunctionServiceMock.list.mockResolvedValueOnce(["upgraded-hook"]);
-    edgeFunctionServiceMock.getState.mockResolvedValueOnce({
+    projectRepositoryMock.findByRef.mockResolvedValue(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValue(["upgraded-hook"]);
+    edgeFunctionServiceMock.getState.mockResolvedValue({
       active_version: "1",
       config: {
         verify_jwt: true,
@@ -902,17 +902,19 @@ describe("ProjectService - Comprehensive", () => {
     });
 
     try {
+      // 瞬时不一致会重试一次，但持续缺失仍必须 fail closed。
       await expect(service.listFunctions("test123abc"))
         .rejects.toThrow("Active function artifact is missing");
+      expect(edgeFunctionServiceMock.list).toHaveBeenCalledTimes(2);
     } finally {
       await fs.rm(projectFunctionsDir, { recursive: true, force: true });
     }
   });
 
   test("listFunctions fails closed when an enumerated Function becomes inactive", async () => {
-    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
-    edgeFunctionServiceMock.list.mockResolvedValueOnce(["concurrent-delete"]);
-    edgeFunctionServiceMock.getState.mockResolvedValueOnce({
+    projectRepositoryMock.findByRef.mockResolvedValue(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValue(["concurrent-delete"]);
+    edgeFunctionServiceMock.getState.mockResolvedValue({
       active_version: "absent",
       config: {
         verify_jwt: true,
@@ -922,7 +924,39 @@ describe("ProjectService - Comprehensive", () => {
 
     await expect(service.listFunctions("test123abc"))
       .rejects.toThrow("Function became inactive while listing");
-    expect(edgeFunctionServiceMock.getState).toHaveBeenCalledTimes(1);
+    // 一次重试后仍然不一致，才向上抛错。
+    expect(edgeFunctionServiceMock.list).toHaveBeenCalledTimes(2);
+  });
+
+  test("listFunctions retries once and succeeds when the activation race clears", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValue(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValue(["raced-function"]);
+    edgeFunctionServiceMock.getState
+      .mockResolvedValueOnce({
+        active_version: "absent",
+        config: {
+          verify_jwt: true,
+          activation_id: "11111111-1111-4111-8111-111111111111",
+        },
+      })
+      .mockResolvedValue({
+        active_version: "2",
+        config: {
+          verify_jwt: true,
+          activation_id: "22222222-2222-4222-8222-222222222222",
+        },
+      });
+
+    const projectFunctionsDir = join(config.edgeFunctionsDir, "test123abc");
+    await fs.mkdir(projectFunctionsDir, { recursive: true });
+    await Bun.write(join(projectFunctionsDir, "raced-function.js"), "export default { fetch: () => new Response('ok') };");
+    try {
+      const listed = await service.listFunctions("test123abc");
+      expect(listed.map((item) => item.slug)).toEqual(["raced-function"]);
+      expect(edgeFunctionServiceMock.list).toHaveBeenCalledTimes(2);
+    } finally {
+      await fs.rm(projectFunctionsDir, { recursive: true, force: true });
+    }
   });
 
   test("listFunctions propagates atomic snapshot read failures", async () => {
