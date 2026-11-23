@@ -162,6 +162,26 @@ test("ownership assistance reports warnings and preserves structured evidence", 
   expect(errors.every(item => item.severity === "error" && item.message.includes("unknown"))).toBe(true);
 });
 
+test("strict compilation keeps ownership assistance warnings non-blocking", async () => {
+  const { root, options } = await fixture();
+  const assist = {
+    mode: "check" as const,
+    ownership: "assist" as const,
+    projectRoot: root,
+    moduleFile: "db/modules.mjs",
+  };
+  const compiled = await compileProject({
+    ...options,
+    strict: true,
+    databaseGovernance: assist,
+  });
+  expect(compiled.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: "database-operation-ownership", severity: "warn" }),
+  ]));
+  expect(compiled.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+  expect(compiled.written.length).toBeGreaterThan(0);
+});
+
 test("compiler rejects conflicting table operation ownership before catalog reconciliation", async () => {
   const { root, options } = await fixture();
   const owned = (name: string, owner: string) => ({

@@ -54,7 +54,12 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   diagnostics.push(...databaseDiagnostics);
   if (options.strict) {
     for (const diagnostic of diagnostics) {
-      if (diagnostic.severity === "warn") diagnostic.severity = "error";
+      // Ownership assistance is intentionally a migration warning: strict
+      // projects may adopt declarations incrementally before switching to
+      // ownership enforcement.
+      if (diagnostic.severity === "warn" && diagnostic.code !== "database-operation-ownership") {
+        diagnostic.severity = "error";
+      }
     }
   }
   // Catalog drift warnings must not block artifact generation; only error-severity
@@ -135,7 +140,11 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   diagnostics.push(...databaseDiagnostics);
   if (options.strict) {
     for (const diagnostic of diagnostics) {
-      if (diagnostic.severity === "warn") diagnostic.severity = "error";
+      // Keep operation ownership assistance non-blocking until enforcement is
+      // explicitly enabled in databaseGovernance.ownership.
+      if (diagnostic.severity === "warn" && diagnostic.code !== "database-operation-ownership") {
+        diagnostic.severity = "error";
+      }
     }
   }
   if (databaseDiagnostics.some((diagnostic) => diagnostic.severity === "error")) {
