@@ -761,6 +761,12 @@ export interface Project {
   postgrest_last_error: string | null;
   postgrest_updated_at: Date | string | null;
   postgrest_last_reconciled_at: Date | string | null;
+  dataplane_desired: string | null;
+  dataplane_actual: string | null;
+  dataplane_health: string | null;
+  dataplane_port: number | null;
+  dataplane_last_error: string | null;
+  dataplane_updated_at: Date | string | null;
   config: Record<string, unknown>;
   created_at: Date;
   updated_at: Date;

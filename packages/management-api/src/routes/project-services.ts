@@ -11,6 +11,10 @@ import {
 } from "../middleware/auth";
 import { $ } from "bun";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
+import {
+  DataPlaneUnavailableError,
+  dataPlaneRuntimeService,
+} from "../services/dataplane-runtime.service";
 import { runtimeSnapshotService } from "../services/runtime-snapshot.service";
 import {
   getAuthRuntimeDescriptor,
@@ -262,6 +266,24 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
+  // Data plane runtime status (observed only; see the data plane ADR)
+  .get(
+    "/:ref/services/dataplane/status",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get data plane runtime status" },
+    },
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+        return status(404, { message: "Project not found" });
+      }
+      return dataPlaneRuntimeService.status(params.ref);
+    },
+  )
+
   // Individual service control (start/stop/restart)
   .post(
     "/:ref/services/:service/:action",
@@ -304,6 +326,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const projectUnitMap: Record<string, string> = {
         postgrest: `supacloud-pgrst@${ref}`,
         rest: `supacloud-pgrst@${ref}`,
+        dataplane: dataPlaneRuntimeService.unit(ref),
         gotrue: `supacloud-gotrue@${ref}`,
         auth: `supacloud-gotrue@${ref}`,
       };
@@ -347,6 +370,35 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
           set.status = 500;
           return {
             message: `Failed to ${action} PostgREST: ${err instanceof Error ? err.message : String(err)}`,
+            code: "500",
+          };
+        }
+      }
+
+      if (service === "dataplane") {
+        try {
+          const runtime =
+            action === "stop" || action === "pause"
+              ? await dataPlaneRuntimeService.stop(ref)
+              : action === "status"
+                ? await dataPlaneRuntimeService.status(ref)
+                : await dataPlaneRuntimeService.start(ref);
+
+          return {
+            service: "dataplane",
+            action,
+            success: action === "status" || runtime.actual !== "error",
+            runtime,
+            message: `Data plane ${action} ${runtime.actual === "error" ? "failed" : "completed"}`,
+          };
+        } catch (err: unknown) {
+          if (err instanceof DataPlaneUnavailableError) {
+            set.status = 409;
+            return { message: err.message, code: err.code };
+          }
+          set.status = 500;
+          return {
+            message: `Failed to ${action} data plane: ${err instanceof Error ? err.message : String(err)}`,
             code: "500",
           };
         }

@@ -9,6 +9,7 @@ import { ApiError, type RequestContext } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './build.js'
 import { errorToResponse, jsonResponse } from './errors.js'
+import { buildRestOpenApiDocument } from './openapi.js'
 import { ParseError, parseQuery, type ParsedQuery } from './parse.js'
 
 /** Internal throw used to roll back a successful mutation while preserving its result. */
@@ -123,7 +124,6 @@ export class RestHandler {
   async handle(req: Request, ctx: RequestContext, url: URL): Promise<Response> {
     try {
       const rest = url.pathname.replace(/^\/rest\/v1\/?/, '')
-      if (rest === '') return jsonResponse(200, { info: { title: 'supacloud-lite', version: SUPACLOUD_LITE_VERSION } })
 
       const method = req.method.toUpperCase()
       const schema =
@@ -142,6 +142,17 @@ export class RestHandler {
           details: null,
           hint: null,
         })
+      }
+
+      // The root document is per-schema in PostgREST: it describes the schema
+      // the request negotiated, not every exposed schema at once.
+      if (rest === '') {
+        return jsonResponse(200, await buildRestOpenApiDocument(this.db, {
+          schema,
+          exposedSchemas: this.exposedSchemas,
+          version: SUPACLOUD_LITE_VERSION,
+          serverUrl: url.origin,
+        }))
       }
 
       if (rest.startsWith('rpc/')) {
