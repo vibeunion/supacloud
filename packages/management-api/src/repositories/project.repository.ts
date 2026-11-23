@@ -16,6 +16,8 @@ const PROJECT_COLUMNS = [
   "anon_key_encrypted", "anon_key_hash", "service_role_key_hash",
   "region", "status", "postgrest_desired", "postgrest_actual", "postgrest_health",
   "postgrest_port", "postgrest_last_error", "postgrest_updated_at", "postgrest_last_reconciled_at",
+  "dataplane_desired", "dataplane_actual", "dataplane_health", "dataplane_port",
+  "dataplane_last_error", "dataplane_updated_at",
   "config", "created_at", "updated_at", "deleted_at",
 ] as const;
 export const projectColumns = PROJECT_COLUMNS.join(", ");

@@ -122,6 +122,15 @@ export class Database {
 
   private constructor(public engine: DbEngine, private strict = false) {}
 
+  /**
+   * Attach to an already-bootstrapped database without running the Lite
+   * bootstrap. Use this for a managed project, where schema, roles and
+   * extensions are owned by the project's own provisioning and migrations.
+   */
+  static attach(engine: DbEngine, opts?: { strict?: boolean }): Database {
+    return new Database(engine, opts?.strict)
+  }
+
   /** Create a Database on PGlite (default) or any custom DbEngine. */
   static async create(dataDirOrEngine?: string | DbEngine, opts?: { vaultKey?: string; strict?: boolean }): Promise<Database> {
     const engine =
@@ -480,6 +489,95 @@ export class Database {
     const info: SchemaInfo = { tables, foreignKeys: [...fkMap.values()] }
     this.schemaCache.set(schema, info)
     return info
+  }
+
+  /**
+   * Relations in `schema` the given role may `SELECT`.
+   *
+   * Used by the OpenAPI root document: PostgREST advertises what the caller's
+   * role can reach, not what merely exists, so an `anon` key must not learn the
+   * shape of tables it cannot read. The role arrives validated and is bound,
+   * never interpolated.
+   *
+   * The `CASE` guard matters: `has_table_privilege` raises `role does not
+   * exist`, so an unknown role would turn the root document into a 500. `CASE`
+   * is evaluated lazily, so the function is never called for a missing role and
+   * the result fails closed to an empty set.
+   */
+  async listAccessibleRelations(schema: string, role: string): Promise<Set<string>> {
+    const res = await this.engine.query<{ name: string }>(
+      `select c.relname as name
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = $1
+         and c.relkind in ('r', 'v', 'm', 'p', 'f')
+         and case when exists (select 1 from pg_roles r where r.rolname = $2)
+                  then has_table_privilege($2, c.oid, 'SELECT')
+                  else false end`,
+      [schema, role]
+    )
+    return new Set(res.rows.map((row) => row.name))
+  }
+
+  /**
+   * Every function in a schema, with overloads kept distinct.
+   *
+   * With a `role`, only overloads that role may `EXECUTE` are returned, and the
+   * filter is applied per `pg_proc` row. Filtering by function *name* would keep
+   * an executable overload and leak the argument shape of a sibling the caller
+   * cannot call. The role guard mirrors {@link listAccessibleRelations}.
+   */
+  async listFunctions(schema: string, options: { role?: string } = {}): Promise<FunctionInfo[]> {
+    const role = options.role
+    const privilege = role === undefined
+      ? ''
+      : `
+         and case when exists (select 1 from pg_roles r where r.rolname = $2)
+                  then has_function_privilege($2, p.oid, 'EXECUTE')
+                  else false end`
+    const res = await this.engine.query<{
+      name: string
+      returns_set: boolean
+      returns_table: boolean
+      return_type: string
+      return_typtype: string
+      volatility: string
+      required_arg_count: number
+      input_args: FunctionArg[]
+    }>(
+      `select p.proname as name, p.proretset as returns_set,
+              coalesce('t' = any(p.proargmodes), false) as returns_table,
+              t.typname as return_type, t.typtype as return_typtype,
+              p.provolatile as volatility,
+              p.pronargs - p.pronargdefaults as required_arg_count,
+              coalesce((
+                select json_agg(json_build_object(
+                  'name', coalesce(a.name, ''),
+                  'type', format_type(a.type, null)
+                ) order by a.ordinal)
+                from unnest(coalesce(p.proallargtypes, p.proargtypes::oid[]),
+                            p.proargnames, p.proargmodes)
+                  with ordinality as a(type, name, mode, ordinal)
+                where a.mode is null or a.mode in ('i', 'b', 'v')
+              ), '[]'::json) as input_args
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       join pg_type t on t.oid = p.prorettype
+       where n.nspname = $1${privilege}
+       order by p.proname, p.oid`,
+      role === undefined ? [schema] : [schema, role]
+    )
+    return res.rows.map((r) => ({
+      schema,
+      name: r.name,
+      returnsSet: r.returns_set,
+      returnsTable: r.returns_table,
+      returnType: r.return_type,
+      returnTypType: r.return_typtype,
+      volatility: r.volatility,
+      requiredArgCount: r.required_arg_count,
+      args: r.input_args,
+    }))
   }
 
   /**

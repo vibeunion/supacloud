@@ -210,6 +210,8 @@ async function launch(bundle: string, databaseUrl: string, signal: AbortSignal, 
         region text, status text, postgrest_desired text, postgrest_actual text, postgrest_health text,
         postgrest_port integer, postgrest_last_error text, postgrest_updated_at timestamptz,
         postgrest_last_reconciled_at timestamptz, config jsonb,
+      dataplane_desired text, dataplane_actual text, dataplane_health text,
+      dataplane_port integer, dataplane_last_error text, dataplane_updated_at timestamptz,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), deleted_at timestamptz
       )`);
       await admin`INSERT INTO projects(ref,db_name,db_user,db_password)
