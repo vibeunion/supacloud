@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.64.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.63.1...compiler-v0.64.0) (2026-11-23)
+
+
+### Features
+
+* **db:** add compile-time operation ownership governance ([#2763](https://github.com/vibeunion/supacloud/issues/2763)) ([d5f5b3e](https://github.com/vibeunion/supacloud/commit/d5f5b3eb7fc1ae5484a9f78f3ae08d3dd9ede04f))
+* **db:** add operation ownership adoption workflow ([#2765](https://github.com/vibeunion/supacloud/issues/2765)) ([c3df7ad](https://github.com/vibeunion/supacloud/commit/c3df7ada5cd16672370ec45b968959eb78296ba4))
+
 ## [0.63.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.63.0...compiler-v0.63.1) (2026-11-21)
 
 
