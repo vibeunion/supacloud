@@ -457,7 +457,7 @@ function remoteModuleManifest(modules: readonly DatabaseModule[]): Array<Record<
             privilege: grant.privilege,
             role: grant.role,
         })),
-        operationOwnership: module.operationOwnership.map((ownership) => ({
+        operationOwnership: (module.operationOwnership ?? []).map((ownership) => ({
             table: ownership.table,
             operation: ownership.operation,
             owner: ownership.owner,
