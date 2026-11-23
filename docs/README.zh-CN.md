@@ -78,6 +78,8 @@
 - [路由契约升级迁移](./route-contract-migration.md) - schema-first 路由、客户端 decoder、OpenAPI 与 Management API 注册表迁移
 - [数据库治理](./database-governance.md) - RLS/RPC 作为一等资源管理、Catalog 对齐与 SQL Lint (`@supacloud/db`)
 - [应用平台原语](./application-platform-primitives.md) - 自定义 PostgREST Schema、事务性 Command 回执与不可变物料追溯
+- [Rust 平台能力引入与 PostgREST 边界](./adr/2026-11-23-rust-platform-adoption.md) - Rust 服务基线、控制面协调与数据面替换门槛
+- [统一 Data API 与 PostgREST 退役](./adr/2026-11-24-postgrest-dataplane-unification.md) - 单一 REST 实现、双层权限执行、切换门槛与回滚边界
 
 ## 产品定位
 

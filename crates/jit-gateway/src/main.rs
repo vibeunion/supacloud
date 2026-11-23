@@ -6,8 +6,8 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use supacloud_runtime_core::{health_payload, init_tracing, resolve_socket_addr, shutdown_signal};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -39,18 +39,15 @@ fn unauthorized() -> (StatusCode, Json<serde_json::Value>) {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,supacloud_jit_gateway=debug".into()),
-        )
-        .init();
+    init_tracing("info,supacloud_jit_gateway=debug");
 
-    let control_host = std::env::var("JIT_GATEWAY_CONTROL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let control_port = std::env::var("JIT_GATEWAY_CONTROL_PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9012);
+    let control_addr = resolve_socket_addr(
+        "JIT_GATEWAY_CONTROL_HOST",
+        &["JIT_GATEWAY_CONTROL_PORT"],
+        "127.0.0.1",
+        9012,
+    )
+    .expect("invalid JIT gateway control bind address");
 
     let bind_host = std::env::var("JIT_GATEWAY_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".into());
     let upstream_host = std::env::var("JIT_GATEWAY_UPSTREAM_HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -73,27 +70,25 @@ async fn main() {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let control_addr: SocketAddr = format!("{}:{}", control_host, control_port)
-        .parse()
-        .expect("Invalid control bind address");
-
     info!(
         "🚀 SupaCloud JIT Database Gateway (Rust) control listening on http://{}",
         control_addr
     );
 
     let listener = tokio::net::TcpListener::bind(&control_addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 }
 
 async fn healthcheck() -> impl IntoResponse {
     (
         StatusCode::OK,
-        Json(json!({
-            "status": "healthy",
-            "engine": "supacloud-jit-gateway/rust",
-            "version": env!("CARGO_PKG_VERSION")
-        })),
+        Json(health_payload(
+            "supacloud-jit-gateway/rust",
+            env!("CARGO_PKG_VERSION"),
+        )),
     )
 }
 

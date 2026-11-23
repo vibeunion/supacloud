@@ -19,3 +19,4 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 parking_lot = "0.12"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
+supacloud-runtime-core = { path = "../runtime-core" }
