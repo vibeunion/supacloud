@@ -3,10 +3,14 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   checkRpcBoundary,
+  findOperationOwnershipConflicts,
   lintModule,
+  normalizeOperationOwnership,
   readCatalog,
   reconcileModule,
+  suggestOperationOwnership,
   type DatabaseModule,
+  type OperationOwnershipSuggestion,
   type QueryExecutor,
 } from "@supacloud/db";
 import { databaseSources } from "@supacloud/db/source-contracts";
@@ -36,7 +40,10 @@ function normalizeModule(value: unknown, file: string): DatabaseModule {
     || !declarations(value.grants, ["object", "privilege", "role", "source"], () => true)) {
     throw new Error(`Invalid database module: ${file}`);
   }
-  return value as unknown as DatabaseModule;
+  // Ownership is explicit: validate schema-qualified tables, operations, owners
+  // and duplicate table/operation declarations before catalog reconciliation.
+  const operationOwnership = normalizeOperationOwnership(value.operationOwnership, value.tables as string[]);
+  return { ...value, operationOwnership } as unknown as DatabaseModule;
 }
 
 async function loadModules(projectRoot: string, moduleFile: string): Promise<DatabaseModule[]> {
@@ -58,6 +65,55 @@ function governanceDiagnostic(
     message,
     suggestion: "Fix the database source contract, module manifest or live catalog before compiling.",
   };
+}
+
+function ownershipDiagnostic(
+  suggestion: OperationOwnershipSuggestion,
+  severity: Diagnostic["severity"],
+): Diagnostic {
+  const object = `${suggestion.table}.${suggestion.operation}`;
+  const candidates = suggestion.candidates.length > 0
+    ? ` Candidates: ${suggestion.candidates.join(", ")}.`
+    : "";
+  const state = suggestion.status === "suggested"
+    ? `suggested owner ${suggestion.owner} (${suggestion.reason})`
+    : `${suggestion.status} (${suggestion.reason})`;
+  return {
+    severity,
+    code: "database-operation-ownership",
+    message: `Table operation ${object} ownership is ${state}.${candidates}`,
+    suggestion: suggestion.status === "suggested"
+      ? `Declare operationOwnership ${object} = ${suggestion.owner} to lock in the suggested owner.`
+      : `Declare exactly one operationOwnership owner for ${object} in its database module.`,
+    evidence: [
+      ...suggestion.evidence.map(({ kind, detail, role, privilege, source }) => ({
+        kind,
+        detail,
+        ...(role === undefined ? {} : { role }),
+        ...(privilege === undefined ? {} : { privilege }),
+        ...(source === undefined ? {} : { source }),
+      })),
+      {
+        kind: "suggestion",
+        detail: suggestion.status === "suggested"
+          ? `high-confidence suggestion: ${suggestion.owner}`
+          : `no owner is asserted (${suggestion.reason})`,
+        ...(suggestion.owner === null ? {} : { owner: suggestion.owner }),
+        ...(suggestion.candidates.length === 0 ? {} : { candidates: [...suggestion.candidates] }),
+      },
+    ],
+  };
+}
+
+/** assist reports every undeclared operation; enforce only blocks ambiguous or missing evidence. */
+function ownershipSeverity(
+  suggestion: OperationOwnershipSuggestion,
+  mode: "assist" | "enforce",
+): Diagnostic["severity"] | null {
+  if (suggestion.status === "declared") return null;
+  const blocked = suggestion.status === "ambiguous" || suggestion.status === "unknown";
+  if (!blocked && mode === "enforce") return null;
+  return blocked && mode === "enforce" ? "error" : "warn";
 }
 
 export async function enforceDatabaseGovernance(
@@ -98,13 +154,31 @@ export async function enforceDatabaseGovernance(
     }
   }
   if (diagnostics.length > 0) return { diagnostics };
-  // Offline checks never import executable modules or access the database.
-  if (options.mode === "check") return { diagnostics };
+  const ownership = options.ownership ?? "off";
+  // Offline checks never import executable modules unless ownership assistance is
+  // explicitly requested; ownership evidence lives in the module declarations.
+  if (options.mode === "check" && ownership === "off") return { diagnostics };
 
   const modules = await loadModules(projectRoot, options.moduleFile ?? "db/modules.ts");
   if (!modules.length || new Set(modules.map(module => module.name)).size !== modules.length
-    || modules.some(module => !module.tables.length && !module.functions.length)) {
-    return { diagnostics: [governanceDiagnostic("Enforced governance requires nonempty, uniquely named database modules.")] };
+    || (options.mode === "enforce" && modules.some(module => !module.tables.length && !module.functions.length))) {
+    return { diagnostics: [governanceDiagnostic("Database governance requires nonempty, uniquely named database modules.")] };
+  }
+  const ownershipConflicts = findOperationOwnershipConflicts(modules);
+  if (ownershipConflicts.length > 0) {
+    return { diagnostics: ownershipConflicts.map((conflict) => governanceDiagnostic(
+      `Table operation ${conflict.table}.${conflict.operation} has conflicting owners (${conflict.owners.join(", ")}) `
+      + `in modules ${conflict.modules.join(", ")}. Declare exactly one owner for each table operation.`,
+      "database-operation-ownership",
+    )) };
+  }
+  if (ownership !== "off") {
+    for (const suggestion of suggestOperationOwnership(modules)) {
+      const severity = ownershipSeverity(suggestion, ownership);
+      if (severity !== null) diagnostics.push(ownershipDiagnostic(suggestion, severity));
+    }
+    // Ownership assistance is declaration-only: check mode stops before SQL and Catalog checks.
+    if (options.mode === "check") return { diagnostics };
   }
   const readSql = async (path: string): Promise<string> =>
     readFile(await withinRoot(projectRoot, path), "utf8");

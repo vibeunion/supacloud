@@ -120,6 +120,48 @@ export const caseDb = defineDatabaseModule({
 
 `tables` 仅接受 schema-qualified 字符串，例如 `public.cases`；不接受 ORM 内部表对象。
 
+### 操作所有权（operation ownership）
+
+`operationOwnership` 在同一个 `defineDatabaseModule` 声明里为每个
+schema-qualified 表操作指定**唯一**入口。它是声明与校验，不新增迁移账本、
+不改变 PostgREST 公开协议，也不暴露 ZenStack CRUD：
+
+```ts
+export const caseDb = defineDatabaseModule({
+  name: "case",
+  tables: ["public.cases"],
+  operationOwnership: [
+    { table: "public.cases", operation: "select", owner: "postgrest-data-api" },
+    { table: "public.cases", operation: "insert", owner: "durable-command" },
+    { table: "public.cases", operation: "update", owner: "governed-sql-rpc" },
+    { table: "public.cases", operation: "delete", owner: "legacy-rpc" },
+  ],
+});
+```
+
+| owner | 含义 | 现有入口名 |
+|---|---|---|
+| `postgrest-data-api` | PostgREST / Data API，普通读取与低风险 CRUD | `postgrest-read` |
+| `durable-command` | 编译器应用车道的 durable Command | `model-command` |
+| `governed-sql-rpc` | 受治理的 SQL 投影、函数或生成 RPC | `governed-sql` |
+| `legacy-rpc` | 已登记的存量 RPC 迁移桥 | `legacy-rpc` |
+
+规则：
+
+- 每一行必须显式写出 `table`、`operation` 和 `owner`；不接受默认归属。
+- `table` 必须由同一个模块的 `tables` 声明，`operation` 只能是
+  `select` / `insert` / `update` / `delete`。
+- 同一模块内重复的 `table + operation` 会被拒绝（同名 owner 是重复，不同
+  owner 是冲突）；跨模块声明同一 `table + operation` 但 owner 不同时，
+  compiler 以 `database-operation-ownership` 报错。
+- 未声明的表或操作保持未分类，不推断归属；可以先只声明已经迁移完成的条目。
+- `ownership: "assist"` 会在 `check` 阶段读取模块并输出带 evidence 的 warning；
+  `ownership: "enforce"` 会把 ambiguous/unknown 变成 error。未开启 ownership
+  时，`check` 仍保持离线且不导入可执行模块；`enforce` 始终在 Catalog 对账前读取模块。
+
+`buildDatabaseManifest` 会序列化 `operationOwnership`；`explainObject` 支持
+`public.cases.select` 形式的对象名，表的解释里也会列出已声明的操作归属。
+
 ## Catalog 对账
 
 ```ts
@@ -197,7 +239,7 @@ const manifest = buildDatabaseManifest([caseDb, intakeDb]);
 console.log(explainObject(manifest, "public.case_create"));
 ```
 
-`db.manifest.json` 记录表/策略/函数/测试的所有权关系，是 `db graph`、`db impact` 与 AI 辅助修改的基础数据。
+`db.manifest.json` 记录表/策略/函数/测试以及表操作归属关系，是 `db graph`、`db impact` 与 AI 辅助修改的基础数据。
 
 ## 测试
 

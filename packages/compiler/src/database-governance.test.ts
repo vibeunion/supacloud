@@ -67,12 +67,16 @@ async function fixture(): Promise<{ root: string; options: CompileOptions }> {
 
 test("configuration defaults off, resolves project root and rejects malformed modes", () => {
   expect(defineSupacloudConfig().databaseGovernance?.mode).toBe("off");
+  expect(defineSupacloudConfig().databaseGovernance?.ownership).toBeUndefined();
+  expect(compileOptionsFromConfig({ databaseGovernance: { mode: "enforce", ownership: "assist" } }, "/project"))
+    .toMatchObject({ databaseGovernance: { mode: "enforce", ownership: "assist" } });
   expect(compileOptionsFromConfig({ databaseGovernance: { mode: "check" } }, "/project"))
     .toMatchObject({ databaseGovernance: { mode: "check", projectRoot: "/project" } });
   expect(compileOptionsFromConfig({ root: "src", databaseGovernance: { mode: "enforce" } }, "/project"))
     .toMatchObject({ rootDir: "/project/src", databaseGovernance: { projectRoot: "/project" } });
   for (const value of [false, null, {}, { mode: "warn" }, { mode: "enforce", schemas: [] },
-    { mode: "enforce", databaseUrlEnv: "bad-name" }, { mode: "enforce", optional: true }]) {
+    { mode: "enforce", databaseUrlEnv: "bad-name" }, { mode: "enforce", optional: true },
+    { mode: "enforce", ownership: "warn" }]) {
     expect(() => Reflect.apply(defineSupacloudConfig, undefined, [{ databaseGovernance: value }])).toThrow();
   }
 });
@@ -104,6 +108,79 @@ test("offline governance binds Command RPC capabilities to registry or catalog a
   expect(await checkDatabaseGovernance(root, governance, ["approveCase"])).toEqual([]);
   const missing = await checkDatabaseGovernance(root, governance, ["unownedCase"]);
   expect(missing).toEqual([expect.objectContaining({ code: "database-rpc-boundary", severity: "error" })]);
+});
+
+test("ownership assistance reports warnings and preserves structured evidence", async () => {
+  const { root } = await fixture();
+  const declared = (name: string, ownership: unknown[], grants: unknown[]) => ({
+    name, tables: ["public.items"], policies: [], functions: [], triggers: [], grants, operationOwnership: ownership,
+  });
+  const writeModules = async (values: unknown[]) => {
+    await writeFile(join(root, "db/modules.mjs"), fakeTransport + `export default ${JSON.stringify(values)};`);
+  };
+  const assist = { mode: "check" as const, ownership: "assist" as const, projectRoot: root, moduleFile: "db/modules.mjs" };
+
+  await writeModules([declared("items", [], [
+    { object: "public.items", privilege: "SELECT", role: "authenticated", source: "db/grants/items_select.sql" },
+    { object: "public.items", privilege: "ALL", role: "authenticated", source: "db/grants/items_write.sql" },
+  ])]);
+  const warnings = await checkDatabaseGovernance(root, assist);
+  expect(warnings).toHaveLength(4);
+  expect(warnings.every(item => item.code === "database-operation-ownership" && item.severity === "warn")).toBe(true);
+  const selectWarning = warnings.find(item => item.message.includes("public.items.select"));
+  const insertWarning = warnings.find(item => item.message.includes("public.items.insert"));
+  expect(selectWarning).toMatchObject({
+    message: expect.stringContaining("suggested owner postgrest-data-api"),
+    evidence: expect.arrayContaining([
+      expect.objectContaining({ kind: "grant", role: "authenticated", privilege: "SELECT" }),
+      expect.objectContaining({ kind: "suggestion", owner: "postgrest-data-api" }),
+    ]),
+  });
+  expect(insertWarning).toMatchObject({
+    message: expect.stringContaining("ambiguous"),
+    evidence: expect.arrayContaining([expect.objectContaining({
+      kind: "suggestion", candidates: ["durable-command", "postgrest-data-api"],
+    })]),
+  });
+
+  const ownership = ["select", "insert", "update", "delete"].map(operation => ({
+    table: "public.items", operation,
+    owner: operation === "select" ? "postgrest-data-api" : "durable-command",
+  }));
+  await writeModules([declared("items", ownership, [])]);
+  expect((await checkDatabaseGovernance(root, assist))
+    .filter(item => item.code === "database-operation-ownership")).toEqual([]);
+
+  const enforce = { ...assist, ownership: "enforce" as const };
+  expect((await checkDatabaseGovernance(root, enforce))
+    .filter(item => item.code === "database-operation-ownership")).toEqual([]);
+
+  await writeModules([declared("items", [], [])]);
+  const errors = (await checkDatabaseGovernance(root, enforce))
+    .filter(item => item.code === "database-operation-ownership");
+  expect(errors).toHaveLength(4);
+  expect(errors.every(item => item.severity === "error" && item.message.includes("unknown"))).toBe(true);
+});
+
+test("compiler rejects conflicting table operation ownership before catalog reconciliation", async () => {
+  const { root, options } = await fixture();
+  const owned = (name: string, owner: string) => ({
+    name, tables: ["public.items"], policies: [], functions: [], triggers: [], grants: [],
+    operationOwnership: [{ table: "public.items", operation: "select", owner }],
+  });
+  const writeModules = async (values: unknown[]) => {
+    await writeFile(join(root, "db/modules.mjs"), fakeTransport + `export default ${JSON.stringify(values)};`);
+  };
+  await writeModules([owned("reader", "postgrest-data-api"), owned("writer", "durable-command")]);
+  expect(await checkDatabaseGovernance(root, options.databaseGovernance)).toEqual([
+    expect.objectContaining({
+      severity: "error",
+      code: "database-operation-ownership",
+      message: expect.stringContaining("public.items.select"),
+    }),
+  ]);
+  await writeModules([owned("reader", "postgrest-data-api"), owned("reader-two", "postgrest-data-api")]);
+  expect(await checkDatabaseGovernance(root, options.databaseGovernance)).toEqual([]);
 });
 
 test("offline compile and incremental checks fail closed on stale contracts without repairing artifacts", async () => {

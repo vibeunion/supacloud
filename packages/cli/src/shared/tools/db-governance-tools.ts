@@ -5,12 +5,15 @@ import {
     buildDatabaseManifest,
     explainObject,
     lintModule,
+    normalizeOperationOwnership,
     readCatalog,
     reconcileModule,
     type DatabaseModule,
     type LintIssue,
+    type OperationOwner,
     type QueryExecutor,
     type ReconcileReport,
+    type TableOperation,
 } from "@supacloud/db";
 import { databaseSources } from "@supacloud/db/source-contracts";
 import { runDbWorkflow, type DbWorkflowAction } from "./db-workflow";
@@ -41,10 +44,12 @@ export interface DbToolArguments {
 }
 
 export interface DatabaseAiContextObject {
-    kind: "table" | "policy" | "function" | "trigger" | "grant";
+    kind: "table" | "policy" | "function" | "trigger" | "grant" | "operation";
     name: string;
     module: string;
     table?: string;
+    operation?: TableOperation;
+    owner?: OperationOwner;
     source: string | null;
     tests: string[];
     security?: string;
@@ -93,13 +98,15 @@ function normalizeModule(candidate: unknown, sourcePath: string): DatabaseModule
         throw new Error(`Invalid database module export in ${sourcePath}（应导出 defineDatabaseModule(...) 结果）`);
     }
     const raw = candidate as Partial<DatabaseModule> & { name: string };
+    const tables = raw.tables ?? [];
     return {
         name: raw.name,
-        tables: raw.tables ?? [],
+        tables,
         policies: raw.policies ?? [],
         functions: raw.functions ?? [],
         triggers: raw.triggers ?? [],
         grants: raw.grants ?? [],
+        operationOwnership: normalizeOperationOwnership(raw.operationOwnership, tables),
     };
 }
 
@@ -171,6 +178,16 @@ function moduleObjects(module: DatabaseModule): DatabaseAiContextObject[] {
         ...module.grants.map((grant) => ({
             kind: "grant" as const, name: `${grant.object}:${grant.privilege}:${grant.role}`,
             module: module.name, source: grant.source, tests: [],
+        })),
+        ...(module.operationOwnership ?? []).map((ownership) => ({
+            kind: "operation" as const,
+            name: `${ownership.table}.${ownership.operation}`,
+            module: module.name,
+            table: ownership.table,
+            operation: ownership.operation,
+            owner: ownership.owner,
+            source: null,
+            tests: [],
         })),
     ];
 }
@@ -439,6 +456,11 @@ function remoteModuleManifest(modules: readonly DatabaseModule[]): Array<Record<
             object: grant.object,
             privilege: grant.privilege,
             role: grant.role,
+        })),
+        operationOwnership: module.operationOwnership.map((ownership) => ({
+            table: ownership.table,
+            operation: ownership.operation,
+            owner: ownership.owner,
         })),
     }));
 }

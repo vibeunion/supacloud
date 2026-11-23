@@ -99,6 +99,22 @@ export interface Diagnostic {
   docsUrl?: string;
   /** Machine-readable remediation that an agent or IDE can apply. */
   fix?: DiagnosticFix;
+  /** Structured, machine-readable evidence for governance diagnostics. */
+  evidence?: DiagnosticEvidence[];
+}
+
+/**
+ * Stable evidence attached to governance diagnostics. Database ownership
+ * suggestions use `declaration` / `grant` / `missing-grant` / `suggestion`.
+ */
+export interface DiagnosticEvidence {
+  kind: "declaration" | "grant" | "missing-grant" | "suggestion";
+  detail: string;
+  role?: string;
+  privilege?: string;
+  source?: string;
+  owner?: string;
+  candidates?: string[];
 }
 
 /**
@@ -795,6 +811,12 @@ export interface TypeSafetyOptions {
 export interface DatabaseGovernanceOptions {
   /** Off for existing callers; check validates sources offline, enforce also checks SQL and Catalog. */
   mode: "off" | "check" | "enforce";
+  /**
+   * Opt-in operation ownership assistance. off keeps existing behavior, assist reports
+   * warnings for undeclared/ambiguous table operations, enforce turns unresolved or
+   * ambiguous ownership into errors. High-confidence evidence and declarations pass.
+   */
+  ownership?: "off" | "assist" | "enforce";
   /** Relative to the configuration directory, or rootDir for programmatic callers. */
   projectRoot?: string;
   /** Project-relative module file exporting defineDatabaseModule(...) results. */

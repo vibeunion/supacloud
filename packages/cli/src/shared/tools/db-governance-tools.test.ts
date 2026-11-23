@@ -55,6 +55,9 @@ const MODULES_SOURCE = `export default [
     grants: [
       { object: "public.cases", privilege: "select", role: "authenticated", source: "db/grants/cases.sql" },
     ],
+    operationOwnership: [
+      { table: "public.cases", operation: "select", owner: "postgrest-data-api" },
+    ],
   },
   {
     name: "clean",
@@ -164,6 +167,7 @@ describe("db governance tools", () => {
         const [solo] = await loadDatabaseModules(root, "db/single.ts");
         expect(solo).toEqual({
             name: "solo", tables: [], policies: [], functions: [], triggers: [], grants: [],
+            operationOwnership: [],
         });
 
         await expect(loadDatabaseModules(root, "db/invalid.ts")).rejects.toThrow("Invalid database module");
@@ -391,6 +395,9 @@ describe("db governance tools", () => {
         expect(JSON.stringify(modules)).not.toContain("db/policies");
         expect(modules[0]?.["functions"]).toEqual([
             { name: "public.case_create", security: "definer" },
+        ]);
+        expect(modules[0]?.["operationOwnership"]).toEqual([
+            { table: "public.cases", operation: "select", owner: "postgrest-data-api" },
         ]);
     });
 

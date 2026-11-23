@@ -189,6 +189,7 @@ export type {
   DependencyOptions,
   DependencyGraphIndex,
   Diagnostic,
+  DiagnosticEvidence,
   DiagnosticFix,
   EffectCompilerOptions,
   EffectErrorMappingNode,
