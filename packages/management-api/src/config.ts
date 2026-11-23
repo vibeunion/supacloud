@@ -148,6 +148,8 @@ export interface Config {
   managementProjectPoolCacheSize: number;
   gotrueBin: string;
   pgrstPortBase: number;
+  dataPlaneEnabled: boolean;
+  dataPlaneRuntimeDir: string;
   gotruePortBase: number;
   /** Optional project ref that exclusively owns the local GoTrue runtime. */
   authRuntimeOwnerRef: string;
@@ -390,6 +392,8 @@ export const config: Config = {
   managementProjectPoolCacheSize: Number(getEnv("MANAGEMENT_PROJECT_POOL_CACHE_SIZE", "5")),
   gotrueBin: getEnv("GOTRUE_BIN", "/usr/local/bin/gotrue"),
   pgrstPortBase: Number(getEnv("PGRST_PORT_BASE", "3100")),
+  dataPlaneEnabled: getEnv("DATA_PLANE_ENABLED", "false").trim().toLowerCase() === "true",
+  dataPlaneRuntimeDir: getEnv("DATA_PLANE_RUNTIME_DIR", "/etc/supacloud/dataplane"),
   gotruePortBase: Number(getEnv("GOTRUE_PORT_BASE", "3200")),
   authRuntimeOwnerRef: getEnv("SUPACLOUD_AUTH_RUNTIME_OWNER_REF", "").trim(),
   portRange: getEnv("PORT_RANGE", "3100-3299"),

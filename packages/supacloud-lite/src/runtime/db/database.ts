@@ -122,6 +122,15 @@ export class Database {
 
   private constructor(public engine: DbEngine, private strict = false) {}
 
+  /**
+   * Attach to an already-bootstrapped database without running the Lite
+   * bootstrap. Use this for a managed project, where schema, roles and
+   * extensions are owned by the project's own provisioning and migrations.
+   */
+  static attach(engine: DbEngine, opts?: { strict?: boolean }): Database {
+    return new Database(engine, opts?.strict)
+  }
+
   /** Create a Database on PGlite (default) or any custom DbEngine. */
   static async create(dataDirOrEngine?: string | DbEngine, opts?: { vaultKey?: string; strict?: boolean }): Promise<Database> {
     const engine =
@@ -480,6 +489,26 @@ export class Database {
     const info: SchemaInfo = { tables, foreignKeys: [...fkMap.values()] }
     this.schemaCache.set(schema, info)
     return info
+  }
+
+  /**
+   * Every function in a schema, with overloads flattened. Used by schema
+   * introspection surfaces (OpenAPI) that must list callable RPC entry points.
+   */
+  async listFunctions(schema: string): Promise<FunctionInfo[]> {
+    const res = await this.engine.query<{ name: string }>(
+      `select distinct p.proname as name
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = $1
+       order by p.proname`,
+      [schema]
+    )
+    const functions: FunctionInfo[] = []
+    for (const row of res.rows) {
+      functions.push(...await this.getFunctions(schema, row.name))
+    }
+    return functions
   }
 
   /**

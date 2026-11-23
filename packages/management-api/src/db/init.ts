@@ -135,6 +135,12 @@ export async function initDatabase() {
       postgrest_last_error TEXT,
       postgrest_updated_at TIMESTAMPTZ,
       postgrest_last_reconciled_at TIMESTAMPTZ,
+      dataplane_desired VARCHAR(20),
+      dataplane_actual VARCHAR(20),
+      dataplane_health VARCHAR(20),
+      dataplane_port INTEGER,
+      dataplane_last_error TEXT,
+      dataplane_updated_at TIMESTAMPTZ,
       config JSONB DEFAULT '{}',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -487,6 +493,12 @@ export async function initDatabase() {
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_last_error TEXT', description: "projects.postgrest_last_error" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_updated_at TIMESTAMPTZ', description: "projects.postgrest_updated_at" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_last_reconciled_at TIMESTAMPTZ', description: "projects.postgrest_last_reconciled_at" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataplane_desired VARCHAR(20)', description: "projects.dataplane_desired" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataplane_actual VARCHAR(20)', description: "projects.dataplane_actual" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataplane_health VARCHAR(20)', description: "projects.dataplane_health" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataplane_port INTEGER', description: "projects.dataplane_port" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataplane_last_error TEXT', description: "projects.dataplane_last_error" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataplane_updated_at TIMESTAMPTZ', description: "projects.dataplane_updated_at" },
       {
         statement: `
           CREATE TABLE IF NOT EXISTS branch_replacement_journal (
