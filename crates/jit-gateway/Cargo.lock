@@ -477,9 +477,20 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "supacloud-runtime-core",
  "thiserror",
  "tokio",
  "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "supacloud-runtime-core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

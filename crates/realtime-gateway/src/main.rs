@@ -3,26 +3,19 @@ use std::net::SocketAddr;
 use supacloud_realtime_gateway::{
     create_router, AppState, ChannelHub, PostgresListenerManager, TenantRegistry,
 };
+use supacloud_runtime_core::{init_tracing, resolve_socket_addr, shutdown_signal};
 use tracing::info;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Setup tracing subscriber
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,supacloud_realtime_gateway=debug,tower_http=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    init_tracing("info,supacloud_realtime_gateway=debug,tower_http=info");
 
-    let bind_host = env::var("REALTIME_BIND_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port: u16 = env::var("REALTIME_PORT")
-        .or_else(|_| env::var("PORT"))
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4000);
+    let addr = resolve_socket_addr(
+        "REALTIME_BIND_HOST",
+        &["REALTIME_PORT", "PORT"],
+        "0.0.0.0",
+        4000,
+    )?;
 
     let global_jwt_secret = env::var("API_JWT_SECRET")
         .or_else(|_| env::var("JWT_SECRET"))
@@ -54,7 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = create_router(state);
 
-    let addr: SocketAddr = format!("{}:{}", bind_host, port).parse()?;
     info!("Realtime Gateway listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -67,28 +59,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Realtime Gateway stopped cleanly");
     Ok(())
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
 }

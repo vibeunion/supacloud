@@ -14,3 +14,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.6", features = ["trace"] }
 parking_lot = "0.12"
 thiserror = "2"
+supacloud-runtime-core = { path = "../runtime-core" }

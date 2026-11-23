@@ -962,6 +962,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "supacloud-runtime-core",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -969,6 +970,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "supacloud-runtime-core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

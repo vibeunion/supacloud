@@ -96,6 +96,8 @@
 - [Route Contract Migration](./route-contract-migration.md) - Schema-first routes, generated client decoding, OpenAPI, and Management API registry migration
 - [Database Governance](./database-governance.md) - RLS/RPC as first-class resources with catalog reconcile and SQL lint (`@supacloud/db`)
 - [Application Platform Primitives](./application-platform-primitives.md) - Custom PostgREST schemas, transactional command receipts, and immutable artifact lineage
+- [Rust Platform Adoption and PostgREST Boundary](./adr/2026-11-23-rust-platform-adoption.md) - Rust service baseline, control-plane coordination, and data-plane replacement gates
+- [Unified Data API and PostgREST Retirement](./adr/2026-11-24-postgrest-dataplane-unification.md) - One REST implementation, layered enforcement, switch gates, and rollback boundary
 
 ## Product Positioning
 

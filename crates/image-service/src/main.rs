@@ -6,9 +6,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde_json::json;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use supacloud_runtime_core::{health_payload, init_tracing, resolve_socket_addr, shutdown_signal};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
@@ -20,22 +19,15 @@ use parser::parse_path;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,supacloud_image_service=debug".into()),
-        )
-        .init();
+    init_tracing("info,supacloud_image_service=debug");
 
-    let host = std::env::var("IMAGE_SERVICE_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = std::env::var("IMAGE_SERVICE_PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9010);
-
-    let addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .expect("Invalid bind address");
+    let addr = resolve_socket_addr(
+        "IMAGE_SERVICE_HOST",
+        &["IMAGE_SERVICE_PORT"],
+        "127.0.0.1",
+        9010,
+    )
+    .expect("invalid image service bind address");
 
     let app = Router::new()
         .route("/healthcheck", get(healthcheck))
@@ -48,7 +40,10 @@ async fn main() {
     info!("🚀 SupaCloud Image Service (Rust) listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 }
 
 fn with_engine_headers() -> HeaderMap {
@@ -63,11 +58,10 @@ async fn healthcheck() -> impl IntoResponse {
     (
         StatusCode::OK,
         headers,
-        Json(json!({
-            "status": "healthy",
-            "engine": "supacloud-image/rust",
-            "version": env!("CARGO_PKG_VERSION")
-        })),
+        Json(health_payload(
+            "supacloud-image/rust",
+            env!("CARGO_PKG_VERSION"),
+        )),
     )
 }
 
