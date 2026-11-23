@@ -296,6 +296,57 @@ describe("db governance tools", () => {
         expect(readFileSync(moduleFile, "utf8")).toBe(before);
     });
 
+    test("operation-ownership adopt only edits the exported module object", async () => {
+        const moduleFile = join(root, "db/ownership-collision.ts");
+        writeFileSync(moduleFile, `const metadata = {
+  name: "collision",
+  tables: [],
+};
+export default {
+  name: "collision",
+  tables: ["public.collision"],
+  policies: [], functions: [], triggers: [],
+  grants: [{ object: "public.collision", privilege: "select", role: "authenticated", source: "x.sql" }],
+};
+`, "utf8");
+        const result = await db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: "db/ownership-collision.ts",
+            write: true,
+        });
+        expect(result.isError).toBe(false);
+        const source = readFileSync(moduleFile, "utf8");
+        expect(source.slice(source.indexOf("const metadata"), source.indexOf("export default")))
+            .not.toContain("operationOwnership");
+        expect(source.slice(source.indexOf("export default")))
+            .toContain('{ table: "public.collision", operation: "select", owner: "postgrest-data-api" }');
+    });
+
+    test("operation-ownership adopt resolves static shorthand module properties", async () => {
+        const moduleFile = join(root, "db/ownership-shorthand.ts");
+        writeFileSync(moduleFile, `const moduleName = "shorthand";
+const tables = ["public.shorthand"];
+export default {
+  name: moduleName,
+  tables,
+  policies: [], functions: [], triggers: [],
+  grants: [{ object: "public.shorthand", privilege: "select", role: "authenticated", source: "x.sql" }],
+};
+`, "utf8");
+        const result = await db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: "db/ownership-shorthand.ts",
+            write: true,
+        });
+        expect(result.isError).toBe(false);
+        expect(readFileSync(moduleFile, "utf8"))
+            .toContain('{ table: "public.shorthand", operation: "select", owner: "postgrest-data-api" }');
+    });
+
     test("operation-ownership adopt previews by default and writes only high-confidence entries", async () => {
         const moduleFile = join(root, "db/ownership-adopt.ts");
         writeFileSync(moduleFile, `export default {

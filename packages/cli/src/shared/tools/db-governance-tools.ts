@@ -463,14 +463,135 @@ interface ModuleObjectNode {
     object: ts.ObjectLiteralExpression;
 }
 
-function staticProperty(object: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment | undefined {
-    const properties = object.properties.filter((property): property is ts.PropertyAssignment =>
-        ts.isPropertyAssignment(property)
+function propertyNameMatches(property: ts.ObjectLiteralElementLike, name: string): boolean {
+    return (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
         && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
-        && property.name.text === name,
-    );
+        && property.name.text === name;
+}
+
+function staticProperty(object: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment | undefined {
+    const properties = object.properties.filter((property) => propertyNameMatches(property, name));
     if (properties.length > 1) throw new Error(`数据库模块存在重复 '${name}' 属性`);
-    return properties[0];
+    return properties[0] && ts.isPropertyAssignment(properties[0]) ? properties[0] : undefined;
+}
+
+function staticPropertyValue(
+    object: ts.ObjectLiteralExpression,
+    name: string,
+): ts.Expression | undefined {
+    const assignment = staticProperty(object, name);
+    if (assignment) return assignment.initializer;
+    const shorthand = object.properties.filter((property): property is ts.ShorthandPropertyAssignment =>
+        ts.isShorthandPropertyAssignment(property) && propertyNameMatches(property, name),
+    );
+    if (shorthand.length > 1) throw new Error(`数据库模块存在重复 '${name}' 属性`);
+    return shorthand[0] && ts.isIdentifier(shorthand[0].name)
+        ? shorthand[0].name
+        : undefined;
+}
+
+function unwrapStaticExpression(expression: ts.Expression): ts.Expression {
+    if (ts.isParenthesizedExpression(expression)
+        || ts.isAsExpression(expression)
+        || ts.isSatisfiesExpression(expression)) {
+        return unwrapStaticExpression(expression.expression);
+    }
+    return expression;
+}
+
+function staticBindings(source: ts.SourceFile): Map<string, ts.Expression> {
+    const bindings = new Map<string, ts.Expression>();
+    const visit = (node: ts.Node): void => {
+        if (ts.isVariableDeclaration(node)
+            && ts.isIdentifier(node.name)
+            && node.initializer !== undefined) {
+            bindings.set(node.name.text, node.initializer);
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return bindings;
+}
+
+function resolveStaticExpression(
+    expression: ts.Expression | undefined,
+    bindings: ReadonlyMap<string, ts.Expression>,
+    seen = new Set<string>(),
+): ts.Expression | undefined {
+    if (!expression) return undefined;
+    const unwrapped = unwrapStaticExpression(expression);
+    if (!ts.isIdentifier(unwrapped) || seen.has(unwrapped.text)) return unwrapped;
+    const binding = bindings.get(unwrapped.text);
+    if (!binding) return unwrapped;
+    const nextSeen = new Set(seen);
+    nextSeen.add(unwrapped.text);
+    return resolveStaticExpression(binding, bindings, nextSeen);
+}
+
+function exportedModuleObjects(
+    source: ts.SourceFile,
+    bindings: ReadonlyMap<string, ts.Expression>,
+): ts.ObjectLiteralExpression[] {
+    const result = new Set<ts.ObjectLiteralExpression>();
+    const factoryNames = new Set(["defineDatabaseModule"]);
+    for (const statement of source.statements) {
+        if (!ts.isImportDeclaration(statement)
+            || !statement.importClause
+            || !statement.importClause.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const imported = element.propertyName?.text ?? element.name.text;
+            if (imported === "defineDatabaseModule") factoryNames.add(element.name.text);
+        }
+    }
+    const addExpression = (expression: ts.Expression | undefined): void => {
+        const resolved = resolveStaticExpression(expression, bindings);
+        if (!resolved) return;
+        if (ts.isObjectLiteralExpression(resolved)) {
+            result.add(resolved);
+            return;
+        }
+        if (ts.isArrayLiteralExpression(resolved)) {
+            for (const element of resolved.elements) {
+                if (!ts.isExpression(element)) continue;
+                addExpression(element);
+            }
+            return;
+        }
+        if (ts.isCallExpression(resolved)
+            && ts.isIdentifier(resolved.expression)
+            && factoryNames.has(resolved.expression.text)) {
+            addExpression(resolved.arguments[0]);
+        }
+    };
+    for (const statement of source.statements) {
+        if (ts.isExportAssignment(statement)) {
+            addExpression(statement.expression);
+            continue;
+        }
+        if (ts.isExportDeclaration(statement)) {
+            if (!statement.exportClause || !ts.isNamedExports(statement.exportClause)) continue;
+            for (const element of statement.exportClause.elements) {
+                if ((element.name.text === "modules" || element.propertyName?.text === "modules")
+                    && ts.isIdentifier(element.name)) {
+                    addExpression(bindings.get(element.propertyName?.text ?? element.name.text));
+                }
+            }
+            continue;
+        }
+        if (!ts.isVariableStatement(statement)
+            || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+            continue;
+        }
+        for (const declaration of statement.declarationList.declarations) {
+            if (ts.isIdentifier(declaration.name) && declaration.name.text === "modules") {
+                addExpression(declaration.initializer);
+            }
+        }
+    }
+    return [...result];
 }
 
 async function parseSource(file: string, content: string): Promise<ts.SourceFile> {
@@ -488,18 +609,15 @@ async function parseSource(file: string, content: string): Promise<ts.SourceFile
 
 async function findModuleObjects(file: string, content: string): Promise<ModuleObjectNode[]> {
     const source = await parseSource(file, content);
+    const bindings = staticBindings(source);
     const result: ModuleObjectNode[] = [];
-    const visit = (node: ts.Node): void => {
-        if (ts.isObjectLiteralExpression(node)) {
-            const name = staticProperty(node, "name")?.initializer;
-            const tables = staticProperty(node, "tables");
-            if (name && ts.isStringLiteral(name) && tables && ts.isArrayLiteralExpression(tables.initializer)) {
-                result.push({ name: name.text, object: node });
-            }
+    for (const object of exportedModuleObjects(source, bindings)) {
+        const name = resolveStaticExpression(staticPropertyValue(object, "name"), bindings);
+        const tables = resolveStaticExpression(staticPropertyValue(object, "tables"), bindings);
+        if (name && ts.isStringLiteral(name) && tables && ts.isArrayLiteralExpression(tables)) {
+            result.push({ name: name.text, object });
         }
-        ts.forEachChild(node, visit);
-    };
-    visit(source);
+    }
     return result;
 }
 
@@ -521,9 +639,18 @@ async function editOperationOwnershipSource(
     const edits: Array<{ start: number; end: number; text: string }> = [];
     for (const group of new Set(changes.map((change) => change.module))) {
         const moduleChanges = changes.filter((change) => change.module === group);
-        const moduleNode = modules.find((module) => module.name === group);
-        if (!moduleNode) throw new Error(`源文件中找不到数据库模块: ${group}`);
+        const matchingModules = modules.filter((module) => module.name === group);
+        if (matchingModules.length !== 1) {
+            throw new Error(matchingModules.length === 0
+                ? `源文件中找不到数据库模块: ${group}`
+                : `源文件中数据库模块名称不唯一: ${group}`);
+        }
+        const moduleNode = matchingModules[0]!;
         const ownership = staticProperty(moduleNode.object, "operationOwnership");
+        const ownershipValue = staticPropertyValue(moduleNode.object, "operationOwnership");
+        if (ownership === undefined && ownershipValue !== undefined) {
+            throw new Error(`模块 ${group} 的 operationOwnership 必须是静态数组`);
+        }
         const objectIndent = lineIndent(original, moduleNode.object.getStart());
         const propertyIndent = `${objectIndent}  `;
         const values = moduleChanges.map(entryText);
