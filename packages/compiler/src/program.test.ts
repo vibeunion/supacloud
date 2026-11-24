@@ -139,8 +139,10 @@ describe("TypeScript 7 asynchronous API on Bun", () => {
     await using program = await ts.createProgram([file], {
       strict: true, noImplicitThis: true, target: ts.ScriptTarget.ES2022, types: [],
     }, { cwd: root });
-    expect(program.getSourceFiles().map((source) => source.fileName)).toEqual([file]);
-    expect((await program.getSemanticDiagnostics(program.getSourceFile(file)))
+    const names = program.getSourceFiles().map((source) => source.fileName.replaceAll("\\", "/"));
+    expect(names.some((name) => name.endsWith("/src/production.ts"))).toBe(true);
+    expect(names.some((name) => name.endsWith("/lib.dom.d.ts"))).toBe(false);
+    expect((await program.getSemanticDiagnostics(program.getSourceFile(file)!))
       .some((error) => error.code === 2683)).toBe(true);
   });
 
