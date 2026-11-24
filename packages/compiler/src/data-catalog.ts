@@ -8,20 +8,20 @@ import { Errors, Value } from "typebox/value";
  *
  * The ZModel is the schema owner. PostgREST, Postrust, and the Lite Data API
  * are PostgREST-compatible REST execution surfaces. They do not own the schema.
- * Postrust's Hasura-dialect GraphQL is not the public contract. Public GraphQL
- * stays the pg_graphql rewrite at `/graphql/v1`. This module records that
- * binding and the projection status of row policies. It does not emit REST
- * types, GraphQL SDL, or GRANT statements.
+ * Public GraphQL is the Postrust Hasura dialect at `/graphql/v1`, rewritten to
+ * `/v1/graphql` on the tenant REST port. This module records that binding and
+ * the projection status of row policies. It does not emit REST types, GraphQL
+ * SDL, or GRANT statements. Lite GraphQL remains `pg_graphql`.
  */
 
 export const DATA_CATALOG_VERSION = 1 as const;
 
 export const PUBLIC_GRAPHQL_CONTRACT = {
   path: "/graphql/v1",
-  rewritePath: "/rpc/graphql",
-  acceptProfile: "graphql_public",
-  contentProfile: "graphql_public",
-  dialect: "pg_graphql",
+  rewritePath: "/v1/graphql",
+  acceptProfile: null,
+  contentProfile: null,
+  dialect: "postrust-hasura",
 } as const;
 
 export const DATA_PLANE_ROLES: ["anon", "authenticated", "service_role"] = ["anon", "authenticated", "service_role"];
@@ -39,8 +39,8 @@ export const DATA_CATALOG_GAPS: [
   "grants-not-emitted-from-catalog",
   "field-level-deny-not-projected",
   "relation-predicates-not-projected",
-  "public-graphql-remains-pg-graphql",
-  "postrust-hasura-graphql-is-not-the-contract",
+  "graphql-db-pre-request-not-applied",
+  "lite-graphql-remains-pg-graphql",
   "generated-typescript-model-not-proven-equal-to-zmodel",
 ] = [
   "rest-types-not-generated-from-catalog",
@@ -48,8 +48,8 @@ export const DATA_CATALOG_GAPS: [
   "grants-not-emitted-from-catalog",
   "field-level-deny-not-projected",
   "relation-predicates-not-projected",
-  "public-graphql-remains-pg-graphql",
-  "postrust-hasura-graphql-is-not-the-contract",
+  "graphql-db-pre-request-not-applied",
+  "lite-graphql-remains-pg-graphql",
   "generated-typescript-model-not-proven-equal-to-zmodel",
 ];
 
@@ -170,12 +170,12 @@ export const dataCatalogDocumentSchema = Type.Object({
     schemaOwner: Type.Literal("zenstack"),
     publicPath: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.path),
     rewritePath: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.rewritePath),
-    acceptProfile: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.acceptProfile),
-    contentProfile: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.contentProfile),
+    acceptProfile: Type.Null(),
+    contentProfile: Type.Null(),
     dialect: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.dialect),
     generatedFromCatalog: Type.Literal(false),
     clientDefault: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.path),
-    postrustHasuraDialect: Type.Literal("not-public-contract"),
+    postrustHasuraDialect: Type.Literal("public-contract"),
   }, closed),
   policyRls: Type.Union([projectedPolicy, noRowPolicy, incompletePolicy]),
   gaps: Type.Tuple([
@@ -184,8 +184,8 @@ export const dataCatalogDocumentSchema = Type.Object({
     Type.Literal("grants-not-emitted-from-catalog"),
     Type.Literal("field-level-deny-not-projected"),
     Type.Literal("relation-predicates-not-projected"),
-    Type.Literal("public-graphql-remains-pg-graphql"),
-    Type.Literal("postrust-hasura-graphql-is-not-the-contract"),
+    Type.Literal("graphql-db-pre-request-not-applied"),
+    Type.Literal("lite-graphql-remains-pg-graphql"),
     Type.Literal("generated-typescript-model-not-proven-equal-to-zmodel"),
   ]),
 }, closed);
@@ -220,15 +220,15 @@ const SCALARS = new Set(["String", "Boolean", "Int", "BigInt", "Float", "Decimal
 const BLOCK_KINDS = new Set(["model", "enum", "type", "datasource", "plugin", "generator"]);
 
 const FORBIDDEN_CATALOG_KEYS: Readonly<Record<string, string>> = {
-  graphql: "Public GraphQL stays /graphql/v1 (pg_graphql). The catalog does not accept a GraphQL owner or dialect.",
-  graphqlDialect: "Postrust Hasura GraphQL is not the public contract or the schema owner. Public GraphQL stays /graphql/v1 (pg_graphql).",
-  graphqlOwner: "The schema owner is ZenStack. Postrust does not own GraphQL.",
+  graphql: "Public GraphQL is Postrust Hasura at /graphql/v1. The catalog does not accept a GraphQL owner or dialect.",
+  graphqlDialect: "The public dialect is Postrust Hasura and is not selectable. The schema owner stays ZenStack.",
+  graphqlOwner: "The schema owner is ZenStack. Postrust does not own the schema.",
   publicPath: "The public GraphQL path stays /graphql/v1.",
   publicEntry: "The public GraphQL path stays /graphql/v1.",
   roles: "Data-plane roles stay anon, authenticated, and service_role.",
   schemaOwner: "The schema owner is the ZenStack schema.",
-  hasura: "Hasura is not a catalog owner. Public GraphQL stays /graphql/v1 (pg_graphql).",
-  dialect: "The catalog does not select a GraphQL dialect. Public GraphQL stays pg_graphql at /graphql/v1.",
+  hasura: "Hasura is not a catalog owner. Public GraphQL is the Postrust Hasura dialect at /graphql/v1.",
+  dialect: "The catalog does not select a GraphQL dialect. Public GraphQL is Postrust Hasura at /graphql/v1.",
 };
 
 function fail(message: string): never {
@@ -785,7 +785,7 @@ export async function compileDataCatalog(input: CompileDataCatalogInput): Promis
       dialect: PUBLIC_GRAPHQL_CONTRACT.dialect,
       generatedFromCatalog: false,
       clientDefault: PUBLIC_GRAPHQL_CONTRACT.path,
-      postrustHasuraDialect: "not-public-contract",
+      postrustHasuraDialect: "public-contract",
     },
     policyRls,
     gaps: DATA_CATALOG_GAPS,

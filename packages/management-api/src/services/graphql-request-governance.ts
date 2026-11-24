@@ -170,7 +170,7 @@ function metrics(
         result = definition.defaultValue.kind === Kind.NULL ? null : coerceInputLiteral(definition.defaultValue, GraphQLInt);
       } else {
         if (required) invalidInput();
-        return undefined; // Omitted is distinct from null; leave schema defaults to pg_graphql.
+        return undefined; // Omitted is distinct from null; leave schema defaults to the GraphQL service.
       }
       if (result === null) {
         if (required) invalidInput();
@@ -258,7 +258,7 @@ export async function governGraphqlRequest(
       : operations.length === 1 ? operations[0] : undefined;
     if (!operation) return invalid("Select exactly one GraphQL operation", "GRAPHQL_OPERATION_REQUIRED");
     if (operation.operation === "subscription") {
-      return invalid("GraphQL subscriptions use Supabase Realtime, not the pg_graphql HTTP endpoint", "GRAPHQL_SUBSCRIPTION_USE_REALTIME");
+      return invalid("GraphQL subscriptions use Supabase Realtime, not the public GraphQL HTTP endpoint", "GRAPHQL_SUBSCRIPTION_USE_REALTIME");
     }
     if ((request.method === "GET" || request.method === "HEAD") && operation.operation !== "query") {
       return invalid("GraphQL mutations require POST", "GRAPHQL_GET_MUTATION_DENIED");

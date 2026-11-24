@@ -909,16 +909,12 @@ const graphqlHandler = async ({ request }: { request: Request }) => {
     if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     
     const url = new URL(request.url);
-    const targetUrl = `http://127.0.0.1:${ports.pgrstPort}/rpc/graphql${url.search}`;
-    
+    const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${POSTRUST_GRAPHQL_UPSTREAM_URI}${url.search}`;
+
     return executeProxy(request, targetUrl, {
         ref,
         host: resolveProjectApiHost(ref, undefined),
         timeoutMs: config.restProxyTimeoutMs,
-        extraHeaders: {
-            'Accept-Profile': 'graphql_public',
-            'Content-Profile': 'graphql_public'
-        }
     });
 };
 

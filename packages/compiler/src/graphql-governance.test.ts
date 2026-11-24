@@ -32,6 +32,9 @@ test("reports pg_graphql-shaped capabilities and operation budgets", () => {
     aggregation: false,
     byPk: true,
     functions: false,
+    hasuraWhere: false,
+    hasuraOrderBy: false,
+    queryRoot: false,
   });
   const result = checkGraphqlCompatibility(schema, [{
     path: "orders.graphql",
@@ -39,6 +42,32 @@ test("reports pg_graphql-shaped capabilities and operation budgets", () => {
   }], { maxDepth: 5, maxFields: 10, maxComplexity: 10, maxPageSize: 5, operations: ["Orders"] });
   expect(result.ok).toBe(true);
   expect(result.operations[0]).toMatchObject({ name: "Orders", depth: 4, fields: 5, pageSizes: [3], allowed: true });
+});
+
+test("reports hosted Postrust Hasura arguments and limit page size", () => {
+  const schema = schemaFromSource(`
+    schema { query: query_root }
+    type query_root {
+      notes(where: String, order_by: String, limit: Int): [Note!]!
+      notes_by_pk(id: Int!): Note
+    }
+    type Note { id: Int }
+  `);
+  expect(graphqlFeatureMatrix(schema)).toMatchObject({
+    relayConnections: false,
+    filtering: true,
+    ordering: true,
+    byPk: true,
+    functions: false,
+    hasuraWhere: true,
+    hasuraOrderBy: true,
+    queryRoot: true,
+  });
+  const result = checkGraphqlCompatibility(schema, [{
+    source: "query Notes { notes(limit: 3, where: \"owner\") { id } }",
+  }], { maxPageSize: 5 });
+  expect(result.ok).toBe(true);
+  expect(result.operations[0]).toMatchObject({ pageSizes: [3] });
 });
 
 test("rejects disallowed, too-deep and over-sized operations", () => {
