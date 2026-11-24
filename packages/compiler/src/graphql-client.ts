@@ -7,7 +7,7 @@ export interface GraphqlClientOptions {
   publishableKey?: string;
   /** Resolved on every request so session refresh and logout are observed. */
   getAccessToken?: () => string | null | undefined | Promise<string | null | undefined>;
-  /** Send the persisted-operation SHA with the full document. Public /graphql/v1 is Postrust Hasura; the extension is not a second runtime. */
+  /** Include the persisted-operation SHA while retaining the full query for pg_graphql compatibility. */
   persistedOperations?: boolean;
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }

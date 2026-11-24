@@ -3,10 +3,8 @@
 ## Scope
 
 This pilot runs a real PostgreSQL + pg_graphql + Postrust stack in isolated
-local Docker containers with synthetic order data. It still calls `pg_graphql`
-at `/rpc/graphql`. It is not the hosted `/graphql/v1` Postrust Hasura route.
-It does not connect to an existing project, alter a shared cluster, or deploy
-a production application.
+local Docker containers with synthetic order data. It does not connect to an
+existing project, alter a shared cluster, or deploy a production application.
 The read-only order detail includes a customer, line items and deliveries.
 
 The migration/contract gate is explicit:

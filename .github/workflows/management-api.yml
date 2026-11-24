@@ -1722,7 +1722,7 @@ jobs:
           echo "${SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256}  ${extract}/usr/local/bin/postrust" | sha256sum -c -
           install -m 755 "${extract}/usr/local/bin/postrust" "$RUNNER_TEMP/postrust"
 
-      - name: Run public /graphql/v1 RLS through the pinned binary
+      - name: Run the evaluation-route RLS fixture through the pinned binary
         working-directory: packages/management-api
         env:
           SUPACLOUD_TEST_POSTRUST_GRAPHQL: "1"

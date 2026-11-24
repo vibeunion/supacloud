@@ -1213,12 +1213,11 @@ describe("sdkProxyRoutes functions proxy", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(calls[0]?.url).toBe("http://127.0.0.1:7361/v1/graphql");
+      expect(calls[0]?.url).toBe("http://127.0.0.1:7361/rpc/graphql");
       const headers = new Headers(calls[0]?.init?.headers);
       expect(headers.get("apikey")).toBe("legacy-anon-jwt");
       expect(headers.get("authorization")).toBe("Bearer user.session.jwt");
-      expect(headers.get("accept-profile")).toBeNull();
-      expect(headers.get("content-profile")).toBeNull();
+      expect(headers.get("accept-profile")).toBe("graphql_public");
     });
   });
 

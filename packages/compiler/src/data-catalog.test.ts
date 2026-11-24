@@ -94,13 +94,13 @@ test("binds REST execution and public GraphQL to one ZenStack schema", async () 
   expect(catalog.graphql).toEqual({
     schemaOwner: "zenstack",
     publicPath: "/graphql/v1",
-    rewritePath: "/v1/graphql",
-    acceptProfile: null,
-    contentProfile: null,
-    dialect: "postrust-hasura",
+    rewritePath: "/rpc/graphql",
+    acceptProfile: "graphql_public",
+    contentProfile: "graphql_public",
+    dialect: "pg_graphql",
     generatedFromCatalog: false,
     clientDefault: "/graphql/v1",
-    postrustHasuraDialect: "public-contract",
+    postrustHasuraDialect: "not-public-contract",
   });
   expect(catalog.graphql.publicPath).toBe(PUBLIC_GRAPHQL_CONTRACT.path);
   expect(catalog.gaps).toEqual(DATA_CATALOG_GAPS);
@@ -177,7 +177,7 @@ test("rejects Postrust GraphQL, renamed roles, and a non-PostgreSQL schema as th
     schema: "schema.zmodel",
     restExecution: "postrust",
     graphqlDialect: "hasura",
-  }, "/tmp/app")).toThrow(/public dialect is Postrust Hasura/);
+  }, "/tmp/app")).toThrow(/Postrust Hasura GraphQL is not the public contract/);
   expect(() => parseDataCatalogConfig({
     schema: "schema.zmodel",
     restExecution: "postrust",
@@ -210,16 +210,14 @@ test("keeps the compiler GraphQL client and schema export on /graphql/v1", async
   expect(exporter).toContain('"/graphql/v1"');
   expect(client).not.toContain("/v1/graphql");
   expect(exporter).not.toContain("/v1/graphql");
-  expect(client).not.toContain("/internal/postrust/graphql");
-  expect(exporter).not.toContain("/internal/postrust/graphql");
-  expect(client).toContain("Postrust Hasura");
-  expect(exporter).toContain("Postrust Hasura");
+  expect(client).not.toContain("postrust");
+  expect(exporter).not.toContain("postrust");
   expect(PUBLIC_GRAPHQL_CONTRACT).toEqual({
     path: "/graphql/v1",
-    rewritePath: "/v1/graphql",
-    acceptProfile: null,
-    contentProfile: null,
-    dialect: "postrust-hasura",
+    rewritePath: "/rpc/graphql",
+    acceptProfile: "graphql_public",
+    contentProfile: "graphql_public",
+    dialect: "pg_graphql",
   });
 });
 
@@ -247,12 +245,10 @@ test("database-contracts writes the catalog beside the existing contract and che
     expect(document.rest.servesPublicRest).toBe(false);
     expect(document.policyRls.reading).toBe("row-policies-emitted");
     expect(document.graphql.publicPath).toBe("/graphql/v1");
-    expect(document.graphql.dialect).toBe("postrust-hasura");
-    expect(document.graphql.rewritePath).toBe("/v1/graphql");
-    expect(document.graphql.acceptProfile).toBeNull();
+    expect(document.graphql.dialect).toBe("pg_graphql");
     expect(document.graphql.generatedFromCatalog).toBe(false);
     expect(document.schemaPath).toBe("schema.zmodel");
-    expect(await readFile(join(root, "generated/database.ts"), "utf8")).toContain("Public GraphQL is /graphql/v1 (Postrust Hasura)");
+    expect(await readFile(join(root, "generated/database.ts"), "utf8")).toContain("Public GraphQL remains /graphql/v1");
     expect((await generateDatabaseContracts(options, true)).upToDate).toBe(true);
     const before = await readFile(join(root, "generated/data-catalog.json"), "utf8");
     await writeFixtureProject(root, { "schema.zmodel": orders.replace("title String?", "title String") });

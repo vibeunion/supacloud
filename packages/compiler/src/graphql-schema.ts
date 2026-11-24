@@ -16,10 +16,7 @@ export interface PullGraphqlSchemaOptions {
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
 
-/**
- * Explicit authenticated snapshot export, separate from the offline compile/check pipeline.
- * Hosted `/graphql/v1` returns Postrust Hasura introspection. The client path stays `/graphql/v1`.
- */
+/** Explicit authenticated snapshot export, separate from the offline compile/check pipeline. */
 export async function pullGraphqlSchema(options: PullGraphqlSchemaOptions): Promise<{
   path: string;
   schemaHash: string;

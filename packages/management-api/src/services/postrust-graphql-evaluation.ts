@@ -1,6 +1,6 @@
-// Default-off management-listener probe of the GraphQL handler compiled into
-// the pinned Postrust REST process. Public /graphql/v1 rewrites to /v1/graphql
-// without this flag. See docs/postrust-graphql-evaluation.md.
+// Default-off evaluation of the GraphQL surface compiled into the pinned
+// Postrust REST process. Public project GraphQL stays /graphql/v1 → pg_graphql.
+// See docs/postrust-graphql-evaluation.md.
 
 export const POSTRUST_GRAPHQL_EVALUATION_ENV = "SUPACLOUD_POSTRUST_GRAPHQL";
 

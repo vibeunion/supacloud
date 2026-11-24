@@ -24,7 +24,7 @@ import {
     POSTRUST_COLUMNS_QUERY_REPLACE,
     isBlockedPostrustUpstreamPath,
 } from "./postrust-rest-guard";
-import { POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND, POSTRUST_GRAPHQL_UPSTREAM_URI } from "./postrust-graphql-evaluation";
+import { POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND } from "./postrust-graphql-evaluation";
 import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
     FRONTEND_RELEASE_POINTER_PATH,
@@ -2094,7 +2094,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 // on this host is the public gateway. hostIp may be a bridge
                 // address, which would publish the listener again.
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", rewriteColumns: true, corsOrigins, encodeResponses: true }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, rewriteUri: POSTRUST_GRAPHQL_UPSTREAM_URI, corsOrigins, encodeResponses: true }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "auth"),
                     hosts,

@@ -61,12 +61,6 @@ export interface GraphqlFeatureMatrix {
   aggregation: boolean;
   byPk: boolean;
   functions: boolean;
-  /** Root field argument `where`, the hosted Postrust Hasura filter shape. */
-  hasuraWhere: boolean;
-  /** Root field argument `order_by`, the hosted Postrust Hasura order shape. */
-  hasuraOrderBy: boolean;
-  /** Query type named `query_root`, as on the hosted Postrust route. */
-  queryRoot: boolean;
 }
 
 export interface GraphqlCompatibilityReport {
@@ -124,36 +118,23 @@ export async function readGraphqlSchema(path: string): Promise<{
   return { path: absolute, source, schema: schemaFromSource(source, absolute), ...hashes };
 }
 
-function argumentNames(field: GraphQLField<unknown, unknown>): string[] {
-  return field.args.map((argument) => argument.name);
-}
-
 export function graphqlFeatureMatrix(schema: GraphQLSchema): GraphqlFeatureMatrix {
   const query = schema.getQueryType();
   const mutation = schema.getMutationType();
   const subscription = schema.getSubscriptionType();
   const rootFields = query ? Object.values(query.getFields()) : [];
   const names = rootFields.map((field) => field.name);
-  const hasuraWhere = rootFields.some((field) => argumentNames(field).includes("where"));
-  const hasuraOrderBy = rootFields.some((field) => argumentNames(field).includes("order_by"));
   return {
     pgGraphql: "schema-snapshot",
     query: Boolean(query),
     mutation: Boolean(mutation),
     subscription: Boolean(subscription),
     relayConnections: rootFields.some((field) => field.type.toString().includes("Connection")),
-    filtering: names.some((name) => name === "filter" || name.endsWith("Collection")) || hasuraWhere,
-    ordering: names.some((name) => name === "orderBy" || name.endsWith("Collection")) || hasuraOrderBy,
+    filtering: names.some((name) => name === "filter" || name.endsWith("Collection")),
+    ordering: names.some((name) => name === "orderBy" || name.endsWith("Collection")),
     aggregation: names.some((name) => name.toLowerCase().includes("aggregate")),
-    byPk: names.some((name) => name.endsWith("ByPk") || name.endsWith("_by_pk")),
-    functions: rootFields.some((field) =>
-      !field.name.endsWith("Collection")
-      && !field.name.endsWith("ByPk")
-      && !field.name.endsWith("_by_pk")
-      && !argumentNames(field).some((name) => name === "where" || name === "order_by")),
-    hasuraWhere,
-    hasuraOrderBy,
-    queryRoot: query?.name === "query_root",
+    byPk: names.some((name) => name.endsWith("ByPk")),
+    functions: Boolean(query && Object.values(query.getFields()).some((field) => !field.name.endsWith("Collection") && !field.name.endsWith("ByPk"))),
   };
 }
 

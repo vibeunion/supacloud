@@ -311,7 +311,7 @@
     {
       "name": "DATA_CATALOG_GAPS",
       "kind": "value",
-      "signature": "export declare const DATA_CATALOG_GAPS: [\n    \"rest-types-not-generated-from-catalog\",\n    \"graphql-sdl-not-generated-from-catalog\",\n    \"grants-not-emitted-from-catalog\",\n    \"field-level-deny-not-projected\",\n    \"relation-predicates-not-projected\",\n    \"graphql-db-pre-request-not-applied\",\n    \"lite-graphql-remains-pg-graphql\",\n    \"generated-typescript-model-not-proven-equal-to-zmodel\"\n];"
+      "signature": "export declare const DATA_CATALOG_GAPS: [\n    \"rest-types-not-generated-from-catalog\",\n    \"graphql-sdl-not-generated-from-catalog\",\n    \"grants-not-emitted-from-catalog\",\n    \"field-level-deny-not-projected\",\n    \"relation-predicates-not-projected\",\n    \"public-graphql-remains-pg-graphql\",\n    \"postrust-hasura-graphql-is-not-the-contract\",\n    \"generated-typescript-model-not-proven-equal-to-zmodel\"\n];"
     },
     {
       "name": "DATA_CATALOG_VERSION",
@@ -821,7 +821,7 @@
     {
       "name": "GraphqlFeatureMatrix",
       "kind": "type",
-      "signature": "export interface GraphqlFeatureMatrix {\n    pgGraphql: \"schema-snapshot\";\n    query: boolean;\n    mutation: boolean;\n    subscription: boolean;\n    relayConnections: boolean;\n    filtering: boolean;\n    ordering: boolean;\n    aggregation: boolean;\n    byPk: boolean;\n    functions: boolean;\n    hasuraWhere: boolean;\n    hasuraOrderBy: boolean;\n    queryRoot: boolean;\n}"
+      "signature": "export interface GraphqlFeatureMatrix {\n    pgGraphql: \"schema-snapshot\";\n    query: boolean;\n    mutation: boolean;\n    subscription: boolean;\n    relayConnections: boolean;\n    filtering: boolean;\n    ordering: boolean;\n    aggregation: boolean;\n    byPk: boolean;\n    functions: boolean;\n}"
     },
     {
       "name": "GraphqlGovernanceDiagnostic",
@@ -1131,7 +1131,7 @@
     {
       "name": "PUBLIC_GRAPHQL_CONTRACT",
       "kind": "value",
-      "signature": "export declare const PUBLIC_GRAPHQL_CONTRACT: {\n    readonly path: \"/graphql/v1\";\n    readonly rewritePath: \"/v1/graphql\";\n    readonly acceptProfile: null;\n    readonly contentProfile: null;\n    readonly dialect: \"postrust-hasura\";\n};"
+      "signature": "export declare const PUBLIC_GRAPHQL_CONTRACT: {\n    readonly path: \"/graphql/v1\";\n    readonly rewritePath: \"/rpc/graphql\";\n    readonly acceptProfile: \"graphql_public\";\n    readonly contentProfile: \"graphql_public\";\n    readonly dialect: \"pg_graphql\";\n};"
     },
     {
       "name": "pullGraphqlSchema",
